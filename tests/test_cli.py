@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -44,6 +45,35 @@ def write_project_config(root: Path) -> dict:
     }
     (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
     return config
+
+
+def init_local_repo(root: Path) -> Path:
+    repo = root / "origin"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "Test User"], check=True
+    )
+    (repo / "README.md").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "chore: initial"], check=True
+    )
+    subprocess.run(["git", "-C", str(repo), "branch", "-M", "main"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "checkout", "-b", "scott/feat-demo"], check=True
+    )
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "feature.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "feat: demo change"], check=True
+    )
+    subprocess.run(["git", "-C", str(repo), "checkout", "main"], check=True)
+    return repo
 
 
 def write_workspace_config(workspace_dir: Path, name: str, branch: str) -> None:
@@ -672,5 +702,66 @@ class TestOpenWorkspace(TestCase):
                 self.assertTrue(
                     any(cmd[0] == "codex" and "--cd" in cmd for cmd in commands)
                 )
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_uses_remote_branch_and_appends_commit_messages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            origin_repo = init_local_repo(root)
+            config = {
+                "project": {"name": "demo", "repo_url": str(origin_repo)},
+                "branch": {"default": "main", "prefix": "scott/"},
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "true", "options": {"true": []}},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+                    if cmd[0] == "codex":
+                        return
+                    subprocess.run(cmd, cwd=cwd, check=True)
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                ):
+                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+
+                workspace_dir = root / "workspaces" / "feat-demo"
+                agents_content = (workspace_dir / "AGENTS.md").read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn("Latest Commit Message(s)", agents_content)
+                self.assertIn("feat: demo change", agents_content)
+                self.assertIn("Review vs Mainline", agents_content)
+
+                head = subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(workspace_dir / "repo"),
+                        "rev-parse",
+                        "--abbrev-ref",
+                        "HEAD",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                self.assertEqual(head.stdout.strip(), "scott/feat-demo")
+                self.assertTrue(any(cmd[0] == "codex" for cmd in commands))
             finally:
                 os.chdir(original_cwd)

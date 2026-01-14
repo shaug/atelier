@@ -322,6 +322,15 @@ def run_git_command(cmd: list[str]) -> subprocess.CompletedProcess[str]:
         die("missing required command: git")
 
 
+def try_run_command(
+    cmd: list[str], cwd: Path | None = None
+) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return None
+
+
 def init_project(args: argparse.Namespace) -> None:
     cwd = Path.cwd()
     existing_root = find_project_root(cwd)
@@ -536,6 +545,7 @@ def open_workspace(args: argparse.Namespace) -> None:
     )
 
     workspace_dir = workspace_root / workspace_name
+    agents_path = workspace_dir / "AGENTS.md"
     is_new_workspace = not workspace_dir.exists()
     if is_new_workspace:
         ensure_dir(workspace_dir)
@@ -554,7 +564,6 @@ def open_workspace(args: argparse.Namespace) -> None:
         write_json(workspace_dir / ".atelier.workspace.json", workspace_config)
 
         template_override = project_root / "templates" / "AGENTS.md"
-        agents_path = workspace_dir / "AGENTS.md"
         if template_override.exists():
             agents_path.write_text(
                 template_override.read_text(encoding="utf-8"), encoding="utf-8"
@@ -567,9 +576,6 @@ def open_workspace(args: argparse.Namespace) -> None:
                 ),
                 encoding="utf-8",
             )
-
-        editor_cmd = resolve_editor_command(config)
-        run_command([*editor_cmd, str(agents_path)], cwd=project_root)
 
     repo_dir = workspace_dir / "repo"
     project_repo_url = config.get("project", {}).get("repo_url")
@@ -600,20 +606,30 @@ def open_workspace(args: argparse.Namespace) -> None:
 
     run_command(["git", "-C", str(repo_dir), "checkout", default_branch])
 
-    branch_exists = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo_dir),
-            "show-ref",
-            "--verify",
-            "--quiet",
-            f"refs/heads/{workspace_branch}",
-        ],
-        check=False,
-    )
-    if branch_exists.returncode == 0:
+    local_branch = git_ref_exists(repo_dir, f"refs/heads/{workspace_branch}")
+    remote_branch = git_ref_exists(repo_dir, f"refs/remotes/origin/{workspace_branch}")
+    if not remote_branch:
+        remote_branch = git_has_remote_branch(repo_dir, workspace_branch) is True
+        if remote_branch:
+            run_command(
+                ["git", "-C", str(repo_dir), "fetch", "origin", workspace_branch]
+            )
+
+    if local_branch:
         run_command(["git", "-C", str(repo_dir), "checkout", workspace_branch])
+    elif remote_branch:
+        run_command(
+            [
+                "git",
+                "-C",
+                str(repo_dir),
+                "checkout",
+                "-b",
+                workspace_branch,
+                "--track",
+                f"origin/{workspace_branch}",
+            ]
+        )
     else:
         run_command(["git", "-C", str(repo_dir), "checkout", "-b", workspace_branch])
 
@@ -625,6 +641,13 @@ def open_workspace(args: argparse.Namespace) -> None:
     if not isinstance(agent_options, list):
         agent_options = []
     agent_options = [str(opt) for opt in agent_options]
+
+    if is_new_workspace:
+        append_workspace_branch_summary(
+            agents_path, repo_dir, default_branch, workspace_branch
+        )
+        editor_cmd = resolve_editor_command(config)
+        run_command([*editor_cmd, str(agents_path)], cwd=project_root)
 
     session_id = find_codex_session(atelier_id, workspace_name)
     if session_id:
@@ -694,6 +717,203 @@ def git_has_remote_branch(repo_dir: Path, branch: str) -> bool | None:
     if result.returncode != 0:
         return None
     return result.stdout.strip() != ""
+
+
+def git_ref_exists(repo_dir: Path, ref: str) -> bool:
+    result = run_git_command(
+        ["git", "-C", str(repo_dir), "show-ref", "--verify", "--quiet", ref]
+    )
+    return result.returncode == 0
+
+
+def git_rev_parse(repo_dir: Path, ref: str) -> str | None:
+    result = run_git_command(["git", "-C", str(repo_dir), "rev-parse", ref])
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def git_is_repo(repo_dir: Path) -> bool:
+    result = run_git_command(
+        ["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"]
+    )
+    return result.returncode == 0
+
+
+def git_commits_ahead(repo_dir: Path, base: str, branch: str) -> int | None:
+    result = run_git_command(
+        ["git", "-C", str(repo_dir), "rev-list", "--count", f"{base}..{branch}"]
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def git_commit_messages(repo_dir: Path, base: str, branch: str) -> list[str]:
+    result = run_git_command(
+        ["git", "-C", str(repo_dir), "log", "--format=%B%x1f", f"{base}..{branch}"]
+    )
+    if result.returncode != 0:
+        return []
+    raw = result.stdout.strip()
+    if not raw:
+        return []
+    return [msg.strip() for msg in raw.split("\x1f") if msg.strip()]
+
+
+def git_diff_name_status(repo_dir: Path, base: str, branch: str) -> list[str]:
+    result = run_git_command(
+        ["git", "-C", str(repo_dir), "diff", "--name-status", f"{base}..{branch}"]
+    )
+    if result.returncode != 0:
+        return []
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    return lines
+
+
+def git_diff_stat(repo_dir: Path, base: str, branch: str) -> list[str]:
+    result = run_git_command(
+        ["git", "-C", str(repo_dir), "diff", "--stat", f"{base}..{branch}"]
+    )
+    if result.returncode != 0:
+        return []
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    return lines
+
+
+def git_head_matches_remote(repo_dir: Path, branch: str) -> bool | None:
+    remote_ref = f"origin/{branch}"
+    if not git_ref_exists(repo_dir, f"refs/remotes/{remote_ref}"):
+        return None
+    head = git_rev_parse(repo_dir, "HEAD")
+    remote = git_rev_parse(repo_dir, remote_ref)
+    if not head or not remote:
+        return None
+    return head == remote
+
+
+def workspace_up_to_date(
+    checked_out: bool | None, clean: bool | None, remote_equal: bool | None
+) -> str:
+    if checked_out is False or clean is False or remote_equal is False:
+        return "no"
+    if checked_out is None or clean is None or remote_equal is None:
+        return "unknown"
+    return "yes"
+
+
+def gh_pr_message(repo_dir: Path) -> dict | None:
+    result = try_run_command(
+        ["gh", "pr", "view", "--json", "title,body,number"], cwd=repo_dir
+    )
+    if result is None or result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    title = payload.get("title")
+    if not title:
+        return None
+    return {
+        "title": title,
+        "body": payload.get("body") or "",
+        "number": payload.get("number"),
+    }
+
+
+def append_workspace_branch_summary(
+    agents_path: Path,
+    repo_dir: Path,
+    mainline_branch: str,
+    workspace_branch: str,
+) -> None:
+    if not agents_path.exists():
+        return
+    if not repo_dir.exists() or not git_is_repo(repo_dir):
+        warn("could not append branch summary to AGENTS.md (repo unavailable)")
+        return
+
+    pr_message = gh_pr_message(repo_dir)
+    commit_messages = []
+    if not pr_message:
+        commit_messages = git_commit_messages(
+            repo_dir, mainline_branch, workspace_branch
+        )
+
+    commits_ahead = git_commits_ahead(repo_dir, mainline_branch, workspace_branch)
+    diff_names = git_diff_name_status(repo_dir, mainline_branch, workspace_branch)
+    diff_stat = git_diff_stat(repo_dir, mainline_branch, workspace_branch)
+
+    checked_out = None
+    current_branch = git_current_branch(repo_dir)
+    if current_branch:
+        checked_out = current_branch == workspace_branch
+    clean = git_is_clean(repo_dir)
+    remote_equal = git_head_matches_remote(repo_dir, workspace_branch)
+    up_to_date = workspace_up_to_date(checked_out, clean, remote_equal)
+
+    today = dt.datetime.now(tz=dt.timezone.utc).strftime("%Y-%m-%d")
+    content = agents_path.read_text(encoding="utf-8")
+    if content and not content.endswith("\n"):
+        content += "\n"
+
+    lines = [
+        "---",
+        "",
+        "## Branch Sync Status (Latest)",
+        "",
+        f"- Date checked: {today}",
+        f"- Branch: `{workspace_branch}`",
+        f"- Mainline: `{mainline_branch}`",
+        f"- Workspace up to date with branch: {up_to_date}",
+    ]
+    if checked_out is not None:
+        lines.append(f"- Branch checked out: {format_status(checked_out)}")
+    if clean is not None:
+        lines.append(f"- Working tree clean: {format_status(clean)}")
+    if remote_equal is not None:
+        lines.append(f"- Matches remote: {format_status(remote_equal)}")
+
+    if pr_message:
+        lines.extend(
+            [
+                "",
+                f"## Latest PR Message (generated {today})",
+                "",
+                f"- PR: #{pr_message.get('number')} {pr_message.get('title')}",
+            ]
+        )
+        body = pr_message.get("body")
+        if body:
+            lines.extend(["- Body:", "", "```text", body.rstrip(), "```"])
+        else:
+            lines.append("- Body: (empty)")
+    else:
+        lines.extend(["", f"## Latest Commit Message(s) (generated {today})", ""])
+        if commit_messages:
+            for index, message in enumerate(commit_messages, start=1):
+                lines.append(f"- Commit {index}:")
+                lines.extend(["", "```text", message.rstrip(), "```"])
+        else:
+            lines.append("- None (no commits ahead of mainline).")
+
+    lines.extend(["", f"## Review vs Mainline (`{mainline_branch}`)", ""])
+    if commits_ahead is not None:
+        lines.append(f"- Commits ahead: {commits_ahead}")
+    if diff_names:
+        lines.append("- Files changed:")
+        lines.extend([f"  - `{line}`" for line in diff_names])
+    else:
+        lines.append("- Files changed: none")
+    if diff_stat:
+        lines.extend(["", "```text", *diff_stat, "```"])
+
+    content = content + "\n".join(lines).rstrip() + "\n"
+    agents_path.write_text(content, encoding="utf-8")
 
 
 def format_status(value: bool | None) -> str:
