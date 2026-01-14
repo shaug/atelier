@@ -136,13 +136,7 @@ Atelier must respect those boundaries strictly.
 
 ---
 
-## How to Begin
+## Workflow Requirements
 
-To start work:
-
-1. Read `docs/SPEC.md` in full
-2. Identify the smallest complete unit of functionality
-3. Implement it cleanly and conservatively
-4. Stop when the behavior matches the spec exactly
-
-If something in the spec is ambiguous, ask for clarification rather than guessing.
+- Run `just format` before making commits.
+- Ensure `just lint` and `just test` pass before shipping changes.

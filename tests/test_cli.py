@@ -75,8 +75,9 @@ class TestInitProject(TestCase):
                 args = SimpleNamespace(repo_url="owner/repo")
                 responses = iter(["", "", "", "", "", ""])
 
-                with patch("builtins.input", lambda _: next(responses)), patch(
-                    "atelier.cli.shutil.which", return_value="/usr/bin/cursor"
+                with (
+                    patch("builtins.input", lambda _: next(responses)),
+                    patch("atelier.cli.shutil.which", return_value="/usr/bin/cursor"),
                 ):
                     cli.init_project(args)
 
@@ -103,9 +104,11 @@ class TestInitProject(TestCase):
                 args = SimpleNamespace(repo_url="owner/repo")
                 responses = iter(["", "", "", "", "", ""])
 
-                with patch("builtins.input", lambda _: next(responses)), patch(
-                    "atelier.cli.shutil.which", return_value="/usr/bin/cursor"
-                ), patch.dict(os.environ, {"EDITOR": "nano -w"}):
+                with (
+                    patch("builtins.input", lambda _: next(responses)),
+                    patch("atelier.cli.shutil.which", return_value="/usr/bin/cursor"),
+                    patch.dict(os.environ, {"EDITOR": "nano -w"}),
+                ):
                     cli.init_project(args)
 
                 config_path = root / ".atelier.json"
@@ -142,9 +145,11 @@ class TestInitProject(TestCase):
                 args = SimpleNamespace(repo_url="owner/repo")
                 responses = iter(["", "", "", "", "", ""])
 
-                with patch("builtins.input", lambda _: next(responses)), patch(
-                    "atelier.cli.shutil.which", return_value=None
-                ), patch.dict(os.environ, {"EDITOR": "nano -w"}):
+                with (
+                    patch("builtins.input", lambda _: next(responses)),
+                    patch("atelier.cli.shutil.which", return_value=None),
+                    patch.dict(os.environ, {"EDITOR": "nano -w"}),
+                ):
                     cli.init_project(args)
 
                 config_path = root / ".atelier.json"
