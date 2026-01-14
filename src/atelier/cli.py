@@ -332,16 +332,27 @@ def init_project(args: argparse.Namespace) -> None:
     if not project_name_default:
         project_name_default = cwd.name
 
-    project_name = prompt("Project name", project_name_default, required=True)
+    project_name_flag = getattr(args, "project_name_flag", None)
+    project_name_arg = getattr(args, "project_name", None)
+    if project_name_flag is not None:
+        project_name = project_name_flag
+    elif project_name_arg is not None:
+        project_name = project_name_arg
+    else:
+        project_name = prompt("Project name", project_name_default, required=True)
 
     repo_url_default = (
         config.get("project", {}).get("repo_url")
         if isinstance(config.get("project"), dict)
         else ""
     )
-    repo_url = args.repo_url or prompt(
-        "Repo URL (owner/name or full URL)", repo_url_default, required=True
-    )
+    repo_url_arg = getattr(args, "repo_url", None)
+    if repo_url_arg is not None:
+        repo_url = repo_url_arg
+    else:
+        repo_url = prompt(
+            "Repo URL (owner/name or full URL)", repo_url_default, required=True
+        )
     repo_url = normalize_repo_url(repo_url)
 
     branch_default_default = (
@@ -351,7 +362,11 @@ def init_project(args: argparse.Namespace) -> None:
     )
     if not branch_default_default:
         branch_default_default = "main"
-    branch_default = prompt("Default branch", branch_default_default, required=True)
+    branch_default_arg = getattr(args, "branch_default", None)
+    if branch_default_arg is not None:
+        branch_default = branch_default_arg
+    else:
+        branch_default = prompt("Default branch", branch_default_default, required=True)
 
     branch_prefix_default = (
         config.get("branch", {}).get("prefix")
@@ -360,7 +375,11 @@ def init_project(args: argparse.Namespace) -> None:
     )
     if branch_prefix_default is None:
         branch_prefix_default = ""
-    branch_prefix = prompt("Branch prefix (optional)", branch_prefix_default)
+    branch_prefix_arg = getattr(args, "branch_prefix", None)
+    if branch_prefix_arg is not None:
+        branch_prefix = branch_prefix_arg
+    else:
+        branch_prefix = prompt("Branch prefix (optional)", branch_prefix_default)
 
     agent_default_default = (
         config.get("agent", {}).get("default")
@@ -369,7 +388,11 @@ def init_project(args: argparse.Namespace) -> None:
     )
     if not agent_default_default:
         agent_default_default = "codex"
-    agent_default = prompt("Agent (codex)", agent_default_default, required=True)
+    agent_arg = getattr(args, "agent", None)
+    if agent_arg is not None:
+        agent_default = agent_arg
+    else:
+        agent_default = prompt("Agent (codex)", agent_default_default, required=True)
     if agent_default != "codex":
         die("only 'codex' is supported as the agent in v2")
 
@@ -385,7 +408,11 @@ def init_project(args: argparse.Namespace) -> None:
     else:
         editor_prompt_default = system_editor_default()
 
-    editor_input = prompt("Editor command", editor_prompt_default, required=True)
+    editor_arg = getattr(args, "editor", None)
+    if editor_arg is not None:
+        editor_input = editor_arg
+    else:
+        editor_input = prompt("Editor command", editor_prompt_default, required=True)
     editor_parts = shlex.split(editor_input)
     editor_default = editor_parts[0]
     editor_input_options = editor_parts[1:]
@@ -397,7 +424,13 @@ def init_project(args: argparse.Namespace) -> None:
     )
     if not workspaces_root_default:
         workspaces_root_default = "workspaces"
-    workspaces_root = prompt("Workspaces root", workspaces_root_default, required=True)
+    workspaces_root_arg = getattr(args, "workspaces_root", None)
+    if workspaces_root_arg is not None:
+        workspaces_root = workspaces_root_arg
+    else:
+        workspaces_root = prompt(
+            "Workspaces root", workspaces_root_default, required=True
+        )
 
     atelier_section = (
         config.get("atelier") if isinstance(config.get("atelier"), dict) else {}
@@ -617,8 +650,27 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init", help="initialize a project")
+    init_parser.add_argument("project_name", nargs="?", help="project name")
+    init_parser.add_argument(
+        "--project-name",
+        dest="project_name_flag",
+        help="project name (overrides positional)",
+    )
     init_parser.add_argument(
         "--repo-url", dest="repo_url", help="project repo URL or owner/name"
+    )
+    init_parser.add_argument(
+        "--default-branch", dest="branch_default", help="default branch name"
+    )
+    init_parser.add_argument(
+        "--branch-prefix", dest="branch_prefix", help="prefix for workspace branches"
+    )
+    init_parser.add_argument("--agent", dest="agent", help="agent name")
+    init_parser.add_argument("--editor", dest="editor", help="editor command")
+    init_parser.add_argument(
+        "--workspaces-root",
+        dest="workspaces_root",
+        help="directory for workspace roots",
     )
     init_parser.set_defaults(func=init_project)
 

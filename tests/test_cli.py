@@ -14,6 +14,21 @@ sys.path.insert(0, str(ROOT / "src"))
 import atelier.cli as cli  # noqa: E402
 
 
+def make_init_args(**overrides: object) -> SimpleNamespace:
+    data = {
+        "project_name": None,
+        "project_name_flag": None,
+        "repo_url": None,
+        "branch_default": None,
+        "branch_prefix": None,
+        "agent": None,
+        "editor": None,
+        "workspaces_root": None,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
 class TestUlid(TestCase):
     def test_ulid_format(self) -> None:
         value = cli.ulid_now()
@@ -72,7 +87,7 @@ class TestInitProject(TestCase):
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                args = SimpleNamespace(repo_url="owner/repo")
+                args = make_init_args(repo_url="owner/repo")
                 responses = iter(["", "", "", "", "", ""])
 
                 with (
@@ -101,7 +116,7 @@ class TestInitProject(TestCase):
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                args = SimpleNamespace(repo_url="owner/repo")
+                args = make_init_args(repo_url="owner/repo")
                 responses = iter(["", "", "", "", "", ""])
 
                 with (
@@ -123,7 +138,7 @@ class TestInitProject(TestCase):
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                args = SimpleNamespace(repo_url="owner/repo")
+                args = make_init_args(repo_url="owner/repo")
                 responses = iter(["", "", "", "", "cursor -w", ""])
 
                 with patch("builtins.input", lambda _: next(responses)):
@@ -142,7 +157,7 @@ class TestInitProject(TestCase):
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                args = SimpleNamespace(repo_url="owner/repo")
+                args = make_init_args(repo_url="owner/repo")
                 responses = iter(["", "", "", "", "", ""])
 
                 with (
@@ -156,6 +171,84 @@ class TestInitProject(TestCase):
                 config = json.loads(config_path.read_text(encoding="utf-8"))
                 self.assertEqual(config["editor"]["default"], "nano")
                 self.assertEqual(config["editor"]["options"]["nano"], ["-w"])
+            finally:
+                os.chdir(original_cwd)
+
+    def test_init_with_flags_overrides_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                config = {
+                    "project": {
+                        "name": "old",
+                        "repo_url": "git@github.com:old/repo.git",
+                    },
+                    "branch": {"default": "main", "prefix": "old/"},
+                    "agent": {"default": "codex", "options": {"codex": ["--old"]}},
+                    "editor": {"default": "nano", "options": {"nano": ["-w"]}},
+                    "workspaces": {"root": "old-workspaces"},
+                    "atelier": {
+                        "id": "01OLD",
+                        "version": "0.1.0",
+                        "created_at": "2026-01-01T00:00:00Z",
+                    },
+                }
+                (root / ".atelier.json").write_text(
+                    json.dumps(config), encoding="utf-8"
+                )
+
+                args = make_init_args(
+                    project_name_flag="flag-project",
+                    repo_url="org/new-repo",
+                    branch_default="develop",
+                    branch_prefix="feat/",
+                    agent="codex",
+                    editor="cursor -w",
+                    workspaces_root="new-workspaces",
+                )
+
+                with patch(
+                    "builtins.input",
+                    side_effect=AssertionError("prompt should not be called"),
+                ):
+                    cli.init_project(args)
+
+                config_path = root / ".atelier.json"
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(config["project"]["name"], "flag-project")
+                self.assertEqual(
+                    config["project"]["repo_url"], "git@github.com:org/new-repo.git"
+                )
+                self.assertEqual(config["branch"]["default"], "develop")
+                self.assertEqual(config["branch"]["prefix"], "feat/")
+                self.assertEqual(config["agent"]["default"], "codex")
+                self.assertEqual(config["editor"]["default"], "cursor")
+                self.assertEqual(config["editor"]["options"]["cursor"], ["-w"])
+                self.assertEqual(config["workspaces"]["root"], "new-workspaces")
+                self.assertTrue((root / "new-workspaces").is_dir())
+            finally:
+                os.chdir(original_cwd)
+
+    def test_init_uses_positional_project_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                args = make_init_args(
+                    project_name="positional-project",
+                    repo_url="owner/repo",
+                )
+                responses = iter(["", "", "", "", ""])
+
+                with patch("builtins.input", lambda _: next(responses)):
+                    cli.init_project(args)
+
+                config_path = root / ".atelier.json"
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(config["project"]["name"], "positional-project")
             finally:
                 os.chdir(original_cwd)
 
