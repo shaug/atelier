@@ -48,6 +48,32 @@ escape_sed() {
   printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'
 }
 
+normalize_github_repo() {
+  local input="$1"
+  local slug="$input"
+
+  case "$input" in
+    https://github.com/*|http://github.com/*)
+      slug="${input#*github.com/}"
+      ;;
+    git@github.com:*)
+      slug="${input#git@github.com:}"
+      ;;
+    github.com/*)
+      slug="${input#github.com/}"
+      ;;
+  esac
+
+  slug="${slug%.git}"
+  slug="${slug%/}"
+
+  if [[ "$slug" != */* ]]; then
+    return 1
+  fi
+
+  printf '%s' "$slug"
+}
+
 render_template() {
   local src="$1"
   local dest="$2"
@@ -75,10 +101,36 @@ render_template() {
 }
 
 need_cmd git
+need_cmd gh
 
-project_name="${1:-}"
+github_input="${1:-}"
+project_name="${2:-}"
+
+if [[ -z "$github_input" ]]; then
+  github_input="$(prompt_required "GitHub repo (owner/name or URL)")"
+fi
+
+repo_slug="$(normalize_github_repo "$github_input" || true)"
+if [[ -z "$repo_slug" ]]; then
+  die "expected GitHub repo like owner/name or URL"
+fi
+
+repo_info="$(gh repo view "$repo_slug" --json sshUrl,defaultBranchRef,name -q '.sshUrl + "\n" + .defaultBranchRef.name + "\n" + .name' 2>/dev/null)" || {
+  die "unable to read repo via gh; run 'gh auth login' and ensure the repo exists"
+}
+
+IFS=$'\n' read -r repo_url default_branch repo_name <<<"$repo_info"
+
+if [[ -z "$repo_url" ]]; then
+  die "failed to resolve repo URL for $repo_slug"
+fi
+
+if [[ -z "$default_branch" ]]; then
+  default_branch="main"
+fi
+
 if [[ -z "$project_name" ]]; then
-  project_name="$(prompt_required "Project name")"
+  project_name="$(prompt "Project name" "$repo_name")"
 fi
 
 project_dir="$WORKSPACES_DIR/$project_name"
@@ -88,8 +140,6 @@ if [[ -e "$project_dir" ]]; then
   die "project already exists: $project_dir"
 fi
 
-repo_url="$(prompt "Repo URL (optional)" "")"
-default_branch="$(prompt "Default branch" "main")"
 branch_prefix="$(prompt "Branch prefix" "feat")"
 
 mkdir -p "$project_dir"
