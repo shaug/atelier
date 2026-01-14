@@ -111,10 +111,10 @@ if [[ ! -f "$project_yaml" ]]; then
   die "missing project.yaml: $project_yaml"
 fi
 
-project_name="$(awk -F': *' '/^  name:/ {print $2; exit}' "$project_yaml")"
-repo_url="$(awk -F': *' '/^    url:/ {print $2; exit}' "$project_yaml")"
-default_branch="$(awk -F': *' '/^    default_branch:/ {print $2; exit}' "$project_yaml")"
-branch_prefix="$(awk -F': *' '/^  branch_prefix:/ {print $2; exit}' "$project_yaml")"
+project_name="$(awk '/^  name:/ {sub(/^  name:[[:space:]]*/, ""); print; exit}' "$project_yaml")"
+repo_url="$(awk '/^    url:/ {sub(/^    url:[[:space:]]*/, ""); print; exit}' "$project_yaml")"
+default_branch="$(awk '/^    default_branch:/ {sub(/^    default_branch:[[:space:]]*/, ""); print; exit}' "$project_yaml")"
+branch_prefix="$(awk '/^  branch_prefix:/ {sub(/^  branch_prefix:[[:space:]]*/, ""); print; exit}' "$project_yaml")"
 
 if [[ -z "$project_name" ]]; then
   project_name="$project"
@@ -133,7 +133,7 @@ if [[ -z "$branch_prefix" ]]; then
   branch_prefix="$(prompt "Branch prefix" "feat")"
 fi
 
-naming_pattern="$(awk -F': *' '/^  naming_pattern:/ {print $2; exit}' "$project_yaml" | tr -d '"')"
+naming_pattern="$(awk '/^  naming_pattern:/ {sub(/^  naming_pattern:[[:space:]]*/, ""); print; exit}' "$project_yaml" | tr -d '\"')"
 if [[ -z "$naming_pattern" ]]; then
   naming_pattern="{type}-{slug}"
 fi
