@@ -1,3 +1,16 @@
+from __future__ import annotations
+
 __all__ = ["__version__"]
 
-__version__ = "0.2.0"
+try:
+    from ._version import __version__
+except Exception:  # pragma: no cover - fallback for editable installs
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+    except Exception:  # pragma: no cover - import edge cases
+        __version__ = "0.0.0"
+    else:
+        try:
+            __version__ = version("atelier")
+        except PackageNotFoundError:
+            __version__ = "0.0.0"
