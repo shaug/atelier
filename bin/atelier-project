@@ -48,6 +48,10 @@ escape_sed() {
   printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'
 }
 
+escape_env_value() {
+  printf '%s' "$1" | sed "s/'/'\"'\"'/g"
+}
+
 normalize_github_repo() {
   local input="$1"
   local slug="$input"
@@ -87,10 +91,10 @@ render_template() {
   local default_branch_escaped
   local branch_prefix_escaped
 
-  project_name_escaped="$(escape_sed "$project_name")"
-  repo_url_escaped="$(escape_sed "$repo_url")"
-  default_branch_escaped="$(escape_sed "$default_branch")"
-  branch_prefix_escaped="$(escape_sed "$branch_prefix")"
+  project_name_escaped="$(escape_sed "$(escape_env_value "$project_name")")"
+  repo_url_escaped="$(escape_sed "$(escape_env_value "$repo_url")")"
+  default_branch_escaped="$(escape_sed "$(escape_env_value "$default_branch")")"
+  branch_prefix_escaped="$(escape_sed "$(escape_env_value "$branch_prefix")")"
 
   sed \
     -e "s/__PROJECT_NAME__/${project_name_escaped}/g" \
@@ -138,7 +142,7 @@ if [[ -z "$project_name" ]]; then
 fi
 
 project_dir="$WORKSPACES_DIR/$project_name"
-project_yaml="$project_dir/project.yaml"
+project_env="$project_dir/project.env"
 
 if [[ -e "$project_dir" ]]; then
   die "project already exists: $project_dir"
@@ -148,11 +152,11 @@ branch_prefix="$(prompt "Branch prefix" "feat")"
 
 mkdir -p "$project_dir"
 
-if [[ ! -f "$TEMPLATES_DIR/project.yaml" ]]; then
-  die "missing template: $TEMPLATES_DIR/project.yaml"
+if [[ ! -f "$TEMPLATES_DIR/project.env" ]]; then
+  die "missing template: $TEMPLATES_DIR/project.env"
 fi
 
-render_template "$TEMPLATES_DIR/project.yaml" "$project_yaml" \
+render_template "$TEMPLATES_DIR/project.env" "$project_env" \
   "$project_name" "$repo_url" "$default_branch" "$branch_prefix"
 
 create_agents="$(prompt "Create project-level AGENTS.md? (y/N)" "N")"

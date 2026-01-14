@@ -99,7 +99,7 @@ Atelier manages a root directory (default `~/atelier`):
 ~/atelier/
 ├─ workspaces/              # user-owned, gitignored
 │  ├─ <project>/
-│  │  ├─ project.yaml
+│  │  ├─ project.env
 │  │  ├─ AGENTS.md          (optional, project-level)
 │  │  ├─ <workspace>/
 │  │  │  ├─ AGENTS.md       (workspace intent & contract)
@@ -144,27 +144,22 @@ Rules:
 
 ## 5. Configuration Files
 
-### `project.yaml` (Required)
+### `project.env` (Required)
 
 Machine-readable metadata for a project.
 
 Example:
 
-```yaml
-project:
-  name: gumshoe
-  repo:
-    url: git@github.com:org/gumshoe.git
-    default_branch: main
+```sh
+PROJECT_NAME='gumshoe'
+REPO_URL='git@github.com:org/gumshoe.git'
+DEFAULT_BRANCH='main'
+BRANCH_PREFIX='feat'
+NAMING_PATTERN='{type}-{slug}'
 
-workspace:
-  branch_prefix: feat
-  naming_pattern: "{type}-{slug}"
-
-defaults:
-  pr_base: main
-  delete_branch_on_merge: true
-  delete_workspace_on_merge: true
+PR_BASE='main'
+DELETE_BRANCH_ON_MERGE='true'
+DELETE_WORKSPACE_ON_MERGE='true'
 ```
 
 Used by:
@@ -210,7 +205,7 @@ Creates a new project container.
 Responsibilities:
 - Create `workspaces/<project>/`
 - Prompt for repo URL (optional at first)
-- Generate `project.yaml`
+- Generate `project.env`
 - Generate project-level `AGENTS.md` (optional)
 - Optionally create GitHub repo via `gh`
 
@@ -228,7 +223,7 @@ All cloning and branch creation happens exclusively in `atelier-workspace`.
 Creates a new workspace.
 
 Responsibilities:
-1. Load `project.yaml`
+1. Load `project.env`
 2. Create workspace directory
 3. Clone repo into `repo/`
 4. Create new branch from default branch

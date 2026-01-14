@@ -105,22 +105,27 @@ if [[ -z "$slug" ]]; then
 fi
 
 project_dir="$WORKSPACES_DIR/$project"
-project_yaml="$project_dir/project.yaml"
+project_env="$project_dir/project.env"
 
-if [[ ! -f "$project_yaml" ]]; then
-  die "missing project.yaml: $project_yaml"
+if [[ ! -f "$project_env" ]]; then
+  die "missing project.env: $project_env"
 fi
 
-project_name="$(awk '/^  name:/ {sub(/^  name:[[:space:]]*/, ""); print; exit}' "$project_yaml")"
-repo_url="$(awk '/^    url:/ {sub(/^    url:[[:space:]]*/, ""); print; exit}' "$project_yaml")"
-default_branch="$(awk '/^    default_branch:/ {sub(/^    default_branch:[[:space:]]*/, ""); print; exit}' "$project_yaml")"
-branch_prefix="$(awk '/^  branch_prefix:/ {sub(/^  branch_prefix:[[:space:]]*/, ""); print; exit}' "$project_yaml")"
+set -a
+# shellcheck disable=SC1090
+source "$project_env"
+set +a
+
+project_name="${PROJECT_NAME:-}"
+repo_url="${REPO_URL:-}"
+default_branch="${DEFAULT_BRANCH:-}"
+branch_prefix="${BRANCH_PREFIX:-}"
+naming_pattern="${NAMING_PATTERN:-}"
 
 if [[ -z "$project_name" ]]; then
   project_name="$project"
 fi
 
-repo_url="${repo_url:-}"
 if [[ -z "$repo_url" ]]; then
   repo_url="$(prompt_required "Repo URL")"
 fi
@@ -133,7 +138,6 @@ if [[ -z "$branch_prefix" ]]; then
   branch_prefix="$(prompt "Branch prefix" "feat")"
 fi
 
-naming_pattern="$(awk '/^  naming_pattern:/ {sub(/^  naming_pattern:[[:space:]]*/, ""); print; exit}' "$project_yaml" | tr -d '\"')"
 if [[ -z "$naming_pattern" ]]; then
   naming_pattern="{type}-{slug}"
 fi

@@ -33,7 +33,7 @@ atelier/
 ├─ templates/           # Templates for projects and workspaces
 ├─ workspaces/          # User-owned, gitignored
 │  └─ <project>/
-│     ├─ project.yaml
+│     ├─ project.env
 │     ├─ AGENTS.md      # optional project-level instructions
 │     └─ <workspace>/
 │        ├─ AGENTS.md   # required workspace intent
@@ -62,7 +62,7 @@ Example:
 ```
 
 The workspace script will:
-- read `project.yaml`
+- read `project.env`
 - clone the repo
 - create a branch
 - generate a workspace `AGENTS.md` with your intent
@@ -72,13 +72,13 @@ The workspace script will:
 Templates live in `templates/` and are rendered by the scripts. You can edit
 these to match your preferences.
 
-- `templates/project.yaml`
+- `templates/project.env`
 - `templates/project/AGENTS.md`
 - `templates/workspace/AGENTS.md`
 
 ## Scripts
 
-- `bin/atelier-project`: create a project container and `project.yaml`
+- `bin/atelier-project`: create a project container and `project.env`
 - `bin/atelier-workspace`: create a workspace, clone repo, and branch
 
 More scripts (`atelier-pr`, `atelier-clean`, `atelier-status`) can be added as
