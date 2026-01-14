@@ -3,6 +3,7 @@ import datetime as dt
 import json
 import os
 import secrets
+import shutil
 import shlex
 import subprocess
 import sys
@@ -114,6 +115,13 @@ def prompt(text: str, default: str | None = None, required: bool = False) -> str
         return value
 
 
+def system_editor_default() -> str:
+    env_editor = os.environ.get("EDITOR", "").strip()
+    if env_editor:
+        return env_editor
+    return "vi"
+
+
 def ulid_now() -> str:
     timestamp_ms = int(dt.datetime.now(tz=dt.timezone.utc).timestamp() * 1000)
     randomness = int.from_bytes(secrets.token_bytes(10), "big")
@@ -174,6 +182,23 @@ def ensure_dir(path: Path) -> None:
 
 def read_first_user_message(path: Path) -> str | None:
     try:
+        if path.suffix == ".jsonl":
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        return None
+                    if isinstance(data, dict) and data.get("type") == "session_meta":
+                        payload = data.get("payload")
+                        if isinstance(payload, dict):
+                            instructions = payload.get("instructions")
+                            if instructions:
+                                return str(instructions)
+                    return extract_first_user_from_obj(data)
+            return None
         raw = path.read_text(encoding="utf-8")
     except OSError:
         return None
@@ -192,17 +217,30 @@ def read_first_user_message(path: Path) -> str | None:
         except json.JSONDecodeError:
             return None
         return extract_first_user_from_obj(data)
-    # JSONL fallback
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
+    # JSONL is handled above.
+    return None
+
+
+def read_session_id(path: Path) -> str | None:
+    if path.suffix == ".jsonl":
         try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        message = extract_first_user_from_obj(data)
-        if message:
-            return message
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        return None
+                    if isinstance(data, dict) and data.get("type") == "session_meta":
+                        payload = data.get("payload")
+                        if isinstance(payload, dict):
+                            session_id = payload.get("id")
+                            if session_id:
+                                return str(session_id)
+                    return None
+        except OSError:
+            return None
     return None
 
 
@@ -246,7 +284,7 @@ def find_codex_session(atelier_id: str, workspace_name: str) -> str | None:
     if not sessions_root.exists():
         return None
     target = f"atelier:{atelier_id}:{workspace_name}"
-    matches: list[tuple[float, Path]] = []
+    matches: list[tuple[float, Path, str | None]] = []
     for path in sessions_root.rglob("*"):
         if path.suffix not in {".json", ".jsonl"}:
             continue
@@ -259,11 +297,13 @@ def find_codex_session(atelier_id: str, workspace_name: str) -> str | None:
             mtime = path.stat().st_mtime
         except OSError:
             continue
-        matches.append((mtime, path))
+        session_id = read_session_id(path)
+        matches.append((mtime, path, session_id))
     if not matches:
         return None
     matches.sort(key=lambda item: item[0], reverse=True)
-    return matches[0][1].stem
+    _, path, session_id = matches[0]
+    return session_id or path.stem
 
 
 def run_command(cmd: list[str], cwd: Path | None = None) -> None:
@@ -338,15 +378,17 @@ def init_project(args: argparse.Namespace) -> None:
         if isinstance(config.get("editor"), dict)
         else None
     )
-    env_editor = os.environ.get("EDITOR", "").strip()
     if editor_default_default:
         editor_prompt_default = editor_default_default
-    elif env_editor:
-        editor_prompt_default = env_editor
+    elif shutil.which("cursor"):
+        editor_prompt_default = "cursor"
     else:
-        editor_prompt_default = "vi"
+        editor_prompt_default = system_editor_default()
 
-    editor_default = prompt("Editor command", editor_prompt_default, required=True)
+    editor_input = prompt("Editor command", editor_prompt_default, required=True)
+    editor_parts = shlex.split(editor_input)
+    editor_default = editor_parts[0]
+    editor_input_options = editor_parts[1:]
 
     workspaces_root_default = (
         config.get("workspaces", {}).get("root")
@@ -377,6 +419,8 @@ def init_project(args: argparse.Namespace) -> None:
         existing_editor_options = config.get("editor", {}).get("options")
         if isinstance(existing_editor_options, dict):
             editor_options = existing_editor_options
+    if editor_input_options:
+        editor_options = {**editor_options, editor_default: editor_input_options}
 
     payload: dict = {
         "project": {
@@ -564,11 +608,7 @@ def resolve_editor_command(config: dict) -> list[str]:
             options = []
         return [editor_default, *options]
 
-    env_editor = os.environ.get("EDITOR", "").strip()
-    if env_editor:
-        return shlex.split(env_editor)
-
-    return ["vi"]
+    return shlex.split(system_editor_default())
 
 
 def main() -> None:
