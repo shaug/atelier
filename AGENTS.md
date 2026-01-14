@@ -140,3 +140,6 @@ Atelier must respect those boundaries strictly.
 
 - Run `just format` before making commits.
 - Ensure `just lint` and `just test` pass before shipping changes.
+- When merging PRs to `main`, keep merge commit messages non-Conventional
+  (use the default “Merge pull request #...” message) so Release Please
+  does not double-count changelog entries.
