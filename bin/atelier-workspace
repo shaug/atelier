@@ -91,17 +91,40 @@ need_cmd git
 project="${1:-}"
 work_type="${2:-}"
 slug="${3:-}"
+slug_default=""
+
+is_known_type() {
+  case "$1" in
+    feat|fix|chore|docs|refactor|test|build|ci)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
 if [[ -z "$project" ]]; then
   project="$(prompt_required "Project name")"
 fi
 
+if [[ -z "$slug" && -n "$work_type" ]]; then
+  if ! is_known_type "$work_type"; then
+    slug_default="$work_type"
+    work_type=""
+  fi
+fi
+
 if [[ -z "$work_type" ]]; then
-  work_type="$(prompt_required "Work type (feat/fix/chore/etc.)")"
+  work_type="$(prompt "Work type (feat/fix/chore/etc.)" "feat")"
 fi
 
 if [[ -z "$slug" ]]; then
-  slug="$(prompt_required "Slug")"
+  if [[ -n "$slug_default" ]]; then
+    slug="$(prompt "Slug" "$slug_default")"
+  else
+    slug="$(prompt_required "Slug")"
+  fi
 fi
 
 project_dir="$WORKSPACES_DIR/$project"
