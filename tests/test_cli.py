@@ -133,7 +133,11 @@ class TestOpenWorkspace(TestCase):
                 "agent": {"default": "codex", "options": {"codex": []}},
                 "editor": {"default": "true", "options": {"true": []}},
                 "workspaces": {"root": "workspaces"},
-                "atelier": {"id": "01TEST", "version": "0.2.0", "created_at": "2026-01-01T00:00:00Z"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
             }
             (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
 
@@ -150,9 +154,11 @@ class TestOpenWorkspace(TestCase):
                         self.returncode = returncode
                         self.stdout = stdout
 
-                with patch("atelier.cli.run_command", fake_run), patch(
-                    "atelier.cli.find_codex_session", return_value=None
-                ), patch("atelier.cli.subprocess.run", return_value=DummyResult()):
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                ):
                     cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 workspace_dir = root / "workspaces" / "feat-demo"
@@ -160,11 +166,17 @@ class TestOpenWorkspace(TestCase):
                 self.assertTrue((workspace_dir / ".atelier.workspace.json").exists())
 
                 workspace_config = json.loads(
-                    (workspace_dir / ".atelier.workspace.json").read_text(encoding="utf-8")
+                    (workspace_dir / ".atelier.workspace.json").read_text(
+                        encoding="utf-8"
+                    )
                 )
-                self.assertEqual(workspace_config["workspace"]["branch"], "scott/feat-demo")
+                self.assertEqual(
+                    workspace_config["workspace"]["branch"], "scott/feat-demo"
+                )
 
-                agents_content = (workspace_dir / "AGENTS.md").read_text(encoding="utf-8")
+                agents_content = (workspace_dir / "AGENTS.md").read_text(
+                    encoding="utf-8"
+                )
                 self.assertIn("atelier:01TEST:feat-demo", agents_content)
 
                 self.assertTrue(any(cmd[:2] == ["git", "clone"] for cmd in commands))
@@ -180,6 +192,8 @@ class TestOpenWorkspace(TestCase):
                         for cmd in commands
                     )
                 )
-                self.assertTrue(any(cmd[0] == "codex" and "--cd" in cmd for cmd in commands))
+                self.assertTrue(
+                    any(cmd[0] == "codex" and "--cd" in cmd for cmd in commands)
+                )
             finally:
                 os.chdir(original_cwd)

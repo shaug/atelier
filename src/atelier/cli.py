@@ -269,9 +269,9 @@ def find_codex_session(atelier_id: str, workspace_name: str) -> str | None:
 def run_command(cmd: list[str], cwd: Path | None = None) -> None:
     try:
         subprocess.run(cmd, cwd=cwd, check=True)
-    except FileNotFoundError as exc:
+    except FileNotFoundError:
         die(f"missing required command: {cmd[0]}")
-    except subprocess.CalledProcessError as exc:
+    except subprocess.CalledProcessError:
         die(f"command failed: {' '.join(cmd)}")
 
 
@@ -299,7 +299,9 @@ def init_project(args: argparse.Namespace) -> None:
         if isinstance(config.get("project"), dict)
         else ""
     )
-    repo_url = args.repo_url or prompt("Repo URL (owner/name or full URL)", repo_url_default, required=True)
+    repo_url = args.repo_url or prompt(
+        "Repo URL (owner/name or full URL)", repo_url_default, required=True
+    )
     repo_url = normalize_repo_url(repo_url)
 
     branch_default_default = (
@@ -355,7 +357,9 @@ def init_project(args: argparse.Namespace) -> None:
         workspaces_root_default = "workspaces"
     workspaces_root = prompt("Workspaces root", workspaces_root_default, required=True)
 
-    atelier_section = config.get("atelier") if isinstance(config.get("atelier"), dict) else {}
+    atelier_section = (
+        config.get("atelier") if isinstance(config.get("atelier"), dict) else {}
+    )
     atelier_id = atelier_section.get("id") or ulid_now()
     atelier_created_at = atelier_section.get("created_at") or utc_now()
     atelier_version = atelier_section.get("version") or __version__
@@ -468,7 +472,9 @@ def open_workspace(args: argparse.Namespace) -> None:
         template_override = project_root / "templates" / "AGENTS.md"
         agents_path = workspace_dir / "AGENTS.md"
         if template_override.exists():
-            agents_path.write_text(template_override.read_text(encoding="utf-8"), encoding="utf-8")
+            agents_path.write_text(
+                template_override.read_text(encoding="utf-8"), encoding="utf-8"
+            )
         else:
             agents_path.write_text(
                 WORKSPACE_AGENTS_TEMPLATE.format(
@@ -511,7 +517,15 @@ def open_workspace(args: argparse.Namespace) -> None:
     run_command(["git", "-C", str(repo_dir), "checkout", default_branch])
 
     branch_exists = subprocess.run(
-        ["git", "-C", str(repo_dir), "show-ref", "--verify", "--quiet", f"refs/heads/{workspace_branch}"],
+        [
+            "git",
+            "-C",
+            str(repo_dir),
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/heads/{workspace_branch}",
+        ],
         check=False,
     )
     if branch_exists.returncode == 0:
@@ -531,11 +545,15 @@ def open_workspace(args: argparse.Namespace) -> None:
     session_id = find_codex_session(atelier_id, workspace_name)
     if session_id:
         say(f"Resuming Codex session {session_id}")
-        run_command(["codex", "--cd", str(workspace_dir), *agent_options, "resume", session_id])
+        run_command(
+            ["codex", "--cd", str(workspace_dir), *agent_options, "resume", session_id]
+        )
     else:
         opening_prompt = f"atelier:{atelier_id}:{workspace_name}"
         say("Starting new Codex session")
-        run_command(["codex", "--cd", str(workspace_dir), *agent_options, opening_prompt])
+        run_command(
+            ["codex", "--cd", str(workspace_dir), *agent_options, opening_prompt]
+        )
 
 
 def resolve_editor_command(config: dict) -> list[str]:
@@ -559,7 +577,9 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init", help="initialize a project")
-    init_parser.add_argument("--repo-url", dest="repo_url", help="project repo URL or owner/name")
+    init_parser.add_argument(
+        "--repo-url", dest="repo_url", help="project repo URL or owner/name"
+    )
     init_parser.set_defaults(func=init_project)
 
     open_parser = subparsers.add_parser("open", help="open or create a workspace")
