@@ -1,10 +1,10 @@
 # Atelier — Agent Instructions
 
-This repository defines **Atelier**, a local, filesystem-based workflow for
-agent-assisted software development.
+This repository defines **Atelier**, an installable CLI tool for managing
+workspace-based, agent-assisted development within a single project.
 
-Agents working in this repository are expected to help **implement Atelier
-itself**, following the same principles Atelier promotes.
+Agents working in this repository are expected to help **implement Atelier v2**
+according to the specification in `docs/SPEC.md`.
 
 ---
 
@@ -12,13 +12,36 @@ itself**, following the same principles Atelier promotes.
 
 Atelier is:
 
-- a **basecamp**, not an installer
-- a **protocol**, not a framework
-- a **convention**, not an enforcement mechanism
+- a **project-scoped tool**, not a global project manager
+- a **workspace-first workflow**, not a branch-switching helper
+- a **convention with sharp edges**, not a flexible framework
 
-The filesystem is the primary source of truth.
-Text files (Markdown, YAML) are authoritative.
-Scripts exist to reduce friction, not to encode intelligence.
+Atelier exists to make one thing easy:
+
+> Treat every branch-worthy unit of work as its own isolated workspace,
+> with explicit intent captured before code is written.
+
+The filesystem is the source of truth.
+Configuration is explicit.
+Automation is opt-in and conservative.
+
+---
+
+## What This Repository Is
+
+This repository is:
+
+- the **source code** for the Atelier CLI
+- the **owner** of default templates (project and workspace `AGENTS.md`)
+- the **authority** for how `atelier init` and `atelier open` behave
+
+This repository is **not**:
+
+- an Atelier-managed project
+- a workspace container
+- a place where user workspaces live
+
+Atelier manages *other* projects — not itself.
 
 ---
 
@@ -26,67 +49,90 @@ Scripts exist to reduce friction, not to encode intelligence.
 
 When working in this repository, you may:
 
-- implement or refine CLI scripts in `bin/`
-- create or update templates for:
-  - `project.yaml`
-  - project-level `AGENTS.md`
-  - workspace-level `AGENTS.md`
-- improve documentation to clarify intent or usage
-- simplify or remove unnecessary complexity
+- implement or refine the Atelier CLI
+- update templates shipped with the tool
+- adjust schemas for `.atelier.json` and `.atelier.workspace.json`
+- improve documentation and examples
+- simplify behavior while preserving correctness
 
 You should **not**:
 
-- introduce global configuration or installation steps
-- manage user workspaces directly
-- assume ownership of files under `workspaces/`
-- create background processes, daemons, or services
-- over-engineer for portability or wide adoption
+- add global registries or background services
+- auto-modify user files after creation
+- invent migration or upgrade systems
+- enforce coding conventions for managed projects
+- add features not explicitly described in the spec
 
-This tool is intentionally personal-first.
+If a behavior is not in `docs/SPEC.md`, do not add it.
 
 ---
 
 ## Development Model (Dogfooding)
 
-Atelier should be developed **using Atelier itself**.
+Atelier v2 should be developed **using Atelier itself**.
 
 That means:
 
-- Each non-trivial change should conceptually correspond to a workspace
-- Intent should be clear before implementation
-- Changes should be reviewable and incremental
-- The design should remain coherent when used by:
-  - Codex
-  - Claude Code
-  - Cursor
-  - humans editing files directly
+- Non-trivial changes should be worked on in real workspaces
+- Each workspace should have a clear `AGENTS.md` describing intent
+- Agents should follow the same “Read AGENTS.md and go” contract
+- Humans should be able to interrupt, inspect, and continue work easily
+
+However:
+
+- This repository itself is **not** an Atelier project
+- Do not assume `.atelier.json` exists here
+- Do not manage this repo as a workspace
+
+Dogfooding applies to *how* we work, not *where* state lives.
 
 ---
 
-## Script Design Constraints
+## Implementation Constraints
 
-When implementing or modifying scripts:
+### Language & Tooling
 
-- Prefer **interactive prompts** when information is missing
-- Prefer **clarity over cleverness**
-- Use Bash where practical
-- Avoid unnecessary dependencies
-- Assume `git` and `gh` are available
-- Fail safely and loudly when assumptions are violated
+- Implement Atelier in **Python 3.11+**
+- Use **uv** for dependency and packaging management
+- Produce an **installable CLI** (`atelier`)
+- Prefer standard library functionality where possible
 
-Do not invent complex flag systems unless clearly justified.
+### CLI Behavior
+
+- Commands must be deterministic and explicit
+- Interactive prompting is preferred when information is missing
+- Side effects must be obvious and scoped to the project directory
+- Failure modes must be loud and safe
+
+Do not add hidden behavior or implicit defaults.
+
+---
+
+## Templates
+
+Templates shipped with Atelier are:
+
+- copied at creation time
+- never referenced live
+- never auto-updated
+- owned by the user after creation
+
+The tool may ship updated templates in new versions, but existing files
+must never be modified automatically.
 
 ---
 
 ## Authority Model
 
-This `AGENTS.md` is authoritative for work on the Atelier repository itself.
+This `AGENTS.md` is authoritative for **work on the Atelier tool itself**.
 
-When Atelier is used to manage other projects:
+When Atelier manages other projects:
 
-- Project-level and workspace-level `AGENTS.md` files define behavior
-- Atelier does not override those instructions
-- Atelier only provides structure and tooling
+- Project-level `AGENTS.md` defines the Atelier overlay
+- Workspace-level `AGENTS.md` defines execution and intent
+- Repository-level rules (if any) define coding conventions
+
+Atelier must respect those boundaries strictly.
 
 ---
 
@@ -94,9 +140,9 @@ When Atelier is used to manage other projects:
 
 To start work:
 
-1. Read `docs/SPEC.md`
-2. Identify the smallest useful next change
-3. Implement it cleanly
-4. Stop when the change is complete
+1. Read `docs/SPEC.md` in full
+2. Identify the smallest complete unit of functionality
+3. Implement it cleanly and conservatively
+4. Stop when the behavior matches the spec exactly
 
-If unsure what to do next, ask for clarification rather than guessing.
+If something in the spec is ambiguous, ask for clarification rather than guessing.

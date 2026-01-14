@@ -1,342 +1,366 @@
-# Atelier — Initial Project Specification
+# Atelier — Specification (v2)
 
-## 1. Purpose & Motivation
+## 1. Purpose
 
-### Problem Statement
+Atelier is a **local, installable CLI tool** that manages **workspace-based development** for a single project. Each workspace represents one unit of work, one git branch, and (optionally) one agent coding session.
 
-Git allows cheap branching, but local developer workflows often remain constrained by a **single working copy (“enlistment”) per project**. This creates artificial friction:
+Atelier exists to eliminate branch switching, reduce cognitive load, and make agent-assisted development predictable, resumable, and human-interruptible.
 
-- Context switching via `git checkout` pollutes working state
-- Parallel work is serialized by a single filesystem
-- Agent-based tools (Codex, Claude Code, etc.) are forced to reason across unrelated changes
-- Human intervention (debugging, refactoring, exploration) becomes costly mid-flow
-
-Web-based agent tools solve this by creating **isolated environments per task**, but at the cost of:
-- reduced local control
-- poor integration with existing editors and tools
-- friction when humans want to “take the reins”
-
-### Core Insight
-
-> **Every branch-worthy unit of work should be its own local workspace.**
-
-A workspace is:
-- isolated
-- single-purpose
-- short-lived
-- equally operable by humans *and* agents
-
-The filesystem—not Git branches—is the primary unit of isolation.
-
-### Goal of Atelier
-
-**Atelier is a local, filesystem-based workflow for agent-assisted software development**, enabling:
-
-- parallel work across many features / experiments
-- zero branch switching
-- durable, explicit intent *before* an agent starts
-- seamless handoff between agents and humans
-- tool-agnostic operation (Codex, Claude Code, Cursor, VS Code, human-only)
-
-Atelier is **not** an AI tool.
-It is a **workspace protocol** that AI tools can operate within.
-
-### Operational Model
-
-Atelier is not installed or initialized via a script.
-
-Instead, the Atelier repository itself is the long-lived **basecamp** for all work.
-Users clone the Atelier repository once and periodically sync it to receive
-updated scripts and templates.
-
-All actual development work happens inside user-owned workspaces, which are
-intentionally **gitignored** by the Atelier repository. Updating or syncing
-Atelier must never modify, migrate, or invalidate existing workspaces.
-
-Atelier provides:
-- conventions
-- templates
-- helper scripts
-
-It does **not** own or manage user work.
+Atelier is **tool-agnostic** by design. While it integrates well with Codex, it does not depend on any specific LLM or editor.
 
 ---
 
-## 2. Conceptual Model
+## 2. Core Concepts
 
-### Key Concepts
+### Project
+A project is any directory initialized with Atelier. It is identified by a `.atelier.json` file at its root.
 
-#### Project
-A long-lived logical software project, usually (but not always) backed by a GitHub repository.
+- A project has **one Atelier configuration**
+- A project contains **many workspaces**
+- Atelier commands operate relative to the nearest project root
 
-- Identified by name
-- Has a canonical repo URL
-- Defines defaults and invariants
-- Contains many workspaces over time
+### Workspace
+A workspace is a directory representing one unit of work.
 
-#### Workspace
-A short-lived, single-purpose working directory representing *one unit of work*.
+- One workspace → one git branch
+- One workspace → one eventual pull request
+- One workspace → one agent session (best-effort)
+- Workspaces are created and managed by `atelier open`
 
-- Maps 1:1 to a Git branch and PR
-- Has an explicit goal and success criteria
-- Is disposable after merge
-- Is the **only scope visible to an agent session**
-
-> One workspace = one goal = one branch = one agent session
-
-#### Agent
-Any coding agent (Codex, Claude Code, Gemini, Cursor, or human) operating within a workspace.
-
-Agents are **clients** of Atelier, not first-class entities.
+### Repo
+Each workspace contains a `repo/` directory that is a real git repository (clone of the project repo, checked out on a workspace-specific branch).
 
 ---
 
-## 3. Directory Structure
+## 3. Filesystem Layout
 
-Atelier manages a root directory (default `~/atelier`):
+### Project Root
 
 ```
-~/atelier/
-├─ workspaces/              # user-owned, gitignored
-│  ├─ <project>/
-│  │  ├─ project.env
-│  │  ├─ AGENTS.md          (optional, project-level)
-│  │  ├─ <workspace>/
-│  │  │  ├─ AGENTS.md       (workspace intent & contract)
-│  │  │  ├─ repo/           (git clone + branch)
-│  │  │  └─ codex/          (optional notes, summaries)
-├─ bin/
-│  ├─ atelier-project
-│  ├─ atelier-workspace
-│  ├─ atelier-pr
-│  ├─ atelier-clean
-│  └─ atelier-status
+project-dir/
+├─ .atelier.json
+├─ AGENTS.md
+└─ workspaces/
 ```
 
-The `workspaces/` directory is intentionally excluded from version control.
-Workspaces are disposable, user-owned, and must never be assumed to exist
-or remain stable across Atelier updates.
+### Workspace
+
+```
+workspaces/<workspace-name>/
+├─ AGENTS.md
+├─ .atelier.workspace.json
+└─ repo/
+```
+
+---
+
+## 4. Project Configuration: `.atelier.json`
+
+`.atelier.json` is **application-owned state**. It is written and read by Atelier. Humans may inspect it, but it is not intended for frequent manual editing.
+
+### v2 Schema (JSON)
+
+```json
+{
+  "project": {
+    "name": "gumshoe",
+    "repo_url": "git@github.com:org/gumshoe.git"
+  },
+  "branch": {
+    "default": "main",
+    "prefix": "scott/"
+  },
+  "agent": {
+    "default": "codex",
+    "options": {
+      "codex": ["--full-auto"],
+      "claude": []
+    }
+  },
+  "editor": {
+    "default": "cursor",
+    "options": {
+      "cursor": ["-w"],
+      "subl": ["-w"]
+    }
+  },
+  "workspaces": {
+    "root": "workspaces"
+  },
+  "atelier": {
+    "id": "01J1Q5R6H4M2Z8Y6FZK2X9D8R3",
+    "version": "0.2.0",
+    "created_at": "2026-01-15T01:10:00Z"
+  }
+}
+```
+
+### Notes
+
+- `atelier.id` is a **ULID**, generated once at initialization
+- IDs are opaque and must not be parsed by consumers
+- `agent.options` and `editor.options` are **static argv fragments only**
+- No templating, interpolation, or logic is supported in config
+
+---
+
+## 5. Project-Level `AGENTS.md`
+
+This file describes the **Atelier workflow overlay only**. It does not describe code layout or coding conventions.
+
+### Default Template (v2)
+
+```markdown
+# Atelier Project Overlay
+
+This project is managed using **Atelier**, a workspace-based workflow for
+agent-assisted development.
+
+## How Work Is Organized
+
+- Development work is performed in isolated **workspaces**
+- Workspaces live under the directory configured for this project
+- Each workspace represents **one unit of work**
+- Each workspace has its own `AGENTS.md` defining intent and scope
+
+## Authority
+
+- This file describes only the **Atelier workflow overlay**
+- Workspace `AGENTS.md` files define execution expectations
+- Repository-specific coding conventions are defined elsewhere
+  (e.g. a repository-level `AGENTS.md`, if present)
+
+- See `.atelier.json` for the current project configuration used by Atelier.
+```
+
+This file is generated by `atelier init`. Users may edit it, but most will not.
+
+---
+
+## 6. Workspace Configuration: `.atelier.workspace.json`
+
+This file records workspace identity and provenance.
+
+### v2 Schema
+
+```json
+{
+  "workspace": {
+    "name": "feat-org-api-keys",
+    "branch": "scott/feat-org-api-keys",
+    "id": "atelier:01J1Q5R6H4M2Z8Y6FZK2X9D8R3:feat-org-api-keys"
+  },
+  "atelier": {
+    "version": "0.2.0",
+    "created_at": "2026-01-15T02:03:00Z"
+  }
+}
+```
+
+---
+
+## 7. Workspace `AGENTS.md`
+
+This file is the **execution contract** for agents and humans.
+
+### Structure
+
+1. **Standard prologue** (owned by Atelier)
+2. **User-owned intent**, with suggested headers and commented guidance
+
+### Standard Prologue (v2)
+
+```markdown
+<!-- atelier:<atelier.id>:<workspace.name> -->
+
+# Atelier Workspace
+
+This directory is an **Atelier workspace**.
+
+## Workspace Model
+
+- This workspace represents **one unit of work**
+- All code changes for this work should be made under `repo/`
+- The code in `repo/` is a real git repository and should be treated normally
+- This workspace maps to **one git branch** and **one eventual pull request**
+
+## Execution Expectations
+
+- Complete the work described in this file **to completion**
+- Do not expand scope beyond what is written here
+- Prefer small, reviewable changes over large refactors
+- Avoid unrelated cleanup unless explicitly required
+
+## Agent Context
+
+When operating in this workspace:
+
+- Treat this workspace as the **entire world**
+- Do not reference or modify other workspaces
+- Read the remainder of this file carefully before beginning work
+
+After reading this file, proceed with the work described below.
+```
+
+### Suggested User Sections (commented)
+
+```markdown
+---
+
+## Goal
+
+<!-- Describe what this workspace is meant to accomplish. -->
+
+## Context
+
+<!-- Relevant background, links, tickets, or prior discussion. -->
+
+## Constraints / Considerations
+
+<!-- Technical, organizational, or temporal constraints. -->
+
+## What “Done” Looks Like
+
+<!-- Describe how to know when this workspace is complete. -->
+
+## Notes
+
+<!-- Optional execution notes or reminders. -->
+```
+
+Users may freely edit, reorder, or delete these sections.
+
+---
+
+## 8. CLI Commands (v2)
+
+### `atelier init`
+
+Initializes the current directory as an Atelier project.
+
+#### Behavior
+
+- Creates `.atelier.json` (or updates missing fields)
+- Generates a ULID for `atelier.id` if missing
+- Creates project-level `AGENTS.md` if missing
+- Creates workspace root directory if missing
+- Never modifies existing workspaces
+
+---
+
+### `atelier open <workspace-name>`
+
+Ensures a workspace exists and launches or resumes agent work.
+
+#### Behavior
+
+1. Locate project root by walking up to `.atelier.json`
+2. Ensure workspace directory exists
+3. If workspace is new:
+   - Generate `.atelier.workspace.json`
+   - Generate workspace `AGENTS.md` from template
+   - Open `AGENTS.md` in the configured editor (blocking)
+4. Ensure `repo/` exists:
+   - Clone repo if missing
+   - Checkout default branch
+   - Create workspace branch if missing
+5. Launch agent:
+   - Attempt to resume an existing Codex session by scanning local Codex transcripts
+   - Otherwise start a new session with an opening prompt containing the workspace ID
+   - Use `agent.options` and `codex -C <workspace-dir>` for execution
+
+---
+
+## 9. Codex Session Resumption (Best-Effort)
+
+Atelier may attempt to resume Codex sessions by:
+
+- Scanning `~/.codex/sessions/**` JSON/JSONL files
+- Matching the first user message against:
+  ```
+  atelier:<atelier.id>:<workspace.name>
+  ```
+- Selecting the most recent match
+
+If resumption fails, a new session is started.
+
+Session resumption is **opportunistic** and must never be required for correctness.
+
+---
+
+## 10. Templates
+
+Atelier ships with internal templates for:
+
+- Project `AGENTS.md`
+- Workspace `AGENTS.md`
+
+If a project provides:
+
+```
+project-dir/templates/AGENTS.md
+```
+
+that file is used as the **workspace AGENTS.md template** instead of the built-in one.
+
+Templates are **copied, not referenced**. Atelier never auto-updates existing files.
+
+---
+
+## 11. Non-Goals
+
+Atelier does **not**:
+
+- Manage multiple projects globally
+- Create or manage GitHub repositories (v2)
+- Enforce coding standards
+- Track PRs or merges
+- Maintain background processes
+- Auto-upgrade templates
+
+---
+
+## 12. Implementation Guidelines (v2)
+
+### Language & Runtime
+
+- **Python 3.11+**
+- Packaged as an installable CLI
+- Installed via `pipx` or equivalent
+
+### Tooling
+
+- Use **`uv`** for:
+  - dependency management
+  - packaging
+  - reproducible builds
+- Use standard Python libraries where possible
+- Prefer `subprocess` for invoking git, agent, and editor commands
+
+### CLI Framework
+
+- Use a mature CLI framework (e.g. `typer` or `argparse`)
+- Commands must be:
+  - deterministic
+  - safe by default
+  - explicit about side effects
 
 ### Design Principles
 
-- **No repo pollution**: the actual project repo is untouched
-- **Intent lives outside code**, but adjacent to it
-- **Hierarchy defines authority** (via AGENTS.md)
-- **Disk space is cheaper than cognitive load**
+- Filesystem is the source of truth
+- No global registries
+- No background services
+- No hidden state
+- Human intent before agent execution
 
 ---
 
-## 4. Authority & Configuration Model
-
-### AGENTS.md Hierarchy (Most → Least Specific)
-
-1. Workspace `AGENTS.md`
-2. Project `AGENTS.md` (if present)
-3. Repo `AGENTS.md` (canonical project rules)
-4. Agent defaults
-
-Rules:
-- Higher levels may *constrain* behavior
-- Lower levels may *not* override repo rules
-- Agents must treat AGENTS.md as authoritative contracts
-
----
-
-## 5. Configuration Files
-
-### `project.env` (Required)
-
-Machine-readable metadata for a project.
-
-Example:
-
-```sh
-PROJECT_NAME='gumshoe'
-REPO_URL='git@github.com:org/gumshoe.git'
-DEFAULT_BRANCH='main'
-BRANCH_PREFIX='feat'
-NAMING_PATTERN='{type}-{slug}'
-
-PR_BASE='main'
-DELETE_BRANCH_ON_MERGE='true'
-DELETE_WORKSPACE_ON_MERGE='true'
-```
-
-Used by:
-- CLI tools
-- workspace creation
-- branch naming
-- cleanup logic
-
-The initial schema is intentionally minimal and may evolve over time.
-
----
-
-## 6. Workspace AGENTS.md (Required)
-
-This file must fully define the workspace *before* an agent starts.
-
-### Required Sections
-
-- Identity (project, workspace, branch)
-- Goal
-- Out of scope
-- Success criteria
-- Constraints / notes
-- Workspace contract (lifecycle rules)
-- Authority statement
-
-The agent session should be able to start with:
-
-> “Read AGENTS.md and proceed.”
-
-No additional setup prompt should be required.
-
----
-
-## 7. CLI Tools (Initial Scope)
-
-Atelier does not provide an initialization or installation command.
-Cloning the Atelier repository is sufficient to begin use.
-
-### `atelier-project <name>`
-Creates a new project container.
-
-Responsibilities:
-- Create `workspaces/<project>/`
-- Prompt for repo URL (optional at first)
-- Generate `project.env`
-- Generate project-level `AGENTS.md` (optional)
-- Optionally create GitHub repo via `gh`
-
-No workspace is created yet.
-
-`atelier-project` defines project-level metadata only.
-It does not clone repositories or create branches.
-
-All cloning and branch creation happens exclusively in `atelier-workspace`.
-
----
-
-### `atelier-workspace <project> <type> <slug>`
-
-Creates a new workspace.
-
-Responsibilities:
-1. Load `project.env`
-2. Create workspace directory
-3. Clone repo into `repo/`
-4. Create new branch from default branch
-5. Prompt for:
-   - Goal
-   - Out of scope
-   - Success criteria
-   - Optional ticket link
-6. Generate workspace `AGENTS.md`
-7. Open `AGENTS.md` in `$EDITOR`
-8. Print next steps:
-
-```text
-cd ~/atelier/workspaces/<project>/<workspace>
-<agent command>
-```
-
-This command is the only mechanism by which code is cloned and branches are created.
-
----
-
-### `atelier-pr`
-
-Run inside a workspace.
-
-Responsibilities:
-- Push branch
-- Create PR via `gh`
-- Record PR URL (optional)
-
----
-
-### `atelier-clean`
-
-Run after merge.
-
-Responsibilities:
-- Confirm PR merged
-- Delete branch
-- Delete workspace directory
-
----
-
-### `atelier-status`
-
-Shows active workspaces across projects.
-
----
-
-### Script Design Philosophy
-
-All Atelier scripts are designed to be:
-
-- **Interactive-first**: if required arguments are missing, scripts must prompt
-- **Prompt-driven**: flags are optional, not required
-- **Bash-first**: implemented as portable shell scripts where practical
-- **Minimal**: no background processes, daemons, or global state
-
-Atelier scripts optimize for clarity, hackability, and personal productivity,
-not broad distribution or strict portability guarantees.
-
----
-
-## 8. Non-Goals (Explicit)
-
-Atelier will **not**:
-
-- manage tasks or tickets
-- enforce workflow correctness
-- integrate deeply with specific agents
-- replace Git, PRs, or CI
-- maintain long-lived state beyond the filesystem
-- manage global configuration, installation, or environment setup
-
----
-
-## 9. Key Design Constraints
-
-- Tool-agnostic: must work with any agent or editor
-- Text-first: Markdown and YAML only
-- No background processes
-- No server or daemon
-- Safe by default
-- Easy to abandon or fork
-
----
-
-## 10. Success Criteria for Initial Version
-
-The initial version of Atelier is successful if:
-
-- A developer can run **multiple parallel agent sessions** on the same project locally without branch switching
-- Each session has clear, durable intent defined *before* code generation
-- Agents reliably operate only within their workspace
-- A human can open any workspace in VS Code or Cursor and continue work
-- Cleanup is trivial and leaves no residue
-
----
-
-## 11. Development Approach (Meta)
-
-This project **should be developed using Atelier itself**:
-
-- Each feature/refactor of Atelier is its own workspace
-- Codex (or other agents) are used as primary implementers
-- Human acts as editor, reviewer, and architect
-
-This dogfooding is intentional.
-
----
-
-## Summary (For Codex)
-
-> Atelier defines a local, workspace-oriented development protocol where each unit of work is isolated in its own directory, with explicit intent captured in AGENTS.md before any agent begins coding.
->
-> Implement the initial CLI, templates, and documentation to support this workflow.
+## 13. Success Criteria (v2)
+
+Atelier v2 is successful if:
+
+- A user can initialize a project once
+- Create multiple workspaces without branch switching
+- Resume agent work reliably
+- Interrupt and resume work using an editor
+- Upgrade Atelier without breaking existing projects

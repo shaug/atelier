@@ -1,101 +1,81 @@
 # Atelier
 
-Atelier is a local, filesystem-based workflow for agent-assisted software
-development. It treats the filesystem as the primary unit of isolation so each
-branch-worthy unit of work lives in its own workspace directory.
+Atelier is an installable CLI for workspace-based, agent-assisted development
+within a single project. It turns each unit of work into its own workspace
+with a dedicated git checkout, explicit intent, and a predictable launch path
+for agents and humans.
 
 Atelier is:
-- a basecamp, not an installer
-- a protocol, not a framework
-- a convention, not an enforcement mechanism
-
-The repository provides conventions, templates, and small CLI scripts. It does
-not manage your workspaces, run background services, or impose global setup.
-
-## Why
-
-Git branches are cheap, but a single working copy makes parallel work painful.
-Atelier lets you run multiple agent or human sessions in parallel without
-constantly switching branches or mixing intent.
+- a project-scoped tool, not a global project manager
+- a workspace-first workflow, not a branch-switching helper
+- a convention with sharp edges, not a flexible framework
 
 ## Core Ideas
 
-- One workspace = one goal = one branch = one agent session
-- Intent is written before code (in `AGENTS.md`)
-- Workspaces are short-lived and disposable
-- Text files are the source of truth
+- One workspace = one unit of work = one branch
+- Intent is captured before code (in `AGENTS.md`)
+- Workspaces are isolated directories with their own `repo/`
+- The filesystem is the source of truth
 
-## Directory Layout
+## Project Layout
 
 ```
-atelier/
-├─ bin/                 # CLI helpers
-├─ templates/           # Templates for projects and workspaces
-├─ workspaces/          # User-owned, gitignored
-│  └─ <project>/
-│     ├─ project.env
-│     ├─ AGENTS.md      # optional project-level instructions
-│     └─ <workspace>/
-│        ├─ AGENTS.md   # required workspace intent
-│        └─ repo/       # git clone + branch
+project-dir/
+├─ .atelier.json
+├─ AGENTS.md
+└─ workspaces/
+   └─ <workspace-name>/
+      ├─ AGENTS.md
+      ├─ .atelier.workspace.json
+      └─ repo/
 ```
 
 ## Quick Start
 
-1) Create a project container:
+Initialize a project:
 
 ```
-./bin/atelier-project <project>
+atelier init
 ```
 
-2) Create a workspace:
+Open or create a workspace:
 
 ```
-./bin/atelier-workspace <project> <type> <slug>
+atelier open <workspace-name>
 ```
 
-Example:
-
-```
-./bin/atelier-project atelier
-./bin/atelier-workspace atelier feat bootstrap-atelier
-```
-
-The workspace script will:
-- read `project.env`
-- clone the repo
-- create a branch
-- generate a workspace `AGENTS.md` with your intent
-
-## Templates
-
-Templates live in `templates/` and are rendered by the scripts. You can edit
-these to match your preferences.
-
-- `templates/project.env`
-- `templates/project/AGENTS.md`
-- `templates/workspace/AGENTS.md`
-
-## Scripts
-
-- `bin/atelier-project`: create a project container and `project.env`
-- `bin/atelier-workspace`: create a workspace, clone repo, and branch
-
-More scripts (`atelier-pr`, `atelier-clean`, `atelier-status`) can be added as
-needed.
+`atelier open` will:
+- create the workspace if needed
+- generate `AGENTS.md` and `.atelier.workspace.json`
+- clone the repo into `repo/` and create the workspace branch
+- launch the configured editor and Codex
 
 ## Notes
 
-- `workspaces/` is intentionally gitignored.
-- No background processes, daemons, or global installers.
-- Atelier assumes `git` (and optionally `gh`) are available.
+- Atelier never auto-updates existing workspaces or templates.
+- `AGENTS.md` is the execution contract for each workspace.
+- Configuration lives in `.atelier.json` and is owned by the tool.
 
-## Design Constraints
+## Development
 
-- interactive prompts when info is missing
-- clarity over cleverness
-- bash-first, minimal dependencies
-- safe, local, and disposable by default
+Atelier is a Python 3.11+ CLI packaged with `uv`.
+
+```
+uv venv
+uv pip install -e .
+```
+
+Run the CLI locally:
+
+```
+uv run atelier --help
+```
+
+Run tests:
+
+```
+python -m unittest discover -s tests
+```
 
 ## License
 
