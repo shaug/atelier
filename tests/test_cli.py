@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sys
@@ -27,6 +28,74 @@ def make_init_args(**overrides: object) -> SimpleNamespace:
     }
     data.update(overrides)
     return SimpleNamespace(**data)
+
+
+class DummyResult:
+    def __init__(self, returncode: int = 0, stdout: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def write_project_config(root: Path) -> dict:
+    config = {
+        "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
+        "branch": {"default": "main", "prefix": "scott/"},
+        "workspaces": {"root": "workspaces"},
+    }
+    (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+    return config
+
+
+def write_workspace_config(workspace_dir: Path, name: str, branch: str) -> None:
+    payload = {
+        "workspace": {
+            "name": name,
+            "branch": branch,
+            "id": f"atelier:01TEST:{name}",
+        },
+        "atelier": {"version": "0.2.0", "created_at": "2026-01-01T00:00:00Z"},
+    }
+    (workspace_dir / ".atelier.workspace.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+
+def make_fake_git(
+    branches: dict[Path, str],
+    statuses: dict[Path, str],
+    remotes: dict[tuple[Path, str], str],
+):
+    normalized_branches = {path.resolve(): value for path, value in branches.items()}
+    normalized_statuses = {path.resolve(): value for path, value in statuses.items()}
+    normalized_remotes = {
+        (path.resolve(), branch): value for (path, branch), value in remotes.items()
+    }
+
+    def fake_run(
+        cmd: list[str],
+        capture_output: bool = False,
+        text: bool = False,
+        check: bool = False,
+        cwd: Path | None = None,
+    ) -> DummyResult:
+        if cmd[0] != "git":
+            return DummyResult(returncode=1, stdout="")
+        if "-C" not in cmd:
+            return DummyResult(returncode=1, stdout="")
+        repo_dir = Path(cmd[cmd.index("-C") + 1]).resolve()
+        if "rev-parse" in cmd:
+            branch = normalized_branches.get(repo_dir, "")
+            return DummyResult(returncode=0, stdout=f"{branch}\n")
+        if "status" in cmd and "--porcelain" in cmd:
+            status = normalized_statuses.get(repo_dir, "")
+            return DummyResult(returncode=0, stdout=status)
+        if "ls-remote" in cmd:
+            branch = cmd[-1]
+            output = normalized_remotes.get((repo_dir, branch), "")
+            return DummyResult(returncode=0, stdout=output)
+        return DummyResult(returncode=1, stdout="")
+
+    return fake_run
 
 
 class TestUlid(TestCase):
@@ -251,6 +320,225 @@ class TestInitProject(TestCase):
                 self.assertEqual(config["project"]["name"], "positional-project")
             finally:
                 os.chdir(original_cwd)
+
+
+class TestListWorkspaces(TestCase):
+    def test_list_reports_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_project_config(root)
+
+            workspaces_root = root / "workspaces"
+            alpha_dir = workspaces_root / "alpha"
+            beta_dir = workspaces_root / "beta"
+            (alpha_dir / "repo").mkdir(parents=True)
+            (beta_dir / "repo").mkdir(parents=True)
+            write_workspace_config(alpha_dir, "alpha", "scott/alpha")
+            write_workspace_config(beta_dir, "beta", "scott/beta")
+
+            repo_alpha = alpha_dir / "repo"
+            repo_beta = beta_dir / "repo"
+            fake_run = make_fake_git(
+                branches={repo_alpha: "scott/alpha", repo_beta: "main"},
+                statuses={repo_alpha: "", repo_beta: " M file.txt\n"},
+                remotes={
+                    (repo_alpha, "scott/alpha"): "deadbeef\trefs/heads/scott/alpha\n",
+                    (repo_beta, "scott/beta"): "",
+                },
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                buffer = io.StringIO()
+                with (
+                    patch("atelier.cli.subprocess.run", fake_run),
+                    patch("sys.stdout", buffer),
+                ):
+                    cli.list_workspaces(SimpleNamespace())
+                lines = [
+                    line.strip() for line in buffer.getvalue().splitlines() if line
+                ]
+                data = {
+                    line.split()[0]: line.split()
+                    for line in lines
+                    if line.split()[0] in {"alpha", "beta"}
+                }
+                self.assertEqual(data["alpha"][1:], ["yes", "yes", "yes"])
+                self.assertEqual(data["beta"][1:], ["no", "unknown", "no"])
+            finally:
+                os.chdir(original_cwd)
+
+
+class TestCleanWorkspaces(TestCase):
+    def test_clean_default_deletes_complete_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_project_config(root)
+            workspaces_root = root / "workspaces"
+            complete_dir = workspaces_root / "complete"
+            incomplete_dir = workspaces_root / "incomplete"
+            (complete_dir / "repo").mkdir(parents=True)
+            (incomplete_dir / "repo").mkdir(parents=True)
+            write_workspace_config(complete_dir, "complete", "scott/complete")
+            write_workspace_config(incomplete_dir, "incomplete", "scott/incomplete")
+
+            repo_complete = complete_dir / "repo"
+            repo_incomplete = incomplete_dir / "repo"
+            fake_run = make_fake_git(
+                branches={repo_complete: "scott/complete", repo_incomplete: "main"},
+                statuses={repo_complete: "", repo_incomplete: " M file.txt\n"},
+                remotes={
+                    (
+                        repo_complete,
+                        "scott/complete",
+                    ): "abc\trefs/heads/scott/complete\n",
+                    (repo_incomplete, "scott/incomplete"): "",
+                },
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                responses = iter(["y"])
+                with (
+                    patch("atelier.cli.subprocess.run", fake_run),
+                    patch("builtins.input", lambda _: next(responses)),
+                ):
+                    cli.clean_workspaces(
+                        SimpleNamespace(all=False, force=False, workspace_names=[])
+                    )
+                self.assertFalse(complete_dir.exists())
+                self.assertTrue(incomplete_dir.exists())
+            finally:
+                os.chdir(original_cwd)
+
+    def test_clean_all_flag_deletes_all(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_project_config(root)
+            workspaces_root = root / "workspaces"
+            alpha_dir = workspaces_root / "alpha"
+            beta_dir = workspaces_root / "beta"
+            (alpha_dir / "repo").mkdir(parents=True)
+            (beta_dir / "repo").mkdir(parents=True)
+            write_workspace_config(alpha_dir, "alpha", "scott/alpha")
+            write_workspace_config(beta_dir, "beta", "scott/beta")
+
+            repo_alpha = alpha_dir / "repo"
+            repo_beta = beta_dir / "repo"
+            fake_run = make_fake_git(
+                branches={repo_alpha: "scott/alpha", repo_beta: "main"},
+                statuses={repo_alpha: " M file.txt\n", repo_beta: ""},
+                remotes={
+                    (repo_alpha, "scott/alpha"): "",
+                    (repo_beta, "scott/beta"): "abc\trefs/heads/scott/beta\n",
+                },
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                responses = iter(["y", "y"])
+                with (
+                    patch("atelier.cli.subprocess.run", fake_run),
+                    patch("builtins.input", lambda _: next(responses)),
+                ):
+                    cli.clean_workspaces(
+                        SimpleNamespace(all=True, force=False, workspace_names=[])
+                    )
+                self.assertFalse(alpha_dir.exists())
+                self.assertFalse(beta_dir.exists())
+            finally:
+                os.chdir(original_cwd)
+
+    def test_clean_force_skips_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_project_config(root)
+            workspaces_root = root / "workspaces"
+            alpha_dir = workspaces_root / "alpha"
+            (alpha_dir / "repo").mkdir(parents=True)
+            write_workspace_config(alpha_dir, "alpha", "scott/alpha")
+
+            repo_alpha = alpha_dir / "repo"
+            fake_run = make_fake_git(
+                branches={repo_alpha: "scott/alpha"},
+                statuses={repo_alpha: ""},
+                remotes={(repo_alpha, "scott/alpha"): "abc\trefs/heads/scott/alpha\n"},
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.cli.subprocess.run", fake_run),
+                    patch(
+                        "builtins.input",
+                        side_effect=AssertionError("prompted unexpectedly"),
+                    ),
+                ):
+                    cli.clean_workspaces(
+                        SimpleNamespace(all=True, force=True, workspace_names=[])
+                    )
+                self.assertFalse(alpha_dir.exists())
+            finally:
+                os.chdir(original_cwd)
+
+    def test_clean_positional_targets_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_project_config(root)
+            workspaces_root = root / "workspaces"
+            alpha_dir = workspaces_root / "alpha"
+            beta_dir = workspaces_root / "beta"
+            (alpha_dir / "repo").mkdir(parents=True)
+            (beta_dir / "repo").mkdir(parents=True)
+            write_workspace_config(alpha_dir, "alpha", "scott/alpha")
+            write_workspace_config(beta_dir, "beta", "scott/beta")
+
+            repo_alpha = alpha_dir / "repo"
+            repo_beta = beta_dir / "repo"
+            fake_run = make_fake_git(
+                branches={repo_alpha: "scott/alpha", repo_beta: "scott/beta"},
+                statuses={repo_alpha: "", repo_beta: ""},
+                remotes={
+                    (repo_alpha, "scott/alpha"): "abc\trefs/heads/scott/alpha\n",
+                    (repo_beta, "scott/beta"): "abc\trefs/heads/scott/beta\n",
+                },
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with patch("atelier.cli.subprocess.run", fake_run):
+                    cli.clean_workspaces(
+                        SimpleNamespace(
+                            all=False, force=True, workspace_names=["beta", "missing"]
+                        )
+                    )
+                self.assertTrue(alpha_dir.exists())
+                self.assertFalse(beta_dir.exists())
+            finally:
+                os.chdir(original_cwd)
+
+
+class TestCleanFlags(TestCase):
+    def test_clean_short_flags(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_clean(args: SimpleNamespace) -> None:
+            captured["all"] = args.all
+            captured["force"] = args.force
+
+        with (
+            patch.object(sys, "argv", ["atelier", "clean", "-A", "-F"]),
+            patch("atelier.cli.clean_workspaces", fake_clean),
+        ):
+            cli.main()
+
+        self.assertTrue(captured["all"])
+        self.assertTrue(captured["force"])
 
 
 class TestFindCodexSession(TestCase):
