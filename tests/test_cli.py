@@ -75,7 +75,9 @@ class TestInitProject(TestCase):
                 args = SimpleNamespace(repo_url="owner/repo")
                 responses = iter(["", "", "", "", "", ""])
 
-                with patch("builtins.input", lambda _: next(responses)):
+                with patch("builtins.input", lambda _: next(responses)), patch(
+                    "atelier.cli.shutil.which", return_value="/usr/bin/cursor"
+                ):
                     cli.init_project(args)
 
                 config_path = root / ".atelier.json"
@@ -86,9 +88,69 @@ class TestInitProject(TestCase):
                     config["project"]["repo_url"], "git@github.com:owner/repo.git"
                 )
                 self.assertEqual(config["branch"]["default"], "main")
-                self.assertEqual(config["editor"]["default"], "vi")
+                self.assertEqual(config["editor"]["default"], "cursor")
                 self.assertTrue((root / "AGENTS.md").exists())
                 self.assertTrue((root / "workspaces").is_dir())
+            finally:
+                os.chdir(original_cwd)
+
+    def test_init_prefers_cursor_over_env_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                args = SimpleNamespace(repo_url="owner/repo")
+                responses = iter(["", "", "", "", "", ""])
+
+                with patch("builtins.input", lambda _: next(responses)), patch(
+                    "atelier.cli.shutil.which", return_value="/usr/bin/cursor"
+                ), patch.dict(os.environ, {"EDITOR": "nano -w"}):
+                    cli.init_project(args)
+
+                config_path = root / ".atelier.json"
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(config["editor"]["default"], "cursor")
+            finally:
+                os.chdir(original_cwd)
+
+    def test_init_parses_editor_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                args = SimpleNamespace(repo_url="owner/repo")
+                responses = iter(["", "", "", "", "cursor -w", ""])
+
+                with patch("builtins.input", lambda _: next(responses)):
+                    cli.init_project(args)
+
+                config_path = root / ".atelier.json"
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(config["editor"]["default"], "cursor")
+                self.assertEqual(config["editor"]["options"]["cursor"], ["-w"])
+            finally:
+                os.chdir(original_cwd)
+
+    def test_init_uses_editor_env_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                args = SimpleNamespace(repo_url="owner/repo")
+                responses = iter(["", "", "", "", "", ""])
+
+                with patch("builtins.input", lambda _: next(responses)), patch(
+                    "atelier.cli.shutil.which", return_value=None
+                ), patch.dict(os.environ, {"EDITOR": "nano -w"}):
+                    cli.init_project(args)
+
+                config_path = root / ".atelier.json"
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(config["editor"]["default"], "nano")
+                self.assertEqual(config["editor"]["options"]["nano"], ["-w"])
             finally:
                 os.chdir(original_cwd)
 
@@ -121,6 +183,35 @@ class TestFindCodexSession(TestCase):
                 session = cli.find_codex_session("01TEST", "feat-demo")
 
             self.assertEqual(session, "session-new")
+
+    def test_returns_session_id_from_jsonl_meta(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            sessions = home / ".codex" / "sessions" / "2026" / "01" / "14"
+            sessions.mkdir(parents=True)
+
+            target = "atelier:01TEST:feat-demo"
+            session_id = "019bbe1b-1c3c-7ef0-b7e6-61477c74ceb1"
+            session_file = sessions / f"rollout-2026-01-14T12-03-26-{session_id}.jsonl"
+
+            session_file.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {
+                            "id": session_id,
+                            "instructions": target,
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("atelier.cli.Path.home", return_value=home):
+                session = cli.find_codex_session("01TEST", "feat-demo")
+
+            self.assertEqual(session, session_id)
 
 
 class TestOpenWorkspace(TestCase):
