@@ -129,6 +129,10 @@ if [[ -z "$default_branch" ]]; then
   default_branch="main"
 fi
 
+if [[ -z "$repo_name" ]]; then
+  repo_name="${repo_slug#*/}"
+fi
+
 if [[ -z "$project_name" ]]; then
   project_name="$(prompt "Project name" "$repo_name")"
 fi
