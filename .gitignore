@@ -8,6 +8,7 @@ __pycache__/
 .ruff_cache/
 build/
 dist/
+src/atelier/_version.py
 /.venv/
 .vscode/
 uv.lock
