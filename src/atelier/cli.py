@@ -315,6 +315,13 @@ def run_command(cmd: list[str], cwd: Path | None = None) -> None:
         die(f"command failed: {' '.join(cmd)}")
 
 
+def run_git_command(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        die("missing required command: git")
+
+
 def init_project(args: argparse.Namespace) -> None:
     cwd = Path.cwd()
     existing_root = find_project_root(cwd)
@@ -644,6 +651,190 @@ def resolve_editor_command(config: dict) -> list[str]:
     return shlex.split(system_editor_default())
 
 
+def workspace_root_for_config(project_root: Path, config: dict) -> Path:
+    workspaces_root = config.get("workspaces", {}).get("root")
+    if not workspaces_root:
+        die(".atelier.json missing workspaces.root")
+    if is_absolute_path(str(workspaces_root)):
+        return Path(workspaces_root)
+    return project_root / str(workspaces_root)
+
+
+def workspace_branch_for_dir(
+    workspace_dir: Path, workspace_name: str, config: dict
+) -> str:
+    workspace_config = load_json(workspace_dir / ".atelier.workspace.json") or {}
+    branch = workspace_config.get("workspace", {}).get("branch")
+    if branch:
+        return str(branch)
+    prefix = config.get("branch", {}).get("prefix", "")
+    return f"{prefix}{workspace_name}"
+
+
+def git_current_branch(repo_dir: Path) -> str | None:
+    result = run_git_command(
+        ["git", "-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"]
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def git_is_clean(repo_dir: Path) -> bool | None:
+    result = run_git_command(["git", "-C", str(repo_dir), "status", "--porcelain"])
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() == ""
+
+
+def git_has_remote_branch(repo_dir: Path, branch: str) -> bool | None:
+    result = run_git_command(
+        ["git", "-C", str(repo_dir), "ls-remote", "--heads", "origin", branch]
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() != ""
+
+
+def format_status(value: bool | None) -> str:
+    if value is None:
+        return "unknown"
+    return "yes" if value else "no"
+
+
+def collect_workspaces(project_root: Path, config: dict) -> list[dict]:
+    workspaces_root = workspace_root_for_config(project_root, config)
+    if not workspaces_root.exists():
+        return []
+    workspaces: list[dict] = []
+    for workspace_dir in sorted(workspaces_root.iterdir(), key=lambda item: item.name):
+        if not workspace_dir.is_dir():
+            continue
+        workspace_name = workspace_dir.name
+        repo_dir = workspace_dir / "repo"
+        branch = workspace_branch_for_dir(workspace_dir, workspace_name, config)
+        checked_out: bool | None = None
+        clean: bool | None = None
+        pushed: bool | None = None
+        if repo_dir.exists():
+            current_branch = git_current_branch(repo_dir)
+            checked_out = current_branch == branch if current_branch else None
+            if current_branch and current_branch == branch:
+                clean = git_is_clean(repo_dir)
+            else:
+                clean = None
+            pushed = git_has_remote_branch(repo_dir, branch)
+        workspaces.append(
+            {
+                "name": workspace_name,
+                "path": workspace_dir,
+                "repo_dir": repo_dir,
+                "branch": branch,
+                "checked_out": checked_out,
+                "clean": clean,
+                "pushed": pushed,
+            }
+        )
+    return workspaces
+
+
+def list_workspaces(args: argparse.Namespace) -> None:
+    cwd = Path.cwd()
+    project_root = find_project_root(cwd)
+    if not project_root:
+        die("no .atelier.json found; run 'atelier init' in a project root")
+
+    config_path = project_root / ".atelier.json"
+    config = load_json(config_path)
+    if not config:
+        die("failed to load .atelier.json")
+
+    workspaces = collect_workspaces(project_root, config)
+    if not workspaces:
+        say("No workspaces found.")
+        return
+
+    rows = [("workspace", "checked_out", "clean", "pushed")]
+    for workspace in workspaces:
+        rows.append(
+            (
+                workspace["name"],
+                format_status(workspace["checked_out"]),
+                format_status(workspace["clean"]),
+                format_status(workspace["pushed"]),
+            )
+        )
+
+    widths = [max(len(row[index]) for row in rows) for index in range(len(rows[0]))]
+    for row in rows:
+        say(
+            "  ".join(
+                value.ljust(widths[index]) for index, value in enumerate(row)
+            ).rstrip()
+        )
+
+
+def confirm_delete(workspace_name: str) -> bool:
+    response = input(f"Delete workspace {workspace_name}? [y/N]: ").strip().lower()
+    return response in {"y", "yes"}
+
+
+def clean_workspaces(args: argparse.Namespace) -> None:
+    cwd = Path.cwd()
+    project_root = find_project_root(cwd)
+    if not project_root:
+        die("no .atelier.json found; run 'atelier init' in a project root")
+
+    config_path = project_root / ".atelier.json"
+    config = load_json(config_path)
+    if not config:
+        die("failed to load .atelier.json")
+
+    workspaces = collect_workspaces(project_root, config)
+    if not workspaces:
+        say("No workspaces found.")
+        return
+
+    workspaces_by_name = {workspace["name"]: workspace for workspace in workspaces}
+
+    requested = [name.strip() for name in args.workspace_names or [] if name.strip()]
+    if args.all and requested:
+        die("cannot combine --all with workspace names")
+
+    if args.all:
+        targets = list(workspaces)
+    elif requested:
+        targets = []
+        for name in requested:
+            workspace = workspaces_by_name.get(name)
+            if not workspace:
+                warn(f"workspace not found: {name}")
+                continue
+            targets.append(workspace)
+    else:
+        targets = [
+            workspace
+            for workspace in workspaces
+            if workspace["clean"] is True and workspace["pushed"] is True
+        ]
+
+    if not targets:
+        say("No workspaces to clean.")
+        return
+
+    for workspace in targets:
+        name = workspace["name"]
+        if not args.force and not confirm_delete(name):
+            say(f"Skipped workspace {name}")
+            continue
+        try:
+            shutil.rmtree(workspace["path"])
+        except OSError as exc:
+            warn(f"failed to delete workspace {name}: {exc}")
+            continue
+        say(f"Deleted workspace {name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="atelier")
     parser.add_argument("--version", action="version", version=__version__)
@@ -677,6 +868,25 @@ def main() -> None:
     open_parser = subparsers.add_parser("open", help="open or create a workspace")
     open_parser.add_argument("workspace_name", help="workspace name")
     open_parser.set_defaults(func=open_workspace)
+
+    list_parser = subparsers.add_parser("list", help="list workspaces")
+    list_parser.set_defaults(func=list_workspaces)
+
+    clean_parser = subparsers.add_parser("clean", help="clean workspaces")
+    clean_parser.add_argument(
+        "-A",
+        "--all",
+        action="store_true",
+        help="delete all workspaces regardless of state",
+    )
+    clean_parser.add_argument(
+        "-F",
+        "--force",
+        action="store_true",
+        help="delete without confirmation",
+    )
+    clean_parser.add_argument("workspace_names", nargs="*", help="workspaces to delete")
+    clean_parser.set_defaults(func=clean_workspaces)
 
     args = parser.parse_args()
     args.func(args)
