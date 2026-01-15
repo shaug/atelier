@@ -730,6 +730,7 @@ def open_workspace(args: argparse.Namespace) -> None:
 
     workspace_dir = workspace_root / workspace_name
     agents_path = workspace_dir / "AGENTS.md"
+    workspace_config_path = workspace_dir / ".atelier.workspace.json"
     is_new_workspace = not workspace_dir.exists()
     branch_prefix = branch_config.get("prefix", "")
     if is_new_workspace:
@@ -767,9 +768,9 @@ def open_workspace(args: argparse.Namespace) -> None:
             )
         if branch_override:
             workspace_branch = branch_override
-    if is_new_workspace:
-        ensure_dir(workspace_dir)
+    ensure_dir(workspace_dir)
 
+    if not workspace_config_path.exists():
         workspace_config = {
             "workspace": {
                 "name": workspace_name,
@@ -783,8 +784,9 @@ def open_workspace(args: argparse.Namespace) -> None:
                 "created_at": utc_now(),
             },
         }
-        write_json(workspace_dir / ".atelier.workspace.json", workspace_config)
+        write_json(workspace_config_path, workspace_config)
 
+    if not agents_path.exists():
         integration_strategy = render_integration_strategy(
             effective_branch_pr, effective_branch_history
         )
@@ -816,7 +818,8 @@ def open_workspace(args: argparse.Namespace) -> None:
         die(".atelier.json missing branch.default")
 
     if not repo_dir.exists():
-        ensure_dir(workspace_dir)
+        editor_cmd = resolve_editor_command(config)
+        run_command([*editor_cmd, str(agents_path)], cwd=project_root)
         run_command(["git", "clone", project_repo_url, str(repo_dir)])
     else:
         remote_check = subprocess.run(
@@ -873,8 +876,6 @@ def open_workspace(args: argparse.Namespace) -> None:
         append_workspace_branch_summary(
             agents_path, repo_dir, default_branch, workspace_branch
         )
-        editor_cmd = resolve_editor_command(config)
-        run_command([*editor_cmd, str(agents_path)], cwd=project_root)
 
     session_id = find_codex_session(atelier_id, workspace_name)
     if session_id:

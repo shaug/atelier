@@ -868,6 +868,105 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_edits_agents_before_clone_when_repo_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {
+                "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
+                "branch": {"default": "main", "prefix": "scott/"},
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "true", "options": {"true": []}},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                class DummyResult:
+                    def __init__(self, returncode: int = 1, stdout: str = "") -> None:
+                        self.returncode = returncode
+                        self.stdout = stdout
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                ):
+                    cli.open_workspace(
+                        SimpleNamespace(workspace_name="feat-demo", branch=None)
+                    )
+
+                editor_index = next(
+                    index for index, cmd in enumerate(commands) if cmd[:1] == ["true"]
+                )
+                clone_index = next(
+                    index
+                    for index, cmd in enumerate(commands)
+                    if cmd[:2] == ["git", "clone"]
+                )
+                self.assertLess(editor_index, clone_index)
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_skips_editor_when_repo_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {
+                "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
+                "branch": {"default": "main", "prefix": "scott/"},
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "true", "options": {"true": []}},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+
+            workspace_dir = root / "workspaces" / "feat-demo"
+            (workspace_dir / "repo").mkdir(parents=True)
+            (workspace_dir / "AGENTS.md").write_text("stub\n", encoding="utf-8")
+            write_workspace_config(workspace_dir, "feat-demo", "scott/feat-demo")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                class DummyResult:
+                    def __init__(self, returncode: int = 1, stdout: str = "") -> None:
+                        self.returncode = returncode
+                        self.stdout = stdout
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                ):
+                    cli.open_workspace(
+                        SimpleNamespace(workspace_name="feat-demo", branch=None)
+                    )
+
+                self.assertFalse(any(cmd[:1] == ["true"] for cmd in commands))
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_accepts_workspace_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
