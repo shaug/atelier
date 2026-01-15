@@ -23,7 +23,7 @@ A project is any directory initialized with Atelier. It is identified by a `.ate
 A workspace is a directory representing one unit of work.
 
 - One workspace → one git branch
-- One workspace → one eventual pull request
+- Integration expectations are defined by project branch settings
 - One workspace → one agent session (best-effort)
 - Workspaces are created and managed by `atelier open`
 
@@ -68,7 +68,9 @@ workspaces/<workspace-name>/
   },
   "branch": {
     "default": "main",
-    "prefix": "scott/"
+    "prefix": "scott/",
+    "pr": true,
+    "history": "manual"
   },
   "agent": {
     "default": "codex",
@@ -99,6 +101,9 @@ workspaces/<workspace-name>/
 
 - `atelier.id` is a **ULID**, generated once at initialization
 - IDs are opaque and must not be parsed by consumers
+- `branch.pr` controls whether integration is expected via pull request (default `true`)
+- `branch.history` defines expected history shape after integration
+  (default `manual`; supported values: `manual`, `squash`, `merge`, `rebase`)
 - `agent.options` and `editor.options` are **static argv fragments only**
 - No templating, interpolation, or logic is supported in config
 
@@ -182,7 +187,8 @@ This directory is an **Atelier workspace**.
 - This workspace represents **one unit of work**
 - All code changes for this work should be made under `repo/`
 - The code in `repo/` is a real git repository and should be treated normally
-- This workspace maps to **one git branch** and **one eventual pull request**
+- This workspace maps to **one git branch**
+- Integration expectations are defined below
 
 ## Execution Expectations
 
@@ -198,6 +204,22 @@ When operating in this workspace:
 - Treat this workspace as the **entire world**
 - Do not reference or modify other workspaces
 - Read the remainder of this file carefully before beginning work
+
+## Integration Strategy
+
+This section describes expected coordination and history semantics.
+Atelier does not automate integration.
+
+- Pull requests expected: yes
+- History policy: manual
+
+When this workspace's success criteria are met:
+
+- The workspace branch is expected to be pushed to the remote.
+- A pull request against the default branch is the expected integration mechanism.
+- Manual review is assumed; integration should not happen automatically.
+- The intended merge style is manual (no specific history behavior is implied).
+- Integration should wait for an explicit instruction in the thread.
 
 After reading this file, proceed with the work described below.
 ```
@@ -268,6 +290,15 @@ Ensures a workspace exists and launches or resumes agent work.
    - Attempt to resume an existing Codex session by scanning local Codex transcripts
    - Otherwise start a new session with an opening prompt containing the workspace ID
    - Use `agent.options` and `codex -C <workspace-dir>` for execution
+
+#### Flags
+
+- `--branch-pr <true|false>` overrides `branch.pr` for new workspaces and is
+  stored in the workspace config. For existing workspaces, the value must match
+  the workspace config or `atelier open` errors.
+- `--branch-history <manual|squash|merge|rebase>` overrides `branch.history` for
+  new workspaces and is stored in the workspace config. For existing workspaces,
+  the value must match the workspace config or `atelier open` errors.
 
 ---
 
