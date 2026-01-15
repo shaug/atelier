@@ -1,4 +1,5 @@
 import argparse
+import concurrent.futures
 import datetime as dt
 import json
 import os
@@ -955,10 +956,17 @@ def collect_workspaces(project_root: Path, config: dict) -> list[dict]:
     workspaces_root = workspace_root_for_config(project_root, config)
     if not workspaces_root.exists():
         return []
-    workspaces: list[dict] = []
-    for workspace_dir in sorted(workspaces_root.iterdir(), key=lambda item: item.name):
-        if not workspace_dir.is_dir():
-            continue
+    workspace_dirs = [
+        workspace_dir
+        for workspace_dir in sorted(
+            workspaces_root.iterdir(), key=lambda item: item.name
+        )
+        if workspace_dir.is_dir()
+    ]
+    if not workspace_dirs:
+        return []
+
+    def build_workspace(workspace_dir: Path) -> dict:
         workspace_name = workspace_dir.name
         repo_dir = workspace_dir / "repo"
         branch = workspace_branch_for_dir(workspace_dir, workspace_name, config)
@@ -973,18 +981,22 @@ def collect_workspaces(project_root: Path, config: dict) -> list[dict]:
             else:
                 clean = None
             pushed = git_has_remote_branch(repo_dir, branch)
-        workspaces.append(
-            {
-                "name": workspace_name,
-                "path": workspace_dir,
-                "repo_dir": repo_dir,
-                "branch": branch,
-                "checked_out": checked_out,
-                "clean": clean,
-                "pushed": pushed,
-            }
-        )
-    return workspaces
+        return {
+            "name": workspace_name,
+            "path": workspace_dir,
+            "repo_dir": repo_dir,
+            "branch": branch,
+            "checked_out": checked_out,
+            "clean": clean,
+            "pushed": pushed,
+        }
+
+    max_workers = min(8, len(workspace_dirs))
+    if max_workers <= 1:
+        return [build_workspace(workspace_dir) for workspace_dir in workspace_dirs]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return list(executor.map(build_workspace, workspace_dirs))
 
 
 def list_workspaces(args: argparse.Namespace) -> None:
