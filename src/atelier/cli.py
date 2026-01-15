@@ -532,6 +532,9 @@ def open_workspace(args: argparse.Namespace) -> None:
     )
     if not workspace_name:
         die("workspace name is required")
+    branch_override = getattr(args, "branch", None)
+    if branch_override is not None:
+        branch_override = str(branch_override).strip() or None
 
     atelier_id = config.get("atelier", {}).get("id")
     if not atelier_id:
@@ -540,13 +543,27 @@ def open_workspace(args: argparse.Namespace) -> None:
     workspace_dir = workspace_root / workspace_name
     agents_path = workspace_dir / "AGENTS.md"
     is_new_workspace = not workspace_dir.exists()
+    branch_prefix = config.get("branch", {}).get("prefix", "")
+    if is_new_workspace:
+        workspace_branch = branch_override or f"{branch_prefix}{workspace_name}"
+    else:
+        workspace_branch = workspace_branch_for_dir(
+            workspace_dir, workspace_name, config
+        )
+        if branch_override and branch_override != workspace_branch:
+            die(
+                "specified branch does not match configured workspace branch "
+                f"({branch_override} != {workspace_branch})"
+            )
+        if branch_override:
+            workspace_branch = branch_override
     if is_new_workspace:
         ensure_dir(workspace_dir)
 
         workspace_config = {
             "workspace": {
                 "name": workspace_name,
-                "branch": f"{config.get('branch', {}).get('prefix', '')}{workspace_name}",
+                "branch": workspace_branch,
                 "id": f"atelier:{atelier_id}:{workspace_name}",
             },
             "atelier": {
@@ -578,9 +595,6 @@ def open_workspace(args: argparse.Namespace) -> None:
     default_branch = config.get("branch", {}).get("default")
     if not default_branch:
         die(".atelier.json missing branch.default")
-
-    branch_prefix = config.get("branch", {}).get("prefix", "")
-    workspace_branch = f"{branch_prefix}{workspace_name}"
 
     if not repo_dir.exists():
         ensure_dir(workspace_dir)
@@ -1159,6 +1173,9 @@ def main() -> None:
 
     open_parser = subparsers.add_parser("open", help="open or create a workspace")
     open_parser.add_argument("workspace_name", help="workspace name")
+    open_parser.add_argument(
+        "-B", "--branch", dest="branch", help="explicit branch name for the workspace"
+    )
     open_parser.set_defaults(func=open_workspace)
 
     list_parser = subparsers.add_parser("list", help="list workspaces")
