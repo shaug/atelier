@@ -370,6 +370,74 @@ def render_integration_strategy(branch_pr: bool, branch_history: str) -> str:
     return "\n".join(lines)
 
 
+def ensure_workspace_metadata(
+    workspace_dir: Path,
+    agents_path: Path,
+    workspace_config_path: Path,
+    project_root: Path,
+    workspace_name: str,
+    workspace_branch: str,
+    atelier_id: str,
+    branch_pr: bool,
+    branch_history: str,
+) -> None:
+    workspace_config_exists = workspace_config_path.exists()
+    if not workspace_config_exists:
+        workspace_config = {
+            "workspace": {
+                "name": workspace_name,
+                "branch": workspace_branch,
+                "branch_pr": branch_pr,
+                "branch_history": branch_history,
+                "id": f"atelier:{atelier_id}:{workspace_name}",
+            },
+            "atelier": {
+                "version": __version__,
+                "created_at": utc_now(),
+            },
+        }
+        write_json(workspace_config_path, workspace_config)
+
+    if agents_path.exists():
+        return
+
+    if workspace_config_exists:
+        stored_pr, stored_history = read_workspace_branch_settings(workspace_dir)
+        if stored_pr is None or not isinstance(stored_pr, bool):
+            die("workspace missing branch.pr setting")
+        if stored_history is None or not isinstance(stored_history, str):
+            die("workspace missing branch.history setting")
+        stored_history = normalize_branch_history(
+            stored_history, "workspace branch.history"
+        )
+        integration_pr = stored_pr
+        integration_history = stored_history
+    else:
+        integration_pr = branch_pr
+        integration_history = branch_history
+
+    integration_strategy = render_integration_strategy(
+        integration_pr, integration_history
+    )
+    template_override = project_root / "templates" / "AGENTS.md"
+    if template_override.exists():
+        content = template_override.read_text(encoding="utf-8")
+        if "## Integration Strategy" not in content:
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content = content.rstrip() + "\n\n" + integration_strategy + "\n"
+        agents_path.write_text(content, encoding="utf-8")
+    else:
+        agents_path.write_text(
+            WORKSPACE_AGENTS_TEMPLATE.format(
+                atelier_id=atelier_id,
+                workspace_name=workspace_name,
+                integration_strategy=integration_strategy,
+            ),
+            encoding="utf-8",
+        )
+
+
 def read_first_user_message(path: Path) -> str | None:
     try:
         if path.suffix == ".jsonl":
@@ -791,12 +859,11 @@ def open_workspace(args: argparse.Namespace) -> None:
 
     workspace_dir = workspace_root / workspace_name
     agents_path = workspace_dir / "AGENTS.md"
+    workspace_config_path = workspace_dir / ".atelier.workspace.json"
     is_new_workspace = not workspace_dir.exists()
+    workspace_config_exists = workspace_config_path.exists()
     branch_prefix = branch_config.get("prefix", "")
-    if is_new_workspace:
-        base_branch = branch_hint or workspace_name
-        workspace_branch = branch_override or f"{branch_prefix}{base_branch}"
-    else:
+    if workspace_config_exists:
         if branch_pr_override is not None or branch_history_override is not None:
             stored_pr, stored_history = read_workspace_branch_settings(workspace_dir)
             if branch_pr_override is not None:
@@ -828,44 +895,21 @@ def open_workspace(args: argparse.Namespace) -> None:
             )
         if branch_override:
             workspace_branch = branch_override
-    if is_new_workspace:
-        ensure_dir(workspace_dir)
-
-        workspace_config = {
-            "workspace": {
-                "name": workspace_name,
-                "branch": workspace_branch,
-                "branch_pr": effective_branch_pr,
-                "branch_history": effective_branch_history,
-                "id": f"atelier:{atelier_id}:{workspace_name}",
-            },
-            "atelier": {
-                "version": __version__,
-                "created_at": utc_now(),
-            },
-        }
-        write_json(workspace_dir / ".atelier.workspace.json", workspace_config)
-
-        integration_strategy = render_integration_strategy(
-            effective_branch_pr, effective_branch_history
-        )
-        template_override = project_root / "templates" / "AGENTS.md"
-        if template_override.exists():
-            content = template_override.read_text(encoding="utf-8")
-            if "## Integration Strategy" not in content:
-                if content and not content.endswith("\n"):
-                    content += "\n"
-                content = content.rstrip() + "\n\n" + integration_strategy + "\n"
-            agents_path.write_text(content, encoding="utf-8")
-        else:
-            agents_path.write_text(
-                WORKSPACE_AGENTS_TEMPLATE.format(
-                    atelier_id=atelier_id,
-                    workspace_name=workspace_name,
-                    integration_strategy=integration_strategy,
-                ),
-                encoding="utf-8",
-            )
+    else:
+        base_branch = branch_hint or workspace_name
+        workspace_branch = branch_override or f"{branch_prefix}{base_branch}"
+    ensure_dir(workspace_dir)
+    ensure_workspace_metadata(
+        workspace_dir=workspace_dir,
+        agents_path=agents_path,
+        workspace_config_path=workspace_config_path,
+        project_root=project_root,
+        workspace_name=workspace_name,
+        workspace_branch=workspace_branch,
+        atelier_id=atelier_id,
+        branch_pr=effective_branch_pr,
+        branch_history=effective_branch_history,
+    )
 
         workspace_policy_template = project_root / "templates" / "WORKSPACE.md"
         workspace_policy_path = workspace_dir / "WORKSPACE.md"
@@ -882,19 +926,25 @@ def open_workspace(args: argparse.Namespace) -> None:
         die(".atelier.json missing branch.default")
 
     if not repo_dir.exists():
-        ensure_dir(workspace_dir)
+        editor_cmd = resolve_editor_command(config)
+        run_command([*editor_cmd, str(agents_path)], cwd=project_root)
         run_command(["git", "clone", project_repo_url, str(repo_dir)])
     else:
+        if not git_is_repo(repo_dir):
+            die("repo exists but is not a git repository")
         remote_check = subprocess.run(
             ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
             check=False,
         )
-        if remote_check.returncode == 0:
-            current_remote = remote_check.stdout.strip()
-            if current_remote and current_remote != project_repo_url:
-                warn("repo remote differs from project.repo_url; using existing repo")
+        if remote_check.returncode != 0:
+            die("repo missing origin remote")
+        current_remote = remote_check.stdout.strip()
+        if not current_remote:
+            die("repo missing origin remote")
+        if current_remote != project_repo_url:
+            warn("repo remote differs from project.repo_url; using existing repo")
 
     run_command(["git", "-C", str(repo_dir), "checkout", default_branch])
 
@@ -939,8 +989,6 @@ def open_workspace(args: argparse.Namespace) -> None:
         append_workspace_branch_summary(
             agents_path, repo_dir, default_branch, workspace_branch
         )
-        editor_cmd = resolve_editor_command(config)
-        run_command([*editor_cmd, str(agents_path)], cwd=project_root)
 
     session_id = find_codex_session(atelier_id, workspace_name)
     if session_id:
