@@ -76,6 +76,26 @@ def init_local_repo(root: Path) -> Path:
     return repo
 
 
+def init_local_repo_without_feature(root: Path) -> Path:
+    repo = root / "origin"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "Test User"], check=True
+    )
+    (repo / "README.md").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "chore: initial"], check=True
+    )
+    subprocess.run(["git", "-C", str(repo), "branch", "-M", "main"], check=True)
+    return repo
+
+
 def write_workspace_config(workspace_dir: Path, name: str, branch: str) -> None:
     payload = {
         "workspace": {
@@ -385,7 +405,7 @@ class TestListWorkspaces(TestCase):
                     patch("atelier.cli.subprocess.run", fake_run),
                     patch("sys.stdout", buffer),
                 ):
-                    cli.list_workspaces(SimpleNamespace())
+                    cli.list_workspaces(SimpleNamespace(status=True))
                 lines = [
                     line.strip() for line in buffer.getvalue().splitlines() if line
                 ]
@@ -396,6 +416,29 @@ class TestListWorkspaces(TestCase):
                 }
                 self.assertEqual(data["alpha"][1:], ["yes", "yes", "yes"])
                 self.assertEqual(data["beta"][1:], ["no", "unknown", "no"])
+            finally:
+                os.chdir(original_cwd)
+
+    def test_list_default_only_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_project_config(root)
+            workspaces_root = root / "workspaces"
+            alpha_dir = workspaces_root / "alpha"
+            beta_dir = workspaces_root / "beta"
+            alpha_dir.mkdir(parents=True)
+            beta_dir.mkdir(parents=True)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                buffer = io.StringIO()
+                with patch("sys.stdout", buffer):
+                    cli.list_workspaces(SimpleNamespace())
+                lines = [
+                    line.strip() for line in buffer.getvalue().splitlines() if line
+                ]
+                self.assertEqual(lines, ["alpha", "beta"])
             finally:
                 os.chdir(original_cwd)
 
@@ -436,7 +479,12 @@ class TestCleanWorkspaces(TestCase):
                     patch("builtins.input", lambda _: next(responses)),
                 ):
                     cli.clean_workspaces(
-                        SimpleNamespace(all=False, force=False, workspace_names=[])
+                        SimpleNamespace(
+                            all=False,
+                            force=False,
+                            no_branch=False,
+                            workspace_names=[],
+                        )
                     )
                 self.assertFalse(complete_dir.exists())
                 self.assertTrue(incomplete_dir.exists())
@@ -475,7 +523,12 @@ class TestCleanWorkspaces(TestCase):
                     patch("builtins.input", lambda _: next(responses)),
                 ):
                     cli.clean_workspaces(
-                        SimpleNamespace(all=True, force=False, workspace_names=[])
+                        SimpleNamespace(
+                            all=True,
+                            force=False,
+                            no_branch=False,
+                            workspace_names=[],
+                        )
                     )
                 self.assertFalse(alpha_dir.exists())
                 self.assertFalse(beta_dir.exists())
@@ -509,7 +562,12 @@ class TestCleanWorkspaces(TestCase):
                     ),
                 ):
                     cli.clean_workspaces(
-                        SimpleNamespace(all=True, force=True, workspace_names=[])
+                        SimpleNamespace(
+                            all=True,
+                            force=True,
+                            no_branch=False,
+                            workspace_names=[],
+                        )
                     )
                 self.assertFalse(alpha_dir.exists())
             finally:
@@ -544,11 +602,91 @@ class TestCleanWorkspaces(TestCase):
                 with patch("atelier.cli.subprocess.run", fake_run):
                     cli.clean_workspaces(
                         SimpleNamespace(
-                            all=False, force=True, workspace_names=["beta", "missing"]
+                            all=False,
+                            force=True,
+                            no_branch=False,
+                            workspace_names=["workspaces/beta", "missing"],
                         )
                     )
                 self.assertTrue(alpha_dir.exists())
                 self.assertFalse(beta_dir.exists())
+            finally:
+                os.chdir(original_cwd)
+
+    def test_clean_skips_branch_deletion_with_no_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_project_config(root)
+            workspaces_root = root / "workspaces"
+            alpha_dir = workspaces_root / "alpha"
+            (alpha_dir / "repo").mkdir(parents=True)
+            write_workspace_config(alpha_dir, "alpha", "scott/alpha")
+
+            repo_alpha = alpha_dir / "repo"
+            fake_run = make_fake_git(
+                branches={repo_alpha: "scott/alpha"},
+                statuses={repo_alpha: ""},
+                remotes={(repo_alpha, "scott/alpha"): "abc\trefs/heads/scott/alpha\n"},
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.cli.subprocess.run", fake_run),
+                    patch(
+                        "atelier.cli.delete_workspace_branch",
+                        side_effect=AssertionError("deleted branch unexpectedly"),
+                    ),
+                ):
+                    cli.clean_workspaces(
+                        SimpleNamespace(
+                            all=True,
+                            force=True,
+                            no_branch=True,
+                            workspace_names=[],
+                        )
+                    )
+                self.assertFalse(alpha_dir.exists())
+            finally:
+                os.chdir(original_cwd)
+
+    def test_clean_deletes_branch_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_project_config(root)
+            workspaces_root = root / "workspaces"
+            alpha_dir = workspaces_root / "alpha"
+            (alpha_dir / "repo").mkdir(parents=True)
+            write_workspace_config(alpha_dir, "alpha", "scott/alpha")
+
+            repo_alpha = alpha_dir / "repo"
+            fake_run = make_fake_git(
+                branches={repo_alpha: "scott/alpha"},
+                statuses={repo_alpha: ""},
+                remotes={(repo_alpha, "scott/alpha"): "abc\trefs/heads/scott/alpha\n"},
+            )
+            deleted: list[tuple[str, str]] = []
+
+            def fake_delete(repo_dir: Path, branch: str, default_branch: str) -> None:
+                deleted.append((repo_dir.name, branch))
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.cli.subprocess.run", fake_run),
+                    patch("atelier.cli.delete_workspace_branch", fake_delete),
+                ):
+                    cli.clean_workspaces(
+                        SimpleNamespace(
+                            all=True,
+                            force=True,
+                            no_branch=False,
+                            workspace_names=[],
+                        )
+                    )
+                self.assertEqual(deleted, [("repo", "scott/alpha")])
             finally:
                 os.chdir(original_cwd)
 
@@ -707,6 +845,106 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_accepts_workspace_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {
+                "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
+                "branch": {"default": "main", "prefix": "scott/"},
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "true", "options": {"true": []}},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    return None
+
+                class DummyResult:
+                    def __init__(self, returncode: int = 1, stdout: str = "") -> None:
+                        self.returncode = returncode
+                        self.stdout = stdout
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                ):
+                    cli.open_workspace(
+                        SimpleNamespace(workspace_name="workspaces/feat-demo")
+                    )
+
+                workspace_dir = root / "workspaces" / "feat-demo"
+                self.assertTrue((workspace_dir / "AGENTS.md").exists())
+                workspace_config = json.loads(
+                    (workspace_dir / ".atelier.workspace.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(workspace_config["workspace"]["name"], "feat-demo")
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_normalizes_workspace_name_and_preserves_branch_slashes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {
+                "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
+                "branch": {"default": "main", "prefix": "scott/"},
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "true", "options": {"true": []}},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    return None
+
+                class DummyResult:
+                    def __init__(self, returncode: int = 1, stdout: str = "") -> None:
+                        self.returncode = returncode
+                        self.stdout = stdout
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                ):
+                    cli.open_workspace(
+                        SimpleNamespace(workspace_name="workspaces/feat/demo")
+                    )
+
+                workspace_dir = root / "workspaces" / "feat-demo"
+                workspace_config = json.loads(
+                    (workspace_dir / ".atelier.workspace.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(workspace_config["workspace"]["name"], "feat-demo")
+                self.assertEqual(
+                    workspace_config["workspace"]["branch"], "scott/feat/demo"
+                )
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_uses_remote_branch_and_appends_commit_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -767,6 +1005,52 @@ class TestOpenWorkspace(TestCase):
                 )
                 self.assertEqual(head.stdout.strip(), "scott/feat-demo")
                 self.assertTrue(any(cmd[0] == "codex" for cmd in commands))
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_skips_branch_summary_for_new_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            origin_repo = init_local_repo_without_feature(root)
+            config = {
+                "project": {"name": "demo", "repo_url": str(origin_repo)},
+                "branch": {"default": "main", "prefix": "scott/"},
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "true", "options": {"true": []}},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+                    if cmd[0] == "codex":
+                        return
+                    subprocess.run(cmd, cwd=cwd, check=True)
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                ):
+                    cli.open_workspace(
+                        SimpleNamespace(workspace_name="feat-demo", branch=None)
+                    )
+
+                workspace_dir = root / "workspaces" / "feat-demo"
+                agents_content = (workspace_dir / "AGENTS.md").read_text(
+                    encoding="utf-8"
+                )
+                self.assertNotIn("Latest Commit Message(s)", agents_content)
+                self.assertNotIn("Review vs Mainline", agents_content)
             finally:
                 os.chdir(original_cwd)
 
