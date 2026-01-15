@@ -28,6 +28,7 @@ def make_init_args(**overrides: object) -> SimpleNamespace:
         "agent": None,
         "editor": None,
         "workspaces_root": None,
+        "workspace_template": False,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -264,6 +265,7 @@ class TestInitProject(TestCase):
                 self.assertEqual(config["branch"]["history"], "manual")
                 self.assertEqual(config["editor"]["default"], "cursor")
                 self.assertTrue((root / "AGENTS.md").exists())
+                self.assertTrue((root / "PROJECT.md").exists())
                 self.assertTrue((root / "workspaces").is_dir())
             finally:
                 os.chdir(original_cwd)
@@ -416,6 +418,25 @@ class TestInitProject(TestCase):
                 config_path = root / ".atelier.json"
                 config = json.loads(config_path.read_text(encoding="utf-8"))
                 self.assertEqual(config["project"]["name"], "positional-project")
+            finally:
+                os.chdir(original_cwd)
+
+    def test_init_creates_workspace_template_when_opted_in(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                args = make_init_args(repo_url="owner/repo", workspace_template=True)
+                responses = iter(["", "", "", "", "", "", "", ""])
+
+                with patch("builtins.input", lambda _: next(responses)):
+                    cli.init_project(args)
+
+                template_path = root / "templates" / "WORKSPACE.md"
+                self.assertTrue(template_path.exists())
+                content = template_path.read_text(encoding="utf-8")
+                self.assertIn("WORKSPACE.md", content)
             finally:
                 os.chdir(original_cwd)
 
@@ -1100,6 +1121,59 @@ class TestOpenWorkspace(TestCase):
                     )
                 )
                 self.assertEqual(workspace_config["workspace"]["name"], "feat-demo")
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_copies_workspace_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {
+                "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
+                "branch": {"default": "main", "prefix": "scott/"},
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "true", "options": {"true": []}},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+            templates_dir = root / "templates"
+            templates_dir.mkdir()
+            template_content = "<!-- workspace template -->\n"
+            (templates_dir / "WORKSPACE.md").write_text(
+                template_content, encoding="utf-8"
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    return None
+
+                class DummyResult:
+                    def __init__(self, returncode: int = 1, stdout: str = "") -> None:
+                        self.returncode = returncode
+                        self.stdout = stdout
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                ):
+                    cli.open_workspace(
+                        SimpleNamespace(workspace_name="feat-demo", branch=None)
+                    )
+
+                workspace_dir = root / "workspaces" / "feat-demo"
+                workspace_template = workspace_dir / "WORKSPACE.md"
+                self.assertTrue(workspace_template.exists())
+                self.assertEqual(
+                    workspace_template.read_text(encoding="utf-8"), template_content
+                )
             finally:
                 os.chdir(original_cwd)
 

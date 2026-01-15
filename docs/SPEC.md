@@ -40,6 +40,9 @@ Each workspace contains a `repo/` directory that is a real git repository (clone
 project-dir/
 ├─ .atelier.json
 ├─ AGENTS.md
+├─ PROJECT.md
+├─ templates/
+│  └─ WORKSPACE.md
 └─ workspaces/
 ```
 
@@ -48,9 +51,16 @@ project-dir/
 ```
 workspaces/<workspace-name>/
 ├─ AGENTS.md
+├─ WORKSPACE.md
 ├─ .atelier.workspace.json
 └─ repo/
 ```
+
+Notes:
+
+- `PROJECT.md` is optional and user-owned.
+- `templates/WORKSPACE.md` is optional and only created when explicitly opted in.
+- `WORKSPACE.md` exists only when copied from `templates/WORKSPACE.md`.
 
 ---
 
@@ -135,6 +145,18 @@ agent-assisted development.
 - Repository-specific coding conventions are defined elsewhere
   (e.g. a repository-level `AGENTS.md`, if present)
 
+## Additional Policy Context
+
+If a `PROJECT.md` file exists at the project root, read it and apply the rules
+defined there in addition to this file.
+
+If a `WORKSPACE.md` file exists in a workspace, read it and apply the rules
+defined there as well.
+
+In case of conflict:
+- `WORKSPACE.md` rules take precedence over `PROJECT.md`
+- `PROJECT.md` rules take precedence over this file
+
 - See `.atelier.json` for the current project configuration used by Atelier.
 ```
 
@@ -205,6 +227,18 @@ When operating in this workspace:
 - Do not reference or modify other workspaces
 - Read the remainder of this file carefully before beginning work
 
+## Additional Policy Context
+
+If a `PROJECT.md` file exists at the project root, read it and apply the rules
+defined there in addition to this file.
+
+If a `WORKSPACE.md` file exists in this workspace, read it and apply the rules
+defined there as well.
+
+In case of conflict:
+- `WORKSPACE.md` rules take precedence over `PROJECT.md`
+- `PROJECT.md` rules take precedence over this file
+
 ## Integration Strategy
 
 This section describes expected coordination and history semantics.
@@ -254,7 +288,34 @@ Users may freely edit, reorder, or delete these sections.
 
 ---
 
-## 8. CLI Commands (v2)
+## 8. Policy Overlays: `PROJECT.md` and `WORKSPACE.md`
+
+These optional, user-owned files define additional agent behavior rules that
+are orthogonal to Atelier's core execution protocol.
+
+### `PROJECT.md`
+
+- Location: project root (same directory as `.atelier.json`)
+- Purpose: define project-level agent policies that apply to all workspaces
+
+### `WORKSPACE.md`
+
+- Location: workspace root (alongside `AGENTS.md` and `.atelier.workspace.json`)
+- Purpose: define workspace-specific policies and override project-level rules
+
+### Precedence
+
+If more than one policy file is present, higher precedence wins:
+
+1. `WORKSPACE.md`
+2. `PROJECT.md`
+3. `AGENTS.md`
+
+Atelier does not parse or modify these files after creation or copy.
+
+---
+
+## 9. CLI Commands (v2)
 
 ### `atelier init`
 
@@ -265,7 +326,10 @@ Initializes the current directory as an Atelier project.
 - Creates `.atelier.json` (or updates missing fields)
 - Generates a ULID for `atelier.id` if missing
 - Creates project-level `AGENTS.md` if missing
+- Creates `PROJECT.md` if missing (comment-only stub)
 - Creates workspace root directory if missing
+- Optionally creates `templates/WORKSPACE.md` when explicitly opted in
+  (e.g. via `--workspace-template`)
 - Never modifies existing workspaces
 
 ---
@@ -281,6 +345,7 @@ Ensures a workspace exists and launches or resumes agent work.
 3. If workspace is new:
    - Generate `.atelier.workspace.json`
    - Generate workspace `AGENTS.md` from template
+   - Copy `templates/WORKSPACE.md` to `WORKSPACE.md` if present
    - Open `AGENTS.md` in the configured editor (blocking)
 4. Ensure `repo/` exists:
    - Clone repo if missing
@@ -302,7 +367,7 @@ Ensures a workspace exists and launches or resumes agent work.
 
 ---
 
-## 9. Codex Session Resumption (Best-Effort)
+## 10. Codex Session Resumption (Best-Effort)
 
 Atelier may attempt to resume Codex sessions by:
 
@@ -319,12 +384,13 @@ Session resumption is **opportunistic** and must never be required for correctne
 
 ---
 
-## 10. Templates
+## 11. Templates
 
 Atelier ships with internal templates for:
 
 - Project `AGENTS.md`
 - Workspace `AGENTS.md`
+- `PROJECT.md` (comment-only stub)
 
 If a project provides:
 
@@ -336,9 +402,17 @@ that file is used as the **workspace AGENTS.md template** instead of the built-i
 
 Templates are **copied, not referenced**. Atelier never auto-updates existing files.
 
+If a project provides:
+
+```
+project-dir/templates/WORKSPACE.md
+```
+
+that file is copied verbatim into new workspaces as `WORKSPACE.md`.
+
 ---
 
-## 11. Non-Goals
+## 12. Non-Goals
 
 Atelier does **not**:
 
@@ -351,7 +425,7 @@ Atelier does **not**:
 
 ---
 
-## 12. Implementation Guidelines (v2)
+## 13. Implementation Guidelines (v2)
 
 ### Language & Runtime
 
@@ -386,7 +460,7 @@ Atelier does **not**:
 
 ---
 
-## 13. Success Criteria (v2)
+## 14. Success Criteria (v2)
 
 Atelier v2 is successful if:
 

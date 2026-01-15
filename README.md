@@ -24,9 +24,13 @@ Atelier is:
 project-dir/
 ├─ .atelier.json
 ├─ AGENTS.md
+├─ PROJECT.md
+├─ templates/
+│  └─ WORKSPACE.md
 └─ workspaces/
    └─ <workspace-name>/
       ├─ AGENTS.md
+      ├─ WORKSPACE.md
       ├─ .atelier.workspace.json
       └─ repo/
 ```
@@ -37,6 +41,12 @@ Initialize a project:
 
 ```sh
 atelier init
+```
+
+Optionally create a workspace policy template:
+
+```sh
+atelier init --workspace-template
 ```
 
 Open or create a workspace:
@@ -56,6 +66,7 @@ atelier open <workspace-name>
 
 - Atelier never auto-updates existing workspaces or templates.
 - `AGENTS.md` is the execution contract for each workspace.
+- `PROJECT.md` and `WORKSPACE.md` are optional policy overlays for agents.
 - Configuration lives in `.atelier.json` and is owned by the tool.
 
 ## Development
