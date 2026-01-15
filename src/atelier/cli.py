@@ -531,8 +531,35 @@ def init_project(args: argparse.Namespace) -> None:
     else:
         branch_prefix = prompt("Branch prefix (optional)", branch_prefix_default)
 
-    branch_pr = resolve_branch_pr(branch_config)
-    branch_history = resolve_branch_history(branch_config)
+    branch_pr_default = resolve_branch_pr(branch_config)
+    branch_history_default = resolve_branch_history(branch_config)
+
+    branch_pr_arg = getattr(args, "branch_pr", None)
+    if branch_pr_arg is not None:
+        branch_pr = parse_branch_pr_override(branch_pr_arg)
+    else:
+        branch_pr_prompt_default = "true" if branch_pr_default else "false"
+        branch_pr_input = prompt(
+            "Expect pull requests for workspace branches (true/false)",
+            branch_pr_prompt_default,
+            required=True,
+        )
+        branch_pr = parse_branch_pr_override(branch_pr_input)
+
+    branch_history_arg = getattr(args, "branch_history", None)
+    if branch_history_arg is not None:
+        branch_history = normalize_branch_history(
+            branch_history_arg, "--branch-history"
+        )
+    else:
+        branch_history_input = prompt(
+            "Branch history policy (manual|squash|merge|rebase)",
+            branch_history_default,
+            required=True,
+        )
+        branch_history = normalize_branch_history(
+            branch_history_input, "branch.history"
+        )
 
     agent_default_default = (
         config.get("agent", {}).get("default")
@@ -549,17 +576,26 @@ def init_project(args: argparse.Namespace) -> None:
     if agent_default != "codex":
         die("only 'codex' is supported as the agent in v2")
 
-    editor_default_default = (
-        config.get("editor", {}).get("default")
-        if isinstance(config.get("editor"), dict)
-        else None
-    )
-    if editor_default_default:
-        editor_prompt_default = editor_default_default
-    elif shutil.which("cursor"):
-        editor_prompt_default = "cursor"
-    else:
-        editor_prompt_default = system_editor_default()
+    editor_prompt_default = None
+    if isinstance(config.get("editor"), dict):
+        editor_default_default = config.get("editor", {}).get("default")
+        if editor_default_default:
+            editor_options_default = (
+                config.get("editor", {})
+                .get("options", {})
+                .get(editor_default_default, [])
+            )
+            if isinstance(editor_options_default, list) and editor_options_default:
+                editor_prompt_default = shlex.join(
+                    [editor_default_default, *editor_options_default]
+                )
+            else:
+                editor_prompt_default = editor_default_default
+    if not editor_prompt_default:
+        if shutil.which("cursor"):
+            editor_prompt_default = "cursor"
+        else:
+            editor_prompt_default = system_editor_default()
 
     editor_arg = getattr(args, "editor", None)
     if editor_arg is not None:
@@ -1370,6 +1406,16 @@ def main() -> None:
     )
     init_parser.add_argument(
         "--branch-prefix", dest="branch_prefix", help="prefix for workspace branches"
+    )
+    init_parser.add_argument(
+        "--branch-pr",
+        dest="branch_pr",
+        help="expect pull requests for workspace branches (true/false)",
+    )
+    init_parser.add_argument(
+        "--branch-history",
+        dest="branch_history",
+        help="branch history policy (manual|squash|merge|rebase)",
     )
     init_parser.add_argument("--agent", dest="agent", help="agent name")
     init_parser.add_argument("--editor", dest="editor", help="editor command")
