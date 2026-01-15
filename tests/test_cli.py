@@ -854,6 +854,8 @@ class TestOpenWorkspace(TestCase):
                 with (
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_is_clean", return_value=True),
                 ):
                     cli.open_workspace(
                         SimpleNamespace(workspace_name="feat-demo", branch=None)
@@ -899,7 +901,7 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
-    def test_open_edits_agents_before_clone_when_repo_missing(self) -> None:
+    def test_open_edits_agents_after_clone_when_repo_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_open_config(root)
@@ -916,6 +918,8 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.git_is_repo", return_value=True),
+                    patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_is_clean", return_value=True),
                 ):
                     cli.open_workspace(
                         SimpleNamespace(workspace_name="feat-demo", branch=None)
@@ -929,7 +933,7 @@ class TestOpenWorkspace(TestCase):
                     for index, cmd in enumerate(commands)
                     if cmd[:2] == ["git", "clone"]
                 )
-                self.assertLess(editor_index, clone_index)
+                self.assertLess(clone_index, editor_index)
             finally:
                 os.chdir(original_cwd)
 
@@ -968,12 +972,92 @@ class TestOpenWorkspace(TestCase):
                 with (
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_is_clean", return_value=True),
                 ):
                     cli.open_workspace(
                         SimpleNamespace(workspace_name="feat-demo", branch=None)
                     )
 
                 self.assertFalse(any(cmd[:1] == ["true"] for cmd in commands))
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_skips_default_checkout_with_dirty_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = write_open_config(root)
+
+            workspace_dir = root / "workspaces" / "feat-demo"
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir(parents=True)
+            subprocess.run(["git", "-C", str(repo_dir), "init"], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_dir),
+                    "config",
+                    "user.email",
+                    "test@example.com",
+                ],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "config", "user.name", "Test User"],
+                check=True,
+            )
+            (repo_dir / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "README.md"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "commit", "-m", "chore: init"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "branch", "-M", "main"], check=True
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "checkout", "-b", "scott/feat-demo"],
+                check=True,
+            )
+            (repo_dir / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_dir),
+                    "remote",
+                    "add",
+                    "origin",
+                    config["project"]["repo_url"],
+                ],
+                check=True,
+            )
+            (workspace_dir / "AGENTS.md").write_text("stub\n", encoding="utf-8")
+            write_workspace_config(workspace_dir, "feat-demo", "scott/feat-demo")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                ):
+                    cli.open_workspace(
+                        SimpleNamespace(workspace_name="feat-demo", branch=None)
+                    )
+
+                self.assertFalse(
+                    any(
+                        cmd == ["git", "-C", str(repo_dir), "checkout", "main"]
+                        for cmd in commands
+                    )
+                )
             finally:
                 os.chdir(original_cwd)
 
@@ -1014,6 +1098,8 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                    patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_is_clean", return_value=True),
                 ):
                     cli.open_workspace(
                         SimpleNamespace(workspace_name="feat-demo", branch=None)
@@ -1108,6 +1194,8 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                    patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_is_clean", return_value=True),
                 ):
                     cli.open_workspace(
                         SimpleNamespace(workspace_name="workspaces/feat-demo")
@@ -1163,6 +1251,8 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                    patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_is_clean", return_value=True),
                 ):
                     cli.open_workspace(
                         SimpleNamespace(workspace_name="feat-demo", branch=None)
@@ -1198,6 +1288,8 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                    patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_is_clean", return_value=True),
                 ):
                     cli.open_workspace(
                         SimpleNamespace(workspace_name="workspaces/feat/demo")
@@ -1245,6 +1337,8 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                    patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_is_clean", return_value=True),
                 ):
                     cli.open_workspace(
                         SimpleNamespace(workspace_name="feat-demo", branch=None)
@@ -1282,6 +1376,8 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                    patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_is_clean", return_value=True),
                 ):
                     cli.open_workspace(
                         SimpleNamespace(
@@ -1318,6 +1414,7 @@ class TestOpenWorkspace(TestCase):
             write_open_config(
                 root, project={"name": "demo", "repo_url": str(origin_repo)}
             )
+            workspace_dir = root / "workspaces" / "feat-demo"
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1328,6 +1425,11 @@ class TestOpenWorkspace(TestCase):
                     commands.append(cmd)
                     if cmd[0] == "codex":
                         return
+                    if cmd[0] == "true":
+                        agents_content = (workspace_dir / "AGENTS.md").read_text(
+                            encoding="utf-8"
+                        )
+                        self.assertIn("Latest Commit Message(s)", agents_content)
                     subprocess.run(cmd, cwd=cwd, check=True)
 
                 with (
@@ -1339,7 +1441,6 @@ class TestOpenWorkspace(TestCase):
                         SimpleNamespace(workspace_name="feat-demo", branch=None)
                     )
 
-                workspace_dir = root / "workspaces" / "feat-demo"
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
                     encoding="utf-8"
                 )
@@ -1423,6 +1524,8 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                    patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_is_clean", return_value=True),
                 ):
                     cli.open_workspace(
                         SimpleNamespace(

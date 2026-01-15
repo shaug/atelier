@@ -924,9 +924,10 @@ def open_workspace(args: argparse.Namespace) -> None:
     if not default_branch:
         die(".atelier.json missing branch.default")
 
+    should_open_editor = False
+    editor_cmd: list[str] | None = None
     if not repo_dir.exists():
-        editor_cmd = resolve_editor_command(config)
-        run_command([*editor_cmd, str(agents_path)], cwd=project_root)
+        should_open_editor = True
         run_command(["git", "clone", project_repo_url, str(repo_dir)])
     else:
         if not git_is_repo(repo_dir):
@@ -945,7 +946,29 @@ def open_workspace(args: argparse.Namespace) -> None:
         if current_remote != project_repo_url:
             warn("repo remote differs from project.repo_url; using existing repo")
 
-    run_command(["git", "-C", str(repo_dir), "checkout", default_branch])
+    current_branch = git_current_branch(repo_dir)
+    if current_branch is None:
+        die("failed to determine repo branch")
+    repo_clean = git_is_clean(repo_dir)
+    if repo_clean is None:
+        die("failed to determine repo status")
+
+    skip_default_checkout = False
+    skip_workspace_checkout = False
+    if not repo_clean:
+        if current_branch not in {default_branch, workspace_branch}:
+            die(
+                "repo has uncommitted changes on "
+                f"{current_branch!r}; checkout {workspace_branch!r} or "
+                f"{default_branch!r} and try again, or commit/stash your changes"
+            )
+        if current_branch != default_branch:
+            skip_default_checkout = True
+        if current_branch == workspace_branch:
+            skip_workspace_checkout = True
+
+    if not skip_default_checkout:
+        run_command(["git", "-C", str(repo_dir), "checkout", default_branch])
 
     local_branch = git_ref_exists(repo_dir, f"refs/heads/{workspace_branch}")
     remote_branch = git_ref_exists(repo_dir, f"refs/remotes/origin/{workspace_branch}")
@@ -957,7 +980,9 @@ def open_workspace(args: argparse.Namespace) -> None:
             )
     existing_branch = local_branch or remote_branch
 
-    if local_branch:
+    if skip_workspace_checkout:
+        pass
+    elif local_branch:
         run_command(["git", "-C", str(repo_dir), "checkout", workspace_branch])
     elif remote_branch:
         run_command(
@@ -988,6 +1013,11 @@ def open_workspace(args: argparse.Namespace) -> None:
         append_workspace_branch_summary(
             agents_path, repo_dir, default_branch, workspace_branch
         )
+
+    if should_open_editor:
+        if editor_cmd is None:
+            editor_cmd = resolve_editor_command(config)
+        run_command([*editor_cmd, str(agents_path)], cwd=project_root)
 
     session_id = find_codex_session(atelier_id, workspace_name)
     if session_id:
