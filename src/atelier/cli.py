@@ -34,6 +34,18 @@ agent-assisted development.
 - Repository-specific coding conventions are defined elsewhere
   (e.g. a repository-level `AGENTS.md`, if present)
 
+## Additional Policy Context
+
+If a `PROJECT.md` file exists at the project root, read it and apply the rules
+defined there in addition to this file.
+
+If a `WORKSPACE.md` file exists in a workspace, read it and apply the rules
+defined there as well.
+
+In case of conflict:
+- `WORKSPACE.md` rules take precedence over `PROJECT.md`
+- `PROJECT.md` rules take precedence over this file
+
 - See `.atelier.json` for the current project configuration used by Atelier.
 """
 
@@ -66,6 +78,18 @@ When operating in this workspace:
 - Do not reference or modify other workspaces
 - Read the remainder of this file carefully before beginning work
 
+## Additional Policy Context
+
+If a `PROJECT.md` file exists at the project root, read it and apply the rules
+defined there in addition to this file.
+
+If a `WORKSPACE.md` file exists in this workspace, read it and apply the rules
+defined there as well.
+
+In case of conflict:
+- `WORKSPACE.md` rules take precedence over `PROJECT.md`
+- `PROJECT.md` rules take precedence over this file
+
 {integration_strategy}
 
 After reading this file, proceed with the work described below.
@@ -91,6 +115,31 @@ After reading this file, proceed with the work described below.
 ## Notes
 
 <!-- Optional execution notes or reminders. -->
+"""
+
+PROJECT_MD_TEMPLATE = """<!--
+PROJECT.md
+
+Use this file to define project-level agent policies for this Atelier project.
+It is optional and fully user-owned.
+
+If a WORKSPACE.md file exists inside a workspace, its rules take precedence.
+This PROJECT.md file takes precedence over project-level AGENTS.md.
+
+Atelier does not parse or modify this file.
+-->
+"""
+
+WORKSPACE_MD_TEMPLATE = """<!--
+WORKSPACE.md
+
+Use this file to define workspace-specific agent policies.
+It is optional and fully user-owned.
+
+WORKSPACE.md overrides PROJECT.md and AGENTS.md when rules conflict.
+
+Atelier does not parse or modify this file.
+-->
 """
 
 
@@ -680,6 +729,18 @@ def init_project(args: argparse.Namespace) -> None:
         agents_path.write_text(PROJECT_AGENTS_TEMPLATE, encoding="utf-8")
         say("Created AGENTS.md")
 
+    project_md_path = cwd / "PROJECT.md"
+    if not project_md_path.exists():
+        project_md_path.write_text(PROJECT_MD_TEMPLATE, encoding="utf-8")
+        say("Created PROJECT.md")
+
+    if getattr(args, "workspace_template", False):
+        workspace_template_path = cwd / "templates" / "WORKSPACE.md"
+        if not workspace_template_path.exists():
+            ensure_dir(workspace_template_path.parent)
+            workspace_template_path.write_text(WORKSPACE_MD_TEMPLATE, encoding="utf-8")
+            say("Created templates/WORKSPACE.md")
+
     workspace_root_path = (
         Path(workspaces_root)
         if is_absolute_path(workspaces_root)
@@ -805,6 +866,11 @@ def open_workspace(args: argparse.Namespace) -> None:
                 ),
                 encoding="utf-8",
             )
+
+        workspace_policy_template = project_root / "templates" / "WORKSPACE.md"
+        workspace_policy_path = workspace_dir / "WORKSPACE.md"
+        if workspace_policy_template.exists() and not workspace_policy_path.exists():
+            shutil.copyfile(workspace_policy_template, workspace_policy_path)
 
     repo_dir = workspace_dir / "repo"
     project_repo_url = config.get("project", {}).get("repo_url")
@@ -1423,6 +1489,11 @@ def main() -> None:
         "--workspaces-root",
         dest="workspaces_root",
         help="directory for workspace roots",
+    )
+    init_parser.add_argument(
+        "--workspace-template",
+        action="store_true",
+        help="create templates/WORKSPACE.md",
     )
     init_parser.set_defaults(func=init_project)
 
