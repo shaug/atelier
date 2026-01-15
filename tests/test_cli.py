@@ -23,6 +23,8 @@ def make_init_args(**overrides: object) -> SimpleNamespace:
         "repo_url": None,
         "branch_default": None,
         "branch_prefix": None,
+        "branch_pr": None,
+        "branch_history": None,
         "agent": None,
         "editor": None,
         "workspaces_root": None,
@@ -214,7 +216,7 @@ class TestInitProject(TestCase):
             os.chdir(root)
             try:
                 args = make_init_args(repo_url="owner/repo")
-                responses = iter(["", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -245,7 +247,7 @@ class TestInitProject(TestCase):
             os.chdir(root)
             try:
                 args = make_init_args(repo_url="owner/repo")
-                responses = iter(["", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -267,7 +269,7 @@ class TestInitProject(TestCase):
             os.chdir(root)
             try:
                 args = make_init_args(repo_url="owner/repo")
-                responses = iter(["", "", "", "", "cursor -w", ""])
+                responses = iter(["", "", "", "", "", "", "cursor -w", ""])
 
                 with patch("builtins.input", lambda _: next(responses)):
                     cli.init_project(args)
@@ -286,7 +288,7 @@ class TestInitProject(TestCase):
             os.chdir(root)
             try:
                 args = make_init_args(repo_url="owner/repo")
-                responses = iter(["", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -337,6 +339,8 @@ class TestInitProject(TestCase):
                     repo_url="org/new-repo",
                     branch_default="develop",
                     branch_prefix="feat/",
+                    branch_pr="false",
+                    branch_history="merge",
                     agent="codex",
                     editor="cursor -w",
                     workspaces_root="new-workspaces",
@@ -376,7 +380,7 @@ class TestInitProject(TestCase):
                     project_name="positional-project",
                     repo_url="owner/repo",
                 )
-                responses = iter(["", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", ""])
 
                 with patch("builtins.input", lambda _: next(responses)):
                     cli.init_project(args)
