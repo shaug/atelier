@@ -910,11 +910,10 @@ def open_workspace(args: argparse.Namespace) -> None:
         branch_pr=effective_branch_pr,
         branch_history=effective_branch_history,
     )
-
-        workspace_policy_template = project_root / "templates" / "WORKSPACE.md"
-        workspace_policy_path = workspace_dir / "WORKSPACE.md"
-        if workspace_policy_template.exists() and not workspace_policy_path.exists():
-            shutil.copyfile(workspace_policy_template, workspace_policy_path)
+    workspace_policy_template = project_root / "templates" / "WORKSPACE.md"
+    workspace_policy_path = workspace_dir / "WORKSPACE.md"
+    if workspace_policy_template.exists() and not workspace_policy_path.exists():
+        shutil.copyfile(workspace_policy_template, workspace_policy_path)
 
     repo_dir = workspace_dir / "repo"
     project_repo_url = config.get("project", {}).get("repo_url")
