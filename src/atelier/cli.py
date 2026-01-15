@@ -1,4 +1,5 @@
 import argparse
+import concurrent.futures
 import datetime as dt
 import json
 import os
@@ -677,7 +678,10 @@ def open_workspace(args: argparse.Namespace) -> None:
         else branch_history
     )
 
-    workspace_name = args.workspace_name.strip()
+    workspace_root = workspace_root_for_config(project_root, config)
+    workspace_name, branch_hint = normalize_workspace_reference(
+        args.workspace_name, workspace_root, project_root
+    )
     if not workspace_name:
         die("workspace name is required")
     branch_override = getattr(args, "branch", None)
@@ -688,22 +692,13 @@ def open_workspace(args: argparse.Namespace) -> None:
     if not atelier_id:
         die(".atelier.json missing atelier.id")
 
-    workspaces_root = config.get("workspaces", {}).get("root")
-    if not workspaces_root:
-        die(".atelier.json missing workspaces.root")
-
-    workspace_root = (
-        Path(workspaces_root)
-        if is_absolute_path(workspaces_root)
-        else project_root / workspaces_root
-    )
-
     workspace_dir = workspace_root / workspace_name
     agents_path = workspace_dir / "AGENTS.md"
     is_new_workspace = not workspace_dir.exists()
     branch_prefix = branch_config.get("prefix", "")
     if is_new_workspace:
-        workspace_branch = branch_override or f"{branch_prefix}{workspace_name}"
+        base_branch = branch_hint or workspace_name
+        workspace_branch = branch_override or f"{branch_prefix}{base_branch}"
     else:
         if branch_pr_override is not None or branch_history_override is not None:
             stored_pr, stored_history = read_workspace_branch_settings(workspace_dir)
@@ -809,6 +804,7 @@ def open_workspace(args: argparse.Namespace) -> None:
             run_command(
                 ["git", "-C", str(repo_dir), "fetch", "origin", workspace_branch]
             )
+    existing_branch = local_branch or remote_branch
 
     if local_branch:
         run_command(["git", "-C", str(repo_dir), "checkout", workspace_branch])
@@ -837,7 +833,7 @@ def open_workspace(args: argparse.Namespace) -> None:
         agent_options = []
     agent_options = [str(opt) for opt in agent_options]
 
-    if is_new_workspace:
+    if is_new_workspace and existing_branch:
         append_workspace_branch_summary(
             agents_path, repo_dir, default_branch, workspace_branch
         )
@@ -876,6 +872,31 @@ def workspace_root_for_config(project_root: Path, config: dict) -> Path:
     if is_absolute_path(str(workspaces_root)):
         return Path(workspaces_root)
     return project_root / str(workspaces_root)
+
+
+def normalize_workspace_reference(
+    value: str, workspace_root: Path, project_root: Path
+) -> tuple[str, str]:
+    raw = value.strip()
+    if not raw:
+        return "", ""
+    raw_normalized = raw.replace("\\", "/")
+    path = Path(raw_normalized)
+    workspace_root = workspace_root.resolve()
+    if path.is_absolute():
+        candidate = path
+    else:
+        candidate = (project_root / path).resolve()
+    try:
+        relative = candidate.relative_to(workspace_root)
+    except ValueError:
+        relative_value = raw_normalized
+    else:
+        relative_value = str(relative).replace("\\", "/")
+    if not relative_value:
+        return "", ""
+    normalized_name = relative_value.replace("/", "-").replace("\\", "-")
+    return normalized_name, relative_value
 
 
 def workspace_branch_for_dir(
@@ -1117,24 +1138,33 @@ def format_status(value: bool | None) -> str:
     return "yes" if value else "no"
 
 
-def collect_workspaces(project_root: Path, config: dict) -> list[dict]:
+def collect_workspaces(
+    project_root: Path, config: dict, with_status: bool = True
+) -> list[dict]:
     branch_config = resolve_branch_config(config)
     resolve_branch_pr(branch_config)
     resolve_branch_history(branch_config)
     workspaces_root = workspace_root_for_config(project_root, config)
     if not workspaces_root.exists():
         return []
-    workspaces: list[dict] = []
-    for workspace_dir in sorted(workspaces_root.iterdir(), key=lambda item: item.name):
-        if not workspace_dir.is_dir():
-            continue
+    workspace_dirs = [
+        workspace_dir
+        for workspace_dir in sorted(
+            workspaces_root.iterdir(), key=lambda item: item.name
+        )
+        if workspace_dir.is_dir()
+    ]
+    if not workspace_dirs:
+        return []
+
+    def build_workspace(workspace_dir: Path) -> dict:
         workspace_name = workspace_dir.name
         repo_dir = workspace_dir / "repo"
         branch = workspace_branch_for_dir(workspace_dir, workspace_name, config)
         checked_out: bool | None = None
         clean: bool | None = None
         pushed: bool | None = None
-        if repo_dir.exists():
+        if with_status and repo_dir.exists():
             current_branch = git_current_branch(repo_dir)
             checked_out = current_branch == branch if current_branch else None
             if current_branch and current_branch == branch:
@@ -1142,18 +1172,22 @@ def collect_workspaces(project_root: Path, config: dict) -> list[dict]:
             else:
                 clean = None
             pushed = git_has_remote_branch(repo_dir, branch)
-        workspaces.append(
-            {
-                "name": workspace_name,
-                "path": workspace_dir,
-                "repo_dir": repo_dir,
-                "branch": branch,
-                "checked_out": checked_out,
-                "clean": clean,
-                "pushed": pushed,
-            }
-        )
-    return workspaces
+        return {
+            "name": workspace_name,
+            "path": workspace_dir,
+            "repo_dir": repo_dir,
+            "branch": branch,
+            "checked_out": checked_out,
+            "clean": clean,
+            "pushed": pushed,
+        }
+
+    max_workers = min(8, len(workspace_dirs))
+    if max_workers <= 1:
+        return [build_workspace(workspace_dir) for workspace_dir in workspace_dirs]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return list(executor.map(build_workspace, workspace_dirs))
 
 
 def list_workspaces(args: argparse.Namespace) -> None:
@@ -1167,9 +1201,16 @@ def list_workspaces(args: argparse.Namespace) -> None:
     if not config:
         die("failed to load .atelier.json")
 
-    workspaces = collect_workspaces(project_root, config)
+    workspaces = collect_workspaces(
+        project_root, config, with_status=getattr(args, "status", False)
+    )
     if not workspaces:
         say("No workspaces found.")
+        return
+
+    if not getattr(args, "status", False):
+        for workspace in workspaces:
+            say(workspace["name"])
         return
 
     rows = [("workspace", "checked_out", "clean", "pushed")]
@@ -1197,6 +1238,42 @@ def confirm_delete(workspace_name: str) -> bool:
     return response in {"y", "yes"}
 
 
+def delete_workspace_branch(
+    repo_dir: Path, workspace_branch: str, default_branch: str
+) -> None:
+    if not repo_dir.exists():
+        return
+    if not git_is_repo(repo_dir):
+        return
+
+    current_branch = git_current_branch(repo_dir)
+    if current_branch == workspace_branch:
+        result = try_run_command(
+            ["git", "-C", str(repo_dir), "checkout", default_branch]
+        )
+        if result is None or result.returncode != 0:
+            warn(
+                f"failed to checkout {default_branch} before deleting {workspace_branch}"
+            )
+            return
+
+    if git_ref_exists(repo_dir, f"refs/heads/{workspace_branch}"):
+        result = try_run_command(
+            ["git", "-C", str(repo_dir), "branch", "-D", workspace_branch]
+        )
+        if result is None or result.returncode != 0:
+            warn(f"failed to delete local branch {workspace_branch}")
+
+    remote_exists = git_has_remote_branch(repo_dir, workspace_branch)
+    if remote_exists is False:
+        return
+    result = try_run_command(
+        ["git", "-C", str(repo_dir), "push", "origin", "--delete", workspace_branch]
+    )
+    if result is None or result.returncode != 0:
+        warn(f"failed to delete remote branch {workspace_branch}")
+
+
 def clean_workspaces(args: argparse.Namespace) -> None:
     cwd = Path.cwd()
     project_root = find_project_root(cwd)
@@ -1208,14 +1285,30 @@ def clean_workspaces(args: argparse.Namespace) -> None:
     if not config:
         die("failed to load .atelier.json")
 
-    workspaces = collect_workspaces(project_root, config)
+    default_branch = config.get("branch", {}).get("default")
+    if not default_branch:
+        die(".atelier.json missing branch.default")
+
+    workspace_root = workspace_root_for_config(project_root, config)
+
+    requested = []
+    for name in args.workspace_names or []:
+        if not name.strip():
+            continue
+        normalized, _ = normalize_workspace_reference(
+            name, workspace_root, project_root
+        )
+        if normalized:
+            requested.append(normalized)
+
+    workspaces = collect_workspaces(
+        project_root, config, with_status=not (args.all or requested)
+    )
     if not workspaces:
         say("No workspaces found.")
         return
 
     workspaces_by_name = {workspace["name"]: workspace for workspace in workspaces}
-
-    requested = [name.strip() for name in args.workspace_names or [] if name.strip()]
     if args.all and requested:
         die("cannot combine --all with workspace names")
 
@@ -1245,6 +1338,10 @@ def clean_workspaces(args: argparse.Namespace) -> None:
         if not args.force and not confirm_delete(name):
             say(f"Skipped workspace {name}")
             continue
+        if not getattr(args, "no_branch", False):
+            delete_workspace_branch(
+                workspace["repo_dir"], workspace["branch"], default_branch
+            )
         try:
             shutil.rmtree(workspace["path"])
         except OSError as exc:
@@ -1301,6 +1398,11 @@ def main() -> None:
     open_parser.set_defaults(func=open_workspace)
 
     list_parser = subparsers.add_parser("list", help="list workspaces")
+    list_parser.add_argument(
+        "--status",
+        action="store_true",
+        help="include workspace status columns",
+    )
     list_parser.set_defaults(func=list_workspaces)
 
     clean_parser = subparsers.add_parser("clean", help="clean workspaces")
@@ -1315,6 +1417,11 @@ def main() -> None:
         "--force",
         action="store_true",
         help="delete without confirmation",
+    )
+    clean_parser.add_argument(
+        "--no-branch",
+        action="store_true",
+        help="do not delete workspace branches",
     )
     clean_parser.add_argument("workspace_names", nargs="*", help="workspaces to delete")
     clean_parser.set_defaults(func=clean_workspaces)
