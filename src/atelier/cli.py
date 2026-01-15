@@ -528,7 +528,7 @@ def open_workspace(args: argparse.Namespace) -> None:
         die("failed to load .atelier.json")
 
     workspace_root = workspace_root_for_config(project_root, config)
-    workspace_name = normalize_workspace_reference(
+    workspace_name, branch_hint = normalize_workspace_reference(
         args.workspace_name, workspace_root, project_root
     )
     if not workspace_name:
@@ -546,7 +546,8 @@ def open_workspace(args: argparse.Namespace) -> None:
     is_new_workspace = not workspace_dir.exists()
     branch_prefix = config.get("branch", {}).get("prefix", "")
     if is_new_workspace:
-        workspace_branch = branch_override or f"{branch_prefix}{workspace_name}"
+        base_branch = branch_hint or workspace_name
+        workspace_branch = branch_override or f"{branch_prefix}{base_branch}"
     else:
         workspace_branch = workspace_branch_for_dir(
             workspace_dir, workspace_name, config
@@ -694,11 +695,12 @@ def workspace_root_for_config(project_root: Path, config: dict) -> Path:
 
 def normalize_workspace_reference(
     value: str, workspace_root: Path, project_root: Path
-) -> str:
+) -> tuple[str, str]:
     raw = value.strip()
     if not raw:
-        return ""
-    path = Path(raw)
+        return "", ""
+    raw_normalized = raw.replace("\\", "/")
+    path = Path(raw_normalized)
     workspace_root = workspace_root.resolve()
     if path.is_absolute():
         candidate = path
@@ -707,10 +709,13 @@ def normalize_workspace_reference(
     try:
         relative = candidate.relative_to(workspace_root)
     except ValueError:
-        return raw
-    if not relative.parts:
-        return ""
-    return str(relative)
+        relative_value = raw_normalized
+    else:
+        relative_value = str(relative).replace("\\", "/")
+    if not relative_value:
+        return "", ""
+    normalized_name = relative_value.replace("/", "-").replace("\\", "-")
+    return normalized_name, relative_value
 
 
 def workspace_branch_for_dir(
@@ -952,7 +957,9 @@ def format_status(value: bool | None) -> str:
     return "yes" if value else "no"
 
 
-def collect_workspaces(project_root: Path, config: dict) -> list[dict]:
+def collect_workspaces(
+    project_root: Path, config: dict, with_status: bool = True
+) -> list[dict]:
     workspaces_root = workspace_root_for_config(project_root, config)
     if not workspaces_root.exists():
         return []
@@ -973,7 +980,7 @@ def collect_workspaces(project_root: Path, config: dict) -> list[dict]:
         checked_out: bool | None = None
         clean: bool | None = None
         pushed: bool | None = None
-        if repo_dir.exists():
+        if with_status and repo_dir.exists():
             current_branch = git_current_branch(repo_dir)
             checked_out = current_branch == branch if current_branch else None
             if current_branch and current_branch == branch:
@@ -1010,7 +1017,9 @@ def list_workspaces(args: argparse.Namespace) -> None:
     if not config:
         die("failed to load .atelier.json")
 
-    workspaces = collect_workspaces(project_root, config)
+    workspaces = collect_workspaces(
+        project_root, config, with_status=getattr(args, "status", False)
+    )
     if not workspaces:
         say("No workspaces found.")
         return
@@ -1098,20 +1107,24 @@ def clean_workspaces(args: argparse.Namespace) -> None:
 
     workspace_root = workspace_root_for_config(project_root, config)
 
-    workspaces = collect_workspaces(project_root, config)
+    requested = []
+    for name in args.workspace_names or []:
+        if not name.strip():
+            continue
+        normalized, _ = normalize_workspace_reference(
+            name, workspace_root, project_root
+        )
+        if normalized:
+            requested.append(normalized)
+
+    workspaces = collect_workspaces(
+        project_root, config, with_status=not (args.all or requested)
+    )
     if not workspaces:
         say("No workspaces found.")
         return
 
     workspaces_by_name = {workspace["name"]: workspace for workspace in workspaces}
-
-    requested = []
-    for name in args.workspace_names or []:
-        if not name.strip():
-            continue
-        normalized = normalize_workspace_reference(name, workspace_root, project_root)
-        if normalized:
-            requested.append(normalized)
     if args.all and requested:
         die("cannot combine --all with workspace names")
 

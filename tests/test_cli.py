@@ -894,6 +894,57 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_normalizes_workspace_name_and_preserves_branch_slashes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {
+                "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
+                "branch": {"default": "main", "prefix": "scott/"},
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "true", "options": {"true": []}},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    return None
+
+                class DummyResult:
+                    def __init__(self, returncode: int = 1, stdout: str = "") -> None:
+                        self.returncode = returncode
+                        self.stdout = stdout
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                ):
+                    cli.open_workspace(
+                        SimpleNamespace(workspace_name="workspaces/feat/demo")
+                    )
+
+                workspace_dir = root / "workspaces" / "feat-demo"
+                workspace_config = json.loads(
+                    (workspace_dir / ".atelier.workspace.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(workspace_config["workspace"]["name"], "feat-demo")
+                self.assertEqual(
+                    workspace_config["workspace"]["branch"], "scott/feat/demo"
+                )
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_uses_remote_branch_and_appends_commit_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
