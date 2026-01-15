@@ -40,7 +40,12 @@ class DummyResult:
 def write_project_config(root: Path) -> dict:
     config = {
         "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
-        "branch": {"default": "main", "prefix": "scott/"},
+        "branch": {
+            "default": "main",
+            "prefix": "scott/",
+            "pr": True,
+            "history": "manual",
+        },
         "workspaces": {"root": "workspaces"},
     }
     (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
@@ -81,6 +86,8 @@ def write_workspace_config(workspace_dir: Path, name: str, branch: str) -> None:
         "workspace": {
             "name": name,
             "branch": branch,
+            "branch_pr": True,
+            "branch_history": "manual",
             "id": f"atelier:01TEST:{name}",
         },
         "atelier": {"version": "0.2.0", "created_at": "2026-01-01T00:00:00Z"},
@@ -203,6 +210,8 @@ class TestInitProject(TestCase):
                     config["project"]["repo_url"], "git@github.com:owner/repo.git"
                 )
                 self.assertEqual(config["branch"]["default"], "main")
+                self.assertTrue(config["branch"]["pr"])
+                self.assertEqual(config["branch"]["history"], "manual")
                 self.assertEqual(config["editor"]["default"], "cursor")
                 self.assertTrue((root / "AGENTS.md").exists())
                 self.assertTrue((root / "workspaces").is_dir())
@@ -284,7 +293,12 @@ class TestInitProject(TestCase):
                         "name": "old",
                         "repo_url": "git@github.com:old/repo.git",
                     },
-                    "branch": {"default": "main", "prefix": "old/"},
+                    "branch": {
+                        "default": "main",
+                        "prefix": "old/",
+                        "pr": False,
+                        "history": "merge",
+                    },
                     "agent": {"default": "codex", "options": {"codex": ["--old"]}},
                     "editor": {"default": "nano", "options": {"nano": ["-w"]}},
                     "workspaces": {"root": "old-workspaces"},
@@ -322,6 +336,8 @@ class TestInitProject(TestCase):
                 )
                 self.assertEqual(config["branch"]["default"], "develop")
                 self.assertEqual(config["branch"]["prefix"], "feat/")
+                self.assertFalse(config["branch"]["pr"])
+                self.assertEqual(config["branch"]["history"], "merge")
                 self.assertEqual(config["agent"]["default"], "codex")
                 self.assertEqual(config["editor"]["default"], "cursor")
                 self.assertEqual(config["editor"]["options"]["cursor"], ["-w"])
@@ -687,6 +703,9 @@ class TestOpenWorkspace(TestCase):
                     encoding="utf-8"
                 )
                 self.assertIn("atelier:01TEST:feat-demo", agents_content)
+                self.assertIn("## Integration Strategy", agents_content)
+                self.assertIn("Pull requests expected: yes", agents_content)
+                self.assertIn("History policy: manual", agents_content)
 
                 self.assertTrue(any(cmd[:2] == ["git", "clone"] for cmd in commands))
                 repo_path = (workspace_dir / "repo").resolve()
@@ -704,6 +723,128 @@ class TestOpenWorkspace(TestCase):
                 self.assertTrue(
                     any(cmd[0] == "codex" and "--cd" in cmd for cmd in commands)
                 )
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_renders_direct_integration_strategy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {
+                "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
+                "branch": {
+                    "default": "main",
+                    "prefix": "scott/",
+                    "pr": False,
+                    "history": "squash",
+                },
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "true", "options": {"true": []}},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                class DummyResult:
+                    def __init__(self, returncode: int = 1, stdout: str = "") -> None:
+                        self.returncode = returncode
+                        self.stdout = stdout
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                ):
+                    cli.open_workspace(
+                        SimpleNamespace(workspace_name="feat-demo", branch=None)
+                    )
+
+                workspace_dir = root / "workspaces" / "feat-demo"
+                agents_content = (workspace_dir / "AGENTS.md").read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn("Pull requests expected: no", agents_content)
+                self.assertIn("History policy: squash", agents_content)
+                self.assertIn("collapsed into a single commit", agents_content)
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_overrides_branch_settings_for_new_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {
+                "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
+                "branch": {
+                    "default": "main",
+                    "prefix": "scott/",
+                    "pr": True,
+                    "history": "manual",
+                },
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "true", "options": {"true": []}},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                class DummyResult:
+                    def __init__(self, returncode: int = 1, stdout: str = "") -> None:
+                        self.returncode = returncode
+                        self.stdout = stdout
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
+                ):
+                    cli.open_workspace(
+                        SimpleNamespace(
+                            workspace_name="feat-demo",
+                            branch=None,
+                            branch_pr="false",
+                            branch_history="merge",
+                        )
+                    )
+
+                workspace_dir = root / "workspaces" / "feat-demo"
+                workspace_config = json.loads(
+                    (workspace_dir / ".atelier.workspace.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertFalse(workspace_config["workspace"]["branch_pr"])
+                self.assertEqual(
+                    workspace_config["workspace"]["branch_history"], "merge"
+                )
+
+                agents_content = (workspace_dir / "AGENTS.md").read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn("Pull requests expected: no", agents_content)
+                self.assertIn("History policy: merge", agents_content)
             finally:
                 os.chdir(original_cwd)
 
@@ -857,6 +998,70 @@ class TestOpenWorkspace(TestCase):
                 with self.assertRaises(SystemExit):
                     cli.open_workspace(
                         SimpleNamespace(workspace_name="feat-demo", branch="feat-demo")
+                    )
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_errors_on_branch_settings_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {
+                "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
+                "branch": {"default": "main", "prefix": "scott/"},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+            workspace_dir = root / "workspaces" / "feat-demo"
+            workspace_dir.mkdir(parents=True)
+            write_workspace_config(workspace_dir, "feat-demo", "scott/feat-demo")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with self.assertRaises(SystemExit):
+                    cli.open_workspace(
+                        SimpleNamespace(
+                            workspace_name="feat-demo",
+                            branch=None,
+                            branch_pr="false",
+                            branch_history="manual",
+                        )
+                    )
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_rejects_invalid_branch_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = {
+                "project": {"name": "demo", "repo_url": "git@github.com:org/repo.git"},
+                "branch": {
+                    "default": "main",
+                    "prefix": "scott/",
+                    "history": "sideways",
+                },
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "true", "options": {"true": []}},
+                "workspaces": {"root": "workspaces"},
+                "atelier": {
+                    "id": "01TEST",
+                    "version": "0.2.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                },
+            }
+            (root / ".atelier.json").write_text(json.dumps(config), encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with self.assertRaises(SystemExit):
+                    cli.open_workspace(
+                        SimpleNamespace(workspace_name="feat-demo", branch=None)
                     )
             finally:
                 os.chdir(original_cwd)

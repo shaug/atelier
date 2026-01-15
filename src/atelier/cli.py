@@ -12,6 +12,7 @@ from pathlib import Path
 from . import __version__
 
 ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+BRANCH_HISTORY_VALUES = ("manual", "squash", "merge", "rebase")
 
 PROJECT_AGENTS_TEMPLATE = """# Atelier Project Overlay
 
@@ -46,7 +47,8 @@ This directory is an **Atelier workspace**.
 - This workspace represents **one unit of work**
 - All code changes for this work should be made under `repo/`
 - The code in `repo/` is a real git repository and should be treated normally
-- This workspace maps to **one git branch** and **one eventual pull request**
+- This workspace maps to **one git branch**
+- Integration expectations are defined below
 
 ## Execution Expectations
 
@@ -62,6 +64,8 @@ When operating in this workspace:
 - Treat this workspace as the **entire world**
 - Do not reference or modify other workspaces
 - Read the remainder of this file carefully before beginning work
+
+{integration_strategy}
 
 After reading this file, proceed with the work described below.
 
@@ -178,6 +182,142 @@ def normalize_repo_url(value: str) -> str:
 
 def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
+
+
+def resolve_branch_config(config: dict) -> dict:
+    branch = config.get("branch")
+    if isinstance(branch, dict):
+        return branch
+    return {}
+
+
+def resolve_branch_pr(branch_config: dict) -> bool:
+    if "pr" not in branch_config:
+        return True
+    value = branch_config.get("pr")
+    if isinstance(value, bool):
+        return value
+    die("branch.pr must be a boolean")
+
+
+def resolve_branch_history(branch_config: dict) -> str:
+    if "history" not in branch_config:
+        return "manual"
+    value = branch_config.get("history")
+    return normalize_branch_history(value, "branch.history")
+
+
+def normalize_branch_history(value: object, source: str) -> str:
+    if not isinstance(value, str):
+        die(f"{source} must be one of: " + ", ".join(BRANCH_HISTORY_VALUES))
+    normalized = value.strip()
+    if normalized not in BRANCH_HISTORY_VALUES:
+        die(f"{source} must be one of: " + ", ".join(BRANCH_HISTORY_VALUES))
+    return normalized
+
+
+def parse_branch_pr_override(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    die("--branch-pr must be true or false")
+
+
+def resolve_branch_overrides(
+    args: argparse.Namespace,
+) -> tuple[bool | None, str | None]:
+    branch_pr_override = getattr(args, "branch_pr", None)
+    branch_history_override = getattr(args, "branch_history", None)
+    resolved_pr = None
+    resolved_history = None
+    if branch_pr_override is not None:
+        resolved_pr = parse_branch_pr_override(branch_pr_override)
+    if branch_history_override is not None:
+        resolved_history = normalize_branch_history(
+            branch_history_override, "--branch-history"
+        )
+    return resolved_pr, resolved_history
+
+
+def read_workspace_branch_settings(
+    workspace_dir: Path,
+) -> tuple[bool | None, str | None]:
+    workspace_config = load_json(workspace_dir / ".atelier.workspace.json") or {}
+    workspace_section = workspace_config.get("workspace", {})
+    branch_pr = workspace_section.get("branch_pr")
+    branch_history = workspace_section.get("branch_history")
+    return branch_pr, branch_history
+
+
+def render_integration_strategy(branch_pr: bool, branch_history: str) -> str:
+    pr_label = "yes" if branch_pr else "no"
+    lines = [
+        "## Integration Strategy",
+        "",
+        "This section describes expected coordination and history semantics.",
+        "Atelier does not automate integration.",
+        "",
+        f"- Pull requests expected: {pr_label}",
+        f"- History policy: {branch_history}",
+        "",
+        "When this workspace's success criteria are met:",
+    ]
+    if branch_pr:
+        lines.extend(
+            [
+                "- The workspace branch is expected to be pushed to the remote.",
+                "- A pull request against the default branch is the expected "
+                "integration mechanism.",
+                "- Manual review is assumed; integration should not happen "
+                "automatically.",
+            ]
+        )
+        if branch_history == "manual":
+            lines.append(
+                "- The intended merge style is manual (no specific history "
+                "behavior is implied)."
+            )
+        else:
+            lines.append(
+                f"- The intended merge style is {branch_history}, but review "
+                "and human control remain authoritative."
+            )
+        lines.append(
+            "- Integration should wait for an explicit instruction in the thread."
+        )
+    else:
+        lines.append(
+            "- Integration is expected to happen directly without a pull request."
+        )
+        if branch_history == "manual":
+            lines.append(
+                "- No specific history behavior is implied; use human judgment "
+                "for how changes land on the default branch."
+            )
+        elif branch_history == "squash":
+            lines.append(
+                "- Workspace changes are expected to be collapsed into a single "
+                "commit on the default branch."
+            )
+        elif branch_history == "merge":
+            lines.append(
+                "- Workspace changes are expected to be merged with a merge "
+                "commit, preserving workspace history."
+            )
+        elif branch_history == "rebase":
+            lines.append(
+                "- Workspace commits are expected to be replayed linearly onto "
+                "the default branch."
+            )
+        lines.append(
+            "- After integration, the default branch is expected to be pushed."
+        )
+    return "\n".join(lines)
 
 
 def read_first_user_message(path: Path) -> str | None:
@@ -371,11 +511,8 @@ def init_project(args: argparse.Namespace) -> None:
         )
     repo_url = normalize_repo_url(repo_url)
 
-    branch_default_default = (
-        config.get("branch", {}).get("default")
-        if isinstance(config.get("branch"), dict)
-        else None
-    )
+    branch_config = resolve_branch_config(config)
+    branch_default_default = branch_config.get("default")
     if not branch_default_default:
         branch_default_default = "main"
     branch_default_arg = getattr(args, "branch_default", None)
@@ -384,11 +521,7 @@ def init_project(args: argparse.Namespace) -> None:
     else:
         branch_default = prompt("Default branch", branch_default_default, required=True)
 
-    branch_prefix_default = (
-        config.get("branch", {}).get("prefix")
-        if isinstance(config.get("branch"), dict)
-        else None
-    )
+    branch_prefix_default = branch_config.get("prefix")
     if branch_prefix_default is None:
         branch_prefix_default = ""
     branch_prefix_arg = getattr(args, "branch_prefix", None)
@@ -396,6 +529,9 @@ def init_project(args: argparse.Namespace) -> None:
         branch_prefix = branch_prefix_arg
     else:
         branch_prefix = prompt("Branch prefix (optional)", branch_prefix_default)
+
+    branch_pr = resolve_branch_pr(branch_config)
+    branch_history = resolve_branch_history(branch_config)
 
     agent_default_default = (
         config.get("agent", {}).get("default")
@@ -479,6 +615,8 @@ def init_project(args: argparse.Namespace) -> None:
         "branch": {
             "default": branch_default,
             "prefix": branch_prefix,
+            "pr": branch_pr,
+            "history": branch_history,
         },
         "agent": {
             "default": agent_default,
@@ -526,6 +664,19 @@ def open_workspace(args: argparse.Namespace) -> None:
     if not config:
         die("failed to load .atelier.json")
 
+    branch_config = resolve_branch_config(config)
+    branch_pr = resolve_branch_pr(branch_config)
+    branch_history = resolve_branch_history(branch_config)
+    branch_pr_override, branch_history_override = resolve_branch_overrides(args)
+    effective_branch_pr = (
+        branch_pr_override if branch_pr_override is not None else branch_pr
+    )
+    effective_branch_history = (
+        branch_history_override
+        if branch_history_override is not None
+        else branch_history
+    )
+
     workspace_name = args.workspace_name.strip()
     if not workspace_name:
         die("workspace name is required")
@@ -550,10 +701,31 @@ def open_workspace(args: argparse.Namespace) -> None:
     workspace_dir = workspace_root / workspace_name
     agents_path = workspace_dir / "AGENTS.md"
     is_new_workspace = not workspace_dir.exists()
-    branch_prefix = config.get("branch", {}).get("prefix", "")
+    branch_prefix = branch_config.get("prefix", "")
     if is_new_workspace:
         workspace_branch = branch_override or f"{branch_prefix}{workspace_name}"
     else:
+        if branch_pr_override is not None or branch_history_override is not None:
+            stored_pr, stored_history = read_workspace_branch_settings(workspace_dir)
+            if branch_pr_override is not None:
+                if stored_pr is None or not isinstance(stored_pr, bool):
+                    die("workspace missing branch.pr setting")
+                if stored_pr != branch_pr_override:
+                    die(
+                        "specified branch.pr does not match workspace config "
+                        f"({branch_pr_override} != {stored_pr})"
+                    )
+            if branch_history_override is not None:
+                if stored_history is None or not isinstance(stored_history, str):
+                    die("workspace missing branch.history setting")
+                stored_history = normalize_branch_history(
+                    stored_history, "workspace branch.history"
+                )
+                if stored_history != branch_history_override:
+                    die(
+                        "specified branch.history does not match workspace config "
+                        f"({branch_history_override} != {stored_history})"
+                    )
         workspace_branch = workspace_branch_for_dir(
             workspace_dir, workspace_name, config
         )
@@ -571,6 +743,8 @@ def open_workspace(args: argparse.Namespace) -> None:
             "workspace": {
                 "name": workspace_name,
                 "branch": workspace_branch,
+                "branch_pr": effective_branch_pr,
+                "branch_history": effective_branch_history,
                 "id": f"atelier:{atelier_id}:{workspace_name}",
             },
             "atelier": {
@@ -580,16 +754,23 @@ def open_workspace(args: argparse.Namespace) -> None:
         }
         write_json(workspace_dir / ".atelier.workspace.json", workspace_config)
 
+        integration_strategy = render_integration_strategy(
+            effective_branch_pr, effective_branch_history
+        )
         template_override = project_root / "templates" / "AGENTS.md"
         if template_override.exists():
-            agents_path.write_text(
-                template_override.read_text(encoding="utf-8"), encoding="utf-8"
-            )
+            content = template_override.read_text(encoding="utf-8")
+            if "## Integration Strategy" not in content:
+                if content and not content.endswith("\n"):
+                    content += "\n"
+                content = content.rstrip() + "\n\n" + integration_strategy + "\n"
+            agents_path.write_text(content, encoding="utf-8")
         else:
             agents_path.write_text(
                 WORKSPACE_AGENTS_TEMPLATE.format(
                     atelier_id=atelier_id,
                     workspace_name=workspace_name,
+                    integration_strategy=integration_strategy,
                 ),
                 encoding="utf-8",
             )
@@ -599,7 +780,7 @@ def open_workspace(args: argparse.Namespace) -> None:
     if not project_repo_url:
         die(".atelier.json missing project.repo_url")
 
-    default_branch = config.get("branch", {}).get("default")
+    default_branch = branch_config.get("default")
     if not default_branch:
         die(".atelier.json missing branch.default")
 
@@ -937,6 +1118,9 @@ def format_status(value: bool | None) -> str:
 
 
 def collect_workspaces(project_root: Path, config: dict) -> list[dict]:
+    branch_config = resolve_branch_config(config)
+    resolve_branch_pr(branch_config)
+    resolve_branch_history(branch_config)
     workspaces_root = workspace_root_for_config(project_root, config)
     if not workspaces_root.exists():
         return []
@@ -1103,6 +1287,16 @@ def main() -> None:
     open_parser.add_argument("workspace_name", help="workspace name")
     open_parser.add_argument(
         "-B", "--branch", dest="branch", help="explicit branch name for the workspace"
+    )
+    open_parser.add_argument(
+        "--branch-pr",
+        dest="branch_pr",
+        help="override pull request expectation (true/false)",
+    )
+    open_parser.add_argument(
+        "--branch-history",
+        dest="branch_history",
+        help="override history policy (manual|squash|merge|rebase)",
     )
     open_parser.set_defaults(func=open_workspace)
 
