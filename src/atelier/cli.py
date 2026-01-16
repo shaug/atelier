@@ -1,19 +1,29 @@
 import argparse
 import concurrent.futures
 import datetime as dt
+import hashlib
 import json
 import os
+import re
 import secrets
 import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
+
+from platformdirs import user_data_dir
 
 from . import __version__
 
 ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 BRANCH_HISTORY_VALUES = ("manual", "squash", "merge", "rebase")
+ATELIER_APP_NAME = "atelier"
+PROJECTS_DIRNAME = "projects"
+WORKSPACES_DIRNAME = "workspaces"
+TEMPLATES_DIRNAME = "templates"
+PROJECT_CONFIG_FILENAME = ".atelier.json"
 
 PROJECT_AGENTS_TEMPLATE = """# Atelier Project Overlay
 
@@ -23,7 +33,7 @@ agent-assisted development.
 ## How Work Is Organized
 
 - Development work is performed in isolated **workspaces**
-- Workspaces live under the directory configured for this project
+- Workspaces live under the Atelier project directory managed in the local data dir
 - Each workspace represents **one unit of work**
 - Each workspace has its own `AGENTS.md` defining intent and scope
 
@@ -36,8 +46,8 @@ agent-assisted development.
 
 ## Additional Policy Context
 
-If a `PROJECT.md` file exists at the project root, read it and apply the rules
-defined there in addition to this file.
+If a `PROJECT.md` file exists at the project root (the Atelier project
+directory), read it and apply the rules defined there in addition to this file.
 
 If a `WORKSPACE.md` file exists in a workspace, read it and apply the rules
 defined there as well.
@@ -46,7 +56,7 @@ In case of conflict:
 - `WORKSPACE.md` rules take precedence over `PROJECT.md`
 - `PROJECT.md` rules take precedence over this file
 
-- See `.atelier.json` for the current project configuration used by Atelier.
+- Atelier project metadata lives in the local data directory (not in the repo).
 """
 
 WORKSPACE_AGENTS_TEMPLATE = """<!-- atelier:{atelier_id}:{workspace_name} -->
@@ -80,8 +90,8 @@ When operating in this workspace:
 
 ## Additional Policy Context
 
-If a `PROJECT.md` file exists at the project root, read it and apply the rules
-defined there in addition to this file.
+If a `PROJECT.md` file exists at the project root (the Atelier project
+directory), read it and apply the rules defined there in addition to this file.
 
 If a `WORKSPACE.md` file exists in this workspace, read it and apply the rules
 defined there as well.
@@ -205,33 +215,94 @@ def write_json(path: Path, payload: dict) -> None:
         fh.write("\n")
 
 
-def find_project_root(start: Path) -> Path | None:
-    current = start.resolve()
-    for parent in [current] + list(current.parents):
-        if (parent / ".atelier.json").exists():
-            return parent
-    return None
+def atelier_data_dir() -> Path:
+    return Path(user_data_dir(ATELIER_APP_NAME))
 
 
-def is_absolute_path(path_value: str) -> bool:
-    if path_value.startswith("/") or path_value.startswith("\\"):
-        return True
-    return os.path.isabs(path_value)
+def projects_root() -> Path:
+    return atelier_data_dir() / PROJECTS_DIRNAME
 
 
-def normalize_repo_url(value: str) -> str:
+def project_key(origin: str) -> str:
+    return hashlib.sha256(origin.encode("utf-8")).hexdigest()
+
+
+def project_dir_for_origin(origin: str) -> Path:
+    return projects_root() / project_key(origin)
+
+
+def project_config_path(project_dir: Path) -> Path:
+    return project_dir / PROJECT_CONFIG_FILENAME
+
+
+def workspaces_root_for_project(project_dir: Path) -> Path:
+    return project_dir / WORKSPACES_DIRNAME
+
+
+def strip_git_suffix(path: str) -> str:
+    normalized = path.strip().rstrip("/")
+    if normalized.lower().endswith(".git"):
+        return normalized[: -len(".git")]
+    return normalized
+
+
+def normalize_origin_url(value: str) -> str:
     raw = value.strip()
-    if raw.startswith("git@") or "://" in raw:
-        return raw
-    if raw.startswith("github.com/"):
-        raw = raw[len("github.com/") :]
-    if raw.count("/") == 1:
-        return f"git@github.com:{raw}.git"
-    return value
+    if not raw:
+        return ""
+
+    scp_match = re.match(r"^(?P<user>[^@]+)@(?P<host>[^:]+):(?P<path>.+)$", raw)
+    if scp_match:
+        host = scp_match.group("host").lower()
+        path = strip_git_suffix(scp_match.group("path").lstrip("/"))
+        return f"https://{host}/{path}"
+
+    if "://" in raw:
+        parsed = urlparse(raw)
+        scheme = (parsed.scheme or "").lower()
+        host = (parsed.hostname or "").lower()
+        path = strip_git_suffix((parsed.path or "").lstrip("/"))
+        if scheme in {"http", "https", "ssh", "git"} and host:
+            return f"https://{host}/{path}"
+        if scheme == "file":
+            local_path = Path(parsed.path).expanduser().resolve()
+            return f"file://{local_path.as_posix()}"
+
+    if "/" in raw and " " not in raw:
+        head, tail = raw.split("/", 1)
+        if "." in head:
+            host = head.lower()
+            path = strip_git_suffix(tail)
+            return f"https://{host}/{path}"
+
+    local_path = Path(raw).expanduser()
+    if not local_path.is_absolute():
+        local_path = local_path.resolve()
+    return f"file://{local_path.as_posix()}"
 
 
 def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
+
+
+def git_repo_root(start: Path) -> Path | None:
+    result = run_git_command(["git", "-C", str(start), "rev-parse", "--show-toplevel"])
+    if result.returncode != 0:
+        return None
+    resolved = result.stdout.strip()
+    if not resolved:
+        return None
+    return Path(resolved)
+
+
+def git_origin_url(repo_dir: Path) -> str | None:
+    result = run_git_command(
+        ["git", "-C", str(repo_dir), "remote", "get-url", "origin"]
+    )
+    if result.returncode != 0:
+        return None
+    origin = result.stdout.strip()
+    return origin or None
 
 
 def resolve_branch_config(config: dict) -> dict:
@@ -419,7 +490,7 @@ def ensure_workspace_metadata(
     integration_strategy = render_integration_strategy(
         integration_pr, integration_history
     )
-    template_override = project_root / "templates" / "AGENTS.md"
+    template_override = project_root / TEMPLATES_DIRNAME / "AGENTS.md"
     if template_override.exists():
         content = template_override.read_text(encoding="utf-8")
         if "## Integration Strategy" not in content:
@@ -589,69 +660,61 @@ def try_run_command(
         return None
 
 
-def init_project(args: argparse.Namespace) -> None:
-    cwd = Path.cwd()
-    existing_root = find_project_root(cwd)
-    if existing_root and existing_root != cwd:
-        die(f"existing Atelier project found at {existing_root}; run init there")
+def read_arg(args: argparse.Namespace | None, name: str) -> object | None:
+    if args is None:
+        return None
+    return getattr(args, name, None)
 
-    config_path = cwd / ".atelier.json"
-    config = load_json(config_path) or {}
 
+def build_project_config(
+    existing: dict,
+    origin: str,
+    origin_raw: str,
+    repo_root: Path,
+    args: argparse.Namespace | None,
+) -> dict:
     project_name_default = (
-        config.get("project", {}).get("name")
-        if isinstance(config.get("project"), dict)
+        existing.get("project", {}).get("name")
+        if isinstance(existing.get("project"), dict)
         else None
     )
     if not project_name_default:
-        project_name_default = cwd.name
+        parsed_origin = urlparse(origin)
+        origin_name = Path(parsed_origin.path).name if parsed_origin.path else ""
+        project_name_default = origin_name or repo_root.name
 
-    project_name_flag = getattr(args, "project_name_flag", None)
-    project_name_arg = getattr(args, "project_name", None)
+    project_name_flag = read_arg(args, "project_name_flag")
+    project_name_arg = read_arg(args, "project_name")
     if project_name_flag is not None:
-        project_name = project_name_flag
+        project_name = str(project_name_flag)
     elif project_name_arg is not None:
-        project_name = project_name_arg
+        project_name = str(project_name_arg)
     else:
         project_name = prompt("Project name", project_name_default, required=True)
 
-    repo_url_default = (
-        config.get("project", {}).get("repo_url")
-        if isinstance(config.get("project"), dict)
-        else ""
-    )
-    repo_url_arg = getattr(args, "repo_url", None)
-    if repo_url_arg is not None:
-        repo_url = repo_url_arg
-    else:
-        repo_url = prompt(
-            "Repo URL (owner/name or full URL)", repo_url_default, required=True
-        )
-    repo_url = normalize_repo_url(repo_url)
-
-    branch_config = resolve_branch_config(config)
+    branch_config = resolve_branch_config(existing)
     branch_default_default = branch_config.get("default")
     if not branch_default_default:
         branch_default_default = "main"
-    branch_default_arg = getattr(args, "branch_default", None)
+    branch_default_arg = read_arg(args, "branch_default")
     if branch_default_arg is not None:
-        branch_default = branch_default_arg
+        branch_default = str(branch_default_arg)
     else:
         branch_default = prompt("Default branch", branch_default_default, required=True)
 
     branch_prefix_default = branch_config.get("prefix")
     if branch_prefix_default is None:
         branch_prefix_default = ""
-    branch_prefix_arg = getattr(args, "branch_prefix", None)
+    branch_prefix_arg = read_arg(args, "branch_prefix")
     if branch_prefix_arg is not None:
-        branch_prefix = branch_prefix_arg
+        branch_prefix = str(branch_prefix_arg)
     else:
         branch_prefix = prompt("Branch prefix (optional)", branch_prefix_default)
 
     branch_pr_default = resolve_branch_pr(branch_config)
     branch_history_default = resolve_branch_history(branch_config)
 
-    branch_pr_arg = getattr(args, "branch_pr", None)
+    branch_pr_arg = read_arg(args, "branch_pr")
     if branch_pr_arg is not None:
         branch_pr = parse_branch_pr_override(branch_pr_arg)
     else:
@@ -663,7 +726,7 @@ def init_project(args: argparse.Namespace) -> None:
         )
         branch_pr = parse_branch_pr_override(branch_pr_input)
 
-    branch_history_arg = getattr(args, "branch_history", None)
+    branch_history_arg = read_arg(args, "branch_history")
     if branch_history_arg is not None:
         branch_history = normalize_branch_history(
             branch_history_arg, "--branch-history"
@@ -679,26 +742,26 @@ def init_project(args: argparse.Namespace) -> None:
         )
 
     agent_default_default = (
-        config.get("agent", {}).get("default")
-        if isinstance(config.get("agent"), dict)
+        existing.get("agent", {}).get("default")
+        if isinstance(existing.get("agent"), dict)
         else None
     )
     if not agent_default_default:
         agent_default_default = "codex"
-    agent_arg = getattr(args, "agent", None)
+    agent_arg = read_arg(args, "agent")
     if agent_arg is not None:
-        agent_default = agent_arg
+        agent_default = str(agent_arg)
     else:
         agent_default = prompt("Agent (codex)", agent_default_default, required=True)
     if agent_default != "codex":
         die("only 'codex' is supported as the agent in v2")
 
     editor_prompt_default = None
-    if isinstance(config.get("editor"), dict):
-        editor_default_default = config.get("editor", {}).get("default")
+    if isinstance(existing.get("editor"), dict):
+        editor_default_default = existing.get("editor", {}).get("default")
         if editor_default_default:
             editor_options_default = (
-                config.get("editor", {})
+                existing.get("editor", {})
                 .get("options", {})
                 .get(editor_default_default, [])
             )
@@ -714,57 +777,42 @@ def init_project(args: argparse.Namespace) -> None:
         else:
             editor_prompt_default = system_editor_default()
 
-    editor_arg = getattr(args, "editor", None)
+    editor_arg = read_arg(args, "editor")
     if editor_arg is not None:
-        editor_input = editor_arg
+        editor_input = str(editor_arg)
     else:
         editor_input = prompt("Editor command", editor_prompt_default, required=True)
     editor_parts = shlex.split(editor_input)
     editor_default = editor_parts[0]
     editor_input_options = editor_parts[1:]
 
-    workspaces_root_default = (
-        config.get("workspaces", {}).get("root")
-        if isinstance(config.get("workspaces"), dict)
-        else None
-    )
-    if not workspaces_root_default:
-        workspaces_root_default = "workspaces"
-    workspaces_root_arg = getattr(args, "workspaces_root", None)
-    if workspaces_root_arg is not None:
-        workspaces_root = workspaces_root_arg
-    else:
-        workspaces_root = prompt(
-            "Workspaces root", workspaces_root_default, required=True
-        )
-
     atelier_section = (
-        config.get("atelier") if isinstance(config.get("atelier"), dict) else {}
+        existing.get("atelier") if isinstance(existing.get("atelier"), dict) else {}
     )
-    atelier_id = atelier_section.get("id") or ulid_now()
     atelier_created_at = atelier_section.get("created_at") or utc_now()
     atelier_version = atelier_section.get("version") or __version__
 
     agent_options = {}
-    if isinstance(config.get("agent"), dict):
-        existing_options = config.get("agent", {}).get("options")
+    if isinstance(existing.get("agent"), dict):
+        existing_options = existing.get("agent", {}).get("options")
         if isinstance(existing_options, dict):
             agent_options = existing_options
     if "codex" not in agent_options:
         agent_options["codex"] = []
 
     editor_options = {}
-    if isinstance(config.get("editor"), dict):
-        existing_editor_options = config.get("editor", {}).get("options")
+    if isinstance(existing.get("editor"), dict):
+        existing_editor_options = existing.get("editor", {}).get("options")
         if isinstance(existing_editor_options, dict):
             editor_options = existing_editor_options
     if editor_input_options:
         editor_options = {**editor_options, editor_default: editor_input_options}
 
-    payload: dict = {
+    return {
         "project": {
             "name": project_name,
-            "repo_url": repo_url,
+            "origin": origin,
+            "repo_url": origin_raw,
         },
         "branch": {
             "default": branch_default,
@@ -780,55 +828,112 @@ def init_project(args: argparse.Namespace) -> None:
             "default": editor_default,
             "options": editor_options,
         },
-        "workspaces": {
-            "root": workspaces_root,
-        },
         "atelier": {
-            "id": atelier_id,
             "version": atelier_version,
             "created_at": atelier_created_at,
         },
     }
 
-    write_json(config_path, payload)
 
-    agents_path = cwd / "AGENTS.md"
+def ensure_project_dirs(project_dir: Path) -> None:
+    ensure_dir(project_dir)
+    ensure_dir(workspaces_root_for_project(project_dir))
+
+
+def ensure_project_scaffold(project_dir: Path, create_workspace_template: bool) -> None:
+    ensure_project_dirs(project_dir)
+
+    agents_path = project_dir / "AGENTS.md"
     if not agents_path.exists():
         agents_path.write_text(PROJECT_AGENTS_TEMPLATE, encoding="utf-8")
         say("Created AGENTS.md")
 
-    project_md_path = cwd / "PROJECT.md"
+    project_md_path = project_dir / "PROJECT.md"
     if not project_md_path.exists():
         project_md_path.write_text(PROJECT_MD_TEMPLATE, encoding="utf-8")
         say("Created PROJECT.md")
 
-    if getattr(args, "workspace_template", False):
-        workspace_template_path = cwd / "templates" / "WORKSPACE.md"
+    if create_workspace_template:
+        workspace_template_path = project_dir / TEMPLATES_DIRNAME / "WORKSPACE.md"
         if not workspace_template_path.exists():
             ensure_dir(workspace_template_path.parent)
             workspace_template_path.write_text(WORKSPACE_MD_TEMPLATE, encoding="utf-8")
             say("Created templates/WORKSPACE.md")
 
-    workspace_root_path = (
-        Path(workspaces_root)
-        if is_absolute_path(workspaces_root)
-        else cwd / workspaces_root
-    )
-    ensure_dir(workspace_root_path)
+
+def resolve_repo_origin(start: Path) -> tuple[Path, str, str]:
+    repo_root = git_repo_root(start)
+    if not repo_root:
+        die("command must be run inside a git repository")
+    origin_raw = git_origin_url(repo_root)
+    if not origin_raw:
+        die("repo missing origin remote")
+    origin = normalize_origin_url(origin_raw)
+    if not origin:
+        die("failed to normalize origin URL")
+    return repo_root, origin_raw, origin
+
+
+def init_project(args: argparse.Namespace) -> None:
+    cwd = Path.cwd()
+    repo_root = git_repo_root(cwd)
+    if not repo_root:
+        die("atelier init must be run inside a git repository")
+
+    origin_raw = git_origin_url(repo_root)
+    if not origin_raw:
+        die("repo missing origin remote")
+    origin = normalize_origin_url(origin_raw)
+    if not origin:
+        die("failed to normalize origin URL")
+
+    project_dir = project_dir_for_origin(origin)
+    config_path = project_config_path(project_dir)
+    config = load_json(config_path) or {}
+    payload = build_project_config(config, origin, origin_raw, repo_root, args)
+    ensure_project_dirs(project_dir)
+    write_json(config_path, payload)
+    ensure_project_scaffold(project_dir, bool(read_arg(args, "workspace_template")))
 
     say("Initialized Atelier project")
 
 
 def open_workspace(args: argparse.Namespace) -> None:
     cwd = Path.cwd()
-    project_root = find_project_root(cwd)
-    if not project_root:
-        die("no .atelier.json found; run 'atelier init' in a project root")
+    repo_root = git_repo_root(cwd)
+    if not repo_root:
+        die("atelier open must be run inside a git repository")
 
-    config_path = project_root / ".atelier.json"
-    config = load_json(config_path)
+    origin_raw = git_origin_url(repo_root)
+    if not origin_raw:
+        die("repo missing origin remote")
+    origin = normalize_origin_url(origin_raw)
+    if not origin:
+        die("failed to normalize origin URL")
+
+    project_dir = project_dir_for_origin(origin)
+    config_path = project_config_path(project_dir)
+    config = load_json(config_path) or {}
     if not config:
-        die("failed to load .atelier.json")
+        config = build_project_config({}, origin, origin_raw, repo_root, None)
+        ensure_project_dirs(project_dir)
+        write_json(config_path, config)
+        ensure_project_scaffold(project_dir, False)
+    else:
+        ensure_project_dirs(project_dir)
+
+    project_section = (
+        config.get("project") if isinstance(config.get("project"), dict) else {}
+    )
+    project_origin = project_section.get("origin")
+    if not project_origin:
+        project_section["origin"] = origin
+        project_section.setdefault("repo_url", origin_raw)
+        config["project"] = project_section
+        write_json(config_path, config)
+        project_origin = origin
+    if project_origin != origin:
+        die("project origin does not match current repo origin")
 
     branch_config = resolve_branch_config(config)
     branch_pr = resolve_branch_pr(branch_config)
@@ -843,19 +948,25 @@ def open_workspace(args: argparse.Namespace) -> None:
         else branch_history
     )
 
-    workspace_root = workspace_root_for_config(project_root, config)
-    workspace_name, branch_hint = normalize_workspace_reference(
-        args.workspace_name, workspace_root, project_root
-    )
-    if not workspace_name:
-        die("workspace name is required")
+    workspace_root = workspaces_root_for_project(project_dir)
+    workspace_name_input = getattr(args, "workspace_name", None)
     branch_override = getattr(args, "branch", None)
     if branch_override is not None:
         branch_override = str(branch_override).strip() or None
 
-    atelier_id = config.get("atelier", {}).get("id")
-    if not atelier_id:
-        die(".atelier.json missing atelier.id")
+    if not workspace_name_input:
+        if branch_override:
+            die("workspace name is required when specifying --branch")
+        workspace_name_input = resolve_implicit_workspace_name(repo_root, config)
+        branch_override = workspace_name_input
+
+    workspace_name, branch_hint = normalize_workspace_reference(
+        str(workspace_name_input), workspace_root
+    )
+    if not workspace_name:
+        die("workspace name is required")
+
+    atelier_id = project_origin
 
     workspace_dir = workspace_root / workspace_name
     agents_path = workspace_dir / "AGENTS.md"
@@ -903,26 +1014,24 @@ def open_workspace(args: argparse.Namespace) -> None:
         workspace_dir=workspace_dir,
         agents_path=agents_path,
         workspace_config_path=workspace_config_path,
-        project_root=project_root,
+        project_root=project_dir,
         workspace_name=workspace_name,
         workspace_branch=workspace_branch,
         atelier_id=atelier_id,
         branch_pr=effective_branch_pr,
         branch_history=effective_branch_history,
     )
-    workspace_policy_template = project_root / "templates" / "WORKSPACE.md"
+    workspace_policy_template = project_dir / TEMPLATES_DIRNAME / "WORKSPACE.md"
     workspace_policy_path = workspace_dir / "WORKSPACE.md"
     if workspace_policy_template.exists() and not workspace_policy_path.exists():
         shutil.copyfile(workspace_policy_template, workspace_policy_path)
 
     repo_dir = workspace_dir / "repo"
-    project_repo_url = config.get("project", {}).get("repo_url")
-    if not project_repo_url:
-        die(".atelier.json missing project.repo_url")
+    project_repo_url = origin_raw
 
     default_branch = branch_config.get("default")
     if not default_branch:
-        die(".atelier.json missing branch.default")
+        die("project config missing branch.default")
 
     should_open_editor = False
     editor_cmd: list[str] | None = None
@@ -944,7 +1053,7 @@ def open_workspace(args: argparse.Namespace) -> None:
         if not current_remote:
             die("repo missing origin remote")
         if current_remote != project_repo_url:
-            warn("repo remote differs from project.repo_url; using existing repo")
+            warn("repo remote differs from current origin; using existing repo")
 
     current_branch = git_current_branch(repo_dir)
     if current_branch is None:
@@ -1017,7 +1126,7 @@ def open_workspace(args: argparse.Namespace) -> None:
     if should_open_editor:
         if editor_cmd is None:
             editor_cmd = resolve_editor_command(config)
-        run_command([*editor_cmd, str(agents_path)], cwd=project_root)
+        run_command([*editor_cmd, str(agents_path)], cwd=project_dir)
 
     session_id = find_codex_session(atelier_id, workspace_name)
     if session_id:
@@ -1033,6 +1142,34 @@ def open_workspace(args: argparse.Namespace) -> None:
         )
 
 
+def resolve_implicit_workspace_name(repo_root: Path, config: dict) -> str:
+    branch_config = resolve_branch_config(config)
+    default_branch = branch_config.get("default")
+    if not default_branch:
+        die("project config missing branch.default")
+
+    current_branch = git_current_branch(repo_root)
+    if not current_branch:
+        die("failed to determine current branch")
+    if current_branch == default_branch:
+        die(
+            "implicit open requires a non-default branch; "
+            f"current branch is {default_branch!r}"
+        )
+
+    clean = git_is_clean(repo_root)
+    if clean is not True:
+        die("implicit open requires a clean working tree")
+
+    fully_pushed = git_branch_fully_pushed(repo_root)
+    if fully_pushed is None:
+        die("implicit open requires the branch to be pushed to its upstream")
+    if fully_pushed is False:
+        die("implicit open requires the branch to be fully pushed to its upstream")
+
+    return current_branch
+
+
 def resolve_editor_command(config: dict) -> list[str]:
     editor_default = config.get("editor", {}).get("default")
     if editor_default:
@@ -1044,38 +1181,32 @@ def resolve_editor_command(config: dict) -> list[str]:
     return shlex.split(system_editor_default())
 
 
-def workspace_root_for_config(project_root: Path, config: dict) -> Path:
-    workspaces_root = config.get("workspaces", {}).get("root")
-    if not workspaces_root:
-        die(".atelier.json missing workspaces.root")
-    if is_absolute_path(str(workspaces_root)):
-        return Path(workspaces_root)
-    return project_root / str(workspaces_root)
-
-
-def normalize_workspace_reference(
-    value: str, workspace_root: Path, project_root: Path
-) -> tuple[str, str]:
+def normalize_workspace_reference(value: str, workspace_root: Path) -> tuple[str, str]:
     raw = value.strip()
     if not raw:
         return "", ""
-    raw_normalized = raw.replace("\\", "/")
-    path = Path(raw_normalized)
-    workspace_root = workspace_root.resolve()
-    if path.is_absolute():
-        candidate = path
-    else:
-        candidate = (project_root / path).resolve()
-    try:
-        relative = candidate.relative_to(workspace_root)
-    except ValueError:
-        relative_value = raw_normalized
-    else:
-        relative_value = str(relative).replace("\\", "/")
-    if not relative_value:
+    raw_normalized = raw.replace("\\", "/").strip("/")
+    if raw_normalized.startswith(f"{WORKSPACES_DIRNAME}/"):
+        raw_normalized = raw_normalized[len(WORKSPACES_DIRNAME) + 1 :]
+    if not raw_normalized:
         return "", ""
-    normalized_name = relative_value.replace("/", "-").replace("\\", "-")
-    return normalized_name, relative_value
+
+    workspace_root = workspace_root.resolve()
+    path = Path(raw_normalized)
+    if path.is_absolute():
+        candidate = path.resolve()
+        try:
+            relative = candidate.relative_to(workspace_root)
+        except ValueError:
+            die("workspace path must be within the project workspaces directory")
+        normalized = relative.as_posix()
+    else:
+        normalized = raw_normalized
+
+    if ".." in Path(normalized).parts:
+        die("workspace name cannot contain '..'")
+
+    return normalized, normalized
 
 
 def workspace_branch_for_dir(
@@ -1103,6 +1234,34 @@ def git_is_clean(repo_dir: Path) -> bool | None:
     if result.returncode != 0:
         return None
     return result.stdout.strip() == ""
+
+
+def git_upstream_branch(repo_dir: Path) -> str | None:
+    result = run_git_command(
+        [
+            "git",
+            "-C",
+            str(repo_dir),
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{u}",
+        ]
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def git_branch_fully_pushed(repo_dir: Path) -> bool | None:
+    upstream = git_upstream_branch(repo_dir)
+    if not upstream:
+        return None
+    head = git_rev_parse(repo_dir, "HEAD")
+    upstream_head = git_rev_parse(repo_dir, upstream)
+    if not head or not upstream_head:
+        return None
+    return head == upstream_head
 
 
 def git_has_remote_branch(repo_dir: Path, branch: str) -> bool | None:
@@ -1323,21 +1482,16 @@ def collect_workspaces(
     branch_config = resolve_branch_config(config)
     resolve_branch_pr(branch_config)
     resolve_branch_history(branch_config)
-    workspaces_root = workspace_root_for_config(project_root, config)
+    workspaces_root = workspaces_root_for_project(project_root)
     if not workspaces_root.exists():
         return []
-    workspace_dirs = [
-        workspace_dir
-        for workspace_dir in sorted(
-            workspaces_root.iterdir(), key=lambda item: item.name
-        )
-        if workspace_dir.is_dir()
-    ]
-    if not workspace_dirs:
+    workspace_configs = sorted(workspaces_root.rglob(".atelier.workspace.json"))
+    if not workspace_configs:
         return []
 
-    def build_workspace(workspace_dir: Path) -> dict:
-        workspace_name = workspace_dir.name
+    def build_workspace(config_path: Path) -> dict:
+        workspace_dir = config_path.parent
+        workspace_name = workspace_dir.relative_to(workspaces_root).as_posix()
         repo_dir = workspace_dir / "repo"
         branch = workspace_branch_for_dir(workspace_dir, workspace_name, config)
         checked_out: bool | None = None
@@ -1361,24 +1515,22 @@ def collect_workspaces(
             "pushed": pushed,
         }
 
-    max_workers = min(8, len(workspace_dirs))
+    max_workers = min(8, len(workspace_configs))
     if max_workers <= 1:
-        return [build_workspace(workspace_dir) for workspace_dir in workspace_dirs]
+        return [build_workspace(config_path) for config_path in workspace_configs]
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        return list(executor.map(build_workspace, workspace_dirs))
+        return list(executor.map(build_workspace, workspace_configs))
 
 
 def list_workspaces(args: argparse.Namespace) -> None:
     cwd = Path.cwd()
-    project_root = find_project_root(cwd)
-    if not project_root:
-        die("no .atelier.json found; run 'atelier init' in a project root")
-
-    config_path = project_root / ".atelier.json"
+    _, _, origin = resolve_repo_origin(cwd)
+    project_root = project_dir_for_origin(origin)
+    config_path = project_config_path(project_root)
     config = load_json(config_path)
     if not config:
-        die("failed to load .atelier.json")
+        die("no Atelier project config found for this repo; run 'atelier init'")
 
     workspaces = collect_workspaces(
         project_root, config, with_status=getattr(args, "status", False)
@@ -1455,28 +1607,24 @@ def delete_workspace_branch(
 
 def clean_workspaces(args: argparse.Namespace) -> None:
     cwd = Path.cwd()
-    project_root = find_project_root(cwd)
-    if not project_root:
-        die("no .atelier.json found; run 'atelier init' in a project root")
-
-    config_path = project_root / ".atelier.json"
+    _, _, origin = resolve_repo_origin(cwd)
+    project_root = project_dir_for_origin(origin)
+    config_path = project_config_path(project_root)
     config = load_json(config_path)
     if not config:
-        die("failed to load .atelier.json")
+        die("no Atelier project config found for this repo; run 'atelier init'")
 
     default_branch = config.get("branch", {}).get("default")
     if not default_branch:
-        die(".atelier.json missing branch.default")
+        die("project config missing branch.default")
 
-    workspace_root = workspace_root_for_config(project_root, config)
+    workspace_root = workspaces_root_for_project(project_root)
 
     requested = []
     for name in args.workspace_names or []:
         if not name.strip():
             continue
-        normalized, _ = normalize_workspace_reference(
-            name, workspace_root, project_root
-        )
+        normalized, _ = normalize_workspace_reference(name, workspace_root)
         if normalized:
             requested.append(normalized)
 
@@ -1542,9 +1690,6 @@ def main() -> None:
         help="project name (overrides positional)",
     )
     init_parser.add_argument(
-        "--repo-url", dest="repo_url", help="project repo URL or owner/name"
-    )
-    init_parser.add_argument(
         "--default-branch", dest="branch_default", help="default branch name"
     )
     init_parser.add_argument(
@@ -1563,11 +1708,6 @@ def main() -> None:
     init_parser.add_argument("--agent", dest="agent", help="agent name")
     init_parser.add_argument("--editor", dest="editor", help="editor command")
     init_parser.add_argument(
-        "--workspaces-root",
-        dest="workspaces_root",
-        help="directory for workspace roots",
-    )
-    init_parser.add_argument(
         "--workspace-template",
         action="store_true",
         help="create templates/WORKSPACE.md",
@@ -1575,7 +1715,11 @@ def main() -> None:
     init_parser.set_defaults(func=init_project)
 
     open_parser = subparsers.add_parser("open", help="open or create a workspace")
-    open_parser.add_argument("workspace_name", help="workspace name")
+    open_parser.add_argument(
+        "workspace_name",
+        nargs="?",
+        help="workspace name (defaults to current branch when criteria are met)",
+    )
     open_parser.add_argument(
         "-B", "--branch", dest="branch", help="explicit branch name for the workspace"
     )

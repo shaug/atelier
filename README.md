@@ -72,23 +72,26 @@ Read more in [docs/why-not-git-worktree.md](docs/why-not-git-worktree.md).
 - One workspace = one unit of work = one branch
 - Intent is captured before code (in `AGENTS.md`)
 - Workspaces are isolated directories with their own `repo/`
+- Projects are identified by their Git origin, not filesystem location
 - The filesystem is the source of truth
 
 ## Project Layout
 
 ```
-project-dir/
-├─ .atelier.json
-├─ AGENTS.md
-├─ PROJECT.md
-├─ templates/
-│  └─ WORKSPACE.md
-└─ workspaces/
-   └─ <workspace-name>/
+<atelier-data-dir>/
+└─ projects/
+   └─ <project-key>/
+      ├─ .atelier.json
       ├─ AGENTS.md
-      ├─ WORKSPACE.md
-      ├─ .atelier.workspace.json
-      └─ repo/
+      ├─ PROJECT.md
+      ├─ templates/
+      │  └─ WORKSPACE.md
+      └─ workspaces/
+         └─ <workspace-name>/
+            ├─ AGENTS.md
+            ├─ WORKSPACE.md
+            ├─ .atelier.workspace.json
+            └─ repo/
 ```
 
 ## Quick Start
@@ -99,6 +102,9 @@ Initialize a project:
 atelier init
 ```
 
+Run this inside an existing Git repo; Atelier stores state in the data directory
+and does not write files into the repo.
+
 Optionally create a workspace policy template:
 
 ```sh
@@ -108,8 +114,11 @@ atelier init --workspace-template
 Open or create a workspace:
 
 ```sh
-atelier open <workspace-name>
+atelier open [workspace-name]
 ```
+
+If no name is provided, Atelier will take over the current branch only when the
+working tree is clean and the branch is fully pushed to its upstream.
 
 `atelier open` will:
 
@@ -123,7 +132,8 @@ atelier open <workspace-name>
 - Atelier never auto-updates existing workspaces or templates.
 - `AGENTS.md` is the execution contract for each workspace.
 - `PROJECT.md` and `WORKSPACE.md` are optional policy overlays for agents.
-- Configuration lives in `.atelier.json` and is owned by the tool.
+- Configuration lives in `.atelier.json` under the Atelier data directory.
+- Workspace names may include `/`, creating nested directories under `workspaces/`.
 
 ## Development
 
