@@ -1097,7 +1097,11 @@ def open_workspace(args: argparse.Namespace) -> None:
     if should_open_editor:
         if editor_cmd is None:
             editor_cmd = resolve_editor_command(config)
-        run_command([*editor_cmd, str(agents_path)], cwd=project_dir)
+        try:
+            agents_target = agents_path.relative_to(workspace_dir)
+        except ValueError:
+            agents_target = agents_path
+        run_command([*editor_cmd, str(agents_target)], cwd=workspace_dir)
 
     session_id = find_codex_session(project_origin, workspace_branch)
     if session_id:

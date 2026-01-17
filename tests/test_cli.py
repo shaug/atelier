@@ -1061,6 +1061,48 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_editor_uses_workspace_relative_agents_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data dir"
+            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
+                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            write_open_config(project_dir)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                cwds: list[Path | None] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+                    cwds.append(cwd)
+
+                with (
+                    patch("atelier.cli.run_command", fake_run),
+                    patch("atelier.cli.find_codex_session", return_value=None),
+                    patch("atelier.cli.git_is_repo", return_value=True),
+                    patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
+                    patch("atelier.cli.git_is_clean", return_value=True),
+                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.cli.git_repo_root", return_value=root),
+                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+
+                editor_index = next(
+                    index for index, cmd in enumerate(commands) if cmd[:1] == ["true"]
+                )
+                self.assertEqual(commands[editor_index][-1], "AGENTS.md")
+                workspace_dir = cli.workspace_dir_for_branch(
+                    project_dir, "scott/feat-demo"
+                )
+                self.assertEqual(cwds[editor_index], workspace_dir)
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_skips_editor_when_repo_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
