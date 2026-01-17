@@ -10,7 +10,7 @@ keywords = ["workspace", "git", "agents"]
 authors = [{ name = "Atelier" }]
 
 [project.optional-dependencies]
-dev = ["ruff>=0.1.0"]
+dev = ["mdformat>=0.7.0", "ruff>=0.1.0"]
 
 [project.scripts]
 atelier = "atelier.cli:main"

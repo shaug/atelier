@@ -2,18 +2,23 @@
 
 ## 1. Purpose
 
-Atelier is a **local, installable CLI tool** that manages **workspace-based development** for a single project. Each workspace represents one unit of work, one git branch, and (optionally) one agent coding session.
+Atelier is a **local, installable CLI tool** that manages **workspace-based
+development** for a single project. Each workspace represents one unit of work,
+one git branch, and (optionally) one agent coding session.
 
-Atelier exists to eliminate branch switching, reduce cognitive load, and make agent-assisted development predictable, resumable, and human-interruptible.
+Atelier exists to eliminate branch switching, reduce cognitive load, and make
+agent-assisted development predictable, resumable, and human-interruptible.
 
-Atelier is **tool-agnostic** by design. While it integrates well with Codex, it does not depend on any specific LLM or editor.
+Atelier is **tool-agnostic** by design. While it integrates well with Codex, it
+does not depend on any specific LLM or editor.
 
----
+______________________________________________________________________
 
 ## 2. Core Concepts
 
 ### Project
-A project is identified by its **normalized Git origin URL**. There is no separate
+
+A project is identified by its **normalized Git origin**. There is no separate
 project ID. Project state is stored under the Atelier data directory (via
 `platformdirs`), not inside the user repo.
 
@@ -22,6 +27,7 @@ project ID. Project state is stored under the Atelier data directory (via
 - Atelier commands resolve the project by reading the repo's origin
 
 ### Workspace
+
 A workspace is a directory representing one unit of work.
 
 - One workspace → one git branch
@@ -30,9 +36,11 @@ A workspace is a directory representing one unit of work.
 - Workspaces are created and managed by `atelier open`
 
 ### Repo
-Each workspace contains a `repo/` directory that is a real git repository (clone of the project repo, checked out on a workspace-specific branch).
 
----
+Each workspace contains a `repo/` directory that is a real git repository (clone
+of the project repo, checked out on a workspace-specific branch).
+
+______________________________________________________________________
 
 ## 3. Filesystem Layout
 
@@ -42,7 +50,7 @@ Each workspace contains a `repo/` directory that is a real git repository (clone
 <atelier-data-dir>/
 └─ projects/
    └─ <project-key>/
-      ├─ .atelier.json
+      ├─ config.json
       ├─ AGENTS.md
       ├─ PROJECT.md
       ├─ templates/
@@ -52,32 +60,38 @@ Each workspace contains a `repo/` directory that is a real git repository (clone
 
 Notes:
 
-- `<project-key>` is a stable, filesystem-safe key derived from the normalized origin.
-- The data directory is platform-specific (e.g. `~/Library/Application Support/atelier`).
+- `<project-key>` is a stable, filesystem-safe key (SHA-256) derived from the
+  normalized origin.
+- The data directory is platform-specific (e.g.
+  `~/Library/Application Support/atelier`).
 
 ### Workspace
 
 ```
-workspaces/<workspace-name>/
+workspaces/<workspace-key>/
 ├─ AGENTS.md
 ├─ WORKSPACE.md
-├─ .atelier.workspace.json
+├─ config.json
 └─ repo/
 ```
 
 Notes:
 
 - `PROJECT.md` is optional and user-owned.
-- `templates/WORKSPACE.md` is optional and only created when explicitly opted in.
+- `templates/WORKSPACE.md` is optional and only created when explicitly opted
+  in.
 - `WORKSPACE.md` exists only when copied from `templates/WORKSPACE.md`.
-- Workspace names may include `/`, creating nested directories under `workspaces/`.
+- `<workspace-key>` is a stable, filesystem-safe key (SHA-256) derived from the
+  workspace branch name.
+- Branch names may include `/` without creating nested directories under
+  `workspaces/`.
 - The workspace root name is fixed (`workspaces/`) and not configurable.
 
----
+______________________________________________________________________
 
-## 4. Project Configuration: `.atelier.json`
+## 4. Project Configuration: `config.json`
 
-`.atelier.json` is **application-owned state** stored in the Atelier data
+`config.json` is **application-owned state** stored in the Atelier data
 directory (not the user repo). Humans may inspect it, but it is not intended for
 frequent manual editing.
 
@@ -86,8 +100,7 @@ frequent manual editing.
 ```json
 {
   "project": {
-    "name": "gumshoe",
-    "origin": "https://github.com/org/gumshoe",
+    "origin": "github.com/org/gumshoe",
     "repo_url": "git@github.com:org/gumshoe.git"
   },
   "branch": {
@@ -99,15 +112,21 @@ frequent manual editing.
   "agent": {
     "default": "codex",
     "options": {
-      "codex": ["--full-auto"],
+      "codex": [
+        "--full-auto"
+      ],
       "claude": []
     }
   },
   "editor": {
     "default": "cursor",
     "options": {
-      "cursor": ["-w"],
-      "subl": ["-w"]
+      "cursor": [
+        "-w"
+      ],
+      "subl": [
+        "-w"
+      ]
     }
   },
   "atelier": {
@@ -119,20 +138,23 @@ frequent manual editing.
 
 ### Notes
 
-- `project.origin` is the **canonical identity** of the project (normalized origin)
+- `project.origin` is the **canonical identity** of the project (normalized to
+  host/path with no scheme, or an absolute path for local repos)
 - `project.repo_url` is the last-seen clone URL for convenience; origin identity
   is still based on `project.origin`
-- `branch.pr` controls whether integration is expected via pull request (default `true`)
-- `branch.history` defines expected history shape after integration
-  (default `manual`; supported values: `manual`, `squash`, `merge`, `rebase`)
+- `branch.pr` controls whether integration is expected via pull request (default
+  `true`)
+- `branch.history` defines expected history shape after integration (default
+  `manual`; supported values: `manual`, `squash`, `merge`, `rebase`)
 - `agent.options` and `editor.options` are **static argv fragments only**
 - No templating, interpolation, or logic is supported in config
 
----
+______________________________________________________________________
 
 ## 5. Project-Level `AGENTS.md`
 
-This file describes the **Atelier workflow overlay only**. It does not describe code layout or coding conventions.
+This file describes the **Atelier workflow overlay only**. It does not describe
+code layout or coding conventions.
 
 ### Default Template (v2)
 
@@ -173,22 +195,24 @@ In case of conflict:
 
 This file is generated by `atelier init`. Users may edit it, but most will not.
 
----
+______________________________________________________________________
 
-## 6. Workspace Configuration: `.atelier.workspace.json`
+## 6. Workspace Configuration: `config.json`
 
 This file records workspace identity and provenance.
+
+The workspace branch is the canonical identifier and is used with the project
+origin to form the workspace ID.
 
 ### v2 Schema
 
 ```json
 {
   "workspace": {
-    "name": "feat-org-api-keys",
     "branch": "scott/feat-org-api-keys",
     "branch_pr": true,
     "branch_history": "manual",
-    "id": "atelier:https://github.com/org/gumshoe:feat-org-api-keys"
+    "id": "atelier:github.com/org/gumshoe/scott/feat-org-api-keys"
   },
   "atelier": {
     "version": "0.2.0",
@@ -197,7 +221,7 @@ This file records workspace identity and provenance.
 }
 ```
 
----
+______________________________________________________________________
 
 ## 7. Workspace `AGENTS.md`
 
@@ -211,7 +235,7 @@ This file is the **execution contract** for agents and humans.
 ### Standard Prologue (v2)
 
 ```markdown
-<!-- atelier:<project.origin>:<workspace.name> -->
+<!-- atelier:<project.origin>/<workspace.branch> -->
 
 # Atelier Workspace
 
@@ -299,21 +323,21 @@ After reading this file, proceed with the work described below.
 
 Users may freely edit, reorder, or delete these sections.
 
----
+______________________________________________________________________
 
 ## 8. Policy Overlays: `PROJECT.md` and `WORKSPACE.md`
 
-These optional, user-owned files define additional agent behavior rules that
-are orthogonal to Atelier's core execution protocol.
+These optional, user-owned files define additional agent behavior rules that are
+orthogonal to Atelier's core execution protocol.
 
 ### `PROJECT.md`
 
-- Location: Atelier project directory (same directory as `.atelier.json`)
+- Location: Atelier project directory (same directory as `config.json`)
 - Purpose: define project-level agent policies that apply to all workspaces
 
 ### `WORKSPACE.md`
 
-- Location: workspace root (alongside `AGENTS.md` and `.atelier.workspace.json`)
+- Location: workspace root (alongside `AGENTS.md` and `config.json`)
 - Purpose: define workspace-specific policies and override project-level rules
 
 ### Precedence
@@ -326,7 +350,7 @@ If more than one policy file is present, higher precedence wins:
 
 Atelier does not parse or modify these files after creation or copy.
 
----
+______________________________________________________________________
 
 ## 9. CLI Commands (v2)
 
@@ -338,18 +362,20 @@ Registers the current repo origin as an Atelier project.
 
 - Must be run inside a Git repository with a resolved `origin` remote
 - Resolves the repo origin and creates/updates the project under the data dir
-- Creates `.atelier.json` in the project directory (if missing)
+- Uses the detected remote default branch (origin/HEAD) as the default prompt
+  for `branch.default` when available
+- Creates `config.json` in the project directory (if missing)
 - Creates project-level `AGENTS.md` if missing
 - Creates `PROJECT.md` if missing (comment-only stub)
 - Creates the workspace root directory (`workspaces/`) if missing
-- Optionally creates `templates/WORKSPACE.md` when explicitly opted in
-  (e.g. via `--workspace-template`)
+- Optionally creates `templates/WORKSPACE.md` when explicitly opted in (e.g. via
+  `--workspace-template`)
 - Never modifies existing workspaces
 - Never writes files into the user repo
 
----
+______________________________________________________________________
 
-### `atelier open [workspace-name]`
+### `atelier open [workspace-branch]`
 
 Ensures a workspace exists and launches or resumes agent work.
 
@@ -359,44 +385,47 @@ Ensures a workspace exists and launches or resumes agent work.
 
 1. Locate the git repo root and resolve the repo origin
 2. Resolve or create the Atelier project in the data directory
-3. Ensure workspace directory exists
-4. If workspace is new:
-   - Generate `.atelier.workspace.json`
+3. Resolve the workspace branch name and workspace key (hashed from the branch)
+4. Ensure workspace directory exists under `workspaces/<workspace-key>/`
+5. If workspace is new:
+   - Generate `config.json`
    - Generate workspace `AGENTS.md` from template
    - Copy `templates/WORKSPACE.md` to `WORKSPACE.md` if present
    - Open `AGENTS.md` in the configured editor (blocking)
-5. Ensure `repo/` exists:
+6. Ensure `repo/` exists:
    - Clone repo if missing
    - Checkout default branch
    - Create workspace branch if missing
-6. Launch agent:
-   - Attempt to resume an existing Codex session by scanning local Codex transcripts
-   - Otherwise start a new session with an opening prompt containing the workspace ID
+7. Launch agent:
+   - Attempt to resume an existing Codex session by scanning local Codex
+     transcripts
+   - Otherwise start a new session with an opening prompt containing the
+     workspace ID
    - Use `agent.options` and `codex -C <workspace-dir>` for execution
 
 #### Flags
 
+- `--raw` treats the argument as the full branch name (no prefix lookup).
 - `--branch-pr <true|false>` overrides `branch.pr` for new workspaces and is
   stored in the workspace config. For existing workspaces, the value must match
   the workspace config or `atelier open` errors.
+- `--branch-history <manual|squash|merge|rebase>` overrides `branch.history` for
+  new workspaces and is stored in the workspace config. For existing workspaces,
+  the value must match the workspace config or `atelier open` errors.
 
-#### Special Case: `atelier open` with no workspace name
+#### Special Case: `atelier open` with no workspace branch
 
-If invoked without a workspace name, Atelier may “take over” the current branch
-only when all of the following are true:
+If invoked without a workspace branch, Atelier may “take over” the current
+branch only when all of the following are true:
 
 - The current repo is on a **non-default branch**
 - The working tree is **clean**
 - The branch is **fully pushed** to its upstream
 
-When these conditions are met, the current branch name becomes the workspace
-name and the workspace branch. Otherwise, `atelier open` fails with a clear
-error message.
-- `--branch-history <manual|squash|merge|rebase>` overrides `branch.history` for
-  new workspaces and is stored in the workspace config. For existing workspaces,
-  the value must match the workspace config or `atelier open` errors.
+When these conditions are met, the current branch becomes the workspace branch.
+Otherwise, `atelier open` fails with a clear error message.
 
----
+______________________________________________________________________
 
 ## 10. Codex Session Resumption (Best-Effort)
 
@@ -405,15 +434,16 @@ Atelier may attempt to resume Codex sessions by:
 - Scanning `~/.codex/sessions/**` JSON/JSONL files
 - Matching the first user message against:
   ```
-  atelier:<project.origin>:<workspace.name>
+  atelier:<project.origin>/<workspace.branch>
   ```
 - Selecting the most recent match
 
 If resumption fails, a new session is started.
 
-Session resumption is **opportunistic** and must never be required for correctness.
+Session resumption is **opportunistic** and must never be required for
+correctness.
 
----
+______________________________________________________________________
 
 ## 11. Templates
 
@@ -431,9 +461,11 @@ If a project provides:
 <project-dir>/templates/AGENTS.md
 ```
 
-that file is used as the **workspace AGENTS.md template** instead of the built-in one.
+that file is used as the **workspace AGENTS.md template** instead of the
+built-in one.
 
-Templates are **copied, not referenced**. Atelier never auto-updates existing files.
+Templates are **copied, not referenced**. Atelier never auto-updates existing
+files.
 
 If a project provides:
 
@@ -443,7 +475,7 @@ If a project provides:
 
 that file is copied verbatim into new workspaces as `WORKSPACE.md`.
 
----
+______________________________________________________________________
 
 ## 12. Non-Goals
 
@@ -456,7 +488,7 @@ Atelier does **not**:
 - Maintain background processes
 - Auto-upgrade templates
 
----
+______________________________________________________________________
 
 ## 13. Implementation Guidelines (v2)
 
@@ -491,7 +523,7 @@ Atelier does **not**:
 - No hidden state
 - Human intent before agent execution
 
----
+______________________________________________________________________
 
 ## 14. Success Criteria (v2)
 

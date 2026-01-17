@@ -5,8 +5,7 @@ Atelier is inspired by the ideas explored in
 The essay argues that traditional Git workflows often add cognitive overhead
 that doesn't pay for itself when fast, capable agents are in the loop.
 
-Atelier leans into the parts of that argument that map well to a daily
-workflow:
+Atelier leans into the parts of that argument that map well to a daily workflow:
 
 - minimize mental context switches
 - evolve codebases linearly when coordination cost is low

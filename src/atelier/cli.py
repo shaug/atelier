@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import re
-import secrets
 import shlex
 import shutil
 import subprocess
@@ -17,13 +16,13 @@ from platformdirs import user_data_dir
 
 from . import __version__
 
-ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 BRANCH_HISTORY_VALUES = ("manual", "squash", "merge", "rebase")
 ATELIER_APP_NAME = "atelier"
 PROJECTS_DIRNAME = "projects"
 WORKSPACES_DIRNAME = "workspaces"
 TEMPLATES_DIRNAME = "templates"
-PROJECT_CONFIG_FILENAME = ".atelier.json"
+PROJECT_CONFIG_FILENAME = "config.json"
+WORKSPACE_CONFIG_FILENAME = "config.json"
 
 PROJECT_AGENTS_TEMPLATE = """# Atelier Project Overlay
 
@@ -59,7 +58,7 @@ In case of conflict:
 - Atelier project metadata lives in the local data directory (not in the repo).
 """
 
-WORKSPACE_AGENTS_TEMPLATE = """<!-- atelier:{atelier_id}:{workspace_name} -->
+WORKSPACE_AGENTS_TEMPLATE = """<!-- atelier:{workspace_id} -->
 
 # Atelier Workspace
 
@@ -186,17 +185,6 @@ def system_editor_default() -> str:
     return "vi"
 
 
-def ulid_now() -> str:
-    timestamp_ms = int(dt.datetime.now(tz=dt.timezone.utc).timestamp() * 1000)
-    randomness = int.from_bytes(secrets.token_bytes(10), "big")
-    value = (timestamp_ms << 80) | randomness
-    chars: list[str] = []
-    for _ in range(26):
-        chars.append(ULID_ALPHABET[value & 0x1F])
-        value >>= 5
-    return "".join(reversed(chars))
-
-
 def utc_now() -> str:
     now = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0)
     return now.isoformat().replace("+00:00", "Z")
@@ -227,6 +215,10 @@ def project_key(origin: str) -> str:
     return hashlib.sha256(origin.encode("utf-8")).hexdigest()
 
 
+def workspace_key(branch: str) -> str:
+    return hashlib.sha256(branch.encode("utf-8")).hexdigest()
+
+
 def project_dir_for_origin(origin: str) -> Path:
     return projects_root() / project_key(origin)
 
@@ -237,6 +229,14 @@ def project_config_path(project_dir: Path) -> Path:
 
 def workspaces_root_for_project(project_dir: Path) -> Path:
     return project_dir / WORKSPACES_DIRNAME
+
+
+def workspace_dir_for_branch(project_dir: Path, branch: str) -> Path:
+    return workspaces_root_for_project(project_dir) / workspace_key(branch)
+
+
+def workspace_config_path(workspace_dir: Path) -> Path:
+    return workspace_dir / WORKSPACE_CONFIG_FILENAME
 
 
 def strip_git_suffix(path: str) -> str:
@@ -255,7 +255,7 @@ def normalize_origin_url(value: str) -> str:
     if scp_match:
         host = scp_match.group("host").lower()
         path = strip_git_suffix(scp_match.group("path").lstrip("/"))
-        return f"https://{host}/{path}"
+        return f"{host}/{path}"
 
     if "://" in raw:
         parsed = urlparse(raw)
@@ -263,22 +263,22 @@ def normalize_origin_url(value: str) -> str:
         host = (parsed.hostname or "").lower()
         path = strip_git_suffix((parsed.path or "").lstrip("/"))
         if scheme in {"http", "https", "ssh", "git"} and host:
-            return f"https://{host}/{path}"
+            return f"{host}/{path}"
         if scheme == "file":
             local_path = Path(parsed.path).expanduser().resolve()
-            return f"file://{local_path.as_posix()}"
+            return local_path.as_posix()
 
     if "/" in raw and " " not in raw:
         head, tail = raw.split("/", 1)
         if "." in head:
             host = head.lower()
             path = strip_git_suffix(tail)
-            return f"https://{host}/{path}"
+            return f"{host}/{path}"
 
     local_path = Path(raw).expanduser()
     if not local_path.is_absolute():
         local_path = local_path.resolve()
-    return f"file://{local_path.as_posix()}"
+    return local_path.as_posix()
 
 
 def ensure_dir(path: Path) -> None:
@@ -368,11 +368,25 @@ def resolve_branch_overrides(
 def read_workspace_branch_settings(
     workspace_dir: Path,
 ) -> tuple[bool | None, str | None]:
-    workspace_config = load_json(workspace_dir / ".atelier.workspace.json") or {}
+    workspace_config = load_json(workspace_config_path(workspace_dir)) or {}
     workspace_section = workspace_config.get("workspace", {})
     branch_pr = workspace_section.get("branch_pr")
     branch_history = workspace_section.get("branch_history")
     return branch_pr, branch_history
+
+
+def workspace_identifier(project_origin: str, workspace_branch: str) -> str:
+    origin = project_origin.rstrip("/")
+    branch = workspace_branch.lstrip("/")
+    return f"atelier:{origin}/{branch}"
+
+
+def require_workspace_branch(config_path: Path, workspace_config: dict) -> str:
+    workspace_section = workspace_config.get("workspace", {})
+    branch = workspace_section.get("branch")
+    if not branch:
+        die(f"workspace config missing branch at {config_path}")
+    return str(branch)
 
 
 def render_integration_strategy(branch_pr: bool, branch_history: str) -> str:
@@ -446,21 +460,20 @@ def ensure_workspace_metadata(
     agents_path: Path,
     workspace_config_path: Path,
     project_root: Path,
-    workspace_name: str,
+    project_origin: str,
     workspace_branch: str,
-    atelier_id: str,
     branch_pr: bool,
     branch_history: str,
 ) -> None:
     workspace_config_exists = workspace_config_path.exists()
     if not workspace_config_exists:
+        workspace_id = workspace_identifier(project_origin, workspace_branch)
         workspace_config = {
             "workspace": {
-                "name": workspace_name,
                 "branch": workspace_branch,
                 "branch_pr": branch_pr,
                 "branch_history": branch_history,
-                "id": f"atelier:{atelier_id}:{workspace_name}",
+                "id": workspace_id,
             },
             "atelier": {
                 "version": __version__,
@@ -499,10 +512,10 @@ def ensure_workspace_metadata(
             content = content.rstrip() + "\n\n" + integration_strategy + "\n"
         agents_path.write_text(content, encoding="utf-8")
     else:
+        workspace_id = workspace_identifier(project_origin, workspace_branch)
         agents_path.write_text(
             WORKSPACE_AGENTS_TEMPLATE.format(
-                atelier_id=atelier_id,
-                workspace_name=workspace_name,
+                workspace_id=workspace_id,
                 integration_strategy=integration_strategy,
             ),
             encoding="utf-8",
@@ -608,11 +621,11 @@ def extract_first_user_from_list(messages: list) -> str | None:
     return None
 
 
-def find_codex_session(atelier_id: str, workspace_name: str) -> str | None:
+def find_codex_session(project_origin: str, workspace_branch: str) -> str | None:
     sessions_root = Path.home() / ".codex" / "sessions"
     if not sessions_root.exists():
         return None
-    target = f"atelier:{atelier_id}:{workspace_name}"
+    target = workspace_identifier(project_origin, workspace_branch)
     matches: list[tuple[float, Path, str | None]] = []
     for path in sessions_root.rglob("*"):
         if path.suffix not in {".json", ".jsonl"}:
@@ -673,29 +686,11 @@ def build_project_config(
     repo_root: Path,
     args: argparse.Namespace | None,
 ) -> dict:
-    project_name_default = (
-        existing.get("project", {}).get("name")
-        if isinstance(existing.get("project"), dict)
-        else None
-    )
-    if not project_name_default:
-        parsed_origin = urlparse(origin)
-        origin_name = Path(parsed_origin.path).name if parsed_origin.path else ""
-        project_name_default = origin_name or repo_root.name
-
-    project_name_flag = read_arg(args, "project_name_flag")
-    project_name_arg = read_arg(args, "project_name")
-    if project_name_flag is not None:
-        project_name = str(project_name_flag)
-    elif project_name_arg is not None:
-        project_name = str(project_name_arg)
-    else:
-        project_name = prompt("Project name", project_name_default, required=True)
-
     branch_config = resolve_branch_config(existing)
     branch_default_default = branch_config.get("default")
     if not branch_default_default:
-        branch_default_default = "main"
+        detected_default = git_default_branch(repo_root)
+        branch_default_default = detected_default or "main"
     branch_default_arg = read_arg(args, "branch_default")
     if branch_default_arg is not None:
         branch_default = str(branch_default_arg)
@@ -810,7 +805,6 @@ def build_project_config(
 
     return {
         "project": {
-            "name": project_name,
             "origin": origin,
             "repo_url": origin_raw,
         },
@@ -948,32 +942,32 @@ def open_workspace(args: argparse.Namespace) -> None:
         else branch_history
     )
 
-    workspace_root = workspaces_root_for_project(project_dir)
     workspace_name_input = getattr(args, "workspace_name", None)
-    branch_override = getattr(args, "branch", None)
-    if branch_override is not None:
-        branch_override = str(branch_override).strip() or None
+    raw_branch = bool(getattr(args, "raw", False))
 
     if not workspace_name_input:
-        if branch_override:
-            die("workspace name is required when specifying --branch")
+        if raw_branch:
+            die("workspace branch is required when using --raw")
         workspace_name_input = resolve_implicit_workspace_name(repo_root, config)
-        branch_override = workspace_name_input
+        raw_branch = True
 
-    workspace_name, branch_hint = normalize_workspace_reference(
-        str(workspace_name_input), workspace_root
-    )
-    if not workspace_name:
-        die("workspace name is required")
+    workspace_name_input = normalize_workspace_name(str(workspace_name_input))
+    if not workspace_name_input:
+        die("workspace branch is required")
 
-    atelier_id = project_origin
-
-    workspace_dir = workspace_root / workspace_name
-    agents_path = workspace_dir / "AGENTS.md"
-    workspace_config_path = workspace_dir / ".atelier.workspace.json"
-    is_new_workspace = not workspace_dir.exists()
-    workspace_config_exists = workspace_config_path.exists()
     branch_prefix = branch_config.get("prefix", "")
+    workspace_branch, workspace_dir, workspace_config_exists = resolve_workspace_target(
+        project_dir,
+        workspace_name_input,
+        branch_prefix,
+        raw_branch,
+    )
+    if not workspace_branch:
+        die("workspace branch is required")
+
+    agents_path = workspace_dir / "AGENTS.md"
+    workspace_config_file = workspace_config_path(workspace_dir)
+    is_new_workspace = not workspace_config_exists
     if workspace_config_exists:
         if branch_pr_override is not None or branch_history_override is not None:
             stored_pr, stored_history = read_workspace_branch_settings(workspace_dir)
@@ -996,28 +990,17 @@ def open_workspace(args: argparse.Namespace) -> None:
                         "specified branch.history does not match workspace config "
                         f"({branch_history_override} != {stored_history})"
                     )
-        workspace_branch = workspace_branch_for_dir(
-            workspace_dir, workspace_name, config
-        )
-        if branch_override and branch_override != workspace_branch:
-            die(
-                "specified branch does not match configured workspace branch "
-                f"({branch_override} != {workspace_branch})"
-            )
-        if branch_override:
-            workspace_branch = branch_override
-    else:
-        base_branch = branch_hint or workspace_name
-        workspace_branch = branch_override or f"{branch_prefix}{base_branch}"
+        stored_branch = workspace_branch_for_dir(workspace_dir)
+        if stored_branch != workspace_branch:
+            die("workspace branch does not match configured workspace branch")
     ensure_dir(workspace_dir)
     ensure_workspace_metadata(
         workspace_dir=workspace_dir,
         agents_path=agents_path,
-        workspace_config_path=workspace_config_path,
+        workspace_config_path=workspace_config_file,
         project_root=project_dir,
-        workspace_name=workspace_name,
+        project_origin=project_origin,
         workspace_branch=workspace_branch,
-        atelier_id=atelier_id,
         branch_pr=effective_branch_pr,
         branch_history=effective_branch_history,
     )
@@ -1128,14 +1111,14 @@ def open_workspace(args: argparse.Namespace) -> None:
             editor_cmd = resolve_editor_command(config)
         run_command([*editor_cmd, str(agents_path)], cwd=project_dir)
 
-    session_id = find_codex_session(atelier_id, workspace_name)
+    session_id = find_codex_session(project_origin, workspace_branch)
     if session_id:
         say(f"Resuming Codex session {session_id}")
         run_command(
             ["codex", "--cd", str(workspace_dir), *agent_options, "resume", session_id]
         )
     else:
-        opening_prompt = f"atelier:{atelier_id}:{workspace_name}"
+        opening_prompt = workspace_identifier(project_origin, workspace_branch)
         say("Starting new Codex session")
         run_command(
             ["codex", "--cd", str(workspace_dir), *agent_options, opening_prompt]
@@ -1181,43 +1164,76 @@ def resolve_editor_command(config: dict) -> list[str]:
     return shlex.split(system_editor_default())
 
 
-def normalize_workspace_reference(value: str, workspace_root: Path) -> tuple[str, str]:
+def workspace_candidate_branches(name: str, branch_prefix: str, raw: bool) -> list[str]:
+    if raw:
+        return [name]
+    candidates = []
+    prefixed = f"{branch_prefix}{name}"
+    if prefixed:
+        candidates.append(prefixed)
+    if name and name not in candidates:
+        candidates.append(name)
+    return candidates
+
+
+def find_workspace_for_branch(
+    project_dir: Path, branch: str
+) -> tuple[Path, dict] | None:
+    workspace_dir = workspace_dir_for_branch(project_dir, branch)
+    config_path = workspace_config_path(workspace_dir)
+    if not config_path.exists():
+        if workspace_dir.exists():
+            die("workspace config missing for existing workspace directory")
+        return None
+    config = load_json(config_path)
+    if not config:
+        die("failed to load workspace config")
+    stored_branch = require_workspace_branch(config_path, config)
+    if stored_branch != branch:
+        die("workspace branch does not match hashed directory")
+    return workspace_dir, config
+
+
+def resolve_workspace_target(
+    project_dir: Path, name: str, branch_prefix: str, raw: bool
+) -> tuple[str, Path, bool]:
+    candidates = workspace_candidate_branches(name, branch_prefix, raw)
+    for branch in candidates:
+        found = find_workspace_for_branch(project_dir, branch)
+        if found:
+            workspace_dir, _ = found
+            return branch, workspace_dir, True
+
+    branch = candidates[0]
+    workspace_dir = workspace_dir_for_branch(project_dir, branch)
+    if workspace_dir.exists():
+        config_path = workspace_config_path(workspace_dir)
+        if not config_path.exists():
+            die("workspace config missing for existing workspace directory")
+        config = load_json(config_path) or {}
+        stored_branch = require_workspace_branch(config_path, config)
+        if stored_branch != branch:
+            die("workspace branch does not match hashed directory")
+    return branch, workspace_dir, False
+
+
+def normalize_workspace_name(value: str) -> str:
     raw = value.strip()
     if not raw:
-        return "", ""
-    raw_normalized = raw.replace("\\", "/").strip("/")
-    if raw_normalized.startswith(f"{WORKSPACES_DIRNAME}/"):
-        raw_normalized = raw_normalized[len(WORKSPACES_DIRNAME) + 1 :]
-    if not raw_normalized:
-        return "", ""
-
-    workspace_root = workspace_root.resolve()
-    path = Path(raw_normalized)
-    if path.is_absolute():
-        candidate = path.resolve()
-        try:
-            relative = candidate.relative_to(workspace_root)
-        except ValueError:
-            die("workspace path must be within the project workspaces directory")
-        normalized = relative.as_posix()
-    else:
-        normalized = raw_normalized
-
+        return ""
+    normalized = raw.replace("\\", "/")
+    if normalized.startswith("/"):
+        die("workspace branch must not be an absolute path")
     if ".." in Path(normalized).parts:
-        die("workspace name cannot contain '..'")
+        die("workspace branch cannot contain '..'")
+    return normalized
 
-    return normalized, normalized
 
-
-def workspace_branch_for_dir(
-    workspace_dir: Path, workspace_name: str, config: dict
-) -> str:
-    workspace_config = load_json(workspace_dir / ".atelier.workspace.json") or {}
-    branch = workspace_config.get("workspace", {}).get("branch")
-    if branch:
-        return str(branch)
-    prefix = config.get("branch", {}).get("prefix", "")
-    return f"{prefix}{workspace_name}"
+def workspace_branch_for_dir(workspace_dir: Path) -> str:
+    config_path = workspace_config_path(workspace_dir)
+    workspace_config = load_json(config_path) or {}
+    branch = require_workspace_branch(config_path, workspace_config)
+    return branch
 
 
 def git_current_branch(repo_dir: Path) -> str | None:
@@ -1227,6 +1243,36 @@ def git_current_branch(repo_dir: Path) -> str | None:
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
+
+
+def git_default_branch(repo_dir: Path) -> str | None:
+    result = run_git_command(
+        ["git", "-C", str(repo_dir), "symbolic-ref", "refs/remotes/origin/HEAD"]
+    )
+    if result.returncode == 0:
+        ref = result.stdout.strip()
+        prefix = "refs/remotes/origin/"
+        if ref.startswith(prefix):
+            branch = ref[len(prefix) :].strip()
+            if branch:
+                return branch
+
+    result = run_git_command(["git", "-C", str(repo_dir), "remote", "show", "origin"])
+    if result.returncode == 0:
+        for line in result.stdout.splitlines():
+            if "HEAD branch:" not in line:
+                continue
+            _, value = line.split(":", 1)
+            branch = value.strip()
+            if branch:
+                return branch
+
+    if git_ref_exists(repo_dir, "refs/heads/main"):
+        return "main"
+    if git_ref_exists(repo_dir, "refs/heads/master"):
+        return "master"
+
+    return git_current_branch(repo_dir)
 
 
 def git_is_clean(repo_dir: Path) -> bool | None:
@@ -1485,15 +1531,27 @@ def collect_workspaces(
     workspaces_root = workspaces_root_for_project(project_root)
     if not workspaces_root.exists():
         return []
-    workspace_configs = sorted(workspaces_root.rglob(".atelier.workspace.json"))
+    workspace_configs: list[Path] = []
+    for workspace_dir in sorted(workspaces_root.iterdir()):
+        if not workspace_dir.is_dir():
+            continue
+        config_path = workspace_config_path(workspace_dir)
+        if not config_path.exists():
+            warn(f"workspace config missing at {config_path}")
+            continue
+        workspace_configs.append(config_path)
     if not workspace_configs:
         return []
 
-    def build_workspace(config_path: Path) -> dict:
+    def build_workspace(config_path: Path) -> dict | None:
         workspace_dir = config_path.parent
-        workspace_name = workspace_dir.relative_to(workspaces_root).as_posix()
+        config = load_json(config_path)
+        if not config:
+            warn(f"failed to load workspace config at {config_path}")
+            return None
+        branch = require_workspace_branch(config_path, config)
+        workspace_name = branch
         repo_dir = workspace_dir / "repo"
-        branch = workspace_branch_for_dir(workspace_dir, workspace_name, config)
         checked_out: bool | None = None
         clean: bool | None = None
         pushed: bool | None = None
@@ -1517,10 +1575,22 @@ def collect_workspaces(
 
     max_workers = min(8, len(workspace_configs))
     if max_workers <= 1:
-        return [build_workspace(config_path) for config_path in workspace_configs]
+        workspaces = [
+            workspace
+            for workspace in (
+                build_workspace(config_path) for config_path in workspace_configs
+            )
+            if workspace is not None
+        ]
+        return sorted(workspaces, key=lambda item: item["name"])
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        return list(executor.map(build_workspace, workspace_configs))
+        workspaces = [
+            workspace
+            for workspace in executor.map(build_workspace, workspace_configs)
+            if workspace is not None
+        ]
+    return sorted(workspaces, key=lambda item: item["name"])
 
 
 def list_workspaces(args: argparse.Namespace) -> None:
@@ -1618,15 +1688,22 @@ def clean_workspaces(args: argparse.Namespace) -> None:
     if not default_branch:
         die("project config missing branch.default")
 
-    workspace_root = workspaces_root_for_project(project_root)
+    branch_prefix = config.get("branch", {}).get("prefix", "")
 
     requested = []
     for name in args.workspace_names or []:
         if not name.strip():
             continue
-        normalized, _ = normalize_workspace_reference(name, workspace_root)
-        if normalized:
-            requested.append(normalized)
+        normalized = normalize_workspace_name(name)
+        if not normalized:
+            continue
+        branch, _, exists = resolve_workspace_target(
+            project_root, normalized, branch_prefix, False
+        )
+        if not exists:
+            warn(f"workspace not found: {normalized}")
+            continue
+        requested.append(branch)
 
     workspaces = collect_workspaces(
         project_root, config, with_status=not (args.all or requested)
@@ -1637,7 +1714,7 @@ def clean_workspaces(args: argparse.Namespace) -> None:
 
     workspaces_by_name = {workspace["name"]: workspace for workspace in workspaces}
     if args.all and requested:
-        die("cannot combine --all with workspace names")
+        die("cannot combine --all with workspace branches")
 
     if args.all:
         targets = list(workspaces)
@@ -1683,12 +1760,6 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init", help="initialize a project")
-    init_parser.add_argument("project_name", nargs="?", help="project name")
-    init_parser.add_argument(
-        "--project-name",
-        dest="project_name_flag",
-        help="project name (overrides positional)",
-    )
     init_parser.add_argument(
         "--default-branch", dest="branch_default", help="default branch name"
     )
@@ -1718,10 +1789,12 @@ def main() -> None:
     open_parser.add_argument(
         "workspace_name",
         nargs="?",
-        help="workspace name (defaults to current branch when criteria are met)",
+        help="workspace branch (defaults to current branch when criteria are met)",
     )
     open_parser.add_argument(
-        "-B", "--branch", dest="branch", help="explicit branch name for the workspace"
+        "--raw",
+        action="store_true",
+        help="treat the argument as the full branch name",
     )
     open_parser.add_argument(
         "--branch-pr",
@@ -1761,7 +1834,9 @@ def main() -> None:
         action="store_true",
         help="do not delete workspace branches",
     )
-    clean_parser.add_argument("workspace_names", nargs="*", help="workspaces to delete")
+    clean_parser.add_argument(
+        "workspace_names", nargs="*", help="workspace branches to delete"
+    )
     clean_parser.set_defaults(func=clean_workspaces)
 
     args = parser.parse_args()

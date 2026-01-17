@@ -6,7 +6,7 @@ workspace-based, agent-assisted development within a single project.
 Agents working in this repository are expected to help **implement Atelier v2**
 according to the specification in `docs/SPEC.md`.
 
----
+______________________________________________________________________
 
 ## Core Philosophy
 
@@ -18,14 +18,13 @@ Atelier is:
 
 Atelier exists to make one thing easy:
 
-> Treat every branch-worthy unit of work as its own isolated workspace,
-> with explicit intent captured before code is written.
+> Treat every branch-worthy unit of work as its own isolated workspace, with
+> explicit intent captured before code is written.
 
-The filesystem is the source of truth.
-Configuration is explicit.
-Automation is opt-in and conservative.
+The filesystem is the source of truth. Configuration is explicit. Automation is
+opt-in and conservative.
 
----
+______________________________________________________________________
 
 ## What This Repository Is
 
@@ -43,7 +42,7 @@ This repository is **not**:
 
 Atelier manages *other* projects — not itself.
 
----
+______________________________________________________________________
 
 ## Scope of Work
 
@@ -51,7 +50,7 @@ When working in this repository, you may:
 
 - implement or refine the Atelier CLI
 - update templates shipped with the tool
-- adjust schemas for `.atelier.json` and `.atelier.workspace.json`
+- adjust schemas for `config.json` files
 - improve documentation and examples
 - simplify behavior while preserving correctness
 
@@ -65,7 +64,7 @@ You should **not**:
 
 If a behavior is not in `docs/SPEC.md`, do not add it.
 
----
+______________________________________________________________________
 
 ## Development Model (Dogfooding)
 
@@ -81,12 +80,12 @@ That means:
 However:
 
 - This repository itself is **not** an Atelier project
-- Do not assume `.atelier.json` exists here
+- Do not assume `config.json` exists here
 - Do not manage this repo as a workspace
 
 Dogfooding applies to *how* we work, not *where* state lives.
 
----
+______________________________________________________________________
 
 ## Implementation Constraints
 
@@ -106,7 +105,7 @@ Dogfooding applies to *how* we work, not *where* state lives.
 
 Do not add hidden behavior or implicit defaults.
 
----
+______________________________________________________________________
 
 ## Templates
 
@@ -117,10 +116,10 @@ Templates shipped with Atelier are:
 - never auto-updated
 - owned by the user after creation
 
-The tool may ship updated templates in new versions, but existing files
-must never be modified automatically.
+The tool may ship updated templates in new versions, but existing files must
+never be modified automatically.
 
----
+______________________________________________________________________
 
 ## Authority Model
 
@@ -134,12 +133,12 @@ When Atelier manages other projects:
 
 Atelier must respect those boundaries strictly.
 
----
+______________________________________________________________________
 
 ## Workflow Requirements
 
 - Run `just format` before making commits.
 - Ensure `just lint` and `just test` pass before shipping changes.
-- When merging PRs to `main`, keep merge commit messages non-Conventional
-  (use the default “Merge pull request #...” message) so Release Please
-  does not double-count changelog entries.
+- When merging PRs to `main`, keep merge commit messages non-Conventional (use
+  the default “Merge pull request #...” message) so Release Please does not
+  double-count changelog entries.
