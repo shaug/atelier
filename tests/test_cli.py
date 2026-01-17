@@ -21,7 +21,6 @@ NORMALIZED_ORIGIN = cli.normalize_origin_url(RAW_ORIGIN)
 
 def make_init_args(**overrides: object) -> SimpleNamespace:
     data = {
-        "branch_default": None,
         "branch_prefix": None,
         "branch_pr": None,
         "branch_history": None,
@@ -47,7 +46,6 @@ def write_project_config(project_dir: Path) -> dict:
             "repo_url": RAW_ORIGIN,
         },
         "branch": {
-            "default": "main",
             "prefix": "scott/",
             "pr": True,
             "history": "manual",
@@ -66,7 +64,6 @@ def make_open_config(**overrides: object) -> dict:
             "repo_url": RAW_ORIGIN,
         },
         "branch": {
-            "default": "main",
             "prefix": "scott/",
             "pr": True,
             "history": "manual",
@@ -239,7 +236,7 @@ class TestInitProject(TestCase):
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", ""])
+                responses = iter(["", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -256,7 +253,6 @@ class TestInitProject(TestCase):
                 config = json.loads(config_path.read_text(encoding="utf-8"))
                 self.assertEqual(config["project"]["origin"], NORMALIZED_ORIGIN)
                 self.assertEqual(config["project"]["repo_url"], RAW_ORIGIN)
-                self.assertEqual(config["branch"]["default"], "main")
                 self.assertTrue(config["branch"]["pr"])
                 self.assertEqual(config["branch"]["history"], "manual")
                 self.assertEqual(config["editor"]["default"], "cursor")
@@ -274,7 +270,7 @@ class TestInitProject(TestCase):
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", ""])
+                responses = iter(["", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -301,7 +297,7 @@ class TestInitProject(TestCase):
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", "cursor -w"])
+                responses = iter(["", "", "", "", "cursor -w"])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -327,7 +323,7 @@ class TestInitProject(TestCase):
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", ""])
+                responses = iter(["", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -362,7 +358,6 @@ class TestInitProject(TestCase):
                         "repo_url": "git@github.com:old/repo.git",
                     },
                     "branch": {
-                        "default": "main",
                         "prefix": "old/",
                         "pr": False,
                         "history": "merge",
@@ -383,7 +378,6 @@ class TestInitProject(TestCase):
                 )
 
                 args = make_init_args(
-                    branch_default="develop",
                     branch_prefix="feat/",
                     branch_pr="false",
                     branch_history="merge",
@@ -406,7 +400,6 @@ class TestInitProject(TestCase):
                 config = json.loads(config_path.read_text(encoding="utf-8"))
                 self.assertEqual(config["project"]["origin"], NORMALIZED_ORIGIN)
                 self.assertEqual(config["project"]["repo_url"], RAW_ORIGIN)
-                self.assertEqual(config["branch"]["default"], "develop")
                 self.assertEqual(config["branch"]["prefix"], "feat/")
                 self.assertFalse(config["branch"]["pr"])
                 self.assertEqual(config["branch"]["history"], "merge")
@@ -425,7 +418,7 @@ class TestInitProject(TestCase):
             os.chdir(root)
             try:
                 args = make_init_args(workspace_template=True)
-                responses = iter(["", "", "", "", "", ""])
+                responses = iter(["", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -572,6 +565,7 @@ class TestCleanWorkspaces(TestCase):
                 responses = iter(["y"])
                 with (
                     patch("atelier.cli.subprocess.run", fake_run),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
                     patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
@@ -623,6 +617,7 @@ class TestCleanWorkspaces(TestCase):
                 responses = iter(["y", "y"])
                 with (
                     patch("atelier.cli.subprocess.run", fake_run),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
                     patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
@@ -665,6 +660,7 @@ class TestCleanWorkspaces(TestCase):
             try:
                 with (
                     patch("atelier.cli.subprocess.run", fake_run),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
                     patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
@@ -717,6 +713,7 @@ class TestCleanWorkspaces(TestCase):
             try:
                 with (
                     patch("atelier.cli.subprocess.run", fake_run),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
                     patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
@@ -758,6 +755,7 @@ class TestCleanWorkspaces(TestCase):
             try:
                 with (
                     patch("atelier.cli.subprocess.run", fake_run),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
                     patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
@@ -806,6 +804,7 @@ class TestCleanWorkspaces(TestCase):
             try:
                 with (
                     patch("atelier.cli.subprocess.run", fake_run),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
                     patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
@@ -922,6 +921,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.git_is_clean", return_value=True),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
@@ -997,6 +997,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.git_current_branch", fake_current_branch),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.git_is_clean", return_value=True),
                     patch("atelier.cli.git_branch_fully_pushed", return_value=True),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
@@ -1040,6 +1041,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.git_is_repo", return_value=True),
                     patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.git_is_clean", return_value=True),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
@@ -1099,6 +1101,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.run_command", fake_run),
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.git_is_clean", return_value=True),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
@@ -1234,6 +1237,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
                     patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.git_is_clean", return_value=True),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
@@ -1344,6 +1348,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
                     patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.git_is_clean", return_value=True),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
@@ -1375,7 +1380,7 @@ class TestOpenWorkspace(TestCase):
                     "origin": NORMALIZED_ORIGIN,
                     "repo_url": RAW_ORIGIN,
                 },
-                "branch": {"default": "main", "prefix": "scott/"},
+                "branch": {"prefix": "scott/"},
                 "agent": {"default": "codex", "options": {"codex": []}},
                 "editor": {"default": "true", "options": {"true": []}},
                 "atelier": {
@@ -1414,6 +1419,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
                     patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.git_is_clean", return_value=True),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
@@ -1458,6 +1464,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
                     patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.git_is_clean", return_value=True),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
@@ -1487,7 +1494,6 @@ class TestOpenWorkspace(TestCase):
             write_open_config(
                 project_dir,
                 branch={
-                    "default": "main",
                     "prefix": "scott/",
                     "pr": False,
                     "history": "squash",
@@ -1511,6 +1517,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
                     patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.git_is_clean", return_value=True),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
@@ -1557,6 +1564,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
                     patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.git_is_clean", return_value=True),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
@@ -1729,6 +1737,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.cli.find_codex_session", return_value=None),
                     patch("atelier.cli.subprocess.run", return_value=DummyResult()),
                     patch("atelier.cli.git_current_branch", return_value="main"),
+                    patch("atelier.cli.git_default_branch", return_value="main"),
                     patch("atelier.cli.git_is_clean", return_value=True),
                     patch("atelier.cli.atelier_data_dir", return_value=data_dir),
                     patch("atelier.cli.git_repo_root", return_value=root),
@@ -1827,7 +1836,7 @@ class TestOpenWorkspace(TestCase):
                 project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(
                 project_dir,
-                branch={"default": "main", "prefix": "scott/", "history": "sideways"},
+                branch={"prefix": "scott/", "history": "sideways"},
             )
 
             original_cwd = Path.cwd()

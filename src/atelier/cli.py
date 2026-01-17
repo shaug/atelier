@@ -683,20 +683,9 @@ def build_project_config(
     existing: dict,
     origin: str,
     origin_raw: str,
-    repo_root: Path,
     args: argparse.Namespace | None,
 ) -> dict:
     branch_config = resolve_branch_config(existing)
-    branch_default_default = branch_config.get("default")
-    if not branch_default_default:
-        detected_default = git_default_branch(repo_root)
-        branch_default_default = detected_default or "main"
-    branch_default_arg = read_arg(args, "branch_default")
-    if branch_default_arg is not None:
-        branch_default = str(branch_default_arg)
-    else:
-        branch_default = prompt("Default branch", branch_default_default, required=True)
-
     branch_prefix_default = branch_config.get("prefix")
     if branch_prefix_default is None:
         branch_prefix_default = ""
@@ -809,7 +798,6 @@ def build_project_config(
             "repo_url": origin_raw,
         },
         "branch": {
-            "default": branch_default,
             "prefix": branch_prefix,
             "pr": branch_pr,
             "history": branch_history,
@@ -884,7 +872,7 @@ def init_project(args: argparse.Namespace) -> None:
     project_dir = project_dir_for_origin(origin)
     config_path = project_config_path(project_dir)
     config = load_json(config_path) or {}
-    payload = build_project_config(config, origin, origin_raw, repo_root, args)
+    payload = build_project_config(config, origin, origin_raw, args)
     ensure_project_dirs(project_dir)
     write_json(config_path, payload)
     ensure_project_scaffold(project_dir, bool(read_arg(args, "workspace_template")))
@@ -909,7 +897,7 @@ def open_workspace(args: argparse.Namespace) -> None:
     config_path = project_config_path(project_dir)
     config = load_json(config_path) or {}
     if not config:
-        config = build_project_config({}, origin, origin_raw, repo_root, None)
+        config = build_project_config({}, origin, origin_raw, None)
         ensure_project_dirs(project_dir)
         write_json(config_path, config)
         ensure_project_scaffold(project_dir, False)
@@ -1012,10 +1000,6 @@ def open_workspace(args: argparse.Namespace) -> None:
     repo_dir = workspace_dir / "repo"
     project_repo_url = origin_raw
 
-    default_branch = branch_config.get("default")
-    if not default_branch:
-        die("project config missing branch.default")
-
     should_open_editor = False
     editor_cmd: list[str] | None = None
     if not repo_dir.exists():
@@ -1044,6 +1028,10 @@ def open_workspace(args: argparse.Namespace) -> None:
     repo_clean = git_is_clean(repo_dir)
     if repo_clean is None:
         die("failed to determine repo status")
+
+    default_branch = git_default_branch(repo_dir)
+    if not default_branch:
+        die("failed to determine default branch from repo")
 
     skip_default_checkout = False
     skip_workspace_checkout = False
@@ -1126,10 +1114,9 @@ def open_workspace(args: argparse.Namespace) -> None:
 
 
 def resolve_implicit_workspace_name(repo_root: Path, config: dict) -> str:
-    branch_config = resolve_branch_config(config)
-    default_branch = branch_config.get("default")
+    default_branch = git_default_branch(repo_root)
     if not default_branch:
-        die("project config missing branch.default")
+        die("failed to determine default branch from repo")
 
     current_branch = git_current_branch(repo_root)
     if not current_branch:
@@ -1684,10 +1671,6 @@ def clean_workspaces(args: argparse.Namespace) -> None:
     if not config:
         die("no Atelier project config found for this repo; run 'atelier init'")
 
-    default_branch = config.get("branch", {}).get("default")
-    if not default_branch:
-        die("project config missing branch.default")
-
     branch_prefix = config.get("branch", {}).get("prefix", "")
 
     requested = []
@@ -1743,9 +1726,16 @@ def clean_workspaces(args: argparse.Namespace) -> None:
             say(f"Skipped workspace {name}")
             continue
         if not getattr(args, "no_branch", False):
-            delete_workspace_branch(
-                workspace["repo_dir"], workspace["branch"], default_branch
-            )
+            default_branch = git_default_branch(workspace["repo_dir"])
+            if not default_branch:
+                warn(
+                    "failed to determine default branch for "
+                    f"{workspace['branch']}; skipping branch deletion"
+                )
+            else:
+                delete_workspace_branch(
+                    workspace["repo_dir"], workspace["branch"], default_branch
+                )
         try:
             shutil.rmtree(workspace["path"])
         except OSError as exc:
@@ -1760,9 +1750,6 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init", help="initialize a project")
-    init_parser.add_argument(
-        "--default-branch", dest="branch_default", help="default branch name"
-    )
     init_parser.add_argument(
         "--branch-prefix", dest="branch_prefix", help="prefix for workspace branches"
     )

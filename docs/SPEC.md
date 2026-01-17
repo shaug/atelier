@@ -104,7 +104,6 @@ frequent manual editing.
     "repo_url": "git@github.com:org/gumshoe.git"
   },
   "branch": {
-    "default": "main",
     "prefix": "scott/",
     "pr": true,
     "history": "manual"
@@ -362,8 +361,8 @@ Registers the current repo origin as an Atelier project.
 
 - Must be run inside a Git repository with a resolved `origin` remote
 - Resolves the repo origin and creates/updates the project under the data dir
-- Uses the detected remote default branch (origin/HEAD) as the default prompt
-  for `branch.default` when available
+- Detects the remote default branch (origin/HEAD) when needed instead of storing
+  a static `branch.default`
 - Creates `config.json` in the project directory (if missing)
 - Creates project-level `AGENTS.md` if missing
 - Creates `PROJECT.md` if missing (comment-only stub)
