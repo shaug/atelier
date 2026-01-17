@@ -1,0 +1,45 @@
+from pathlib import Path
+
+from .. import config, git, paths, workspace
+from ..io import die, say
+
+
+def list_workspaces(args: object) -> None:
+    cwd = Path.cwd()
+    _, _, origin = git.resolve_repo_origin(cwd)
+    project_root = paths.project_dir_for_origin(origin)
+    config_path = paths.project_config_path(project_root)
+    config_payload = config.load_json(config_path)
+    if not config_payload:
+        die("no Atelier project config found for this repo; run 'atelier init'")
+
+    workspaces = workspace.collect_workspaces(
+        project_root, config_payload, with_status=getattr(args, "status", False)
+    )
+    if not workspaces:
+        say("No workspaces found.")
+        return
+
+    if not getattr(args, "status", False):
+        for item in workspaces:
+            say(item["name"])
+        return
+
+    rows = [("workspace", "checked_out", "clean", "pushed")]
+    for item in workspaces:
+        rows.append(
+            (
+                item["name"],
+                workspace.format_status(item["checked_out"]),
+                workspace.format_status(item["clean"]),
+                workspace.format_status(item["pushed"]),
+            )
+        )
+
+    widths = [max(len(row[index]) for row in rows) for index in range(len(rows[0]))]
+    for row in rows:
+        say(
+            "  ".join(
+                value.ljust(widths[index]) for index, value in enumerate(row)
+            ).rstrip()
+        )

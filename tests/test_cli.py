@@ -14,9 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 import atelier.cli as cli  # noqa: E402
+import atelier.commands.clean as clean_cmd  # noqa: E402
+import atelier.commands.init as init_cmd  # noqa: E402
+import atelier.commands.list as list_cmd  # noqa: E402
+import atelier.commands.open as open_cmd  # noqa: E402
+import atelier.editor as editor  # noqa: E402
+import atelier.git as git  # noqa: E402
+import atelier.paths as paths  # noqa: E402
+import atelier.sessions as sessions_mod  # noqa: E402
 
 RAW_ORIGIN = "git@github.com:org/repo.git"
-NORMALIZED_ORIGIN = cli.normalize_origin_url(RAW_ORIGIN)
+NORMALIZED_ORIGIN = git.normalize_origin_url(RAW_ORIGIN)
 
 
 def make_init_args(**overrides: object) -> SimpleNamespace:
@@ -51,7 +59,7 @@ def write_project_config(project_dir: Path) -> dict:
             "history": "manual",
         },
     }
-    cli.project_config_path(project_dir).write_text(
+    paths.project_config_path(project_dir).write_text(
         json.dumps(config), encoding="utf-8"
     )
     return config
@@ -82,7 +90,7 @@ def make_open_config(**overrides: object) -> dict:
 def write_open_config(root: Path, **overrides: object) -> dict:
     config = make_open_config(**overrides)
     root.mkdir(parents=True, exist_ok=True)
-    cli.project_config_path(root).write_text(json.dumps(config), encoding="utf-8")
+    paths.project_config_path(root).write_text(json.dumps(config), encoding="utf-8")
     return config
 
 
@@ -189,21 +197,21 @@ def make_fake_git(
 class TestNormalizeOriginUrl(TestCase):
     def test_owner_name_with_host(self) -> None:
         self.assertEqual(
-            cli.normalize_origin_url("github.com/owner/repo"),
+            git.normalize_origin_url("github.com/owner/repo"),
             "github.com/owner/repo",
         )
 
     def test_https_normalizes(self) -> None:
         value = "https://github.com/owner/repo.git"
-        self.assertEqual(cli.normalize_origin_url(value), "github.com/owner/repo")
+        self.assertEqual(git.normalize_origin_url(value), "github.com/owner/repo")
 
     def test_ssh_scp_style(self) -> None:
         value = "git@github.com:owner/repo.git"
-        self.assertEqual(cli.normalize_origin_url(value), "github.com/owner/repo")
+        self.assertEqual(git.normalize_origin_url(value), "github.com/owner/repo")
 
     def test_ssh_scheme(self) -> None:
         value = "ssh://git@github.com/owner/repo.git"
-        self.assertEqual(cli.normalize_origin_url(value), "github.com/owner/repo")
+        self.assertEqual(git.normalize_origin_url(value), "github.com/owner/repo")
 
 
 class TestResolveEditorCommand(TestCase):
@@ -215,16 +223,16 @@ class TestResolveEditorCommand(TestCase):
             }
         }
         with patch.dict(os.environ, {"EDITOR": "nano -w"}):
-            self.assertEqual(cli.resolve_editor_command(config), ["cursor", "-w"])
+            self.assertEqual(editor.resolve_editor_command(config), ["cursor", "-w"])
 
     def test_env_fallback(self) -> None:
         config = {"editor": {"options": {}}}
         with patch.dict(os.environ, {"EDITOR": "nano -w"}):
-            self.assertEqual(cli.resolve_editor_command(config), ["nano", "-w"])
+            self.assertEqual(editor.resolve_editor_command(config), ["nano", "-w"])
 
     def test_vi_fallback(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(cli.resolve_editor_command({}), ["vi"])
+            self.assertEqual(editor.resolve_editor_command({}), ["vi"])
 
 
 class TestInitProject(TestCase):
@@ -240,15 +248,17 @@ class TestInitProject(TestCase):
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
-                    patch("atelier.cli.shutil.which", return_value="/usr/bin/cursor"),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch(
+                        "atelier.config.shutil.which", return_value="/usr/bin/cursor"
+                    ),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.init_project(args)
-                    project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+                    init_cmd.init_project(args)
+                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
 
-                config_path = cli.project_config_path(project_dir)
+                config_path = paths.project_config_path(project_dir)
                 self.assertTrue(config_path.exists())
                 config = json.loads(config_path.read_text(encoding="utf-8"))
                 self.assertEqual(config["project"]["origin"], NORMALIZED_ORIGIN)
@@ -274,16 +284,18 @@ class TestInitProject(TestCase):
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
-                    patch("atelier.cli.shutil.which", return_value="/usr/bin/cursor"),
+                    patch(
+                        "atelier.config.shutil.which", return_value="/usr/bin/cursor"
+                    ),
                     patch.dict(os.environ, {"EDITOR": "nano -w"}),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.init_project(args)
-                    project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+                    init_cmd.init_project(args)
+                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
 
-                config_path = cli.project_config_path(project_dir)
+                config_path = paths.project_config_path(project_dir)
                 config = json.loads(config_path.read_text(encoding="utf-8"))
                 self.assertEqual(config["editor"]["default"], "cursor")
             finally:
@@ -301,14 +313,14 @@ class TestInitProject(TestCase):
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.init_project(args)
-                    project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+                    init_cmd.init_project(args)
+                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
 
-                config_path = cli.project_config_path(project_dir)
+                config_path = paths.project_config_path(project_dir)
                 config = json.loads(config_path.read_text(encoding="utf-8"))
                 self.assertEqual(config["editor"]["default"], "cursor")
                 self.assertEqual(config["editor"]["options"]["cursor"], ["-w"])
@@ -327,16 +339,16 @@ class TestInitProject(TestCase):
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
-                    patch("atelier.cli.shutil.which", return_value=None),
+                    patch("atelier.config.shutil.which", return_value=None),
                     patch.dict(os.environ, {"EDITOR": "nano -w"}),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.init_project(args)
-                    project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+                    init_cmd.init_project(args)
+                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
 
-                config_path = cli.project_config_path(project_dir)
+                config_path = paths.project_config_path(project_dir)
                 config = json.loads(config_path.read_text(encoding="utf-8"))
                 self.assertEqual(config["editor"]["default"], "nano")
                 self.assertEqual(config["editor"]["options"]["nano"], ["-w"])
@@ -352,7 +364,7 @@ class TestInitProject(TestCase):
             try:
                 config = {
                     "project": {
-                        "origin": cli.normalize_origin_url(
+                        "origin": git.normalize_origin_url(
                             "git@github.com:old/repo.git"
                         ),
                         "repo_url": "git@github.com:old/repo.git",
@@ -370,10 +382,10 @@ class TestInitProject(TestCase):
                         "created_at": "2026-01-01T00:00:00Z",
                     },
                 }
-                with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                    project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+                with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
                 project_dir.mkdir(parents=True, exist_ok=True)
-                cli.project_config_path(project_dir).write_text(
+                paths.project_config_path(project_dir).write_text(
                     json.dumps(config), encoding="utf-8"
                 )
 
@@ -390,13 +402,13 @@ class TestInitProject(TestCase):
                         "builtins.input",
                         side_effect=AssertionError("prompt should not be called"),
                     ),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.init_project(args)
+                    init_cmd.init_project(args)
 
-                config_path = cli.project_config_path(project_dir)
+                config_path = paths.project_config_path(project_dir)
                 config = json.loads(config_path.read_text(encoding="utf-8"))
                 self.assertEqual(config["project"]["origin"], NORMALIZED_ORIGIN)
                 self.assertEqual(config["project"]["repo_url"], RAW_ORIGIN)
@@ -422,12 +434,12 @@ class TestInitProject(TestCase):
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.init_project(args)
-                    project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+                    init_cmd.init_project(args)
+                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
 
                 template_path = project_dir / "templates" / "WORKSPACE.md"
                 self.assertTrue(template_path.exists())
@@ -442,14 +454,14 @@ class TestListWorkspaces(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_project_config(project_dir)
 
             alpha_branch = "scott/alpha"
             beta_branch = "scott/beta"
-            alpha_dir = cli.workspace_dir_for_branch(project_dir, alpha_branch)
-            beta_dir = cli.workspace_dir_for_branch(project_dir, beta_branch)
+            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
+            beta_dir = paths.workspace_dir_for_branch(project_dir, beta_branch)
             (alpha_dir / "repo").mkdir(parents=True)
             (beta_dir / "repo").mkdir(parents=True)
             write_workspace_config(alpha_dir, alpha_branch)
@@ -471,13 +483,13 @@ class TestListWorkspaces(TestCase):
             try:
                 buffer = io.StringIO()
                 with (
-                    patch("atelier.cli.subprocess.run", fake_run),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.subprocess.run", fake_run),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                     patch("sys.stdout", buffer),
                 ):
-                    cli.list_workspaces(SimpleNamespace(status=True))
+                    list_cmd.list_workspaces(SimpleNamespace(status=True))
                 lines = [
                     line.strip() for line in buffer.getvalue().splitlines() if line
                 ]
@@ -495,13 +507,13 @@ class TestListWorkspaces(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_project_config(project_dir)
             alpha_branch = "scott/alpha"
             beta_branch = "scott/beta"
-            alpha_dir = cli.workspace_dir_for_branch(project_dir, alpha_branch)
-            beta_dir = cli.workspace_dir_for_branch(project_dir, beta_branch)
+            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
+            beta_dir = paths.workspace_dir_for_branch(project_dir, beta_branch)
             alpha_dir.mkdir(parents=True)
             beta_dir.mkdir(parents=True)
             write_workspace_config(alpha_dir, alpha_branch)
@@ -512,12 +524,12 @@ class TestListWorkspaces(TestCase):
             try:
                 buffer = io.StringIO()
                 with (
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                     patch("sys.stdout", buffer),
                 ):
-                    cli.list_workspaces(SimpleNamespace())
+                    list_cmd.list_workspaces(SimpleNamespace())
                 lines = [
                     line.strip() for line in buffer.getvalue().splitlines() if line
                 ]
@@ -531,13 +543,13 @@ class TestCleanWorkspaces(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_project_config(project_dir)
             complete_branch = "scott/complete"
             incomplete_branch = "scott/incomplete"
-            complete_dir = cli.workspace_dir_for_branch(project_dir, complete_branch)
-            incomplete_dir = cli.workspace_dir_for_branch(
+            complete_dir = paths.workspace_dir_for_branch(project_dir, complete_branch)
+            incomplete_dir = paths.workspace_dir_for_branch(
                 project_dir, incomplete_branch
             )
             (complete_dir / "repo").mkdir(parents=True)
@@ -564,14 +576,14 @@ class TestCleanWorkspaces(TestCase):
             try:
                 responses = iter(["y"])
                 with (
-                    patch("atelier.cli.subprocess.run", fake_run),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.subprocess.run", fake_run),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                     patch("builtins.input", lambda _: next(responses)),
                 ):
-                    cli.clean_workspaces(
+                    clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=False,
                             force=False,
@@ -588,13 +600,13 @@ class TestCleanWorkspaces(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_project_config(project_dir)
             alpha_branch = "scott/alpha"
             beta_branch = "scott/beta"
-            alpha_dir = cli.workspace_dir_for_branch(project_dir, alpha_branch)
-            beta_dir = cli.workspace_dir_for_branch(project_dir, beta_branch)
+            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
+            beta_dir = paths.workspace_dir_for_branch(project_dir, beta_branch)
             (alpha_dir / "repo").mkdir(parents=True)
             (beta_dir / "repo").mkdir(parents=True)
             write_workspace_config(alpha_dir, alpha_branch)
@@ -616,14 +628,14 @@ class TestCleanWorkspaces(TestCase):
             try:
                 responses = iter(["y", "y"])
                 with (
-                    patch("atelier.cli.subprocess.run", fake_run),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.subprocess.run", fake_run),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                     patch("builtins.input", lambda _: next(responses)),
                 ):
-                    cli.clean_workspaces(
+                    clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=True,
                             force=False,
@@ -640,11 +652,11 @@ class TestCleanWorkspaces(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_project_config(project_dir)
             alpha_branch = "scott/alpha"
-            alpha_dir = cli.workspace_dir_for_branch(project_dir, alpha_branch)
+            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
             (alpha_dir / "repo").mkdir(parents=True)
             write_workspace_config(alpha_dir, alpha_branch)
 
@@ -659,17 +671,17 @@ class TestCleanWorkspaces(TestCase):
             os.chdir(root)
             try:
                 with (
-                    patch("atelier.cli.subprocess.run", fake_run),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.subprocess.run", fake_run),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                     patch(
                         "builtins.input",
                         side_effect=AssertionError("prompted unexpectedly"),
                     ),
                 ):
-                    cli.clean_workspaces(
+                    clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=True,
                             force=True,
@@ -685,13 +697,13 @@ class TestCleanWorkspaces(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_project_config(project_dir)
             alpha_branch = "scott/alpha"
             beta_branch = "scott/beta"
-            alpha_dir = cli.workspace_dir_for_branch(project_dir, alpha_branch)
-            beta_dir = cli.workspace_dir_for_branch(project_dir, beta_branch)
+            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
+            beta_dir = paths.workspace_dir_for_branch(project_dir, beta_branch)
             (alpha_dir / "repo").mkdir(parents=True)
             (beta_dir / "repo").mkdir(parents=True)
             write_workspace_config(alpha_dir, alpha_branch)
@@ -712,13 +724,13 @@ class TestCleanWorkspaces(TestCase):
             os.chdir(root)
             try:
                 with (
-                    patch("atelier.cli.subprocess.run", fake_run),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.subprocess.run", fake_run),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.clean_workspaces(
+                    clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=False,
                             force=True,
@@ -735,11 +747,11 @@ class TestCleanWorkspaces(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_project_config(project_dir)
             alpha_branch = "scott/alpha"
-            alpha_dir = cli.workspace_dir_for_branch(project_dir, alpha_branch)
+            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
             (alpha_dir / "repo").mkdir(parents=True)
             write_workspace_config(alpha_dir, alpha_branch)
 
@@ -754,17 +766,17 @@ class TestCleanWorkspaces(TestCase):
             os.chdir(root)
             try:
                 with (
-                    patch("atelier.cli.subprocess.run", fake_run),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.subprocess.run", fake_run),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                     patch(
-                        "atelier.cli.delete_workspace_branch",
+                        "atelier.commands.clean.delete_workspace_branch",
                         side_effect=AssertionError("deleted branch unexpectedly"),
                     ),
                 ):
-                    cli.clean_workspaces(
+                    clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=True,
                             force=True,
@@ -780,11 +792,11 @@ class TestCleanWorkspaces(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_project_config(project_dir)
             alpha_branch = "scott/alpha"
-            alpha_dir = cli.workspace_dir_for_branch(project_dir, alpha_branch)
+            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
             (alpha_dir / "repo").mkdir(parents=True)
             write_workspace_config(alpha_dir, alpha_branch)
 
@@ -803,14 +815,16 @@ class TestCleanWorkspaces(TestCase):
             os.chdir(root)
             try:
                 with (
-                    patch("atelier.cli.subprocess.run", fake_run),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
-                    patch("atelier.cli.delete_workspace_branch", fake_delete),
+                    patch("atelier.exec.subprocess.run", fake_run),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                    patch(
+                        "atelier.commands.clean.delete_workspace_branch", fake_delete
+                    ),
                 ):
-                    cli.clean_workspaces(
+                    clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=True,
                             force=True,
@@ -833,7 +847,7 @@ class TestCleanFlags(TestCase):
 
         with (
             patch.object(sys, "argv", ["atelier", "clean", "-A", "-F"]),
-            patch("atelier.cli.clean_workspaces", fake_clean),
+            patch("atelier.commands.clean.clean_workspaces", fake_clean),
         ):
             cli.main()
 
@@ -865,8 +879,8 @@ class TestFindCodexSession(TestCase):
             os.utime(older, (now - 100, now - 100))
             os.utime(newer, (now, now))
 
-            with patch("atelier.cli.Path.home", return_value=home):
-                session = cli.find_codex_session("01TEST", "feat-demo")
+            with patch("atelier.sessions.Path.home", return_value=home):
+                session = sessions_mod.find_codex_session("01TEST", "feat-demo")
 
             self.assertEqual(session, "session-new")
 
@@ -894,8 +908,8 @@ class TestFindCodexSession(TestCase):
                 encoding="utf-8",
             )
 
-            with patch("atelier.cli.Path.home", return_value=home):
-                session = cli.find_codex_session("01TEST", "feat-demo")
+            with patch("atelier.sessions.Path.home", return_value=home):
+                session = sessions_mod.find_codex_session("01TEST", "feat-demo")
 
             self.assertEqual(session, session_id)
 
@@ -905,8 +919,8 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
 
             original_cwd = Path.cwd()
@@ -918,19 +932,19 @@ class TestOpenWorkspace(TestCase):
                     commands.append(cmd)
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.git_current_branch", return_value="main"),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 workspace_branch = "scott/feat-demo"
-                workspace_dir = cli.workspace_dir_for_branch(
+                workspace_dir = paths.workspace_dir_for_branch(
                     project_dir, workspace_branch
                 )
                 self.assertTrue((workspace_dir / "AGENTS.md").exists())
@@ -976,8 +990,8 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
 
             original_cwd = Path.cwd()
@@ -994,20 +1008,20 @@ class TestOpenWorkspace(TestCase):
                     return "main"
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.git_current_branch", fake_current_branch),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.git_branch_fully_pushed", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", fake_current_branch),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.git.git_branch_fully_pushed", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name=None))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name=None))
 
                 workspace_branch = "feature/demo"
-                workspace_dir = cli.workspace_dir_for_branch(
+                workspace_dir = paths.workspace_dir_for_branch(
                     project_dir, workspace_branch
                 )
                 workspace_config = json.loads(
@@ -1024,8 +1038,8 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
 
             original_cwd = Path.cwd()
@@ -1037,17 +1051,17 @@ class TestOpenWorkspace(TestCase):
                     commands.append(cmd)
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.git_is_repo", return_value=True),
-                    patch("atelier.cli.git_current_branch", return_value="main"),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_is_repo", return_value=True),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 editor_index = next(
                     index for index, cmd in enumerate(commands) if cmd[:1] == ["true"]
@@ -1065,8 +1079,8 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data dir"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
 
             original_cwd = Path.cwd()
@@ -1080,23 +1094,23 @@ class TestOpenWorkspace(TestCase):
                     cwds.append(cwd)
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.git_is_repo", return_value=True),
-                    patch("atelier.cli.git_current_branch", return_value="main"),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_is_repo", return_value=True),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 editor_index = next(
                     index for index, cmd in enumerate(commands) if cmd[:1] == ["true"]
                 )
                 self.assertEqual(commands[editor_index][-1], "AGENTS.md")
-                workspace_dir = cli.workspace_dir_for_branch(
+                workspace_dir = paths.workspace_dir_for_branch(
                     project_dir, "scott/feat-demo"
                 )
                 self.assertEqual(cwds[editor_index], workspace_dir)
@@ -1107,12 +1121,14 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             config = write_open_config(project_dir)
 
             workspace_branch = "scott/feat-demo"
-            workspace_dir = cli.workspace_dir_for_branch(project_dir, workspace_branch)
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir, workspace_branch
+            )
             repo_dir = workspace_dir / "repo"
             repo_dir.mkdir(parents=True)
             subprocess.run(["git", "-C", str(repo_dir), "init"], check=True)
@@ -1140,16 +1156,16 @@ class TestOpenWorkspace(TestCase):
                     commands.append(cmd)
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.git_current_branch", return_value="main"),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 self.assertFalse(any(cmd[:1] == ["true"] for cmd in commands))
             finally:
@@ -1159,12 +1175,14 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             config = write_open_config(project_dir)
 
             workspace_branch = "scott/feat-demo"
-            workspace_dir = cli.workspace_dir_for_branch(project_dir, workspace_branch)
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir, workspace_branch
+            )
             repo_dir = workspace_dir / "repo"
             repo_dir.mkdir(parents=True)
             subprocess.run(["git", "-C", str(repo_dir), "init"], check=True)
@@ -1221,13 +1239,13 @@ class TestOpenWorkspace(TestCase):
                     commands.append(cmd)
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 self.assertFalse(
                     any(
@@ -1242,12 +1260,14 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
 
             workspace_branch = "scott/feat-demo"
-            workspace_dir = cli.workspace_dir_for_branch(project_dir, workspace_branch)
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir, workspace_branch
+            )
             workspace_dir.mkdir(parents=True)
             payload = {
                 "workspace": {
@@ -1275,17 +1295,20 @@ class TestOpenWorkspace(TestCase):
                         self.stdout = stdout
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
-                    patch("atelier.cli.git_current_branch", return_value="main"),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(),
+                    ),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
                     encoding="utf-8"
@@ -1299,12 +1322,14 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
 
             workspace_branch = "scott/feat-demo"
-            workspace_dir = cli.workspace_dir_for_branch(project_dir, workspace_branch)
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir, workspace_branch
+            )
             (workspace_dir / "repo").mkdir(parents=True)
 
             original_cwd = Path.cwd()
@@ -1320,15 +1345,20 @@ class TestOpenWorkspace(TestCase):
                         self.stdout = stdout
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(),
+                    ),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     with self.assertRaises(SystemExit):
-                        cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                        open_cmd.open_workspace(
+                            SimpleNamespace(workspace_name="feat-demo")
+                        )
             finally:
                 os.chdir(original_cwd)
 
@@ -1336,12 +1366,14 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
 
             workspace_branch = "scott/feat-demo"
-            workspace_dir = cli.workspace_dir_for_branch(project_dir, workspace_branch)
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir, workspace_branch
+            )
             repo_dir = workspace_dir / "repo"
             repo_dir.mkdir(parents=True)
             subprocess.run(["git", "-C", str(repo_dir), "init"], check=True)
@@ -1354,14 +1386,16 @@ class TestOpenWorkspace(TestCase):
                     return None
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     with self.assertRaises(SystemExit):
-                        cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                        open_cmd.open_workspace(
+                            SimpleNamespace(workspace_name="feat-demo")
+                        )
             finally:
                 os.chdir(original_cwd)
 
@@ -1369,8 +1403,8 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
 
             original_cwd = Path.cwd()
@@ -1386,22 +1420,25 @@ class TestOpenWorkspace(TestCase):
                         self.stdout = stdout
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
-                    patch("atelier.cli.git_current_branch", return_value="main"),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(),
+                    ),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     workspace_branch = "feature/demo-branch"
-                    cli.open_workspace(
+                    open_cmd.open_workspace(
                         SimpleNamespace(workspace_name=workspace_branch, raw=True)
                     )
 
-                workspace_dir = cli.workspace_dir_for_branch(
+                workspace_dir = paths.workspace_dir_for_branch(
                     project_dir, workspace_branch
                 )
                 self.assertTrue((workspace_dir / "AGENTS.md").exists())
@@ -1431,10 +1468,10 @@ class TestOpenWorkspace(TestCase):
                 },
             }
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             project_dir.mkdir(parents=True, exist_ok=True)
-            cli.project_config_path(project_dir).write_text(
+            paths.project_config_path(project_dir).write_text(
                 json.dumps(config), encoding="utf-8"
             )
             templates_dir = project_dir / "templates"
@@ -1457,20 +1494,23 @@ class TestOpenWorkspace(TestCase):
                         self.stdout = stdout
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
-                    patch("atelier.cli.git_current_branch", return_value="main"),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(),
+                    ),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 workspace_branch = "scott/feat-demo"
-                workspace_dir = cli.workspace_dir_for_branch(
+                workspace_dir = paths.workspace_dir_for_branch(
                     project_dir, workspace_branch
                 )
                 workspace_template = workspace_dir / "WORKSPACE.md"
@@ -1485,8 +1525,8 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
 
             original_cwd = Path.cwd()
@@ -1502,20 +1542,23 @@ class TestOpenWorkspace(TestCase):
                         self.stdout = stdout
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
-                    patch("atelier.cli.git_current_branch", return_value="main"),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(),
+                    ),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name="feat/demo"))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat/demo"))
 
                 workspace_branch = "scott/feat/demo"
-                workspace_dir = cli.workspace_dir_for_branch(
+                workspace_dir = paths.workspace_dir_for_branch(
                     project_dir, workspace_branch
                 )
                 workspace_config = json.loads(
@@ -1531,8 +1574,8 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(
                 project_dir,
                 branch={
@@ -1555,20 +1598,23 @@ class TestOpenWorkspace(TestCase):
                         self.stdout = stdout
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
-                    patch("atelier.cli.git_current_branch", return_value="main"),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(),
+                    ),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 workspace_branch = "scott/feat-demo"
-                workspace_dir = cli.workspace_dir_for_branch(
+                workspace_dir = paths.workspace_dir_for_branch(
                     project_dir, workspace_branch
                 )
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
@@ -1584,8 +1630,8 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
 
             original_cwd = Path.cwd()
@@ -1602,17 +1648,20 @@ class TestOpenWorkspace(TestCase):
                         self.stdout = stdout
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
-                    patch("atelier.cli.git_current_branch", return_value="main"),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(),
+                    ),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    cli.open_workspace(
+                    open_cmd.open_workspace(
                         SimpleNamespace(
                             workspace_name="feat-demo",
                             branch_pr="false",
@@ -1621,7 +1670,7 @@ class TestOpenWorkspace(TestCase):
                     )
 
                 workspace_branch = "scott/feat-demo"
-                workspace_dir = cli.workspace_dir_for_branch(
+                workspace_dir = paths.workspace_dir_for_branch(
                     project_dir, workspace_branch
                 )
                 workspace_config = json.loads(
@@ -1645,16 +1694,18 @@ class TestOpenWorkspace(TestCase):
             root = Path(tmp)
             origin_repo = init_local_repo(root)
             origin_raw = str(origin_repo)
-            origin_norm = cli.normalize_origin_url(origin_raw)
+            origin_norm = git.normalize_origin_url(origin_raw)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(origin_norm)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(origin_norm)
             write_open_config(
                 project_dir,
                 project={"origin": origin_norm, "repo_url": origin_raw},
             )
             workspace_branch = "scott/feat-demo"
-            workspace_dir = cli.workspace_dir_for_branch(project_dir, workspace_branch)
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir, workspace_branch
+            )
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1673,14 +1724,14 @@ class TestOpenWorkspace(TestCase):
                     subprocess.run(cmd, cwd=cwd, check=True)
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.git_is_repo", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=origin_raw),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_is_repo", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=origin_raw),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
                     encoding="utf-8"
@@ -1712,10 +1763,10 @@ class TestOpenWorkspace(TestCase):
             root = Path(tmp)
             origin_repo = init_local_repo_without_feature(root)
             origin_raw = str(origin_repo)
-            origin_norm = cli.normalize_origin_url(origin_raw)
+            origin_norm = git.normalize_origin_url(origin_raw)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(origin_norm)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(origin_norm)
             write_open_config(
                 project_dir,
                 project={"origin": origin_norm, "repo_url": origin_raw},
@@ -1733,16 +1784,16 @@ class TestOpenWorkspace(TestCase):
                     subprocess.run(cmd, cwd=cwd, check=True)
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=origin_raw),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=origin_raw),
                 ):
-                    cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 workspace_branch = "scott/feat-demo"
-                workspace_dir = cli.workspace_dir_for_branch(
+                workspace_dir = paths.workspace_dir_for_branch(
                     project_dir, workspace_branch
                 )
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
@@ -1757,8 +1808,8 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
 
             original_cwd = Path.cwd()
@@ -1775,25 +1826,28 @@ class TestOpenWorkspace(TestCase):
                         self.stdout = stdout
 
                 with (
-                    patch("atelier.cli.run_command", fake_run),
-                    patch("atelier.cli.find_codex_session", return_value=None),
-                    patch("atelier.cli.subprocess.run", return_value=DummyResult()),
-                    patch("atelier.cli.git_current_branch", return_value="main"),
-                    patch("atelier.cli.git_default_branch", return_value="main"),
-                    patch("atelier.cli.git_is_clean", return_value=True),
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(),
+                    ),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     workspace_branch = "feature/demo-branch"
-                    cli.open_workspace(
+                    open_cmd.open_workspace(
                         SimpleNamespace(
                             workspace_name=workspace_branch,
                             raw=True,
                         )
                     )
 
-                workspace_dir = cli.workspace_dir_for_branch(
+                workspace_dir = paths.workspace_dir_for_branch(
                     project_dir, workspace_branch
                 )
                 workspace_config = json.loads(
@@ -1818,11 +1872,13 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
             workspace_branch = "scott/feat-demo"
-            workspace_dir = cli.workspace_dir_for_branch(project_dir, workspace_branch)
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir, workspace_branch
+            )
             workspace_dir.mkdir(parents=True)
             write_workspace_config(workspace_dir, "scott/mismatch")
 
@@ -1830,12 +1886,14 @@ class TestOpenWorkspace(TestCase):
             os.chdir(root)
             try:
                 with (
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     with self.assertRaises(SystemExit):
-                        cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                        open_cmd.open_workspace(
+                            SimpleNamespace(workspace_name="feat-demo")
+                        )
             finally:
                 os.chdir(original_cwd)
 
@@ -1843,11 +1901,13 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(project_dir)
             workspace_branch = "scott/feat-demo"
-            workspace_dir = cli.workspace_dir_for_branch(project_dir, workspace_branch)
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir, workspace_branch
+            )
             workspace_dir.mkdir(parents=True)
             write_workspace_config(workspace_dir, workspace_branch)
 
@@ -1855,12 +1915,12 @@ class TestOpenWorkspace(TestCase):
             os.chdir(root)
             try:
                 with (
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     with self.assertRaises(SystemExit):
-                        cli.open_workspace(
+                        open_cmd.open_workspace(
                             SimpleNamespace(
                                 workspace_name="feat-demo",
                                 branch_pr="false",
@@ -1874,8 +1934,8 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
-            with patch("atelier.cli.atelier_data_dir", return_value=data_dir):
-                project_dir = cli.project_dir_for_origin(NORMALIZED_ORIGIN)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
             write_open_config(
                 project_dir,
                 branch={"prefix": "scott/", "history": "sideways"},
@@ -1885,11 +1945,13 @@ class TestOpenWorkspace(TestCase):
             os.chdir(root)
             try:
                 with (
-                    patch("atelier.cli.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.cli.git_repo_root", return_value=root),
-                    patch("atelier.cli.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     with self.assertRaises(SystemExit):
-                        cli.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+                        open_cmd.open_workspace(
+                            SimpleNamespace(workspace_name="feat-demo")
+                        )
             finally:
                 os.chdir(original_cwd)

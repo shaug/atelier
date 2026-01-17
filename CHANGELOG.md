@@ -2,11 +2,12 @@
 
 ## [0.4.0](https://github.com/shaug/atelier/compare/v0.3.0...v0.4.0) (2026-01-17)
 
-
 ### Features
 
-* derive default branch at runtime ([0140a4f](https://github.com/shaug/atelier/commit/0140a4ffecd290b922e0e88ccde10c81bd80c5fe))
-* simplify atelier state and defaults ([6290250](https://github.com/shaug/atelier/commit/62902501eeb30b6239a7a8d705a86504ff61c0d6))
+- derive default branch at runtime
+  ([0140a4f](https://github.com/shaug/atelier/commit/0140a4ffecd290b922e0e88ccde10c81bd80c5fe))
+- simplify atelier state and defaults
+  ([6290250](https://github.com/shaug/atelier/commit/62902501eeb30b6239a7a8d705a86504ff61c0d6))
 
 ## [0.3.0](https://github.com/shaug/atelier/compare/v0.2.0...v0.3.0) (2026-01-15)
 
