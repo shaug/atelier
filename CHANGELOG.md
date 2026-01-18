@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/shaug/atelier/compare/v0.4.0...v0.5.0) (2026-01-18)
+
+
+### Features
+
+* add pydantic config models ([cb0438d](https://github.com/shaug/atelier/commit/cb0438dea03ef380a7d464d296f798ea2f94fbb6))
+* migrate cli to typer ([7b14260](https://github.com/shaug/atelier/commit/7b14260250f8bc579465818997ed8de6d995d5d9))
+
+
+### Bug Fixes
+
+* fix the code and md formatting ([ea156fb](https://github.com/shaug/atelier/commit/ea156fb7d0eb520f85d5ebda823487e10a06c41e))
+* open workspace AGENTS.md in editor ([ac570a6](https://github.com/shaug/atelier/commit/ac570a617c443f00e139f8e96b5a6db02f8bcdf1))
+* refresh tool install deps ([0e177e3](https://github.com/shaug/atelier/commit/0e177e3b75ed35cc06abe88c1e50b88315bc9d55))
+
 ## [0.4.0](https://github.com/shaug/atelier/compare/v0.3.0...v0.4.0) (2026-01-17)
 
 ### Features
