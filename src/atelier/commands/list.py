@@ -9,7 +9,7 @@ def list_workspaces(args: object) -> None:
     _, _, origin = git.resolve_repo_origin(cwd)
     project_root = paths.project_dir_for_origin(origin)
     config_path = paths.project_config_path(project_root)
-    config_payload = config.load_json(config_path)
+    config_payload = config.load_project_config(config_path)
     if not config_payload:
         die("no Atelier project config found for this repo; run 'atelier init'")
 

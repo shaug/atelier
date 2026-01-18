@@ -18,14 +18,6 @@ def workspace_identifier(project_origin: str, workspace_branch: str) -> str:
     return f"atelier:{origin}/{branch}"
 
 
-def require_workspace_branch(config_path: Path, workspace_config: dict) -> str:
-    workspace_section = workspace_config.get("workspace", {})
-    branch = workspace_section.get("branch")
-    if not branch:
-        die(f"workspace config missing branch at {config_path}")
-    return str(branch)
-
-
 def workspace_candidate_branches(name: str, branch_prefix: str, raw: bool) -> list[str]:
     if raw:
         return [name]
@@ -40,17 +32,17 @@ def workspace_candidate_branches(name: str, branch_prefix: str, raw: bool) -> li
 
 def find_workspace_for_branch(
     project_dir: Path, branch: str
-) -> tuple[Path, dict] | None:
+) -> tuple[Path, config.WorkspaceConfig] | None:
     workspace_dir = workspace_dir_for_branch(project_dir, branch)
     config_path = workspace_config_path(workspace_dir)
     if not config_path.exists():
         if workspace_dir.exists():
             die("workspace config missing for existing workspace directory")
         return None
-    payload = config.load_json(config_path)
+    payload = config.load_workspace_config(config_path)
     if not payload:
         die("failed to load workspace config")
-    stored_branch = require_workspace_branch(config_path, payload)
+    stored_branch = payload.workspace.branch
     if stored_branch != branch:
         die("workspace branch does not match hashed directory")
     return workspace_dir, payload
@@ -72,8 +64,10 @@ def resolve_workspace_target(
         config_path = workspace_config_path(workspace_dir)
         if not config_path.exists():
             die("workspace config missing for existing workspace directory")
-        payload = config.load_json(config_path) or {}
-        stored_branch = require_workspace_branch(config_path, payload)
+        payload = config.load_workspace_config(config_path)
+        if not payload:
+            die("failed to load workspace config")
+        stored_branch = payload.workspace.branch
         if stored_branch != branch:
             die("workspace branch does not match hashed directory")
     return branch, workspace_dir, False
@@ -93,9 +87,10 @@ def normalize_workspace_name(value: str) -> str:
 
 def workspace_branch_for_dir(workspace_dir: Path) -> str:
     config_path = workspace_config_path(workspace_dir)
-    workspace_config = config.load_json(config_path) or {}
-    branch = require_workspace_branch(config_path, workspace_config)
-    return branch
+    workspace_config = config.load_workspace_config(config_path)
+    if not workspace_config:
+        die("failed to load workspace config")
+    return workspace_config.workspace.branch
 
 
 def ensure_workspace_metadata(
@@ -111,18 +106,15 @@ def ensure_workspace_metadata(
     workspace_config_exists = workspace_config_file.exists()
     if not workspace_config_exists:
         workspace_id = workspace_identifier(project_origin, workspace_branch)
-        workspace_config = {
-            "workspace": {
+        workspace_config = config.WorkspaceConfig(
+            workspace={
                 "branch": workspace_branch,
                 "branch_pr": branch_pr,
                 "branch_history": branch_history,
                 "id": workspace_id,
             },
-            "atelier": {
-                "version": __version__,
-                "created_at": config.utc_now(),
-            },
-        }
+            atelier={"version": __version__, "created_at": config.utc_now()},
+        )
         config.write_json(workspace_config_file, workspace_config)
 
     if agents_path.exists():
@@ -130,13 +122,8 @@ def ensure_workspace_metadata(
 
     if workspace_config_exists:
         stored_pr, stored_history = config.read_workspace_branch_settings(workspace_dir)
-        if stored_pr is None or not isinstance(stored_pr, bool):
-            die("workspace missing branch.pr setting")
-        if stored_history is None or not isinstance(stored_history, str):
-            die("workspace missing branch.history setting")
-        stored_history = config.normalize_branch_history(
-            stored_history, "workspace branch.history"
-        )
+        if stored_pr is None or stored_history is None:
+            die("workspace missing branch settings")
         integration_pr = stored_pr
         integration_history = stored_history
     else:
@@ -270,11 +257,8 @@ def append_workspace_branch_summary(
 
 
 def collect_workspaces(
-    project_root: Path, config_payload: dict, with_status: bool = True
+    project_root: Path, config_payload: config.ProjectConfig, with_status: bool = True
 ) -> list[dict]:
-    branch_config = config.resolve_branch_config(config_payload)
-    config.resolve_branch_pr(branch_config)
-    config.resolve_branch_history(branch_config)
     workspaces_root = project_root / WORKSPACES_DIRNAME
     if not workspaces_root.exists():
         return []
@@ -292,11 +276,11 @@ def collect_workspaces(
 
     def build_workspace(config_path: Path) -> dict | None:
         workspace_dir = config_path.parent
-        payload = config.load_json(config_path)
+        payload = config.load_workspace_config(config_path)
         if not payload:
             warn(f"failed to load workspace config at {config_path}")
             return None
-        branch = require_workspace_branch(config_path, payload)
+        branch = payload.workspace.branch
         workspace_name = branch
         repo_dir = workspace_dir / "repo"
         checked_out: bool | None = None

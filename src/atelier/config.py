@@ -4,12 +4,22 @@ import shlex
 import shutil
 from pathlib import Path
 
+from pydantic import BaseModel, ValidationError
+
 from . import __version__
 from .editor import system_editor_default
 from .io import die, prompt
+from .models import (
+    BRANCH_HISTORY_VALUES,
+    AgentConfig,
+    AtelierSection,
+    BranchConfig,
+    EditorConfig,
+    ProjectConfig,
+    ProjectSection,
+    WorkspaceConfig,
+)
 from .paths import workspace_config_path
-
-BRANCH_HISTORY_VALUES = ("manual", "squash", "merge", "rebase")
 
 
 def utc_now() -> str:
@@ -24,26 +34,60 @@ def load_json(path: Path) -> dict | None:
         return json.load(fh)
 
 
-def write_json(path: Path, payload: dict) -> None:
+def write_json(path: Path, payload: dict | BaseModel) -> None:
+    if isinstance(payload, BaseModel):
+        payload = payload.model_dump()
     with path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)
         fh.write("\n")
 
 
-def resolve_branch_config(config: dict) -> dict:
-    branch = config.get("branch")
-    if isinstance(branch, dict):
-        return branch
-    return {}
+def parse_project_config(
+    payload: dict, source: Path | str | None = None
+) -> ProjectConfig:
+    try:
+        return ProjectConfig.model_validate(payload)
+    except ValidationError as exc:
+        location = f" at {source}" if source else ""
+        die(f"invalid project config{location}:\n{exc}")
 
 
-def resolve_branch_pr(branch_config: dict) -> bool:
-    if "pr" not in branch_config:
-        return True
-    value = branch_config.get("pr")
-    if isinstance(value, bool):
-        return value
-    die("branch.pr must be a boolean")
+def load_project_config(path: Path) -> ProjectConfig | None:
+    payload = load_json(path)
+    if not payload:
+        return None
+    return parse_project_config(payload, path)
+
+
+def parse_workspace_config(
+    payload: dict, source: Path | str | None = None
+) -> WorkspaceConfig:
+    try:
+        return WorkspaceConfig.model_validate(payload)
+    except ValidationError as exc:
+        location = f" at {source}" if source else ""
+        die(f"invalid workspace config{location}:\n{exc}")
+
+
+def load_workspace_config(path: Path) -> WorkspaceConfig | None:
+    payload = load_json(path)
+    if not payload:
+        return None
+    return parse_workspace_config(payload, path)
+
+
+def resolve_branch_config(config: ProjectConfig | dict) -> BranchConfig:
+    if isinstance(config, ProjectConfig):
+        return config.branch
+    branch = config.get("branch") if isinstance(config, dict) else None
+    try:
+        return BranchConfig.model_validate(branch or {})
+    except ValidationError as exc:
+        die(f"invalid branch config:\n{exc}")
+
+
+def resolve_branch_pr(branch_config: BranchConfig) -> bool:
+    return branch_config.pr
 
 
 def normalize_branch_history(value: object, source: str) -> str:
@@ -55,11 +99,8 @@ def normalize_branch_history(value: object, source: str) -> str:
     return normalized
 
 
-def resolve_branch_history(branch_config: dict) -> str:
-    if "history" not in branch_config:
-        return "manual"
-    value = branch_config.get("history")
-    return normalize_branch_history(value, "branch.history")
+def resolve_branch_history(branch_config: BranchConfig) -> str:
+    return branch_config.history
 
 
 def parse_branch_pr_override(value: object) -> bool:
@@ -93,11 +134,14 @@ def resolve_branch_overrides(
 def read_workspace_branch_settings(
     workspace_dir: Path,
 ) -> tuple[bool | None, str | None]:
-    workspace_config = load_json(workspace_config_path(workspace_dir)) or {}
-    workspace_section = workspace_config.get("workspace", {})
-    branch_pr = workspace_section.get("branch_pr")
-    branch_history = workspace_section.get("branch_history")
-    return branch_pr, branch_history
+    config_path = workspace_config_path(workspace_dir)
+    workspace_config = load_workspace_config(config_path)
+    if not workspace_config:
+        return None, None
+    return (
+        workspace_config.workspace.branch_pr,
+        workspace_config.workspace.branch_history,
+    )
 
 
 def read_arg(args: object | None, name: str) -> object | None:
@@ -107,23 +151,26 @@ def read_arg(args: object | None, name: str) -> object | None:
 
 
 def build_project_config(
-    existing: dict,
+    existing: ProjectConfig | dict,
     origin: str,
     origin_raw: str,
     args: object | None,
-) -> dict:
-    branch_config = resolve_branch_config(existing)
-    branch_prefix_default = branch_config.get("prefix")
-    if branch_prefix_default is None:
-        branch_prefix_default = ""
+) -> ProjectConfig:
+    existing_config = (
+        existing
+        if isinstance(existing, ProjectConfig)
+        else parse_project_config(existing)
+    )
+    branch_config = existing_config.branch
+    branch_prefix_default = branch_config.prefix or ""
     branch_prefix_arg = read_arg(args, "branch_prefix")
     if branch_prefix_arg is not None:
         branch_prefix = str(branch_prefix_arg)
     else:
         branch_prefix = prompt("Branch prefix (optional)", branch_prefix_default)
 
-    branch_pr_default = resolve_branch_pr(branch_config)
-    branch_history_default = resolve_branch_history(branch_config)
+    branch_pr_default = branch_config.pr
+    branch_history_default = branch_config.history
 
     branch_pr_arg = read_arg(args, "branch_pr")
     if branch_pr_arg is not None:
@@ -152,13 +199,7 @@ def build_project_config(
             branch_history_input, "branch.history"
         )
 
-    agent_default_default = (
-        existing.get("agent", {}).get("default")
-        if isinstance(existing.get("agent"), dict)
-        else None
-    )
-    if not agent_default_default:
-        agent_default_default = "codex"
+    agent_default_default = existing_config.agent.default or "codex"
     agent_arg = read_arg(args, "agent")
     if agent_arg is not None:
         agent_default = str(agent_arg)
@@ -168,20 +209,17 @@ def build_project_config(
         die("only 'codex' is supported as the agent in v2")
 
     editor_prompt_default = None
-    if isinstance(existing.get("editor"), dict):
-        editor_default_default = existing.get("editor", {}).get("default")
-        if editor_default_default:
-            editor_options_default = (
-                existing.get("editor", {})
-                .get("options", {})
-                .get(editor_default_default, [])
+    editor_default_default = existing_config.editor.default
+    if editor_default_default:
+        editor_options_default = existing_config.editor.options.get(
+            editor_default_default, []
+        )
+        if editor_options_default:
+            editor_prompt_default = shlex.join(
+                [editor_default_default, *editor_options_default]
             )
-            if isinstance(editor_options_default, list) and editor_options_default:
-                editor_prompt_default = shlex.join(
-                    [editor_default_default, *editor_options_default]
-                )
-            else:
-                editor_prompt_default = editor_default_default
+        else:
+            editor_prompt_default = editor_default_default
     if not editor_prompt_default:
         if shutil.which("cursor"):
             editor_prompt_default = "cursor"
@@ -197,48 +235,20 @@ def build_project_config(
     editor_default = editor_parts[0]
     editor_input_options = editor_parts[1:]
 
-    atelier_section = (
-        existing.get("atelier") if isinstance(existing.get("atelier"), dict) else {}
-    )
-    atelier_created_at = atelier_section.get("created_at") or utc_now()
-    atelier_version = atelier_section.get("version") or __version__
+    atelier_created_at = existing_config.atelier.created_at or utc_now()
+    atelier_version = existing_config.atelier.version or __version__
 
-    agent_options = {}
-    if isinstance(existing.get("agent"), dict):
-        existing_options = existing.get("agent", {}).get("options")
-        if isinstance(existing_options, dict):
-            agent_options = existing_options
-    if "codex" not in agent_options:
-        agent_options["codex"] = []
+    agent_options = dict(existing_config.agent.options)
+    agent_options.setdefault("codex", [])
 
-    editor_options = {}
-    if isinstance(existing.get("editor"), dict):
-        existing_editor_options = existing.get("editor", {}).get("options")
-        if isinstance(existing_editor_options, dict):
-            editor_options = existing_editor_options
+    editor_options = dict(existing_config.editor.options)
     if editor_input_options:
         editor_options = {**editor_options, editor_default: editor_input_options}
 
-    return {
-        "project": {
-            "origin": origin,
-            "repo_url": origin_raw,
-        },
-        "branch": {
-            "prefix": branch_prefix,
-            "pr": branch_pr,
-            "history": branch_history,
-        },
-        "agent": {
-            "default": agent_default,
-            "options": agent_options,
-        },
-        "editor": {
-            "default": editor_default,
-            "options": editor_options,
-        },
-        "atelier": {
-            "version": atelier_version,
-            "created_at": atelier_created_at,
-        },
-    }
+    return ProjectConfig(
+        project=ProjectSection(origin=origin, repo_url=origin_raw),
+        branch=BranchConfig(prefix=branch_prefix, pr=branch_pr, history=branch_history),
+        agent=AgentConfig(default=agent_default, options=agent_options),
+        editor=EditorConfig(default=editor_default, options=editor_options),
+        atelier=AtelierSection(version=atelier_version, created_at=atelier_created_at),
+    )

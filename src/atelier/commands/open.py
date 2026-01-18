@@ -21,7 +21,7 @@ def open_workspace(args: object) -> None:
 
     project_dir = paths.project_dir_for_origin(origin)
     config_path = paths.project_config_path(project_dir)
-    config_payload = config.load_json(config_path) or {}
+    config_payload = config.load_project_config(config_path)
     if not config_payload:
         config_payload = config.build_project_config({}, origin, origin_raw, None)
         project.ensure_project_dirs(project_dir)
@@ -30,24 +30,23 @@ def open_workspace(args: object) -> None:
     else:
         project.ensure_project_dirs(project_dir)
 
-    project_section = (
-        config_payload.get("project")
-        if isinstance(config_payload.get("project"), dict)
-        else {}
-    )
-    project_origin = project_section.get("origin")
+    project_origin = config_payload.project.origin
     if not project_origin:
-        project_section["origin"] = origin
-        project_section.setdefault("repo_url", origin_raw)
-        config_payload["project"] = project_section
+        project_section = config_payload.project.model_copy(
+            update={
+                "origin": origin,
+                "repo_url": config_payload.project.repo_url or origin_raw,
+            }
+        )
+        config_payload = config_payload.model_copy(update={"project": project_section})
         config.write_json(config_path, config_payload)
         project_origin = origin
     if project_origin != origin:
         die("project origin does not match current repo origin")
 
-    branch_config = config.resolve_branch_config(config_payload)
-    branch_pr = config.resolve_branch_pr(branch_config)
-    branch_history = config.resolve_branch_history(branch_config)
+    branch_config = config_payload.branch
+    branch_pr = branch_config.pr
+    branch_history = branch_config.history
     branch_pr_override, branch_history_override = config.resolve_branch_overrides(args)
     effective_branch_pr = (
         branch_pr_override if branch_pr_override is not None else branch_pr
@@ -73,7 +72,7 @@ def open_workspace(args: object) -> None:
     if not workspace_name_input:
         die("workspace branch is required")
 
-    branch_prefix = branch_config.get("prefix", "")
+    branch_prefix = branch_config.prefix
     workspace_branch, workspace_dir, workspace_config_exists = (
         workspace.resolve_workspace_target(
             project_dir,
@@ -93,20 +92,15 @@ def open_workspace(args: object) -> None:
             stored_pr, stored_history = config.read_workspace_branch_settings(
                 workspace_dir
             )
+            if stored_pr is None or stored_history is None:
+                die("workspace missing branch settings")
             if branch_pr_override is not None:
-                if stored_pr is None or not isinstance(stored_pr, bool):
-                    die("workspace missing branch.pr setting")
                 if stored_pr != branch_pr_override:
                     die(
                         "specified branch.pr does not match workspace config "
                         f"({branch_pr_override} != {stored_pr})"
                     )
             if branch_history_override is not None:
-                if stored_history is None or not isinstance(stored_history, str):
-                    die("workspace missing branch.history setting")
-                stored_history = config.normalize_branch_history(
-                    stored_history, "workspace branch.history"
-                )
                 if stored_history != branch_history_override:
                     die(
                         "specified branch.history does not match workspace config "
@@ -218,14 +212,11 @@ def open_workspace(args: object) -> None:
             ["git", "-C", str(repo_dir), "checkout", "-b", workspace_branch]
         )
 
-    agent_default = config_payload.get("agent", {}).get("default", "codex")
+    agent_default = config_payload.agent.default
     if agent_default != "codex":
         die("only 'codex' is supported as the agent in v2")
 
-    agent_options = config_payload.get("agent", {}).get("options", {}).get("codex", [])
-    if not isinstance(agent_options, list):
-        agent_options = []
-    agent_options = [str(opt) for opt in agent_options]
+    agent_options = config_payload.agent.options.get("codex", [])
 
     if is_new_workspace and existing_branch:
         workspace.append_workspace_branch_summary(
@@ -257,7 +248,7 @@ def open_workspace(args: object) -> None:
         )
 
 
-def resolve_implicit_workspace_name(repo_root: Path, config_payload: dict) -> str:
+def resolve_implicit_workspace_name(repo_root: Path, _config_payload: object) -> str:
     default_branch = git.git_default_branch(repo_root)
     if not default_branch:
         die("failed to determine default branch from repo")

@@ -19,8 +19,8 @@ def init_project(args: object) -> None:
 
     project_dir = paths.project_dir_for_origin(origin)
     config_path = paths.project_config_path(project_dir)
-    existing = config.load_json(config_path) or {}
-    payload = config.build_project_config(existing, origin, origin_raw, args)
+    existing = config.load_project_config(config_path)
+    payload = config.build_project_config(existing or {}, origin, origin_raw, args)
     project.ensure_project_dirs(project_dir)
     config.write_json(config_path, payload)
     project.ensure_project_scaffold(
