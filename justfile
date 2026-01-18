@@ -2,7 +2,7 @@ set dotenv-load := false
 
 # Install globally for day-to-day use
 install:
-  uv tool install --editable .
+  uv tool install --editable . --upgrade --reinstall
   uv tool update-shell
 
 # Editable install in a local venv
