@@ -13,6 +13,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from typer.testing import CliRunner  # noqa: E402
+
 import atelier.cli as cli  # noqa: E402
 import atelier.commands.clean as clean_cmd  # noqa: E402
 import atelier.commands.init as init_cmd  # noqa: E402
@@ -845,11 +847,11 @@ class TestCleanFlags(TestCase):
             captured["all"] = args.all
             captured["force"] = args.force
 
-        with (
-            patch.object(sys, "argv", ["atelier", "clean", "-A", "-F"]),
-            patch("atelier.commands.clean.clean_workspaces", fake_clean),
-        ):
-            cli.main()
+        runner = CliRunner()
+        with patch("atelier.commands.clean.clean_workspaces", fake_clean):
+            result = runner.invoke(cli.app, ["clean", "-A", "-F"])
+
+        self.assertEqual(result.exit_code, 0)
 
         self.assertTrue(captured["all"])
         self.assertTrue(captured["force"])

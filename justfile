@@ -12,7 +12,7 @@ install-dev:
 
 # Run the test suite
 test:
-  python -m unittest discover -s tests
+  uv run python -m unittest discover -s tests
 
 # Run lint checks
 lint:

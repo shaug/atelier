@@ -1,4 +1,7 @@
-import argparse
+from types import SimpleNamespace
+from typing import Annotated
+
+import typer
 
 from . import __version__
 from .commands import clean as clean_cmd
@@ -6,107 +9,158 @@ from .commands import init as init_cmd
 from .commands import list as list_cmd
 from .commands import open as open_cmd
 
-
-def _init_command(args: argparse.Namespace) -> None:
-    init_cmd.init_project(args)
+app = typer.Typer(add_completion=False)
 
 
-def _open_command(args: argparse.Namespace) -> None:
-    open_cmd.open_workspace(args)
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(__version__)
+        raise typer.Exit()
 
 
-def _list_command(args: argparse.Namespace) -> None:
-    list_cmd.list_workspaces(args)
+@app.callback()
+def app_callback(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            help="Show the version and exit.",
+            callback=_version_callback,
+            is_eager=True,
+        ),
+    ] = False,
+) -> None:
+    """Atelier CLI."""
 
 
-def _clean_command(args: argparse.Namespace) -> None:
-    clean_cmd.clean_workspaces(args)
+@app.command("init", help="initialize a project")
+def init_command(
+    branch_prefix: Annotated[
+        str | None,
+        typer.Option("--branch-prefix", help="prefix for workspace branches"),
+    ] = None,
+    branch_pr: Annotated[
+        str | None,
+        typer.Option(
+            "--branch-pr",
+            help="expect pull requests for workspace branches (true/false)",
+        ),
+    ] = None,
+    branch_history: Annotated[
+        str | None,
+        typer.Option(
+            "--branch-history",
+            help="branch history policy (manual|squash|merge|rebase)",
+        ),
+    ] = None,
+    agent: Annotated[str | None, typer.Option("--agent", help="agent name")] = None,
+    editor: Annotated[
+        str | None, typer.Option("--editor", help="editor command")
+    ] = None,
+    workspace_template: Annotated[
+        bool,
+        typer.Option(
+            "--workspace-template",
+            help="create templates/WORKSPACE.md",
+        ),
+    ] = False,
+) -> None:
+    init_cmd.init_project(
+        SimpleNamespace(
+            branch_prefix=branch_prefix,
+            branch_pr=branch_pr,
+            branch_history=branch_history,
+            agent=agent,
+            editor=editor,
+            workspace_template=workspace_template,
+        )
+    )
+
+
+@app.command("open", help="open or create a workspace")
+def open_command(
+    workspace_name: Annotated[
+        str | None,
+        typer.Argument(
+            help="workspace branch (defaults to current branch when criteria are met)",
+        ),
+    ] = None,
+    raw: Annotated[
+        bool,
+        typer.Option(
+            "--raw",
+            help="treat the argument as the full branch name",
+        ),
+    ] = False,
+    branch_pr: Annotated[
+        str | None,
+        typer.Option(
+            "--branch-pr",
+            help="override pull request expectation (true/false)",
+        ),
+    ] = None,
+    branch_history: Annotated[
+        str | None,
+        typer.Option(
+            "--branch-history",
+            help="override history policy (manual|squash|merge|rebase)",
+        ),
+    ] = None,
+) -> None:
+    open_cmd.open_workspace(
+        SimpleNamespace(
+            workspace_name=workspace_name,
+            raw=raw,
+            branch_pr=branch_pr,
+            branch_history=branch_history,
+        )
+    )
+
+
+@app.command("list", help="list workspaces")
+def list_command(
+    status: Annotated[
+        bool,
+        typer.Option(
+            "--status",
+            help="include workspace status columns",
+        ),
+    ] = False,
+) -> None:
+    list_cmd.list_workspaces(SimpleNamespace(status=status))
+
+
+@app.command("clean", help="clean workspaces")
+def clean_command(
+    all_: Annotated[
+        bool,
+        typer.Option("--all", "-A", help="delete all workspaces regardless of state"),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-F", help="delete without confirmation"),
+    ] = False,
+    no_branch: Annotated[
+        bool,
+        typer.Option("--no-branch", help="do not delete workspace branches"),
+    ] = False,
+    workspace_names: Annotated[
+        list[str] | None,
+        typer.Argument(help="workspace branches to delete"),
+    ] = None,
+) -> None:
+    clean_cmd.clean_workspaces(
+        SimpleNamespace(
+            all=all_,
+            force=force,
+            no_branch=no_branch,
+            workspace_names=workspace_names or [],
+        )
+    )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="atelier")
-    parser.add_argument("--version", action="version", version=__version__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    init_parser = subparsers.add_parser("init", help="initialize a project")
-    init_parser.add_argument(
-        "--branch-prefix", dest="branch_prefix", help="prefix for workspace branches"
-    )
-    init_parser.add_argument(
-        "--branch-pr",
-        dest="branch_pr",
-        help="expect pull requests for workspace branches (true/false)",
-    )
-    init_parser.add_argument(
-        "--branch-history",
-        dest="branch_history",
-        help="branch history policy (manual|squash|merge|rebase)",
-    )
-    init_parser.add_argument("--agent", dest="agent", help="agent name")
-    init_parser.add_argument("--editor", dest="editor", help="editor command")
-    init_parser.add_argument(
-        "--workspace-template",
-        action="store_true",
-        help="create templates/WORKSPACE.md",
-    )
-    init_parser.set_defaults(func=_init_command)
-
-    open_parser = subparsers.add_parser("open", help="open or create a workspace")
-    open_parser.add_argument(
-        "workspace_name",
-        nargs="?",
-        help="workspace branch (defaults to current branch when criteria are met)",
-    )
-    open_parser.add_argument(
-        "--raw",
-        action="store_true",
-        help="treat the argument as the full branch name",
-    )
-    open_parser.add_argument(
-        "--branch-pr",
-        dest="branch_pr",
-        help="override pull request expectation (true/false)",
-    )
-    open_parser.add_argument(
-        "--branch-history",
-        dest="branch_history",
-        help="override history policy (manual|squash|merge|rebase)",
-    )
-    open_parser.set_defaults(func=_open_command)
-
-    list_parser = subparsers.add_parser("list", help="list workspaces")
-    list_parser.add_argument(
-        "--status",
-        action="store_true",
-        help="include workspace status columns",
-    )
-    list_parser.set_defaults(func=_list_command)
-
-    clean_parser = subparsers.add_parser("clean", help="clean workspaces")
-    clean_parser.add_argument(
-        "-A",
-        "--all",
-        action="store_true",
-        help="delete all workspaces regardless of state",
-    )
-    clean_parser.add_argument(
-        "-F",
-        "--force",
-        action="store_true",
-        help="delete without confirmation",
-    )
-    clean_parser.add_argument(
-        "--no-branch",
-        action="store_true",
-        help="do not delete workspace branches",
-    )
-    clean_parser.add_argument(
-        "workspace_names", nargs="*", help="workspace branches to delete"
-    )
-    clean_parser.set_defaults(func=_clean_command)
-
-    args = parser.parse_args()
-    args.func(args)
+    app()
 
 
 if __name__ == "__main__":
