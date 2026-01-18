@@ -1,3 +1,5 @@
+"""Pydantic models for Atelier configuration data."""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -9,6 +11,17 @@ BranchHistory = Literal["manual", "squash", "merge", "rebase"]
 
 
 class BranchConfig(BaseModel):
+    """Branch policy configuration for a project.
+
+    Attributes:
+        prefix: Prefix applied to workspace branches.
+        pr: Whether pull requests are expected.
+        history: History policy (manual|squash|merge|rebase).
+
+    Example:
+        >>> BranchConfig(prefix="scott/", pr=False, history="rebase")
+        BranchConfig(...)
+    """
     model_config = ConfigDict(extra="allow")
 
     prefix: str = ""
@@ -31,6 +44,16 @@ class BranchConfig(BaseModel):
 
 
 class ProjectSection(BaseModel):
+    """Project identification metadata.
+
+    Attributes:
+        origin: Normalized origin string.
+        repo_url: Raw origin URL.
+
+    Example:
+        >>> ProjectSection(origin="github.com/org/repo")
+        ProjectSection(...)
+    """
     model_config = ConfigDict(extra="allow")
 
     origin: str | None = None
@@ -38,6 +61,16 @@ class ProjectSection(BaseModel):
 
 
 class AgentConfig(BaseModel):
+    """Agent configuration for the project.
+
+    Attributes:
+        default: Default agent name.
+        options: Mapping of agent names to argument lists.
+
+    Example:
+        >>> AgentConfig(default="codex", options={"codex": ["--profile", "fast"]})
+        AgentConfig(...)
+    """
     model_config = ConfigDict(extra="allow")
 
     default: str = "codex"
@@ -57,6 +90,16 @@ class AgentConfig(BaseModel):
 
 
 class EditorConfig(BaseModel):
+    """Editor configuration for the project.
+
+    Attributes:
+        default: Default editor command.
+        options: Mapping of editor names to argument lists.
+
+    Example:
+        >>> EditorConfig(default="cursor", options={"cursor": ["--reuse-window"]})
+        EditorConfig(...)
+    """
     model_config = ConfigDict(extra="allow")
 
     default: str | None = None
@@ -76,6 +119,16 @@ class EditorConfig(BaseModel):
 
 
 class AtelierSection(BaseModel):
+    """Metadata for Atelier itself stored in configs.
+
+    Attributes:
+        version: Atelier version string.
+        created_at: ISO-8601 UTC timestamp.
+
+    Example:
+        >>> AtelierSection(version="0.4.0", created_at="2026-01-18T00:00:00Z")
+        AtelierSection(...)
+    """
     model_config = ConfigDict(extra="allow")
 
     version: str | None = None
@@ -83,6 +136,19 @@ class AtelierSection(BaseModel):
 
 
 class ProjectConfig(BaseModel):
+    """Top-level project configuration model.
+
+    Attributes:
+        project: Project metadata section.
+        branch: Branch policy section.
+        agent: Agent configuration section.
+        editor: Editor configuration section.
+        atelier: Atelier metadata section.
+
+    Example:
+        >>> ProjectConfig(project=ProjectSection(origin="github.com/org/repo"))
+        ProjectConfig(...)
+    """
     model_config = ConfigDict(extra="allow")
 
     project: ProjectSection = Field(default_factory=ProjectSection)
@@ -93,6 +159,18 @@ class ProjectConfig(BaseModel):
 
 
 class WorkspaceSection(BaseModel):
+    """Workspace-specific configuration.
+
+    Attributes:
+        branch: Workspace branch name.
+        branch_pr: Whether pull requests are expected.
+        branch_history: History policy (manual|squash|merge|rebase).
+        id: Workspace identifier string.
+
+    Example:
+        >>> WorkspaceSection(branch="feat/demo", branch_pr=True, branch_history="manual")
+        WorkspaceSection(...)
+    """
     model_config = ConfigDict(extra="allow")
 
     branch: str
@@ -116,6 +194,16 @@ class WorkspaceSection(BaseModel):
 
 
 class WorkspaceConfig(BaseModel):
+    """Top-level workspace configuration model.
+
+    Attributes:
+        workspace: Workspace section.
+        atelier: Atelier metadata section.
+
+    Example:
+        >>> WorkspaceConfig(workspace=WorkspaceSection(branch="feat/demo"))
+        WorkspaceConfig(...)
+    """
     model_config = ConfigDict(extra="allow")
 
     workspace: WorkspaceSection

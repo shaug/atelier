@@ -1,3 +1,12 @@
+"""Command-line interface entrypoint for Atelier.
+
+Defines the Typer app, global options, and subcommands that delegate to the
+implementation modules under ``atelier.commands``.
+
+Example:
+    $ atelier --help
+"""
+
 from types import SimpleNamespace
 from typing import Annotated
 
@@ -9,10 +18,28 @@ from .commands import init as init_cmd
 from .commands import list as list_cmd
 from .commands import open as open_cmd
 
-app = typer.Typer(add_completion=False)
+app = typer.Typer(
+    add_completion=False,
+    help=(
+        "Workspace-first CLI for managing isolated, agent-assisted work. "
+        "Use 'atelier init' to register a repo, then 'atelier open' to create "
+        "or resume a workspace that owns its own checkout and agent session."
+    ),
+)
 
 
 def _version_callback(value: bool) -> None:
+    """Handle the ``--version`` option and exit early.
+
+    Args:
+        value: ``True`` when ``--version`` is provided.
+
+    Returns:
+        None. Raises ``typer.Exit`` to stop execution when ``value`` is true.
+
+    Example:
+        $ atelier --version
+    """
     if value:
         typer.echo(__version__)
         raise typer.Exit()
@@ -30,10 +57,23 @@ def app_callback(
         ),
     ] = False,
 ) -> None:
-    """Atelier CLI."""
+    """Workspace-first CLI for managing isolated, agent-assisted work.
+
+    Args:
+        version: When true, prints the CLI version and exits.
+
+    Returns:
+        None.
+
+    Example:
+        $ atelier init
+    """
 
 
-@app.command("init", help="initialize a project")
+@app.command(
+    "init",
+    help="Register the current repo as an Atelier project in the data directory.",
+)
 def init_command(
     branch_prefix: Annotated[
         str | None,
@@ -65,6 +105,22 @@ def init_command(
         ),
     ] = False,
 ) -> None:
+    """Initialize an Atelier project for the current Git repo.
+
+    Args:
+        branch_prefix: Prefix for new workspace branches (optional).
+        branch_pr: Whether workspace branches expect pull requests (true/false).
+        branch_history: History policy (manual|squash|merge|rebase).
+        agent: Agent name (currently only ``codex``).
+        editor: Editor command used to open ``AGENTS.md``.
+        workspace_template: Create ``templates/WORKSPACE.md`` when true.
+
+    Returns:
+        None.
+
+    Example:
+        $ atelier init --branch-prefix scott/ --branch-history rebase
+    """
     init_cmd.init_project(
         SimpleNamespace(
             branch_prefix=branch_prefix,
@@ -77,7 +133,10 @@ def init_command(
     )
 
 
-@app.command("open", help="open or create a workspace")
+@app.command(
+    "open",
+    help="Create or open a workspace, ensure its checkout, then launch Codex.",
+)
 def open_command(
     workspace_name: Annotated[
         str | None,
@@ -107,6 +166,21 @@ def open_command(
         ),
     ] = None,
 ) -> None:
+    """Open or create a workspace and launch the agent.
+
+    Args:
+        workspace_name: Workspace branch name. When omitted, the current branch
+            may be used if it meets the implicit-open criteria.
+        raw: Treat the argument as the full branch name (no prefix lookup).
+        branch_pr: Override pull request expectation (true/false).
+        branch_history: Override history policy (manual|squash|merge|rebase).
+
+    Returns:
+        None.
+
+    Example:
+        $ atelier open feat/new-search
+    """
     open_cmd.open_workspace(
         SimpleNamespace(
             workspace_name=workspace_name,
@@ -117,7 +191,7 @@ def open_command(
     )
 
 
-@app.command("list", help="list workspaces")
+@app.command("list", help="List workspaces for the current project.")
 def list_command(
     status: Annotated[
         bool,
@@ -127,10 +201,24 @@ def list_command(
         ),
     ] = False,
 ) -> None:
+    """List workspaces for the current project.
+
+    Args:
+        status: When true, include status columns in the output.
+
+    Returns:
+        None.
+
+    Example:
+        $ atelier list --status
+    """
     list_cmd.list_workspaces(SimpleNamespace(status=status))
 
 
-@app.command("clean", help="clean workspaces")
+@app.command(
+    "clean",
+    help="Delete workspaces safely (clean + pushed by default).",
+)
 def clean_command(
     all_: Annotated[
         bool,
@@ -149,6 +237,20 @@ def clean_command(
         typer.Argument(help="workspace branches to delete"),
     ] = None,
 ) -> None:
+    """Delete workspaces safely based on their status or explicit targets.
+
+    Args:
+        all_: Delete all workspaces regardless of state when true.
+        force: Delete without confirmation prompts when true.
+        no_branch: Skip deleting local/remote workspace branches when true.
+        workspace_names: Workspace branches to delete (optional).
+
+    Returns:
+        None.
+
+    Example:
+        $ atelier clean --all --force
+    """
     clean_cmd.clean_workspaces(
         SimpleNamespace(
             all=all_,
@@ -160,6 +262,16 @@ def clean_command(
 
 
 def main() -> None:
+    """Run the Atelier CLI application.
+
+    Returns:
+        None.
+
+    Example:
+        >>> from atelier.cli import main
+        >>> callable(main)
+        True
+    """
     app()
 
 

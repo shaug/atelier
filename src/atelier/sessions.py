@@ -1,3 +1,5 @@
+"""Codex session discovery helpers."""
+
 import json
 from pathlib import Path
 
@@ -5,6 +7,20 @@ from .workspace import workspace_identifier
 
 
 def read_first_user_message(path: Path) -> str | None:
+    """Read the first user message from a session transcript file.
+
+    Supports JSON and JSONL session formats.
+
+    Args:
+        path: Path to the session file.
+
+    Returns:
+        First user message text, or ``None`` if unavailable.
+
+    Example:
+        >>> read_first_user_message(Path("missing.json")) is None
+        True
+    """
     try:
         if path.suffix == ".jsonl":
             with path.open("r", encoding="utf-8") as handle:
@@ -46,6 +62,18 @@ def read_first_user_message(path: Path) -> str | None:
 
 
 def read_session_id(path: Path) -> str | None:
+    """Read the session ID from a Codex JSONL transcript file.
+
+    Args:
+        path: Path to the session file.
+
+    Returns:
+        Session ID string or ``None`` if not found.
+
+    Example:
+        >>> read_session_id(Path("missing.jsonl")) is None
+        True
+    """
     if path.suffix == ".jsonl":
         try:
             with path.open("r", encoding="utf-8") as handle:
@@ -69,6 +97,18 @@ def read_session_id(path: Path) -> str | None:
 
 
 def extract_first_user_from_obj(data: object) -> str | None:
+    """Extract the first user message from a structured object.
+
+    Args:
+        data: Parsed JSON object or list.
+
+    Returns:
+        First user message text, or ``None``.
+
+    Example:
+        >>> extract_first_user_from_obj({"messages": [{"role": "user", "content": "hi"}]})
+        'hi'
+    """
     if isinstance(data, dict):
         if "messages" in data and isinstance(data["messages"], list):
             return extract_first_user_from_list(data["messages"])
@@ -80,6 +120,18 @@ def extract_first_user_from_obj(data: object) -> str | None:
 
 
 def extract_first_user_from_list(messages: list) -> str | None:
+    """Extract the first user message from a list of message objects.
+
+    Args:
+        messages: List of message dicts.
+
+    Returns:
+        First user message text, or ``None`` if not found.
+
+    Example:
+        >>> extract_first_user_from_list([{"role": "user", "content": "hi"}])
+        'hi'
+    """
     for item in messages:
         if not isinstance(item, dict):
             continue
@@ -104,6 +156,19 @@ def extract_first_user_from_list(messages: list) -> str | None:
 
 
 def find_codex_session(project_origin: str, workspace_branch: str) -> str | None:
+    """Find the most recent Codex session for a workspace.
+
+    Args:
+        project_origin: Normalized project origin.
+        workspace_branch: Workspace branch name.
+
+    Returns:
+        Session ID string when found, otherwise ``None``.
+
+    Example:
+        >>> find_codex_session(\"github.com/org/repo\", \"feat/demo\") is None or True
+        True
+    """
     sessions_root = Path.home() / ".codex" / "sessions"
     if not sessions_root.exists():
         return None

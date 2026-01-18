@@ -1,3 +1,14 @@
+"""Atelier package metadata.
+
+Exports the package version resolved from build metadata or installed
+distribution information.
+
+Example:
+    >>> from atelier import __version__
+    >>> isinstance(__version__, str)
+    True
+"""
+
 from __future__ import annotations
 
 __all__ = ["__version__"]

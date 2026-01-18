@@ -1,3 +1,14 @@
+"""Configuration helpers for Atelier projects and workspaces.
+
+This module reads and writes ``config.json`` files, validates them with
+Pydantic models, and normalizes CLI overrides.
+
+Example:
+    >>> from atelier.config import utc_now
+    >>> utc_now().endswith("Z")
+    True
+"""
+
 import datetime as dt
 import json
 import shlex
@@ -23,11 +34,34 @@ from .paths import workspace_config_path
 
 
 def utc_now() -> str:
+    """Return the current UTC timestamp in ISO-8601 format.
+
+    Returns:
+        UTC timestamp like ``2026-01-18T12:34:56Z``.
+
+    Example:
+        >>> timestamp = utc_now()
+        >>> timestamp.endswith("Z")
+        True
+    """
     now = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0)
     return now.isoformat().replace("+00:00", "Z")
 
 
 def load_json(path: Path) -> dict | None:
+    """Load a JSON file if it exists.
+
+    Args:
+        path: Path to the JSON file.
+
+    Returns:
+        Parsed payload as a dict, or ``None`` if the file does not exist.
+
+    Example:
+        >>> from pathlib import Path
+        >>> load_json(Path("missing.json")) is None
+        True
+    """
     if not path.exists():
         return None
     with path.open("r", encoding="utf-8") as fh:
@@ -35,6 +69,19 @@ def load_json(path: Path) -> dict | None:
 
 
 def write_json(path: Path, payload: dict | BaseModel) -> None:
+    """Write a JSON payload to disk.
+
+    Args:
+        path: Path to the JSON file to write.
+        payload: Dict or Pydantic model to serialize.
+
+    Returns:
+        None.
+
+    Example:
+        >>> from pathlib import Path
+        >>> write_json(Path("/tmp/atelier-example.json"), {"ok": True})
+    """
     if isinstance(payload, BaseModel):
         payload = payload.model_dump()
     with path.open("w", encoding="utf-8") as fh:
@@ -45,6 +92,19 @@ def write_json(path: Path, payload: dict | BaseModel) -> None:
 def parse_project_config(
     payload: dict, source: Path | str | None = None
 ) -> ProjectConfig:
+    """Validate a project config payload.
+
+    Args:
+        payload: Raw config payload.
+        source: Optional path or label for error messages.
+
+    Returns:
+        Parsed ``ProjectConfig``.
+
+    Example:
+        >>> parse_project_config({"project": {"origin": "example.com/repo"}})
+        ProjectConfig(...)
+    """
     try:
         return ProjectConfig.model_validate(payload)
     except ValidationError as exc:
@@ -53,6 +113,19 @@ def parse_project_config(
 
 
 def load_project_config(path: Path) -> ProjectConfig | None:
+    """Load and validate a project config from disk.
+
+    Args:
+        path: Path to ``config.json`` in the project directory.
+
+    Returns:
+        Parsed ``ProjectConfig`` or ``None`` when missing/empty.
+
+    Example:
+        >>> from pathlib import Path
+        >>> load_project_config(Path("missing.json")) is None
+        True
+    """
     payload = load_json(path)
     if not payload:
         return None
@@ -62,6 +135,19 @@ def load_project_config(path: Path) -> ProjectConfig | None:
 def parse_workspace_config(
     payload: dict, source: Path | str | None = None
 ) -> WorkspaceConfig:
+    """Validate a workspace config payload.
+
+    Args:
+        payload: Raw config payload.
+        source: Optional path or label for error messages.
+
+    Returns:
+        Parsed ``WorkspaceConfig``.
+
+    Example:
+        >>> parse_workspace_config({"workspace": {"branch": "feat/demo"}})
+        WorkspaceConfig(...)
+    """
     try:
         return WorkspaceConfig.model_validate(payload)
     except ValidationError as exc:
@@ -70,6 +156,19 @@ def parse_workspace_config(
 
 
 def load_workspace_config(path: Path) -> WorkspaceConfig | None:
+    """Load and validate a workspace config from disk.
+
+    Args:
+        path: Path to ``config.json`` in the workspace directory.
+
+    Returns:
+        Parsed ``WorkspaceConfig`` or ``None`` when missing/empty.
+
+    Example:
+        >>> from pathlib import Path
+        >>> load_workspace_config(Path("missing.json")) is None
+        True
+    """
     payload = load_json(path)
     if not payload:
         return None
@@ -77,6 +176,18 @@ def load_workspace_config(path: Path) -> WorkspaceConfig | None:
 
 
 def resolve_branch_config(config: ProjectConfig | dict) -> BranchConfig:
+    """Resolve a ``BranchConfig`` from a project config or raw dict.
+
+    Args:
+        config: ``ProjectConfig`` instance or raw payload dict.
+
+    Returns:
+        ``BranchConfig`` instance.
+
+    Example:
+        >>> resolve_branch_config({"branch": {"prefix": "scott/"}})
+        BranchConfig(...)
+    """
     if isinstance(config, ProjectConfig):
         return config.branch
     branch = config.get("branch") if isinstance(config, dict) else None
@@ -87,10 +198,35 @@ def resolve_branch_config(config: ProjectConfig | dict) -> BranchConfig:
 
 
 def resolve_branch_pr(branch_config: BranchConfig) -> bool:
+    """Return whether pull requests are expected for the branch config.
+
+    Args:
+        branch_config: Branch configuration to read from.
+
+    Returns:
+        ``True`` when pull requests are expected.
+
+    Example:
+        >>> resolve_branch_pr(BranchConfig())
+        True
+    """
     return branch_config.pr
 
 
 def normalize_branch_history(value: object, source: str) -> str:
+    """Normalize a branch history string or fail with a helpful error.
+
+    Args:
+        value: Raw history value (string).
+        source: Label to include in error messages.
+
+    Returns:
+        Normalized history string (``manual``, ``squash``, ``merge``, ``rebase``).
+
+    Example:
+        >>> normalize_branch_history("squash", "branch.history")
+        'squash'
+    """
     if not isinstance(value, str):
         die(f"{source} must be one of: " + ", ".join(BRANCH_HISTORY_VALUES))
     normalized = value.strip()
@@ -100,10 +236,34 @@ def normalize_branch_history(value: object, source: str) -> str:
 
 
 def resolve_branch_history(branch_config: BranchConfig) -> str:
+    """Return the branch history policy string.
+
+    Args:
+        branch_config: Branch configuration to read from.
+
+    Returns:
+        One of ``manual``, ``squash``, ``merge``, ``rebase``.
+
+    Example:
+        >>> resolve_branch_history(BranchConfig())
+        'manual'
+    """
     return branch_config.history
 
 
 def parse_branch_pr_override(value: object) -> bool:
+    """Parse a ``--branch-pr`` value into a boolean.
+
+    Args:
+        value: Raw override (bool or string).
+
+    Returns:
+        Parsed boolean.
+
+    Example:
+        >>> parse_branch_pr_override("true")
+        True
+    """
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -118,6 +278,19 @@ def parse_branch_pr_override(value: object) -> bool:
 def resolve_branch_overrides(
     args: object,
 ) -> tuple[bool | None, str | None]:
+    """Resolve CLI overrides for branch settings.
+
+    Args:
+        args: CLI argument object with ``branch_pr`` and ``branch_history``.
+
+    Returns:
+        Tuple of ``(branch_pr_override, branch_history_override)`` where each
+        value is ``None`` when unset.
+
+    Example:
+        >>> resolve_branch_overrides(type("Args", (), {"branch_pr": None, "branch_history": None})())
+        (None, None)
+    """
     branch_pr_override = getattr(args, "branch_pr", None)
     branch_history_override = getattr(args, "branch_history", None)
     resolved_pr = None
@@ -134,6 +307,19 @@ def resolve_branch_overrides(
 def read_workspace_branch_settings(
     workspace_dir: Path,
 ) -> tuple[bool | None, str | None]:
+    """Read branch settings from a workspace config.
+
+    Args:
+        workspace_dir: Path to the workspace directory.
+
+    Returns:
+        Tuple of ``(branch_pr, branch_history)`` or ``(None, None)`` when missing.
+
+    Example:
+        >>> from pathlib import Path
+        >>> read_workspace_branch_settings(Path("missing"))
+        (None, None)
+    """
     config_path = workspace_config_path(workspace_dir)
     workspace_config = load_workspace_config(config_path)
     if not workspace_config:
@@ -145,6 +331,19 @@ def read_workspace_branch_settings(
 
 
 def read_arg(args: object | None, name: str) -> object | None:
+    """Safely read an attribute from an args object.
+
+    Args:
+        args: CLI argument object or ``None``.
+        name: Attribute name to look up.
+
+    Returns:
+        Attribute value or ``None`` when missing.
+
+    Example:
+        >>> read_arg(None, "branch_prefix") is None
+        True
+    """
     if args is None:
         return None
     return getattr(args, name, None)
@@ -156,6 +355,22 @@ def build_project_config(
     origin_raw: str,
     args: object | None,
 ) -> ProjectConfig:
+    """Build a new project config, prompting when necessary.
+
+    Args:
+        existing: Existing config payload or ``ProjectConfig``.
+        origin: Normalized repo origin (e.g., ``github.com/org/repo``).
+        origin_raw: Raw origin URL from Git.
+        args: CLI argument object for overrides, or ``None`` to prompt.
+
+    Returns:
+        ``ProjectConfig`` with updated project, branch, agent, editor, and
+        atelier metadata.
+
+    Example:
+        >>> build_project_config({}, "example.com/repo", "https://example.com/repo", None)
+        ProjectConfig(...)
+    """
     existing_config = (
         existing
         if isinstance(existing, ProjectConfig)

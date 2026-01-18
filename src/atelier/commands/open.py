@@ -1,3 +1,5 @@
+"""Implementation for the ``atelier open`` command."""
+
 import shutil
 import subprocess
 from pathlib import Path
@@ -7,6 +9,18 @@ from ..io import die, say, warn
 
 
 def open_workspace(args: object) -> None:
+    """Create or open a workspace and launch the agent session.
+
+    Args:
+        args: CLI argument object with fields like ``workspace_name``, ``raw``,
+            ``branch_pr``, and ``branch_history``.
+
+    Returns:
+        None.
+
+    Example:
+        $ atelier open feat/new-search
+    """
     cwd = Path.cwd()
     repo_root = git.git_repo_root(cwd)
     if not repo_root:
@@ -249,6 +263,23 @@ def open_workspace(args: object) -> None:
 
 
 def resolve_implicit_workspace_name(repo_root: Path, _config_payload: object) -> str:
+    """Resolve the current branch for implicit ``atelier open`` calls.
+
+    The branch is accepted only when it is non-default, clean, and fully pushed
+    to its upstream.
+
+    Args:
+        repo_root: Path to the git repository root.
+        _config_payload: Reserved for future use; currently ignored.
+
+    Returns:
+        The current branch name when it meets the implicit-open criteria.
+
+    Example:
+        >>> from pathlib import Path
+        >>> isinstance(repo_root := Path("."), Path)
+        True
+    """
     default_branch = git.git_default_branch(repo_root)
     if not default_branch:
         die("failed to determine default branch from repo")

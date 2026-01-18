@@ -73,6 +73,17 @@ Read more in [docs/why-not-git-worktree.md](docs/why-not-git-worktree.md).
 - Projects are identified by their Git origin, not filesystem location
 - The filesystem is the source of truth
 
+## What the CLI Manages
+
+Atelier is intentionally small. The CLI:
+
+- registers a repo origin as a project in the Atelier data directory
+- creates workspace folders keyed by branch name
+- maintains minimal `config.json` state for projects and workspaces
+- bootstraps policy files (`AGENTS.md`, `PROJECT.md`, `WORKSPACE.md`)
+- clones the repo and checks out workspace branches on demand
+- launches your editor and Codex in a predictable way
+
 ## Project Layout
 
 ```
@@ -125,7 +136,32 @@ Use `--raw` to treat the argument as the full branch name (no prefix lookup).
 - create the workspace if needed
 - generate `AGENTS.md` and `config.json`
 - clone the repo into `repo/` and create the workspace branch
-- launch the configured editor and Codex
+- open the configured editor for new workspaces, then launch Codex
+
+List workspaces:
+
+```sh
+atelier list
+atelier list --status
+```
+
+Clean completed workspaces (clean + pushed):
+
+```sh
+atelier clean
+```
+
+Delete specific workspaces and keep their branches:
+
+```sh
+atelier clean --no-branch feat/login refactor/api
+```
+
+Delete everything without prompting:
+
+```sh
+atelier clean --all --force
+```
 
 ## Notes
 
@@ -134,6 +170,105 @@ Use `--raw` to treat the argument as the full branch name (no prefix lookup).
 - `PROJECT.md` and `WORKSPACE.md` are optional policy overlays for agents.
 - Configuration lives in `config.json` under the Atelier data directory.
 - Workspace directories are keyed by a stable hash of the branch name.
+
+## CLI Reference
+
+### `atelier --help` and `atelier --version`
+
+Use `atelier --help` to view all commands and options. Use `atelier --version`
+to print the installed version and exit.
+
+### `atelier init`
+
+Register the current Git repo as an Atelier project. This command writes
+configuration into the Atelier data directory and never modifies the repo.
+
+Usage:
+
+```sh
+atelier init
+```
+
+Options:
+
+- `--branch-prefix`: Prefix for workspace branches (e.g., `scott/`).
+- `--branch-pr`: Whether workspace branches require pull requests.
+- `--branch-history`: History policy (`manual`, `squash`, `merge`, `rebase`).
+- `--agent`: Agent name (currently only `codex`).
+- `--editor`: Editor command (e.g., `cursor --reuse-window`).
+- `--workspace-template`: Create `templates/WORKSPACE.md` in the project dir.
+
+Example:
+
+```sh
+atelier init --branch-prefix scott/ --branch-pr false --branch-history rebase
+```
+
+### `atelier open [workspace-branch]`
+
+Create or open a workspace, ensuring its `repo/` checkout exists, open your
+editor for new workspaces, then launch Codex.
+
+Usage:
+
+```sh
+atelier open feat/new-search
+```
+
+If no branch is provided, `atelier open` can take over the current branch only
+when the working tree is clean and the branch is fully pushed to its upstream.
+
+Options:
+
+- `--raw`: Treat the argument as the full branch name (no prefix lookup).
+- `--branch-pr`: Override pull request expectation for this workspace.
+- `--branch-history`: Override history policy for this workspace.
+
+Examples:
+
+```sh
+atelier open scott/feat/new-search --raw
+atelier open feat/new-search --branch-history squash
+```
+
+### `atelier list`
+
+List workspaces for the current project.
+
+Usage:
+
+```sh
+atelier list
+atelier list --status
+```
+
+With `--status`, columns show whether each workspace repo is checked out,
+clean, and pushed.
+
+### `atelier clean`
+
+Delete workspaces safely. By default, this removes only workspaces that are
+both clean and pushed.
+
+Usage:
+
+```sh
+atelier clean
+atelier clean feat/old-branch refactor/api
+```
+
+Options:
+
+- `--all` or `-A`: Delete all workspaces regardless of state.
+- `--force` or `-F`: Delete without confirmation prompts.
+- `--no-branch`: Keep local/remote branches; delete only workspace folders.
+
+Examples:
+
+```sh
+atelier clean --all --force
+atelier clean --no-branch feat/old-branch
+```
 
 ## Development
 

@@ -1,3 +1,5 @@
+"""Workspace helpers for locating, creating, and summarizing workspaces."""
+
 import concurrent.futures
 import datetime as dt
 from pathlib import Path
@@ -13,12 +15,39 @@ from .paths import (
 
 
 def workspace_identifier(project_origin: str, workspace_branch: str) -> str:
+    """Build the stable workspace identifier string.
+
+    Args:
+        project_origin: Normalized project origin.
+        workspace_branch: Workspace branch name.
+
+    Returns:
+        Workspace identifier string (``atelier:<origin>/<branch>``).
+
+    Example:
+        >>> workspace_identifier("github.com/org/repo", "feat/demo")
+        'atelier:github.com/org/repo/feat/demo'
+    """
     origin = project_origin.rstrip("/")
     branch = workspace_branch.lstrip("/")
     return f"atelier:{origin}/{branch}"
 
 
 def workspace_candidate_branches(name: str, branch_prefix: str, raw: bool) -> list[str]:
+    """Generate candidate branch names for a workspace lookup.
+
+    Args:
+        name: Workspace name input.
+        branch_prefix: Prefix to prepend when ``raw`` is false.
+        raw: When true, do not apply the prefix.
+
+    Returns:
+        List of candidate branch names.
+
+    Example:
+        >>> workspace_candidate_branches("feat/demo", "scott/", False)
+        ['scott/feat/demo', 'feat/demo']
+    """
     if raw:
         return [name]
     candidates = []
@@ -33,6 +62,19 @@ def workspace_candidate_branches(name: str, branch_prefix: str, raw: bool) -> li
 def find_workspace_for_branch(
     project_dir: Path, branch: str
 ) -> tuple[Path, config.WorkspaceConfig] | None:
+    """Find an existing workspace directory and config for a branch.
+
+    Args:
+        project_dir: Project directory path.
+        branch: Workspace branch name.
+
+    Returns:
+        Tuple of ``(workspace_dir, workspace_config)`` or ``None`` if missing.
+
+    Example:
+        >>> find_workspace_for_branch(Path("/tmp/project"), "feat/demo") is None
+        True
+    """
     workspace_dir = workspace_dir_for_branch(project_dir, branch)
     config_path = workspace_config_path(workspace_dir)
     if not config_path.exists():
@@ -51,6 +93,22 @@ def find_workspace_for_branch(
 def resolve_workspace_target(
     project_dir: Path, name: str, branch_prefix: str, raw: bool
 ) -> tuple[str, Path, bool]:
+    """Resolve the target workspace branch and directory.
+
+    Args:
+        project_dir: Project directory path.
+        name: Workspace branch input.
+        branch_prefix: Prefix to apply when ``raw`` is false.
+        raw: When true, use the name as-is.
+
+    Returns:
+        Tuple of ``(branch, workspace_dir, exists)`` where ``exists`` indicates
+        whether a matching workspace config was found.
+
+    Example:
+        >>> resolve_workspace_target(Path("/tmp/project"), "feat/demo", "", True)[0]
+        'feat/demo'
+    """
     candidates = workspace_candidate_branches(name, branch_prefix, raw)
     for branch in candidates:
         found = find_workspace_for_branch(project_dir, branch)
@@ -74,6 +132,18 @@ def resolve_workspace_target(
 
 
 def normalize_workspace_name(value: str) -> str:
+    """Normalize and validate workspace branch input.
+
+    Args:
+        value: Raw workspace name input.
+
+    Returns:
+        Normalized branch name string.
+
+    Example:
+        >>> normalize_workspace_name("feat/demo")
+        'feat/demo'
+    """
     raw = value.strip()
     if not raw:
         return ""
@@ -86,6 +156,18 @@ def normalize_workspace_name(value: str) -> str:
 
 
 def workspace_branch_for_dir(workspace_dir: Path) -> str:
+    """Read the workspace branch name from its config file.
+
+    Args:
+        workspace_dir: Workspace directory path.
+
+    Returns:
+        Branch name string.
+
+    Example:
+        >>> workspace_branch_for_dir(Path("/tmp/workspace"))  # doctest: +SKIP
+        'feat/demo'
+    """
     config_path = workspace_config_path(workspace_dir)
     workspace_config = config.load_workspace_config(config_path)
     if not workspace_config:
@@ -103,6 +185,24 @@ def ensure_workspace_metadata(
     branch_pr: bool,
     branch_history: str,
 ) -> None:
+    """Ensure workspace config and ``AGENTS.md`` exist.
+
+    Args:
+        workspace_dir: Workspace directory path.
+        agents_path: Path to ``AGENTS.md`` in the workspace.
+        workspace_config_file: Path to workspace ``config.json``.
+        project_root: Project directory path.
+        project_origin: Normalized project origin string.
+        workspace_branch: Workspace branch name.
+        branch_pr: Whether pull requests are expected.
+        branch_history: History policy (manual|squash|merge|rebase).
+
+    Returns:
+        None.
+
+    Example:
+        >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/config.json"), Path("/tmp/project"), "example.com/repo", "feat/demo", True, "manual")
+    """
     workspace_config_exists = workspace_config_file.exists()
     if not workspace_config_exists:
         workspace_id = workspace_identifier(project_origin, workspace_branch)
@@ -152,6 +252,20 @@ def ensure_workspace_metadata(
 def workspace_up_to_date(
     checked_out: bool | None, clean: bool | None, remote_equal: bool | None
 ) -> str:
+    """Convert workspace status flags into a summary string.
+
+    Args:
+        checked_out: Whether the workspace branch is checked out.
+        clean: Whether the working tree is clean.
+        remote_equal: Whether local ``HEAD`` matches the remote branch.
+
+    Returns:
+        ``yes``, ``no``, or ``unknown``.
+
+    Example:
+        >>> workspace_up_to_date(True, True, True)
+        'yes'
+    """
     if checked_out is False or clean is False or remote_equal is False:
         return "no"
     if checked_out is None or clean is None or remote_equal is None:
@@ -160,6 +274,18 @@ def workspace_up_to_date(
 
 
 def format_status(value: bool | None) -> str:
+    """Format a tri-state status into ``yes``/``no``/``unknown``.
+
+    Args:
+        value: Boolean status or ``None``.
+
+    Returns:
+        String representation.
+
+    Example:
+        >>> format_status(None)
+        'unknown'
+    """
     if value is None:
         return "unknown"
     return "yes" if value else "no"
@@ -171,6 +297,20 @@ def append_workspace_branch_summary(
     mainline_branch: str,
     workspace_branch: str,
 ) -> None:
+    """Append branch sync status details to ``AGENTS.md``.
+
+    Args:
+        agents_path: Path to workspace ``AGENTS.md``.
+        repo_dir: Path to workspace ``repo/`` directory.
+        mainline_branch: Default branch name.
+        workspace_branch: Workspace branch name.
+
+    Returns:
+        None.
+
+    Example:
+        >>> append_workspace_branch_summary(Path("/tmp/AGENTS.md"), Path("/tmp/repo"), "main", "feat/demo")
+    """
     if not agents_path.exists():
         return
     if not repo_dir.exists() or not git.git_is_repo(repo_dir):
@@ -259,6 +399,20 @@ def append_workspace_branch_summary(
 def collect_workspaces(
     project_root: Path, config_payload: config.ProjectConfig, with_status: bool = True
 ) -> list[dict]:
+    """Collect workspace metadata for a project.
+
+    Args:
+        project_root: Project directory path.
+        config_payload: Project config payload.
+        with_status: When true, compute status info from each workspace repo.
+
+    Returns:
+        List of workspace dicts with name, path, branch, and status fields.
+
+    Example:
+        >>> isinstance(collect_workspaces(Path("/tmp/project"), config.ProjectConfig(), False), list)
+        True
+    """
     workspaces_root = project_root / WORKSPACES_DIRNAME
     if not workspaces_root.exists():
         return []

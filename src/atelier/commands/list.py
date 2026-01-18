@@ -1,3 +1,5 @@
+"""Implementation for the ``atelier list`` command."""
+
 from pathlib import Path
 
 from .. import config, git, paths, workspace
@@ -5,6 +7,17 @@ from ..io import die, say
 
 
 def list_workspaces(args: object) -> None:
+    """List workspaces for the current project.
+
+    Args:
+        args: CLI argument object with a ``status`` flag.
+
+    Returns:
+        None.
+
+    Example:
+        $ atelier list --status
+    """
     cwd = Path.cwd()
     _, _, origin = git.resolve_repo_origin(cwd)
     project_root = paths.project_dir_for_origin(origin)

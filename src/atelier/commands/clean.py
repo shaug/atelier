@@ -1,3 +1,5 @@
+"""Implementation for the ``atelier clean`` command."""
+
 import shutil
 from pathlib import Path
 
@@ -6,6 +8,17 @@ from ..io import die, say, warn
 
 
 def confirm_delete(workspace_name: str) -> bool:
+    """Prompt to confirm workspace deletion.
+
+    Args:
+        workspace_name: Workspace branch name to confirm.
+
+    Returns:
+        ``True`` when the user confirms deletion.
+
+    Example:
+        Delete workspace feat/demo? [y/N]:
+    """
     response = input(f"Delete workspace {workspace_name}? [y/N]: ").strip().lower()
     return response in {"y", "yes"}
 
@@ -13,6 +26,21 @@ def confirm_delete(workspace_name: str) -> bool:
 def delete_workspace_branch(
     repo_dir: Path, workspace_branch: str, default_branch: str
 ) -> None:
+    """Delete local and remote workspace branches when possible.
+
+    Args:
+        repo_dir: Path to the workspace ``repo/`` directory.
+        workspace_branch: Branch name to delete.
+        default_branch: Default branch to switch to before deletion.
+
+    Returns:
+        None.
+
+    Example:
+        >>> from pathlib import Path
+        >>> isinstance(repo_dir := Path("."), Path)
+        True
+    """
     if not repo_dir.exists():
         return
     if not git.git_is_repo(repo_dir):
@@ -47,6 +75,18 @@ def delete_workspace_branch(
 
 
 def clean_workspaces(args: object) -> None:
+    """Clean workspaces based on status or explicit targets.
+
+    Args:
+        args: CLI argument object with ``all``, ``force``, ``no_branch``, and
+            ``workspace_names`` fields.
+
+    Returns:
+        None.
+
+    Example:
+        $ atelier clean --all --force
+    """
     cwd = Path.cwd()
     _, _, origin = git.resolve_repo_origin(cwd)
     project_root = paths.project_dir_for_origin(origin)

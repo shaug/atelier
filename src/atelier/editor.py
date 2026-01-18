@@ -1,3 +1,5 @@
+"""Editor resolution utilities for Atelier."""
+
 import os
 import shlex
 
@@ -5,6 +7,17 @@ from .models import EditorConfig, ProjectConfig
 
 
 def system_editor_default() -> str:
+    """Return the default editor command.
+
+    Uses ``$EDITOR`` when set; otherwise falls back to ``vi``.
+
+    Returns:
+        Editor command string.
+
+    Example:
+        >>> isinstance(system_editor_default(), str)
+        True
+    """
     env_editor = os.environ.get("EDITOR", "").strip()
     if env_editor:
         return env_editor
@@ -12,6 +25,19 @@ def system_editor_default() -> str:
 
 
 def resolve_editor_command(config: ProjectConfig | EditorConfig | dict) -> list[str]:
+    """Resolve the editor command and options to execute.
+
+    Args:
+        config: ``ProjectConfig``, ``EditorConfig``, or raw dict containing
+            editor defaults and options.
+
+    Returns:
+        List of command tokens suitable for ``subprocess`` execution.
+
+    Example:
+        >>> resolve_editor_command({"editor": {"default": "vim", "options": {}}})
+        ['vim']
+    """
     if isinstance(config, ProjectConfig):
         editor_config = config.editor
     elif isinstance(config, EditorConfig):

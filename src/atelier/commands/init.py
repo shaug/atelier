@@ -1,3 +1,5 @@
+"""Implementation for the ``atelier init`` command."""
+
 from pathlib import Path
 
 from .. import config, git, paths, project
@@ -5,6 +7,19 @@ from ..io import die, say
 
 
 def init_project(args: object) -> None:
+    """Initialize an Atelier project for the current Git repository.
+
+    Args:
+        args: CLI argument object with optional fields such as ``branch_prefix``,
+            ``branch_pr``, ``branch_history``, ``agent``, ``editor``, and
+            ``workspace_template``.
+
+    Returns:
+        None.
+
+    Example:
+        $ atelier init --workspace-template
+    """
     cwd = Path.cwd()
     repo_root = git.git_repo_root(cwd)
     if not repo_root:

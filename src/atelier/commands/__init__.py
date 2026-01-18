@@ -1,3 +1,5 @@
+"""Command implementations exposed by the Atelier CLI."""
+
 from .clean import clean_workspaces
 from .init import init_project
 from .list import list_workspaces
