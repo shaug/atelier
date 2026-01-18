@@ -22,6 +22,7 @@ class BranchConfig(BaseModel):
         >>> BranchConfig(prefix="scott/", pr=False, history="rebase")
         BranchConfig(...)
     """
+
     model_config = ConfigDict(extra="allow")
 
     prefix: str = ""
@@ -54,6 +55,7 @@ class ProjectSection(BaseModel):
         >>> ProjectSection(origin="github.com/org/repo")
         ProjectSection(...)
     """
+
     model_config = ConfigDict(extra="allow")
 
     origin: str | None = None
@@ -71,6 +73,7 @@ class AgentConfig(BaseModel):
         >>> AgentConfig(default="codex", options={"codex": ["--profile", "fast"]})
         AgentConfig(...)
     """
+
     model_config = ConfigDict(extra="allow")
 
     default: str = "codex"
@@ -100,6 +103,7 @@ class EditorConfig(BaseModel):
         >>> EditorConfig(default="cursor", options={"cursor": ["--reuse-window"]})
         EditorConfig(...)
     """
+
     model_config = ConfigDict(extra="allow")
 
     default: str | None = None
@@ -129,6 +133,7 @@ class AtelierSection(BaseModel):
         >>> AtelierSection(version="0.4.0", created_at="2026-01-18T00:00:00Z")
         AtelierSection(...)
     """
+
     model_config = ConfigDict(extra="allow")
 
     version: str | None = None
@@ -149,6 +154,7 @@ class ProjectConfig(BaseModel):
         >>> ProjectConfig(project=ProjectSection(origin="github.com/org/repo"))
         ProjectConfig(...)
     """
+
     model_config = ConfigDict(extra="allow")
 
     project: ProjectSection = Field(default_factory=ProjectSection)
@@ -171,6 +177,7 @@ class WorkspaceSection(BaseModel):
         >>> WorkspaceSection(branch="feat/demo", branch_pr=True, branch_history="manual")
         WorkspaceSection(...)
     """
+
     model_config = ConfigDict(extra="allow")
 
     branch: str
@@ -204,6 +211,7 @@ class WorkspaceConfig(BaseModel):
         >>> WorkspaceConfig(workspace=WorkspaceSection(branch="feat/demo"))
         WorkspaceConfig(...)
     """
+
     model_config = ConfigDict(extra="allow")
 
     workspace: WorkspaceSection

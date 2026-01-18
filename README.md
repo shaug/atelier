@@ -242,13 +242,13 @@ atelier list
 atelier list --status
 ```
 
-With `--status`, columns show whether each workspace repo is checked out,
-clean, and pushed.
+With `--status`, columns show whether each workspace repo is checked out, clean,
+and pushed.
 
 ### `atelier clean`
 
-Delete workspaces safely. By default, this removes only workspaces that are
-both clean and pushed.
+Delete workspaces safely. By default, this removes only workspaces that are both
+clean and pushed.
 
 Usage:
 
