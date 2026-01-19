@@ -50,6 +50,8 @@ def workspace_candidate_branches(name: str, branch_prefix: str, raw: bool) -> li
     """
     if raw:
         return [name]
+    if branch_prefix and name.startswith(branch_prefix):
+        return [name]
     candidates = []
     prefixed = f"{branch_prefix}{name}"
     if prefixed:

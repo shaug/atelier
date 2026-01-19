@@ -988,6 +988,55 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_with_prefixed_branch_does_not_double_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
+            write_open_config(project_dir)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(workspace_name="scott/feat-demo")
+                    )
+
+                workspace_branch = "scott/feat-demo"
+                workspace_dir = paths.workspace_dir_for_branch(
+                    project_dir, workspace_branch
+                )
+                workspace_config = json.loads(
+                    (workspace_dir / "config.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    workspace_config["workspace"]["branch"], workspace_branch
+                )
+                self.assertFalse(
+                    paths.workspace_dir_for_branch(
+                        project_dir, "scott/scott/feat-demo"
+                    ).exists()
+                )
+                self.assertTrue(any(cmd[:2] == ["git", "clone"] for cmd in commands))
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_without_name_uses_current_branch_when_clean_and_pushed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
