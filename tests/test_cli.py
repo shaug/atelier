@@ -1062,7 +1062,33 @@ class TestFindCodexSession(TestCase):
                         "type": "session_meta",
                         "payload": {
                             "id": session_id,
-                            "instructions": target,
+                            "instructions": "agent instructions",
+                        },
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": "agent preamble"},
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "event_msg",
+                        "payload": {
+                            "type": "user_message",
+                            "message": target,
+                            "images": [],
+                            "local_images": [],
+                            "text_elements": [],
                         },
                     }
                 )
