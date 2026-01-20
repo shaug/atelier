@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import sys
 from pathlib import Path
+from typing import Sequence
 
 try:
     import questionary
@@ -101,6 +102,48 @@ def prompt(
         if required and value == "":
             continue
         return value
+
+
+def select(
+    text: str,
+    choices: Sequence[str],
+    default: str | None = None,
+) -> str:
+    """Prompt the user to select one of a fixed set of choices.
+
+    Args:
+        text: Prompt label shown to the user.
+        choices: Allowed selection values.
+        default: Default choice when the user presses enter.
+
+    Returns:
+        The selected choice string.
+    """
+    choices_list = [str(choice) for choice in choices]
+    if not choices_list:
+        raise ValueError("choices must not be empty")
+    if default is not None and default not in choices_list:
+        default = None
+
+    while True:
+        if _use_questionary():
+            question = questionary.select(text, choices=choices_list, default=default)
+            value = question.ask()
+            if value is None:
+                die("aborted")
+            return str(value)
+
+        options = "/".join(choices_list)
+        if default is not None:
+            prompt_text = f"{text} [{default}] ({options}): "
+        else:
+            prompt_text = f"{text} ({options}): "
+        value = input(prompt_text).strip()
+        if value == "" and default is not None:
+            return default
+        if value in choices_list:
+            return value
+        warn(f"please choose one of: {', '.join(choices_list)}")
 
 
 def confirm(text: str, default: bool = False) -> bool:

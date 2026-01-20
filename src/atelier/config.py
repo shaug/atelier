@@ -20,7 +20,7 @@ from pydantic import BaseModel, ValidationError
 
 from . import __version__, paths, templates
 from .editor import system_editor_default
-from .io import die, prompt
+from .io import die, prompt, select
 from .models import (
     BRANCH_HISTORY_VALUES,
     UPGRADE_POLICY_VALUES,
@@ -648,10 +648,10 @@ def build_project_config(
         branch_pr = parse_branch_pr_override(branch_pr_arg)
     elif should_prompt("branch", "pr"):
         branch_pr_prompt_default = "true" if branch_pr_default else "false"
-        branch_pr_input = prompt(
-            "Expect pull requests for workspace branches (true/false)",
+        branch_pr_input = select(
+            "Expect pull requests for workspace branches",
+            ("true", "false"),
             branch_pr_prompt_default,
-            required=True,
         )
         branch_pr = parse_branch_pr_override(branch_pr_input)
     else:
@@ -663,10 +663,10 @@ def build_project_config(
             branch_history_arg, "--branch-history"
         )
     elif should_prompt("branch", "history"):
-        branch_history_input = prompt(
-            "Branch history policy (manual|squash|merge|rebase)",
+        branch_history_input = select(
+            "Branch history policy",
+            BRANCH_HISTORY_VALUES,
             branch_history_default,
-            required=True,
         )
         branch_history = normalize_branch_history(
             branch_history_input, "branch.history"
@@ -679,7 +679,7 @@ def build_project_config(
     if agent_arg is not None:
         agent_default = str(agent_arg)
     elif should_prompt("agent", "default"):
-        agent_default = prompt("Agent (codex)", agent_default_default, required=True)
+        agent_default = select("Agent", ("codex",), agent_default_default)
     else:
         agent_default = agent_default_default
     if agent_default != "codex":

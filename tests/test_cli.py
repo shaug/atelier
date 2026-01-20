@@ -2655,6 +2655,59 @@ class TestConfigCommand(TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_config_prompt_retries_invalid_choices(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                responses = iter(
+                    [
+                        "team/",
+                        "maybe",
+                        "false",
+                        "sideways",
+                        "merge",
+                        "codex",
+                        "vim -w",
+                    ]
+                )
+                call_count = {"count": 0}
+
+                def fake_input(_: str) -> str:
+                    call_count["count"] += 1
+                    return next(responses)
+
+                with (
+                    patch("builtins.input", fake_input),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    config_cmd.show_config(
+                        SimpleNamespace(
+                            workspace_name=None,
+                            installed=False,
+                            prompt=True,
+                            reset=False,
+                        )
+                    )
+                config_path = paths.project_config_path(project_dir)
+                updated = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(call_count["count"], 7)
+                self.assertFalse(updated["branch"]["pr"])
+                self.assertEqual(updated["branch"]["history"], "merge")
+            finally:
+                os.chdir(original_cwd)
+
     def test_config_reset_uses_installed_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
