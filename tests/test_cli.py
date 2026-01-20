@@ -15,15 +15,18 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from typer.testing import CliRunner  # noqa: E402
 
+import atelier  # noqa: E402
 import atelier.cli as cli  # noqa: E402
 import atelier.commands.clean as clean_cmd  # noqa: E402
 import atelier.commands.init as init_cmd  # noqa: E402
 import atelier.commands.list as list_cmd  # noqa: E402
 import atelier.commands.open as open_cmd  # noqa: E402
+import atelier.config as config  # noqa: E402
 import atelier.editor as editor  # noqa: E402
 import atelier.git as git  # noqa: E402
 import atelier.paths as paths  # noqa: E402
 import atelier.sessions as sessions_mod  # noqa: E402
+import atelier.templates as templates  # noqa: E402
 import atelier.workspace as workspace  # noqa: E402
 
 RAW_ORIGIN = "git@github.com:org/repo.git"
@@ -91,8 +94,9 @@ def make_open_config(enlistment_path: str, **overrides: object) -> dict:
         "agent": {"default": "codex", "options": {"codex": []}},
         "editor": {"default": "true", "options": {"true": []}},
         "atelier": {
-            "version": "0.2.0",
+            "version": atelier.__version__,
             "created_at": "2026-01-01T00:00:00Z",
+            "upgrade": "ask",
         },
     }
     overrides = dict(overrides)
@@ -169,7 +173,11 @@ def write_workspace_config(
             "branch_history": "manual",
             "id": workspace_id_for(enlistment_path, branch),
         },
-        "atelier": {"version": "0.2.0", "created_at": "2026-01-01T00:00:00Z"},
+        "atelier": {
+            "version": atelier.__version__,
+            "created_at": "2026-01-01T00:00:00Z",
+            "upgrade": "ask",
+        },
     }
     (workspace_dir / "config.json").write_text(json.dumps(payload), encoding="utf-8")
 
@@ -1151,6 +1159,117 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_auto_upgrades_project_templates_with_always_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+
+            project_dir.mkdir(parents=True, exist_ok=True)
+            templates_dir = project_dir / "templates"
+            templates_dir.mkdir(parents=True, exist_ok=True)
+
+            canonical = templates.project_agents_template(prefer_installed=True)
+            old_text = f"{canonical}\nlegacy\n"
+            (templates_dir / "AGENTS.md").write_text(old_text, encoding="utf-8")
+            (project_dir / "AGENTS.md").write_text(old_text, encoding="utf-8")
+
+            payload = make_open_config(enlistment_path)
+            payload["atelier"]["version"] = "9999.0.0"
+            payload["atelier"]["upgrade"] = "always"
+            payload["atelier"]["managed_files"] = {
+                "templates/AGENTS.md": config.hash_text(old_text),
+                "AGENTS.md": config.hash_text(old_text),
+            }
+            paths.project_config_path(project_dir).write_text(
+                json.dumps(payload), encoding="utf-8"
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    return None
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+            finally:
+                os.chdir(original_cwd)
+
+            updated = (templates_dir / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertEqual(updated, canonical)
+            updated_root = (project_dir / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertEqual(updated_root, canonical)
+
+    def test_open_ask_policy_updates_when_confirmed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+
+            project_dir.mkdir(parents=True, exist_ok=True)
+            templates_dir = project_dir / "templates"
+            templates_dir.mkdir(parents=True, exist_ok=True)
+
+            canonical = templates.project_agents_template(prefer_installed=True)
+            old_text = f"{canonical}\nlegacy\n"
+            (templates_dir / "AGENTS.md").write_text(old_text, encoding="utf-8")
+            (project_dir / "AGENTS.md").write_text(canonical, encoding="utf-8")
+
+            payload = make_open_config(enlistment_path)
+            payload["atelier"]["version"] = "9999.0.0"
+            payload["atelier"]["upgrade"] = "ask"
+            payload["atelier"]["managed_files"] = {
+                "templates/AGENTS.md": config.hash_text(old_text),
+                "AGENTS.md": config.hash_text(canonical),
+            }
+            paths.project_config_path(project_dir).write_text(
+                json.dumps(payload), encoding="utf-8"
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    return None
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("builtins.input", return_value="y"),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+            finally:
+                os.chdir(original_cwd)
+
+            updated = (templates_dir / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertEqual(updated, canonical)
+
     def test_open_with_prefixed_branch_does_not_double_prefix(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1572,7 +1691,11 @@ class TestOpenWorkspace(TestCase):
                     "branch_history": "squash",
                     "id": workspace_id_for(enlistment_path, workspace_branch),
                 },
-                "atelier": {"version": "0.2.0", "created_at": "2026-01-01T00:00:00Z"},
+                "atelier": {
+                    "version": atelier.__version__,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "upgrade": "ask",
+                },
             }
             (workspace_dir / "config.json").write_text(
                 json.dumps(payload), encoding="utf-8"
@@ -1915,8 +2038,9 @@ class TestOpenWorkspace(TestCase):
                 "agent": {"default": "codex", "options": {"codex": []}},
                 "editor": {"default": "true", "options": {"true": []}},
                 "atelier": {
-                    "version": "0.2.0",
+                    "version": atelier.__version__,
                     "created_at": "2026-01-01T00:00:00Z",
+                    "upgrade": "ask",
                 },
             }
             data_dir = root / "data"

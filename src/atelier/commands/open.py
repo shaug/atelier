@@ -1,11 +1,25 @@
 """Implementation for the ``atelier open`` command."""
 
+import difflib
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
-from .. import config, editor, exec, git, paths, project, sessions, workspace
-from ..io import die, say, warn
+from .. import (
+    __version__,
+    config,
+    editor,
+    exec,
+    git,
+    paths,
+    project,
+    sessions,
+    templates,
+    workspace,
+)
+from ..io import die, link_or_copy, say, warn
 
 
 def confirm_remove_finalization_tag(workspace_branch: str, tag: str) -> bool:
@@ -28,6 +42,300 @@ def confirm_remove_finalization_tag(workspace_branch: str, tag: str) -> bool:
         .lower()
     )
     return response in {"y", "yes"}
+
+
+@dataclass
+class ManagedTemplateUpdate:
+    description: str
+    path: Path
+    new_text: str
+    current_text: str | None
+    current_hash: str | None
+    stored_hash: str | None
+    update_hash: Callable[[str], None] | None
+    create: Callable[[], None] | None
+    write_text: Callable[[str], None] | None
+    unmodified: bool
+    needs_update: bool
+
+
+def build_managed_template_update(
+    *,
+    description: str,
+    path: Path,
+    new_text: str,
+    stored_hash: str | None,
+    update_hash: Callable[[str], None] | None,
+    create: Callable[[], None] | None = None,
+    write_text: Callable[[str], None] | None = None,
+) -> ManagedTemplateUpdate:
+    if path.exists():
+        current_text = path.read_text(encoding="utf-8")
+        current_hash = config.hash_text(current_text)
+    else:
+        current_text = None
+        current_hash = None
+    if current_text is None:
+        unmodified = True
+        needs_update = True
+    else:
+        if stored_hash is not None:
+            unmodified = current_hash == stored_hash
+        else:
+            unmodified = current_text == new_text
+        needs_update = current_text != new_text
+    return ManagedTemplateUpdate(
+        description=description,
+        path=path,
+        new_text=new_text,
+        current_text=current_text,
+        current_hash=current_hash,
+        stored_hash=stored_hash,
+        update_hash=update_hash,
+        create=create,
+        write_text=write_text,
+        unmodified=unmodified,
+        needs_update=needs_update,
+    )
+
+
+def apply_managed_template_update(item: ManagedTemplateUpdate) -> None:
+    if item.current_text is None:
+        if item.create is not None:
+            item.create()
+        elif item.write_text is not None:
+            item.write_text(item.new_text)
+        else:
+            item.path.write_text(item.new_text, encoding="utf-8")
+    else:
+        if item.write_text is not None:
+            item.write_text(item.new_text)
+        else:
+            item.path.write_text(item.new_text, encoding="utf-8")
+    if item.update_hash is not None:
+        item.update_hash(config.hash_text(item.new_text))
+
+
+def maybe_record_managed_hash(item: ManagedTemplateUpdate) -> bool:
+    if (
+        item.update_hash is None
+        or item.current_hash is None
+        or item.stored_hash == item.current_hash
+        or item.needs_update
+    ):
+        return False
+    item.update_hash(item.current_hash)
+    return True
+
+
+def show_template_diff(item: ManagedTemplateUpdate) -> None:
+    before = item.current_text or ""
+    diff_lines = difflib.unified_diff(
+        before.splitlines(),
+        item.new_text.splitlines(),
+        fromfile=str(item.path),
+        tofile=str(item.path),
+        lineterm="",
+    )
+    say(f"Diff for {item.description}:")
+    for line in diff_lines:
+        say(line)
+
+
+def confirm_template_update(description: str) -> bool:
+    response = input(f"Apply update for {description}? [y/N]: ").strip().lower()
+    return response in {"y", "yes"}
+
+
+def apply_upgrade_policy(
+    *,
+    policy: str,
+    items: list[ManagedTemplateUpdate],
+    skip_command: str,
+) -> bool:
+    changed = False
+    for item in items:
+        if not item.needs_update:
+            if maybe_record_managed_hash(item):
+                changed = True
+            continue
+        if policy == "always":
+            if item.unmodified:
+                apply_managed_template_update(item)
+                changed = True
+            else:
+                warn(
+                    "skipping "
+                    f"{item.description} because it appears modified; "
+                    f"run `{skip_command}` to upgrade it manually"
+                )
+            continue
+        if policy == "ask":
+            show_template_diff(item)
+            if confirm_template_update(item.description):
+                apply_managed_template_update(item)
+                changed = True
+            continue
+    return changed
+
+
+def update_project_atelier(
+    project_dir: Path, *, version: str | None = None, upgrade: str | None = None
+) -> None:
+    config_path = paths.project_config_path(project_dir)
+    project_config = config.load_project_config(config_path)
+    if not project_config:
+        return
+    updates: dict[str, object] = {}
+    if version is not None:
+        updates["version"] = version
+    if upgrade is not None:
+        updates["upgrade"] = upgrade
+    if not updates:
+        return
+    atelier_section = project_config.atelier.model_copy(update=updates)
+    project_config = project_config.model_copy(update={"atelier": atelier_section})
+    config.write_json(config_path, project_config)
+
+
+def update_workspace_atelier(
+    workspace_dir: Path, *, version: str | None = None, upgrade: str | None = None
+) -> None:
+    config_path = paths.workspace_config_path(workspace_dir)
+    workspace_config = config.load_workspace_config(config_path)
+    if not workspace_config:
+        return
+    updates: dict[str, object] = {}
+    if version is not None:
+        updates["version"] = version
+    if upgrade is not None:
+        updates["upgrade"] = upgrade
+    if not updates:
+        return
+    atelier_section = workspace_config.atelier.model_copy(update=updates)
+    workspace_config = workspace_config.model_copy(update={"atelier": atelier_section})
+    config.write_json(config_path, workspace_config)
+
+
+def collect_project_template_updates(
+    project_dir: Path, project_config: config.ProjectConfig
+) -> list[ManagedTemplateUpdate]:
+    managed = project_config.atelier.managed_files
+    templates_root = project_dir / paths.TEMPLATES_DIRNAME
+    project_label_text = project_dir.name
+
+    agents_text = templates.project_agents_template(prefer_installed=True)
+    template_agents_path = templates_root / "AGENTS.md"
+    template_agents_key = f"{paths.TEMPLATES_DIRNAME}/AGENTS.md"
+
+    def update_template_agents_hash(value: str) -> None:
+        config.update_project_managed_files(project_dir, {template_agents_key: value})
+
+    def create_template_agents() -> None:
+        paths.ensure_dir(template_agents_path.parent)
+        template_agents_path.write_text(agents_text, encoding="utf-8")
+
+    updates: list[ManagedTemplateUpdate] = [
+        build_managed_template_update(
+            description=f"Project templates/AGENTS.md ({project_label_text})",
+            path=template_agents_path,
+            new_text=agents_text,
+            stored_hash=managed.get(template_agents_key),
+            update_hash=update_template_agents_hash,
+            create=create_template_agents,
+            write_text=lambda text: template_agents_path.write_text(
+                text, encoding="utf-8"
+            ),
+        )
+    ]
+
+    agents_path = project_dir / "AGENTS.md"
+    agents_key = "AGENTS.md"
+
+    def update_agents_hash(value: str) -> None:
+        config.update_project_managed_files(project_dir, {agents_key: value})
+
+    def create_agents() -> None:
+        if template_agents_path.exists():
+            link_or_copy(template_agents_path, agents_path)
+        else:
+            agents_path.write_text(agents_text, encoding="utf-8")
+
+    updates.append(
+        build_managed_template_update(
+            description=f"Project AGENTS.md ({project_label_text})",
+            path=agents_path,
+            new_text=agents_text,
+            stored_hash=managed.get(agents_key),
+            update_hash=update_agents_hash,
+            create=create_agents,
+            write_text=lambda text: agents_path.write_text(text, encoding="utf-8"),
+        )
+    )
+
+    success_text = templates.success_md_template(prefer_installed=True)
+    template_success_path = templates_root / "SUCCESS.md"
+    template_success_key = f"{paths.TEMPLATES_DIRNAME}/SUCCESS.md"
+
+    def update_success_hash(value: str) -> None:
+        config.update_project_managed_files(project_dir, {template_success_key: value})
+
+    def create_success_template() -> None:
+        paths.ensure_dir(template_success_path.parent)
+        template_success_path.write_text(success_text, encoding="utf-8")
+
+    updates.append(
+        build_managed_template_update(
+            description=f"Project templates/SUCCESS.md ({project_label_text})",
+            path=template_success_path,
+            new_text=success_text,
+            stored_hash=managed.get(template_success_key),
+            update_hash=update_success_hash,
+            create=create_success_template,
+            write_text=lambda text: template_success_path.write_text(
+                text, encoding="utf-8"
+            ),
+        )
+    )
+    return updates
+
+
+def collect_workspace_template_updates(
+    workspace_dir: Path,
+    workspace_config: config.WorkspaceConfig,
+    project_dir: Path,
+) -> list[ManagedTemplateUpdate]:
+    managed = workspace_config.atelier.managed_files
+    workspace_label_text = workspace_config.workspace.branch
+    project_template_path = project_dir / paths.TEMPLATES_DIRNAME / "AGENTS.md"
+    if project_template_path.exists():
+        source_text = project_template_path.read_text(encoding="utf-8")
+    else:
+        source_text = templates.workspace_agents_template(prefer_installed=True)
+
+    agents_path = workspace_dir / "AGENTS.md"
+    agents_key = "AGENTS.md"
+
+    def update_agents_hash(value: str) -> None:
+        config.update_workspace_managed_files(workspace_dir, {agents_key: value})
+
+    def create_agents() -> None:
+        if project_template_path.exists():
+            link_or_copy(project_template_path, agents_path)
+        else:
+            agents_path.write_text(source_text, encoding="utf-8")
+
+    return [
+        build_managed_template_update(
+            description=f"Workspace AGENTS.md ({workspace_label_text})",
+            path=agents_path,
+            new_text=source_text,
+            stored_hash=managed.get(agents_key),
+            update_hash=update_agents_hash,
+            create=create_agents,
+            write_text=lambda text: agents_path.write_text(text, encoding="utf-8"),
+        )
+    ]
 
 
 def open_workspace(args: object) -> None:
@@ -82,6 +390,28 @@ def open_workspace(args: object) -> None:
         config_payload = config_payload.model_copy(update={"project": project_section})
         config.write_json(config_path, config_payload)
 
+    project_upgrade_policy = config.resolve_upgrade_policy(
+        config_payload.atelier.upgrade
+    )
+    project_version = config_payload.atelier.version
+    project_version_mismatch = (
+        project_version is not None and project_version != __version__
+    )
+    if project_upgrade_policy != "manual" and project_version_mismatch:
+        say(
+            "Checking project templates for upgrades "
+            f"({project_upgrade_policy} policy)."
+        )
+        project_updates = collect_project_template_updates(project_dir, config_payload)
+        apply_upgrade_policy(
+            policy=project_upgrade_policy,
+            items=project_updates,
+            skip_command="atelier upgrade --installed",
+        )
+        update_project_atelier(
+            project_dir, version=__version__, upgrade=project_upgrade_policy
+        )
+
     branch_config = config_payload.branch
     branch_pr = branch_config.pr
     branch_history = branch_config.history
@@ -128,13 +458,14 @@ def open_workspace(args: object) -> None:
     background_path = workspace_dir / "BACKGROUND.md"
     workspace_config_file = paths.workspace_config_path(workspace_dir)
     is_new_workspace = not workspace_config_exists
+    workspace_config: config.WorkspaceConfig | None = None
     if workspace_config_exists:
+        workspace_config = config.load_workspace_config(workspace_config_file)
+        if not workspace_config:
+            die("failed to load workspace config")
         if branch_pr_override is not None or branch_history_override is not None:
-            stored_pr, stored_history = config.read_workspace_branch_settings(
-                workspace_dir
-            )
-            if stored_pr is None or stored_history is None:
-                die("workspace missing branch settings")
+            stored_pr = workspace_config.workspace.branch_pr
+            stored_history = workspace_config.workspace.branch_history
             if branch_pr_override is not None:
                 if stored_pr != branch_pr_override:
                     die(
@@ -147,7 +478,7 @@ def open_workspace(args: object) -> None:
                         "specified branch.history does not match workspace config "
                         f"({branch_history_override} != {stored_history})"
                     )
-        stored_branch = workspace.workspace_branch_for_dir(workspace_dir)
+        stored_branch = workspace_config.workspace.branch
         if stored_branch != workspace_branch:
             die("workspace branch does not match configured workspace branch")
     if is_new_workspace:
@@ -166,6 +497,7 @@ def open_workspace(args: object) -> None:
             workspace_branch=workspace_branch,
             branch_pr=effective_branch_pr,
             branch_history=effective_branch_history,
+            upgrade_policy=project_upgrade_policy,
         )
         config.update_workspace_managed_files(
             workspace_dir, config.managed_workspace_agents_updates(workspace_dir)
@@ -187,6 +519,35 @@ def open_workspace(args: object) -> None:
             and not workspace_policy_target.exists()
         ):
             shutil.copyfile(workspace_policy_template, workspace_policy_target)
+
+    if workspace_config is not None:
+        workspace_upgrade_policy = project_upgrade_policy
+        if workspace_config.atelier.upgrade is not None:
+            workspace_upgrade_policy = config.resolve_upgrade_policy(
+                workspace_config.atelier.upgrade
+            )
+        workspace_version = workspace_config.atelier.version
+        workspace_version_mismatch = (
+            workspace_version is not None and workspace_version != __version__
+        )
+        if workspace_upgrade_policy != "manual" and workspace_version_mismatch:
+            say(
+                "Checking workspace templates for upgrades "
+                f"({workspace_upgrade_policy} policy)."
+            )
+            workspace_updates = collect_workspace_template_updates(
+                workspace_dir, workspace_config, project_dir
+            )
+            apply_upgrade_policy(
+                policy=workspace_upgrade_policy,
+                items=workspace_updates,
+                skip_command=(
+                    f"atelier upgrade {workspace_config.workspace.branch} --installed"
+                ),
+            )
+            update_workspace_atelier(
+                workspace_dir, version=__version__, upgrade=workspace_upgrade_policy
+            )
 
     workspace_policy_path: Path | None = None
     success_policy_path = workspace_dir / "SUCCESS.md"

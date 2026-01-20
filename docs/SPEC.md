@@ -143,7 +143,8 @@ frequent manual editing.
   },
   "atelier": {
     "version": "0.2.0",
-    "created_at": "2026-01-15T01:10:00Z"
+    "created_at": "2026-01-15T01:10:00Z",
+    "upgrade": "ask"
   }
 }
 ```
@@ -159,6 +160,8 @@ frequent manual editing.
   `true`)
 - `branch.history` defines expected history shape after integration (default
   `manual`; supported values: `manual`, `squash`, `merge`, `rebase`)
+- `atelier.upgrade` controls when managed templates are upgraded (default `ask`;
+  supported values: `always`, `ask`, `manual`)
 - `agent.options` and `editor.options` are **static argv fragments only**
 - No templating, interpolation, or logic is supported in config
 
@@ -241,7 +244,8 @@ enlistment path to form the workspace ID.
   },
   "atelier": {
     "version": "0.2.0",
-    "created_at": "2026-01-15T02:03:00Z"
+    "created_at": "2026-01-15T02:03:00Z",
+    "upgrade": "ask"
   }
 }
 ```
@@ -479,7 +483,21 @@ canonical `AGENTS.md` content. Project- and workspace-level `AGENTS.md` files
 may be symlinked to this template when possible; otherwise they are copied.
 
 Templates are **copied** (or symlinked for `AGENTS.md`) and Atelier never
-auto-updates existing files.
+auto-updates existing files without an explicit policy.
+
+### Template upgrade policy (`atelier.upgrade`)
+
+`atelier.open` checks for template upgrades only when the stored
+`atelier.version` differs from the installed version. Behavior is controlled by
+`atelier.upgrade` (project and workspace):
+
+- `manual`: never check or apply upgrades on `open` (use `atelier upgrade`)
+- `ask`: show a per-file diff and prompt before applying each change
+- `always`: automatically upgrade unmodified managed files; skip modified files
+  with a warning and a suggested manual upgrade command
+
+New projects default to `ask`. New workspaces inherit the project policy unless
+explicitly set.
 
 If a project provides `templates/SUCCESS.md`, that file is copied verbatim into
 new workspaces as `SUCCESS.md`. If `templates/SUCCESS.md` is missing and the
@@ -497,7 +515,7 @@ Atelier does **not**:
 - Enforce coding standards
 - Track PRs or merges
 - Maintain background processes
-- Auto-upgrade templates
+- Auto-upgrade templates outside the configured `atelier.upgrade` policy
 
 ______________________________________________________________________
 

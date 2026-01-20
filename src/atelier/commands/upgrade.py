@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from .. import config, git, paths, templates, workspace
+from .. import __version__, config, git, paths, templates, workspace
 from ..io import die, link_or_copy, say, warn
 
 
@@ -355,7 +355,12 @@ def plan_project_templates(plan: UpgradePlan, project: ProjectTarget) -> None:
 
         def apply_create_success() -> None:
             paths.ensure_dir(success_path.parent)
-            success_path.write_text(templates.success_md_template(), encoding="utf-8")
+            success_text = templates.success_md_template(prefer_installed=True)
+            success_path.write_text(success_text, encoding="utf-8")
+            config.update_project_managed_files(
+                project.root,
+                {f"{paths.TEMPLATES_DIRNAME}/SUCCESS.md": hash_text(success_text)},
+            )
 
         plan.actions.append(
             PlanAction(
@@ -377,7 +382,7 @@ def plan_project_template_refresh(plan: UpgradePlan, project: ProjectTarget) -> 
         (
             "SUCCESS.md",
             lambda: templates.success_md_template(prefer_installed=True),
-            None,
+            f"{paths.TEMPLATES_DIRNAME}/SUCCESS.md",
         ),
     ]
     for filename, read_text, managed_key in refresh_targets:
@@ -484,8 +489,8 @@ def upgrade(args: object) -> None:
             if refresh_project_templates:
                 plan_project_template_refresh(plan, project)
 
+    workspace_targets: list[WorkspaceTarget] = []
     if projects and not no_workspaces:
-        workspace_targets: list[WorkspaceTarget] = []
         if workspace_names:
             if current_project is None:
                 die("workspace upgrades require the current Atelier project")
@@ -513,5 +518,33 @@ def upgrade(args: object) -> None:
 
     for action in plan.actions:
         action.apply()
+
+    if projects and not no_projects:
+        for project in projects:
+            config_path = paths.project_config_path(project.root)
+            project_config = config.load_project_config(config_path)
+            if not project_config:
+                continue
+            atelier_section = project_config.atelier.model_copy(
+                update={"version": __version__}
+            )
+            project_config = project_config.model_copy(
+                update={"atelier": atelier_section}
+            )
+            config.write_json(config_path, project_config)
+
+    if workspace_targets:
+        for target in workspace_targets:
+            config_path = paths.workspace_config_path(target.root)
+            workspace_config = config.load_workspace_config(config_path)
+            if not workspace_config:
+                continue
+            atelier_section = workspace_config.atelier.model_copy(
+                update={"version": __version__}
+            )
+            workspace_config = workspace_config.model_copy(
+                update={"atelier": atelier_section}
+            )
+            config.write_json(config_path, workspace_config)
 
     say("Upgrade complete.")

@@ -23,6 +23,7 @@ from .editor import system_editor_default
 from .io import die, prompt
 from .models import (
     BRANCH_HISTORY_VALUES,
+    UPGRADE_POLICY_VALUES,
     AgentConfig,
     AtelierSection,
     BranchConfig,
@@ -151,6 +152,14 @@ def managed_project_agents_updates(project_dir: Path) -> dict[str, str]:
         content = path.read_text(encoding="utf-8")
         if content == canonical:
             updates[rel_path] = hash_text(content)
+    success_path = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
+    if success_path.exists():
+        success_content = success_path.read_text(encoding="utf-8")
+        success_canonical = templates.success_md_template(prefer_installed=True)
+        if success_content == success_canonical:
+            updates[f"{paths.TEMPLATES_DIRNAME}/SUCCESS.md"] = hash_text(
+                success_content
+            )
     return updates
 
 
@@ -306,7 +315,7 @@ def normalize_branch_history(value: object, source: str) -> str:
     """
     if not isinstance(value, str):
         die(f"{source} must be one of: " + ", ".join(BRANCH_HISTORY_VALUES))
-    normalized = value.strip()
+    normalized = value.strip().lower()
     if normalized not in BRANCH_HISTORY_VALUES:
         die(f"{source} must be one of: " + ", ".join(BRANCH_HISTORY_VALUES))
     return normalized
@@ -326,6 +335,33 @@ def resolve_branch_history(branch_config: BranchConfig) -> str:
         'manual'
     """
     return branch_config.history
+
+
+def normalize_upgrade_policy(value: object, source: str) -> str:
+    """Normalize an upgrade policy string or fail with a helpful error.
+
+    Args:
+        value: Raw policy value (string).
+        source: Label to include in error messages.
+
+    Returns:
+        Normalized policy string (``always``, ``ask``, ``manual``).
+    """
+    if not isinstance(value, str):
+        die(f"{source} must be one of: " + ", ".join(UPGRADE_POLICY_VALUES))
+    normalized = value.strip().lower()
+    if normalized not in UPGRADE_POLICY_VALUES:
+        die(f"{source} must be one of: " + ", ".join(UPGRADE_POLICY_VALUES))
+    return normalized
+
+
+def resolve_upgrade_policy(
+    value: object | None, source: str = "atelier.upgrade"
+) -> str:
+    """Resolve an upgrade policy value, defaulting to ``ask`` when missing."""
+    if value is None:
+        return "ask"
+    return normalize_upgrade_policy(value, source)
 
 
 def parse_branch_pr_override(value: object) -> bool:
@@ -531,6 +567,7 @@ def build_project_config(
 
     atelier_created_at = existing_config.atelier.created_at or utc_now()
     atelier_version = existing_config.atelier.version or __version__
+    atelier_upgrade = resolve_upgrade_policy(existing_config.atelier.upgrade)
     atelier_managed_files = dict(existing_config.atelier.managed_files)
 
     agent_options = dict(existing_config.agent.options)
@@ -555,6 +592,7 @@ def build_project_config(
         atelier=AtelierSection(
             version=atelier_version,
             created_at=atelier_created_at,
+            upgrade=atelier_upgrade,
             managed_files=atelier_managed_files,
         ),
     )

@@ -269,7 +269,7 @@ def render_workspace_agents() -> str:
         >>> "Atelier" in render_workspace_agents()
         True
     """
-    return workspace_agents_template()
+    return workspace_agents_template(prefer_installed=True)
 
 
 def render_persist(branch_pr: bool, branch_history: str) -> str:

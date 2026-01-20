@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 BRANCH_HISTORY_VALUES = ("manual", "squash", "merge", "rebase")
 BranchHistory = Literal["manual", "squash", "merge", "rebase"]
 
+UPGRADE_POLICY_VALUES = ("always", "ask", "manual")
+UpgradePolicy = Literal["always", "ask", "manual"]
+
 
 class BranchConfig(BaseModel):
     """Branch policy configuration for a project.
@@ -130,6 +133,8 @@ class AtelierSection(BaseModel):
     Attributes:
         version: Atelier version string.
         created_at: ISO-8601 UTC timestamp.
+        upgrade: Template upgrade policy (always|ask|manual).
+        managed_files: Hashes for managed files.
 
     Example:
         >>> AtelierSection(version="0.4.0", created_at="2026-01-18T00:00:00Z")
@@ -140,7 +145,17 @@ class AtelierSection(BaseModel):
 
     version: str | None = None
     created_at: str | None = None
+    upgrade: UpgradePolicy | None = None
     managed_files: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("upgrade", mode="before")
+    @classmethod
+    def normalize_upgrade(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
 
     @field_validator("managed_files", mode="before")
     @classmethod

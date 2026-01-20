@@ -175,7 +175,8 @@ atelier clean --all --force
 
 ## Notes
 
-- Atelier never auto-updates existing workspaces or templates.
+- Template upgrades on `atelier open` are governed by `atelier.upgrade`
+  (`always`, `ask`, `manual`).
 - `SUCCESS.md` is the execution contract for each workspace (legacy workspaces
   may still use `WORKSPACE.md`).
 - `AGENTS.md` is a managed, static prologue shared across projects/workspaces.

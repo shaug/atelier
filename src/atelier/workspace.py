@@ -214,6 +214,7 @@ def ensure_workspace_metadata(
     workspace_branch: str,
     branch_pr: bool,
     branch_history: str,
+    upgrade_policy: str | None,
 ) -> None:
     """Ensure workspace config and managed workspace files exist.
 
@@ -227,12 +228,13 @@ def ensure_workspace_metadata(
         workspace_branch: Workspace branch name.
         branch_pr: Whether pull requests are expected.
         branch_history: History policy (manual|squash|merge|rebase).
+        upgrade_policy: Template upgrade policy (always|ask|manual).
 
     Returns:
         None.
 
     Example:
-        >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/PERSIST.md"), Path("/tmp/workspace/config.json"), Path("/tmp/project"), "/repo", "feat/demo", True, "manual")
+        >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/PERSIST.md"), Path("/tmp/workspace/config.json"), Path("/tmp/project"), "/repo", "feat/demo", True, "manual", "ask")
     """
     workspace_config_exists = workspace_config_file.exists()
     if not workspace_config_exists:
@@ -244,7 +246,11 @@ def ensure_workspace_metadata(
                 "branch_history": branch_history,
                 "id": workspace_id,
             },
-            atelier={"version": __version__, "created_at": config.utc_now()},
+            atelier={
+                "version": __version__,
+                "created_at": config.utc_now(),
+                "upgrade": upgrade_policy,
+            },
         )
         config.write_json(workspace_config_file, workspace_config)
 
