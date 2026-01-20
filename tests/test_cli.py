@@ -471,7 +471,7 @@ class TestInitProject(TestCase):
             finally:
                 os.chdir(original_cwd)
 
-    def test_init_creates_workspace_template(self) -> None:
+    def test_init_creates_success_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -493,10 +493,11 @@ class TestInitProject(TestCase):
                         enlistment_path, NORMALIZED_ORIGIN
                     )
 
-                template_path = project_dir / "templates" / "WORKSPACE.md"
+                template_path = project_dir / "templates" / "SUCCESS.md"
                 self.assertTrue(template_path.exists())
                 content = template_path.read_text(encoding="utf-8")
-                self.assertIn("WORKSPACE.md", content)
+                self.assertIn("SUCCESS.md", content)
+                self.assertFalse((project_dir / "templates" / "WORKSPACE.md").exists())
             finally:
                 os.chdir(original_cwd)
 
@@ -1083,7 +1084,7 @@ class TestOpenWorkspace(TestCase):
                 )
                 self.assertTrue((workspace_dir / "AGENTS.md").exists())
                 self.assertTrue((workspace_dir / "PERSIST.md").exists())
-                self.assertTrue((workspace_dir / "WORKSPACE.md").exists())
+                self.assertTrue((workspace_dir / "SUCCESS.md").exists())
                 self.assertTrue((workspace_dir / "config.json").exists())
 
                 workspace_config = json.loads(
@@ -1097,7 +1098,7 @@ class TestOpenWorkspace(TestCase):
                     encoding="utf-8"
                 )
                 self.assertIn("Atelier Agent Contract", agents_content)
-                self.assertIn("WORKSPACE.md", agents_content)
+                self.assertIn("SUCCESS.md", agents_content)
                 self.assertIn("PERSIST.md", agents_content)
 
                 persist_content = (workspace_dir / "PERSIST.md").read_text(
@@ -1316,7 +1317,7 @@ class TestOpenWorkspace(TestCase):
                 editor_index = next(
                     index for index, cmd in enumerate(commands) if cmd[:1] == ["true"]
                 )
-                self.assertEqual(commands[editor_index][-1], "WORKSPACE.md")
+                self.assertEqual(commands[editor_index][-1], "SUCCESS.md")
                 workspace_dir = paths.workspace_dir_for_branch(
                     project_dir,
                     "scott/feat-demo",
@@ -1385,7 +1386,7 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
-    def test_open_skips_editor_when_workspace_md_missing_for_existing_workspace(
+    def test_open_skips_editor_when_success_md_missing_for_existing_workspace(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1426,7 +1427,7 @@ class TestOpenWorkspace(TestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                self.assertFalse((workspace_dir / "WORKSPACE.md").exists())
+                self.assertFalse((workspace_dir / "SUCCESS.md").exists())
                 self.assertFalse((project_dir / "templates").exists())
                 self.assertFalse(any(cmd[:1] == ["true"] for cmd in commands))
             finally:
@@ -1553,7 +1554,7 @@ class TestOpenWorkspace(TestCase):
                 json.dumps(payload), encoding="utf-8"
             )
             agents_path = workspace_dir / "AGENTS.md"
-            workspace_path = workspace_dir / "WORKSPACE.md"
+            workspace_path = workspace_dir / "SUCCESS.md"
             agents_path.write_text("agents stub\n", encoding="utf-8")
             workspace_path.write_text("workspace stub\n", encoding="utf-8")
             os.utime(agents_path, (1_000_000_000, 1_000_000_000))
@@ -1876,7 +1877,7 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
-    def test_open_copies_workspace_template(self) -> None:
+    def test_open_prefers_success_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -1905,9 +1906,11 @@ class TestOpenWorkspace(TestCase):
             )
             templates_dir = project_dir / "templates"
             templates_dir.mkdir()
-            template_content = "<!-- workspace template -->\n"
+            success_content = "<!-- success template -->\n"
+            legacy_content = "<!-- workspace template -->\n"
+            (templates_dir / "SUCCESS.md").write_text(success_content, encoding="utf-8")
             (templates_dir / "WORKSPACE.md").write_text(
-                template_content, encoding="utf-8"
+                legacy_content, encoding="utf-8"
             )
 
             original_cwd = Path.cwd()
@@ -1944,11 +1947,12 @@ class TestOpenWorkspace(TestCase):
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                workspace_template = workspace_dir / "WORKSPACE.md"
-                self.assertTrue(workspace_template.exists())
+                success_template = workspace_dir / "SUCCESS.md"
+                self.assertTrue(success_template.exists())
                 self.assertEqual(
-                    workspace_template.read_text(encoding="utf-8"), template_content
+                    success_template.read_text(encoding="utf-8"), success_content
                 )
+                self.assertFalse((workspace_dir / "WORKSPACE.md").exists())
             finally:
                 os.chdir(original_cwd)
 

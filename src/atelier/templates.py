@@ -76,8 +76,21 @@ def workspace_agents_template() -> str:
     return agents_template()
 
 
+def success_md_template() -> str:
+    """Return the workspace ``SUCCESS.md`` template text.
+
+    Returns:
+        Template text.
+
+    Example:
+        >>> "SUCCESS" in success_md_template()
+        True
+    """
+    return _read_template("workspace", "SUCCESS.md")
+
+
 def workspace_md_template() -> str:
-    """Return the workspace ``WORKSPACE.md`` template text.
+    """Return the legacy workspace ``WORKSPACE.md`` template text.
 
     Returns:
         Template text.

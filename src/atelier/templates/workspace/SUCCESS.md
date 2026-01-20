@@ -1,15 +1,15 @@
 <!--
-WORKSPACE.md
+SUCCESS.md
 
 Use this file to define workspace intent, scope, success criteria, and verification.
 It is optional and fully user-owned.
 
-WORKSPACE.md overrides PROJECT.md and AGENTS.md when rules conflict.
+SUCCESS.md overrides PROJECT.md and AGENTS.md when rules conflict.
 
 Atelier does not parse or modify this file.
 -->
 
-# Workspace Brief
+# Success Contract
 
 ## Goal
 

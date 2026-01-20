@@ -68,7 +68,7 @@ Read more in [docs/why-not-git-worktree.md](docs/why-not-git-worktree.md).
 ## Core Ideas
 
 - One workspace = one unit of work = one branch
-- Intent is captured before code (in `WORKSPACE.md`)
+- Intent is captured before code (in `SUCCESS.md`)
 - Workspaces are isolated directories with their own `repo/`
 - Projects are identified by their local enlistment path, not Git origin
 - The filesystem is the source of truth
@@ -80,8 +80,8 @@ Atelier is intentionally small. The CLI:
 - registers a local enlistment as a project in the Atelier data directory
 - creates workspace folders keyed by branch name plus a stable hash
 - maintains minimal `config.json` state for projects and workspaces
-- bootstraps policy/context files (`AGENTS.md`, `PROJECT.md`, `WORKSPACE.md`,
-  `PERSIST.md`, `BACKGROUND.md`)
+- bootstraps policy/context files (`AGENTS.md`, `PROJECT.md`, `SUCCESS.md` (or
+  legacy `WORKSPACE.md`), `PERSIST.md`, `BACKGROUND.md`)
 - clones the repo and checks out workspace branches on demand
 - launches your editor and Codex in a predictable way
 
@@ -96,13 +96,13 @@ Atelier is intentionally small. The CLI:
       ├─ PROJECT.md
       ├─ templates/
       │  ├─ AGENTS.md
-      │  └─ WORKSPACE.md
+      │  └─ SUCCESS.md
       └─ workspaces/
          └─ <workspace-key>/
             ├─ AGENTS.md
             ├─ PERSIST.md
             ├─ BACKGROUND.md (optional)
-            ├─ WORKSPACE.md
+            ├─ SUCCESS.md
             ├─ config.json
             └─ repo/
 ```
@@ -113,6 +113,7 @@ Notes:
   enlistment path.
 - `<workspace-key>` is the normalized branch name plus a short SHA-256 of the
   full workspace ID.
+- Legacy projects/workspaces may still use `WORKSPACE.md` as the intent file.
 
 ## Quick Start
 
@@ -139,13 +140,13 @@ Use `--raw` to treat the argument as the full branch name (no prefix lookup).
 `atelier open` will:
 
 - create the workspace if needed
-- generate `AGENTS.md`, `WORKSPACE.md`, `PERSIST.md`, and `config.json` (plus
-  `BACKGROUND.md` when the branch already exists)
+- generate `AGENTS.md`, `SUCCESS.md` (or legacy `WORKSPACE.md`), `PERSIST.md`,
+  and `config.json` (plus `BACKGROUND.md` when the branch already exists)
 - clone the repo into `repo/` and create the workspace branch
 - prompt to remove the finalization tag `atelier/<branch-name>/finalized` if
   present (continuing either way)
-- open the configured editor for new workspaces (`WORKSPACE.md`), then launch
-  Codex
+- open the configured editor for new workspaces (`SUCCESS.md` by default), then
+  launch Codex
 
 List workspaces:
 
@@ -175,7 +176,8 @@ atelier clean --all --force
 ## Notes
 
 - Atelier never auto-updates existing workspaces or templates.
-- `WORKSPACE.md` is the execution contract for each workspace.
+- `SUCCESS.md` is the execution contract for each workspace (legacy workspaces
+  may still use `WORKSPACE.md`).
 - `AGENTS.md` is a managed, static prologue shared across projects/workspaces.
 - `PERSIST.md` records integration guidance and the finalization tag
   (`atelier/<branch-name>/finalized`) used by `atelier clean`.
@@ -219,9 +221,9 @@ atelier init --branch-prefix scott/ --branch-pr false --branch-history rebase
 ### `atelier open [workspace-branch]`
 
 Create or open a workspace, ensuring its `repo/` checkout exists, open your
-editor for new workspaces (`WORKSPACE.md`), then launch Codex. New workspaces
-include managed `AGENTS.md`/`PERSIST.md`, and `BACKGROUND.md` when the branch
-already exists. If the workspace repo has the finalization tag
+editor for new workspaces (`SUCCESS.md` by default), then launch Codex. New
+workspaces include managed `AGENTS.md`/`PERSIST.md`, and `BACKGROUND.md` when
+the branch already exists. If the workspace repo has the finalization tag
 `atelier/<branch-name>/finalized`, `atelier open` will prompt to remove it but
 continues either way.
 

@@ -56,10 +56,10 @@ def ensure_project_scaffold(project_dir: Path) -> None:
         project_md_path.write_text(templates.project_md_template(), encoding="utf-8")
         say("Created PROJECT.md")
 
-    workspace_template_path = templates_dir / "WORKSPACE.md"
-    if not workspace_template_path.exists():
-        ensure_dir(workspace_template_path.parent)
-        workspace_template_path.write_text(
-            templates.workspace_md_template(), encoding="utf-8"
+    success_template_path = templates_dir / "SUCCESS.md"
+    if not success_template_path.exists():
+        ensure_dir(success_template_path.parent)
+        success_template_path.write_text(
+            templates.success_md_template(), encoding="utf-8"
         )
-        say("Created templates/WORKSPACE.md")
+        say("Created templates/SUCCESS.md")

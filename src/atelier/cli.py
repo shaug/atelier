@@ -105,7 +105,7 @@ def init_command(
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
         agent: Agent name (currently only ``codex``).
-        editor: Editor command used to open ``WORKSPACE.md``.
+        editor: Editor command used to open ``SUCCESS.md``.
     Returns:
         None.
 

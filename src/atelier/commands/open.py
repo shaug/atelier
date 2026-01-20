@@ -126,8 +126,6 @@ def open_workspace(args: object) -> None:
     agents_path = workspace_dir / "AGENTS.md"
     persist_path = workspace_dir / "PERSIST.md"
     background_path = workspace_dir / "BACKGROUND.md"
-    workspace_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "WORKSPACE.md"
-    workspace_policy_path = workspace_dir / "WORKSPACE.md"
     workspace_config_file = paths.workspace_config_path(workspace_dir)
     is_new_workspace = not workspace_config_exists
     if workspace_config_exists:
@@ -166,8 +164,31 @@ def open_workspace(args: object) -> None:
             branch_pr=effective_branch_pr,
             branch_history=effective_branch_history,
         )
-        if workspace_policy_template.exists() and not workspace_policy_path.exists():
-            shutil.copyfile(workspace_policy_template, workspace_policy_path)
+        success_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
+        legacy_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "WORKSPACE.md"
+        if success_policy_template.exists():
+            workspace_policy_template = success_policy_template
+            workspace_policy_target = workspace_dir / "SUCCESS.md"
+        elif legacy_policy_template.exists():
+            workspace_policy_template = legacy_policy_template
+            workspace_policy_target = workspace_dir / "WORKSPACE.md"
+        else:
+            workspace_policy_template = None
+            workspace_policy_target = None
+        if (
+            workspace_policy_template is not None
+            and workspace_policy_target is not None
+            and not workspace_policy_target.exists()
+        ):
+            shutil.copyfile(workspace_policy_template, workspace_policy_target)
+
+    workspace_policy_path: Path | None = None
+    success_policy_path = workspace_dir / "SUCCESS.md"
+    legacy_policy_path = workspace_dir / "WORKSPACE.md"
+    if success_policy_path.exists():
+        workspace_policy_path = success_policy_path
+    elif legacy_policy_path.exists():
+        workspace_policy_path = legacy_policy_path
 
     repo_dir = workspace_dir / "repo"
     project_repo_url = origin_raw or enlistment_path
@@ -278,7 +299,7 @@ def open_workspace(args: object) -> None:
             background_path, repo_dir, default_branch, workspace_branch
         )
 
-    if should_open_editor and workspace_policy_path.exists():
+    if should_open_editor and workspace_policy_path is not None:
         if editor_cmd is None:
             editor_cmd = editor.resolve_editor_command(config_payload)
         try:
