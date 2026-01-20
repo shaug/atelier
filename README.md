@@ -1,13 +1,20 @@
 # Atelier
 
 Atelier is an installable CLI for workspace-based, agent-assisted development
-within a single project. It turns each unit of work into its own workspace with
-a dedicated git checkout, explicit intent, and a predictable launch path for
+inside local Git repos. It turns each unit of work into its own workspace with a
+dedicated git checkout, explicit intent, and a predictable launch path for
 agents and humans.
+
+Atelier can manage multiple projects on one machine; each project is identified
+by its local enlistment path and stored under the Atelier data directory.
+
+The goal is to simulate web-based agent development on a local machine: you can
+hand off and resume workspaces easily, take the wheel at any time, and
+coordinate multiple agents across parallel tasks without losing context.
 
 Atelier is:
 
-- a project-scoped tool, not a global project manager
+- a per-repo tool, not a global project manager
 - a workspace-first workflow, not a branch-switching helper
 - a convention with sharp edges, not a flexible framework
 
@@ -70,7 +77,8 @@ Read more in [docs/why-not-git-worktree.md](docs/why-not-git-worktree.md).
 - One workspace = one unit of work = one branch
 - Intent is captured before code (in `SUCCESS.md`)
 - Workspaces are isolated directories with their own `repo/`
-- Projects are identified by their local enlistment path, not Git origin
+- Projects are identified by their local enlistment path (each repo you
+  initialize is a separate project), not Git origin
 - The filesystem is the source of truth
 
 ## What the CLI Manages
@@ -80,8 +88,8 @@ Atelier is intentionally small. The CLI:
 - registers a local enlistment as a project in the Atelier data directory
 - creates workspace folders keyed by branch name plus a stable hash
 - maintains minimal `config.json` state for projects and workspaces
-- bootstraps policy/context files (`AGENTS.md`, `PROJECT.md`, `SUCCESS.md` (or
-  legacy `WORKSPACE.md`), `PERSIST.md`, `BACKGROUND.md`)
+- bootstraps policy/context files (`AGENTS.md`, `PROJECT.md`, `SUCCESS.md`,
+  `PERSIST.md`, `BACKGROUND.md`)
 - clones the repo and checks out workspace branches on demand
 - launches your editor and Codex in a predictable way
 
@@ -113,7 +121,6 @@ Notes:
   enlistment path.
 - `<workspace-key>` is the normalized branch name plus a short SHA-256 of the
   full workspace ID.
-- Legacy projects/workspaces may still use `WORKSPACE.md` as the intent file.
 
 ## Quick Start
 
@@ -125,6 +132,9 @@ atelier init
 
 Run this inside an existing Git repo; Atelier stores state in the data directory
 and does not write files into the repo.
+
+You can run `atelier init` in multiple repos; each enlistment becomes its own
+project entry.
 
 Open or create a workspace:
 
@@ -140,8 +150,8 @@ Use `--raw` to treat the argument as the full branch name (no prefix lookup).
 `atelier open` will:
 
 - create the workspace if needed
-- generate `AGENTS.md`, `SUCCESS.md` (or legacy `WORKSPACE.md`), `PERSIST.md`,
-  and `config.json` (plus `BACKGROUND.md` when the branch already exists)
+- generate `AGENTS.md`, `SUCCESS.md`, `PERSIST.md`, and `config.json` (plus
+  `BACKGROUND.md` when the branch already exists)
 - clone the repo into `repo/` and create the workspace branch
 - prompt to remove the finalization tag `atelier/<branch-name>/finalized` if
   present (continuing either way)
@@ -177,8 +187,7 @@ atelier clean --all --force
 
 - Template upgrades on `atelier open` are governed by `atelier.upgrade`
   (`always`, `ask`, `manual`).
-- `SUCCESS.md` is the execution contract for each workspace (legacy workspaces
-  may still use `WORKSPACE.md`).
+- `SUCCESS.md` is the execution contract for each workspace.
 - `AGENTS.md` is a managed, static prologue shared across projects/workspaces.
 - `PERSIST.md` records integration guidance and the finalization tag
   (`atelier/<branch-name>/finalized`) used by `atelier clean`.
