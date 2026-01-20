@@ -368,9 +368,7 @@ def edit_command(
     ] = False,
 ) -> None:
     """Open editable project/workspace documents."""
-    edit_cmd.edit_files(
-        SimpleNamespace(workspace_name=workspace_name, project=project)
-    )
+    edit_cmd.edit_files(SimpleNamespace(workspace_name=workspace_name, project=project))
 
 
 def main() -> None:

@@ -2749,9 +2749,7 @@ class TestTemplateCommand(TestCase):
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
-            installed_template = (
-                data_dir / "templates" / "project" / "PROJECT.md"
-            )
+            installed_template = data_dir / "templates" / "project" / "PROJECT.md"
             installed_template.parent.mkdir(parents=True)
             installed_template.write_text("installed project\n", encoding="utf-8")
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
@@ -2805,9 +2803,7 @@ class TestTemplateCommand(TestCase):
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     template_cmd.render_template(
-                        SimpleNamespace(
-                            target="workspace", installed=False, edit=False
-                        )
+                        SimpleNamespace(target="workspace", installed=False, edit=False)
                     )
                 self.assertEqual(buffer.getvalue().strip(), "project success")
             finally:
