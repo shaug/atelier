@@ -80,7 +80,8 @@ Atelier is intentionally small. The CLI:
 - registers a local enlistment as a project in the Atelier data directory
 - creates workspace folders keyed by branch name plus a stable hash
 - maintains minimal `config.json` state for projects and workspaces
-- bootstraps policy files (`AGENTS.md`, `PROJECT.md`, `WORKSPACE.md`)
+- bootstraps policy/context files (`AGENTS.md`, `PROJECT.md`, `WORKSPACE.md`,
+  `PERSIST.md`, `BACKGROUND.md`)
 - clones the repo and checks out workspace branches on demand
 - launches your editor and Codex in a predictable way
 
@@ -94,10 +95,13 @@ Atelier is intentionally small. The CLI:
       ├─ AGENTS.md
       ├─ PROJECT.md
       ├─ templates/
+      │  ├─ AGENTS.md
       │  └─ WORKSPACE.md
       └─ workspaces/
          └─ <workspace-key>/
             ├─ AGENTS.md
+            ├─ PERSIST.md
+            ├─ BACKGROUND.md (optional)
             ├─ WORKSPACE.md
             ├─ config.json
             └─ repo/
@@ -135,7 +139,8 @@ Use `--raw` to treat the argument as the full branch name (no prefix lookup).
 `atelier open` will:
 
 - create the workspace if needed
-- generate `AGENTS.md`, `WORKSPACE.md`, and `config.json`
+- generate `AGENTS.md`, `WORKSPACE.md`, `PERSIST.md`, and `config.json` (plus
+  `BACKGROUND.md` when the branch already exists)
 - clone the repo into `repo/` and create the workspace branch
 - open the configured editor for new workspaces (`WORKSPACE.md`), then launch
   Codex
@@ -169,7 +174,9 @@ atelier clean --all --force
 
 - Atelier never auto-updates existing workspaces or templates.
 - `WORKSPACE.md` is the execution contract for each workspace.
-- `AGENTS.md` is the standard workspace prologue with integration guidance.
+- `AGENTS.md` is a managed, static prologue shared across projects/workspaces.
+- `PERSIST.md` records integration guidance for each workspace.
+- `BACKGROUND.md` captures context when opening an existing branch.
 - `PROJECT.md` is an optional policy overlay for agents.
 - Configuration lives in `config.json` under the Atelier data directory.
 - Workspace directories are keyed by a stable hash of the branch name.
@@ -209,7 +216,9 @@ atelier init --branch-prefix scott/ --branch-pr false --branch-history rebase
 ### `atelier open [workspace-branch]`
 
 Create or open a workspace, ensuring its `repo/` checkout exists, open your
-editor for new workspaces (`WORKSPACE.md`), then launch Codex.
+editor for new workspaces (`WORKSPACE.md`), then launch Codex. New workspaces
+include managed `AGENTS.md`/`PERSIST.md`, and `BACKGROUND.md` when the branch
+already exists.
 
 Usage:
 

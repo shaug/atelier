@@ -499,6 +499,64 @@ def git_diff_stat(repo_dir: Path, base: str, branch: str) -> list[str]:
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
+def git_merge_base(repo_dir: Path, base: str, branch: str) -> str | None:
+    """Return the merge base hash between two refs.
+
+    Args:
+        repo_dir: Git repository directory.
+        base: Base branch/ref.
+        branch: Branch/ref to compare.
+
+    Returns:
+        Merge-base commit hash or ``None`` on error.
+
+    Example:
+        >>> git_merge_base(Path("."), "main", "HEAD") is None or True
+        True
+    """
+    result = run_git_command(["git", "-C", str(repo_dir), "merge-base", base, branch])
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def git_commit_subjects_since_merge_base(
+    repo_dir: Path, base: str, branch: str, limit: int = 20
+) -> list[str]:
+    """Return commit subjects since the merge base of two refs.
+
+    Args:
+        repo_dir: Git repository directory.
+        base: Base branch/ref.
+        branch: Branch/ref to compare.
+        limit: Maximum number of subjects to return.
+
+    Returns:
+        List of commit subject lines.
+
+    Example:
+        >>> isinstance(git_commit_subjects_since_merge_base(Path("."), "main", "HEAD"), list)
+        True
+    """
+    merge_base = git_merge_base(repo_dir, base, branch)
+    if not merge_base:
+        return []
+    result = run_git_command(
+        [
+            "git",
+            "-C",
+            str(repo_dir),
+            "log",
+            "--format=%s",
+            f"--max-count={max(0, limit)}",
+            f"{merge_base}..{branch}",
+        ]
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
 def git_head_matches_remote(repo_dir: Path, branch: str) -> bool | None:
     """Return whether ``HEAD`` matches ``origin/<branch>``.
 

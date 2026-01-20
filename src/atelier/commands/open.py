@@ -102,6 +102,8 @@ def open_workspace(args: object) -> None:
         die("workspace branch is required")
 
     agents_path = workspace_dir / "AGENTS.md"
+    persist_path = workspace_dir / "PERSIST.md"
+    background_path = workspace_dir / "BACKGROUND.md"
     workspace_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "WORKSPACE.md"
     workspace_policy_path = workspace_dir / "WORKSPACE.md"
     workspace_config_file = paths.workspace_config_path(workspace_dir)
@@ -134,6 +136,7 @@ def open_workspace(args: object) -> None:
         workspace.ensure_workspace_metadata(
             workspace_dir=workspace_dir,
             agents_path=agents_path,
+            persist_path=persist_path,
             workspace_config_file=workspace_config_file,
             project_root=project_dir,
             project_enlistment=project_enlistment,
@@ -239,8 +242,8 @@ def open_workspace(args: object) -> None:
     agent_options = config_payload.agent.options.get("codex", [])
 
     if is_new_workspace and existing_branch:
-        workspace.append_workspace_branch_summary(
-            agents_path, repo_dir, default_branch, workspace_branch
+        workspace.write_background_snapshot(
+            background_path, repo_dir, default_branch, workspace_branch
         )
 
     if should_open_editor and workspace_policy_path.exists():

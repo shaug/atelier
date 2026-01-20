@@ -1,6 +1,10 @@
 """Console I/O helpers for user-facing messages and prompts."""
 
+from __future__ import annotations
+
+import shutil
 import sys
+from pathlib import Path
 
 
 def say(message: str) -> None:
@@ -74,3 +78,23 @@ def prompt(text: str, default: str | None = None, required: bool = False) -> str
         if required and value == "":
             continue
         return value
+
+
+def link_or_copy(src: Path, dest: Path) -> None:
+    """Create a symlink from ``dest`` to ``src`` with copy fallback.
+
+    Args:
+        src: Source file path.
+        dest: Destination file path.
+
+    Returns:
+        None.
+    """
+    if dest.exists() or dest.is_symlink():
+        return
+    try:
+        dest.symlink_to(src)
+        return
+    except (OSError, NotImplementedError):
+        pass
+    shutil.copyfile(src, dest)

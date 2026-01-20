@@ -5,13 +5,15 @@ import datetime as dt
 from pathlib import Path
 
 from . import __version__, config, git, templates
-from .io import die, warn
+from .io import die, link_or_copy, warn
 from .paths import (
     TEMPLATES_DIRNAME,
     WORKSPACES_DIRNAME,
     workspace_config_path,
     workspace_dir_for_branch,
 )
+
+BACKGROUND_COMMIT_LIMIT = 20
 
 
 def workspace_identifier(project_enlistment: str, workspace_branch: str) -> str:
@@ -188,6 +190,7 @@ def workspace_branch_for_dir(workspace_dir: Path) -> str:
 def ensure_workspace_metadata(
     workspace_dir: Path,
     agents_path: Path,
+    persist_path: Path,
     workspace_config_file: Path,
     project_root: Path,
     project_enlistment: str,
@@ -195,11 +198,12 @@ def ensure_workspace_metadata(
     branch_pr: bool,
     branch_history: str,
 ) -> None:
-    """Ensure workspace config and ``AGENTS.md`` exist.
+    """Ensure workspace config and managed workspace files exist.
 
     Args:
         workspace_dir: Workspace directory path.
         agents_path: Path to ``AGENTS.md`` in the workspace.
+        persist_path: Path to ``PERSIST.md`` in the workspace.
         workspace_config_file: Path to workspace ``config.json``.
         project_root: Project directory path.
         project_enlistment: Absolute path to the local enlistment.
@@ -211,7 +215,7 @@ def ensure_workspace_metadata(
         None.
 
     Example:
-        >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/config.json"), Path("/tmp/project"), "/repo", "feat/demo", True, "manual")
+        >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/PERSIST.md"), Path("/tmp/workspace/config.json"), Path("/tmp/project"), "/repo", "feat/demo", True, "manual")
     """
     workspace_config_exists = workspace_config_file.exists()
     if not workspace_config_exists:
@@ -227,9 +231,6 @@ def ensure_workspace_metadata(
         )
         config.write_json(workspace_config_file, workspace_config)
 
-    if agents_path.exists():
-        return
-
     if workspace_config_exists:
         stored_pr, stored_history = config.read_workspace_branch_settings(workspace_dir)
         if stored_pr is None or stored_history is None:
@@ -240,21 +241,18 @@ def ensure_workspace_metadata(
         integration_pr = branch_pr
         integration_history = branch_history
 
-    integration_strategy = templates.render_integration_strategy(
-        integration_pr, integration_history
-    )
-    template_override = project_root / TEMPLATES_DIRNAME / "AGENTS.md"
-    if template_override.exists():
-        content = template_override.read_text(encoding="utf-8")
-        if "## Integration Strategy" not in content:
-            if content and not content.endswith("\n"):
-                content += "\n"
-            content = content.rstrip() + "\n\n" + integration_strategy + "\n"
-        agents_path.write_text(content, encoding="utf-8")
-    else:
-        workspace_id = workspace_identifier(project_enlistment, workspace_branch)
-        agents_path.write_text(
-            templates.render_workspace_agents(workspace_id, integration_strategy),
+    if not agents_path.exists():
+        template_override = project_root / TEMPLATES_DIRNAME / "AGENTS.md"
+        if template_override.exists():
+            link_or_copy(template_override, agents_path)
+        else:
+            agents_path.write_text(
+                templates.render_workspace_agents(), encoding="utf-8"
+            )
+
+    if not persist_path.exists():
+        persist_path.write_text(
+            templates.render_persist(integration_pr, integration_history),
             encoding="utf-8",
         )
 
@@ -404,6 +402,73 @@ def append_workspace_branch_summary(
 
     content = content + "\n".join(lines).rstrip() + "\n"
     agents_path.write_text(content, encoding="utf-8")
+
+
+def write_background_snapshot(
+    background_path: Path,
+    repo_dir: Path,
+    mainline_branch: str,
+    workspace_branch: str,
+) -> None:
+    """Write ``BACKGROUND.md`` for a workspace created from an existing branch.
+
+    Args:
+        background_path: Path to ``BACKGROUND.md``.
+        repo_dir: Path to workspace ``repo/`` directory.
+        mainline_branch: Default branch name.
+        workspace_branch: Workspace branch name.
+
+    Returns:
+        None.
+    """
+    if background_path.exists():
+        return
+    if not repo_dir.exists() or not git.git_is_repo(repo_dir):
+        warn("could not write BACKGROUND.md (repo unavailable)")
+        return
+
+    today = dt.datetime.now(tz=dt.timezone.utc).strftime("%Y-%m-%d")
+    lines = [
+        "# Background Snapshot",
+        "",
+        "Captured at workspace creation time; not updated automatically.",
+        "",
+        f"- Date captured: {today}",
+        f"- Branch: `{workspace_branch}`",
+        f"- Mainline: `{mainline_branch}`",
+    ]
+
+    pr_message = git.gh_pr_message(repo_dir)
+    if pr_message:
+        title = pr_message.get("title")
+        number = pr_message.get("number")
+        pr_label = f"#{number} {title}" if number else f"{title}"
+        lines.extend(
+            [
+                "",
+                f"## PR Snapshot (generated {today})",
+                "",
+                f"- PR: {pr_label}",
+            ]
+        )
+        body = pr_message.get("body")
+        if body:
+            lines.extend(["- Body:", "", "```text", body.rstrip(), "```"])
+        else:
+            lines.append("- Body: (empty)")
+    else:
+        subjects = git.git_commit_subjects_since_merge_base(
+            repo_dir, mainline_branch, workspace_branch, limit=BACKGROUND_COMMIT_LIMIT
+        )
+        lines.extend(
+            ["", f"## Commit Subjects since merge-base (generated {today})", ""]
+        )
+        if subjects:
+            lines.extend([f"- {subject}" for subject in subjects])
+        else:
+            lines.append("- None (no commits ahead of mainline).")
+
+    background_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
 def collect_workspaces(

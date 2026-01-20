@@ -289,6 +289,7 @@ class TestInitProject(TestCase):
                 self.assertEqual(config["branch"]["history"], "manual")
                 self.assertEqual(config["editor"]["default"], "cursor")
                 self.assertTrue((project_dir / "AGENTS.md").exists())
+                self.assertTrue((project_dir / "templates" / "AGENTS.md").exists())
                 self.assertTrue((project_dir / "PROJECT.md").exists())
                 self.assertTrue((project_dir / "workspaces").is_dir())
             finally:
@@ -1066,6 +1067,7 @@ class TestOpenWorkspace(TestCase):
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
                 self.assertTrue((workspace_dir / "AGENTS.md").exists())
+                self.assertTrue((workspace_dir / "PERSIST.md").exists())
                 self.assertTrue((workspace_dir / "WORKSPACE.md").exists())
                 self.assertTrue((workspace_dir / "config.json").exists())
 
@@ -1079,15 +1081,16 @@ class TestOpenWorkspace(TestCase):
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
                     encoding="utf-8"
                 )
-                self.assertIn(
-                    workspace_id_for(enlistment_path, workspace_branch),
-                    agents_content,
-                )
+                self.assertIn("Atelier Agent Contract", agents_content)
                 self.assertIn("WORKSPACE.md", agents_content)
-                self.assertIn("Read `WORKSPACE.md`", agents_content)
-                self.assertIn("## Integration Strategy", agents_content)
-                self.assertIn("Pull requests expected: yes", agents_content)
-                self.assertIn("History policy: manual", agents_content)
+                self.assertIn("PERSIST.md", agents_content)
+
+                persist_content = (workspace_dir / "PERSIST.md").read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn("## Integration Strategy", persist_content)
+                self.assertIn("Pull requests expected: yes", persist_content)
+                self.assertIn("History policy: manual", persist_content)
 
                 self.assertTrue(any(cmd[:2] == ["git", "clone"] for cmd in commands))
                 repo_path = (workspace_dir / "repo").resolve()
@@ -1580,6 +1583,8 @@ class TestOpenWorkspace(TestCase):
                 )
                 self.assertEqual(int(agents_path.stat().st_mtime), 1_000_000_000)
                 self.assertEqual(int(workspace_path.stat().st_mtime), 1_000_000_000)
+                self.assertFalse((workspace_dir / "PERSIST.md").exists())
+                self.assertFalse((workspace_dir / "BACKGROUND.md").exists())
             finally:
                 os.chdir(original_cwd)
 
@@ -1914,12 +1919,12 @@ class TestOpenWorkspace(TestCase):
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                agents_content = (workspace_dir / "AGENTS.md").read_text(
+                persist_content = (workspace_dir / "PERSIST.md").read_text(
                     encoding="utf-8"
                 )
-                self.assertIn("Pull requests expected: no", agents_content)
-                self.assertIn("History policy: squash", agents_content)
-                self.assertIn("collapsed into a single commit", agents_content)
+                self.assertIn("Pull requests expected: no", persist_content)
+                self.assertIn("History policy: squash", persist_content)
+                self.assertIn("collapsed into a single commit", persist_content)
             finally:
                 os.chdir(original_cwd)
 
@@ -1983,15 +1988,15 @@ class TestOpenWorkspace(TestCase):
                     workspace_config["workspace"]["branch_history"], "merge"
                 )
 
-                agents_content = (workspace_dir / "AGENTS.md").read_text(
+                persist_content = (workspace_dir / "PERSIST.md").read_text(
                     encoding="utf-8"
                 )
-                self.assertIn("Pull requests expected: no", agents_content)
-                self.assertIn("History policy: merge", agents_content)
+                self.assertIn("Pull requests expected: no", persist_content)
+                self.assertIn("History policy: merge", persist_content)
             finally:
                 os.chdir(original_cwd)
 
-    def test_open_uses_remote_branch_and_appends_commit_messages(self) -> None:
+    def test_open_uses_remote_branch_and_writes_background_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -2025,10 +2030,12 @@ class TestOpenWorkspace(TestCase):
                     if cmd[0] == "codex":
                         return
                     if cmd[0] == "true":
-                        agents_content = (workspace_dir / "AGENTS.md").read_text(
-                            encoding="utf-8"
+                        background_content = (
+                            workspace_dir / "BACKGROUND.md"
+                        ).read_text(encoding="utf-8")
+                        self.assertIn(
+                            "Commit Subjects since merge-base", background_content
                         )
-                        self.assertIn("Latest Commit Message(s)", agents_content)
                     subprocess.run(cmd, cwd=cwd, check=True)
 
                 with (
@@ -2041,12 +2048,12 @@ class TestOpenWorkspace(TestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                agents_content = (workspace_dir / "AGENTS.md").read_text(
+                self.assertTrue((workspace_dir / "BACKGROUND.md").exists())
+                background_content = (workspace_dir / "BACKGROUND.md").read_text(
                     encoding="utf-8"
                 )
-                self.assertIn("Latest Commit Message(s)", agents_content)
-                self.assertIn("feat: demo change", agents_content)
-                self.assertIn("Review vs Mainline", agents_content)
+                self.assertIn("Commit Subjects since merge-base", background_content)
+                self.assertIn("feat: demo change", background_content)
 
                 head = subprocess.run(
                     [
@@ -2066,7 +2073,7 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
-    def test_open_skips_branch_summary_for_new_branch(self) -> None:
+    def test_open_skips_background_for_new_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -2110,11 +2117,7 @@ class TestOpenWorkspace(TestCase):
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                agents_content = (workspace_dir / "AGENTS.md").read_text(
-                    encoding="utf-8"
-                )
-                self.assertNotIn("Latest Commit Message(s)", agents_content)
-                self.assertNotIn("Review vs Mainline", agents_content)
+                self.assertFalse((workspace_dir / "BACKGROUND.md").exists())
             finally:
                 os.chdir(original_cwd)
 

@@ -1,48 +1,47 @@
-<!-- atelier:{workspace_id} -->
+<!--
+AGENTS.md
 
-# Atelier Workspace
+This file is managed by Atelier. Do not edit it directly.
+-->
 
-This directory is an **Atelier workspace**.
+# Atelier Agent Contract
 
-## Workspace Model
+This project uses **Atelier**, a workspace-based workflow for agent-assisted
+development.
 
-- This workspace represents **one unit of work**
-- All code changes for this work should be made under `repo/`
-- The code in `repo/` is a real git repository and should be treated normally
-- This workspace maps to **one git branch**
-- Integration expectations are defined below
-- Workspace intent and success criteria are defined in `WORKSPACE.md`
+## How Work Is Organized
+
+- Work happens in isolated workspaces under the Atelier data directory.
+- Each workspace maps to one git branch and includes a `repo/` checkout.
+- Workspace intent and success criteria live in `WORKSPACE.md`.
+
+## Required Reading
+
+- `PROJECT.md` (if present) for project-level rules.
+- `WORKSPACE.md` (if present) for workspace intent, scope, and completion
+  criteria.
+- `PERSIST.md` for how to finish and integrate this work (created for new
+  workspaces).
+- `BACKGROUND.md` (if present) for context when a workspace is created from an
+  existing branch.
 
 ## Execution Expectations
 
-- Complete the work described in `WORKSPACE.md` **to completion**
-- Do not expand scope beyond what is written there
-- Prefer small, reviewable changes over large refactors
-- Avoid unrelated cleanup unless explicitly required
-- Read `WORKSPACE.md` before beginning work
+- Complete the work described in `WORKSPACE.md` **to completion**.
+- Do not expand scope beyond what is written there.
+- Prefer small, reviewable changes over large refactors.
+- Avoid unrelated cleanup unless explicitly required.
 
 ## Agent Context
 
-When operating in this workspace:
+- When operating in a workspace, treat it as the entire world.
+- Do not reference or modify other workspaces.
 
-- Treat this workspace as the **entire world**
-- Do not reference or modify other workspaces
-- Read `WORKSPACE.md` and the remainder of this file carefully before beginning
-  work
+## Policy Precedence
 
-## Additional Policy Context
+- `WORKSPACE.md` rules take precedence over `PROJECT.md`.
+- `PROJECT.md` rules take precedence over this file.
 
-If a `PROJECT.md` file exists at the project root (the Atelier project
-directory), read it and apply the rules defined there in addition to this file.
+Before finalizing work in a workspace, read `PERSIST.md`.
 
-If a `WORKSPACE.md` file exists in this workspace, read it and apply the rules
-defined there as well.
-
-In case of conflict:
-
-- `WORKSPACE.md` rules take precedence over `PROJECT.md`
-- `PROJECT.md` rules take precedence over this file
-
-{integration_strategy}
-
-After reading `WORKSPACE.md`, proceed with the work described there.
+After reading the applicable files, proceed with the work described there.
