@@ -8,6 +8,28 @@ from .. import config, editor, exec, git, paths, project, sessions, workspace
 from ..io import die, say, warn
 
 
+def confirm_remove_finalization_tag(workspace_branch: str, tag: str) -> bool:
+    """Prompt to remove an existing finalization tag before reopening.
+
+    Args:
+        workspace_branch: Workspace branch name.
+        tag: Finalization tag name.
+
+    Returns:
+        ``True`` when the user confirms tag removal.
+    """
+    response = (
+        input(
+            "Workspace "
+            f"{workspace_branch} has finalization tag {tag}. "
+            "Remove it before continuing? [y/N]: "
+        )
+        .strip()
+        .lower()
+    )
+    return response in {"y", "yes"}
+
+
 def open_workspace(args: object) -> None:
     """Create or open a workspace and launch the agent session.
 
@@ -172,6 +194,16 @@ def open_workspace(args: object) -> None:
                 die("repo missing origin remote")
             if current_remote != project_repo_url:
                 warn("repo remote differs from current origin; using existing repo")
+
+    if repo_dir.exists():
+        finalization_tag = workspace.finalization_tag_name(workspace_branch)
+        if git.git_tag_exists(repo_dir, finalization_tag):
+            if confirm_remove_finalization_tag(workspace_branch, finalization_tag):
+                result = exec.try_run_command(
+                    ["git", "-C", str(repo_dir), "tag", "-d", finalization_tag]
+                )
+                if result is None or result.returncode != 0:
+                    warn("failed to delete finalization tag; continuing with open")
 
     current_branch = git.git_current_branch(repo_dir)
     if current_branch is None:

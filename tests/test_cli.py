@@ -178,11 +178,15 @@ def make_fake_git(
     branches: dict[Path, str],
     statuses: dict[Path, str],
     remotes: dict[tuple[Path, str], str],
+    tags: dict[Path, set[str]] | None = None,
 ):
     normalized_branches = {path.resolve(): value for path, value in branches.items()}
     normalized_statuses = {path.resolve(): value for path, value in statuses.items()}
     normalized_remotes = {
         (path.resolve(), branch): value for (path, branch), value in remotes.items()
+    }
+    normalized_tags = {
+        path.resolve(): set(values) for path, values in (tags or {}).items()
     }
 
     def fake_run(
@@ -203,6 +207,14 @@ def make_fake_git(
         if "status" in cmd and "--porcelain" in cmd:
             status = normalized_statuses.get(repo_dir, "")
             return DummyResult(returncode=0, stdout=status)
+        if "show-ref" in cmd and "--verify" in cmd and "--quiet" in cmd:
+            ref = cmd[-1]
+            if ref.startswith("refs/tags/"):
+                tag = ref[len("refs/tags/") :]
+                tag_set = normalized_tags.get(repo_dir, set())
+                if tag in tag_set:
+                    return DummyResult(returncode=0, stdout="")
+                return DummyResult(returncode=1, stdout="")
         if "ls-remote" in cmd:
             branch = cmd[-1]
             output = normalized_remotes.get((repo_dir, branch), "")
@@ -601,7 +613,7 @@ class TestListWorkspaces(TestCase):
 
 
 class TestCleanWorkspaces(TestCase):
-    def test_clean_default_deletes_complete_only(self) -> None:
+    def test_clean_default_deletes_finalized_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -632,13 +644,16 @@ class TestCleanWorkspaces(TestCase):
             repo_incomplete = incomplete_dir / "repo"
             fake_run = make_fake_git(
                 branches={repo_complete: "scott/complete", repo_incomplete: "main"},
-                statuses={repo_complete: "", repo_incomplete: " M file.txt\n"},
+                statuses={repo_complete: " M file.txt\n", repo_incomplete: ""},
                 remotes={
+                    (repo_complete, "scott/complete"): "",
                     (
-                        repo_complete,
-                        "scott/complete",
-                    ): "abc\trefs/heads/scott/complete\n",
-                    (repo_incomplete, "scott/incomplete"): "",
+                        repo_incomplete,
+                        "scott/incomplete",
+                    ): "abc\trefs/heads/scott/incomplete\n",
+                },
+                tags={
+                    repo_complete: {workspace.finalization_tag_name(complete_branch)}
                 },
             )
 
@@ -1569,6 +1584,7 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
                     patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.git.git_tag_exists", return_value=False),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
@@ -1587,6 +1603,130 @@ class TestOpenWorkspace(TestCase):
                 self.assertFalse((workspace_dir / "BACKGROUND.md").exists())
             finally:
                 os.chdir(original_cwd)
+
+    def test_open_continues_when_finalization_tag_present_and_declined(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            workspace_branch = "scott/feat-demo"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
+            )
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir(parents=True)
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                class DummyResult:
+                    def __init__(self, returncode: int = 0, stdout: str = "") -> None:
+                        self.returncode = returncode
+                        self.stdout = stdout
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(stdout=RAW_ORIGIN),
+                    ),
+                    patch("atelier.git.git_is_repo", return_value=True),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.git.git_tag_exists", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("builtins.input", return_value="n"),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+            finally:
+                os.chdir(original_cwd)
+
+            self.assertTrue(any(cmd[0] == "codex" for cmd in commands))
+
+    def test_open_removes_finalization_tag_when_confirmed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            workspace_branch = "scott/feat-demo"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
+            )
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir(parents=True)
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                try_commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                class DummyResult:
+                    def __init__(self, returncode: int = 0, stdout: str = "") -> None:
+                        self.returncode = returncode
+                        self.stdout = stdout
+
+                def fake_try(cmd: list[str], cwd: Path | None = None) -> DummyResult:
+                    try_commands.append(cmd)
+                    return DummyResult(returncode=0, stdout="")
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(stdout=RAW_ORIGIN),
+                    ),
+                    patch("atelier.git.git_is_repo", return_value=True),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.git.git_tag_exists", return_value=True),
+                    patch("atelier.exec.try_run_command", fake_try),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("builtins.input", return_value="y"),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+            finally:
+                os.chdir(original_cwd)
+
+            finalization_tag = workspace.finalization_tag_name(workspace_branch)
+            self.assertIn(
+                ["git", "-C", str(repo_dir), "tag", "-d", finalization_tag],
+                try_commands,
+            )
 
     def test_open_errors_when_repo_is_not_git_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

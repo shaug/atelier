@@ -167,6 +167,23 @@ def normalize_workspace_name(value: str) -> str:
     return normalized
 
 
+def finalization_tag_name(workspace_branch: str) -> str:
+    """Return the local finalization tag name for a workspace branch.
+
+    Args:
+        workspace_branch: Workspace branch name.
+
+    Returns:
+        Finalization tag string (``atelier/<branch>/finalized``).
+
+    Example:
+        >>> finalization_tag_name("feat/demo")
+        'atelier/feat/demo/finalized'
+    """
+    branch = workspace_branch.lstrip("/")
+    return f"atelier/{branch}/finalized"
+
+
 def workspace_branch_for_dir(workspace_dir: Path) -> str:
     """Read the workspace branch name from its config file.
 
@@ -515,6 +532,7 @@ def collect_workspaces(
         checked_out: bool | None = None
         clean: bool | None = None
         pushed: bool | None = None
+        finalized: bool | None = None
         if with_status and repo_dir.exists():
             current_branch = git.git_current_branch(repo_dir)
             checked_out = current_branch == branch if current_branch else None
@@ -523,6 +541,7 @@ def collect_workspaces(
             else:
                 clean = None
             pushed = git.git_has_remote_branch(repo_dir, branch)
+            finalized = git.git_tag_exists(repo_dir, finalization_tag_name(branch))
         return {
             "name": workspace_name,
             "path": workspace_dir,
@@ -531,6 +550,7 @@ def collect_workspaces(
             "checked_out": checked_out,
             "clean": clean,
             "pushed": pushed,
+            "finalized": finalized,
         }
 
     max_workers = min(8, len(workspace_configs))

@@ -142,11 +142,7 @@ def clean_workspaces(args: object) -> None:
                 continue
             targets.append(item)
     else:
-        targets = [
-            item
-            for item in workspaces
-            if item["clean"] is True and item["pushed"] is True
-        ]
+        targets = [item for item in workspaces if item["finalized"] is True]
 
     if not targets:
         say("No workspaces to clean.")

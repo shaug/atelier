@@ -31,6 +31,8 @@ development.
 - Do not expand scope beyond what is written there.
 - Prefer small, reviewable changes over large refactors.
 - Avoid unrelated cleanup unless explicitly required.
+- After integration, create the local finalization tag
+  `atelier/<branch-name>/finalized` (do not push); `atelier clean` relies on it.
 
 ## Agent Context
 

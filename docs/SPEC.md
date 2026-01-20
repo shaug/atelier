@@ -299,7 +299,10 @@ user-owned.
 
 `PERSIST.md` is created for every new workspace and is managed by Atelier. It
 records the integration strategy derived from workspace settings (`branch.pr`
-and `branch.history`). Read it before finishing or integrating work.
+and `branch.history`). Read it before finishing or integrating work. It also
+instructs the user to create a local finalization tag
+`atelier/<branch-name>/finalized` on the integration commit; `atelier clean`
+uses this tag by default.
 
 ### `BACKGROUND.md`
 
@@ -397,6 +400,8 @@ Ensures a workspace exists and launches or resumes agent work.
 6. Existing workspaces are not modified
 7. Ensure `repo/` exists:
    - Clone repo if missing
+   - If the finalization tag `atelier/<branch-name>/finalized` exists, prompt to
+     remove it (continue either way)
    - Checkout default branch
    - Create workspace branch if missing
 8. Launch agent:

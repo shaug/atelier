@@ -142,6 +142,8 @@ Use `--raw` to treat the argument as the full branch name (no prefix lookup).
 - generate `AGENTS.md`, `WORKSPACE.md`, `PERSIST.md`, and `config.json` (plus
   `BACKGROUND.md` when the branch already exists)
 - clone the repo into `repo/` and create the workspace branch
+- prompt to remove the finalization tag `atelier/<branch-name>/finalized` if
+  present (continuing either way)
 - open the configured editor for new workspaces (`WORKSPACE.md`), then launch
   Codex
 
@@ -152,7 +154,7 @@ atelier list
 atelier list --status
 ```
 
-Clean completed workspaces (clean + pushed):
+Clean completed workspaces (finalization tag):
 
 ```sh
 atelier clean
@@ -175,7 +177,8 @@ atelier clean --all --force
 - Atelier never auto-updates existing workspaces or templates.
 - `WORKSPACE.md` is the execution contract for each workspace.
 - `AGENTS.md` is a managed, static prologue shared across projects/workspaces.
-- `PERSIST.md` records integration guidance for each workspace.
+- `PERSIST.md` records integration guidance and the finalization tag
+  (`atelier/<branch-name>/finalized`) used by `atelier clean`.
 - `BACKGROUND.md` captures context when opening an existing branch.
 - `PROJECT.md` is an optional policy overlay for agents.
 - Configuration lives in `config.json` under the Atelier data directory.
@@ -218,7 +221,9 @@ atelier init --branch-prefix scott/ --branch-pr false --branch-history rebase
 Create or open a workspace, ensuring its `repo/` checkout exists, open your
 editor for new workspaces (`WORKSPACE.md`), then launch Codex. New workspaces
 include managed `AGENTS.md`/`PERSIST.md`, and `BACKGROUND.md` when the branch
-already exists.
+already exists. If the workspace repo has the finalization tag
+`atelier/<branch-name>/finalized`, `atelier open` will prompt to remove it but
+continues either way.
 
 Usage:
 
@@ -258,8 +263,8 @@ and pushed.
 
 ### `atelier clean`
 
-Delete workspaces safely. By default, this removes only workspaces that are both
-clean and pushed.
+Delete workspaces safely. By default, this removes only workspaces that have the
+local finalization tag `atelier/<branch-name>/finalized`.
 
 Usage:
 

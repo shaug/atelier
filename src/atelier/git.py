@@ -362,6 +362,25 @@ def git_ref_exists(repo_dir: Path, ref: str) -> bool:
     return result.returncode == 0
 
 
+def git_tag_exists(repo_dir: Path, tag: str) -> bool:
+    """Check whether a local tag exists.
+
+    Args:
+        repo_dir: Git repository directory.
+        tag: Tag name to check (without ``refs/tags/``).
+
+    Returns:
+        ``True`` if the tag exists.
+
+    Example:
+        >>> git_tag_exists(Path("."), "v0.1.0") in {True, False}
+        True
+    """
+    if not tag:
+        return False
+    return git_ref_exists(repo_dir, f"refs/tags/{tag}")
+
+
 def git_rev_parse(repo_dir: Path, ref: str) -> str | None:
     """Resolve a ref to its commit hash.
 

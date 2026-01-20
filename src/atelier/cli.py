@@ -207,7 +207,7 @@ def list_command(
 
 @app.command(
     "clean",
-    help="Delete workspaces safely (clean + pushed by default).",
+    help="Delete workspaces safely (finalization tag by default).",
 )
 def clean_command(
     all_: Annotated[
