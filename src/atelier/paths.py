@@ -40,6 +40,19 @@ def projects_root() -> Path:
     return atelier_data_dir() / PROJECTS_DIRNAME
 
 
+def installed_templates_dir() -> Path:
+    """Return the root directory for the installed template cache.
+
+    Returns:
+        Path to the installed template cache directory.
+
+    Example:
+        >>> installed_templates_dir().name == TEMPLATES_DIRNAME
+        True
+    """
+    return atelier_data_dir() / TEMPLATES_DIRNAME
+
+
 def project_key(origin: str) -> str:
     """Hash a normalized origin string into a legacy project key.
 

@@ -35,5 +35,8 @@ def init_project(args: object) -> None:
     project.ensure_project_dirs(project_dir)
     config.write_json(config_path, payload)
     project.ensure_project_scaffold(project_dir)
+    config.update_project_managed_files(
+        project_dir, config.managed_project_agents_updates(project_dir)
+    )
 
     say("Initialized Atelier project")

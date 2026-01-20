@@ -10,6 +10,7 @@ Example:
 """
 
 import datetime as dt
+import hashlib
 import json
 import shlex
 import shutil
@@ -17,7 +18,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from . import __version__
+from . import __version__, paths, templates
 from .editor import system_editor_default
 from .io import die, prompt
 from .models import (
@@ -46,6 +47,16 @@ def utc_now() -> str:
     """
     now = dt.datetime.now(tz=dt.timezone.utc).replace(microsecond=0)
     return now.isoformat().replace("+00:00", "Z")
+
+
+def hash_text(text: str) -> str:
+    """Return the SHA-256 hex digest for text content."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def hash_file(path: Path) -> str:
+    """Return the SHA-256 hex digest for a file's contents."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def load_json(path: Path) -> dict | None:
@@ -87,6 +98,72 @@ def write_json(path: Path, payload: dict | BaseModel) -> None:
     with path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2)
         fh.write("\n")
+
+
+def update_project_managed_files(project_dir: Path, updates: dict[str, str]) -> None:
+    """Update managed file hashes in a project config."""
+    if not updates:
+        return
+    config_path = paths.project_config_path(project_dir)
+    config_payload = load_project_config(config_path)
+    if not config_payload:
+        die("no Atelier project config found for managed file updates")
+    atelier_section = config_payload.atelier
+    managed = dict(atelier_section.managed_files)
+    managed.update(updates)
+    atelier_section = atelier_section.model_copy(update={"managed_files": managed})
+    config_payload = config_payload.model_copy(update={"atelier": atelier_section})
+    write_json(config_path, config_payload)
+
+
+def update_workspace_managed_files(
+    workspace_dir: Path, updates: dict[str, str]
+) -> None:
+    """Update managed file hashes in a workspace config."""
+    if not updates:
+        return
+    config_path = workspace_config_path(workspace_dir)
+    workspace_config = load_workspace_config(config_path)
+    if not workspace_config:
+        die("no workspace config found for managed file updates")
+    atelier_section = workspace_config.atelier
+    managed = dict(atelier_section.managed_files)
+    managed.update(updates)
+    atelier_section = atelier_section.model_copy(update={"managed_files": managed})
+    workspace_config = workspace_config.model_copy(update={"atelier": atelier_section})
+    write_json(config_path, workspace_config)
+
+
+def managed_project_agents_updates(project_dir: Path) -> dict[str, str]:
+    """Return managed hashes for project AGENTS files when canonical."""
+    canonical = templates.project_agents_template(prefer_installed=True)
+    updates: dict[str, str] = {}
+    candidates = [
+        ("AGENTS.md", project_dir / "AGENTS.md"),
+        (
+            f"{paths.TEMPLATES_DIRNAME}/AGENTS.md",
+            project_dir / paths.TEMPLATES_DIRNAME / "AGENTS.md",
+        ),
+    ]
+    for rel_path, path in candidates:
+        if not path.exists():
+            continue
+        content = path.read_text(encoding="utf-8")
+        if content == canonical:
+            updates[rel_path] = hash_text(content)
+    return updates
+
+
+def managed_workspace_agents_updates(workspace_dir: Path) -> dict[str, str]:
+    """Return managed hashes for workspace AGENTS files when canonical."""
+    agents_path = workspace_dir / "AGENTS.md"
+    if not agents_path.exists():
+        return {}
+    content = agents_path.read_text(encoding="utf-8")
+    canonical = templates.workspace_agents_template(prefer_installed=True)
+    if content != canonical:
+        return {}
+    return {"AGENTS.md": hash_text(content)}
 
 
 def parse_project_config(
@@ -454,6 +531,7 @@ def build_project_config(
 
     atelier_created_at = existing_config.atelier.created_at or utc_now()
     atelier_version = existing_config.atelier.version or __version__
+    atelier_managed_files = dict(existing_config.atelier.managed_files)
 
     agent_options = dict(existing_config.agent.options)
     agent_options.setdefault("codex", [])
@@ -474,5 +552,9 @@ def build_project_config(
         branch=BranchConfig(prefix=branch_prefix, pr=branch_pr, history=branch_history),
         agent=AgentConfig(default=agent_default, options=agent_options),
         editor=EditorConfig(default=editor_default, options=editor_options),
-        atelier=AtelierSection(version=atelier_version, created_at=atelier_created_at),
+        atelier=AtelierSection(
+            version=atelier_version,
+            created_at=atelier_created_at,
+            managed_files=atelier_managed_files,
+        ),
     )

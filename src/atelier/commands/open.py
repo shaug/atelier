@@ -152,6 +152,9 @@ def open_workspace(args: object) -> None:
             die("workspace branch does not match configured workspace branch")
     if is_new_workspace:
         project.ensure_project_scaffold(project_dir)
+        config.update_project_managed_files(
+            project_dir, config.managed_project_agents_updates(project_dir)
+        )
         paths.ensure_dir(workspace_dir)
         workspace.ensure_workspace_metadata(
             workspace_dir=workspace_dir,
@@ -163,6 +166,9 @@ def open_workspace(args: object) -> None:
             workspace_branch=workspace_branch,
             branch_pr=effective_branch_pr,
             branch_history=effective_branch_history,
+        )
+        config.update_workspace_managed_files(
+            workspace_dir, config.managed_workspace_agents_updates(workspace_dir)
         )
         success_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
         legacy_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "WORKSPACE.md"

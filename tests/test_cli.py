@@ -985,6 +985,30 @@ class TestCleanFlags(TestCase):
         self.assertTrue(captured["force"])
 
 
+class TestUpgradeFlags(TestCase):
+    def test_upgrade_flags(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_upgrade(args: SimpleNamespace) -> None:
+            captured["installed"] = args.installed
+            captured["dry_run"] = args.dry_run
+            captured["yes"] = args.yes
+            captured["workspaces"] = args.workspace_names
+
+        runner = CliRunner()
+        with patch("atelier.commands.upgrade.upgrade", fake_upgrade):
+            result = runner.invoke(
+                cli.app,
+                ["upgrade", "alpha", "beta", "--installed", "--dry-run", "--yes"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertTrue(captured["installed"])
+        self.assertTrue(captured["dry_run"])
+        self.assertTrue(captured["yes"])
+        self.assertEqual(captured["workspaces"], ["alpha", "beta"])
+
+
 class TestFindCodexSession(TestCase):
     def test_returns_most_recent_match(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

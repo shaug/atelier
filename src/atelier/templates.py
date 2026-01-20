@@ -1,6 +1,19 @@
 """Template loading and rendering helpers."""
 
 from importlib import resources
+from pathlib import Path
+
+from . import paths
+
+TEMPLATE_PARTS: tuple[tuple[str, ...], ...] = (
+    ("AGENTS.md",),
+    ("project", "AGENTS.md"),
+    ("project", "PROJECT.md"),
+    ("workspace", "AGENTS.md"),
+    ("workspace", "SUCCESS.md"),
+    ("workspace", "WORKSPACE.md"),
+    ("workspace", "PERSIST.md"),
+)
 
 
 def _read_template(*parts: str) -> str:
@@ -24,7 +37,59 @@ def _read_template(*parts: str) -> str:
     )
 
 
-def agents_template() -> str:
+def _installed_template_path(*parts: str) -> Path:
+    return paths.installed_templates_dir().joinpath(*parts)
+
+
+def read_installed_template(*parts: str) -> str | None:
+    """Read a template from the installed cache when present.
+
+    Args:
+        *parts: Path components under the installed template cache.
+
+    Returns:
+        Template text or ``None`` when missing.
+    """
+    path = _installed_template_path(*parts)
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def read_template(*parts: str, prefer_installed: bool = False) -> str:
+    """Read a template from the installed cache or packaged defaults.
+
+    Args:
+        *parts: Path components under ``atelier/templates``.
+        prefer_installed: When true, read from the installed cache if present.
+
+    Returns:
+        Template text.
+    """
+    if prefer_installed:
+        cached = read_installed_template(*parts)
+        if cached is not None:
+            return cached
+    return _read_template(*parts)
+
+
+def refresh_installed_templates() -> list[Path]:
+    """Refresh the installed template cache from the packaged defaults.
+
+    Returns:
+        List of paths written to the cache.
+    """
+    dest_root = paths.installed_templates_dir()
+    written: list[Path] = []
+    for parts in TEMPLATE_PARTS:
+        dest = dest_root.joinpath(*parts)
+        paths.ensure_dir(dest.parent)
+        dest.write_text(_read_template(*parts), encoding="utf-8")
+        written.append(dest)
+    return written
+
+
+def agents_template(*, prefer_installed: bool = False) -> str:
     """Return the canonical ``AGENTS.md`` template text.
 
     Returns:
@@ -34,10 +99,10 @@ def agents_template() -> str:
         >>> "Atelier" in agents_template()
         True
     """
-    return _read_template("AGENTS.md")
+    return read_template("AGENTS.md", prefer_installed=prefer_installed)
 
 
-def project_agents_template() -> str:
+def project_agents_template(*, prefer_installed: bool = False) -> str:
     """Return the project-level ``AGENTS.md`` template text.
 
     Returns:
@@ -47,10 +112,10 @@ def project_agents_template() -> str:
         >>> "Atelier" in project_agents_template()
         True
     """
-    return agents_template()
+    return read_template("project", "AGENTS.md", prefer_installed=prefer_installed)
 
 
-def project_md_template() -> str:
+def project_md_template(*, prefer_installed: bool = False) -> str:
     """Return the project-level ``PROJECT.md`` template text.
 
     Returns:
@@ -60,10 +125,10 @@ def project_md_template() -> str:
         >>> "PROJECT" in project_md_template()
         True
     """
-    return _read_template("project", "PROJECT.md")
+    return read_template("project", "PROJECT.md", prefer_installed=prefer_installed)
 
 
-def workspace_agents_template() -> str:
+def workspace_agents_template(*, prefer_installed: bool = False) -> str:
     """Return the workspace ``AGENTS.md`` template text.
 
     Returns:
@@ -73,10 +138,10 @@ def workspace_agents_template() -> str:
         >>> "Atelier" in workspace_agents_template()
         True
     """
-    return agents_template()
+    return read_template("workspace", "AGENTS.md", prefer_installed=prefer_installed)
 
 
-def success_md_template() -> str:
+def success_md_template(*, prefer_installed: bool = False) -> str:
     """Return the workspace ``SUCCESS.md`` template text.
 
     Returns:
@@ -86,10 +151,10 @@ def success_md_template() -> str:
         >>> "SUCCESS" in success_md_template()
         True
     """
-    return _read_template("workspace", "SUCCESS.md")
+    return read_template("workspace", "SUCCESS.md", prefer_installed=prefer_installed)
 
 
-def workspace_md_template() -> str:
+def workspace_md_template(*, prefer_installed: bool = False) -> str:
     """Return the legacy workspace ``WORKSPACE.md`` template text.
 
     Returns:
@@ -99,10 +164,10 @@ def workspace_md_template() -> str:
         >>> "WORKSPACE" in workspace_md_template()
         True
     """
-    return _read_template("workspace", "WORKSPACE.md")
+    return read_template("workspace", "WORKSPACE.md", prefer_installed=prefer_installed)
 
 
-def persist_template() -> str:
+def persist_template(*, prefer_installed: bool = False) -> str:
     """Return the workspace ``PERSIST.md`` template text.
 
     Returns:
@@ -112,7 +177,7 @@ def persist_template() -> str:
         >>> "PERSIST" in persist_template()
         True
     """
-    return _read_template("workspace", "PERSIST.md")
+    return read_template("workspace", "PERSIST.md", prefer_installed=prefer_installed)
 
 
 def render_integration_strategy(branch_pr: bool, branch_history: str) -> str:

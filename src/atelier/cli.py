@@ -17,6 +17,7 @@ from .commands import clean as clean_cmd
 from .commands import init as init_cmd
 from .commands import list as list_cmd
 from .commands import open as open_cmd
+from .commands import upgrade as upgrade_cmd
 
 app = typer.Typer(
     add_completion=False,
@@ -247,6 +248,54 @@ def clean_command(
             force=force,
             no_branch=no_branch,
             workspace_names=workspace_names or [],
+        )
+    )
+
+
+@app.command(
+    "upgrade",
+    help="Upgrade project/workspace metadata and templates safely.",
+)
+def upgrade_command(
+    workspace_names: Annotated[
+        list[str] | None,
+        typer.Argument(help="workspace branches to upgrade"),
+    ] = None,
+    installed: Annotated[
+        bool,
+        typer.Option("--installed", help="refresh the installed template cache"),
+    ] = False,
+    all_projects: Annotated[
+        bool,
+        typer.Option("--all-projects", help="upgrade all projects in the data dir"),
+    ] = False,
+    no_projects: Annotated[
+        bool,
+        typer.Option("--no-projects", help="skip project upgrades"),
+    ] = False,
+    no_workspaces: Annotated[
+        bool,
+        typer.Option("--no-workspaces", help="skip workspace upgrades"),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="show planned changes only"),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="apply without confirmation"),
+    ] = False,
+) -> None:
+    """Upgrade project/workspace metadata to current conventions."""
+    upgrade_cmd.upgrade(
+        SimpleNamespace(
+            workspace_names=workspace_names or [],
+            installed=installed,
+            all_projects=all_projects,
+            no_projects=no_projects,
+            no_workspaces=no_workspaces,
+            dry_run=dry_run,
+            yes=yes,
         )
     )
 
