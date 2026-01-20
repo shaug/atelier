@@ -146,6 +146,46 @@ def resolve_repo_origin(start: Path) -> tuple[Path, str, str]:
     return repo_root, origin_raw, origin
 
 
+def resolve_enlistment_path(repo_root: Path) -> str:
+    """Resolve the enlistment path identifier for a repository.
+
+    Args:
+        repo_root: Path to the git repository root.
+
+    Returns:
+        Resolved absolute path string for the enlistment.
+
+    Example:
+        >>> resolve_enlistment_path(Path("."))  # doctest: +SKIP
+        '/repo'
+    """
+    return str(repo_root.resolve())
+
+
+def resolve_repo_enlistment(
+    start: Path,
+) -> tuple[Path, str, str | None, str | None]:
+    """Resolve the repo root, enlistment path, and origin metadata.
+
+    Args:
+        start: Directory to search from.
+
+    Returns:
+        Tuple of ``(repo_root, enlistment_path, origin_raw, origin_normalized)``.
+
+    Example:
+        >>> resolve_repo_enlistment(Path("."))  # doctest: +SKIP
+        (Path("/repo"), "/repo", "git@...", "github.com/org/repo")
+    """
+    repo_root = git_repo_root(start)
+    if not repo_root:
+        die("command must be run inside a git repository")
+    enlistment_path = resolve_enlistment_path(repo_root)
+    origin_raw = git_origin_url(repo_root)
+    origin = normalize_origin_url(origin_raw) if origin_raw else None
+    return repo_root, enlistment_path, origin_raw, origin
+
+
 def git_current_branch(repo_dir: Path) -> str | None:
     """Return the current branch name.
 

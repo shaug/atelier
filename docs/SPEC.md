@@ -18,13 +18,14 @@ ______________________________________________________________________
 
 ### Project
 
-A project is identified by its **normalized Git origin**. There is no separate
-project ID. Project state is stored under the Atelier data directory (via
-`platformdirs`), not inside the user repo.
+A project is identified by its **local enlistment path** (resolved absolute
+path). There is no separate project ID. Project state is stored under the
+Atelier data directory (via `platformdirs`), not inside the user repo.
 
 - A project has **one Atelier configuration** stored in the data directory
-- Multiple local checkouts with the same origin map to the **same** project
-- Atelier commands resolve the project by reading the repo's origin
+- Multiple local checkouts with the same origin map to **different** projects
+- Atelier commands resolve the project by reading the repo root path; origin is
+  stored only as metadata when available
 
 ### Workspace
 
@@ -60,8 +61,8 @@ ______________________________________________________________________
 
 Notes:
 
-- `<project-key>` is a stable, filesystem-safe key (SHA-256) derived from the
-  normalized origin.
+- `<project-key>` is the enlistment basename plus a short SHA-256 of the full
+  enlistment path.
 - The data directory is platform-specific (e.g.
   `~/Library/Application Support/atelier`).
 
@@ -81,8 +82,8 @@ Notes:
 - `templates/WORKSPACE.md` is created by `atelier init` (or `atelier open` when
   needed).
 - `WORKSPACE.md` is copied into new workspaces from `templates/WORKSPACE.md`.
-- `<workspace-key>` is a stable, filesystem-safe key (SHA-256) derived from the
-  workspace branch name.
+- `<workspace-key>` is the normalized branch name plus a short SHA-256 of the
+  full workspace ID.
 - Branch names may include `/` without creating nested directories under
   `workspaces/`.
 - The workspace root name is fixed (`workspaces/`) and not configurable.
@@ -100,6 +101,7 @@ frequent manual editing.
 ```json
 {
   "project": {
+    "enlistment": "/path/to/gumshoe",
     "origin": "github.com/org/gumshoe",
     "repo_url": "git@github.com:org/gumshoe.git"
   },
@@ -137,10 +139,11 @@ frequent manual editing.
 
 ### Notes
 
-- `project.origin` is the **canonical identity** of the project (normalized to
-  host/path with no scheme, or an absolute path for local repos)
-- `project.repo_url` is the last-seen clone URL for convenience; origin identity
-  is still based on `project.origin`
+- `project.enlistment` is the **canonical identity** of the project (resolved
+  absolute path to the local enlistment)
+- `project.origin` is optional metadata derived from the git remote when
+  available; it is not used for identity
+- `project.repo_url` is the last-seen clone URL for convenience
 - `branch.pr` controls whether integration is expected via pull request (default
   `true`)
 - `branch.history` defines expected history shape after integration (default
@@ -201,7 +204,7 @@ ______________________________________________________________________
 This file records workspace identity and provenance.
 
 The workspace branch is the canonical identifier and is used with the project
-origin to form the workspace ID.
+enlistment path to form the workspace ID.
 
 ### v2 Schema
 
@@ -211,7 +214,7 @@ origin to form the workspace ID.
     "branch": "scott/feat-org-api-keys",
     "branch_pr": true,
     "branch_history": "manual",
-    "id": "atelier:github.com/org/gumshoe/scott/feat-org-api-keys"
+    "id": "atelier:/path/to/gumshoe:scott/feat-org-api-keys"
   },
   "atelier": {
     "version": "0.2.0",
@@ -235,7 +238,7 @@ criteria live in `WORKSPACE.md`.
 ### Standard Prologue (v2)
 
 ```markdown
-<!-- atelier:<project.origin>/<workspace.branch> -->
+<!-- atelier:<project.enlistment>:<workspace.branch> -->
 
 # Atelier Workspace
 
@@ -337,12 +340,13 @@ ______________________________________________________________________
 
 ### `atelier init`
 
-Registers the current repo origin as an Atelier project.
+Registers the current enlistment path as an Atelier project.
 
 #### Behavior
 
-- Must be run inside a Git repository with a resolved `origin` remote
-- Resolves the repo origin and creates/updates the project under the data dir
+- Must be run inside a Git repository
+- Resolves the repo enlistment path and creates/updates the project under the
+  data dir
 - Detects the remote default branch (origin/HEAD) when needed instead of storing
   a static `branch.default`
 - Creates `config.json` in the project directory (if missing)
@@ -363,9 +367,11 @@ Ensures a workspace exists and launches or resumes agent work.
 
 #### Behavior
 
-1. Locate the git repo root and resolve the repo origin
+1. Locate the git repo root and resolve the enlistment path (and origin when
+   available)
 2. Resolve or create the Atelier project in the data directory
-3. Resolve the workspace branch name and workspace key (hashed from the branch)
+3. Resolve the workspace branch name and workspace key (branch name plus a short
+   hash of the workspace ID)
 4. Ensure workspace directory exists under `workspaces/<workspace-key>/`
 5. If workspace is new:
    - Generate `config.json`
@@ -415,7 +421,7 @@ Atelier may attempt to resume Codex sessions by:
 - Scanning `~/.codex/sessions/**` JSON/JSONL files
 - Matching the first user message against:
   ```
-  atelier:<project.origin>/<workspace.branch>
+  atelier:<project.enlistment>:<workspace.branch>
   ```
 - Selecting the most recent match
 
@@ -516,5 +522,5 @@ Atelier v2 is successful if:
 - Resume agent work reliably
 - Interrupt and resume work using an editor
 - Upgrade Atelier without breaking existing projects
-- Multiple local checkouts with the same origin share one project
+- Multiple local checkouts with the same origin map to different projects
 - Deleting the Atelier data directory removes state without touching repos

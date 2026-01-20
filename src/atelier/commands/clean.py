@@ -88,12 +88,16 @@ def clean_workspaces(args: object) -> None:
         $ atelier clean --all --force
     """
     cwd = Path.cwd()
-    _, _, origin = git.resolve_repo_origin(cwd)
-    project_root = paths.project_dir_for_origin(origin)
+    _, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
+    project_root = paths.project_dir_for_enlistment(enlistment_path, origin)
     config_path = paths.project_config_path(project_root)
     config_payload = config.load_project_config(config_path)
     if not config_payload:
         die("no Atelier project config found for this repo; run 'atelier init'")
+
+    project_enlistment = config_payload.project.enlistment
+    if project_enlistment and project_enlistment != enlistment_path:
+        die("project enlistment does not match current repo path")
 
     branch_prefix = config_payload.branch.prefix
 
@@ -105,7 +109,11 @@ def clean_workspaces(args: object) -> None:
         if not normalized:
             continue
         branch, _, exists = workspace.resolve_workspace_target(
-            project_root, normalized, branch_prefix, False
+            project_root,
+            project_enlistment or enlistment_path,
+            normalized,
+            branch_prefix,
+            False,
         )
         if not exists:
             warn(f"workspace not found: {normalized}")

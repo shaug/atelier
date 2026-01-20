@@ -22,40 +22,43 @@ def open_workspace(args: object) -> None:
         $ atelier open feat/new-search
     """
     cwd = Path.cwd()
-    repo_root = git.git_repo_root(cwd)
-    if not repo_root:
-        die("atelier open must be run inside a git repository")
+    repo_root, enlistment_path, origin_raw, origin = git.resolve_repo_enlistment(cwd)
 
-    origin_raw = git.git_origin_url(repo_root)
-    if not origin_raw:
-        die("repo missing origin remote")
-    origin = git.normalize_origin_url(origin_raw)
-    if not origin:
-        die("failed to normalize origin URL")
-
-    project_dir = paths.project_dir_for_origin(origin)
+    project_dir = paths.project_dir_for_enlistment(enlistment_path, origin)
     config_path = paths.project_config_path(project_dir)
     config_payload = config.load_project_config(config_path)
     if not config_payload:
-        config_payload = config.build_project_config({}, origin, origin_raw, None)
+        config_payload = config.build_project_config(
+            {}, enlistment_path, origin, origin_raw, None
+        )
         project.ensure_project_dirs(project_dir)
         config.write_json(config_path, config_payload)
     else:
         project.ensure_project_dirs(project_dir)
 
-    project_origin = config_payload.project.origin
-    if not project_origin:
-        project_section = config_payload.project.model_copy(
-            update={
-                "origin": origin,
-                "repo_url": config_payload.project.repo_url or origin_raw,
-            }
-        )
+    project_section = config_payload.project
+    project_enlistment = project_section.enlistment
+    project_origin = project_section.origin
+    project_repo_url = project_section.repo_url
+    updates: dict[str, object] = {}
+
+    if not project_enlistment:
+        updates["enlistment"] = enlistment_path
+        project_enlistment = enlistment_path
+    elif project_enlistment != enlistment_path:
+        die("project enlistment does not match current repo path")
+
+    if origin is not None and project_origin != origin:
+        updates["origin"] = origin
+        project_origin = origin
+    if origin_raw is not None and project_repo_url != origin_raw:
+        updates["repo_url"] = origin_raw
+        project_repo_url = origin_raw
+
+    if updates:
+        project_section = project_section.model_copy(update=updates)
         config_payload = config_payload.model_copy(update={"project": project_section})
         config.write_json(config_path, config_payload)
-        project_origin = origin
-    if project_origin != origin:
-        die("project origin does not match current repo origin")
 
     branch_config = config_payload.branch
     branch_pr = branch_config.pr
@@ -89,6 +92,7 @@ def open_workspace(args: object) -> None:
     workspace_branch, workspace_dir, workspace_config_exists = (
         workspace.resolve_workspace_target(
             project_dir,
+            project_enlistment,
             workspace_name_input,
             branch_prefix,
             raw_branch,
@@ -132,7 +136,7 @@ def open_workspace(args: object) -> None:
             agents_path=agents_path,
             workspace_config_file=workspace_config_file,
             project_root=project_dir,
-            project_origin=project_origin,
+            project_enlistment=project_enlistment,
             workspace_branch=workspace_branch,
             branch_pr=effective_branch_pr,
             branch_history=effective_branch_history,
@@ -141,7 +145,7 @@ def open_workspace(args: object) -> None:
             shutil.copyfile(workspace_policy_template, workspace_policy_path)
 
     repo_dir = workspace_dir / "repo"
-    project_repo_url = origin_raw
+    project_repo_url = origin_raw or enlistment_path
 
     should_open_editor = False
     editor_cmd: list[str] | None = None
@@ -151,19 +155,20 @@ def open_workspace(args: object) -> None:
     else:
         if not git.git_is_repo(repo_dir):
             die("repo exists but is not a git repository")
-        remote_check = subprocess.run(
-            ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if remote_check.returncode != 0:
-            die("repo missing origin remote")
-        current_remote = remote_check.stdout.strip()
-        if not current_remote:
-            die("repo missing origin remote")
-        if current_remote != project_repo_url:
-            warn("repo remote differs from current origin; using existing repo")
+        if origin_raw is not None:
+            remote_check = subprocess.run(
+                ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if remote_check.returncode != 0:
+                die("repo missing origin remote")
+            current_remote = remote_check.stdout.strip()
+            if not current_remote:
+                die("repo missing origin remote")
+            if current_remote != project_repo_url:
+                warn("repo remote differs from current origin; using existing repo")
 
     current_branch = git.git_current_branch(repo_dir)
     if current_branch is None:
@@ -247,7 +252,7 @@ def open_workspace(args: object) -> None:
             workspace_target = workspace_policy_path
         exec.run_command([*editor_cmd, str(workspace_target)], cwd=workspace_dir)
 
-    session_id = sessions.find_codex_session(project_origin, workspace_branch)
+    session_id = sessions.find_codex_session(project_enlistment, workspace_branch)
     if session_id:
         say(f"Resuming Codex session {session_id}")
         exec.run_command(
@@ -255,7 +260,7 @@ def open_workspace(args: object) -> None:
         )
     else:
         opening_prompt = workspace.workspace_identifier(
-            project_origin, workspace_branch
+            project_enlistment, workspace_branch
         )
         say("Starting new Codex session")
         exec.run_command(

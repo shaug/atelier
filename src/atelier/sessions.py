@@ -155,24 +155,24 @@ def extract_first_user_from_list(messages: list) -> str | None:
     return None
 
 
-def find_codex_session(project_origin: str, workspace_branch: str) -> str | None:
+def find_codex_session(project_enlistment: str, workspace_branch: str) -> str | None:
     """Find the most recent Codex session for a workspace.
 
     Args:
-        project_origin: Normalized project origin.
+        project_enlistment: Absolute path to the local enlistment.
         workspace_branch: Workspace branch name.
 
     Returns:
         Session ID string when found, otherwise ``None``.
 
     Example:
-        >>> find_codex_session(\"github.com/org/repo\", \"feat/demo\") is None or True
+        >>> find_codex_session(\"/repo\", \"feat/demo\") is None or True
         True
     """
     sessions_root = Path.home() / ".codex" / "sessions"
     if not sessions_root.exists():
         return None
-    target = workspace_identifier(project_origin, workspace_branch)
+    target = workspace_identifier(project_enlistment, workspace_branch)
     matches: list[tuple[float, Path, str | None]] = []
     for path in sessions_root.rglob("*"):
         if path.suffix not in {".json", ".jsonl"}:

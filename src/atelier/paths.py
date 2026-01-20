@@ -1,6 +1,7 @@
 """Path helpers for locating Atelier data directories and files."""
 
 import hashlib
+import string
 from pathlib import Path
 
 from platformdirs import user_data_dir
@@ -40,7 +41,7 @@ def projects_root() -> Path:
 
 
 def project_key(origin: str) -> str:
-    """Hash a normalized origin string into a project key.
+    """Hash a normalized origin string into a legacy project key.
 
     Args:
         origin: Normalized origin string.
@@ -56,7 +57,7 @@ def project_key(origin: str) -> str:
 
 
 def workspace_key(branch: str) -> str:
-    """Hash a workspace branch name into a workspace key.
+    """Hash a workspace branch name into a legacy workspace key.
 
     Args:
         branch: Workspace branch name.
@@ -71,8 +72,107 @@ def workspace_key(branch: str) -> str:
     return hashlib.sha256(branch.encode("utf-8")).hexdigest()
 
 
+_URL_SAFE_CHARS = set(string.ascii_letters + string.digits + "-._~")
+
+
+def _short_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+
+
+def _normalize_filespace(value: str, *, strip_git: bool) -> str:
+    raw = value.strip()
+    if strip_git and raw.startswith("git@"):
+        raw = raw[len("git@") :]
+    if strip_git and raw.lower().endswith(".git"):
+        raw = raw[: -len(".git")]
+    raw = raw.strip(" .\t\r\n")
+    normalized = "".join(char if char in _URL_SAFE_CHARS else "-" for char in raw)
+    return normalized.strip(" .\t\r\n")
+
+
+def legacy_project_dir_name(origin: str) -> str:
+    """Return the normalized legacy project directory name for an origin.
+
+    Args:
+        origin: Normalized origin string.
+
+    Returns:
+        Normalized project directory name with a short hash suffix.
+
+    Example:
+        >>> legacy_project_dir_name("git@github.com:org/repo.git").startswith("github.com-org-repo-")
+        True
+    """
+    base = _normalize_filespace(origin, strip_git=True)
+    suffix = _short_hash(origin)
+    if not base:
+        return suffix
+    return f"{base}-{suffix}"
+
+
+def project_dir_name(enlistment_path: str) -> str:
+    """Return the normalized project directory name for an enlistment path.
+
+    Args:
+        enlistment_path: Absolute path to the local enlistment.
+
+    Returns:
+        Normalized project directory name with a short hash suffix.
+
+    Example:
+        >>> project_dir_name("/path/to/gumshoe").startswith("gumshoe-")
+        True
+    """
+    base = _normalize_filespace(Path(enlistment_path).name, strip_git=False)
+    suffix = _short_hash(enlistment_path)
+    if not base:
+        return suffix
+    return f"{base}-{suffix}"
+
+
+def legacy_workspace_dir_name(branch: str) -> str:
+    """Return the normalized legacy workspace directory name for a branch.
+
+    Args:
+        branch: Workspace branch name.
+
+    Returns:
+        Normalized workspace directory name with a short hash suffix.
+
+    Example:
+        >>> legacy_workspace_dir_name("feat/demo").startswith("feat-demo-")
+        True
+    """
+    base = _normalize_filespace(branch, strip_git=False)
+    suffix = _short_hash(branch)
+    if not base:
+        return suffix
+    return f"{base}-{suffix}"
+
+
+def workspace_dir_name(branch: str, workspace_id: str) -> str:
+    """Return the normalized workspace directory name for a workspace ID.
+
+    Args:
+        branch: Workspace branch name.
+        workspace_id: Full workspace identifier string.
+
+    Returns:
+        Normalized workspace directory name with a short hash suffix.
+
+    Example:
+        >>> workspace_dir_name("feat/demo", "atelier:/repo:feat/demo").startswith("feat-demo-")
+        True
+    """
+    base = _normalize_filespace(branch, strip_git=False)
+    suffix = _short_hash(workspace_id)
+    if not base:
+        return suffix
+    return f"{base}-{suffix}"
+
+
 def project_dir_for_origin(origin: str) -> Path:
-    """Return the project directory for a normalized origin.
+    """Return the legacy project directory for a normalized origin.
 
     Args:
         origin: Normalized origin string.
@@ -81,10 +181,37 @@ def project_dir_for_origin(origin: str) -> Path:
         Project directory path.
 
     Example:
-        >>> project_dir_for_origin("github.com/org/repo").name == project_key("github.com/org/repo")
+        >>> project_dir_for_origin("github.com/org/repo").parent.name == PROJECTS_DIRNAME
         True
     """
-    return projects_root() / project_key(origin)
+    legacy_dir = projects_root() / project_key(origin)
+    if legacy_dir.exists():
+        return legacy_dir
+    return projects_root() / legacy_project_dir_name(origin)
+
+
+def project_dir_for_enlistment(enlistment_path: str, origin: str | None) -> Path:
+    """Return the project directory for an enlistment path.
+
+    Args:
+        enlistment_path: Absolute path to the local enlistment.
+        origin: Normalized repo origin string or ``None``.
+
+    Returns:
+        Project directory path.
+
+    Example:
+        >>> project_dir_for_enlistment("/repo", None).parent.name == PROJECTS_DIRNAME
+        True
+    """
+    if origin:
+        legacy_dir = projects_root() / project_key(origin)
+        if legacy_dir.exists():
+            return legacy_dir
+        legacy_short = projects_root() / legacy_project_dir_name(origin)
+        if legacy_short.exists():
+            return legacy_short
+    return projects_root() / project_dir_name(enlistment_path)
 
 
 def project_config_path(project_dir: Path) -> Path:
@@ -119,7 +246,9 @@ def workspaces_root_for_project(project_dir: Path) -> Path:
     return project_dir / WORKSPACES_DIRNAME
 
 
-def workspace_dir_for_branch(project_dir: Path, branch: str) -> Path:
+def workspace_dir_for_branch(
+    project_dir: Path, branch: str, workspace_id: str | None
+) -> Path:
     """Return the workspace directory path for a branch.
 
     Args:
@@ -130,10 +259,19 @@ def workspace_dir_for_branch(project_dir: Path, branch: str) -> Path:
         Path to the workspace directory.
 
     Example:
-        >>> workspace_dir_for_branch(Path("/tmp/project"), "feat/demo").parent.name == WORKSPACES_DIRNAME
+        >>> workspace_dir_for_branch(Path("/tmp/project"), "feat/demo", "atelier:/repo:feat/demo").parent.name == WORKSPACES_DIRNAME
         True
     """
-    return workspaces_root_for_project(project_dir) / workspace_key(branch)
+    workspaces_root = workspaces_root_for_project(project_dir)
+    legacy_dir = workspaces_root / workspace_key(branch)
+    if legacy_dir.exists():
+        return legacy_dir
+    legacy_short = workspaces_root / legacy_workspace_dir_name(branch)
+    if legacy_short.exists():
+        return legacy_short
+    if not workspace_id:
+        raise ValueError("workspace_id is required for workspace directory naming")
+    return workspaces_root / workspace_dir_name(branch, workspace_id)
 
 
 def workspace_config_path(workspace_dir: Path) -> Path:

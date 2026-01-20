@@ -48,16 +48,18 @@ class ProjectSection(BaseModel):
     """Project identification metadata.
 
     Attributes:
+        enlistment: Absolute path to the local enlistment.
         origin: Normalized origin string.
         repo_url: Raw origin URL.
 
     Example:
-        >>> ProjectSection(origin="github.com/org/repo")
+        >>> ProjectSection(enlistment="/repo", origin="github.com/org/repo")
         ProjectSection(...)
     """
 
     model_config = ConfigDict(extra="allow")
 
+    enlistment: str | None = None
     origin: str | None = None
     repo_url: str | None = None
 

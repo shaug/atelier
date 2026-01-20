@@ -351,16 +351,18 @@ def read_arg(args: object | None, name: str) -> object | None:
 
 def build_project_config(
     existing: ProjectConfig | dict,
-    origin: str,
-    origin_raw: str,
+    enlistment_path: str,
+    origin: str | None,
+    origin_raw: str | None,
     args: object | None,
 ) -> ProjectConfig:
     """Build a new project config, prompting when necessary.
 
     Args:
         existing: Existing config payload or ``ProjectConfig``.
-        origin: Normalized repo origin (e.g., ``github.com/org/repo``).
-        origin_raw: Raw origin URL from Git.
+        enlistment_path: Resolved local enlistment path.
+        origin: Normalized repo origin (e.g., ``github.com/org/repo``) or ``None``.
+        origin_raw: Raw origin URL from Git or ``None``.
         args: CLI argument object for overrides, or ``None`` to prompt.
 
     Returns:
@@ -368,7 +370,7 @@ def build_project_config(
         atelier metadata.
 
     Example:
-        >>> build_project_config({}, "example.com/repo", "https://example.com/repo", None)
+        >>> build_project_config({}, "/repo", "example.com/repo", "https://example.com/repo", None)
         ProjectConfig(...)
     """
     existing_config = (
@@ -460,8 +462,15 @@ def build_project_config(
     if editor_input_options:
         editor_options = {**editor_options, editor_default: editor_input_options}
 
+    project_origin = origin or existing_config.project.origin
+    project_repo_url = origin_raw or existing_config.project.repo_url
+
     return ProjectConfig(
-        project=ProjectSection(origin=origin, repo_url=origin_raw),
+        project=ProjectSection(
+            enlistment=enlistment_path,
+            origin=project_origin,
+            repo_url=project_repo_url,
+        ),
         branch=BranchConfig(prefix=branch_prefix, pr=branch_pr, history=branch_history),
         agent=AgentConfig(default=agent_default, options=agent_options),
         editor=EditorConfig(default=editor_default, options=editor_options),

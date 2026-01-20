@@ -24,9 +24,18 @@ import atelier.editor as editor  # noqa: E402
 import atelier.git as git  # noqa: E402
 import atelier.paths as paths  # noqa: E402
 import atelier.sessions as sessions_mod  # noqa: E402
+import atelier.workspace as workspace  # noqa: E402
 
 RAW_ORIGIN = "git@github.com:org/repo.git"
 NORMALIZED_ORIGIN = git.normalize_origin_url(RAW_ORIGIN)
+
+
+def enlistment_path_for(path: Path) -> str:
+    return str(path.resolve())
+
+
+def workspace_id_for(enlistment_path: str, branch: str) -> str:
+    return workspace.workspace_identifier(enlistment_path, branch)
 
 
 def make_init_args(**overrides: object) -> SimpleNamespace:
@@ -47,10 +56,11 @@ class DummyResult:
         self.stdout = stdout
 
 
-def write_project_config(project_dir: Path) -> dict:
+def write_project_config(project_dir: Path, enlistment_path: str) -> dict:
     project_dir.mkdir(parents=True, exist_ok=True)
     config = {
         "project": {
+            "enlistment": enlistment_path,
             "origin": NORMALIZED_ORIGIN,
             "repo_url": RAW_ORIGIN,
         },
@@ -66,9 +76,10 @@ def write_project_config(project_dir: Path) -> dict:
     return config
 
 
-def make_open_config(**overrides: object) -> dict:
+def make_open_config(enlistment_path: str, **overrides: object) -> dict:
     config = {
         "project": {
+            "enlistment": enlistment_path,
             "origin": NORMALIZED_ORIGIN,
             "repo_url": RAW_ORIGIN,
         },
@@ -84,12 +95,16 @@ def make_open_config(**overrides: object) -> dict:
             "created_at": "2026-01-01T00:00:00Z",
         },
     }
+    overrides = dict(overrides)
+    project_override = overrides.pop("project", None)
+    if isinstance(project_override, dict):
+        config["project"] = {**config["project"], **project_override}
     config.update(overrides)
     return config
 
 
-def write_open_config(root: Path, **overrides: object) -> dict:
-    config = make_open_config(**overrides)
+def write_open_config(root: Path, enlistment_path: str, **overrides: object) -> dict:
+    config = make_open_config(enlistment_path, **overrides)
     root.mkdir(parents=True, exist_ok=True)
     paths.project_config_path(root).write_text(json.dumps(config), encoding="utf-8")
     return config
@@ -144,13 +159,15 @@ def init_local_repo_without_feature(root: Path) -> Path:
     return repo
 
 
-def write_workspace_config(workspace_dir: Path, branch: str) -> None:
+def write_workspace_config(
+    workspace_dir: Path, branch: str, enlistment_path: str
+) -> None:
     payload = {
         "workspace": {
             "branch": branch,
             "branch_pr": True,
             "branch_history": "manual",
-            "id": f"atelier:{NORMALIZED_ORIGIN}/{branch}",
+            "id": workspace_id_for(enlistment_path, branch),
         },
         "atelier": {"version": "0.2.0", "created_at": "2026-01-01T00:00:00Z"},
     }
@@ -240,6 +257,7 @@ class TestInitProject(TestCase):
     def test_init_creates_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -257,11 +275,14 @@ class TestInitProject(TestCase):
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     init_cmd.init_project(args)
-                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
+                    project_dir = paths.project_dir_for_enlistment(
+                        enlistment_path, NORMALIZED_ORIGIN
+                    )
 
                 config_path = paths.project_config_path(project_dir)
                 self.assertTrue(config_path.exists())
                 config = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(config["project"]["enlistment"], enlistment_path)
                 self.assertEqual(config["project"]["origin"], NORMALIZED_ORIGIN)
                 self.assertEqual(config["project"]["repo_url"], RAW_ORIGIN)
                 self.assertTrue(config["branch"]["pr"])
@@ -276,6 +297,7 @@ class TestInitProject(TestCase):
     def test_init_prefers_cursor_over_env_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -294,7 +316,9 @@ class TestInitProject(TestCase):
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     init_cmd.init_project(args)
-                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
+                    project_dir = paths.project_dir_for_enlistment(
+                        enlistment_path, NORMALIZED_ORIGIN
+                    )
 
                 config_path = paths.project_config_path(project_dir)
                 config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -305,6 +329,7 @@ class TestInitProject(TestCase):
     def test_init_parses_editor_flags(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -319,7 +344,9 @@ class TestInitProject(TestCase):
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     init_cmd.init_project(args)
-                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
+                    project_dir = paths.project_dir_for_enlistment(
+                        enlistment_path, NORMALIZED_ORIGIN
+                    )
 
                 config_path = paths.project_config_path(project_dir)
                 config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -331,6 +358,7 @@ class TestInitProject(TestCase):
     def test_init_uses_editor_env_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -347,7 +375,9 @@ class TestInitProject(TestCase):
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     init_cmd.init_project(args)
-                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
+                    project_dir = paths.project_dir_for_enlistment(
+                        enlistment_path, NORMALIZED_ORIGIN
+                    )
 
                 config_path = paths.project_config_path(project_dir)
                 config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -359,12 +389,14 @@ class TestInitProject(TestCase):
     def test_init_with_flags_overrides_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
                 config = {
                     "project": {
+                        "enlistment": enlistment_path,
                         "origin": git.normalize_origin_url(
                             "git@github.com:old/repo.git"
                         ),
@@ -384,7 +416,9 @@ class TestInitProject(TestCase):
                     },
                 }
                 with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
+                    project_dir = paths.project_dir_for_enlistment(
+                        enlistment_path, NORMALIZED_ORIGIN
+                    )
                 project_dir.mkdir(parents=True, exist_ok=True)
                 paths.project_config_path(project_dir).write_text(
                     json.dumps(config), encoding="utf-8"
@@ -411,6 +445,7 @@ class TestInitProject(TestCase):
 
                 config_path = paths.project_config_path(project_dir)
                 config = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(config["project"]["enlistment"], enlistment_path)
                 self.assertEqual(config["project"]["origin"], NORMALIZED_ORIGIN)
                 self.assertEqual(config["project"]["repo_url"], RAW_ORIGIN)
                 self.assertEqual(config["branch"]["prefix"], "feat/")
@@ -426,6 +461,7 @@ class TestInitProject(TestCase):
     def test_init_creates_workspace_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -440,7 +476,9 @@ class TestInitProject(TestCase):
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     init_cmd.init_project(args)
-                    project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
+                    project_dir = paths.project_dir_for_enlistment(
+                        enlistment_path, NORMALIZED_ORIGIN
+                    )
 
                 template_path = project_dir / "templates" / "WORKSPACE.md"
                 self.assertTrue(template_path.exists())
@@ -454,19 +492,30 @@ class TestListWorkspaces(TestCase):
     def test_list_reports_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_project_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
 
             alpha_branch = "scott/alpha"
             beta_branch = "scott/beta"
-            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
-            beta_dir = paths.workspace_dir_for_branch(project_dir, beta_branch)
+            alpha_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                alpha_branch,
+                workspace_id_for(enlistment_path, alpha_branch),
+            )
+            beta_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                beta_branch,
+                workspace_id_for(enlistment_path, beta_branch),
+            )
             (alpha_dir / "repo").mkdir(parents=True)
             (beta_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch)
-            write_workspace_config(beta_dir, beta_branch)
+            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
+            write_workspace_config(beta_dir, beta_branch, enlistment_path)
 
             repo_alpha = alpha_dir / "repo"
             repo_beta = beta_dir / "repo"
@@ -507,18 +556,29 @@ class TestListWorkspaces(TestCase):
     def test_list_default_only_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_project_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
             alpha_branch = "scott/alpha"
             beta_branch = "scott/beta"
-            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
-            beta_dir = paths.workspace_dir_for_branch(project_dir, beta_branch)
+            alpha_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                alpha_branch,
+                workspace_id_for(enlistment_path, alpha_branch),
+            )
+            beta_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                beta_branch,
+                workspace_id_for(enlistment_path, beta_branch),
+            )
             alpha_dir.mkdir(parents=True)
             beta_dir.mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch)
-            write_workspace_config(beta_dir, beta_branch)
+            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
+            write_workspace_config(beta_dir, beta_branch, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -543,20 +603,29 @@ class TestCleanWorkspaces(TestCase):
     def test_clean_default_deletes_complete_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_project_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
             complete_branch = "scott/complete"
             incomplete_branch = "scott/incomplete"
-            complete_dir = paths.workspace_dir_for_branch(project_dir, complete_branch)
+            complete_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                complete_branch,
+                workspace_id_for(enlistment_path, complete_branch),
+            )
             incomplete_dir = paths.workspace_dir_for_branch(
-                project_dir, incomplete_branch
+                project_dir,
+                incomplete_branch,
+                workspace_id_for(enlistment_path, incomplete_branch),
             )
             (complete_dir / "repo").mkdir(parents=True)
             (incomplete_dir / "repo").mkdir(parents=True)
-            write_workspace_config(complete_dir, complete_branch)
-            write_workspace_config(incomplete_dir, incomplete_branch)
+            write_workspace_config(complete_dir, complete_branch, enlistment_path)
+            write_workspace_config(incomplete_dir, incomplete_branch, enlistment_path)
 
             repo_complete = complete_dir / "repo"
             repo_incomplete = incomplete_dir / "repo"
@@ -600,18 +669,29 @@ class TestCleanWorkspaces(TestCase):
     def test_clean_all_flag_deletes_all(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_project_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
             alpha_branch = "scott/alpha"
             beta_branch = "scott/beta"
-            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
-            beta_dir = paths.workspace_dir_for_branch(project_dir, beta_branch)
+            alpha_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                alpha_branch,
+                workspace_id_for(enlistment_path, alpha_branch),
+            )
+            beta_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                beta_branch,
+                workspace_id_for(enlistment_path, beta_branch),
+            )
             (alpha_dir / "repo").mkdir(parents=True)
             (beta_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch)
-            write_workspace_config(beta_dir, beta_branch)
+            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
+            write_workspace_config(beta_dir, beta_branch, enlistment_path)
 
             repo_alpha = alpha_dir / "repo"
             repo_beta = beta_dir / "repo"
@@ -652,14 +732,21 @@ class TestCleanWorkspaces(TestCase):
     def test_clean_force_skips_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_project_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
             alpha_branch = "scott/alpha"
-            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
+            alpha_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                alpha_branch,
+                workspace_id_for(enlistment_path, alpha_branch),
+            )
             (alpha_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch)
+            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
 
             repo_alpha = alpha_dir / "repo"
             fake_run = make_fake_git(
@@ -697,18 +784,29 @@ class TestCleanWorkspaces(TestCase):
     def test_clean_positional_targets_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_project_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
             alpha_branch = "scott/alpha"
             beta_branch = "scott/beta"
-            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
-            beta_dir = paths.workspace_dir_for_branch(project_dir, beta_branch)
+            alpha_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                alpha_branch,
+                workspace_id_for(enlistment_path, alpha_branch),
+            )
+            beta_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                beta_branch,
+                workspace_id_for(enlistment_path, beta_branch),
+            )
             (alpha_dir / "repo").mkdir(parents=True)
             (beta_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch)
-            write_workspace_config(beta_dir, beta_branch)
+            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
+            write_workspace_config(beta_dir, beta_branch, enlistment_path)
 
             repo_alpha = alpha_dir / "repo"
             repo_beta = beta_dir / "repo"
@@ -747,14 +845,21 @@ class TestCleanWorkspaces(TestCase):
     def test_clean_skips_branch_deletion_with_no_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_project_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
             alpha_branch = "scott/alpha"
-            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
+            alpha_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                alpha_branch,
+                workspace_id_for(enlistment_path, alpha_branch),
+            )
             (alpha_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch)
+            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
 
             repo_alpha = alpha_dir / "repo"
             fake_run = make_fake_git(
@@ -792,14 +897,21 @@ class TestCleanWorkspaces(TestCase):
     def test_clean_deletes_branch_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_project_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
             alpha_branch = "scott/alpha"
-            alpha_dir = paths.workspace_dir_for_branch(project_dir, alpha_branch)
+            alpha_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                alpha_branch,
+                workspace_id_for(enlistment_path, alpha_branch),
+            )
             (alpha_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch)
+            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
 
             repo_alpha = alpha_dir / "repo"
             fake_run = make_fake_git(
@@ -863,7 +975,7 @@ class TestFindCodexSession(TestCase):
             sessions = home / ".codex" / "sessions"
             sessions.mkdir(parents=True)
 
-            target = "atelier:01TEST/feat-demo"
+            target = "atelier:01TEST:feat-demo"
             older = sessions / "session-old.json"
             newer = sessions / "session-new.json"
 
@@ -891,7 +1003,7 @@ class TestFindCodexSession(TestCase):
             sessions = home / ".codex" / "sessions" / "2026" / "01" / "14"
             sessions.mkdir(parents=True)
 
-            target = "atelier:01TEST/feat-demo"
+            target = "atelier:01TEST:feat-demo"
             session_id = "019bbe1b-1c3c-7ef0-b7e6-61477c74ceb1"
             session_file = sessions / f"rollout-2026-01-14T12-03-26-{session_id}.jsonl"
 
@@ -919,10 +1031,13 @@ class TestOpenWorkspace(TestCase):
     def test_open_creates_workspace_and_launches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -946,7 +1061,9 @@ class TestOpenWorkspace(TestCase):
 
                 workspace_branch = "scott/feat-demo"
                 workspace_dir = paths.workspace_dir_for_branch(
-                    project_dir, workspace_branch
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
                 )
                 self.assertTrue((workspace_dir / "AGENTS.md").exists())
                 self.assertTrue((workspace_dir / "WORKSPACE.md").exists())
@@ -963,7 +1080,8 @@ class TestOpenWorkspace(TestCase):
                     encoding="utf-8"
                 )
                 self.assertIn(
-                    f"atelier:{NORMALIZED_ORIGIN}/{workspace_branch}", agents_content
+                    workspace_id_for(enlistment_path, workspace_branch),
+                    agents_content,
                 )
                 self.assertIn("WORKSPACE.md", agents_content)
                 self.assertIn("Read `WORKSPACE.md`", agents_content)
@@ -993,10 +1111,13 @@ class TestOpenWorkspace(TestCase):
     def test_open_with_prefixed_branch_does_not_double_prefix(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1022,7 +1143,9 @@ class TestOpenWorkspace(TestCase):
 
                 workspace_branch = "scott/feat-demo"
                 workspace_dir = paths.workspace_dir_for_branch(
-                    project_dir, workspace_branch
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
                 )
                 workspace_config = json.loads(
                     (workspace_dir / "config.json").read_text(encoding="utf-8")
@@ -1032,7 +1155,9 @@ class TestOpenWorkspace(TestCase):
                 )
                 self.assertFalse(
                     paths.workspace_dir_for_branch(
-                        project_dir, "scott/scott/feat-demo"
+                        project_dir,
+                        "scott/scott/feat-demo",
+                        workspace_id_for(enlistment_path, "scott/scott/feat-demo"),
                     ).exists()
                 )
                 self.assertTrue(any(cmd[:2] == ["git", "clone"] for cmd in commands))
@@ -1042,10 +1167,13 @@ class TestOpenWorkspace(TestCase):
     def test_open_without_name_uses_current_branch_when_clean_and_pushed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1075,7 +1203,9 @@ class TestOpenWorkspace(TestCase):
 
                 workspace_branch = "feature/demo"
                 workspace_dir = paths.workspace_dir_for_branch(
-                    project_dir, workspace_branch
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
                 )
                 workspace_config = json.loads(
                     (workspace_dir / "config.json").read_text(encoding="utf-8")
@@ -1090,10 +1220,13 @@ class TestOpenWorkspace(TestCase):
     def test_open_edits_agents_after_clone_when_repo_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1131,10 +1264,13 @@ class TestOpenWorkspace(TestCase):
     def test_open_editor_uses_workspace_relative_workspace_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data dir"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1164,7 +1300,9 @@ class TestOpenWorkspace(TestCase):
                 )
                 self.assertEqual(commands[editor_index][-1], "WORKSPACE.md")
                 workspace_dir = paths.workspace_dir_for_branch(
-                    project_dir, "scott/feat-demo"
+                    project_dir,
+                    "scott/feat-demo",
+                    workspace_id_for(enlistment_path, "scott/feat-demo"),
                 )
                 self.assertEqual(cwds[editor_index], workspace_dir)
             finally:
@@ -1173,14 +1311,19 @@ class TestOpenWorkspace(TestCase):
     def test_open_skips_editor_when_repo_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            config = write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            config = write_open_config(project_dir, enlistment_path)
 
             workspace_branch = "scott/feat-demo"
             workspace_dir = paths.workspace_dir_for_branch(
-                project_dir, workspace_branch
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
             )
             repo_dir = workspace_dir / "repo"
             repo_dir.mkdir(parents=True)
@@ -1198,7 +1341,7 @@ class TestOpenWorkspace(TestCase):
                 check=True,
             )
             (workspace_dir / "AGENTS.md").write_text("stub\n", encoding="utf-8")
-            write_workspace_config(workspace_dir, workspace_branch)
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1271,14 +1414,19 @@ class TestOpenWorkspace(TestCase):
     def test_open_skips_default_checkout_with_dirty_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            config = write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            config = write_open_config(project_dir, enlistment_path)
 
             workspace_branch = "scott/feat-demo"
             workspace_dir = paths.workspace_dir_for_branch(
-                project_dir, workspace_branch
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
             )
             repo_dir = workspace_dir / "repo"
             repo_dir.mkdir(parents=True)
@@ -1325,7 +1473,7 @@ class TestOpenWorkspace(TestCase):
                 check=True,
             )
             (workspace_dir / "AGENTS.md").write_text("stub\n", encoding="utf-8")
-            write_workspace_config(workspace_dir, workspace_branch)
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1356,14 +1504,19 @@ class TestOpenWorkspace(TestCase):
     def test_open_does_not_modify_existing_workspace_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             workspace_branch = "scott/feat-demo"
             workspace_dir = paths.workspace_dir_for_branch(
-                project_dir, workspace_branch
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
             )
             workspace_dir.mkdir(parents=True)
             payload = {
@@ -1371,7 +1524,7 @@ class TestOpenWorkspace(TestCase):
                     "branch": workspace_branch,
                     "branch_pr": False,
                     "branch_history": "squash",
-                    "id": f"atelier:{NORMALIZED_ORIGIN}/{workspace_branch}",
+                    "id": workspace_id_for(enlistment_path, workspace_branch),
                 },
                 "atelier": {"version": "0.2.0", "created_at": "2026-01-01T00:00:00Z"},
             }
@@ -1430,14 +1583,19 @@ class TestOpenWorkspace(TestCase):
     def test_open_errors_when_repo_is_not_git_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             workspace_branch = "scott/feat-demo"
             workspace_dir = paths.workspace_dir_for_branch(
-                project_dir, workspace_branch
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
             )
             (workspace_dir / "repo").mkdir(parents=True)
 
@@ -1474,14 +1632,19 @@ class TestOpenWorkspace(TestCase):
     def test_open_errors_when_origin_remote_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             workspace_branch = "scott/feat-demo"
             workspace_dir = paths.workspace_dir_for_branch(
-                project_dir, workspace_branch
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
             )
             repo_dir = workspace_dir / "repo"
             repo_dir.mkdir(parents=True)
@@ -1511,10 +1674,13 @@ class TestOpenWorkspace(TestCase):
     def test_open_accepts_raw_branch_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1548,7 +1714,9 @@ class TestOpenWorkspace(TestCase):
                     )
 
                 workspace_dir = paths.workspace_dir_for_branch(
-                    project_dir, workspace_branch
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
                 )
                 self.assertTrue((workspace_dir / "AGENTS.md").exists())
                 workspace_config = json.loads(
@@ -1563,8 +1731,10 @@ class TestOpenWorkspace(TestCase):
     def test_open_copies_workspace_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             config = {
                 "project": {
+                    "enlistment": enlistment_path,
                     "origin": NORMALIZED_ORIGIN,
                     "repo_url": RAW_ORIGIN,
                 },
@@ -1578,7 +1748,9 @@ class TestOpenWorkspace(TestCase):
             }
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
             project_dir.mkdir(parents=True, exist_ok=True)
             paths.project_config_path(project_dir).write_text(
                 json.dumps(config), encoding="utf-8"
@@ -1620,7 +1792,9 @@ class TestOpenWorkspace(TestCase):
 
                 workspace_branch = "scott/feat-demo"
                 workspace_dir = paths.workspace_dir_for_branch(
-                    project_dir, workspace_branch
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
                 )
                 workspace_template = workspace_dir / "WORKSPACE.md"
                 self.assertTrue(workspace_template.exists())
@@ -1633,10 +1807,13 @@ class TestOpenWorkspace(TestCase):
     def test_open_normalizes_workspace_name_and_preserves_branch_slashes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1668,7 +1845,9 @@ class TestOpenWorkspace(TestCase):
 
                 workspace_branch = "scott/feat/demo"
                 workspace_dir = paths.workspace_dir_for_branch(
-                    project_dir, workspace_branch
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
                 )
                 workspace_config = json.loads(
                     (workspace_dir / "config.json").read_text(encoding="utf-8")
@@ -1682,11 +1861,15 @@ class TestOpenWorkspace(TestCase):
     def test_open_renders_direct_integration_strategy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
             write_open_config(
                 project_dir,
+                enlistment_path,
                 branch={
                     "prefix": "scott/",
                     "pr": False,
@@ -1724,7 +1907,9 @@ class TestOpenWorkspace(TestCase):
 
                 workspace_branch = "scott/feat-demo"
                 workspace_dir = paths.workspace_dir_for_branch(
-                    project_dir, workspace_branch
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
                 )
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
                     encoding="utf-8"
@@ -1738,10 +1923,13 @@ class TestOpenWorkspace(TestCase):
     def test_open_overrides_branch_settings_for_new_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1780,7 +1968,9 @@ class TestOpenWorkspace(TestCase):
 
                 workspace_branch = "scott/feat-demo"
                 workspace_dir = paths.workspace_dir_for_branch(
-                    project_dir, workspace_branch
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
                 )
                 workspace_config = json.loads(
                     (workspace_dir / "config.json").read_text(encoding="utf-8")
@@ -1801,19 +1991,25 @@ class TestOpenWorkspace(TestCase):
     def test_open_uses_remote_branch_and_appends_commit_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             origin_repo = init_local_repo(root)
             origin_raw = str(origin_repo)
             origin_norm = git.normalize_origin_url(origin_raw)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(origin_norm)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, origin_norm
+                )
             write_open_config(
                 project_dir,
+                enlistment_path,
                 project={"origin": origin_norm, "repo_url": origin_raw},
             )
             workspace_branch = "scott/feat-demo"
             workspace_dir = paths.workspace_dir_for_branch(
-                project_dir, workspace_branch
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
             )
 
             original_cwd = Path.cwd()
@@ -1870,14 +2066,18 @@ class TestOpenWorkspace(TestCase):
     def test_open_skips_branch_summary_for_new_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             origin_repo = init_local_repo_without_feature(root)
             origin_raw = str(origin_repo)
             origin_norm = git.normalize_origin_url(origin_raw)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(origin_norm)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, origin_norm
+                )
             write_open_config(
                 project_dir,
+                enlistment_path,
                 project={"origin": origin_norm, "repo_url": origin_raw},
             )
 
@@ -1903,7 +2103,9 @@ class TestOpenWorkspace(TestCase):
 
                 workspace_branch = "scott/feat-demo"
                 workspace_dir = paths.workspace_dir_for_branch(
-                    project_dir, workspace_branch
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
                 )
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
                     encoding="utf-8"
@@ -1916,10 +2118,13 @@ class TestOpenWorkspace(TestCase):
     def test_open_uses_raw_branch_without_prefix(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1957,7 +2162,9 @@ class TestOpenWorkspace(TestCase):
                     )
 
                 workspace_dir = paths.workspace_dir_for_branch(
-                    project_dir, workspace_branch
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
                 )
                 workspace_config = json.loads(
                     (workspace_dir / "config.json").read_text(encoding="utf-8")
@@ -1980,16 +2187,21 @@ class TestOpenWorkspace(TestCase):
     def test_open_errors_on_branch_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
             workspace_branch = "scott/feat-demo"
             workspace_dir = paths.workspace_dir_for_branch(
-                project_dir, workspace_branch
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
             )
             workspace_dir.mkdir(parents=True)
-            write_workspace_config(workspace_dir, "scott/mismatch")
+            write_workspace_config(workspace_dir, "scott/mismatch", enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -2009,16 +2221,21 @@ class TestOpenWorkspace(TestCase):
     def test_open_errors_on_branch_settings_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
             workspace_branch = "scott/feat-demo"
             workspace_dir = paths.workspace_dir_for_branch(
-                project_dir, workspace_branch
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
             )
             workspace_dir.mkdir(parents=True)
-            write_workspace_config(workspace_dir, workspace_branch)
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -2042,11 +2259,15 @@ class TestOpenWorkspace(TestCase):
     def test_open_rejects_invalid_branch_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
             write_open_config(
                 project_dir,
+                enlistment_path,
                 branch={"prefix": "scott/", "history": "sideways"},
             )
 

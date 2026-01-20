@@ -14,23 +14,23 @@ from .paths import (
 )
 
 
-def workspace_identifier(project_origin: str, workspace_branch: str) -> str:
+def workspace_identifier(project_enlistment: str, workspace_branch: str) -> str:
     """Build the stable workspace identifier string.
 
     Args:
-        project_origin: Normalized project origin.
+        project_enlistment: Absolute path to the local enlistment.
         workspace_branch: Workspace branch name.
 
     Returns:
-        Workspace identifier string (``atelier:<origin>/<branch>``).
+        Workspace identifier string (``atelier:<enlistment-path>:<branch>``).
 
     Example:
-        >>> workspace_identifier("github.com/org/repo", "feat/demo")
-        'atelier:github.com/org/repo/feat/demo'
+        >>> workspace_identifier("/repo", "feat/demo")
+        'atelier:/repo:feat/demo'
     """
-    origin = project_origin.rstrip("/")
+    enlistment = project_enlistment
     branch = workspace_branch.lstrip("/")
-    return f"atelier:{origin}/{branch}"
+    return f"atelier:{enlistment}:{branch}"
 
 
 def workspace_candidate_branches(name: str, branch_prefix: str, raw: bool) -> list[str]:
@@ -62,12 +62,13 @@ def workspace_candidate_branches(name: str, branch_prefix: str, raw: bool) -> li
 
 
 def find_workspace_for_branch(
-    project_dir: Path, branch: str
+    project_dir: Path, project_enlistment: str, branch: str
 ) -> tuple[Path, config.WorkspaceConfig] | None:
     """Find an existing workspace directory and config for a branch.
 
     Args:
         project_dir: Project directory path.
+        project_enlistment: Absolute path to the local enlistment.
         branch: Workspace branch name.
 
     Returns:
@@ -77,7 +78,8 @@ def find_workspace_for_branch(
         >>> find_workspace_for_branch(Path("/tmp/project"), "feat/demo") is None
         True
     """
-    workspace_dir = workspace_dir_for_branch(project_dir, branch)
+    workspace_id = workspace_identifier(project_enlistment, branch)
+    workspace_dir = workspace_dir_for_branch(project_dir, branch, workspace_id)
     config_path = workspace_config_path(workspace_dir)
     if not config_path.exists():
         if workspace_dir.exists():
@@ -88,17 +90,22 @@ def find_workspace_for_branch(
         die("failed to load workspace config")
     stored_branch = payload.workspace.branch
     if stored_branch != branch:
-        die("workspace branch does not match hashed directory")
+        die("workspace branch does not match workspace directory")
     return workspace_dir, payload
 
 
 def resolve_workspace_target(
-    project_dir: Path, name: str, branch_prefix: str, raw: bool
+    project_dir: Path,
+    project_enlistment: str,
+    name: str,
+    branch_prefix: str,
+    raw: bool,
 ) -> tuple[str, Path, bool]:
     """Resolve the target workspace branch and directory.
 
     Args:
         project_dir: Project directory path.
+        project_enlistment: Absolute path to the local enlistment.
         name: Workspace branch input.
         branch_prefix: Prefix to apply when ``raw`` is false.
         raw: When true, use the name as-is.
@@ -108,18 +115,19 @@ def resolve_workspace_target(
         whether a matching workspace config was found.
 
     Example:
-        >>> resolve_workspace_target(Path("/tmp/project"), "feat/demo", "", True)[0]
+        >>> resolve_workspace_target(Path("/tmp/project"), "/repo", "feat/demo", "", True)[0]
         'feat/demo'
     """
     candidates = workspace_candidate_branches(name, branch_prefix, raw)
     for branch in candidates:
-        found = find_workspace_for_branch(project_dir, branch)
+        found = find_workspace_for_branch(project_dir, project_enlistment, branch)
         if found:
             workspace_dir, _ = found
             return branch, workspace_dir, True
 
     branch = candidates[0]
-    workspace_dir = workspace_dir_for_branch(project_dir, branch)
+    workspace_id = workspace_identifier(project_enlistment, branch)
+    workspace_dir = workspace_dir_for_branch(project_dir, branch, workspace_id)
     if workspace_dir.exists():
         config_path = workspace_config_path(workspace_dir)
         if not config_path.exists():
@@ -129,7 +137,7 @@ def resolve_workspace_target(
             die("failed to load workspace config")
         stored_branch = payload.workspace.branch
         if stored_branch != branch:
-            die("workspace branch does not match hashed directory")
+            die("workspace branch does not match workspace directory")
     return branch, workspace_dir, False
 
 
@@ -182,7 +190,7 @@ def ensure_workspace_metadata(
     agents_path: Path,
     workspace_config_file: Path,
     project_root: Path,
-    project_origin: str,
+    project_enlistment: str,
     workspace_branch: str,
     branch_pr: bool,
     branch_history: str,
@@ -194,7 +202,7 @@ def ensure_workspace_metadata(
         agents_path: Path to ``AGENTS.md`` in the workspace.
         workspace_config_file: Path to workspace ``config.json``.
         project_root: Project directory path.
-        project_origin: Normalized project origin string.
+        project_enlistment: Absolute path to the local enlistment.
         workspace_branch: Workspace branch name.
         branch_pr: Whether pull requests are expected.
         branch_history: History policy (manual|squash|merge|rebase).
@@ -203,11 +211,11 @@ def ensure_workspace_metadata(
         None.
 
     Example:
-        >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/config.json"), Path("/tmp/project"), "example.com/repo", "feat/demo", True, "manual")
+        >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/config.json"), Path("/tmp/project"), "/repo", "feat/demo", True, "manual")
     """
     workspace_config_exists = workspace_config_file.exists()
     if not workspace_config_exists:
-        workspace_id = workspace_identifier(project_origin, workspace_branch)
+        workspace_id = workspace_identifier(project_enlistment, workspace_branch)
         workspace_config = config.WorkspaceConfig(
             workspace={
                 "branch": workspace_branch,
@@ -244,7 +252,7 @@ def ensure_workspace_metadata(
             content = content.rstrip() + "\n\n" + integration_strategy + "\n"
         agents_path.write_text(content, encoding="utf-8")
     else:
-        workspace_id = workspace_identifier(project_origin, workspace_branch)
+        workspace_id = workspace_identifier(project_enlistment, workspace_branch)
         agents_path.write_text(
             templates.render_workspace_agents(workspace_id, integration_strategy),
             encoding="utf-8",

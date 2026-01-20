@@ -19,12 +19,15 @@ def list_workspaces(args: object) -> None:
         $ atelier list --status
     """
     cwd = Path.cwd()
-    _, _, origin = git.resolve_repo_origin(cwd)
-    project_root = paths.project_dir_for_origin(origin)
+    _, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
+    project_root = paths.project_dir_for_enlistment(enlistment_path, origin)
     config_path = paths.project_config_path(project_root)
     config_payload = config.load_project_config(config_path)
     if not config_payload:
         die("no Atelier project config found for this repo; run 'atelier init'")
+    project_enlistment = config_payload.project.enlistment
+    if project_enlistment and project_enlistment != enlistment_path:
+        die("project enlistment does not match current repo path")
 
     workspaces = workspace.collect_workspaces(
         project_root, config_payload, with_status=getattr(args, "status", False)

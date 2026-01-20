@@ -70,15 +70,15 @@ Read more in [docs/why-not-git-worktree.md](docs/why-not-git-worktree.md).
 - One workspace = one unit of work = one branch
 - Intent is captured before code (in `WORKSPACE.md`)
 - Workspaces are isolated directories with their own `repo/`
-- Projects are identified by their Git origin, not filesystem location
+- Projects are identified by their local enlistment path, not Git origin
 - The filesystem is the source of truth
 
 ## What the CLI Manages
 
 Atelier is intentionally small. The CLI:
 
-- registers a repo origin as a project in the Atelier data directory
-- creates workspace folders keyed by branch name
+- registers a local enlistment as a project in the Atelier data directory
+- creates workspace folders keyed by branch name plus a stable hash
 - maintains minimal `config.json` state for projects and workspaces
 - bootstraps policy files (`AGENTS.md`, `PROJECT.md`, `WORKSPACE.md`)
 - clones the repo and checks out workspace branches on demand
@@ -102,6 +102,13 @@ Atelier is intentionally small. The CLI:
             ├─ config.json
             └─ repo/
 ```
+
+Notes:
+
+- `<project-key>` is the enlistment basename plus a short SHA-256 of the full
+  enlistment path.
+- `<workspace-key>` is the normalized branch name plus a short SHA-256 of the
+  full workspace ID.
 
 ## Quick Start
 
