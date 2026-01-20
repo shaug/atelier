@@ -1372,17 +1372,20 @@ class TestOpenWorkspace(TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
                 project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
-            write_open_config(project_dir)
+            write_open_config(project_dir, enlistment_path)
 
             workspace_branch = "scott/feat-demo"
             workspace_dir = paths.workspace_dir_for_branch(
-                project_dir, workspace_branch
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
             )
             workspace_dir.mkdir(parents=True)
-            write_workspace_config(workspace_dir, workspace_branch)
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
             (workspace_dir / "AGENTS.md").write_text("stub\n", encoding="utf-8")
 
             original_cwd = Path.cwd()
