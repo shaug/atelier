@@ -219,6 +219,67 @@ Example:
 atelier init --branch-prefix scott/ --branch-pr false --branch-history rebase
 ```
 
+### `atelier config [workspace-branch]`
+
+Inspect or update configuration. Without arguments, prints the merged project
+config. With a workspace branch, prints that workspace config.
+
+Usage:
+
+```sh
+atelier config
+atelier config scott/feat/new-search
+```
+
+Options:
+
+- `--installed`: Operate on installed defaults instead of the current project.
+- `--prompt`: Prompt for user-editable settings (branch/agent/editor).
+- `--reset`: Reset user-editable settings to installed defaults.
+
+Examples:
+
+```sh
+atelier config --prompt
+atelier config --reset
+atelier config --installed --prompt
+```
+
+### `atelier template <project|workspace|success>`
+
+Print or edit templates used to seed new documents.
+
+Usage:
+
+```sh
+atelier template project
+atelier template workspace
+atelier template success
+```
+
+Options:
+
+- `--installed`: Use the installed template cache.
+- `--edit`: Open the resolved template in the configured editor.
+
+Examples:
+
+```sh
+atelier template workspace --edit
+atelier template workspace --installed
+```
+
+### `atelier edit [workspace-branch]`
+
+Open editable docs in the configured editor.
+
+Usage:
+
+```sh
+atelier edit --project
+atelier edit scott/feat/new-search
+```
+
 ### `atelier open [workspace-branch]`
 
 Create or open a workspace, ensuring its `repo/` checkout exists, open your

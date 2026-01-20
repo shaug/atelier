@@ -384,6 +384,58 @@ Registers the current enlistment path as an Atelier project.
 - Creates the workspace root directory (`workspaces/`) if missing
 - Never modifies existing workspaces
 - Never writes files into the user repo
+- Prompts only for missing config values; subsequent runs are no-ops unless new
+  config fields are introduced or explicit overrides are provided
+
+______________________________________________________________________
+
+### `atelier config [workspace-branch]`
+
+Inspect or update Atelier configuration.
+
+#### Behavior
+
+- Must be run inside a Git repository
+- Without arguments, prints the merged project config
+- With a workspace branch, prints the workspace config
+- `--installed` shows or updates installed defaults for user-editable settings
+  (`branch`, `agent`, `editor`)
+- `--prompt` interactively updates user-editable settings
+- `--reset` resets user-editable settings to installed defaults (with
+  confirmation)
+- Installed defaults are stored at `<atelier-data-dir>/config.json` and contain
+  only the user-editable sections
+- Workspace config output cannot be combined with `--installed`, `--prompt`, or
+  `--reset`
+
+______________________________________________________________________
+
+### `atelier template <project|workspace|success>`
+
+Print or edit the templates used to seed new documents.
+
+#### Behavior
+
+- Must be run inside a Git repository
+- `project` resolves the `PROJECT.md` template
+- `workspace`/`success` resolves the `SUCCESS.md` template
+- Resolution order: project template → installed cache → built-in default
+- `--installed` bypasses the project template (redundant for `project`)
+- `--edit` opens the resolved template in the configured editor, creating the
+  file when missing
+
+______________________________________________________________________
+
+### `atelier edit [workspace-branch]`
+
+Open editable policy documents in the configured editor.
+
+#### Behavior
+
+- `atelier edit --project` opens `PROJECT.md`
+- `atelier edit <workspace>` opens `SUCCESS.md` (or legacy `WORKSPACE.md`)
+- Creates the target file from templates when missing
+- `PERSIST.md` and `BACKGROUND.md` are not editable through this command
 
 ______________________________________________________________________
 
@@ -534,6 +586,7 @@ ______________________________________________________________________
   - packaging
   - reproducible builds
 - Use standard Python libraries where possible
+- Dependencies that improve CLI UX (e.g., prompt libraries) are acceptable
 - Prefer `subprocess` for invoking git, agent, and editor commands
 
 ### CLI Framework

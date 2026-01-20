@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 from .. import config, exec, git, paths, workspace
-from ..io import die, say, warn
+from ..io import confirm, die, say, warn
 
 
 def confirm_delete(workspace_name: str) -> bool:
@@ -19,8 +19,7 @@ def confirm_delete(workspace_name: str) -> bool:
     Example:
         Delete workspace feat/demo? [y/N]:
     """
-    response = input(f"Delete workspace {workspace_name}? [y/N]: ").strip().lower()
-    return response in {"y", "yes"}
+    return confirm(f"Delete workspace {workspace_name}?", default=False)
 
 
 def delete_workspace_branch(

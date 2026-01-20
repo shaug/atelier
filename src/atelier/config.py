@@ -462,12 +462,141 @@ def read_arg(args: object | None, name: str) -> object | None:
     return getattr(args, name, None)
 
 
+def _path_has_value(payload: dict | None, *path: str) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    current: object = payload
+    for key in path:
+        if not isinstance(current, dict) or key not in current:
+            return False
+        current = current[key]
+    return current is not None
+
+
+def user_config_missing_fields(payload: dict | None) -> list[str]:
+    """Return user-editable config fields missing from a payload."""
+    missing: list[str] = []
+    fields = [
+        ("branch", "prefix"),
+        ("branch", "pr"),
+        ("branch", "history"),
+        ("agent", "default"),
+        ("editor", "default"),
+    ]
+    for path in fields:
+        if not _path_has_value(payload, *path):
+            missing.append(".".join(path))
+    return missing
+
+
+def user_config_payload(config: ProjectConfig) -> dict:
+    """Return user-editable config sections as a dict."""
+    return {
+        "branch": config.branch.model_dump(),
+        "agent": config.agent.model_dump(),
+        "editor": config.editor.model_dump(),
+    }
+
+
+def _default_editor_command(config_payload: ProjectConfig) -> str:
+    editor_prompt_default = None
+    editor_default_default = config_payload.editor.default
+    if editor_default_default:
+        editor_options_default = config_payload.editor.options.get(
+            editor_default_default, []
+        )
+        if editor_options_default:
+            editor_prompt_default = shlex.join(
+                [editor_default_default, *editor_options_default]
+            )
+        else:
+            editor_prompt_default = editor_default_default
+    if not editor_prompt_default:
+        if shutil.which("cursor"):
+            editor_prompt_default = "cursor"
+        else:
+            editor_prompt_default = system_editor_default()
+    return editor_prompt_default
+
+
+def default_user_config() -> ProjectConfig:
+    """Return default user-editable config values."""
+    base = ProjectConfig()
+    editor_prompt_default = _default_editor_command(base)
+    editor_parts = shlex.split(editor_prompt_default) if editor_prompt_default else []
+    editor_default = editor_parts[0] if editor_parts else None
+    editor_options: dict[str, list[str]] = {}
+    if editor_default:
+        editor_options[editor_default] = editor_parts[1:]
+    agent_options = {"codex": []}
+    return base.model_copy(
+        update={
+            "branch": base.branch,
+            "agent": AgentConfig(default="codex", options=agent_options),
+            "editor": EditorConfig(default=editor_default, options=editor_options),
+        }
+    )
+
+
+def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
+    """Load installed defaults for user-editable config values."""
+    defaults_path = path or paths.installed_config_path()
+    payload = load_json(defaults_path)
+    default_config = default_user_config()
+    if not payload:
+        return default_config
+    parsed = parse_project_config(payload, defaults_path)
+    branch = parsed.branch
+    if not _path_has_value(payload, "branch", "prefix"):
+        branch = branch.model_copy(update={"prefix": default_config.branch.prefix})
+    if not _path_has_value(payload, "branch", "pr"):
+        branch = branch.model_copy(update={"pr": default_config.branch.pr})
+    if not _path_has_value(payload, "branch", "history"):
+        branch = branch.model_copy(update={"history": default_config.branch.history})
+
+    agent = parsed.agent
+    if not _path_has_value(payload, "agent", "default"):
+        agent = agent.model_copy(update={"default": default_config.agent.default})
+    agent_options = dict(agent.options)
+    agent_options.setdefault("codex", [])
+    agent = agent.model_copy(update={"options": agent_options})
+
+    editor_config = parsed.editor
+    if not _path_has_value(payload, "editor", "default"):
+        editor_config = editor_config.model_copy(
+            update={"default": default_config.editor.default}
+        )
+    if editor_config.default:
+        options = dict(editor_config.options)
+        if editor_config.default not in options:
+            options.update(default_config.editor.options)
+        editor_config = editor_config.model_copy(update={"options": options})
+
+    parsed = parsed.model_copy(
+        update={"branch": branch, "agent": agent, "editor": editor_config}
+    )
+    return parsed
+
+
+def write_installed_defaults(
+    config_payload: ProjectConfig, path: Path | None = None
+) -> None:
+    """Write installed defaults for user-editable config values."""
+    defaults_path = path or paths.installed_config_path()
+    paths.ensure_dir(defaults_path.parent)
+    write_json(defaults_path, user_config_payload(config_payload))
+
+
 def build_project_config(
     existing: ProjectConfig | dict,
     enlistment_path: str,
     origin: str | None,
     origin_raw: str | None,
     args: object | None,
+    *,
+    prompt_missing_only: bool = False,
+    raw_existing: dict | None = None,
+    allow_editor_empty: bool = False,
 ) -> ProjectConfig:
     """Build a new project config, prompting when necessary.
 
@@ -477,6 +606,9 @@ def build_project_config(
         origin: Normalized repo origin (e.g., ``github.com/org/repo``) or ``None``.
         origin_raw: Raw origin URL from Git or ``None``.
         args: CLI argument object for overrides, or ``None`` to prompt.
+        prompt_missing_only: When true, prompt only for missing user fields.
+        raw_existing: Raw payload used to detect missing fields.
+        allow_editor_empty: When true, allow clearing the editor command.
 
     Returns:
         ``ProjectConfig`` with updated project, branch, agent, editor, and
@@ -491,13 +623,22 @@ def build_project_config(
         if isinstance(existing, ProjectConfig)
         else parse_project_config(existing)
     )
+    raw_payload = existing if isinstance(existing, dict) else raw_existing
+
+    def should_prompt(*path: str) -> bool:
+        if not prompt_missing_only:
+            return True
+        return not _path_has_value(raw_payload, *path)
+
     branch_config = existing_config.branch
     branch_prefix_default = branch_config.prefix or ""
     branch_prefix_arg = read_arg(args, "branch_prefix")
     if branch_prefix_arg is not None:
         branch_prefix = str(branch_prefix_arg)
-    else:
+    elif should_prompt("branch", "prefix"):
         branch_prefix = prompt("Branch prefix (optional)", branch_prefix_default)
+    else:
+        branch_prefix = branch_config.prefix
 
     branch_pr_default = branch_config.pr
     branch_history_default = branch_config.history
@@ -505,7 +646,7 @@ def build_project_config(
     branch_pr_arg = read_arg(args, "branch_pr")
     if branch_pr_arg is not None:
         branch_pr = parse_branch_pr_override(branch_pr_arg)
-    else:
+    elif should_prompt("branch", "pr"):
         branch_pr_prompt_default = "true" if branch_pr_default else "false"
         branch_pr_input = prompt(
             "Expect pull requests for workspace branches (true/false)",
@@ -513,13 +654,15 @@ def build_project_config(
             required=True,
         )
         branch_pr = parse_branch_pr_override(branch_pr_input)
+    else:
+        branch_pr = branch_pr_default
 
     branch_history_arg = read_arg(args, "branch_history")
     if branch_history_arg is not None:
         branch_history = normalize_branch_history(
             branch_history_arg, "--branch-history"
         )
-    else:
+    elif should_prompt("branch", "history"):
         branch_history_input = prompt(
             "Branch history policy (manual|squash|merge|rebase)",
             branch_history_default,
@@ -528,42 +671,42 @@ def build_project_config(
         branch_history = normalize_branch_history(
             branch_history_input, "branch.history"
         )
+    else:
+        branch_history = branch_history_default
 
     agent_default_default = existing_config.agent.default or "codex"
     agent_arg = read_arg(args, "agent")
     if agent_arg is not None:
         agent_default = str(agent_arg)
-    else:
+    elif should_prompt("agent", "default"):
         agent_default = prompt("Agent (codex)", agent_default_default, required=True)
+    else:
+        agent_default = agent_default_default
     if agent_default != "codex":
         die("only 'codex' is supported as the agent in v2")
 
-    editor_prompt_default = None
-    editor_default_default = existing_config.editor.default
-    if editor_default_default:
-        editor_options_default = existing_config.editor.options.get(
-            editor_default_default, []
-        )
-        if editor_options_default:
-            editor_prompt_default = shlex.join(
-                [editor_default_default, *editor_options_default]
-            )
-        else:
-            editor_prompt_default = editor_default_default
-    if not editor_prompt_default:
-        if shutil.which("cursor"):
-            editor_prompt_default = "cursor"
-        else:
-            editor_prompt_default = system_editor_default()
-
+    editor_prompt_default = _default_editor_command(existing_config)
     editor_arg = read_arg(args, "editor")
+    editor_input = None
     if editor_arg is not None:
         editor_input = str(editor_arg)
-    else:
-        editor_input = prompt("Editor command", editor_prompt_default, required=True)
-    editor_parts = shlex.split(editor_input)
-    editor_default = editor_parts[0]
-    editor_input_options = editor_parts[1:]
+    elif should_prompt("editor", "default"):
+        editor_input = prompt(
+            "Editor command",
+            editor_prompt_default,
+            required=not allow_editor_empty,
+            allow_empty=allow_editor_empty,
+        )
+    editor_default = existing_config.editor.default
+    editor_input_options: list[str] = []
+    if editor_input is not None:
+        editor_parts = shlex.split(editor_input)
+        if editor_parts:
+            editor_default = editor_parts[0]
+            editor_input_options = editor_parts[1:]
+        else:
+            editor_default = None
+            editor_input_options = []
 
     atelier_created_at = existing_config.atelier.created_at or utc_now()
     atelier_version = existing_config.atelier.version or __version__
@@ -574,7 +717,7 @@ def build_project_config(
     agent_options.setdefault("codex", [])
 
     editor_options = dict(existing_config.editor.options)
-    if editor_input_options:
+    if editor_input_options and editor_default:
         editor_options = {**editor_options, editor_default: editor_input_options}
 
     project_origin = origin or existing_config.project.origin

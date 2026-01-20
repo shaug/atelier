@@ -6,6 +6,17 @@ import shutil
 import sys
 from pathlib import Path
 
+try:
+    import questionary
+except ImportError:  # pragma: no cover - safety fallback when dependency is missing
+    questionary = None
+
+
+def _use_questionary() -> bool:
+    if questionary is None:
+        return False
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
 
 def say(message: str) -> None:
     """Print a normal message to stdout.
@@ -54,7 +65,12 @@ def die(message: str, code: int = 1) -> None:
     sys.exit(code)
 
 
-def prompt(text: str, default: str | None = None, required: bool = False) -> str:
+def prompt(
+    text: str,
+    default: str | None = None,
+    required: bool = False,
+    allow_empty: bool = False,
+) -> str:
     """Prompt the user for input, optionally enforcing a default or requirement.
 
     Args:
@@ -69,15 +85,42 @@ def prompt(text: str, default: str | None = None, required: bool = False) -> str
         Branch prefix (optional) [scott/]:
     """
     while True:
-        if default is not None and default != "":
-            value = input(f"{text} [{default}]: ").strip()
-            if value == "":
-                value = default
+        if _use_questionary():
+            question = questionary.text(text, default=default or "")
+            value = question.ask()
+            if value is None:
+                die("aborted")
+            value = str(value).strip()
         else:
-            value = input(f"{text}: ").strip()
+            if default is not None and default != "":
+                value = input(f"{text} [{default}]: ").strip()
+                if value == "" and not allow_empty:
+                    value = default
+            else:
+                value = input(f"{text}: ").strip()
         if required and value == "":
             continue
         return value
+
+
+def confirm(text: str, default: bool = False) -> bool:
+    """Prompt for a yes/no confirmation.
+
+    Args:
+        text: Prompt label shown to the user.
+        default: Default answer when the user presses enter.
+
+    Returns:
+        ``True`` when the user confirms.
+    """
+    if _use_questionary():
+        response = questionary.confirm(text, default=default).ask()
+        return bool(response)
+    suffix = "[Y/n]" if default else "[y/N]"
+    response = input(f"{text} {suffix}: ").strip().lower()
+    if response == "":
+        return default
+    return response in {"y", "yes"}
 
 
 def link_or_copy(src: Path, dest: Path) -> None:

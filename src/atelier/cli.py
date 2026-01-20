@@ -14,9 +14,12 @@ import typer
 
 from . import __version__
 from .commands import clean as clean_cmd
+from .commands import config as config_cmd
+from .commands import edit as edit_cmd
 from .commands import init as init_cmd
 from .commands import list as list_cmd
 from .commands import open as open_cmd
+from .commands import template as template_cmd
 from .commands import upgrade as upgrade_cmd
 
 app = typer.Typer(
@@ -297,6 +300,76 @@ def upgrade_command(
             dry_run=dry_run,
             yes=yes,
         )
+    )
+
+
+@app.command("config", help="Inspect or update Atelier configuration.")
+def config_command(
+    workspace_name: Annotated[
+        str | None,
+        typer.Argument(
+            help="workspace branch to show config for (optional)",
+        ),
+    ] = None,
+    installed: Annotated[
+        bool,
+        typer.Option("--installed", help="operate on installed defaults"),
+    ] = False,
+    prompt: Annotated[
+        bool,
+        typer.Option("--prompt", help="prompt for user-editable settings"),
+    ] = False,
+    reset: Annotated[
+        bool,
+        typer.Option("--reset", help="reset user-editable settings to defaults"),
+    ] = False,
+) -> None:
+    """Show or update Atelier configuration."""
+    config_cmd.show_config(
+        SimpleNamespace(
+            workspace_name=workspace_name,
+            installed=installed,
+            prompt=prompt,
+            reset=reset,
+        )
+    )
+
+
+@app.command("template", help="Print or edit Atelier templates.")
+def template_command(
+    target: Annotated[
+        str,
+        typer.Argument(help="template target (project|workspace|success)"),
+    ],
+    installed: Annotated[
+        bool,
+        typer.Option("--installed", help="use the installed template cache"),
+    ] = False,
+    edit: Annotated[
+        bool,
+        typer.Option("--edit", help="open the resolved template in the editor"),
+    ] = False,
+) -> None:
+    """Print or edit templates for the current project."""
+    template_cmd.render_template(
+        SimpleNamespace(target=target, installed=installed, edit=edit)
+    )
+
+
+@app.command("edit", help="Open editable project/workspace documents.")
+def edit_command(
+    workspace_name: Annotated[
+        str | None,
+        typer.Argument(help="workspace branch to edit SUCCESS.md"),
+    ] = None,
+    project: Annotated[
+        bool,
+        typer.Option("--project", help="edit PROJECT.md for the current project"),
+    ] = False,
+) -> None:
+    """Open editable project/workspace documents."""
+    edit_cmd.edit_files(
+        SimpleNamespace(workspace_name=workspace_name, project=project)
     )
 
 

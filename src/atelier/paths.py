@@ -12,6 +12,7 @@ WORKSPACES_DIRNAME = "workspaces"
 TEMPLATES_DIRNAME = "templates"
 PROJECT_CONFIG_FILENAME = "config.json"
 WORKSPACE_CONFIG_FILENAME = "config.json"
+INSTALLED_CONFIG_FILENAME = "config.json"
 
 
 def atelier_data_dir() -> Path:
@@ -51,6 +52,15 @@ def installed_templates_dir() -> Path:
         True
     """
     return atelier_data_dir() / TEMPLATES_DIRNAME
+
+
+def installed_config_path() -> Path:
+    """Return the path to the installed defaults config file.
+
+    Returns:
+        Path to the installed defaults config file.
+    """
+    return atelier_data_dir() / INSTALLED_CONFIG_FILENAME
 
 
 def project_key(origin: str) -> str:

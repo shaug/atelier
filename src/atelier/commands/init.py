@@ -24,13 +24,23 @@ def init_project(args: object) -> None:
 
     project_dir = paths.project_dir_for_enlistment(enlistment_path, origin)
     config_path = paths.project_config_path(project_dir)
-    existing = config.load_project_config(config_path)
+    existing_payload = config.load_json(config_path)
+    missing_fields = config.user_config_missing_fields(existing_payload)
+    args_provided = any(
+        getattr(args, name, None) is not None
+        for name in ("branch_prefix", "branch_pr", "branch_history", "agent", "editor")
+    )
+    if existing_payload and not missing_fields and not args_provided:
+        say("Atelier project already initialized")
+        return
     payload = config.build_project_config(
-        existing or {},
+        existing_payload or {},
         enlistment_path,
         origin,
         origin_raw,
         args,
+        prompt_missing_only=True,
+        raw_existing=existing_payload,
     )
     project.ensure_project_dirs(project_dir)
     config.write_json(config_path, payload)

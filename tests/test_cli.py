@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
@@ -18,9 +19,12 @@ from typer.testing import CliRunner  # noqa: E402
 import atelier  # noqa: E402
 import atelier.cli as cli  # noqa: E402
 import atelier.commands.clean as clean_cmd  # noqa: E402
+import atelier.commands.config as config_cmd  # noqa: E402
+import atelier.commands.edit as edit_cmd  # noqa: E402
 import atelier.commands.init as init_cmd  # noqa: E402
 import atelier.commands.list as list_cmd  # noqa: E402
 import atelier.commands.open as open_cmd  # noqa: E402
+import atelier.commands.template as template_cmd  # noqa: E402
 import atelier.config as config  # noqa: E402
 import atelier.editor as editor  # noqa: E402
 import atelier.git as git  # noqa: E402
@@ -2607,5 +2611,344 @@ class TestOpenWorkspace(TestCase):
                         open_cmd.open_workspace(
                             SimpleNamespace(workspace_name="feat-demo")
                         )
+            finally:
+                os.chdir(original_cwd)
+
+
+class TestConfigCommand(TestCase):
+    def test_config_prompt_updates_project_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                responses = iter(["team/", "false", "rebase", "codex", "vim -w"])
+                with (
+                    patch("builtins.input", lambda _: next(responses)),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    config_cmd.show_config(
+                        SimpleNamespace(
+                            workspace_name=None,
+                            installed=False,
+                            prompt=True,
+                            reset=False,
+                        )
+                    )
+                config_path = paths.project_config_path(project_dir)
+                updated = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(updated["branch"]["prefix"], "team/")
+                self.assertFalse(updated["branch"]["pr"])
+                self.assertEqual(updated["branch"]["history"], "rebase")
+                self.assertEqual(updated["editor"]["default"], "vim")
+                self.assertEqual(updated["editor"]["options"]["vim"], ["-w"])
+            finally:
+                os.chdir(original_cwd)
+
+    def test_config_reset_uses_installed_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            defaults = {
+                "branch": {"prefix": "installed/", "pr": False, "history": "squash"},
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "nano", "options": {"nano": ["-w"]}},
+            }
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                data_dir.mkdir(parents=True, exist_ok=True)
+                config.write_json(paths.installed_config_path(), defaults)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("builtins.input", return_value="y"),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    config_cmd.show_config(
+                        SimpleNamespace(
+                            workspace_name=None,
+                            installed=False,
+                            prompt=False,
+                            reset=True,
+                        )
+                    )
+                config_path = paths.project_config_path(project_dir)
+                updated = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(updated["branch"]["prefix"], "installed/")
+                self.assertFalse(updated["branch"]["pr"])
+                self.assertEqual(updated["branch"]["history"], "squash")
+                self.assertEqual(updated["editor"]["default"], "nano")
+                self.assertEqual(updated["editor"]["options"]["nano"], ["-w"])
+            finally:
+                os.chdir(original_cwd)
+
+    def test_config_prompt_updates_installed_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                responses = iter(["prefs/", "true", "merge", "codex", "code -w"])
+                with (
+                    patch("builtins.input", lambda _: next(responses)),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    config_cmd.show_config(
+                        SimpleNamespace(
+                            workspace_name=None,
+                            installed=True,
+                            prompt=True,
+                            reset=False,
+                        )
+                    )
+                with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                    installed_path = paths.installed_config_path()
+                stored = json.loads(installed_path.read_text(encoding="utf-8"))
+                self.assertEqual(stored["branch"]["prefix"], "prefs/")
+                self.assertTrue(stored["branch"]["pr"])
+                self.assertEqual(stored["branch"]["history"], "merge")
+                self.assertEqual(stored["editor"]["default"], "code")
+                self.assertEqual(stored["editor"]["options"]["code"], ["-w"])
+            finally:
+                os.chdir(original_cwd)
+
+
+class TestTemplateCommand(TestCase):
+    def test_template_project_uses_installed_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            installed_template = (
+                data_dir / "templates" / "project" / "PROJECT.md"
+            )
+            installed_template.parent.mkdir(parents=True)
+            installed_template.write_text("installed project\n", encoding="utf-8")
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                buffer = io.StringIO()
+                with (
+                    redirect_stdout(buffer),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    template_cmd.render_template(
+                        SimpleNamespace(target="project", installed=False, edit=False)
+                    )
+                self.assertEqual(buffer.getvalue().strip(), "installed project")
+            finally:
+                os.chdir(original_cwd)
+
+    def test_template_workspace_prefers_project_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+            project_template = project_dir / "templates" / "SUCCESS.md"
+            project_template.parent.mkdir(parents=True, exist_ok=True)
+            project_template.write_text("project success\n", encoding="utf-8")
+            installed_template = data_dir / "templates" / "workspace" / "SUCCESS.md"
+            installed_template.parent.mkdir(parents=True, exist_ok=True)
+            installed_template.write_text("installed success\n", encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                buffer = io.StringIO()
+                with (
+                    redirect_stdout(buffer),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    template_cmd.render_template(
+                        SimpleNamespace(
+                            target="workspace", installed=False, edit=False
+                        )
+                    )
+                self.assertEqual(buffer.getvalue().strip(), "project success")
+            finally:
+                os.chdir(original_cwd)
+
+    def test_template_edit_creates_installed_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            installed_path = data_dir / "templates" / "project" / "PROJECT.md"
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                calls: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    calls.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch(
+                        "atelier.templates.project_md_template",
+                        return_value="template stub\n",
+                    ),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    template_cmd.render_template(
+                        SimpleNamespace(target="project", installed=False, edit=True)
+                    )
+
+                self.assertTrue(installed_path.exists())
+                self.assertEqual(
+                    installed_path.read_text(encoding="utf-8"), "template stub\n"
+                )
+                self.assertTrue(calls)
+                self.assertIn(str(installed_path), calls[0])
+            finally:
+                os.chdir(original_cwd)
+
+
+class TestEditCommand(TestCase):
+    def test_edit_project_creates_project_md(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                calls: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    calls.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch(
+                        "atelier.templates.project_md_template",
+                        return_value="project stub\n",
+                    ),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    edit_cmd.edit_files(
+                        SimpleNamespace(workspace_name=None, project=True)
+                    )
+
+                project_path = project_dir / "PROJECT.md"
+                self.assertTrue(project_path.exists())
+                self.assertEqual(
+                    project_path.read_text(encoding="utf-8"), "project stub\n"
+                )
+                self.assertTrue(calls)
+                self.assertIn(str(project_path), calls[0])
+            finally:
+                os.chdir(original_cwd)
+
+    def test_edit_workspace_creates_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+            branch = "scott/feat-demo"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                branch,
+                workspace_id_for(enlistment_path, branch),
+            )
+            workspace_dir.mkdir(parents=True)
+            write_workspace_config(workspace_dir, branch, enlistment_path)
+
+            template_path = project_dir / "templates" / "SUCCESS.md"
+            template_path.parent.mkdir(parents=True, exist_ok=True)
+            template_path.write_text("workspace success\n", encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                calls: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    calls.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    edit_cmd.edit_files(
+                        SimpleNamespace(workspace_name="feat-demo", project=False)
+                    )
+
+                success_path = workspace_dir / "SUCCESS.md"
+                self.assertTrue(success_path.exists())
+                self.assertEqual(
+                    success_path.read_text(encoding="utf-8"), "workspace success\n"
+                )
+                self.assertTrue(calls)
+                self.assertIn(str(success_path), calls[0])
             finally:
                 os.chdir(original_cwd)

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from .. import __version__, config, git, paths, templates, workspace
-from ..io import die, link_or_copy, say, warn
+from ..io import confirm, die, link_or_copy, say, warn
 
 
 @dataclass
@@ -40,11 +40,6 @@ class WorkspaceTarget:
     project: ProjectTarget
     root: Path
     config: config.WorkspaceConfig
-
-
-def confirm(prompt_text: str) -> bool:
-    response = input(f"{prompt_text} [y/N]: ").strip().lower()
-    return response in {"y", "yes"}
 
 
 def project_label(target: ProjectTarget) -> str:

@@ -19,7 +19,7 @@ from .. import (
     templates,
     workspace,
 )
-from ..io import die, link_or_copy, say, warn
+from ..io import confirm, die, link_or_copy, say, warn
 
 
 def confirm_remove_finalization_tag(workspace_branch: str, tag: str) -> bool:
@@ -32,16 +32,12 @@ def confirm_remove_finalization_tag(workspace_branch: str, tag: str) -> bool:
     Returns:
         ``True`` when the user confirms tag removal.
     """
-    response = (
-        input(
-            "Workspace "
-            f"{workspace_branch} has finalization tag {tag}. "
-            "Remove it before continuing? [y/N]: "
-        )
-        .strip()
-        .lower()
+    return confirm(
+        "Workspace "
+        f"{workspace_branch} has finalization tag {tag}. "
+        "Remove it before continuing?",
+        default=False,
     )
-    return response in {"y", "yes"}
 
 
 @dataclass
@@ -143,8 +139,7 @@ def show_template_diff(item: ManagedTemplateUpdate) -> None:
 
 
 def confirm_template_update(description: str) -> bool:
-    response = input(f"Apply update for {description}? [y/N]: ").strip().lower()
-    return response in {"y", "yes"}
+    return confirm(f"Apply update for {description}?", default=False)
 
 
 def apply_upgrade_policy(
