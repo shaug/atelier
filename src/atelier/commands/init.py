@@ -11,14 +11,13 @@ def init_project(args: object) -> None:
 
     Args:
         args: CLI argument object with optional fields such as ``branch_prefix``,
-            ``branch_pr``, ``branch_history``, ``agent``, ``editor``, and
-            ``workspace_template``.
+            ``branch_pr``, ``branch_history``, ``agent``, and ``editor``.
 
     Returns:
         None.
 
     Example:
-        $ atelier init --workspace-template
+        $ atelier init
     """
     cwd = Path.cwd()
     repo_root = git.git_repo_root(cwd)
@@ -38,8 +37,6 @@ def init_project(args: object) -> None:
     payload = config.build_project_config(existing or {}, origin, origin_raw, args)
     project.ensure_project_dirs(project_dir)
     config.write_json(config_path, payload)
-    project.ensure_project_scaffold(
-        project_dir, bool(getattr(args, "workspace_template", False))
-    )
+    project.ensure_project_scaffold(project_dir)
 
     say("Initialized Atelier project")

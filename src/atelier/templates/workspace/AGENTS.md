@@ -11,13 +11,15 @@ This directory is an **Atelier workspace**.
 - The code in `repo/` is a real git repository and should be treated normally
 - This workspace maps to **one git branch**
 - Integration expectations are defined below
+- Workspace intent and success criteria are defined in `WORKSPACE.md`
 
 ## Execution Expectations
 
-- Complete the work described in this file **to completion**
-- Do not expand scope beyond what is written here
+- Complete the work described in `WORKSPACE.md` **to completion**
+- Do not expand scope beyond what is written there
 - Prefer small, reviewable changes over large refactors
 - Avoid unrelated cleanup unless explicitly required
+- Read `WORKSPACE.md` before beginning work
 
 ## Agent Context
 
@@ -25,7 +27,8 @@ When operating in this workspace:
 
 - Treat this workspace as the **entire world**
 - Do not reference or modify other workspaces
-- Read the remainder of this file carefully before beginning work
+- Read `WORKSPACE.md` and the remainder of this file carefully before beginning
+  work
 
 ## Additional Policy Context
 
@@ -42,26 +45,4 @@ In case of conflict:
 
 {integration_strategy}
 
-After reading this file, proceed with the work described below.
-
-______________________________________________________________________
-
-## Goal
-
-<!-- Describe what this workspace is meant to accomplish. -->
-
-## Context
-
-<!-- Relevant background, links, tickets, or prior discussion. -->
-
-## Constraints / Considerations
-
-<!-- Technical, organizational, or temporal constraints. -->
-
-## What "Done" Looks Like
-
-<!-- Describe how to know when this workspace is complete. -->
-
-## Notes
-
-<!-- Optional execution notes or reminders. -->
+After reading `WORKSPACE.md`, proceed with the work described there.

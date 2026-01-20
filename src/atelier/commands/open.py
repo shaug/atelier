@@ -40,7 +40,6 @@ def open_workspace(args: object) -> None:
         config_payload = config.build_project_config({}, origin, origin_raw, None)
         project.ensure_project_dirs(project_dir)
         config.write_json(config_path, config_payload)
-        project.ensure_project_scaffold(project_dir, False)
     else:
         project.ensure_project_dirs(project_dir)
 
@@ -99,6 +98,8 @@ def open_workspace(args: object) -> None:
         die("workspace branch is required")
 
     agents_path = workspace_dir / "AGENTS.md"
+    workspace_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "WORKSPACE.md"
+    workspace_policy_path = workspace_dir / "WORKSPACE.md"
     workspace_config_file = paths.workspace_config_path(workspace_dir)
     is_new_workspace = not workspace_config_exists
     if workspace_config_exists:
@@ -123,21 +124,21 @@ def open_workspace(args: object) -> None:
         stored_branch = workspace.workspace_branch_for_dir(workspace_dir)
         if stored_branch != workspace_branch:
             die("workspace branch does not match configured workspace branch")
-    paths.ensure_dir(workspace_dir)
-    workspace.ensure_workspace_metadata(
-        workspace_dir=workspace_dir,
-        agents_path=agents_path,
-        workspace_config_file=workspace_config_file,
-        project_root=project_dir,
-        project_origin=project_origin,
-        workspace_branch=workspace_branch,
-        branch_pr=effective_branch_pr,
-        branch_history=effective_branch_history,
-    )
-    workspace_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "WORKSPACE.md"
-    workspace_policy_path = workspace_dir / "WORKSPACE.md"
-    if workspace_policy_template.exists() and not workspace_policy_path.exists():
-        shutil.copyfile(workspace_policy_template, workspace_policy_path)
+    if is_new_workspace:
+        project.ensure_project_scaffold(project_dir)
+        paths.ensure_dir(workspace_dir)
+        workspace.ensure_workspace_metadata(
+            workspace_dir=workspace_dir,
+            agents_path=agents_path,
+            workspace_config_file=workspace_config_file,
+            project_root=project_dir,
+            project_origin=project_origin,
+            workspace_branch=workspace_branch,
+            branch_pr=effective_branch_pr,
+            branch_history=effective_branch_history,
+        )
+        if workspace_policy_template.exists() and not workspace_policy_path.exists():
+            shutil.copyfile(workspace_policy_template, workspace_policy_path)
 
     repo_dir = workspace_dir / "repo"
     project_repo_url = origin_raw
@@ -237,14 +238,14 @@ def open_workspace(args: object) -> None:
             agents_path, repo_dir, default_branch, workspace_branch
         )
 
-    if should_open_editor:
+    if should_open_editor and workspace_policy_path.exists():
         if editor_cmd is None:
             editor_cmd = editor.resolve_editor_command(config_payload)
         try:
-            agents_target = agents_path.relative_to(workspace_dir)
+            workspace_target = workspace_policy_path.relative_to(workspace_dir)
         except ValueError:
-            agents_target = agents_path
-        exec.run_command([*editor_cmd, str(agents_target)], cwd=workspace_dir)
+            workspace_target = workspace_policy_path
+        exec.run_command([*editor_cmd, str(workspace_target)], cwd=workspace_dir)
 
     session_id = sessions.find_codex_session(project_origin, workspace_branch)
     if session_id:

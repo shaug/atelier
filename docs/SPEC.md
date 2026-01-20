@@ -78,9 +78,9 @@ workspaces/<workspace-key>/
 Notes:
 
 - `PROJECT.md` is optional and user-owned.
-- `templates/WORKSPACE.md` is optional and only created when explicitly opted
-  in.
-- `WORKSPACE.md` exists only when copied from `templates/WORKSPACE.md`.
+- `templates/WORKSPACE.md` is created by `atelier init` (or `atelier open` when
+  needed).
+- `WORKSPACE.md` is copied into new workspaces from `templates/WORKSPACE.md`.
 - `<workspace-key>` is a stable, filesystem-safe key (SHA-256) derived from the
   workspace branch name.
 - Branch names may include `/` without creating nested directories under
@@ -168,12 +168,12 @@ agent-assisted development.
 - Development work is performed in isolated **workspaces**
 - Workspaces live under the Atelier project directory managed in the local data dir
 - Each workspace represents **one unit of work**
-- Each workspace has its own `AGENTS.md` defining intent and scope
+- Each workspace has its own `WORKSPACE.md` defining intent and scope
 
 ## Authority
 
 - This file describes only the **Atelier workflow overlay**
-- Workspace `AGENTS.md` files define execution expectations
+- Workspace `WORKSPACE.md` files define execution expectations
 - Repository-specific coding conventions are defined elsewhere
   (e.g. a repository-level `AGENTS.md`, if present)
 
@@ -224,12 +224,13 @@ ______________________________________________________________________
 
 ## 7. Workspace `AGENTS.md`
 
-This file is the **execution contract** for agents and humans.
+This file is the **standard prologue** for each workspace. It provides context,
+policy precedence, and integration strategy. Workspace intent and completion
+criteria live in `WORKSPACE.md`.
 
 ### Structure
 
 1. **Standard prologue** (owned by Atelier)
-2. **User-owned intent**, with suggested headers and commented guidance
 
 ### Standard Prologue (v2)
 
@@ -247,13 +248,15 @@ This directory is an **Atelier workspace**.
 - The code in `repo/` is a real git repository and should be treated normally
 - This workspace maps to **one git branch**
 - Integration expectations are defined below
+- Workspace intent and success criteria are defined in `WORKSPACE.md`
 
 ## Execution Expectations
 
-- Complete the work described in this file **to completion**
-- Do not expand scope beyond what is written here
+- Complete the work described in `WORKSPACE.md` **to completion**
+- Do not expand scope beyond what is written there
 - Prefer small, reviewable changes over large refactors
 - Avoid unrelated cleanup unless explicitly required
+- Read `WORKSPACE.md` before beginning work
 
 ## Agent Context
 
@@ -261,7 +264,7 @@ When operating in this workspace:
 
 - Treat this workspace as the **entire world**
 - Do not reference or modify other workspaces
-- Read the remainder of this file carefully before beginning work
+- Read `WORKSPACE.md` and the remainder of this file carefully before beginning work
 
 ## Additional Policy Context
 
@@ -291,43 +294,19 @@ When this workspace's success criteria are met:
 - The intended merge style is manual (no specific history behavior is implied).
 - Integration should wait for an explicit instruction in the thread.
 
-After reading this file, proceed with the work described below.
+After reading `WORKSPACE.md`, proceed with the work described there.
 ```
 
-### Suggested User Sections (commented)
-
-```markdown
----
-
-## Goal
-
-<!-- Describe what this workspace is meant to accomplish. -->
-
-## Context
-
-<!-- Relevant background, links, tickets, or prior discussion. -->
-
-## Constraints / Considerations
-
-<!-- Technical, organizational, or temporal constraints. -->
-
-## What “Done” Looks Like
-
-<!-- Describe how to know when this workspace is complete. -->
-
-## Notes
-
-<!-- Optional execution notes or reminders. -->
-```
-
-Users may freely edit, reorder, or delete these sections.
+Workspace intent and success criteria live in `WORKSPACE.md`, which is fully
+user-owned.
 
 ______________________________________________________________________
 
 ## 8. Policy Overlays: `PROJECT.md` and `WORKSPACE.md`
 
-These optional, user-owned files define additional agent behavior rules that are
-orthogonal to Atelier's core execution protocol.
+These user-owned files define additional agent behavior rules that are
+orthogonal to Atelier's core execution protocol. `PROJECT.md` is optional;
+`WORKSPACE.md` is created for new workspaces but fully user-owned.
 
 ### `PROJECT.md`
 
@@ -337,7 +316,10 @@ orthogonal to Atelier's core execution protocol.
 ### `WORKSPACE.md`
 
 - Location: workspace root (alongside `AGENTS.md` and `config.json`)
-- Purpose: define workspace-specific policies and override project-level rules
+- Purpose: define workspace intent, scope, and completion criteria while
+  overriding project-level rules when needed
+- Suggested sections: Goal, Context, Constraints / Considerations, What "Done"
+  Looks Like, Notes
 
 ### Precedence
 
@@ -366,9 +348,8 @@ Registers the current repo origin as an Atelier project.
 - Creates `config.json` in the project directory (if missing)
 - Creates project-level `AGENTS.md` if missing
 - Creates `PROJECT.md` if missing (comment-only stub)
+- Creates `templates/WORKSPACE.md` if missing
 - Creates the workspace root directory (`workspaces/`) if missing
-- Optionally creates `templates/WORKSPACE.md` when explicitly opted in (e.g. via
-  `--workspace-template`)
 - Never modifies existing workspaces
 - Never writes files into the user repo
 
@@ -389,13 +370,14 @@ Ensures a workspace exists and launches or resumes agent work.
 5. If workspace is new:
    - Generate `config.json`
    - Generate workspace `AGENTS.md` from template
-   - Copy `templates/WORKSPACE.md` to `WORKSPACE.md` if present
-   - Open `AGENTS.md` in the configured editor (blocking)
-6. Ensure `repo/` exists:
+   - Copy `templates/WORKSPACE.md` to `WORKSPACE.md`
+   - Open `WORKSPACE.md` in the configured editor (blocking)
+6. Existing workspaces are not modified
+7. Ensure `repo/` exists:
    - Clone repo if missing
    - Checkout default branch
    - Create workspace branch if missing
-7. Launch agent:
+8. Launch agent:
    - Attempt to resume an existing Codex session by scanning local Codex
      transcripts
    - Otherwise start a new session with an opening prompt containing the
@@ -450,6 +432,7 @@ Atelier ships with internal templates for:
 
 - Project `AGENTS.md`
 - Workspace `AGENTS.md`
+- Workspace `WORKSPACE.md`
 - `PROJECT.md` (comment-only stub)
 
 `<project-dir>` refers to the Atelier project directory under the data dir.

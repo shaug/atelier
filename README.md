@@ -68,7 +68,7 @@ Read more in [docs/why-not-git-worktree.md](docs/why-not-git-worktree.md).
 ## Core Ideas
 
 - One workspace = one unit of work = one branch
-- Intent is captured before code (in `AGENTS.md`)
+- Intent is captured before code (in `WORKSPACE.md`)
 - Workspaces are isolated directories with their own `repo/`
 - Projects are identified by their Git origin, not filesystem location
 - The filesystem is the source of truth
@@ -114,12 +114,6 @@ atelier init
 Run this inside an existing Git repo; Atelier stores state in the data directory
 and does not write files into the repo.
 
-Optionally create a workspace policy template:
-
-```sh
-atelier init --workspace-template
-```
-
 Open or create a workspace:
 
 ```sh
@@ -134,9 +128,10 @@ Use `--raw` to treat the argument as the full branch name (no prefix lookup).
 `atelier open` will:
 
 - create the workspace if needed
-- generate `AGENTS.md` and `config.json`
+- generate `AGENTS.md`, `WORKSPACE.md`, and `config.json`
 - clone the repo into `repo/` and create the workspace branch
-- open the configured editor for new workspaces, then launch Codex
+- open the configured editor for new workspaces (`WORKSPACE.md`), then launch
+  Codex
 
 List workspaces:
 
@@ -166,8 +161,9 @@ atelier clean --all --force
 ## Notes
 
 - Atelier never auto-updates existing workspaces or templates.
-- `AGENTS.md` is the execution contract for each workspace.
-- `PROJECT.md` and `WORKSPACE.md` are optional policy overlays for agents.
+- `WORKSPACE.md` is the execution contract for each workspace.
+- `AGENTS.md` is the standard workspace prologue with integration guidance.
+- `PROJECT.md` is an optional policy overlay for agents.
 - Configuration lives in `config.json` under the Atelier data directory.
 - Workspace directories are keyed by a stable hash of the branch name.
 
@@ -196,7 +192,6 @@ Options:
 - `--branch-history`: History policy (`manual`, `squash`, `merge`, `rebase`).
 - `--agent`: Agent name (currently only `codex`).
 - `--editor`: Editor command (e.g., `cursor --reuse-window`).
-- `--workspace-template`: Create `templates/WORKSPACE.md` in the project dir.
 
 Example:
 
@@ -207,7 +202,7 @@ atelier init --branch-prefix scott/ --branch-pr false --branch-history rebase
 ### `atelier open [workspace-branch]`
 
 Create or open a workspace, ensuring its `repo/` checkout exists, open your
-editor for new workspaces, then launch Codex.
+editor for new workspaces (`WORKSPACE.md`), then launch Codex.
 
 Usage:
 

@@ -9,12 +9,12 @@ agent-assisted development.
 - Workspaces live under the Atelier project directory managed in the local data
   dir
 - Each workspace represents **one unit of work**
-- Each workspace has its own `AGENTS.md` defining intent and scope
+- Each workspace has its own `WORKSPACE.md` defining intent and scope
 
 ## Authority
 
 - This file describes only the **Atelier workflow overlay**
-- Workspace `AGENTS.md` files define execution expectations
+- Workspace `WORKSPACE.md` files define execution expectations
 - Repository-specific coding conventions are defined elsewhere (e.g. a
   repository-level `AGENTS.md`, if present)
 

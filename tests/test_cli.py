@@ -36,7 +36,6 @@ def make_init_args(**overrides: object) -> SimpleNamespace:
         "branch_history": None,
         "agent": None,
         "editor": None,
-        "workspace_template": False,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -424,14 +423,14 @@ class TestInitProject(TestCase):
             finally:
                 os.chdir(original_cwd)
 
-    def test_init_creates_workspace_template_when_opted_in(self) -> None:
+    def test_init_creates_workspace_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                args = make_init_args(workspace_template=True)
+                args = make_init_args()
                 responses = iter(["", "", "", "", ""])
 
                 with (
@@ -950,6 +949,7 @@ class TestOpenWorkspace(TestCase):
                     project_dir, workspace_branch
                 )
                 self.assertTrue((workspace_dir / "AGENTS.md").exists())
+                self.assertTrue((workspace_dir / "WORKSPACE.md").exists())
                 self.assertTrue((workspace_dir / "config.json").exists())
 
                 workspace_config = json.loads(
@@ -965,6 +965,8 @@ class TestOpenWorkspace(TestCase):
                 self.assertIn(
                     f"atelier:{NORMALIZED_ORIGIN}/{workspace_branch}", agents_content
                 )
+                self.assertIn("WORKSPACE.md", agents_content)
+                self.assertIn("Read `WORKSPACE.md`", agents_content)
                 self.assertIn("## Integration Strategy", agents_content)
                 self.assertIn("Pull requests expected: yes", agents_content)
                 self.assertIn("History policy: manual", agents_content)
@@ -1126,7 +1128,7 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
-    def test_open_editor_uses_workspace_relative_agents_path(self) -> None:
+    def test_open_editor_uses_workspace_relative_workspace_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data dir"
@@ -1160,7 +1162,7 @@ class TestOpenWorkspace(TestCase):
                 editor_index = next(
                     index for index, cmd in enumerate(commands) if cmd[:1] == ["true"]
                 )
-                self.assertEqual(commands[editor_index][-1], "AGENTS.md")
+                self.assertEqual(commands[editor_index][-1], "WORKSPACE.md")
                 workspace_dir = paths.workspace_dir_for_branch(
                     project_dir, "scott/feat-demo"
                 )
@@ -1218,6 +1220,50 @@ class TestOpenWorkspace(TestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
+                self.assertFalse(any(cmd[:1] == ["true"] for cmd in commands))
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_skips_editor_when_workspace_md_missing_for_existing_workspace(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_origin(NORMALIZED_ORIGIN)
+            write_open_config(project_dir)
+
+            workspace_branch = "scott/feat-demo"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir, workspace_branch
+            )
+            workspace_dir.mkdir(parents=True)
+            write_workspace_config(workspace_dir, workspace_branch)
+            (workspace_dir / "AGENTS.md").write_text("stub\n", encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+
+                self.assertFalse((workspace_dir / "WORKSPACE.md").exists())
+                self.assertFalse((project_dir / "templates").exists())
                 self.assertFalse(any(cmd[:1] == ["true"] for cmd in commands))
             finally:
                 os.chdir(original_cwd)
@@ -1307,7 +1353,7 @@ class TestOpenWorkspace(TestCase):
             finally:
                 os.chdir(original_cwd)
 
-    def test_open_uses_workspace_branch_settings_for_agents(self) -> None:
+    def test_open_does_not_modify_existing_workspace_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data_dir = root / "data"
@@ -1332,6 +1378,14 @@ class TestOpenWorkspace(TestCase):
             (workspace_dir / "config.json").write_text(
                 json.dumps(payload), encoding="utf-8"
             )
+            agents_path = workspace_dir / "AGENTS.md"
+            workspace_path = workspace_dir / "WORKSPACE.md"
+            agents_path.write_text("agents stub\n", encoding="utf-8")
+            workspace_path.write_text("workspace stub\n", encoding="utf-8")
+            os.utime(agents_path, (1_000_000_000, 1_000_000_000))
+            os.utime(workspace_path, (1_000_000_000, 1_000_000_000))
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir()
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1341,7 +1395,7 @@ class TestOpenWorkspace(TestCase):
                     return None
 
                 class DummyResult:
-                    def __init__(self, returncode: int = 1, stdout: str = "") -> None:
+                    def __init__(self, returncode: int = 0, stdout: str = "") -> None:
                         self.returncode = returncode
                         self.stdout = stdout
 
@@ -1350,8 +1404,9 @@ class TestOpenWorkspace(TestCase):
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",
-                        return_value=DummyResult(),
+                        return_value=DummyResult(stdout=RAW_ORIGIN),
                     ),
+                    patch("atelier.git.git_is_repo", return_value=True),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
                     patch("atelier.git.git_is_clean", return_value=True),
@@ -1361,11 +1416,14 @@ class TestOpenWorkspace(TestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                agents_content = (workspace_dir / "AGENTS.md").read_text(
-                    encoding="utf-8"
+                self.assertEqual(
+                    agents_path.read_text(encoding="utf-8"), "agents stub\n"
                 )
-                self.assertIn("Pull requests expected: no", agents_content)
-                self.assertIn("History policy: squash", agents_content)
+                self.assertEqual(
+                    workspace_path.read_text(encoding="utf-8"), "workspace stub\n"
+                )
+                self.assertEqual(int(agents_path.stat().st_mtime), 1_000_000_000)
+                self.assertEqual(int(workspace_path.stat().st_mtime), 1_000_000_000)
             finally:
                 os.chdir(original_cwd)
 

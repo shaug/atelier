@@ -97,13 +97,6 @@ def init_command(
     editor: Annotated[
         str | None, typer.Option("--editor", help="editor command")
     ] = None,
-    workspace_template: Annotated[
-        bool,
-        typer.Option(
-            "--workspace-template",
-            help="create templates/WORKSPACE.md",
-        ),
-    ] = False,
 ) -> None:
     """Initialize an Atelier project for the current Git repo.
 
@@ -112,9 +105,7 @@ def init_command(
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
         agent: Agent name (currently only ``codex``).
-        editor: Editor command used to open ``AGENTS.md``.
-        workspace_template: Create ``templates/WORKSPACE.md`` when true.
-
+        editor: Editor command used to open ``WORKSPACE.md``.
     Returns:
         None.
 
@@ -128,7 +119,6 @@ def init_command(
             branch_history=branch_history,
             agent=agent,
             editor=editor,
-            workspace_template=workspace_template,
         )
     )
 
