@@ -411,11 +411,10 @@ def update_workspace_managed_files(
 
 
 def managed_project_agents_updates(project_dir: Path) -> dict[str, str]:
-    """Return managed hashes for project AGENTS files when canonical."""
-    canonical = templates.project_agents_template(prefer_installed=True)
+    """Return managed hashes for project AGENTS templates when canonical."""
+    canonical = templates.agents_template(prefer_installed=True)
     updates: dict[str, str] = {}
     candidates = [
-        ("AGENTS.md", project_dir / "AGENTS.md"),
         (
             f"{paths.TEMPLATES_DIRNAME}/AGENTS.md",
             project_dir / paths.TEMPLATES_DIRNAME / "AGENTS.md",

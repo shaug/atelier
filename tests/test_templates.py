@@ -12,7 +12,7 @@ class TestInstalledTemplateCache(TestCase):
             root = Path(tmp)
             data_dir = root / "data"
             project_dir = root / "project"
-            installed_agents = data_dir / "templates" / "project" / "AGENTS.md"
+            installed_agents = data_dir / "templates" / "AGENTS.md"
             installed_agents.parent.mkdir(parents=True)
             installed_agents.write_text("custom agents\n", encoding="utf-8")
 

@@ -7,9 +7,7 @@ from . import paths
 
 TEMPLATE_PARTS: tuple[tuple[str, ...], ...] = (
     ("AGENTS.md",),
-    ("project", "AGENTS.md"),
     ("project", "PROJECT.md"),
-    ("workspace", "AGENTS.md"),
     ("workspace", "SUCCESS.md"),
     ("workspace", "WORKSPACE.md"),
     ("workspace", "PERSIST.md"),
@@ -26,7 +24,7 @@ def _read_template(*parts: str) -> str:
         Template text.
 
     Example:
-        >>> isinstance(_read_template("project", "AGENTS.md"), str)
+        >>> isinstance(_read_template("AGENTS.md"), str)
         True
     """
     return (
@@ -103,7 +101,7 @@ def agents_template(*, prefer_installed: bool = False) -> str:
 
 
 def project_agents_template(*, prefer_installed: bool = False) -> str:
-    """Return the project-level ``AGENTS.md`` template text.
+    """Return the canonical ``AGENTS.md`` template text.
 
     Returns:
         Template text.
@@ -112,7 +110,7 @@ def project_agents_template(*, prefer_installed: bool = False) -> str:
         >>> "Atelier" in project_agents_template()
         True
     """
-    return read_template("project", "AGENTS.md", prefer_installed=prefer_installed)
+    return read_template("AGENTS.md", prefer_installed=prefer_installed)
 
 
 def project_md_template(*, prefer_installed: bool = False) -> str:
@@ -129,7 +127,7 @@ def project_md_template(*, prefer_installed: bool = False) -> str:
 
 
 def workspace_agents_template(*, prefer_installed: bool = False) -> str:
-    """Return the workspace ``AGENTS.md`` template text.
+    """Return the canonical ``AGENTS.md`` template text.
 
     Returns:
         Template text.
@@ -138,7 +136,7 @@ def workspace_agents_template(*, prefer_installed: bool = False) -> str:
         >>> "Atelier" in workspace_agents_template()
         True
     """
-    return read_template("workspace", "AGENTS.md", prefer_installed=prefer_installed)
+    return read_template("AGENTS.md", prefer_installed=prefer_installed)
 
 
 def success_md_template(*, prefer_installed: bool = False) -> str:

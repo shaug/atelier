@@ -229,7 +229,7 @@ def collect_project_template_updates(
     templates_root = project_dir / paths.TEMPLATES_DIRNAME
     project_label_text = project_dir.name
 
-    agents_text = templates.project_agents_template(prefer_installed=True)
+    agents_text = templates.agents_template(prefer_installed=True)
     template_agents_path = templates_root / "AGENTS.md"
     template_agents_key = f"{paths.TEMPLATES_DIRNAME}/AGENTS.md"
 
@@ -253,30 +253,6 @@ def collect_project_template_updates(
             ),
         )
     ]
-
-    agents_path = project_dir / "AGENTS.md"
-    agents_key = "AGENTS.md"
-
-    def update_agents_hash(value: str) -> None:
-        config.update_project_managed_files(project_dir, {agents_key: value})
-
-    def create_agents() -> None:
-        if template_agents_path.exists():
-            link_or_copy(template_agents_path, agents_path)
-        else:
-            agents_path.write_text(agents_text, encoding="utf-8")
-
-    updates.append(
-        build_managed_template_update(
-            description=f"Project AGENTS.md ({project_label_text})",
-            path=agents_path,
-            new_text=agents_text,
-            stored_hash=managed.get(agents_key),
-            update_hash=update_agents_hash,
-            create=create_agents,
-            write_text=lambda text: agents_path.write_text(text, encoding="utf-8"),
-        )
-    )
 
     success_text = templates.success_md_template(prefer_installed=True)
     template_success_path = templates_root / "SUCCESS.md"

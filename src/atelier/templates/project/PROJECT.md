@@ -6,7 +6,8 @@ It is optional and fully user-owned.
 
 If a SUCCESS.md file exists inside a workspace, its rules take precedence.
 For legacy workspaces, WORKSPACE.md is treated as equivalent.
-This PROJECT.md file takes precedence over project-level AGENTS.md.
+Atelier may link/copy this file into workspaces as PROJECT.md.
+This PROJECT.md file takes precedence over AGENTS.md.
 
 Atelier does not parse or modify this file.
 -->

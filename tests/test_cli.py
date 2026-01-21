@@ -334,8 +334,8 @@ class TestInitProject(BaseAtelierTestCase):
                 self.assertTrue(config_payload.branch.pr)
                 self.assertEqual(config_payload.branch.history, "manual")
                 self.assertEqual(config_payload.editor.default, "cursor")
-                self.assertTrue((project_dir / "AGENTS.md").exists())
                 self.assertTrue((project_dir / "templates" / "AGENTS.md").exists())
+                self.assertFalse((project_dir / "AGENTS.md").exists())
                 self.assertTrue((project_dir / "PROJECT.md").exists())
                 self.assertTrue((project_dir / "workspaces").is_dir())
             finally:
@@ -1223,6 +1223,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
                 self.assertTrue((workspace_dir / "AGENTS.md").exists())
+                self.assertTrue((workspace_dir / "PROJECT.md").exists())
                 self.assertTrue((workspace_dir / "PERSIST.md").exists())
                 self.assertTrue((workspace_dir / "SUCCESS.md").exists())
                 self.assertTrue(paths.workspace_config_path(workspace_dir).exists())
@@ -1238,6 +1239,13 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 )
                 self.assertIn("Atelier Agent Contract", agents_content)
                 self.assertIn("SUCCESS.md", agents_content)
+                project_content = (project_dir / "PROJECT.md").read_text(
+                    encoding="utf-8"
+                )
+                workspace_project_content = (workspace_dir / "PROJECT.md").read_text(
+                    encoding="utf-8"
+                )
+                self.assertEqual(workspace_project_content, project_content)
                 self.assertIn("PERSIST.md", agents_content)
 
                 persist_content = (workspace_dir / "PERSIST.md").read_text(
@@ -1331,17 +1339,15 @@ class TestOpenWorkspace(BaseAtelierTestCase):
             templates_dir.mkdir(parents=True, exist_ok=True)
 
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                canonical = templates.project_agents_template(prefer_installed=True)
+                canonical = templates.agents_template(prefer_installed=True)
             old_text = f"{canonical}\nlegacy\n"
             (templates_dir / "AGENTS.md").write_text(old_text, encoding="utf-8")
-            (project_dir / "AGENTS.md").write_text(old_text, encoding="utf-8")
 
             payload = make_open_config(enlistment_path)
             payload["atelier"]["version"] = "9999.0.0"
             payload["atelier"]["upgrade"] = "always"
             payload["atelier"]["managed_files"] = {
                 "templates/AGENTS.md": config.hash_text(old_text),
-                "AGENTS.md": config.hash_text(old_text),
             }
             parsed = config.ProjectConfig.model_validate(payload)
             config.write_project_config(paths.project_config_path(project_dir), parsed)
@@ -1369,8 +1375,6 @@ class TestOpenWorkspace(BaseAtelierTestCase):
 
             updated = (templates_dir / "AGENTS.md").read_text(encoding="utf-8")
             self.assertEqual(updated, canonical)
-            updated_root = (project_dir / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertEqual(updated_root, canonical)
 
     def test_open_ask_policy_updates_when_confirmed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1387,17 +1391,15 @@ class TestOpenWorkspace(BaseAtelierTestCase):
             templates_dir.mkdir(parents=True, exist_ok=True)
 
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                canonical = templates.project_agents_template(prefer_installed=True)
+                canonical = templates.agents_template(prefer_installed=True)
             old_text = f"{canonical}\nlegacy\n"
             (templates_dir / "AGENTS.md").write_text(old_text, encoding="utf-8")
-            (project_dir / "AGENTS.md").write_text(canonical, encoding="utf-8")
 
             payload = make_open_config(enlistment_path)
             payload["atelier"]["version"] = "9999.0.0"
             payload["atelier"]["upgrade"] = "ask"
             payload["atelier"]["managed_files"] = {
                 "templates/AGENTS.md": config.hash_text(old_text),
-                "AGENTS.md": config.hash_text(canonical),
             }
             parsed = config.ProjectConfig.model_validate(payload)
             config.write_project_config(paths.project_config_path(project_dir), parsed)

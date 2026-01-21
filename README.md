@@ -112,7 +112,6 @@ Atelier is intentionally small. The CLI:
    └─ <project-key>/
       ├─ config.sys.json
       ├─ config.user.json
-      ├─ AGENTS.md
       ├─ PROJECT.md
       ├─ templates/
       │  ├─ AGENTS.md
@@ -120,6 +119,7 @@ Atelier is intentionally small. The CLI:
       └─ workspaces/
          └─ <workspace-key>/
             ├─ AGENTS.md
+            ├─ PROJECT.md
             ├─ PERSIST.md
             ├─ BACKGROUND.md (optional)
             ├─ SUCCESS.md
@@ -201,11 +201,12 @@ atelier clean --all --force
 - Template upgrades on `atelier open` are governed by `atelier.upgrade`
   (`always`, `ask`, `manual`).
 - `SUCCESS.md` is the execution contract for each workspace.
-- `AGENTS.md` is a managed, static prologue shared across projects/workspaces.
+- `AGENTS.md` is a managed, static prologue created in each workspace.
 - `PERSIST.md` records integration guidance and the finalization tag
   (`atelier/<branch-name>/finalized`) used by `atelier clean`.
 - `BACKGROUND.md` captures context when opening an existing branch.
-- `PROJECT.md` is an optional policy overlay for agents.
+- `PROJECT.md` is an optional policy overlay for agents and is linked/copied
+  into each workspace.
 - Configuration lives in `config.sys.json`/`config.user.json` under the Atelier
   data directory.
 - Workspace directories are keyed by a stable hash of the branch name.

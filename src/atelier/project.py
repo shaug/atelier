@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from . import templates
-from .io import link_or_copy, say
+from .io import say
 from .paths import TEMPLATES_DIRNAME, WORKSPACES_DIRNAME, ensure_dir
 
 
@@ -42,15 +42,10 @@ def ensure_project_scaffold(project_dir: Path) -> None:
     if not agents_template_path.exists():
         ensure_dir(agents_template_path.parent)
         agents_template_path.write_text(
-            templates.project_agents_template(prefer_installed=True),
+            templates.agents_template(prefer_installed=True),
             encoding="utf-8",
         )
         say("Created templates/AGENTS.md")
-
-    agents_path = project_dir / "AGENTS.md"
-    if not agents_path.exists():
-        link_or_copy(agents_template_path, agents_path)
-        say("Created AGENTS.md")
 
     project_md_path = project_dir / "PROJECT.md"
     if not project_md_path.exists():

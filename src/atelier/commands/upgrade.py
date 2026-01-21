@@ -231,21 +231,12 @@ def plan_project_agents(
     plan: UpgradePlan,
     project: ProjectTarget,
 ) -> None:
-    canonical = templates.project_agents_template()
+    canonical = templates.agents_template()
     managed = project.config.atelier.managed_files
     project_label_text = project_label(project)
 
     template_agents_path = project.root / paths.TEMPLATES_DIRNAME / "AGENTS.md"
     template_key = f"{paths.TEMPLATES_DIRNAME}/AGENTS.md"
-    template_unmodified = True
-    if template_agents_path.exists():
-        template_text = file_text(template_agents_path)
-        template_hash = hash_text(template_text)
-        stored_template_hash = managed.get(template_key)
-        if stored_template_hash is not None:
-            template_unmodified = template_hash == stored_template_hash
-        else:
-            template_unmodified = template_text == canonical
 
     def update_template_hash(value: str) -> None:
         config.update_project_managed_files(project.root, {template_key: value})
@@ -260,31 +251,40 @@ def plan_project_agents(
         write_text=lambda text: template_agents_path.write_text(text, encoding="utf-8"),
     )
 
-    agents_path = project.root / "AGENTS.md"
-    agents_key = "AGENTS.md"
-
-    def update_agents_hash(value: str) -> None:
-        config.update_project_managed_files(project.root, {agents_key: value})
-
-    record_root_hash = template_unmodified
-    agents_hash_updater = update_agents_hash if record_root_hash else None
-
-    def create_agents() -> None:
-        if template_agents_path.exists():
-            link_or_copy(template_agents_path, agents_path)
-        else:
-            agents_path.write_text(canonical, encoding="utf-8")
-
-    plan_agents_file(
-        plan,
-        description=f"Project AGENTS.md ({project_label_text})",
-        file_path=agents_path,
-        canonical_text=canonical,
-        stored_hash=managed.get(agents_key),
-        update_hash=agents_hash_updater,
-        create=create_agents,
-        write_text=lambda text: agents_path.write_text(text, encoding="utf-8"),
-    )
+    legacy_agents_path = project.root / "AGENTS.md"
+    if legacy_agents_path.exists() or legacy_agents_path.is_symlink():
+        remove_description = f"Remove legacy project AGENTS.md ({project_label_text})"
+        is_template_link = False
+        if legacy_agents_path.is_symlink():
+            try:
+                is_template_link = (
+                    legacy_agents_path.resolve() == template_agents_path.resolve()
+                )
+            except FileNotFoundError:
+                is_template_link = False
+        if is_template_link:
+            plan.actions.append(
+                PlanAction(
+                    description=remove_description,
+                    apply=legacy_agents_path.unlink,
+                )
+            )
+        elif legacy_agents_path.is_file():
+            legacy_text = file_text(legacy_agents_path)
+            if legacy_text == canonical:
+                plan.actions.append(
+                    PlanAction(
+                        description=remove_description,
+                        apply=legacy_agents_path.unlink,
+                    )
+                )
+            else:
+                plan.skips.append(
+                    PlanSkip(
+                        description=remove_description,
+                        reason="modified",
+                    )
+                )
 
 
 def plan_workspace_agents(plan: UpgradePlan, target: WorkspaceTarget) -> None:
@@ -371,7 +371,7 @@ def plan_project_template_refresh(plan: UpgradePlan, project: ProjectTarget) -> 
     refresh_targets = [
         (
             "AGENTS.md",
-            lambda: templates.project_agents_template(prefer_installed=True),
+            lambda: templates.agents_template(prefer_installed=True),
             f"{paths.TEMPLATES_DIRNAME}/AGENTS.md",
         ),
         (

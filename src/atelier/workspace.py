@@ -273,6 +273,11 @@ def ensure_workspace_metadata(
                 templates.render_workspace_agents(), encoding="utf-8"
             )
 
+    project_md_path = project_root / "PROJECT.md"
+    workspace_project_path = workspace_dir / "PROJECT.md"
+    if project_md_path.exists() and not workspace_project_path.exists():
+        link_or_copy(project_md_path, workspace_project_path)
+
     if not persist_path.exists():
         persist_path.write_text(
             templates.render_persist(integration_pr, integration_history),
