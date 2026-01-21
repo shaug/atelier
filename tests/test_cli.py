@@ -72,6 +72,15 @@ class BaseAtelierTestCase(TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
+        io_patcher = patch("atelier.io._use_questionary", return_value=False)
+        io_patcher.start()
+        self.addCleanup(io_patcher.stop)
+        input_patcher = patch(
+            "builtins.input",
+            side_effect=AssertionError("prompted unexpectedly"),
+        )
+        input_patcher.start()
+        self.addCleanup(input_patcher.stop)
 
 
 def write_project_config(project_dir: Path, enlistment_path: str) -> dict:
