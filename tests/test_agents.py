@@ -1,6 +1,9 @@
+import os
 import sys
+import tempfile
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
@@ -110,10 +113,18 @@ class AgentSpecTestCase(TestCase):
         self.assertEqual(copilot.resume_subcommand, ("--continue",))
         self.assertFalse(copilot.resume_requires_session_id)
 
+    def test_aider_defaults(self) -> None:
+        aider = get_agent("aider")
+        self.assertIsNotNone(aider)
+        assert aider is not None
+        self.assertEqual(aider.command, ("aider",))
+        self.assertEqual(aider.resume_subcommand, ("--restore-chat-history",))
+        self.assertFalse(aider.resume_requires_session_id)
+
     def test_supported_agent_names(self) -> None:
         self.assertEqual(
             agents.supported_agent_names(),
-            ("codex", "claude", "gemini", "copilot"),
+            ("codex", "claude", "gemini", "copilot", "aider"),
         )
 
     def test_agent_config_rejects_unsupported_default(self) -> None:
@@ -127,3 +138,27 @@ class AgentSpecTestCase(TestCase):
     def test_agent_config_accepts_supported_default(self) -> None:
         config = AgentConfig(default="Codex", options={"codex": []})
         self.assertEqual(config.default, "codex")
+
+    def test_aider_chat_history_path_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace_dir = Path(tmp)
+            history = workspace_dir / agents.AIDER_DEFAULT_CHAT_HISTORY
+            history.write_text("hello\n", encoding="utf-8")
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(agents.aider_chat_history_path(workspace_dir), history)
+
+    def test_aider_chat_history_path_env_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace_dir = Path(tmp)
+            history = workspace_dir / "custom.history"
+            history.write_text("hello\n", encoding="utf-8")
+            with patch.dict(
+                os.environ, {"AIDER_CHAT_HISTORY_FILE": "custom.history"}, clear=True
+            ):
+                self.assertEqual(agents.aider_chat_history_path(workspace_dir), history)
+
+    def test_aider_chat_history_path_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace_dir = Path(tmp)
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertIsNone(agents.aider_chat_history_path(workspace_dir))

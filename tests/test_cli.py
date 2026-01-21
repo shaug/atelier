@@ -1364,7 +1364,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
             finally:
                 os.chdir(original_cwd)
 
-    def test_open_starts_gemini_with_prompt_interactive(self) -> None:
+    def test_open_starts_gemini_without_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -1409,19 +1409,124 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                workspace_branch = "scott/feat-demo"
-                prompt = workspace_id_for(enlistment_path, workspace_branch)
-                expected = [
-                    "gemini",
-                    "--model",
-                    "flash",
-                    "--prompt-interactive",
-                    prompt,
-                ]
+                expected = ["gemini", "--model", "flash"]
                 gemini_commands = [
                     cmd for cmd in commands if cmd and cmd[0] == "gemini"
                 ]
                 self.assertEqual(gemini_commands, [expected])
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_resumes_aider_with_chat_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(
+                project_dir,
+                enlistment_path,
+                agent={
+                    "default": "aider",
+                    "options": {"aider": ["--model", "gpt-4"]},
+                },
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                status_calls: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                def fake_status(cmd: list[str], cwd: Path | None = None) -> DummyResult:
+                    status_calls.append(cmd)
+                    return DummyResult(returncode=0)
+
+                with (
+                    patch(
+                        "atelier.agents.available_agent_names",
+                        return_value=("codex", "claude", "aider"),
+                    ),
+                    patch(
+                        "atelier.agents.aider_chat_history_path",
+                        return_value=Path("/tmp/aider.chat.history.md"),
+                    ),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.exec.run_command_status", fake_status),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+
+                self.assertEqual(
+                    status_calls,
+                    [["aider", "--model", "gpt-4", "--restore-chat-history"]],
+                )
+                self.assertFalse(any(cmd and cmd[0] == "aider" for cmd in commands))
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_starts_aider_without_prompt_when_no_history(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(
+                project_dir,
+                enlistment_path,
+                agent={
+                    "default": "aider",
+                    "options": {"aider": ["--model", "gpt-4"]},
+                },
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                status_calls: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                def fake_status(cmd: list[str], cwd: Path | None = None) -> DummyResult:
+                    status_calls.append(cmd)
+                    return DummyResult(returncode=1)
+
+                with (
+                    patch(
+                        "atelier.agents.available_agent_names",
+                        return_value=("codex", "claude", "aider"),
+                    ),
+                    patch("atelier.agents.aider_chat_history_path", return_value=None),
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.exec.run_command_status", fake_status),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+
+                self.assertEqual(status_calls, [])
+                aider_commands = [cmd for cmd in commands if cmd and cmd[0] == "aider"]
+                self.assertEqual(aider_commands, [["aider", "--model", "gpt-4"]])
             finally:
                 os.chdir(original_cwd)
 

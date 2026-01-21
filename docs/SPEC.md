@@ -183,6 +183,7 @@ left behind.
 - [Claude Code CLI](https://claude.com/product/claude-code)
 - [Gemini CLI](https://geminicli.com)
 - [GitHub Copilot CLI](https://github.com/features/copilot/cli)
+- [Aider](https://aider.chat/docs/install.html)
 
 ______________________________________________________________________
 
@@ -508,9 +509,10 @@ Ensures a workspace exists and launches or resumes agent work.
    - Attempt to resume an existing session when supported (Codex uses local
      session transcripts; Claude uses `--continue`; Gemini uses `--resume`;
      Copilot uses `--continue`; others start fresh)
-   - Otherwise start a new session with an opening prompt containing the
-     workspace ID (Gemini uses `--prompt-interactive` to pass the prompt;
-     Copilot uses `--interactive`)
+   - Otherwise start a new session; only Codex receives an opening prompt
+     containing the workspace ID (used for session discovery). Other agents
+     start without an opening prompt (Aider avoids it because `--message` exits
+     after sending one message).
    - Use `agent.options` and the agent command for execution
    - Codex runs with `--cd <workspace-dir>`; other agents run with the workspace
      as the current working directory
@@ -570,6 +572,9 @@ Atelier may attempt to resume sessions by:
 - Copilot: invoking `copilot --continue`, which resumes the most recent session
   in the current directory when supported (`copilot --resume` can be used
   manually to select another session).
+- Aider: invoking `aider --restore-chat-history` when the chat history file is
+  present (`.aider.chat.history.md` by default or `AIDER_CHAT_HISTORY_FILE` when
+  set). If no history file is found, start a new session.
 
 Other agents start new sessions because session discovery is not yet supported.
 

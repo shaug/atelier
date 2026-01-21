@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -98,7 +99,16 @@ AGENTS: dict[str, AgentSpec] = {
         resume_subcommand=("--continue",),
         resume_requires_session_id=False,
     ),
+    "aider": AgentSpec(
+        name="aider",
+        display_name="Aider",
+        command=("aider",),
+        resume_subcommand=("--restore-chat-history",),
+        resume_requires_session_id=False,
+    ),
 }
+
+AIDER_DEFAULT_CHAT_HISTORY = ".aider.chat.history.md"
 
 
 def normalize_agent_name(value: str | None) -> str:
@@ -178,3 +188,16 @@ def find_resume_session(
     from . import sessions
 
     return sessions.find_codex_session(project_enlistment, workspace_branch)
+
+
+def aider_chat_history_path(workspace_dir: Path) -> Path | None:
+    raw_path = os.environ.get("AIDER_CHAT_HISTORY_FILE")
+    if raw_path:
+        path = Path(raw_path).expanduser()
+        if not path.is_absolute():
+            path = workspace_dir / path
+    else:
+        path = workspace_dir / AIDER_DEFAULT_CHAT_HISTORY
+    if not path.is_file():
+        return None
+    return path

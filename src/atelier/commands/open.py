@@ -663,6 +663,11 @@ def open_workspace(args: object) -> None:
     resume_command = agent_spec.build_resume_command(
         workspace_dir, agent_options, session_id
     )
+    resume_reason: str | None = None
+    if agent_spec.name == "aider":
+        if agents.aider_chat_history_path(workspace_dir) is None:
+            resume_command = None
+            resume_reason = "Aider chat history not found"
     if resume_command is not None:
         resume_cmd, resume_cwd = resume_command
         if session_id:
@@ -682,10 +687,14 @@ def open_workspace(args: object) -> None:
                 f"failed to resume {agent_spec.display_name} session "
                 f"(exit code {result.returncode}); starting new session"
             )
+    elif resume_reason is not None:
+        warn(f"{resume_reason}; starting new session")
 
     opening_prompt = workspace.workspace_identifier(
         project_enlistment, workspace_branch
     )
+    if agent_spec.name != "codex":
+        opening_prompt = ""
     say(f"Starting new {agent_spec.display_name} session")
     start_cmd, start_cwd = agent_spec.build_start_command(
         workspace_dir, agent_options, opening_prompt

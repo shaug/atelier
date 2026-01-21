@@ -94,12 +94,13 @@ Atelier validates that the configured agent is available on your PATH (using
 - [Claude Code CLI](https://claude.com/product/claude-code)
 - [Gemini CLI](https://geminicli.com)
 - [GitHub Copilot CLI](https://github.com/features/copilot/cli)
+- [Aider](https://aider.chat/docs/install.html)
 
 ### Supported agent features
 
 - Launch agents from the workspace directory
 - Best-effort session resumption when the agent CLI supports it
-- Opening prompt containing the workspace ID
+- Opening prompt containing the workspace ID (Codex only)
 
 ## What the CLI Manages
 
