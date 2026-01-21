@@ -684,26 +684,28 @@ def open_workspace(args: object) -> None:
     session_id = agents.find_resume_session(
         agent_spec, project_enlistment, workspace_branch
     )
-    if session_id:
-        resume_command = agent_spec.build_resume_command(
-            workspace_dir, agent_options, session_id
-        )
-        if resume_command is not None:
-            resume_cmd, resume_cwd = resume_command
+    resume_command = agent_spec.build_resume_command(
+        workspace_dir, agent_options, session_id
+    )
+    if resume_command is not None:
+        resume_cmd, resume_cwd = resume_command
+        if session_id:
             say(f"Resuming {agent_spec.display_name} session {session_id}")
-            result = exec.run_command_status(resume_cmd, cwd=resume_cwd)
-            if result is not None and result.returncode == 0:
-                return
-            if result is None:
-                warn(
-                    f"failed to resume {agent_spec.display_name} session; "
-                    "command not found; starting new session"
-                )
-            else:
-                warn(
-                    f"failed to resume {agent_spec.display_name} session "
-                    f"(exit code {result.returncode}); starting new session"
-                )
+        else:
+            say(f"Resuming {agent_spec.display_name} session")
+        result = exec.run_command_status(resume_cmd, cwd=resume_cwd)
+        if result is not None and result.returncode == 0:
+            return
+        if result is None:
+            warn(
+                f"failed to resume {agent_spec.display_name} session; "
+                "command not found; starting new session"
+            )
+        else:
+            warn(
+                f"failed to resume {agent_spec.display_name} session "
+                f"(exit code {result.returncode}); starting new session"
+            )
 
     opening_prompt = workspace.workspace_identifier(
         project_enlistment, workspace_branch

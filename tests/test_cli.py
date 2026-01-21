@@ -1266,6 +1266,56 @@ class TestOpenWorkspace(BaseAtelierTestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_resumes_claude_with_continue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(
+                project_dir,
+                enlistment_path,
+                agent={
+                    "default": "claude",
+                    "options": {"claude": ["--model", "sonnet"]},
+                },
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                status_calls: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                def fake_status(cmd: list[str], cwd: Path | None = None) -> DummyResult:
+                    status_calls.append(cmd)
+                    return DummyResult(returncode=0)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.exec.run_command_status", fake_status),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+
+                self.assertEqual(
+                    status_calls, [["claude", "--model", "sonnet", "--continue"]]
+                )
+                self.assertFalse(any(cmd and cmd[0] == "claude" for cmd in commands))
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_auto_upgrades_project_templates_with_always_policy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -87,8 +87,9 @@ Atelier launches the agent CLI configured in `agent.default`. Install and
 authenticate the agent CLI you want to use and set `agent.default` accordingly.
 Atelier validates that the configured agent is available on your PATH (using
 `--version` when possible) and exits early if no agent CLI is available. Codex
-resumption is best-effort via local session files; other agents always start new
-sessions.
+resumption is best-effort via local session files; Claude attempts `--continue`
+(directory-scoped; falls back to a new session on failure); other agents always
+start new sessions.
 
 ## What the CLI Manages
 

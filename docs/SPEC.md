@@ -489,7 +489,7 @@ Ensures a workspace exists and launches or resumes agent work.
    - Create workspace branch if missing
 8. Launch agent:
    - Attempt to resume an existing session when supported (Codex uses local
-     session transcripts; others start fresh)
+     session transcripts; Claude uses `--continue`; others start fresh)
    - Otherwise start a new session with an opening prompt containing the
      workspace ID
    - Use `agent.options` and the agent command for execution
@@ -522,14 +522,16 @@ ______________________________________________________________________
 
 ## 10. Agent Session Resumption (Best-Effort)
 
-Atelier may attempt to resume Codex sessions by:
+Atelier may attempt to resume sessions by:
 
-- Scanning `~/.codex/sessions/**` JSON/JSONL files
-- Matching the first user message against:
+- Codex: scanning `~/.codex/sessions/**` JSON/JSONL files, matching the first
+  user message against:
   ```
   atelier:<project.enlistment>:<workspace.branch>
   ```
-- Selecting the most recent match
+  and selecting the most recent match.
+- Claude: invoking `claude --continue`, which loads the most recent conversation
+  in the current directory (no session discovery).
 
 Other agents start new sessions because session discovery is not yet supported.
 

@@ -21,6 +21,7 @@ class AgentSpec:
     working_dir_mode: WorkingDirMode = "cwd"
     working_dir_flag: str | None = None
     resume_subcommand: tuple[str, ...] | None = None
+    resume_requires_session_id: bool = True
     version_args: tuple[str, ...] = ("--version",)
 
     def _base_command(
@@ -47,12 +48,16 @@ class AgentSpec:
         return cmd, cwd
 
     def build_resume_command(
-        self, workspace_dir: Path, options: list[str], session_id: str
+        self, workspace_dir: Path, options: list[str], session_id: str | None
     ) -> tuple[list[str], Path | None] | None:
         if self.resume_subcommand is None:
             return None
+        if self.resume_requires_session_id and not session_id:
+            return None
         cmd, cwd = self._base_command(workspace_dir, options)
-        cmd.extend([*self.resume_subcommand, session_id])
+        cmd.extend(self.resume_subcommand)
+        if self.resume_requires_session_id and session_id:
+            cmd.append(session_id)
         return cmd, cwd
 
 
@@ -71,6 +76,8 @@ AGENTS: dict[str, AgentSpec] = {
         name="claude",
         display_name="Claude",
         command=("claude",),
+        resume_subcommand=("--continue",),
+        resume_requires_session_id=False,
     ),
     "gemini": AgentSpec(
         name="gemini",
