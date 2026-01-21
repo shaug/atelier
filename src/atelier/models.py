@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import agents
 
@@ -128,30 +128,36 @@ class EditorConfig(BaseModel):
     """Editor configuration for the project.
 
     Attributes:
-        default: Default editor command.
-        options: Mapping of editor names to argument lists.
+        edit: Blocking editor command for lightweight edits.
+        work: Non-blocking editor command for opening the workspace repo.
 
     Example:
-        >>> EditorConfig(default="cursor", options={"cursor": ["--reuse-window"]})
+        >>> EditorConfig(edit=["subl", "-w"], work=["code"])
         EditorConfig(...)
     """
 
     model_config = ConfigDict(extra="allow")
 
-    default: str | None = None
-    options: dict[str, list[str]] = Field(default_factory=dict)
+    edit: list[str] | None = None
+    work: list[str] | None = None
 
-    @field_validator("options", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def normalize_options(cls, value: object) -> dict[str, list[str]]:
-        if not isinstance(value, dict):
-            return {}
-        normalized: dict[str, list[str]] = {}
-        for key, options in value.items():
-            if not isinstance(options, list):
-                continue
-            normalized[str(key)] = [str(item) for item in options]
-        return normalized
+    def reject_legacy_editor_config(cls, value: object) -> object:
+        if isinstance(value, dict) and {"default", "options"} & set(value.keys()):
+            raise ValueError(
+                "legacy editor config detected; use editor.edit/editor.work instead"
+            )
+        return value
+
+    @field_validator("edit", "work", mode="before")
+    @classmethod
+    def normalize_command(cls, value: object) -> list[str] | None:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            raise ValueError("editor commands must be lists of arguments")
+        return [str(item) for item in value]
 
 
 class AtelierSection(BaseModel):

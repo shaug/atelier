@@ -25,6 +25,7 @@ import atelier.commands.init as init_cmd  # noqa: E402
 import atelier.commands.list as list_cmd  # noqa: E402
 import atelier.commands.open as open_cmd  # noqa: E402
 import atelier.commands.template as template_cmd  # noqa: E402
+import atelier.commands.work as work_cmd  # noqa: E402
 import atelier.config as config  # noqa: E402
 import atelier.editor as editor  # noqa: E402
 import atelier.git as git  # noqa: E402
@@ -51,7 +52,8 @@ def make_init_args(**overrides: object) -> SimpleNamespace:
         "branch_pr": None,
         "branch_history": None,
         "agent": None,
-        "editor": None,
+        "editor_edit": None,
+        "editor_work": None,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -115,7 +117,7 @@ def make_open_config(enlistment_path: str, **overrides: object) -> dict:
             "history": "manual",
         },
         "agent": {"default": "codex", "options": {"codex": []}},
-        "editor": {"default": "true", "options": {"true": []}},
+        "editor": {"edit": ["true"], "work": ["true"]},
         "atelier": {
             "version": atelier.__version__,
             "created_at": "2026-01-01T00:00:00Z",
@@ -279,23 +281,19 @@ class TestNormalizeOriginUrl(BaseAtelierTestCase):
 
 class TestResolveEditorCommand(BaseAtelierTestCase):
     def test_config_precedence(self) -> None:
-        config = {
-            "editor": {
-                "default": "cursor",
-                "options": {"cursor": ["-w"]},
-            }
-        }
-        with patch.dict(os.environ, {"EDITOR": "nano -w"}):
-            self.assertEqual(editor.resolve_editor_command(config), ["cursor", "-w"])
+        config = {"editor": {"edit": ["cursor", "-w"], "work": ["code"]}}
+        self.assertEqual(
+            editor.resolve_editor_command(config, role="edit"),
+            ["cursor", "-w"],
+        )
 
-    def test_env_fallback(self) -> None:
-        config = {"editor": {"options": {}}}
-        with patch.dict(os.environ, {"EDITOR": "nano -w"}):
-            self.assertEqual(editor.resolve_editor_command(config), ["nano", "-w"])
+    def test_work_role(self) -> None:
+        config = {"editor": {"edit": ["cursor", "-w"], "work": ["code"]}}
+        self.assertEqual(editor.resolve_editor_command(config, role="work"), ["code"])
 
-    def test_vi_fallback(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(editor.resolve_editor_command({}), ["vi"])
+    def test_missing_role_errors(self) -> None:
+        with self.assertRaises(SystemExit):
+            editor.resolve_editor_command({"editor": {"edit": ["cursor"]}}, role="work")
 
 
 class TestInitProject(BaseAtelierTestCase):
@@ -308,7 +306,7 @@ class TestInitProject(BaseAtelierTestCase):
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", ""])
+                responses = iter(["", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -333,7 +331,8 @@ class TestInitProject(BaseAtelierTestCase):
                 self.assertEqual(config_payload.project.repo_url, RAW_ORIGIN)
                 self.assertTrue(config_payload.branch.pr)
                 self.assertEqual(config_payload.branch.history, "manual")
-                self.assertEqual(config_payload.editor.default, "cursor")
+                self.assertEqual(config_payload.editor.edit, ["cursor", "-w"])
+                self.assertEqual(config_payload.editor.work, ["cursor"])
                 self.assertTrue((project_dir / "templates" / "AGENTS.md").exists())
                 self.assertFalse((project_dir / "AGENTS.md").exists())
                 self.assertTrue((project_dir / "PROJECT.md").exists())
@@ -350,7 +349,7 @@ class TestInitProject(BaseAtelierTestCase):
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", ""])
+                responses = iter(["", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -370,7 +369,8 @@ class TestInitProject(BaseAtelierTestCase):
                 config_path = paths.project_config_path(project_dir)
                 config_payload = config.load_project_config(config_path)
                 self.assertIsNotNone(config_payload)
-                self.assertEqual(config_payload.editor.default, "cursor")
+                self.assertEqual(config_payload.editor.edit, ["cursor", "-w"])
+                self.assertEqual(config_payload.editor.work, ["cursor"])
             finally:
                 os.chdir(original_cwd)
 
@@ -383,7 +383,7 @@ class TestInitProject(BaseAtelierTestCase):
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "cursor -w"])
+                responses = iter(["", "", "", "", "cursor -w", "cursor"])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -399,8 +399,8 @@ class TestInitProject(BaseAtelierTestCase):
                 config_path = paths.project_config_path(project_dir)
                 config_payload = config.load_project_config(config_path)
                 self.assertIsNotNone(config_payload)
-                self.assertEqual(config_payload.editor.default, "cursor")
-                self.assertEqual(config_payload.editor.options["cursor"], ["-w"])
+                self.assertEqual(config_payload.editor.edit, ["cursor", "-w"])
+                self.assertEqual(config_payload.editor.work, ["cursor"])
             finally:
                 os.chdir(original_cwd)
 
@@ -413,7 +413,7 @@ class TestInitProject(BaseAtelierTestCase):
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", ""])
+                responses = iter(["", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -431,8 +431,8 @@ class TestInitProject(BaseAtelierTestCase):
                 config_path = paths.project_config_path(project_dir)
                 config_payload = config.load_project_config(config_path)
                 self.assertIsNotNone(config_payload)
-                self.assertEqual(config_payload.editor.default, "nano")
-                self.assertEqual(config_payload.editor.options["nano"], ["-w"])
+                self.assertEqual(config_payload.editor.edit, ["nano", "-w"])
+                self.assertEqual(config_payload.editor.work, ["nano"])
             finally:
                 os.chdir(original_cwd)
 
@@ -458,7 +458,7 @@ class TestInitProject(BaseAtelierTestCase):
                         "history": "merge",
                     },
                     "agent": {"default": "codex", "options": {"codex": ["--old"]}},
-                    "editor": {"default": "nano", "options": {"nano": ["-w"]}},
+                    "editor": {"edit": ["nano", "-w"], "work": ["nano"]},
                     "atelier": {
                         "id": "01OLD",
                         "version": "0.1.0",
@@ -480,7 +480,8 @@ class TestInitProject(BaseAtelierTestCase):
                     branch_pr="false",
                     branch_history="merge",
                     agent="codex",
-                    editor="cursor -w",
+                    editor_edit="cursor -w",
+                    editor_work="cursor",
                 )
 
                 with (
@@ -504,8 +505,8 @@ class TestInitProject(BaseAtelierTestCase):
                 self.assertFalse(config_payload.branch.pr)
                 self.assertEqual(config_payload.branch.history, "merge")
                 self.assertEqual(config_payload.agent.default, "codex")
-                self.assertEqual(config_payload.editor.default, "cursor")
-                self.assertEqual(config_payload.editor.options["cursor"], ["-w"])
+                self.assertEqual(config_payload.editor.edit, ["cursor", "-w"])
+                self.assertEqual(config_payload.editor.work, ["cursor"])
                 self.assertTrue((project_dir / "workspaces").is_dir())
             finally:
                 os.chdir(original_cwd)
@@ -519,7 +520,7 @@ class TestInitProject(BaseAtelierTestCase):
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", ""])
+                responses = iter(["", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -540,7 +541,7 @@ class TestInitProject(BaseAtelierTestCase):
             finally:
                 os.chdir(original_cwd)
 
-    def test_legacy_project_config_migrates(self) -> None:
+    def test_legacy_project_config_rejects_legacy_editor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -569,27 +570,12 @@ class TestInitProject(BaseAtelierTestCase):
             legacy_path = paths.project_config_legacy_path(project_dir)
             legacy_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
 
-            config_payload = config.load_project_config(
-                paths.project_config_path(project_dir)
-            )
-            self.assertIsNotNone(config_payload)
-            self.assertFalse(legacy_path.exists())
-            self.assertTrue(legacy_path.with_suffix(".json.bak").exists())
-            self.assertTrue(paths.project_config_sys_path(project_dir).exists())
-            self.assertTrue(paths.project_config_user_path(project_dir).exists())
-
-            system_config = config.load_project_system_config(
-                paths.project_config_sys_path(project_dir)
-            )
-            user_config = config.load_project_user_config(
-                paths.project_config_user_path(project_dir)
-            )
-            self.assertIsNotNone(system_config)
-            self.assertIsNotNone(user_config)
-            self.assertEqual(system_config.project.enlistment, enlistment_path)
-            self.assertEqual(user_config.branch.prefix, "legacy/")
-            self.assertEqual(user_config.editor.default, "vim")
-            self.assertEqual(user_config.atelier.upgrade, "manual")
+            with self.assertRaises(SystemExit):
+                config.load_project_config(paths.project_config_path(project_dir))
+            self.assertTrue(legacy_path.exists())
+            self.assertFalse(legacy_path.with_suffix(".json.bak").exists())
+            self.assertFalse(paths.project_config_sys_path(project_dir).exists())
+            self.assertFalse(paths.project_config_user_path(project_dir).exists())
 
 
 class TestListWorkspaces(BaseAtelierTestCase):
@@ -2308,7 +2294,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 },
                 "branch": {"prefix": "scott/"},
                 "agent": {"default": "codex", "options": {"codex": []}},
-                "editor": {"default": "true", "options": {"true": []}},
+                "editor": {"edit": ["true"], "work": ["true"]},
                 "atelier": {
                     "version": atelier.__version__,
                     "created_at": "2026-01-01T00:00:00Z",
@@ -2855,6 +2841,58 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 os.chdir(original_cwd)
 
 
+class TestWorkCommand(BaseAtelierTestCase):
+    def test_work_opens_repo_with_work_editor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(
+                project_dir,
+                enlistment_path,
+                editor={"edit": ["true"], "work": ["code"]},
+            )
+
+            workspace_branch = "scott/alpha"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
+            )
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir(parents=True)
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
+
+            captured: dict[str, object] = {}
+
+            def fake_detached(cmd: list[str], cwd: Path | None = None) -> None:
+                captured["cmd"] = cmd
+                captured["cwd"] = cwd
+
+            with (
+                patch(
+                    "atelier.commands.work.git.resolve_repo_enlistment",
+                    return_value=(None, enlistment_path, None, NORMALIZED_ORIGIN),
+                ),
+                patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                patch("atelier.commands.work.git.git_is_repo", return_value=True),
+                patch("atelier.commands.work.exec.run_command_detached", fake_detached),
+            ):
+                work_cmd.open_workspace_repo(
+                    SimpleNamespace(workspace_name=workspace_branch)
+                )
+
+            self.assertEqual(
+                captured["cmd"],
+                ["code", str(repo_dir)],
+            )
+            self.assertEqual(captured["cwd"], workspace_dir)
+
+
 class TestConfigCommand(BaseAtelierTestCase):
     def test_config_prompt_updates_project_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2870,7 +2908,7 @@ class TestConfigCommand(BaseAtelierTestCase):
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(["team/", "false", "rebase", "codex", "vim -w"])
+                responses = iter(["team/", "false", "rebase", "codex", "vim -w", "vim"])
                 with (
                     patch("builtins.input", lambda _: next(responses)),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -2891,8 +2929,8 @@ class TestConfigCommand(BaseAtelierTestCase):
                 self.assertEqual(updated.branch.prefix, "team/")
                 self.assertFalse(updated.branch.pr)
                 self.assertEqual(updated.branch.history, "rebase")
-                self.assertEqual(updated.editor.default, "vim")
-                self.assertEqual(updated.editor.options["vim"], ["-w"])
+                self.assertEqual(updated.editor.edit, ["vim", "-w"])
+                self.assertEqual(updated.editor.work, ["vim"])
             finally:
                 os.chdir(original_cwd)
 
@@ -2910,7 +2948,7 @@ class TestConfigCommand(BaseAtelierTestCase):
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(["team/", "false", "rebase", "vim -w"])
+                responses = iter(["team/", "false", "rebase", "vim -w", "vim"])
                 call_count = {"count": 0}
 
                 def fake_input(_: str) -> str:
@@ -2939,7 +2977,7 @@ class TestConfigCommand(BaseAtelierTestCase):
                 updated = config.load_project_config(config_path)
                 self.assertIsNotNone(updated)
                 self.assertEqual(updated.agent.default, "codex")
-                self.assertEqual(call_count["count"], 4)
+                self.assertEqual(call_count["count"], 5)
             finally:
                 os.chdir(original_cwd)
 
@@ -2966,6 +3004,7 @@ class TestConfigCommand(BaseAtelierTestCase):
                         "merge",
                         "codex",
                         "vim -w",
+                        "vim",
                     ]
                 )
                 call_count = {"count": 0}
@@ -2991,7 +3030,7 @@ class TestConfigCommand(BaseAtelierTestCase):
                 config_path = paths.project_config_path(project_dir)
                 updated = config.load_project_config(config_path)
                 self.assertIsNotNone(updated)
-                self.assertEqual(call_count["count"], 7)
+                self.assertEqual(call_count["count"], 8)
                 self.assertFalse(updated.branch.pr)
                 self.assertEqual(updated.branch.history, "merge")
             finally:
@@ -3011,7 +3050,7 @@ class TestConfigCommand(BaseAtelierTestCase):
             defaults = {
                 "branch": {"prefix": "installed/", "pr": False, "history": "squash"},
                 "agent": {"default": "codex", "options": {"codex": []}},
-                "editor": {"default": "nano", "options": {"nano": ["-w"]}},
+                "editor": {"edit": ["nano", "-w"], "work": ["nano"]},
             }
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
                 data_dir.mkdir(parents=True, exist_ok=True)
@@ -3040,8 +3079,8 @@ class TestConfigCommand(BaseAtelierTestCase):
                 self.assertEqual(updated.branch.prefix, "installed/")
                 self.assertFalse(updated.branch.pr)
                 self.assertEqual(updated.branch.history, "squash")
-                self.assertEqual(updated.editor.default, "nano")
-                self.assertEqual(updated.editor.options["nano"], ["-w"])
+                self.assertEqual(updated.editor.edit, ["nano", "-w"])
+                self.assertEqual(updated.editor.work, ["nano"])
             finally:
                 os.chdir(original_cwd)
 
@@ -3059,7 +3098,9 @@ class TestConfigCommand(BaseAtelierTestCase):
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(["prefs/", "true", "merge", "codex", "code -w"])
+                responses = iter(
+                    ["prefs/", "true", "merge", "codex", "code -w", "code"]
+                )
                 with (
                     patch("builtins.input", lambda _: next(responses)),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -3080,8 +3121,8 @@ class TestConfigCommand(BaseAtelierTestCase):
                 self.assertEqual(stored["branch"]["prefix"], "prefs/")
                 self.assertTrue(stored["branch"]["pr"])
                 self.assertEqual(stored["branch"]["history"], "merge")
-                self.assertEqual(stored["editor"]["default"], "code")
-                self.assertEqual(stored["editor"]["options"]["code"], ["-w"])
+                self.assertEqual(stored["editor"]["edit"], ["code", "-w"])
+                self.assertEqual(stored["editor"]["work"], ["code"])
             finally:
                 os.chdir(original_cwd)
 
@@ -3109,7 +3150,7 @@ class TestConfigCommand(BaseAtelierTestCase):
                             "history": "merge",
                         },
                         "agent": {"default": "codex", "options": {"codex": []}},
-                        "editor": {"default": "nano", "options": {"nano": ["-w"]}},
+                        "editor": {"edit": ["nano", "-w"], "work": ["nano"]},
                         "atelier": {"upgrade": "manual"},
                     }
                     temp_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -3136,8 +3177,8 @@ class TestConfigCommand(BaseAtelierTestCase):
                 self.assertEqual(user_config.branch.prefix, "edited/")
                 self.assertFalse(user_config.branch.pr)
                 self.assertEqual(user_config.branch.history, "merge")
-                self.assertEqual(user_config.editor.default, "nano")
-                self.assertEqual(user_config.editor.options["nano"], ["-w"])
+                self.assertEqual(user_config.editor.edit, ["nano", "-w"])
+                self.assertEqual(user_config.editor.work, ["nano"])
                 self.assertEqual(user_config.atelier.upgrade, "manual")
             finally:
                 os.chdir(original_cwd)

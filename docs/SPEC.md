@@ -109,8 +109,8 @@ ______________________________________________________________________
 Atelier stores configuration across two files in the project directory:
 
 - `config.sys.json` is system-managed (IDs, origin, timestamps, managed hashes).
-- `config.user.json` is user-managed (branch defaults, agent/editor, upgrade
-  policy).
+- `config.user.json` is user-managed (branch defaults, agent, editor roles,
+  upgrade policy).
 
 Runtime configuration is the merged view of both files. Legacy `config.json`
 files are migrated once into the split layout, with a `config.json.bak` backup
@@ -139,15 +139,13 @@ left behind.
     }
   },
   "editor": {
-    "default": "cursor",
-    "options": {
-      "cursor": [
-        "-w"
-      ],
-      "subl": [
-        "-w"
-      ]
-    }
+    "edit": [
+      "subl",
+      "-w"
+    ],
+    "work": [
+      "code"
+    ]
   },
   "atelier": {
     "version": "0.2.0",
@@ -170,7 +168,10 @@ left behind.
   `manual`; supported values: `manual`, `squash`, `merge`, `rebase`)
 - `atelier.upgrade` controls when managed templates are upgraded (default `ask`;
   supported values: `always`, `ask`, `manual`)
-- `agent.options` and `editor.options` are **static argv fragments only**
+- `editor.edit` should be a blocking command (e.g., `-w`)
+- `editor.work` should be non-blocking by default (omit `-w`)
+- `agent.options` are **static argv fragments only**
+- `editor.edit` and `editor.work` are **argv lists** (command + args)
 - No templating, interpolation, or logic is supported in config
 - Agent CLIs are assumed to be installed and authenticated by the user
 - Atelier validates that the configured agent is available on PATH (using
@@ -428,7 +429,7 @@ Inspect or update Atelier configuration.
 - Without arguments, prints the merged project config
 - With a workspace branch, prints the workspace config
 - `--installed` shows or updates installed defaults for user-editable settings
-  (`branch`, `agent`, `editor`, `atelier.upgrade`)
+  (`branch`, `agent`, `editor.edit`, `editor.work`, `atelier.upgrade`)
 - `--prompt` interactively updates user-editable settings
 - `--reset` resets user-editable settings to installed defaults (with
   confirmation)
@@ -453,14 +454,14 @@ Print or edit the templates used to seed new documents.
 - `workspace`/`success` resolves the `SUCCESS.md` template
 - Resolution order: project template → installed cache → built-in default
 - `--installed` bypasses the project template (redundant for `project`)
-- `--edit` opens the resolved template in the configured editor, creating the
-  file when missing
+- `--edit` opens the resolved template in `editor.edit`, creating the file when
+  missing
 
 ______________________________________________________________________
 
 ### `atelier edit [workspace-branch]`
 
-Open editable policy documents in the configured editor.
+Open editable policy documents in `editor.edit`.
 
 #### Behavior
 
@@ -495,7 +496,7 @@ Ensures a workspace exists and launches or resumes agent work.
    - Create `BACKGROUND.md` when the workspace branch already exists
    - Copy `templates/SUCCESS.md` to `SUCCESS.md` when available
    - Otherwise copy legacy `templates/WORKSPACE.md` to `WORKSPACE.md`
-   - Open the chosen file in the configured editor (blocking)
+   - Open the chosen file in `editor.edit` (blocking)
 6. Existing workspaces are not modified
 7. Ensure `repo/` exists:
    - Clone repo if missing
@@ -535,6 +536,20 @@ branch only when all of the following are true:
 
 When these conditions are met, the current branch becomes the workspace branch.
 Otherwise, `atelier open` fails with a clear error message.
+
+______________________________________________________________________
+
+### `atelier work <workspace-branch>`
+
+Open the workspace repo in the configured work editor.
+
+#### Behavior
+
+- Must be run inside a Git repository
+- Resolves the workspace using the project branch prefix (like `atelier open`)
+- Errors if the workspace does not exist
+- Opens `<workspace>/repo` using `editor.work`
+- Does not block the CLI process
 
 ______________________________________________________________________
 

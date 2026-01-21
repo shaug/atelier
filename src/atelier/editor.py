@@ -3,6 +3,7 @@
 import os
 import shlex
 
+from .io import die
 from .models import EditorConfig, ProjectConfig
 
 
@@ -24,38 +25,41 @@ def system_editor_default() -> str:
     return "vi"
 
 
-def resolve_editor_command(config: ProjectConfig | EditorConfig | dict) -> list[str]:
-    """Resolve the editor command and options to execute.
+def resolve_editor_command(
+    config: ProjectConfig | EditorConfig | dict, *, role: str = "edit"
+) -> list[str]:
+    """Resolve the editor command for the requested role.
 
     Args:
         config: ``ProjectConfig``, ``EditorConfig``, or raw dict containing
-            editor defaults and options.
+            editor configuration.
+        role: Editor role to resolve (``edit`` or ``work``).
 
     Returns:
         List of command tokens suitable for ``subprocess`` execution.
 
     Example:
-        >>> resolve_editor_command({"editor": {"default": "vim", "options": {}}})
+        >>> resolve_editor_command({"editor": {"edit": ["vim"]}})
         ['vim']
     """
+    if role not in {"edit", "work"}:
+        raise ValueError(f"unsupported editor role {role!r}")
     if isinstance(config, ProjectConfig):
         editor_config = config.editor
     elif isinstance(config, EditorConfig):
         editor_config = config
     else:
-        editor_default = config.get("editor", {}).get("default")
-        if editor_default:
-            options = (
-                config.get("editor", {}).get("options", {}).get(editor_default, [])
-            )
-            if not isinstance(options, list):
-                options = []
-            return [editor_default, *options]
-        return shlex.split(system_editor_default())
+        editor_config = config.get("editor", {})
 
-    editor_default = editor_config.default
-    if editor_default:
-        options = editor_config.options.get(editor_default, [])
-        return [editor_default, *options]
+    if isinstance(editor_config, EditorConfig):
+        command = editor_config.edit if role == "edit" else editor_config.work
+    else:
+        command = editor_config.get(role)
 
-    return shlex.split(system_editor_default())
+    if not command:
+        die(f"missing editor.{role} command; run 'atelier config --prompt' to set it")
+    if isinstance(command, str):
+        command = shlex.split(command)
+    if not isinstance(command, list) or not command:
+        die(f"invalid editor.{role} command; must be a list of arguments")
+    return [str(item) for item in command]

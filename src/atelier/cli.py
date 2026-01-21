@@ -21,6 +21,7 @@ from .commands import list as list_cmd
 from .commands import open as open_cmd
 from .commands import template as template_cmd
 from .commands import upgrade as upgrade_cmd
+from .commands import work as work_cmd
 
 app = typer.Typer(
     add_completion=False,
@@ -104,8 +105,13 @@ def init_command(
             help="agent name",
         ),
     ] = None,
-    editor: Annotated[
-        str | None, typer.Option("--editor", help="editor command")
+    editor_edit: Annotated[
+        str | None,
+        typer.Option("--editor-edit", help="editor command for edit actions"),
+    ] = None,
+    editor_work: Annotated[
+        str | None,
+        typer.Option("--editor-work", help="editor command for work actions"),
     ] = None,
 ) -> None:
     """Initialize an Atelier project for the current Git repo.
@@ -115,7 +121,8 @@ def init_command(
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
         agent: Agent name.
-        editor: Editor command used to open ``SUCCESS.md``.
+        editor_edit: Editor command used for blocking edits (``SUCCESS.md``).
+        editor_work: Editor command used for opening the workspace repo.
     Returns:
         None.
 
@@ -128,7 +135,8 @@ def init_command(
             branch_pr=branch_pr,
             branch_history=branch_history,
             agent=agent,
-            editor=editor,
+            editor_edit=editor_edit,
+            editor_work=editor_work,
         )
     )
 
@@ -189,6 +197,17 @@ def open_command(
             branch_history=branch_history,
         )
     )
+
+
+@app.command("work", help="Open the workspace repo in your work editor.")
+def work_command(
+    workspace_name: Annotated[
+        str,
+        typer.Argument(help="workspace branch to open"),
+    ],
+) -> None:
+    """Open the workspace repo in the configured work editor."""
+    work_cmd.open_workspace_repo(SimpleNamespace(workspace_name=workspace_name))
 
 
 @app.command("list", help="List workspaces for the current project.")
@@ -331,7 +350,7 @@ def config_command(
     ] = False,
     edit: Annotated[
         bool,
-        typer.Option("--edit", help="edit user config in your editor"),
+        typer.Option("--edit", help="edit user config in editor.edit"),
     ] = False,
 ) -> None:
     """Show or update Atelier configuration."""
@@ -358,7 +377,7 @@ def template_command(
     ] = False,
     edit: Annotated[
         bool,
-        typer.Option("--edit", help="open the resolved template in the editor"),
+        typer.Option("--edit", help="open the resolved template in editor.edit"),
     ] = False,
 ) -> None:
     """Print or edit templates for the current project."""

@@ -11,7 +11,8 @@ def init_project(args: object) -> None:
 
     Args:
         args: CLI argument object with optional fields such as ``branch_prefix``,
-            ``branch_pr``, ``branch_history``, ``agent``, and ``editor``.
+            ``branch_pr``, ``branch_history``, ``agent``, ``editor_edit``, and
+            ``editor_work``.
 
     Returns:
         None.
@@ -29,7 +30,15 @@ def init_project(args: object) -> None:
     missing_fields = config.user_config_missing_fields(user_payload)
     args_provided = any(
         getattr(args, name, None) is not None
-        for name in ("branch_prefix", "branch_pr", "branch_history", "agent", "editor")
+        for name in (
+            "branch_prefix",
+            "branch_pr",
+            "branch_history",
+            "agent",
+            "editor_edit",
+            "editor_work",
+            "editor",
+        )
     )
     if config_payload and not missing_fields and not args_provided:
         say("Atelier project already initialized")

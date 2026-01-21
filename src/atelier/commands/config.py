@@ -128,7 +128,7 @@ def show_config(args: object) -> None:
         if edit_values:
             _edit_user_config(
                 payload=config.user_config_payload(defaults),
-                editor_cmd=editor.resolve_editor_command(defaults),
+                editor_cmd=editor.resolve_editor_command(defaults, role="edit"),
                 target_path=paths.installed_config_path(),
                 cwd=project_root,
             )
@@ -166,7 +166,7 @@ def show_config(args: object) -> None:
     if edit_values:
         _edit_user_config(
             payload=config.user_config_payload(updated),
-            editor_cmd=editor.resolve_editor_command(updated),
+            editor_cmd=editor.resolve_editor_command(updated, role="edit"),
             target_path=paths.project_config_user_path(project_root),
             cwd=project_root,
         )

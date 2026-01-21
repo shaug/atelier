@@ -90,7 +90,7 @@ def render_template(args: object) -> None:
         say(text)
         return
 
-    editor_cmd = editor.resolve_editor_command(project_config)
+    editor_cmd = editor.resolve_editor_command(project_config, role="edit")
     _edit_template(
         text=text,
         target_path=target_path,

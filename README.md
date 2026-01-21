@@ -178,8 +178,14 @@ Use `--raw` to treat the argument as the full branch name (no prefix lookup).
 - clone the repo into `repo/` and create the workspace branch
 - prompt to remove the finalization tag `atelier/<branch-name>/finalized` if
   present (continuing either way)
-- open the configured editor for new workspaces (`SUCCESS.md` by default), then
-  launch the configured agent
+- open `editor.edit` for new workspaces (`SUCCESS.md` by default), then launch
+  the configured agent
+
+Open a workspace repo in your work editor:
+
+```sh
+atelier work <workspace-branch>
+```
 
 List workspaces:
 
@@ -245,7 +251,8 @@ Options:
 - `--branch-pr`: Whether workspace branches require pull requests.
 - `--branch-history`: History policy (`manual`, `squash`, `merge`, `rebase`).
 - `--agent`: Agent name.
-- `--editor`: Editor command (e.g., `cursor --reuse-window`).
+- `--editor-edit`: Editor command for blocking edits (e.g., `subl -w`).
+- `--editor-work`: Editor command for opening the repo (e.g., `code`).
 
 Example:
 
@@ -268,7 +275,7 @@ atelier config scott/feat/new-search
 Options:
 
 - `--installed`: Operate on installed defaults instead of the current project.
-- `--prompt`: Prompt for user-editable settings (branch/agent/editor).
+- `--prompt`: Prompt for user-editable settings (branch/agent/editor roles).
 - `--reset`: Reset user-editable settings to installed defaults.
 
 Examples:
@@ -294,7 +301,7 @@ atelier template success
 Options:
 
 - `--installed`: Use the installed template cache.
-- `--edit`: Open the resolved template in the configured editor.
+- `--edit`: Open the resolved template in `editor.edit`.
 
 Examples:
 
@@ -305,7 +312,7 @@ atelier template workspace --installed
 
 ### `atelier edit [workspace-branch]`
 
-Open editable docs in the configured editor.
+Open editable docs in `editor.edit`.
 
 Usage:
 
@@ -316,9 +323,9 @@ atelier edit scott/feat/new-search
 
 ### `atelier open [workspace-branch]`
 
-Create or open a workspace, ensuring its `repo/` checkout exists, open your
-editor for new workspaces (`SUCCESS.md` by default), then launch the configured
-agent. New workspaces include managed `AGENTS.md`/`PERSIST.md`, and
+Create or open a workspace, ensuring its `repo/` checkout exists, open
+`editor.edit` for new workspaces (`SUCCESS.md` by default), then launch the
+configured agent. New workspaces include managed `AGENTS.md`/`PERSIST.md`, and
 `BACKGROUND.md` when the branch already exists. If the workspace repo has the
 finalization tag `atelier/<branch-name>/finalized`, `atelier open` will prompt
 to remove it but continues either way.
@@ -344,6 +351,10 @@ Examples:
 atelier open scott/feat/new-search --raw
 atelier open feat/new-search --branch-history squash
 ```
+
+### `atelier work <workspace-branch>`
+
+Open a workspace repo in `editor.work` without blocking the CLI.
 
 ### `atelier list`
 

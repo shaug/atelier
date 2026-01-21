@@ -7,6 +7,7 @@ from .init import init_project
 from .list import list_workspaces
 from .open import open_workspace
 from .template import render_template
+from .work import open_workspace_repo
 
 __all__ = [
     "clean_workspaces",
@@ -14,6 +15,7 @@ __all__ = [
     "init_project",
     "list_workspaces",
     "open_workspace",
+    "open_workspace_repo",
     "render_template",
     "show_config",
 ]

@@ -765,7 +765,8 @@ def user_config_missing_fields(payload: dict | None) -> list[str]:
         ("branch", "pr"),
         ("branch", "history"),
         ("agent", "default"),
-        ("editor", "default"),
+        ("editor", "edit"),
+        ("editor", "work"),
     ]
     for path in fields:
         if not _path_has_value(payload, *path):
@@ -814,42 +815,58 @@ def ensure_agent_available(
     return resolved
 
 
-def _default_editor_command(config_payload: ProjectConfig | ProjectUserConfig) -> str:
-    editor_prompt_default = None
-    editor_default_default = config_payload.editor.default
-    if editor_default_default:
-        editor_options_default = config_payload.editor.options.get(
-            editor_default_default, []
-        )
-        if editor_options_default:
-            editor_prompt_default = shlex.join(
-                [editor_default_default, *editor_options_default]
-            )
-        else:
-            editor_prompt_default = editor_default_default
-    if not editor_prompt_default:
-        if shutil.which("cursor"):
-            editor_prompt_default = "cursor"
-        else:
-            editor_prompt_default = system_editor_default()
-    return editor_prompt_default
+_WAIT_FLAGS = {"-w", "--wait", "--blocking", "--block"}
+
+
+def _strip_wait_flags(command: list[str]) -> list[str]:
+    return [part for part in command if part not in _WAIT_FLAGS]
+
+
+def _default_edit_command(
+    config_payload: ProjectConfig | ProjectUserConfig,
+) -> list[str]:
+    if config_payload.editor.edit:
+        return list(config_payload.editor.edit)
+    if shutil.which("cursor"):
+        return ["cursor", "-w"]
+    if shutil.which("code"):
+        return ["code", "-w"]
+    default = system_editor_default()
+    parts = shlex.split(default) if default else []
+    return parts or ["vi"]
+
+
+def _default_work_command(
+    config_payload: ProjectConfig | ProjectUserConfig, edit_command: list[str]
+) -> list[str]:
+    if config_payload.editor.work:
+        return list(config_payload.editor.work)
+    if shutil.which("cursor"):
+        return ["cursor"]
+    if shutil.which("code"):
+        return ["code"]
+    if edit_command:
+        stripped = _strip_wait_flags(edit_command)
+        return stripped or edit_command
+    default = system_editor_default()
+    parts = shlex.split(default) if default else []
+    return parts or ["vi"]
 
 
 def default_user_config() -> ProjectUserConfig:
     """Return default user-editable config values."""
     base = ProjectUserConfig()
-    editor_prompt_default = _default_editor_command(base)
-    editor_parts = shlex.split(editor_prompt_default) if editor_prompt_default else []
-    editor_default = editor_parts[0] if editor_parts else None
-    editor_options: dict[str, list[str]] = {}
-    if editor_default:
-        editor_options[editor_default] = editor_parts[1:]
+    editor_edit_default = _default_edit_command(base)
+    editor_work_default = _default_work_command(base, editor_edit_default)
     agent_options = {agents.DEFAULT_AGENT: []}
     return base.model_copy(
         update={
             "branch": base.branch,
             "agent": AgentConfig(default=agents.DEFAULT_AGENT, options=agent_options),
-            "editor": EditorConfig(default=editor_default, options=editor_options),
+            "editor": EditorConfig(
+                edit=editor_edit_default,
+                work=editor_work_default,
+            ),
             "atelier": AtelierUserSection(upgrade="ask"),
         }
     )
@@ -881,15 +898,14 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
     agent = agent.model_copy(update={"options": agent_options})
 
     editor_config = parsed.editor
-    if not _path_has_value(payload, "editor", "default"):
+    if not _path_has_value(payload, "editor", "edit"):
         editor_config = editor_config.model_copy(
-            update={"default": default_config.editor.default}
+            update={"edit": default_config.editor.edit}
         )
-    if editor_config.default:
-        options = dict(editor_config.options)
-        if editor_config.default not in options:
-            options.update(default_config.editor.options)
-        editor_config = editor_config.model_copy(update={"options": options})
+    if not _path_has_value(payload, "editor", "work"):
+        editor_config = editor_config.model_copy(
+            update={"work": default_config.editor.work}
+        )
 
     atelier_section = parsed.atelier
     if not _path_has_value(payload, "atelier", "upgrade"):
@@ -1035,28 +1051,51 @@ def build_project_config(
         die(f"unsupported agent {agent_default!r}")
     ensure_agent_available(agent_default, available=available_agents)
 
-    editor_prompt_default = _default_editor_command(existing_config)
-    editor_arg = read_arg(args, "editor")
-    editor_input = None
-    if editor_arg is not None:
-        editor_input = str(editor_arg)
-    elif should_prompt("editor", "default"):
-        editor_input = prompt(
-            "Editor command",
-            editor_prompt_default,
+    editor_edit_default = _default_edit_command(existing_config)
+    editor_work_default = _default_work_command(existing_config, editor_edit_default)
+    editor_edit_prompt_default = shlex.join(editor_edit_default)
+    editor_work_prompt_default = shlex.join(editor_work_default)
+
+    editor_edit_arg = read_arg(args, "editor_edit")
+    legacy_editor_arg = None
+    if editor_edit_arg is None:
+        legacy_editor_arg = read_arg(args, "editor")
+    if editor_edit_arg is not None:
+        editor_edit_input = str(editor_edit_arg)
+    elif legacy_editor_arg is not None:
+        editor_edit_input = str(legacy_editor_arg)
+    elif should_prompt("editor", "edit"):
+        editor_edit_input = prompt(
+            "Editor command (edit)",
+            editor_edit_prompt_default,
             required=not allow_editor_empty,
             allow_empty=allow_editor_empty,
         )
-    editor_default = existing_config.editor.default
-    editor_input_options: list[str] = []
-    if editor_input is not None:
-        editor_parts = shlex.split(editor_input)
-        if editor_parts:
-            editor_default = editor_parts[0]
-            editor_input_options = editor_parts[1:]
-        else:
-            editor_default = None
-            editor_input_options = []
+    else:
+        editor_edit_input = None
+
+    editor_work_arg = read_arg(args, "editor_work")
+    if editor_work_arg is not None:
+        editor_work_input = str(editor_work_arg)
+    elif should_prompt("editor", "work"):
+        editor_work_input = prompt(
+            "Editor command (work)",
+            editor_work_prompt_default,
+            required=not allow_editor_empty,
+            allow_empty=allow_editor_empty,
+        )
+    else:
+        editor_work_input = None
+
+    editor_edit = existing_config.editor.edit
+    if editor_edit_input is not None:
+        editor_parts = shlex.split(editor_edit_input)
+        editor_edit = editor_parts or None
+
+    editor_work = existing_config.editor.work
+    if editor_work_input is not None:
+        editor_parts = shlex.split(editor_work_input)
+        editor_work = editor_parts or None
 
     atelier_created_at = existing_config.atelier.created_at or utc_now()
     atelier_version = existing_config.atelier.version or __version__
@@ -1065,10 +1104,6 @@ def build_project_config(
 
     agent_options = dict(existing_config.agent.options)
     agent_options.setdefault(agent_default, [])
-
-    editor_options = dict(existing_config.editor.options)
-    if editor_input_options and editor_default:
-        editor_options = {**editor_options, editor_default: editor_input_options}
 
     project_origin = origin or existing_config.project.origin
     project_repo_url = origin_raw or existing_config.project.repo_url
@@ -1081,7 +1116,7 @@ def build_project_config(
         ),
         branch=BranchConfig(prefix=branch_prefix, pr=branch_pr, history=branch_history),
         agent=AgentConfig(default=agent_default, options=agent_options),
-        editor=EditorConfig(default=editor_default, options=editor_options),
+        editor=EditorConfig(edit=editor_edit, work=editor_work),
         atelier=AtelierSection(
             version=atelier_version,
             created_at=atelier_created_at,

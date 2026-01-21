@@ -85,3 +85,19 @@ def run_command_status(
         return subprocess.run(cmd, cwd=cwd, check=False)
     except FileNotFoundError:
         return None
+
+
+def run_command_detached(cmd: list[str], cwd: Path | None = None) -> None:
+    """Run a command without blocking the current process.
+
+    Args:
+        cmd: Command and arguments to execute.
+        cwd: Optional working directory.
+
+    Returns:
+        None.
+    """
+    try:
+        subprocess.Popen(cmd, cwd=cwd, start_new_session=True)
+    except FileNotFoundError:
+        die(f"missing required command: {cmd[0]}")

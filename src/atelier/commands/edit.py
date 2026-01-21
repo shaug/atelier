@@ -24,7 +24,7 @@ def _resolve_project() -> tuple[Path, config.ProjectConfig, str]:
 
 
 def edit_files(args: object) -> None:
-    """Open editable project/workspace documents in the configured editor."""
+    """Open editable project/workspace documents in ``editor.edit``."""
     workspace_name = getattr(args, "workspace_name", None)
     edit_project = bool(getattr(args, "project", False))
     if edit_project and workspace_name:
@@ -33,7 +33,7 @@ def edit_files(args: object) -> None:
         die("must specify --project or a workspace branch")
 
     project_root, project_config, enlistment_path = _resolve_project()
-    editor_cmd = editor.resolve_editor_command(project_config)
+    editor_cmd = editor.resolve_editor_command(project_config, role="edit")
 
     if edit_project:
         project_path = project_root / "PROJECT.md"

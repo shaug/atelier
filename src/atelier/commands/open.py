@@ -650,7 +650,7 @@ def open_workspace(args: object) -> None:
 
     if should_open_editor and workspace_policy_path is not None:
         if editor_cmd is None:
-            editor_cmd = editor.resolve_editor_command(config_payload)
+            editor_cmd = editor.resolve_editor_command(config_payload, role="edit")
         try:
             workspace_target = workspace_policy_path.relative_to(workspace_dir)
         except ValueError:
