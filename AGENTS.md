@@ -135,6 +135,35 @@ Atelier must respect those boundaries strictly.
 
 ______________________________________________________________________
 
+## Commit Messages
+
+- Use Conventional Commits format: `<type>(<scope>): <subject>`
+- Allowed types: feat, fix, docs, refactor, test, chore, build, ci, perf,
+  style, revert
+- Subject is imperative, present tense, no trailing period.
+- Every commit must include a body that summarizes all changes since the
+  previous commit. For the first commit, summarize the full change set.
+- If squashing or rebasing, update the body to reflect the aggregated change.
+- Use markdown in the body; prefer bullets for multiple changes.
+- If a commit fixes an issue, add this as the final line of the commit body:
+  `Fixes #<issue-number>`
+- For multiple issues, add one `Fixes #...` line per issue.
+
+______________________________________________________________________
+
+## Verification
+
+After the workspace goals are met, run:
+
+- `just test`
+- `just format`
+- `just lint`
+
+If any command is missing or fails due to missing tooling, do not substitute
+alternatives; record the failure and reason.
+
+______________________________________________________________________
+
 ## Workflow Requirements
 
 - Run `just format` before making commits.
