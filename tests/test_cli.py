@@ -25,6 +25,7 @@ import atelier.commands.init as init_cmd  # noqa: E402
 import atelier.commands.list as list_cmd  # noqa: E402
 import atelier.commands.open as open_cmd  # noqa: E402
 import atelier.commands.template as template_cmd  # noqa: E402
+import atelier.commands.upgrade as upgrade_cmd  # noqa: E402
 import atelier.commands.work as work_cmd  # noqa: E402
 import atelier.config as config  # noqa: E402
 import atelier.editor as editor  # noqa: E402
@@ -935,6 +936,44 @@ class TestCleanWorkspaces(BaseAtelierTestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_clean_handles_missing_workspace_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
+            branch = "scott/alpha"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                branch,
+                workspace_id_for(enlistment_path, branch),
+            )
+            (workspace_dir / "repo").mkdir(parents=True, exist_ok=True)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    clean_cmd.clean_workspaces(
+                        SimpleNamespace(
+                            all=False,
+                            force=True,
+                            no_branch=True,
+                            workspace_names=[branch],
+                        )
+                    )
+                self.assertFalse(workspace_dir.exists())
+            finally:
+                os.chdir(original_cwd)
+
     def test_clean_skips_branch_deletion_with_no_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1083,6 +1122,184 @@ class TestUpgradeFlags(BaseAtelierTestCase):
         self.assertTrue(captured["dry_run"])
         self.assertTrue(captured["yes"])
         self.assertEqual(captured["workspaces"], ["alpha", "beta"])
+
+
+class TestUpgradeLegacyEditorMigration(BaseAtelierTestCase):
+    def test_upgrade_migrates_legacy_project_user_editor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            enlistment_path = enlistment_path_for(root / "repo")
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+
+                project_dir.mkdir(parents=True, exist_ok=True)
+                system_payload = {
+                    "project": {
+                        "enlistment": enlistment_path,
+                        "origin": NORMALIZED_ORIGIN,
+                        "repo_url": RAW_ORIGIN,
+                    },
+                    "atelier": {
+                        "version": "0.1.0",
+                        "created_at": "2026-01-01T00:00:00Z",
+                    },
+                }
+                system_config = config.ProjectSystemConfig.model_validate(
+                    system_payload
+                )
+                config.write_project_system_config(
+                    paths.project_config_sys_path(project_dir), system_config
+                )
+
+                user_payload = {
+                    "agent": {"default": "codex", "options": {"codex": []}},
+                    "editor": {
+                        "default": "cursor",
+                        "options": {"cursor": ["--wait", "--new-window"]},
+                    },
+                }
+                user_path = paths.project_config_user_path(project_dir)
+                user_path.write_text(json.dumps(user_payload), encoding="utf-8")
+
+                args = SimpleNamespace(
+                    workspace_names=[],
+                    installed=False,
+                    all_projects=True,
+                    no_projects=False,
+                    no_workspaces=True,
+                    dry_run=False,
+                    yes=True,
+                )
+                upgrade_cmd.upgrade(args)
+
+                updated = json.loads(user_path.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    updated["editor"]["edit"],
+                    ["cursor", "--wait", "--new-window"],
+                )
+                self.assertEqual(
+                    updated["editor"]["work"],
+                    ["cursor", "--new-window"],
+                )
+                self.assertNotIn("default", updated["editor"])
+                self.assertNotIn("options", updated["editor"])
+                self.assertTrue(user_path.with_suffix(".json.bak").exists())
+
+    def test_upgrade_migrates_legacy_project_config_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            enlistment_path = enlistment_path_for(root / "repo")
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+                project_dir.mkdir(parents=True, exist_ok=True)
+                legacy_payload = {
+                    "project": {
+                        "enlistment": enlistment_path,
+                        "origin": NORMALIZED_ORIGIN,
+                        "repo_url": RAW_ORIGIN,
+                    },
+                    "branch": {"prefix": "legacy/", "pr": False, "history": "merge"},
+                    "agent": {"default": "codex", "options": {"codex": []}},
+                    "editor": {
+                        "default": "cursor",
+                        "options": {"cursor": ["--wait", "--new-window"]},
+                    },
+                    "atelier": {
+                        "version": "0.1.0",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "upgrade": "manual",
+                    },
+                }
+                legacy_path = paths.project_config_legacy_path(project_dir)
+                legacy_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
+
+                args = SimpleNamespace(
+                    workspace_names=[],
+                    installed=False,
+                    all_projects=True,
+                    no_projects=False,
+                    no_workspaces=True,
+                    dry_run=False,
+                    yes=True,
+                )
+                upgrade_cmd.upgrade(args)
+
+                sys_path = paths.project_config_sys_path(project_dir)
+                user_path = paths.project_config_user_path(project_dir)
+                self.assertTrue(sys_path.exists())
+                self.assertTrue(user_path.exists())
+                self.assertFalse(legacy_path.exists())
+                self.assertTrue(legacy_path.with_suffix(".json.bak").exists())
+
+                updated = json.loads(user_path.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    updated["editor"]["edit"],
+                    ["cursor", "--wait", "--new-window"],
+                )
+                self.assertEqual(
+                    updated["editor"]["work"],
+                    ["cursor", "--new-window"],
+                )
+                self.assertNotIn("default", updated["editor"])
+                self.assertNotIn("options", updated["editor"])
+
+
+class TestUpgradeWorkspaceConfigRepair(BaseAtelierTestCase):
+    def test_upgrade_repairs_missing_workspace_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
+            branch = "scott/alpha"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                branch,
+                workspace_id_for(enlistment_path, branch),
+            )
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+
+            args = SimpleNamespace(
+                workspace_names=[branch],
+                installed=False,
+                all_projects=False,
+                no_projects=True,
+                no_workspaces=False,
+                dry_run=False,
+                yes=True,
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    upgrade_cmd.upgrade(args)
+            finally:
+                os.chdir(original_cwd)
+
+            sys_path = paths.workspace_config_sys_path(workspace_dir)
+            user_path = paths.workspace_config_user_path(workspace_dir)
+            self.assertTrue(sys_path.exists())
+            self.assertTrue(user_path.exists())
+            loaded = config.load_workspace_config(
+                paths.workspace_config_path(workspace_dir)
+            )
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded.workspace.branch, branch)
 
 
 class TestFindCodexSession(BaseAtelierTestCase):

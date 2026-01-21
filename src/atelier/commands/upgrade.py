@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -61,7 +62,132 @@ def file_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def resolve_current_project() -> ProjectTarget | None:
+def backup_json(path: Path) -> None:
+    backup_path = path.with_suffix(".json.bak")
+    if backup_path.exists():
+        return
+    shutil.move(path, backup_path)
+
+
+def project_label_from_parts(root: Path, origin: str | None) -> str:
+    if origin:
+        return f"{origin} ({root.name})"
+    return root.name
+
+
+def split_project_payload(payload: dict) -> tuple[dict, dict]:
+    user_payload: dict = {}
+    for key in ("branch", "agent", "editor"):
+        if key in payload:
+            user_payload[key] = payload.get(key)
+    atelier_payload = dict(payload.get("atelier", {}) or {})
+    upgrade = atelier_payload.pop("upgrade", None)
+    if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
+        user_payload["atelier"] = {"upgrade": upgrade}
+    system_payload = dict(payload)
+    for key in ("branch", "agent", "editor"):
+        system_payload.pop(key, None)
+    system_payload["atelier"] = atelier_payload
+    return system_payload, user_payload
+
+
+def load_project_user_config_for_upgrade(
+    path: Path, *, plan: UpgradePlan | None, label: str
+) -> config.ProjectUserConfig | None:
+    payload = config.load_json(path)
+    if not payload:
+        return None
+    migrated_payload, changed = config.migrate_legacy_editor_payload(payload)
+    if changed and plan is not None:
+
+        def apply_migration() -> None:
+            backup_json(path)
+            config.write_json(path, migrated_payload)
+
+        plan.actions.append(
+            PlanAction(
+                description=f"Migrate legacy editor config ({label})",
+                apply=apply_migration,
+            )
+        )
+    return config.parse_project_user_config(migrated_payload, path)
+
+
+def load_project_target_for_upgrade(
+    project_root: Path, *, plan: UpgradePlan | None
+) -> ProjectTarget | None:
+    sys_path = paths.project_config_sys_path(project_root)
+    user_path = paths.project_config_user_path(project_root)
+    legacy_path = paths.project_config_legacy_path(project_root)
+
+    if not sys_path.exists() and not user_path.exists() and legacy_path.exists():
+        payload = config.load_json(legacy_path)
+        if not payload:
+            return None
+        system_payload, user_payload = split_project_payload(payload)
+        user_payload, _ = config.migrate_legacy_editor_payload(user_payload)
+        system_config = config.parse_project_system_config(system_payload, legacy_path)
+        user_config = config.parse_project_user_config(user_payload, legacy_path)
+        merged = config.merge_project_configs(system_config, user_config)
+        config.ensure_agent_available(merged.agent.default, label="project")
+        target = ProjectTarget(
+            root=project_root,
+            config=merged,
+            enlistment=merged.project.enlistment,
+        )
+        if plan is not None:
+            label = project_label(target)
+
+            def apply_migration() -> None:
+                backup_json(legacy_path)
+                config.write_project_system_config(sys_path, system_config)
+                config.write_project_user_config(user_path, user_config)
+
+            description = f"Migrate legacy project config.json ({label})"
+            plan.actions.append(
+                PlanAction(description=description, apply=apply_migration)
+            )
+        return target
+
+    system_config = config.load_project_system_config(sys_path)
+    if not system_config:
+        return None
+    label = project_label_from_parts(project_root, system_config.project.origin)
+    user_config = load_project_user_config_for_upgrade(
+        user_path, plan=plan, label=label
+    )
+    merged = config.merge_project_configs(system_config, user_config)
+    config.ensure_agent_available(merged.agent.default, label="project")
+    return ProjectTarget(
+        root=project_root,
+        config=merged,
+        enlistment=merged.project.enlistment,
+    )
+
+
+def plan_installed_defaults_migration(plan: UpgradePlan) -> None:
+    defaults_path = paths.installed_config_path()
+    payload = config.load_json(defaults_path)
+    if not payload:
+        return
+    migrated_payload, changed = config.migrate_legacy_editor_payload(payload)
+    if not changed:
+        return
+    config.parse_project_user_config(migrated_payload, defaults_path)
+
+    def apply_migration() -> None:
+        backup_json(defaults_path)
+        config.write_json(defaults_path, migrated_payload)
+
+    plan.actions.append(
+        PlanAction(
+            description="Migrate legacy editor config (installed defaults)",
+            apply=apply_migration,
+        )
+    )
+
+
+def resolve_current_project(plan: UpgradePlan | None) -> ProjectTarget | None:
     cwd = Path.cwd()
     repo_root = git.git_repo_root(cwd)
     if not repo_root:
@@ -70,19 +196,20 @@ def resolve_current_project() -> ProjectTarget | None:
     origin_raw = git.git_origin_url(repo_root)
     origin = git.normalize_origin_url(origin_raw) if origin_raw else None
     project_root = paths.project_dir_for_enlistment(enlistment_path, origin)
-    config_path = paths.project_config_path(project_root)
-    config_payload = config.load_project_config(config_path)
-    if not config_payload:
+    target = load_project_target_for_upgrade(project_root, plan=plan)
+    if not target:
         return None
-    project_enlistment = config_payload.project.enlistment
+    project_enlistment = target.config.project.enlistment
     if project_enlistment and project_enlistment != enlistment_path:
         die("project enlistment does not match current repo path")
     return ProjectTarget(
-        root=project_root, config=config_payload, enlistment=enlistment_path
+        root=target.root,
+        config=target.config,
+        enlistment=enlistment_path,
     )
 
 
-def collect_all_projects() -> list[ProjectTarget]:
+def collect_all_projects(plan: UpgradePlan | None) -> list[ProjectTarget]:
     root = paths.projects_root()
     if not root.exists():
         return []
@@ -91,17 +218,11 @@ def collect_all_projects() -> list[ProjectTarget]:
         if not project_root.is_dir():
             continue
         config_path = paths.project_config_path(project_root)
-        config_payload = config.load_project_config(config_path)
-        if not config_payload:
+        target = load_project_target_for_upgrade(project_root, plan=plan)
+        if not target:
             warn(f"project config missing at {config_path}")
             continue
-        targets.append(
-            ProjectTarget(
-                root=project_root,
-                config=config_payload,
-                enlistment=config_payload.project.enlistment,
-            )
-        )
+        targets.append(target)
     return targets
 
 
@@ -119,19 +240,32 @@ def resolve_requested_workspaces(
         normalized = workspace.normalize_workspace_name(raw_name)
         if not normalized:
             continue
+        resolved_branch = normalized
         found = workspace.find_workspace_for_branch(
-            project.root, enlistment, normalized
+            project.root,
+            enlistment,
+            normalized,
+            allow_missing_config=True,
         )
         if not found and branch_prefix and not normalized.startswith(branch_prefix):
             candidate = f"{branch_prefix}{normalized}"
             found = workspace.find_workspace_for_branch(
-                project.root, enlistment, candidate
+                project.root,
+                enlistment,
+                candidate,
+                allow_missing_config=True,
             )
+            if found:
+                resolved_branch = candidate
         if not found:
             warn(f"workspace not found: {normalized}")
             continue
         workspace_root, workspace_config = found
-        branch = workspace_config.workspace.branch
+        branch = (
+            workspace_config.workspace.branch if workspace_config else resolved_branch
+        )
+        if workspace_config is None:
+            workspace_config = build_workspace_config(project, branch)
         if branch in seen:
             continue
         resolved.append(
@@ -143,6 +277,63 @@ def resolve_requested_workspaces(
         )
         seen.add(branch)
     return resolved
+
+
+def build_workspace_config(
+    project: ProjectTarget, branch: str
+) -> config.WorkspaceConfig:
+    enlistment = project.enlistment or project.config.project.enlistment
+    if not enlistment:
+        die("project enlistment is required to repair workspaces")
+    workspace_id = workspace.workspace_identifier(enlistment, branch)
+    upgrade_policy = config.resolve_upgrade_policy(project.config.atelier.upgrade)
+    return config.WorkspaceConfig(
+        workspace={
+            "branch": branch,
+            "branch_pr": project.config.branch.pr,
+            "branch_history": project.config.branch.history,
+            "id": workspace_id,
+        },
+        atelier={
+            "version": __version__,
+            "created_at": config.utc_now(),
+            "upgrade": upgrade_policy,
+        },
+    )
+
+
+def plan_workspace_config_repair(plan: UpgradePlan, target: WorkspaceTarget) -> None:
+    sys_path = paths.workspace_config_sys_path(target.root)
+    user_path = paths.workspace_config_user_path(target.root)
+    if sys_path.exists() and user_path.exists():
+        return
+
+    def apply_repair() -> None:
+        if not sys_path.exists():
+            system_config = config.WorkspaceSystemConfig(
+                workspace=target.config.workspace.model_dump(),
+                atelier={
+                    "version": __version__,
+                    "created_at": config.utc_now(),
+                    "managed_files": dict(target.config.atelier.managed_files),
+                },
+            )
+            config.write_workspace_system_config(sys_path, system_config)
+        if not user_path.exists():
+            upgrade_value = target.config.atelier.upgrade
+            if upgrade_value is None:
+                upgrade_value = config.resolve_upgrade_policy(
+                    target.project.config.atelier.upgrade
+                )
+            user_config = config.WorkspaceUserConfig(atelier={"upgrade": upgrade_value})
+            config.write_workspace_user_config(user_path, user_config)
+
+    plan.actions.append(
+        PlanAction(
+            description=f"Repair workspace config ({workspace_label(target)})",
+            apply=apply_repair,
+        )
+    )
 
 
 def collect_project_workspaces(project: ProjectTarget) -> list[WorkspaceTarget]:
@@ -438,12 +629,14 @@ def upgrade(args: object) -> None:
     if no_workspaces and workspace_names:
         die("workspace arguments cannot be used with --no-workspaces")
 
+    plan = UpgradePlan(actions=[], skips=[])
+
     projects: list[ProjectTarget] = []
     current_project = None
     if all_projects:
-        projects = collect_all_projects()
+        projects = collect_all_projects(plan)
     else:
-        current_project = resolve_current_project()
+        current_project = resolve_current_project(plan)
         if current_project is not None:
             projects = [current_project]
 
@@ -463,9 +656,8 @@ def upgrade(args: object) -> None:
                 "Refresh project templates from the installed cache?"
             )
 
-    plan = UpgradePlan(actions=[], skips=[])
-
     if installed:
+        plan_installed_defaults_migration(plan)
 
         def apply_installed_refresh() -> None:
             templates.refresh_installed_templates()
@@ -497,6 +689,7 @@ def upgrade(args: object) -> None:
                 workspace_targets.extend(collect_project_workspaces(project))
 
         for target in workspace_targets:
+            plan_workspace_config_repair(plan, target)
             plan_workspace_policy_rename(plan, target)
             plan_workspace_agents(plan, target)
 

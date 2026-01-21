@@ -822,6 +822,58 @@ def _strip_wait_flags(command: list[str]) -> list[str]:
     return [part for part in command if part not in _WAIT_FLAGS]
 
 
+def _legacy_editor_command(default: object, options: object) -> list[str]:
+    command: list[str] = []
+    option_key: str | None = None
+    if isinstance(default, list) and default:
+        command = [str(item) for item in default]
+        option_key = str(default[0]).strip()
+    elif isinstance(default, str) and default.strip():
+        command = [part for part in shlex.split(default.strip()) if part]
+        if command:
+            option_key = command[0].strip()
+
+    extra: list[str] = []
+    if isinstance(options, dict) and option_key:
+        candidate_keys = [option_key, option_key.lower()]
+        for key in candidate_keys:
+            if key in options and isinstance(options[key], list):
+                extra = [str(item) for item in options[key]]
+                break
+    return command + extra
+
+
+def migrate_legacy_editor_payload(payload: dict) -> tuple[dict, bool]:
+    """Convert legacy editor config (default/options) into edit/work commands."""
+    if not isinstance(payload, dict):
+        return payload, False
+    editor_payload = payload.get("editor")
+    if not isinstance(editor_payload, dict):
+        return payload, False
+    legacy_keys = {"default", "options"}
+    if not (legacy_keys & set(editor_payload.keys())):
+        return payload, False
+
+    updated = dict(payload)
+    editor_updated = dict(editor_payload)
+    default = editor_payload.get("default")
+    options = editor_payload.get("options")
+    editor_updated.pop("default", None)
+    editor_updated.pop("options", None)
+
+    if "edit" not in editor_updated or "work" not in editor_updated:
+        command = _legacy_editor_command(default, options)
+        if command:
+            if "edit" not in editor_updated:
+                editor_updated["edit"] = command
+            if "work" not in editor_updated:
+                stripped = _strip_wait_flags(command)
+                editor_updated["work"] = stripped or command
+
+    updated["editor"] = editor_updated
+    return updated, True
+
+
 def _default_edit_command(
     config_payload: ProjectConfig | ProjectUserConfig,
 ) -> list[str]:

@@ -101,13 +101,14 @@ def clean_workspaces(args: object) -> None:
     branch_prefix = config_payload.branch.prefix
 
     requested = []
+    requested_paths: dict[str, Path] = {}
     for name in getattr(args, "workspace_names", []) or []:
         if not name.strip():
             continue
         normalized = workspace.normalize_workspace_name(name)
         if not normalized:
             continue
-        branch, _, exists = workspace.resolve_workspace_target(
+        branch, workspace_dir, exists = workspace.resolve_workspace_target(
             project_root,
             project_enlistment or enlistment_path,
             normalized,
@@ -118,11 +119,12 @@ def clean_workspaces(args: object) -> None:
             warn(f"workspace not found: {normalized}")
             continue
         requested.append(branch)
+        requested_paths[branch] = workspace_dir
 
     workspaces = workspace.collect_workspaces(
         project_root, config_payload, with_status=not (args.all or requested)
     )
-    if not workspaces:
+    if not workspaces and not requested:
         say("No workspaces found.")
         return
 
@@ -136,10 +138,25 @@ def clean_workspaces(args: object) -> None:
         targets = []
         for name in requested:
             item = workspaces_by_name.get(name)
-            if not item:
-                warn(f"workspace not found: {name}")
+            if item:
+                targets.append(item)
                 continue
-            targets.append(item)
+            workspace_dir = requested_paths.get(name)
+            if workspace_dir:
+                targets.append(
+                    {
+                        "name": name,
+                        "path": workspace_dir,
+                        "repo_dir": workspace_dir / "repo",
+                        "branch": name,
+                        "checked_out": None,
+                        "clean": None,
+                        "pushed": None,
+                        "finalized": None,
+                    }
+                )
+                continue
+            warn(f"workspace not found: {name}")
     else:
         targets = [item for item in workspaces if item["finalized"] is True]
 

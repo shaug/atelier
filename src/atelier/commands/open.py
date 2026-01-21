@@ -438,6 +438,7 @@ def open_workspace(args: object) -> None:
     persist_path = workspace_dir / "PERSIST.md"
     background_path = workspace_dir / "BACKGROUND.md"
     workspace_config_file = paths.workspace_config_path(workspace_dir)
+    workspace_config_exists = workspace_config_file.exists()
     is_new_workspace = not workspace_config_exists
     workspace_config: config.WorkspaceConfig | None = None
     if workspace_config_exists:

@@ -10,6 +10,7 @@ from .paths import (
     TEMPLATES_DIRNAME,
     WORKSPACES_DIRNAME,
     workspace_config_path,
+    workspace_config_user_path,
     workspace_dir_for_branch,
 )
 
@@ -64,8 +65,12 @@ def workspace_candidate_branches(name: str, branch_prefix: str, raw: bool) -> li
 
 
 def find_workspace_for_branch(
-    project_dir: Path, project_enlistment: str, branch: str
-) -> tuple[Path, config.WorkspaceConfig] | None:
+    project_dir: Path,
+    project_enlistment: str,
+    branch: str,
+    *,
+    allow_missing_config: bool = False,
+) -> tuple[Path, config.WorkspaceConfig | None] | None:
     """Find an existing workspace directory and config for a branch.
 
     Args:
@@ -85,6 +90,14 @@ def find_workspace_for_branch(
     config_path = workspace_config_path(workspace_dir)
     if not config_path.exists():
         if workspace_dir.exists():
+            payload = config.load_workspace_config(config_path)
+            if payload:
+                stored_branch = payload.workspace.branch
+                if stored_branch != branch:
+                    die("workspace branch does not match workspace directory")
+                return workspace_dir, payload
+            if allow_missing_config:
+                return workspace_dir, None
             die("workspace config missing for existing workspace directory")
         return None
     payload = config.load_workspace_config(config_path)
@@ -114,7 +127,7 @@ def resolve_workspace_target(
 
     Returns:
         Tuple of ``(branch, workspace_dir, exists)`` where ``exists`` indicates
-        whether a matching workspace config was found.
+        whether a workspace directory was found.
 
     Example:
         >>> resolve_workspace_target(Path("/tmp/project"), "/repo", "feat/demo", "", True)[0]
@@ -122,7 +135,12 @@ def resolve_workspace_target(
     """
     candidates = workspace_candidate_branches(name, branch_prefix, raw)
     for branch in candidates:
-        found = find_workspace_for_branch(project_dir, project_enlistment, branch)
+        found = find_workspace_for_branch(
+            project_dir,
+            project_enlistment,
+            branch,
+            allow_missing_config=True,
+        )
         if found:
             workspace_dir, _ = found
             return branch, workspace_dir, True
@@ -132,14 +150,12 @@ def resolve_workspace_target(
     workspace_dir = workspace_dir_for_branch(project_dir, branch, workspace_id)
     if workspace_dir.exists():
         config_path = workspace_config_path(workspace_dir)
-        if not config_path.exists():
-            die("workspace config missing for existing workspace directory")
         payload = config.load_workspace_config(config_path)
-        if not payload:
-            die("failed to load workspace config")
-        stored_branch = payload.workspace.branch
-        if stored_branch != branch:
-            die("workspace branch does not match workspace directory")
+        if payload:
+            stored_branch = payload.workspace.branch
+            if stored_branch != branch:
+                die("workspace branch does not match workspace directory")
+        return branch, workspace_dir, True
     return branch, workspace_dir, False
 
 
@@ -236,10 +252,12 @@ def ensure_workspace_metadata(
     Example:
         >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/PERSIST.md"), Path("/tmp/workspace/config.sys.json"), Path("/tmp/project"), "/repo", "feat/demo", True, "manual", "ask")
     """
-    workspace_config_exists = workspace_config_file.exists()
-    if not workspace_config_exists:
+    workspace_sys_path = workspace_config_file
+    workspace_user_path = workspace_config_user_path(workspace_dir)
+    workspace_config_exists = workspace_sys_path.exists()
+    if not workspace_sys_path.exists():
         workspace_id = workspace_identifier(project_enlistment, workspace_branch)
-        workspace_config = config.WorkspaceConfig(
+        system_config = config.WorkspaceSystemConfig(
             workspace={
                 "branch": workspace_branch,
                 "branch_pr": branch_pr,
@@ -249,10 +267,13 @@ def ensure_workspace_metadata(
             atelier={
                 "version": __version__,
                 "created_at": config.utc_now(),
-                "upgrade": upgrade_policy,
+                "managed_files": {},
             },
         )
-        config.write_workspace_config(workspace_config_file, workspace_config)
+        config.write_workspace_system_config(workspace_sys_path, system_config)
+    if not workspace_user_path.exists():
+        user_config = config.WorkspaceUserConfig(atelier={"upgrade": upgrade_policy})
+        config.write_workspace_user_config(workspace_user_path, user_config)
 
     if workspace_config_exists:
         stored_pr, stored_history = config.read_workspace_branch_settings(workspace_dir)
