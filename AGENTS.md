@@ -50,7 +50,7 @@ When working in this repository, you may:
 
 - implement or refine the Atelier CLI
 - update templates shipped with the tool
-- adjust schemas for `config.json` files
+- adjust schemas for `config.sys.json`/`config.user.json` files
 - improve documentation and examples
 - simplify behavior while preserving correctness
 
@@ -80,7 +80,7 @@ That means:
 However:
 
 - This repository itself is **not** an Atelier project
-- Do not assume `config.json` exists here
+- Do not assume `config.sys.json`/`config.user.json` exists here
 - Do not manage this repo as a workspace
 
 Dogfooding applies to *how* we work, not *where* state lives.

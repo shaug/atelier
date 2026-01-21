@@ -177,39 +177,49 @@ def apply_upgrade_policy(
 def update_project_atelier(
     project_dir: Path, *, version: str | None = None, upgrade: str | None = None
 ) -> None:
-    config_path = paths.project_config_path(project_dir)
-    project_config = config.load_project_config(config_path)
-    if not project_config:
+    system_path = paths.project_config_sys_path(project_dir)
+    user_path = paths.project_config_user_path(project_dir)
+    system_config = config.load_project_system_config(system_path)
+    if not system_config:
         return
-    updates: dict[str, object] = {}
+    user_config = (
+        config.load_project_user_config(user_path) or config.default_user_config()
+    )
+    system_updates: dict[str, object] = {}
     if version is not None:
-        updates["version"] = version
+        system_updates["version"] = version
+    if system_updates:
+        atelier_section = system_config.atelier.model_copy(update=system_updates)
+        system_config = system_config.model_copy(update={"atelier": atelier_section})
+        config.write_project_system_config(system_path, system_config)
     if upgrade is not None:
-        updates["upgrade"] = upgrade
-    if not updates:
-        return
-    atelier_section = project_config.atelier.model_copy(update=updates)
-    project_config = project_config.model_copy(update={"atelier": atelier_section})
-    config.write_json(config_path, project_config)
+        atelier_section = user_config.atelier.model_copy(update={"upgrade": upgrade})
+        user_config = user_config.model_copy(update={"atelier": atelier_section})
+        config.write_project_user_config(user_path, user_config)
 
 
 def update_workspace_atelier(
     workspace_dir: Path, *, version: str | None = None, upgrade: str | None = None
 ) -> None:
-    config_path = paths.workspace_config_path(workspace_dir)
-    workspace_config = config.load_workspace_config(config_path)
-    if not workspace_config:
+    system_path = paths.workspace_config_sys_path(workspace_dir)
+    user_path = paths.workspace_config_user_path(workspace_dir)
+    system_config = config.load_workspace_system_config(system_path)
+    if not system_config:
         return
-    updates: dict[str, object] = {}
+    user_config = (
+        config.load_workspace_user_config(user_path) or config.WorkspaceUserConfig()
+    )
+    system_updates: dict[str, object] = {}
     if version is not None:
-        updates["version"] = version
+        system_updates["version"] = version
+    if system_updates:
+        atelier_section = system_config.atelier.model_copy(update=system_updates)
+        system_config = system_config.model_copy(update={"atelier": atelier_section})
+        config.write_workspace_system_config(system_path, system_config)
     if upgrade is not None:
-        updates["upgrade"] = upgrade
-    if not updates:
-        return
-    atelier_section = workspace_config.atelier.model_copy(update=updates)
-    workspace_config = workspace_config.model_copy(update={"atelier": atelier_section})
-    config.write_json(config_path, workspace_config)
+        atelier_section = user_config.atelier.model_copy(update={"upgrade": upgrade})
+        user_config = user_config.model_copy(update={"atelier": atelier_section})
+        config.write_workspace_user_config(user_path, user_config)
 
 
 def collect_project_template_updates(
@@ -357,7 +367,7 @@ def open_workspace(args: object) -> None:
             {}, enlistment_path, origin, origin_raw, None
         )
         project.ensure_project_dirs(project_dir)
-        config.write_json(config_path, config_payload)
+        config.write_project_config(config_path, config_payload)
     else:
         project.ensure_project_dirs(project_dir)
 
@@ -383,7 +393,7 @@ def open_workspace(args: object) -> None:
     if updates:
         project_section = project_section.model_copy(update=updates)
         config_payload = config_payload.model_copy(update={"project": project_section})
-        config.write_json(config_path, config_payload)
+        config.write_project_config(config_path, config_payload)
 
     project_upgrade_policy = config.resolve_upgrade_policy(
         config_payload.atelier.upgrade

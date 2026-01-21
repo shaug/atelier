@@ -87,7 +87,8 @@ Atelier is intentionally small. The CLI:
 
 - registers a local enlistment as a project in the Atelier data directory
 - creates workspace folders keyed by branch name plus a stable hash
-- maintains minimal `config.json` state for projects and workspaces
+- maintains minimal `config.sys.json`/`config.user.json` state for projects and
+  workspaces
 - bootstraps policy/context files (`AGENTS.md`, `PROJECT.md`, `SUCCESS.md`,
   `PERSIST.md`, `BACKGROUND.md`)
 - clones the repo and checks out workspace branches on demand
@@ -99,7 +100,8 @@ Atelier is intentionally small. The CLI:
 <atelier-data-dir>/
 └─ projects/
    └─ <project-key>/
-      ├─ config.json
+      ├─ config.sys.json
+      ├─ config.user.json
       ├─ AGENTS.md
       ├─ PROJECT.md
       ├─ templates/
@@ -111,7 +113,8 @@ Atelier is intentionally small. The CLI:
             ├─ PERSIST.md
             ├─ BACKGROUND.md (optional)
             ├─ SUCCESS.md
-            ├─ config.json
+            ├─ config.sys.json
+            ├─ config.user.json
             └─ repo/
 ```
 
@@ -150,7 +153,7 @@ Use `--raw` to treat the argument as the full branch name (no prefix lookup).
 `atelier open` will:
 
 - create the workspace if needed
-- generate `AGENTS.md`, `SUCCESS.md`, `PERSIST.md`, and `config.json` (plus
+- generate `AGENTS.md`, `SUCCESS.md`, `PERSIST.md`, and config files (plus
   `BACKGROUND.md` when the branch already exists)
 - clone the repo into `repo/` and create the workspace branch
 - prompt to remove the finalization tag `atelier/<branch-name>/finalized` if
@@ -193,7 +196,8 @@ atelier clean --all --force
   (`atelier/<branch-name>/finalized`) used by `atelier clean`.
 - `BACKGROUND.md` captures context when opening an existing branch.
 - `PROJECT.md` is an optional policy overlay for agents.
-- Configuration lives in `config.json` under the Atelier data directory.
+- Configuration lives in `config.sys.json`/`config.user.json` under the Atelier
+  data directory.
 - Workspace directories are keyed by a stable hash of the branch name.
 
 ## CLI Reference

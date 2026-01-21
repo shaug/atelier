@@ -10,9 +10,12 @@ ATELIER_APP_NAME = "atelier"
 PROJECTS_DIRNAME = "projects"
 WORKSPACES_DIRNAME = "workspaces"
 TEMPLATES_DIRNAME = "templates"
-PROJECT_CONFIG_FILENAME = "config.json"
-WORKSPACE_CONFIG_FILENAME = "config.json"
-INSTALLED_CONFIG_FILENAME = "config.json"
+LEGACY_CONFIG_FILENAME = "config.json"
+PROJECT_CONFIG_SYS_FILENAME = "config.sys.json"
+PROJECT_CONFIG_USER_FILENAME = "config.user.json"
+WORKSPACE_CONFIG_SYS_FILENAME = "config.sys.json"
+WORKSPACE_CONFIG_USER_FILENAME = "config.user.json"
+INSTALLED_CONFIG_USER_FILENAME = "config.user.json"
 
 
 def atelier_data_dir() -> Path:
@@ -60,7 +63,12 @@ def installed_config_path() -> Path:
     Returns:
         Path to the installed defaults config file.
     """
-    return atelier_data_dir() / INSTALLED_CONFIG_FILENAME
+    return atelier_data_dir() / INSTALLED_CONFIG_USER_FILENAME
+
+
+def installed_legacy_config_path() -> Path:
+    """Return the legacy installed defaults config path."""
+    return atelier_data_dir() / LEGACY_CONFIG_FILENAME
 
 
 def project_key(origin: str) -> str:
@@ -237,20 +245,35 @@ def project_dir_for_enlistment(enlistment_path: str, origin: str | None) -> Path
     return projects_root() / project_dir_name(enlistment_path)
 
 
-def project_config_path(project_dir: Path) -> Path:
-    """Return the path to a project's ``config.json`` file.
+def project_config_sys_path(project_dir: Path) -> Path:
+    """Return the path to a project's system config file.
 
     Args:
         project_dir: Project directory path.
 
     Returns:
-        Path to ``config.json``.
+        Path to ``config.sys.json``.
 
     Example:
-        >>> project_config_path(Path("/tmp/project")).name == PROJECT_CONFIG_FILENAME
+        >>> project_config_sys_path(Path("/tmp/project")).name == PROJECT_CONFIG_SYS_FILENAME
         True
     """
-    return project_dir / PROJECT_CONFIG_FILENAME
+    return project_dir / PROJECT_CONFIG_SYS_FILENAME
+
+
+def project_config_user_path(project_dir: Path) -> Path:
+    """Return the path to a project's user config file."""
+    return project_dir / PROJECT_CONFIG_USER_FILENAME
+
+
+def project_config_legacy_path(project_dir: Path) -> Path:
+    """Return the legacy project config path."""
+    return project_dir / LEGACY_CONFIG_FILENAME
+
+
+def project_config_path(project_dir: Path) -> Path:
+    """Return the path to a project's system config file."""
+    return project_config_sys_path(project_dir)
 
 
 def workspaces_root_for_project(project_dir: Path) -> Path:
@@ -297,20 +320,35 @@ def workspace_dir_for_branch(
     return workspaces_root / workspace_dir_name(branch, workspace_id)
 
 
-def workspace_config_path(workspace_dir: Path) -> Path:
-    """Return the path to a workspace ``config.json`` file.
+def workspace_config_sys_path(workspace_dir: Path) -> Path:
+    """Return the path to a workspace system config file.
 
     Args:
         workspace_dir: Workspace directory path.
 
     Returns:
-        Path to ``config.json``.
+        Path to ``config.sys.json``.
 
     Example:
-        >>> workspace_config_path(Path("/tmp/workspace")).name == WORKSPACE_CONFIG_FILENAME
+        >>> workspace_config_sys_path(Path("/tmp/workspace")).name == WORKSPACE_CONFIG_SYS_FILENAME
         True
     """
-    return workspace_dir / WORKSPACE_CONFIG_FILENAME
+    return workspace_dir / WORKSPACE_CONFIG_SYS_FILENAME
+
+
+def workspace_config_user_path(workspace_dir: Path) -> Path:
+    """Return the path to a workspace user config file."""
+    return workspace_dir / WORKSPACE_CONFIG_USER_FILENAME
+
+
+def workspace_config_legacy_path(workspace_dir: Path) -> Path:
+    """Return the legacy workspace config path."""
+    return workspace_dir / LEGACY_CONFIG_FILENAME
+
+
+def workspace_config_path(workspace_dir: Path) -> Path:
+    """Return the path to a workspace system config file."""
+    return workspace_config_sys_path(workspace_dir)
 
 
 def ensure_dir(path: Path) -> None:

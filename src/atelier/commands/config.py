@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 
-from .. import config, git, paths, workspace
+from .. import config, editor, exec, git, paths, workspace
 from ..io import confirm, die, say
 
 
@@ -30,13 +31,49 @@ def _emit_json(payload: dict) -> None:
 def _apply_user_sections(
     base: config.ProjectConfig, updates: config.ProjectConfig
 ) -> config.ProjectConfig:
+    atelier_section = base.atelier.model_copy(
+        update={"upgrade": updates.atelier.upgrade}
+    )
     return base.model_copy(
         update={
             "branch": updates.branch,
             "agent": updates.agent,
             "editor": updates.editor,
+            "atelier": atelier_section,
         }
     )
+
+
+def _edit_user_config(
+    *,
+    payload: dict,
+    editor_cmd: list[str],
+    target_path: Path,
+    cwd: Path,
+) -> None:
+    temp_path: Path | None = None
+    wrote = False
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        ) as fh:
+            temp_path = Path(fh.name)
+            json.dump(payload, fh, indent=2)
+            fh.write("\n")
+        exec.run_command([*editor_cmd, str(temp_path)], cwd=cwd)
+        if temp_path is None:
+            die("failed to locate edited config")
+        try:
+            edited_payload = json.loads(temp_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            die(f"invalid JSON in edited config ({temp_path}): {exc}")
+        parsed = config.parse_project_user_config(edited_payload, temp_path)
+        paths.ensure_dir(target_path.parent)
+        config.write_json(target_path, parsed)
+        wrote = True
+    finally:
+        if wrote and temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 def show_config(args: object) -> None:
@@ -45,12 +82,18 @@ def show_config(args: object) -> None:
     installed = bool(getattr(args, "installed", False))
     prompt_values = bool(getattr(args, "prompt", False))
     reset_values = bool(getattr(args, "reset", False))
+    edit_values = bool(getattr(args, "edit", False))
+
+    if prompt_values and edit_values:
+        die("--prompt and --edit cannot be combined")
 
     project_root, project_config, enlistment_path = _resolve_project()
 
     if workspace_name:
-        if installed or prompt_values or reset_values:
-            die("workspace config cannot be combined with --installed/--prompt/--reset")
+        if installed or prompt_values or reset_values or edit_values:
+            die(
+                "workspace config cannot be combined with --installed/--prompt/--reset/--edit"
+            )
         normalized = workspace.normalize_workspace_name(str(workspace_name))
         if not normalized:
             die("workspace branch must not be empty")
@@ -75,10 +118,21 @@ def show_config(args: object) -> None:
         defaults = config.load_installed_defaults()
         if reset_values:
             if confirm("Reset installed defaults to packaged defaults?", default=False):
-                defaults = config.default_user_config()
-                config.write_installed_defaults(defaults)
+                user_defaults = config.default_user_config()
+                config.write_installed_defaults(user_defaults)
+                defaults = config.merge_project_configs(
+                    config.ProjectSystemConfig(), user_defaults
+                )
             else:
                 defaults = config.load_installed_defaults()
+        if edit_values:
+            _edit_user_config(
+                payload=config.user_config_payload(defaults),
+                editor_cmd=editor.resolve_editor_command(defaults),
+                target_path=paths.installed_config_path(),
+                cwd=project_root,
+            )
+            defaults = config.load_installed_defaults()
         if prompt_values:
             prompted = config.build_project_config(
                 defaults,
@@ -100,9 +154,23 @@ def show_config(args: object) -> None:
         if confirm("Reset config values to installed defaults?", default=False):
             defaults = config.load_installed_defaults()
             updated = _apply_user_sections(updated, defaults)
-            config.write_json(config_path, updated)
+            user_config = config.parse_project_user_config(
+                config.user_config_payload(updated)
+            )
+            config.write_project_user_config(
+                paths.project_config_user_path(project_root), user_config
+            )
         else:
             updated = project_config
+
+    if edit_values:
+        _edit_user_config(
+            payload=config.user_config_payload(updated),
+            editor_cmd=editor.resolve_editor_command(updated),
+            target_path=paths.project_config_user_path(project_root),
+            cwd=project_root,
+        )
+        updated = config.load_project_config(config_path) or updated
 
     if prompt_values:
         prompted = config.build_project_config(
@@ -114,6 +182,11 @@ def show_config(args: object) -> None:
             allow_editor_empty=True,
         )
         updated = _apply_user_sections(updated, prompted)
-        config.write_json(config_path, updated)
+        user_config = config.parse_project_user_config(
+            config.user_config_payload(updated)
+        )
+        config.write_project_user_config(
+            paths.project_config_user_path(project_root), user_config
+        )
 
     _emit_json(updated.model_dump())

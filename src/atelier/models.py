@@ -170,6 +170,45 @@ class AtelierSection(BaseModel):
         return normalized
 
 
+class AtelierSystemSection(BaseModel):
+    """System-managed Atelier metadata stored in configs."""
+
+    model_config = ConfigDict(extra="allow")
+
+    version: str | None = None
+    created_at: str | None = None
+    managed_files: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("managed_files", mode="before")
+    @classmethod
+    def normalize_managed_files(cls, value: object) -> dict[str, str]:
+        if not isinstance(value, dict):
+            return {}
+        normalized: dict[str, str] = {}
+        for key, item in value.items():
+            if item is None:
+                continue
+            normalized[str(key)] = str(item)
+        return normalized
+
+
+class AtelierUserSection(BaseModel):
+    """User-managed Atelier metadata stored in configs."""
+
+    model_config = ConfigDict(extra="allow")
+
+    upgrade: UpgradePolicy | None = None
+
+    @field_validator("upgrade", mode="before")
+    @classmethod
+    def normalize_upgrade(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+
 class ProjectConfig(BaseModel):
     """Top-level project configuration model.
 
@@ -192,6 +231,26 @@ class ProjectConfig(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     atelier: AtelierSection = Field(default_factory=AtelierSection)
+
+
+class ProjectSystemConfig(BaseModel):
+    """System-managed project configuration."""
+
+    model_config = ConfigDict(extra="allow")
+
+    project: ProjectSection = Field(default_factory=ProjectSection)
+    atelier: AtelierSystemSection = Field(default_factory=AtelierSystemSection)
+
+
+class ProjectUserConfig(BaseModel):
+    """User-managed project configuration."""
+
+    model_config = ConfigDict(extra="allow")
+
+    branch: BranchConfig = Field(default_factory=BranchConfig)
+    agent: AgentConfig = Field(default_factory=AgentConfig)
+    editor: EditorConfig = Field(default_factory=EditorConfig)
+    atelier: AtelierUserSection = Field(default_factory=AtelierUserSection)
 
 
 class WorkspaceSection(BaseModel):
@@ -246,3 +305,20 @@ class WorkspaceConfig(BaseModel):
 
     workspace: WorkspaceSection
     atelier: AtelierSection = Field(default_factory=AtelierSection)
+
+
+class WorkspaceSystemConfig(BaseModel):
+    """System-managed workspace configuration."""
+
+    model_config = ConfigDict(extra="allow")
+
+    workspace: WorkspaceSection
+    atelier: AtelierSystemSection = Field(default_factory=AtelierSystemSection)
+
+
+class WorkspaceUserConfig(BaseModel):
+    """User-managed workspace configuration."""
+
+    model_config = ConfigDict(extra="allow")
+
+    atelier: AtelierUserSection = Field(default_factory=AtelierUserSection)

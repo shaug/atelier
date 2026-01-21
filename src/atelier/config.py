@@ -1,7 +1,7 @@
 """Configuration helpers for Atelier projects and workspaces.
 
-This module reads and writes ``config.json`` files, validates them with
-Pydantic models, and normalizes CLI overrides.
+This module reads and writes ``config.sys.json``/``config.user.json`` files,
+validates them with Pydantic models, and normalizes CLI overrides.
 
 Example:
     >>> from atelier.config import utc_now
@@ -26,11 +26,16 @@ from .models import (
     UPGRADE_POLICY_VALUES,
     AgentConfig,
     AtelierSection,
+    AtelierUserSection,
     BranchConfig,
     EditorConfig,
     ProjectConfig,
     ProjectSection,
+    ProjectSystemConfig,
+    ProjectUserConfig,
     WorkspaceConfig,
+    WorkspaceSystemConfig,
+    WorkspaceUserConfig,
 )
 from .paths import workspace_config_path
 
@@ -101,12 +106,282 @@ def write_json(path: Path, payload: dict | BaseModel) -> None:
         fh.write("\n")
 
 
+def _backup_legacy_config(path: Path) -> None:
+    backup_path = path.with_suffix(".json.bak")
+    if backup_path.exists():
+        return
+    shutil.move(path, backup_path)
+
+
+def _split_project_payload(payload: dict) -> tuple[dict, dict]:
+    user_payload: dict = {}
+    for key in ("branch", "agent", "editor"):
+        if key in payload:
+            user_payload[key] = payload.get(key)
+    atelier_payload = dict(payload.get("atelier", {}) or {})
+    upgrade = atelier_payload.pop("upgrade", None)
+    if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
+        user_payload["atelier"] = {"upgrade": upgrade}
+    system_payload = dict(payload)
+    for key in ("branch", "agent", "editor"):
+        system_payload.pop(key, None)
+    system_payload["atelier"] = atelier_payload
+    return system_payload, user_payload
+
+
+def _split_workspace_payload(payload: dict) -> tuple[dict, dict]:
+    atelier_payload = dict(payload.get("atelier", {}) or {})
+    upgrade = atelier_payload.pop("upgrade", None)
+    user_payload: dict = {}
+    if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
+        user_payload["atelier"] = {"upgrade": upgrade}
+    system_payload = dict(payload)
+    system_payload["atelier"] = atelier_payload
+    return system_payload, user_payload
+
+
+def parse_project_system_config(
+    payload: dict, source: Path | str | None = None
+) -> ProjectSystemConfig:
+    """Validate a project system config payload."""
+    try:
+        return ProjectSystemConfig.model_validate(payload)
+    except ValidationError as exc:
+        location = f" at {source}" if source else ""
+        die(f"invalid project system config{location}:\n{exc}")
+
+
+def parse_project_user_config(
+    payload: dict, source: Path | str | None = None
+) -> ProjectUserConfig:
+    """Validate a project user config payload."""
+    try:
+        return ProjectUserConfig.model_validate(payload)
+    except ValidationError as exc:
+        location = f" at {source}" if source else ""
+        die(f"invalid project user config{location}:\n{exc}")
+
+
+def parse_workspace_system_config(
+    payload: dict, source: Path | str | None = None
+) -> WorkspaceSystemConfig:
+    """Validate a workspace system config payload."""
+    try:
+        return WorkspaceSystemConfig.model_validate(payload)
+    except ValidationError as exc:
+        location = f" at {source}" if source else ""
+        die(f"invalid workspace system config{location}:\n{exc}")
+
+
+def parse_workspace_user_config(
+    payload: dict, source: Path | str | None = None
+) -> WorkspaceUserConfig:
+    """Validate a workspace user config payload."""
+    try:
+        return WorkspaceUserConfig.model_validate(payload)
+    except ValidationError as exc:
+        location = f" at {source}" if source else ""
+        die(f"invalid workspace user config{location}:\n{exc}")
+
+
+def _migrate_legacy_project_config(project_dir: Path) -> None:
+    sys_path = paths.project_config_sys_path(project_dir)
+    user_path = paths.project_config_user_path(project_dir)
+    if sys_path.exists() or user_path.exists():
+        return
+    legacy_path = paths.project_config_legacy_path(project_dir)
+    payload = load_json(legacy_path)
+    if not payload:
+        return
+    system_payload, user_payload = _split_project_payload(payload)
+    system_config = parse_project_system_config(system_payload, legacy_path)
+    user_config = parse_project_user_config(user_payload, legacy_path)
+    write_json(sys_path, system_config)
+    write_json(user_path, user_config)
+    _backup_legacy_config(legacy_path)
+
+
+def _migrate_legacy_workspace_config(workspace_dir: Path) -> None:
+    sys_path = paths.workspace_config_sys_path(workspace_dir)
+    user_path = paths.workspace_config_user_path(workspace_dir)
+    if sys_path.exists() or user_path.exists():
+        return
+    legacy_path = paths.workspace_config_legacy_path(workspace_dir)
+    payload = load_json(legacy_path)
+    if not payload:
+        return
+    system_payload, user_payload = _split_workspace_payload(payload)
+    system_config = parse_workspace_system_config(system_payload, legacy_path)
+    user_config = parse_workspace_user_config(user_payload, legacy_path)
+    write_json(sys_path, system_config)
+    write_json(user_path, user_config)
+    _backup_legacy_config(legacy_path)
+
+
+def _migrate_legacy_installed_config() -> None:
+    user_path = paths.installed_config_path()
+    if user_path.exists():
+        return
+    legacy_path = paths.installed_legacy_config_path()
+    payload = load_json(legacy_path)
+    if not payload:
+        return
+    user_config = parse_project_user_config(payload, legacy_path)
+    paths.ensure_dir(user_path.parent)
+    write_json(user_path, user_config)
+    _backup_legacy_config(legacy_path)
+
+
+def load_project_system_config(path: Path) -> ProjectSystemConfig | None:
+    """Load and validate a project system config from disk."""
+    project_dir = path.parent
+    _migrate_legacy_project_config(project_dir)
+    payload = load_json(path)
+    if not payload:
+        return None
+    return parse_project_system_config(payload, path)
+
+
+def load_project_user_config(path: Path) -> ProjectUserConfig | None:
+    """Load and validate a project user config from disk."""
+    project_dir = path.parent
+    _migrate_legacy_project_config(project_dir)
+    payload = load_json(path)
+    if not payload:
+        return None
+    return parse_project_user_config(payload, path)
+
+
+def load_workspace_system_config(path: Path) -> WorkspaceSystemConfig | None:
+    """Load and validate a workspace system config from disk."""
+    workspace_dir = path.parent
+    _migrate_legacy_workspace_config(workspace_dir)
+    payload = load_json(path)
+    if not payload:
+        return None
+    return parse_workspace_system_config(payload, path)
+
+
+def load_workspace_user_config(path: Path) -> WorkspaceUserConfig | None:
+    """Load and validate a workspace user config from disk."""
+    workspace_dir = path.parent
+    _migrate_legacy_workspace_config(workspace_dir)
+    payload = load_json(path)
+    if not payload:
+        return None
+    return parse_workspace_user_config(payload, path)
+
+
+def merge_project_configs(
+    system_config: ProjectSystemConfig, user_config: ProjectUserConfig | None
+) -> ProjectConfig:
+    """Merge system and user project configs into a full config."""
+    system_payload = system_config.model_dump()
+    user_payload = (user_config or ProjectUserConfig()).model_dump()
+    merged = dict(system_payload)
+    for key in ("branch", "agent", "editor"):
+        merged[key] = user_payload.get(key, {})
+    system_atelier = system_payload.get("atelier", {}) if system_payload else {}
+    user_atelier = user_payload.get("atelier", {}) if user_payload else {}
+    merged_atelier = dict(system_atelier)
+    if "upgrade" in user_atelier:
+        merged_atelier["upgrade"] = user_atelier.get("upgrade")
+    merged["atelier"] = merged_atelier
+    for key, value in user_payload.items():
+        if key not in merged:
+            merged[key] = value
+    return parse_project_config(merged)
+
+
+def merge_workspace_configs(
+    system_config: WorkspaceSystemConfig, user_config: WorkspaceUserConfig | None
+) -> WorkspaceConfig:
+    """Merge system and user workspace configs into a full config."""
+    system_payload = system_config.model_dump()
+    user_payload = (user_config or WorkspaceUserConfig()).model_dump()
+    merged = dict(system_payload)
+    system_atelier = system_payload.get("atelier", {}) if system_payload else {}
+    user_atelier = user_payload.get("atelier", {}) if user_payload else {}
+    merged_atelier = dict(system_atelier)
+    if "upgrade" in user_atelier:
+        merged_atelier["upgrade"] = user_atelier.get("upgrade")
+    merged["atelier"] = merged_atelier
+    for key, value in user_payload.items():
+        if key not in merged:
+            merged[key] = value
+    return parse_workspace_config(merged)
+
+
+def split_project_config(
+    config_payload: ProjectConfig,
+) -> tuple[ProjectSystemConfig, ProjectUserConfig]:
+    """Split a project config into system and user configs."""
+    payload = config_payload.model_dump()
+    system_payload, user_payload = _split_project_payload(payload)
+    system_config = parse_project_system_config(system_payload)
+    user_config = parse_project_user_config(user_payload)
+    return system_config, user_config
+
+
+def split_workspace_config(
+    config_payload: WorkspaceConfig,
+) -> tuple[WorkspaceSystemConfig, WorkspaceUserConfig]:
+    """Split a workspace config into system and user configs."""
+    payload = config_payload.model_dump()
+    system_payload, user_payload = _split_workspace_payload(payload)
+    system_config = parse_workspace_system_config(system_payload)
+    user_config = parse_workspace_user_config(user_payload)
+    return system_config, user_config
+
+
+def write_project_system_config(path: Path, payload: ProjectSystemConfig) -> None:
+    """Write a project system config to disk."""
+    write_json(path, payload)
+
+
+def write_project_user_config(path: Path, payload: ProjectUserConfig) -> None:
+    """Write a project user config to disk."""
+    write_json(path, payload)
+
+
+def write_workspace_system_config(path: Path, payload: WorkspaceSystemConfig) -> None:
+    """Write a workspace system config to disk."""
+    write_json(path, payload)
+
+
+def write_workspace_user_config(path: Path, payload: WorkspaceUserConfig) -> None:
+    """Write a workspace user config to disk."""
+    write_json(path, payload)
+
+
+def write_project_config(path: Path, payload: ProjectConfig) -> None:
+    """Write a merged project config to system/user files."""
+    project_dir = path.parent
+    system_config, user_config = split_project_config(payload)
+    write_project_system_config(
+        paths.project_config_sys_path(project_dir), system_config
+    )
+    write_project_user_config(paths.project_config_user_path(project_dir), user_config)
+
+
+def write_workspace_config(path: Path, payload: WorkspaceConfig) -> None:
+    """Write a merged workspace config to system/user files."""
+    workspace_dir = path.parent
+    system_config, user_config = split_workspace_config(payload)
+    write_workspace_system_config(
+        paths.workspace_config_sys_path(workspace_dir), system_config
+    )
+    write_workspace_user_config(
+        paths.workspace_config_user_path(workspace_dir), user_config
+    )
+
+
 def update_project_managed_files(project_dir: Path, updates: dict[str, str]) -> None:
     """Update managed file hashes in a project config."""
     if not updates:
         return
-    config_path = paths.project_config_path(project_dir)
-    config_payload = load_project_config(config_path)
+    config_path = paths.project_config_sys_path(project_dir)
+    config_payload = load_project_system_config(config_path)
     if not config_payload:
         die("no Atelier project config found for managed file updates")
     atelier_section = config_payload.atelier
@@ -114,7 +389,7 @@ def update_project_managed_files(project_dir: Path, updates: dict[str, str]) -> 
     managed.update(updates)
     atelier_section = atelier_section.model_copy(update={"managed_files": managed})
     config_payload = config_payload.model_copy(update={"atelier": atelier_section})
-    write_json(config_path, config_payload)
+    write_project_system_config(config_path, config_payload)
 
 
 def update_workspace_managed_files(
@@ -123,8 +398,8 @@ def update_workspace_managed_files(
     """Update managed file hashes in a workspace config."""
     if not updates:
         return
-    config_path = workspace_config_path(workspace_dir)
-    workspace_config = load_workspace_config(config_path)
+    config_path = paths.workspace_config_sys_path(workspace_dir)
+    workspace_config = load_workspace_system_config(config_path)
     if not workspace_config:
         die("no workspace config found for managed file updates")
     atelier_section = workspace_config.atelier
@@ -132,7 +407,7 @@ def update_workspace_managed_files(
     managed.update(updates)
     atelier_section = atelier_section.model_copy(update={"managed_files": managed})
     workspace_config = workspace_config.model_copy(update={"atelier": atelier_section})
-    write_json(config_path, workspace_config)
+    write_workspace_system_config(config_path, workspace_config)
 
 
 def managed_project_agents_updates(project_dir: Path) -> dict[str, str]:
@@ -202,7 +477,7 @@ def load_project_config(path: Path) -> ProjectConfig | None:
     """Load and validate a project config from disk.
 
     Args:
-        path: Path to ``config.json`` in the project directory.
+        path: Path to ``config.sys.json`` in the project directory.
 
     Returns:
         Parsed ``ProjectConfig`` or ``None`` when missing/empty.
@@ -212,10 +487,14 @@ def load_project_config(path: Path) -> ProjectConfig | None:
         >>> load_project_config(Path("missing.json")) is None
         True
     """
-    payload = load_json(path)
-    if not payload:
+    project_dir = path.parent
+    system_path = paths.project_config_sys_path(project_dir)
+    user_path = paths.project_config_user_path(project_dir)
+    system_config = load_project_system_config(system_path)
+    if not system_config:
         return None
-    return parse_project_config(payload, path)
+    user_config = load_project_user_config(user_path)
+    return merge_project_configs(system_config, user_config)
 
 
 def parse_workspace_config(
@@ -245,7 +524,7 @@ def load_workspace_config(path: Path) -> WorkspaceConfig | None:
     """Load and validate a workspace config from disk.
 
     Args:
-        path: Path to ``config.json`` in the workspace directory.
+        path: Path to ``config.sys.json`` in the workspace directory.
 
     Returns:
         Parsed ``WorkspaceConfig`` or ``None`` when missing/empty.
@@ -255,10 +534,14 @@ def load_workspace_config(path: Path) -> WorkspaceConfig | None:
         >>> load_workspace_config(Path("missing.json")) is None
         True
     """
-    payload = load_json(path)
-    if not payload:
+    workspace_dir = path.parent
+    system_path = paths.workspace_config_sys_path(workspace_dir)
+    user_path = paths.workspace_config_user_path(workspace_dir)
+    system_config = load_workspace_system_config(system_path)
+    if not system_config:
         return None
-    return parse_workspace_config(payload, path)
+    user_config = load_workspace_user_config(user_path)
+    return merge_workspace_configs(system_config, user_config)
 
 
 def resolve_branch_config(config: ProjectConfig | dict) -> BranchConfig:
@@ -489,16 +772,29 @@ def user_config_missing_fields(payload: dict | None) -> list[str]:
     return missing
 
 
-def user_config_payload(config: ProjectConfig) -> dict:
+def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
     """Return user-editable config sections as a dict."""
-    return {
-        "branch": config.branch.model_dump(),
-        "agent": config.agent.model_dump(),
-        "editor": config.editor.model_dump(),
+    if isinstance(config, ProjectUserConfig):
+        branch = config.branch
+        agent = config.agent
+        editor_config = config.editor
+        upgrade = config.atelier.upgrade
+    else:
+        branch = config.branch
+        agent = config.agent
+        editor_config = config.editor
+        upgrade = config.atelier.upgrade
+    payload = {
+        "branch": branch.model_dump(),
+        "agent": agent.model_dump(),
+        "editor": editor_config.model_dump(),
     }
+    if upgrade is not None:
+        payload["atelier"] = {"upgrade": upgrade}
+    return payload
 
 
-def _default_editor_command(config_payload: ProjectConfig) -> str:
+def _default_editor_command(config_payload: ProjectConfig | ProjectUserConfig) -> str:
     editor_prompt_default = None
     editor_default_default = config_payload.editor.default
     if editor_default_default:
@@ -519,9 +815,9 @@ def _default_editor_command(config_payload: ProjectConfig) -> str:
     return editor_prompt_default
 
 
-def default_user_config() -> ProjectConfig:
+def default_user_config() -> ProjectUserConfig:
     """Return default user-editable config values."""
-    base = ProjectConfig()
+    base = ProjectUserConfig()
     editor_prompt_default = _default_editor_command(base)
     editor_parts = shlex.split(editor_prompt_default) if editor_prompt_default else []
     editor_default = editor_parts[0] if editor_parts else None
@@ -534,18 +830,20 @@ def default_user_config() -> ProjectConfig:
             "branch": base.branch,
             "agent": AgentConfig(default="codex", options=agent_options),
             "editor": EditorConfig(default=editor_default, options=editor_options),
+            "atelier": AtelierUserSection(upgrade="ask"),
         }
     )
 
 
 def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
     """Load installed defaults for user-editable config values."""
+    _migrate_legacy_installed_config()
     defaults_path = path or paths.installed_config_path()
     payload = load_json(defaults_path)
     default_config = default_user_config()
     if not payload:
-        return default_config
-    parsed = parse_project_config(payload, defaults_path)
+        return merge_project_configs(ProjectSystemConfig(), default_config)
+    parsed = parse_project_user_config(payload, defaults_path)
     branch = parsed.branch
     if not _path_has_value(payload, "branch", "prefix"):
         branch = branch.model_copy(update={"prefix": default_config.branch.prefix})
@@ -572,14 +870,25 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
             options.update(default_config.editor.options)
         editor_config = editor_config.model_copy(update={"options": options})
 
+    atelier_section = parsed.atelier
+    if not _path_has_value(payload, "atelier", "upgrade"):
+        atelier_section = atelier_section.model_copy(
+            update={"upgrade": default_config.atelier.upgrade}
+        )
+
     parsed = parsed.model_copy(
-        update={"branch": branch, "agent": agent, "editor": editor_config}
+        update={
+            "branch": branch,
+            "agent": agent,
+            "editor": editor_config,
+            "atelier": atelier_section,
+        }
     )
-    return parsed
+    return merge_project_configs(ProjectSystemConfig(), parsed)
 
 
 def write_installed_defaults(
-    config_payload: ProjectConfig, path: Path | None = None
+    config_payload: ProjectConfig | ProjectUserConfig, path: Path | None = None
 ) -> None:
     """Write installed defaults for user-editable config values."""
     defaults_path = path or paths.installed_config_path()

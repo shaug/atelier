@@ -65,7 +65,7 @@ class DummyResult:
 
 def write_project_config(project_dir: Path, enlistment_path: str) -> dict:
     project_dir.mkdir(parents=True, exist_ok=True)
-    config = {
+    payload = {
         "project": {
             "enlistment": enlistment_path,
             "origin": NORMALIZED_ORIGIN,
@@ -77,10 +77,9 @@ def write_project_config(project_dir: Path, enlistment_path: str) -> dict:
             "history": "manual",
         },
     }
-    paths.project_config_path(project_dir).write_text(
-        json.dumps(config), encoding="utf-8"
-    )
-    return config
+    parsed = config.ProjectConfig.model_validate(payload)
+    config.write_project_config(paths.project_config_path(project_dir), parsed)
+    return parsed.model_dump()
 
 
 def make_open_config(enlistment_path: str, **overrides: object) -> dict:
@@ -112,10 +111,11 @@ def make_open_config(enlistment_path: str, **overrides: object) -> dict:
 
 
 def write_open_config(root: Path, enlistment_path: str, **overrides: object) -> dict:
-    config = make_open_config(enlistment_path, **overrides)
+    config_payload = make_open_config(enlistment_path, **overrides)
     root.mkdir(parents=True, exist_ok=True)
-    paths.project_config_path(root).write_text(json.dumps(config), encoding="utf-8")
-    return config
+    parsed = config.ProjectConfig.model_validate(config_payload)
+    config.write_project_config(paths.project_config_path(root), parsed)
+    return parsed.model_dump()
 
 
 def init_local_repo(root: Path) -> Path:
@@ -183,7 +183,8 @@ def write_workspace_config(
             "upgrade": "ask",
         },
     }
-    (workspace_dir / "config.json").write_text(json.dumps(payload), encoding="utf-8")
+    parsed = config.WorkspaceConfig.model_validate(payload)
+    config.write_workspace_config(paths.workspace_config_path(workspace_dir), parsed)
 
 
 def make_fake_git(
@@ -305,13 +306,14 @@ class TestInitProject(TestCase):
 
                 config_path = paths.project_config_path(project_dir)
                 self.assertTrue(config_path.exists())
-                config = json.loads(config_path.read_text(encoding="utf-8"))
-                self.assertEqual(config["project"]["enlistment"], enlistment_path)
-                self.assertEqual(config["project"]["origin"], NORMALIZED_ORIGIN)
-                self.assertEqual(config["project"]["repo_url"], RAW_ORIGIN)
-                self.assertTrue(config["branch"]["pr"])
-                self.assertEqual(config["branch"]["history"], "manual")
-                self.assertEqual(config["editor"]["default"], "cursor")
+                config_payload = config.load_project_config(config_path)
+                self.assertIsNotNone(config_payload)
+                self.assertEqual(config_payload.project.enlistment, enlistment_path)
+                self.assertEqual(config_payload.project.origin, NORMALIZED_ORIGIN)
+                self.assertEqual(config_payload.project.repo_url, RAW_ORIGIN)
+                self.assertTrue(config_payload.branch.pr)
+                self.assertEqual(config_payload.branch.history, "manual")
+                self.assertEqual(config_payload.editor.default, "cursor")
                 self.assertTrue((project_dir / "AGENTS.md").exists())
                 self.assertTrue((project_dir / "templates" / "AGENTS.md").exists())
                 self.assertTrue((project_dir / "PROJECT.md").exists())
@@ -346,8 +348,9 @@ class TestInitProject(TestCase):
                     )
 
                 config_path = paths.project_config_path(project_dir)
-                config = json.loads(config_path.read_text(encoding="utf-8"))
-                self.assertEqual(config["editor"]["default"], "cursor")
+                config_payload = config.load_project_config(config_path)
+                self.assertIsNotNone(config_payload)
+                self.assertEqual(config_payload.editor.default, "cursor")
             finally:
                 os.chdir(original_cwd)
 
@@ -374,9 +377,10 @@ class TestInitProject(TestCase):
                     )
 
                 config_path = paths.project_config_path(project_dir)
-                config = json.loads(config_path.read_text(encoding="utf-8"))
-                self.assertEqual(config["editor"]["default"], "cursor")
-                self.assertEqual(config["editor"]["options"]["cursor"], ["-w"])
+                config_payload = config.load_project_config(config_path)
+                self.assertIsNotNone(config_payload)
+                self.assertEqual(config_payload.editor.default, "cursor")
+                self.assertEqual(config_payload.editor.options["cursor"], ["-w"])
             finally:
                 os.chdir(original_cwd)
 
@@ -405,9 +409,10 @@ class TestInitProject(TestCase):
                     )
 
                 config_path = paths.project_config_path(project_dir)
-                config = json.loads(config_path.read_text(encoding="utf-8"))
-                self.assertEqual(config["editor"]["default"], "nano")
-                self.assertEqual(config["editor"]["options"]["nano"], ["-w"])
+                config_payload = config.load_project_config(config_path)
+                self.assertIsNotNone(config_payload)
+                self.assertEqual(config_payload.editor.default, "nano")
+                self.assertEqual(config_payload.editor.options["nano"], ["-w"])
             finally:
                 os.chdir(original_cwd)
 
@@ -419,7 +424,7 @@ class TestInitProject(TestCase):
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                config = {
+                payload = {
                     "project": {
                         "enlistment": enlistment_path,
                         "origin": git.normalize_origin_url(
@@ -445,8 +450,9 @@ class TestInitProject(TestCase):
                         enlistment_path, NORMALIZED_ORIGIN
                     )
                 project_dir.mkdir(parents=True, exist_ok=True)
-                paths.project_config_path(project_dir).write_text(
-                    json.dumps(config), encoding="utf-8"
+                parsed = config.ProjectConfig.model_validate(payload)
+                config.write_project_config(
+                    paths.project_config_path(project_dir), parsed
                 )
 
                 args = make_init_args(
@@ -469,16 +475,17 @@ class TestInitProject(TestCase):
                     init_cmd.init_project(args)
 
                 config_path = paths.project_config_path(project_dir)
-                config = json.loads(config_path.read_text(encoding="utf-8"))
-                self.assertEqual(config["project"]["enlistment"], enlistment_path)
-                self.assertEqual(config["project"]["origin"], NORMALIZED_ORIGIN)
-                self.assertEqual(config["project"]["repo_url"], RAW_ORIGIN)
-                self.assertEqual(config["branch"]["prefix"], "feat/")
-                self.assertFalse(config["branch"]["pr"])
-                self.assertEqual(config["branch"]["history"], "merge")
-                self.assertEqual(config["agent"]["default"], "codex")
-                self.assertEqual(config["editor"]["default"], "cursor")
-                self.assertEqual(config["editor"]["options"]["cursor"], ["-w"])
+                config_payload = config.load_project_config(config_path)
+                self.assertIsNotNone(config_payload)
+                self.assertEqual(config_payload.project.enlistment, enlistment_path)
+                self.assertEqual(config_payload.project.origin, NORMALIZED_ORIGIN)
+                self.assertEqual(config_payload.project.repo_url, RAW_ORIGIN)
+                self.assertEqual(config_payload.branch.prefix, "feat/")
+                self.assertFalse(config_payload.branch.pr)
+                self.assertEqual(config_payload.branch.history, "merge")
+                self.assertEqual(config_payload.agent.default, "codex")
+                self.assertEqual(config_payload.editor.default, "cursor")
+                self.assertEqual(config_payload.editor.options["cursor"], ["-w"])
                 self.assertTrue((project_dir / "workspaces").is_dir())
             finally:
                 os.chdir(original_cwd)
@@ -512,6 +519,57 @@ class TestInitProject(TestCase):
                 self.assertFalse((project_dir / "templates" / "WORKSPACE.md").exists())
             finally:
                 os.chdir(original_cwd)
+
+    def test_legacy_project_config_migrates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            project_dir.mkdir(parents=True, exist_ok=True)
+            legacy_payload = {
+                "project": {
+                    "enlistment": enlistment_path,
+                    "origin": NORMALIZED_ORIGIN,
+                    "repo_url": RAW_ORIGIN,
+                },
+                "branch": {"prefix": "legacy/", "pr": False, "history": "merge"},
+                "agent": {"default": "codex", "options": {"codex": []}},
+                "editor": {"default": "vim", "options": {"vim": ["-w"]}},
+                "atelier": {
+                    "version": "0.1.0",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "upgrade": "manual",
+                    "managed_files": {"AGENTS.md": "deadbeef"},
+                },
+            }
+            legacy_path = paths.project_config_legacy_path(project_dir)
+            legacy_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
+
+            config_payload = config.load_project_config(
+                paths.project_config_path(project_dir)
+            )
+            self.assertIsNotNone(config_payload)
+            self.assertFalse(legacy_path.exists())
+            self.assertTrue(legacy_path.with_suffix(".json.bak").exists())
+            self.assertTrue(paths.project_config_sys_path(project_dir).exists())
+            self.assertTrue(paths.project_config_user_path(project_dir).exists())
+
+            system_config = config.load_project_system_config(
+                paths.project_config_sys_path(project_dir)
+            )
+            user_config = config.load_project_user_config(
+                paths.project_config_user_path(project_dir)
+            )
+            self.assertIsNotNone(system_config)
+            self.assertIsNotNone(user_config)
+            self.assertEqual(system_config.project.enlistment, enlistment_path)
+            self.assertEqual(user_config.branch.prefix, "legacy/")
+            self.assertEqual(user_config.editor.default, "vim")
+            self.assertEqual(user_config.atelier.upgrade, "manual")
 
 
 class TestListWorkspaces(TestCase):
@@ -1147,14 +1205,13 @@ class TestOpenWorkspace(TestCase):
                 self.assertTrue((workspace_dir / "AGENTS.md").exists())
                 self.assertTrue((workspace_dir / "PERSIST.md").exists())
                 self.assertTrue((workspace_dir / "SUCCESS.md").exists())
-                self.assertTrue((workspace_dir / "config.json").exists())
+                self.assertTrue(paths.workspace_config_path(workspace_dir).exists())
 
-                workspace_config = json.loads(
-                    (workspace_dir / "config.json").read_text(encoding="utf-8")
+                workspace_config = config.load_workspace_config(
+                    paths.workspace_config_path(workspace_dir)
                 )
-                self.assertEqual(
-                    workspace_config["workspace"]["branch"], workspace_branch
-                )
+                self.assertIsNotNone(workspace_config)
+                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
 
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
                     encoding="utf-8"
@@ -1215,9 +1272,8 @@ class TestOpenWorkspace(TestCase):
                 "templates/AGENTS.md": config.hash_text(old_text),
                 "AGENTS.md": config.hash_text(old_text),
             }
-            paths.project_config_path(project_dir).write_text(
-                json.dumps(payload), encoding="utf-8"
-            )
+            parsed = config.ProjectConfig.model_validate(payload)
+            config.write_project_config(paths.project_config_path(project_dir), parsed)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1271,9 +1327,8 @@ class TestOpenWorkspace(TestCase):
                 "templates/AGENTS.md": config.hash_text(old_text),
                 "AGENTS.md": config.hash_text(canonical),
             }
-            paths.project_config_path(project_dir).write_text(
-                json.dumps(payload), encoding="utf-8"
-            )
+            parsed = config.ProjectConfig.model_validate(payload)
+            config.write_project_config(paths.project_config_path(project_dir), parsed)
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -1339,12 +1394,11 @@ class TestOpenWorkspace(TestCase):
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                workspace_config = json.loads(
-                    (workspace_dir / "config.json").read_text(encoding="utf-8")
+                workspace_config = config.load_workspace_config(
+                    paths.workspace_config_path(workspace_dir)
                 )
-                self.assertEqual(
-                    workspace_config["workspace"]["branch"], workspace_branch
-                )
+                self.assertIsNotNone(workspace_config)
+                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
                 self.assertFalse(
                     paths.workspace_dir_for_branch(
                         project_dir,
@@ -1399,12 +1453,11 @@ class TestOpenWorkspace(TestCase):
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                workspace_config = json.loads(
-                    (workspace_dir / "config.json").read_text(encoding="utf-8")
+                workspace_config = config.load_workspace_config(
+                    paths.workspace_config_path(workspace_dir)
                 )
-                self.assertEqual(
-                    workspace_config["workspace"]["branch"], workspace_branch
-                )
+                self.assertIsNotNone(workspace_config)
+                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
                 self.assertTrue(any(cmd[0] == "codex" for cmd in commands))
             finally:
                 os.chdir(original_cwd)
@@ -1727,8 +1780,9 @@ class TestOpenWorkspace(TestCase):
                     "upgrade": "ask",
                 },
             }
-            (workspace_dir / "config.json").write_text(
-                json.dumps(payload), encoding="utf-8"
+            parsed = config.WorkspaceConfig.model_validate(payload)
+            config.write_workspace_config(
+                paths.workspace_config_path(workspace_dir), parsed
             )
             agents_path = workspace_dir / "AGENTS.md"
             workspace_path = workspace_dir / "SUCCESS.md"
@@ -2045,12 +2099,11 @@ class TestOpenWorkspace(TestCase):
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
                 self.assertTrue((workspace_dir / "AGENTS.md").exists())
-                workspace_config = json.loads(
-                    (workspace_dir / "config.json").read_text(encoding="utf-8")
+                workspace_config = config.load_workspace_config(
+                    paths.workspace_config_path(workspace_dir)
                 )
-                self.assertEqual(
-                    workspace_config["workspace"]["branch"], workspace_branch
-                )
+                self.assertIsNotNone(workspace_config)
+                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
             finally:
                 os.chdir(original_cwd)
 
@@ -2058,7 +2111,7 @@ class TestOpenWorkspace(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
-            config = {
+            payload = {
                 "project": {
                     "enlistment": enlistment_path,
                     "origin": NORMALIZED_ORIGIN,
@@ -2079,9 +2132,8 @@ class TestOpenWorkspace(TestCase):
                     enlistment_path, NORMALIZED_ORIGIN
                 )
             project_dir.mkdir(parents=True, exist_ok=True)
-            paths.project_config_path(project_dir).write_text(
-                json.dumps(config), encoding="utf-8"
-            )
+            parsed = config.ProjectConfig.model_validate(payload)
+            config.write_project_config(paths.project_config_path(project_dir), parsed)
             templates_dir = project_dir / "templates"
             templates_dir.mkdir()
             success_content = "<!-- success template -->\n"
@@ -2179,12 +2231,11 @@ class TestOpenWorkspace(TestCase):
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                workspace_config = json.loads(
-                    (workspace_dir / "config.json").read_text(encoding="utf-8")
+                workspace_config = config.load_workspace_config(
+                    paths.workspace_config_path(workspace_dir)
                 )
-                self.assertEqual(
-                    workspace_config["workspace"]["branch"], workspace_branch
-                )
+                self.assertIsNotNone(workspace_config)
+                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
             finally:
                 os.chdir(original_cwd)
 
@@ -2302,13 +2353,12 @@ class TestOpenWorkspace(TestCase):
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                workspace_config = json.loads(
-                    (workspace_dir / "config.json").read_text(encoding="utf-8")
+                workspace_config = config.load_workspace_config(
+                    paths.workspace_config_path(workspace_dir)
                 )
-                self.assertFalse(workspace_config["workspace"]["branch_pr"])
-                self.assertEqual(
-                    workspace_config["workspace"]["branch_history"], "merge"
-                )
+                self.assertIsNotNone(workspace_config)
+                self.assertFalse(workspace_config.workspace.branch_pr)
+                self.assertEqual(workspace_config.workspace.branch_history, "merge")
 
                 persist_content = (workspace_dir / "PERSIST.md").read_text(
                     encoding="utf-8"
@@ -2494,12 +2544,11 @@ class TestOpenWorkspace(TestCase):
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                workspace_config = json.loads(
-                    (workspace_dir / "config.json").read_text(encoding="utf-8")
+                workspace_config = config.load_workspace_config(
+                    paths.workspace_config_path(workspace_dir)
                 )
-                self.assertEqual(
-                    workspace_config["workspace"]["branch"], workspace_branch
-                )
+                self.assertIsNotNone(workspace_config)
+                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
                 self.assertTrue(
                     any(
                         len(cmd) >= 6
@@ -2593,11 +2642,13 @@ class TestOpenWorkspace(TestCase):
                 project_dir = paths.project_dir_for_enlistment(
                     enlistment_path, NORMALIZED_ORIGIN
                 )
-            write_open_config(
-                project_dir,
+            payload = make_open_config(
                 enlistment_path,
                 branch={"prefix": "scott/", "history": "sideways"},
             )
+            legacy_path = paths.project_config_legacy_path(project_dir)
+            project_dir.mkdir(parents=True, exist_ok=True)
+            legacy_path.write_text(json.dumps(payload), encoding="utf-8")
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -2646,12 +2697,13 @@ class TestConfigCommand(TestCase):
                         )
                     )
                 config_path = paths.project_config_path(project_dir)
-                updated = json.loads(config_path.read_text(encoding="utf-8"))
-                self.assertEqual(updated["branch"]["prefix"], "team/")
-                self.assertFalse(updated["branch"]["pr"])
-                self.assertEqual(updated["branch"]["history"], "rebase")
-                self.assertEqual(updated["editor"]["default"], "vim")
-                self.assertEqual(updated["editor"]["options"]["vim"], ["-w"])
+                updated = config.load_project_config(config_path)
+                self.assertIsNotNone(updated)
+                self.assertEqual(updated.branch.prefix, "team/")
+                self.assertFalse(updated.branch.pr)
+                self.assertEqual(updated.branch.history, "rebase")
+                self.assertEqual(updated.editor.default, "vim")
+                self.assertEqual(updated.editor.options["vim"], ["-w"])
             finally:
                 os.chdir(original_cwd)
 
@@ -2701,10 +2753,11 @@ class TestConfigCommand(TestCase):
                         )
                     )
                 config_path = paths.project_config_path(project_dir)
-                updated = json.loads(config_path.read_text(encoding="utf-8"))
+                updated = config.load_project_config(config_path)
+                self.assertIsNotNone(updated)
                 self.assertEqual(call_count["count"], 7)
-                self.assertFalse(updated["branch"]["pr"])
-                self.assertEqual(updated["branch"]["history"], "merge")
+                self.assertFalse(updated.branch.pr)
+                self.assertEqual(updated.branch.history, "merge")
             finally:
                 os.chdir(original_cwd)
 
@@ -2746,12 +2799,13 @@ class TestConfigCommand(TestCase):
                         )
                     )
                 config_path = paths.project_config_path(project_dir)
-                updated = json.loads(config_path.read_text(encoding="utf-8"))
-                self.assertEqual(updated["branch"]["prefix"], "installed/")
-                self.assertFalse(updated["branch"]["pr"])
-                self.assertEqual(updated["branch"]["history"], "squash")
-                self.assertEqual(updated["editor"]["default"], "nano")
-                self.assertEqual(updated["editor"]["options"]["nano"], ["-w"])
+                updated = config.load_project_config(config_path)
+                self.assertIsNotNone(updated)
+                self.assertEqual(updated.branch.prefix, "installed/")
+                self.assertFalse(updated.branch.pr)
+                self.assertEqual(updated.branch.history, "squash")
+                self.assertEqual(updated.editor.default, "nano")
+                self.assertEqual(updated.editor.options["nano"], ["-w"])
             finally:
                 os.chdir(original_cwd)
 
@@ -2792,6 +2846,63 @@ class TestConfigCommand(TestCase):
                 self.assertEqual(stored["branch"]["history"], "merge")
                 self.assertEqual(stored["editor"]["default"], "code")
                 self.assertEqual(stored["editor"]["options"]["code"], ["-w"])
+            finally:
+                os.chdir(original_cwd)
+
+    def test_config_edit_updates_user_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    temp_path = Path(cmd[-1])
+                    payload = {
+                        "branch": {
+                            "prefix": "edited/",
+                            "pr": False,
+                            "history": "merge",
+                        },
+                        "agent": {"default": "codex", "options": {"codex": []}},
+                        "editor": {"default": "nano", "options": {"nano": ["-w"]}},
+                        "atelier": {"upgrade": "manual"},
+                    }
+                    temp_path.write_text(json.dumps(payload), encoding="utf-8")
+
+                with (
+                    patch("atelier.commands.config.exec.run_command", fake_run),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    config_cmd.show_config(
+                        SimpleNamespace(
+                            workspace_name=None,
+                            installed=False,
+                            prompt=False,
+                            reset=False,
+                            edit=True,
+                        )
+                    )
+                user_config = config.load_project_user_config(
+                    paths.project_config_user_path(project_dir)
+                )
+                self.assertIsNotNone(user_config)
+                self.assertEqual(user_config.branch.prefix, "edited/")
+                self.assertFalse(user_config.branch.pr)
+                self.assertEqual(user_config.branch.history, "merge")
+                self.assertEqual(user_config.editor.default, "nano")
+                self.assertEqual(user_config.editor.options["nano"], ["-w"])
+                self.assertEqual(user_config.atelier.upgrade, "manual")
             finally:
                 os.chdir(original_cwd)
 

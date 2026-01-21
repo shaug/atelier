@@ -222,7 +222,7 @@ def ensure_workspace_metadata(
         workspace_dir: Workspace directory path.
         agents_path: Path to ``AGENTS.md`` in the workspace.
         persist_path: Path to ``PERSIST.md`` in the workspace.
-        workspace_config_file: Path to workspace ``config.json``.
+        workspace_config_file: Path to workspace ``config.sys.json``.
         project_root: Project directory path.
         project_enlistment: Absolute path to the local enlistment.
         workspace_branch: Workspace branch name.
@@ -234,7 +234,7 @@ def ensure_workspace_metadata(
         None.
 
     Example:
-        >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/PERSIST.md"), Path("/tmp/workspace/config.json"), Path("/tmp/project"), "/repo", "feat/demo", True, "manual", "ask")
+        >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/PERSIST.md"), Path("/tmp/workspace/config.sys.json"), Path("/tmp/project"), "/repo", "feat/demo", True, "manual", "ask")
     """
     workspace_config_exists = workspace_config_file.exists()
     if not workspace_config_exists:
@@ -252,7 +252,7 @@ def ensure_workspace_metadata(
                 "upgrade": upgrade_policy,
             },
         )
-        config.write_json(workspace_config_file, workspace_config)
+        config.write_workspace_config(workspace_config_file, workspace_config)
 
     if workspace_config_exists:
         stored_pr, stored_history = config.read_workspace_branch_settings(workspace_dir)

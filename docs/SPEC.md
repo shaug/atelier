@@ -51,7 +51,8 @@ ______________________________________________________________________
 <atelier-data-dir>/
 └─ projects/
    └─ <project-key>/
-      ├─ config.json
+      ├─ config.sys.json
+      ├─ config.user.json
       ├─ AGENTS.md
       ├─ PROJECT.md
       ├─ templates/
@@ -76,7 +77,8 @@ workspaces/<workspace-key>/
 ├─ PERSIST.md
 ├─ BACKGROUND.md (optional)
 ├─ SUCCESS.md
-├─ config.json
+├─ config.sys.json
+├─ config.user.json
 └─ repo/
 ```
 
@@ -101,13 +103,19 @@ Notes:
 
 ______________________________________________________________________
 
-## 4. Project Configuration: `config.json`
+## 4. Project Configuration: `config.sys.json` + `config.user.json`
 
-`config.json` is **application-owned state** stored in the Atelier data
-directory (not the user repo). Humans may inspect it, but it is not intended for
-frequent manual editing.
+Atelier stores configuration across two files in the project directory:
 
-### v2 Schema (JSON)
+- `config.sys.json` is system-managed (IDs, origin, timestamps, managed hashes).
+- `config.user.json` is user-managed (branch defaults, agent/editor, upgrade
+  policy).
+
+Runtime configuration is the merged view of both files. Legacy `config.json`
+files are migrated once into the split layout, with a `config.json.bak` backup
+left behind.
+
+### v2 Schema (Merged JSON)
 
 ```json
 {
@@ -225,14 +233,15 @@ unavailable.
 
 ______________________________________________________________________
 
-## 6. Workspace Configuration: `config.json`
+## 6. Workspace Configuration: `config.sys.json` + `config.user.json`
 
-This file records workspace identity and provenance.
+These files record workspace identity and provenance. The merged view is used at
+runtime.
 
 The workspace branch is the canonical identifier and is used with the project
 enlistment path to form the workspace ID.
 
-### v2 Schema
+### v2 Schema (Merged)
 
 ```json
 {
@@ -339,12 +348,12 @@ precedence.
 
 ### `PROJECT.md`
 
-- Location: Atelier project directory (same directory as `config.json`)
+- Location: Atelier project directory (same directory as `config.sys.json`)
 - Purpose: define project-level agent policies that apply to all workspaces
 
 ### `SUCCESS.md`
 
-- Location: workspace root (alongside `AGENTS.md` and `config.json`)
+- Location: workspace root (alongside `AGENTS.md` and `config.sys.json`)
 - Purpose: define workspace intent, scope, success criteria, and verification
   while overriding project-level rules when needed
 - Suggested sections: Goal, Context, Constraints / Considerations, Success
@@ -375,7 +384,8 @@ Registers the current enlistment path as an Atelier project.
   data dir
 - Detects the remote default branch (origin/HEAD) when needed instead of storing
   a static `branch.default`
-- Creates `config.json` in the project directory (if missing)
+- Creates `config.sys.json` and `config.user.json` in the project directory (if
+  missing)
 - Creates `templates/AGENTS.md` if missing
 - Creates project-level `AGENTS.md` if missing (symlink when possible)
 - Creates `PROJECT.md` if missing (comment-only stub)
@@ -399,14 +409,17 @@ Inspect or update Atelier configuration.
 - Without arguments, prints the merged project config
 - With a workspace branch, prints the workspace config
 - `--installed` shows or updates installed defaults for user-editable settings
-  (`branch`, `agent`, `editor`)
+  (`branch`, `agent`, `editor`, `atelier.upgrade`)
 - `--prompt` interactively updates user-editable settings
 - `--reset` resets user-editable settings to installed defaults (with
   confirmation)
-- Installed defaults are stored at `<atelier-data-dir>/config.json` and contain
-  only the user-editable sections
-- Workspace config output cannot be combined with `--installed`, `--prompt`, or
-  `--reset`
+- Installed defaults are stored at `<atelier-data-dir>/config.user.json` and
+  contain only the user-editable sections
+- `--edit` opens a temp file containing the user config and writes only when
+  valid
+- `--edit` cannot be combined with `--prompt`
+- Workspace config output cannot be combined with `--installed`, `--prompt`,
+  `--reset`, or `--edit`
 
 ______________________________________________________________________
 
@@ -454,7 +467,7 @@ Ensures a workspace exists and launches or resumes agent work.
    hash of the workspace ID)
 4. Ensure workspace directory exists under `workspaces/<workspace-key>/`
 5. If workspace is new:
-   - Generate `config.json`
+   - Generate `config.sys.json` and `config.user.json`
    - Create workspace `AGENTS.md` (symlink to `templates/AGENTS.md` when
      possible)
    - Create `PERSIST.md`

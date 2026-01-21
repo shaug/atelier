@@ -516,8 +516,8 @@ def upgrade(args: object) -> None:
 
     if projects and not no_projects:
         for project in projects:
-            config_path = paths.project_config_path(project.root)
-            project_config = config.load_project_config(config_path)
+            config_path = paths.project_config_sys_path(project.root)
+            project_config = config.load_project_system_config(config_path)
             if not project_config:
                 continue
             atelier_section = project_config.atelier.model_copy(
@@ -526,12 +526,12 @@ def upgrade(args: object) -> None:
             project_config = project_config.model_copy(
                 update={"atelier": atelier_section}
             )
-            config.write_json(config_path, project_config)
+            config.write_project_system_config(config_path, project_config)
 
     if workspace_targets:
         for target in workspace_targets:
-            config_path = paths.workspace_config_path(target.root)
-            workspace_config = config.load_workspace_config(config_path)
+            config_path = paths.workspace_config_sys_path(target.root)
+            workspace_config = config.load_workspace_system_config(config_path)
             if not workspace_config:
                 continue
             atelier_section = workspace_config.atelier.model_copy(
@@ -540,6 +540,6 @@ def upgrade(args: object) -> None:
             workspace_config = workspace_config.model_copy(
                 update={"atelier": atelier_section}
             )
-            config.write_json(config_path, workspace_config)
+            config.write_workspace_system_config(config_path, workspace_config)
 
     say("Upgrade complete.")

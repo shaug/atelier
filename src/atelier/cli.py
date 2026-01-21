@@ -323,6 +323,10 @@ def config_command(
         bool,
         typer.Option("--reset", help="reset user-editable settings to defaults"),
     ] = False,
+    edit: Annotated[
+        bool,
+        typer.Option("--edit", help="edit user config in your editor"),
+    ] = False,
 ) -> None:
     """Show or update Atelier configuration."""
     config_cmd.show_config(
@@ -331,6 +335,7 @@ def config_command(
             installed=installed,
             prompt=prompt,
             reset=reset,
+            edit=edit,
         )
     )
 
