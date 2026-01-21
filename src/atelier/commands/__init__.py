@@ -6,6 +6,7 @@ from .edit import edit_files
 from .init import init_project
 from .list import list_workspaces
 from .open import open_workspace
+from .shell import open_workspace_shell
 from .template import render_template
 from .work import open_workspace_repo
 
@@ -16,6 +17,7 @@ __all__ = [
     "list_workspaces",
     "open_workspace",
     "open_workspace_repo",
+    "open_workspace_shell",
     "render_template",
     "show_config",
 ]

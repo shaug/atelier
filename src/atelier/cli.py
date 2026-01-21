@@ -19,6 +19,7 @@ from .commands import edit as edit_cmd
 from .commands import init as init_cmd
 from .commands import list as list_cmd
 from .commands import open as open_cmd
+from .commands import shell as shell_cmd
 from .commands import template as template_cmd
 from .commands import upgrade as upgrade_cmd
 from .commands import work as work_cmd
@@ -208,6 +209,59 @@ def work_command(
 ) -> None:
     """Open the workspace repo in the configured work editor."""
     work_cmd.open_workspace_repo(SimpleNamespace(workspace_name=workspace_name))
+
+
+@app.command(
+    "shell",
+    help="Open a shell in the workspace repo or run a command there.",
+)
+def shell_command(
+    workspace_name: Annotated[
+        str,
+        typer.Argument(help="workspace branch to open"),
+    ],
+    shell: Annotated[
+        str | None,
+        typer.Option("--shell", help="shell path or name for interactive mode"),
+    ] = None,
+    command: Annotated[
+        list[str] | None,
+        typer.Argument(help="command to run in the workspace repo"),
+    ] = None,
+) -> None:
+    """Open a shell in the workspace repo or run a command there."""
+    shell_cmd.open_workspace_shell(
+        SimpleNamespace(
+            workspace_name=workspace_name,
+            shell=shell,
+            command=command or [],
+        )
+    )
+
+
+@app.command(
+    "exec",
+    help="Run a command in the workspace repo (alias for shell command mode).",
+)
+def exec_command(
+    workspace_name: Annotated[
+        str,
+        typer.Argument(help="workspace branch to open"),
+    ],
+    command: Annotated[
+        list[str] | None,
+        typer.Argument(help="command to run in the workspace repo"),
+    ] = None,
+) -> None:
+    """Run a command in the workspace repo (alias for shell command mode)."""
+    shell_cmd.open_workspace_shell(
+        SimpleNamespace(
+            workspace_name=workspace_name,
+            shell=None,
+            command=command or [],
+        ),
+        require_command=True,
+    )
 
 
 @app.command("list", help="List workspaces for the current project.")

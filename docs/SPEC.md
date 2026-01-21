@@ -555,6 +555,39 @@ Open the workspace repo in the configured work editor.
 
 ______________________________________________________________________
 
+### `atelier shell <workspace-branch> [--] [command ...]`
+
+Open a shell in the workspace repo or run a command there.
+
+#### Behavior
+
+- Must be run inside a Git repository
+- Resolves the workspace using the project branch prefix (like `atelier open`)
+- Errors if the workspace does not exist
+- Runs commands in `<workspace>/repo`
+- Never creates or modifies workspaces
+- When no command is provided, launches an interactive shell in
+  `<workspace>/repo` and exits with the shell's status code
+- Shell selection for interactive mode:
+  - Prefer a detection library when available (e.g., `shellingham`)
+  - Fallback to `$SHELL` on POSIX or `%COMSPEC%` on Windows
+  - Final fallback: `bash`/`sh` on POSIX, `cmd.exe` on Windows
+- `--shell <path|name>` overrides interactive shell selection only
+
+______________________________________________________________________
+
+### `atelier exec <workspace-branch> [--] [command ...]`
+
+Run a command in the workspace repo.
+
+#### Behavior
+
+- Alias for `atelier shell` command-execution mode
+- Requires a command; errors if none is provided
+- Runs the command directly (no shell wrapping) in `<workspace>/repo`
+
+______________________________________________________________________
+
 ## 10. Agent Session Resumption (Best-Effort)
 
 Atelier may attempt to resume sessions by:
