@@ -20,6 +20,7 @@ class AgentSpec:
     command: tuple[str, ...]
     working_dir_mode: WorkingDirMode = "cwd"
     working_dir_flag: str | None = None
+    prompt_flag: str | None = None
     resume_subcommand: tuple[str, ...] | None = None
     resume_requires_session_id: bool = True
     version_args: tuple[str, ...] = ("--version",)
@@ -44,6 +45,8 @@ class AgentSpec:
     ) -> tuple[list[str], Path | None]:
         cmd, cwd = self._base_command(workspace_dir, options)
         if prompt:
+            if self.prompt_flag:
+                cmd.append(self.prompt_flag)
             cmd.append(prompt)
         return cmd, cwd
 
@@ -83,6 +86,9 @@ AGENTS: dict[str, AgentSpec] = {
         name="gemini",
         display_name="Gemini",
         command=("gemini",),
+        prompt_flag="--prompt-interactive",
+        resume_subcommand=("--resume",),
+        resume_requires_session_id=False,
     ),
     "copilot": AgentSpec(
         name="copilot",

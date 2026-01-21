@@ -498,9 +498,10 @@ Ensures a workspace exists and launches or resumes agent work.
    - Create workspace branch if missing
 8. Launch agent:
    - Attempt to resume an existing session when supported (Codex uses local
-     session transcripts; Claude uses `--continue`; others start fresh)
+     session transcripts; Claude uses `--continue`; Gemini uses `--resume`;
+     others start fresh)
    - Otherwise start a new session with an opening prompt containing the
-     workspace ID
+     workspace ID (Gemini uses `--prompt-interactive` to pass the prompt)
    - Use `agent.options` and the agent command for execution
    - Codex runs with `--cd <workspace-dir>`; other agents run with the workspace
      as the current working directory
@@ -541,10 +542,15 @@ Atelier may attempt to resume sessions by:
   and selecting the most recent match.
 - Claude: invoking `claude --continue`, which loads the most recent conversation
   in the current directory (no session discovery).
+- Gemini: invoking `gemini --resume`, which resumes the most recent conversation
+  in the current directory when supported.
 
 Other agents start new sessions because session discovery is not yet supported.
 
 If resumption fails, a new session is started.
+
+Resumption is per-agent; Atelier does not attempt to reuse sessions across
+different agent CLIs.
 
 Session resumption is **opportunistic** and must never be required for
 correctness.
