@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from pathlib import Path
 
 from .. import config, editor, exec, git, paths, templates
@@ -27,8 +29,33 @@ def _resolve_project() -> tuple[Path, config.ProjectConfig, str]:
     return project_root, config_payload, enlistment_path
 
 
-def _installed_template_path(*parts: str) -> Path:
-    return paths.installed_templates_dir().joinpath(*parts)
+def _edit_template(
+    *,
+    text: str,
+    target_path: Path,
+    editor_cmd: list[str],
+    cwd: Path,
+) -> None:
+    temp_path: Path | None = None
+    wrote = False
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=target_path.suffix or ".md",
+            delete=False,
+            encoding="utf-8",
+        ) as fh:
+            temp_path = Path(fh.name)
+            fh.write(text)
+        exec.run_command([*editor_cmd, str(temp_path)], cwd=cwd)
+        if temp_path is None:
+            die("failed to locate edited template")
+        paths.ensure_dir(target_path.parent)
+        shutil.copyfile(temp_path, target_path)
+        wrote = True
+    finally:
+        if wrote and temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 def render_template(args: object) -> None:
@@ -45,26 +72,28 @@ def render_template(args: object) -> None:
     project_root, project_config, _ = _resolve_project()
 
     if target == "project":
-        parts = TEMPLATE_TARGETS["project"]
-        text = templates.project_md_template(prefer_installed=True)
-        template_path = _installed_template_path(*parts)
+        project_template_path = project_root / "PROJECT.md"
+        if project_template_path.exists():
+            text = project_template_path.read_text(encoding="utf-8")
+        else:
+            text = templates.project_md_template(prefer_installed=True)
+        target_path = project_template_path
     else:
-        parts = TEMPLATE_TARGETS["workspace"]
         project_template_path = project_root / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
         if not installed and project_template_path.exists():
             text = project_template_path.read_text(encoding="utf-8")
-            template_path = project_template_path
         else:
             text = templates.success_md_template(prefer_installed=True)
-            template_path = _installed_template_path(*parts)
+        target_path = project_template_path
 
     if not edit_mode:
         say(text)
         return
 
-    if not template_path.exists():
-        paths.ensure_dir(template_path.parent)
-        template_path.write_text(text, encoding="utf-8")
-
     editor_cmd = editor.resolve_editor_command(project_config)
-    exec.run_command([*editor_cmd, str(template_path)], cwd=project_root)
+    _edit_template(
+        text=text,
+        target_path=target_path,
+        editor_cmd=editor_cmd,
+        cwd=project_root,
+    )
