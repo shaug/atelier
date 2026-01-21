@@ -94,11 +94,9 @@ AGENTS: dict[str, AgentSpec] = {
         name="copilot",
         display_name="Copilot",
         command=("copilot",),
-    ),
-    "aider": AgentSpec(
-        name="aider",
-        display_name="Aider",
-        command=("aider",),
+        prompt_flag="--interactive",
+        resume_subcommand=("--continue",),
+        resume_requires_session_id=False,
     ),
 }
 

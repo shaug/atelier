@@ -176,6 +176,13 @@ left behind.
 - Atelier validates that the configured agent is available on PATH (using
   `--version` when possible)
 
+### Supported agent CLIs (install links)
+
+- [Codex CLI](https://developers.openai.com/codex/cli/)
+- [Claude Code CLI](https://claude.com/product/claude-code)
+- [Gemini CLI](https://geminicli.com)
+- [GitHub Copilot CLI](https://github.com/features/copilot/cli)
+
 ______________________________________________________________________
 
 ## 5. `AGENTS.md` (Workspace)
@@ -499,9 +506,10 @@ Ensures a workspace exists and launches or resumes agent work.
 8. Launch agent:
    - Attempt to resume an existing session when supported (Codex uses local
      session transcripts; Claude uses `--continue`; Gemini uses `--resume`;
-     others start fresh)
+     Copilot uses `--continue`; others start fresh)
    - Otherwise start a new session with an opening prompt containing the
-     workspace ID (Gemini uses `--prompt-interactive` to pass the prompt)
+     workspace ID (Gemini uses `--prompt-interactive` to pass the prompt;
+     Copilot uses `--interactive`)
    - Use `agent.options` and the agent command for execution
    - Codex runs with `--cd <workspace-dir>`; other agents run with the workspace
      as the current working directory
@@ -544,6 +552,9 @@ Atelier may attempt to resume sessions by:
   in the current directory (no session discovery).
 - Gemini: invoking `gemini --resume`, which resumes the most recent conversation
   in the current directory when supported.
+- Copilot: invoking `copilot --continue`, which resumes the most recent session
+  in the current directory when supported (`copilot --resume` can be used
+  manually to select another session).
 
 Other agents start new sessions because session discovery is not yet supported.
 

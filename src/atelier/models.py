@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from . import agents
+
 BRANCH_HISTORY_VALUES = ("manual", "squash", "merge", "rebase")
 BranchHistory = Literal["manual", "squash", "merge", "rebase"]
 
@@ -93,6 +95,13 @@ class AgentConfig(BaseModel):
             return value.strip().lower()
         return value
 
+    @field_validator("default", mode="after")
+    @classmethod
+    def validate_default(cls, value: str) -> str:
+        if not agents.is_supported_agent(value):
+            raise ValueError(f"unsupported agent {value!r}")
+        return value
+
     @field_validator("options", mode="before")
     @classmethod
     def normalize_options(cls, value: object) -> dict[str, list[str]]:
@@ -104,6 +113,15 @@ class AgentConfig(BaseModel):
                 continue
             normalized[str(key).strip().lower()] = [str(item) for item in options]
         return normalized
+
+    @field_validator("options", mode="after")
+    @classmethod
+    def validate_options(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        unsupported = [key for key in value if not agents.is_supported_agent(key)]
+        if unsupported:
+            unsupported_str = ", ".join(sorted(unsupported))
+            raise ValueError(f"unsupported agent options: {unsupported_str}")
+        return value
 
 
 class EditorConfig(BaseModel):

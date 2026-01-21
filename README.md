@@ -86,11 +86,20 @@ Read more in [docs/why-not-git-worktree.md](docs/why-not-git-worktree.md).
 Atelier launches the agent CLI configured in `agent.default`. Install and
 authenticate the agent CLI you want to use and set `agent.default` accordingly.
 Atelier validates that the configured agent is available on your PATH (using
-`--version` when possible) and exits early if no agent CLI is available. Codex
-resumption is best-effort via local session files; Claude attempts `--continue`
-(directory-scoped; falls back to a new session on failure); Gemini attempts
-`--resume` (directory-scoped; falls back to a new session on failure); other
-agents always start new sessions.
+`--version` when possible) and exits early if no agent CLI is available.
+
+### Supported agents
+
+- [Codex CLI](https://developers.openai.com/codex/cli/)
+- [Claude Code CLI](https://claude.com/product/claude-code)
+- [Gemini CLI](https://geminicli.com)
+- [GitHub Copilot CLI](https://github.com/features/copilot/cli)
+
+### Supported agent features
+
+- Launch agents from the workspace directory
+- Best-effort session resumption when the agent CLI supports it
+- Opening prompt containing the workspace ID
 
 ## What the CLI Manages
 
