@@ -9,8 +9,8 @@ one git branch, and (optionally) one agent coding session.
 Atelier exists to eliminate branch switching, reduce cognitive load, and make
 agent-assisted development predictable, resumable, and human-interruptible.
 
-Atelier is **tool-agnostic** by design. While it integrates well with Codex, it
-does not depend on any specific LLM or editor.
+Atelier is **tool-agnostic** by design. While it integrates with Codex and other
+supported agent CLIs, it does not depend on any specific LLM or editor.
 
 ______________________________________________________________________
 
@@ -130,12 +130,11 @@ left behind.
     "history": "manual"
   },
   "agent": {
-    "default": "codex",
+    "default": "agent-name",
     "options": {
-      "codex": [
+      "agent-name": [
         "--full-auto"
-      ],
-      "claude": []
+      ]
     }
   },
   "editor": {
@@ -172,6 +171,9 @@ left behind.
   supported values: `always`, `ask`, `manual`)
 - `agent.options` and `editor.options` are **static argv fragments only**
 - No templating, interpolation, or logic is supported in config
+- Agent CLIs are assumed to be installed and authenticated by the user
+- Atelier validates that the configured agent is available on PATH (using
+  `--version` when possible)
 
 ______________________________________________________________________
 
@@ -208,6 +210,9 @@ This project uses **Atelier**, a workspace-based workflow for agent-assisted dev
 - Do not expand scope beyond what is written there.
 - Prefer small, reviewable changes over large refactors.
 - Avoid unrelated cleanup unless explicitly required.
+
+Ensure the configured agent CLI is installed and authenticated
+(see `agent.default`).
 
 ## Agent Context
 
@@ -483,11 +488,13 @@ Ensures a workspace exists and launches or resumes agent work.
    - Checkout default branch
    - Create workspace branch if missing
 8. Launch agent:
-   - Attempt to resume an existing Codex session by scanning local Codex
-     transcripts
+   - Attempt to resume an existing session when supported (Codex uses local
+     session transcripts; others start fresh)
    - Otherwise start a new session with an opening prompt containing the
      workspace ID
-   - Use `agent.options` and `codex -C <workspace-dir>` for execution
+   - Use `agent.options` and the agent command for execution
+   - Codex runs with `--cd <workspace-dir>`; other agents run with the workspace
+     as the current working directory
 
 #### Flags
 
@@ -513,7 +520,7 @@ Otherwise, `atelier open` fails with a clear error message.
 
 ______________________________________________________________________
 
-## 10. Codex Session Resumption (Best-Effort)
+## 10. Agent Session Resumption (Best-Effort)
 
 Atelier may attempt to resume Codex sessions by:
 
@@ -523,6 +530,8 @@ Atelier may attempt to resume Codex sessions by:
   atelier:<project.enlistment>:<workspace.branch>
   ```
 - Selecting the most recent match
+
+Other agents start new sessions because session discovery is not yet supported.
 
 If resumption fails, a new session is started.
 

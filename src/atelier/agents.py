@@ -1,0 +1,169 @@
+"""Agent registry and invocation helpers."""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Literal
+
+WorkingDirMode = Literal["cwd", "flag"]
+
+
+@dataclass(frozen=True)
+class AgentSpec:
+    """Describe how to launch and resume an agent CLI."""
+
+    name: str
+    display_name: str
+    command: tuple[str, ...]
+    working_dir_mode: WorkingDirMode = "cwd"
+    working_dir_flag: str | None = None
+    resume_subcommand: tuple[str, ...] | None = None
+    version_args: tuple[str, ...] = ("--version",)
+
+    def _base_command(
+        self, workspace_dir: Path, options: list[str]
+    ) -> tuple[list[str], Path | None]:
+        cmd = list(self.command)
+        cwd: Path | None = None
+        if self.working_dir_mode == "flag":
+            if not self.working_dir_flag:
+                raise ValueError("working_dir_flag required for flag mode")
+            cmd.extend([self.working_dir_flag, str(workspace_dir)])
+        else:
+            cwd = workspace_dir
+        if options:
+            cmd.extend(options)
+        return cmd, cwd
+
+    def build_start_command(
+        self, workspace_dir: Path, options: list[str], prompt: str
+    ) -> tuple[list[str], Path | None]:
+        cmd, cwd = self._base_command(workspace_dir, options)
+        if prompt:
+            cmd.append(prompt)
+        return cmd, cwd
+
+    def build_resume_command(
+        self, workspace_dir: Path, options: list[str], session_id: str
+    ) -> tuple[list[str], Path | None] | None:
+        if self.resume_subcommand is None:
+            return None
+        cmd, cwd = self._base_command(workspace_dir, options)
+        cmd.extend([*self.resume_subcommand, session_id])
+        return cmd, cwd
+
+
+DEFAULT_AGENT = "codex"
+
+AGENTS: dict[str, AgentSpec] = {
+    "codex": AgentSpec(
+        name="codex",
+        display_name="Codex",
+        command=("codex",),
+        working_dir_mode="flag",
+        working_dir_flag="--cd",
+        resume_subcommand=("resume",),
+    ),
+    "claude": AgentSpec(
+        name="claude",
+        display_name="Claude",
+        command=("claude",),
+    ),
+    "gemini": AgentSpec(
+        name="gemini",
+        display_name="Gemini",
+        command=("gemini",),
+    ),
+    "copilot": AgentSpec(
+        name="copilot",
+        display_name="Copilot",
+        command=("copilot",),
+    ),
+    "aider": AgentSpec(
+        name="aider",
+        display_name="Aider",
+        command=("aider",),
+    ),
+}
+
+
+def normalize_agent_name(value: str | None) -> str:
+    if value is None:
+        return ""
+    return value.strip().lower()
+
+
+def supported_agents() -> tuple[AgentSpec, ...]:
+    return tuple(AGENTS.values())
+
+
+def supported_agent_names() -> tuple[str, ...]:
+    return tuple(AGENTS.keys())
+
+
+def get_agent(name: str) -> AgentSpec | None:
+    normalized = normalize_agent_name(name)
+    if not normalized:
+        return None
+    return AGENTS.get(normalized)
+
+
+def is_supported_agent(name: str | None) -> bool:
+    if name is None:
+        return False
+    return normalize_agent_name(name) in AGENTS
+
+
+def probe_agent_version(agent: AgentSpec) -> str | None:
+    """Attempt to read a version string from the agent CLI."""
+    cmd = [*agent.command, *agent.version_args]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    if result.returncode != 0:
+        return None
+    output = (result.stdout or result.stderr).strip()
+    if not output:
+        return None
+    return output.splitlines()[0].strip() or None
+
+
+def available_agents() -> dict[str, str | None]:
+    """Return available agent names mapped to their version string when known."""
+    available: dict[str, str | None] = {}
+    for agent in AGENTS.values():
+        executable = agent.command[0]
+        if shutil.which(executable) is None:
+            continue
+        available[agent.name] = probe_agent_version(agent)
+    return available
+
+
+def available_agent_names() -> tuple[str, ...]:
+    return tuple(available_agents().keys())
+
+
+def unique_available_agent(available: Iterable[str]) -> str | None:
+    names = list(available)
+    if len(names) == 1:
+        return names[0]
+    return None
+
+
+def find_resume_session(
+    agent: AgentSpec, project_enlistment: str, workspace_branch: str
+) -> str | None:
+    if agent.name != "codex":
+        return None
+    from . import sessions
+
+    return sessions.find_codex_session(project_enlistment, workspace_branch)

@@ -81,6 +81,15 @@ Read more in [docs/why-not-git-worktree.md](docs/why-not-git-worktree.md).
   initialize is a separate project), not Git origin
 - The filesystem is the source of truth
 
+## Agent Setup
+
+Atelier launches the agent CLI configured in `agent.default`. Install and
+authenticate the agent CLI you want to use and set `agent.default` accordingly.
+Atelier validates that the configured agent is available on your PATH (using
+`--version` when possible) and exits early if no agent CLI is available. Codex
+resumption is best-effort via local session files; other agents always start new
+sessions.
+
 ## What the CLI Manages
 
 Atelier is intentionally small. The CLI:
@@ -92,7 +101,7 @@ Atelier is intentionally small. The CLI:
 - bootstraps policy/context files (`AGENTS.md`, `PROJECT.md`, `SUCCESS.md`,
   `PERSIST.md`, `BACKGROUND.md`)
 - clones the repo and checks out workspace branches on demand
-- launches your editor and Codex in a predictable way
+- launches your editor and configured agent in a predictable way
 
 ## Project Layout
 
@@ -159,7 +168,7 @@ Use `--raw` to treat the argument as the full branch name (no prefix lookup).
 - prompt to remove the finalization tag `atelier/<branch-name>/finalized` if
   present (continuing either way)
 - open the configured editor for new workspaces (`SUCCESS.md` by default), then
-  launch Codex
+  launch the configured agent
 
 List workspaces:
 
@@ -223,7 +232,7 @@ Options:
 - `--branch-prefix`: Prefix for workspace branches (e.g., `scott/`).
 - `--branch-pr`: Whether workspace branches require pull requests.
 - `--branch-history`: History policy (`manual`, `squash`, `merge`, `rebase`).
-- `--agent`: Agent name (currently only `codex`).
+- `--agent`: Agent name.
 - `--editor`: Editor command (e.g., `cursor --reuse-window`).
 
 Example:
@@ -296,11 +305,11 @@ atelier edit scott/feat/new-search
 ### `atelier open [workspace-branch]`
 
 Create or open a workspace, ensuring its `repo/` checkout exists, open your
-editor for new workspaces (`SUCCESS.md` by default), then launch Codex. New
-workspaces include managed `AGENTS.md`/`PERSIST.md`, and `BACKGROUND.md` when
-the branch already exists. If the workspace repo has the finalization tag
-`atelier/<branch-name>/finalized`, `atelier open` will prompt to remove it but
-continues either way.
+editor for new workspaces (`SUCCESS.md` by default), then launch the configured
+agent. New workspaces include managed `AGENTS.md`/`PERSIST.md`, and
+`BACKGROUND.md` when the branch already exists. If the workspace repo has the
+finalization tag `atelier/<branch-name>/finalized`, `atelier open` will prompt
+to remove it but continues either way.
 
 Usage:
 

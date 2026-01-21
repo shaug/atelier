@@ -63,6 +63,17 @@ class DummyResult:
         self.stdout = stdout
 
 
+class BaseAtelierTestCase(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        patcher = patch(
+            "atelier.agents.available_agent_names",
+            return_value=("codex", "claude"),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
 def write_project_config(project_dir: Path, enlistment_path: str) -> dict:
     project_dir.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -237,7 +248,7 @@ def make_fake_git(
     return fake_run
 
 
-class TestNormalizeOriginUrl(TestCase):
+class TestNormalizeOriginUrl(BaseAtelierTestCase):
     def test_owner_name_with_host(self) -> None:
         self.assertEqual(
             git.normalize_origin_url("github.com/owner/repo"),
@@ -257,7 +268,7 @@ class TestNormalizeOriginUrl(TestCase):
         self.assertEqual(git.normalize_origin_url(value), "github.com/owner/repo")
 
 
-class TestResolveEditorCommand(TestCase):
+class TestResolveEditorCommand(BaseAtelierTestCase):
     def test_config_precedence(self) -> None:
         config = {
             "editor": {
@@ -278,7 +289,7 @@ class TestResolveEditorCommand(TestCase):
             self.assertEqual(editor.resolve_editor_command({}), ["vi"])
 
 
-class TestInitProject(TestCase):
+class TestInitProject(BaseAtelierTestCase):
     def test_init_creates_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -572,7 +583,7 @@ class TestInitProject(TestCase):
             self.assertEqual(user_config.atelier.upgrade, "manual")
 
 
-class TestListWorkspaces(TestCase):
+class TestListWorkspaces(BaseAtelierTestCase):
     def test_list_reports_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -683,7 +694,7 @@ class TestListWorkspaces(TestCase):
                 os.chdir(original_cwd)
 
 
-class TestCleanWorkspaces(TestCase):
+class TestCleanWorkspaces(BaseAtelierTestCase):
     def test_clean_default_deletes_finalized_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1037,7 +1048,7 @@ class TestCleanWorkspaces(TestCase):
                 os.chdir(original_cwd)
 
 
-class TestCleanFlags(TestCase):
+class TestCleanFlags(BaseAtelierTestCase):
     def test_clean_short_flags(self) -> None:
         captured: dict[str, object] = {}
 
@@ -1055,7 +1066,7 @@ class TestCleanFlags(TestCase):
         self.assertTrue(captured["force"])
 
 
-class TestUpgradeFlags(TestCase):
+class TestUpgradeFlags(BaseAtelierTestCase):
     def test_upgrade_flags(self) -> None:
         captured: dict[str, object] = {}
 
@@ -1079,7 +1090,7 @@ class TestUpgradeFlags(TestCase):
         self.assertEqual(captured["workspaces"], ["alpha", "beta"])
 
 
-class TestFindCodexSession(TestCase):
+class TestFindCodexSession(BaseAtelierTestCase):
     def test_returns_most_recent_match(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
@@ -1164,7 +1175,7 @@ class TestFindCodexSession(TestCase):
             self.assertEqual(session, session_id)
 
 
-class TestOpenWorkspace(TestCase):
+class TestOpenWorkspace(BaseAtelierTestCase):
     def test_open_creates_workspace_and_launches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1260,7 +1271,8 @@ class TestOpenWorkspace(TestCase):
             templates_dir = project_dir / "templates"
             templates_dir.mkdir(parents=True, exist_ok=True)
 
-            canonical = templates.project_agents_template(prefer_installed=True)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                canonical = templates.project_agents_template(prefer_installed=True)
             old_text = f"{canonical}\nlegacy\n"
             (templates_dir / "AGENTS.md").write_text(old_text, encoding="utf-8")
             (project_dir / "AGENTS.md").write_text(old_text, encoding="utf-8")
@@ -1315,7 +1327,8 @@ class TestOpenWorkspace(TestCase):
             templates_dir = project_dir / "templates"
             templates_dir.mkdir(parents=True, exist_ok=True)
 
-            canonical = templates.project_agents_template(prefer_installed=True)
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                canonical = templates.project_agents_template(prefer_installed=True)
             old_text = f"{canonical}\nlegacy\n"
             (templates_dir / "AGENTS.md").write_text(old_text, encoding="utf-8")
             (project_dir / "AGENTS.md").write_text(canonical, encoding="utf-8")
@@ -2666,7 +2679,7 @@ class TestOpenWorkspace(TestCase):
                 os.chdir(original_cwd)
 
 
-class TestConfigCommand(TestCase):
+class TestConfigCommand(BaseAtelierTestCase):
     def test_config_prompt_updates_project_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2704,6 +2717,53 @@ class TestConfigCommand(TestCase):
                 self.assertEqual(updated.branch.history, "rebase")
                 self.assertEqual(updated.editor.default, "vim")
                 self.assertEqual(updated.editor.options["vim"], ["-w"])
+            finally:
+                os.chdir(original_cwd)
+
+    def test_config_prompt_skips_agent_when_only_one_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                responses = iter(["team/", "false", "rebase", "vim -w"])
+                call_count = {"count": 0}
+
+                def fake_input(_: str) -> str:
+                    call_count["count"] += 1
+                    return next(responses)
+
+                with (
+                    patch("builtins.input", fake_input),
+                    patch(
+                        "atelier.agents.available_agent_names",
+                        return_value=("codex",),
+                    ),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    config_cmd.show_config(
+                        SimpleNamespace(
+                            workspace_name=None,
+                            installed=False,
+                            prompt=True,
+                            reset=False,
+                        )
+                    )
+                config_path = paths.project_config_path(project_dir)
+                updated = config.load_project_config(config_path)
+                self.assertIsNotNone(updated)
+                self.assertEqual(updated.agent.default, "codex")
+                self.assertEqual(call_count["count"], 4)
             finally:
                 os.chdir(original_cwd)
 
@@ -2907,7 +2967,7 @@ class TestConfigCommand(TestCase):
                 os.chdir(original_cwd)
 
 
-class TestTemplateCommand(TestCase):
+class TestTemplateCommand(BaseAtelierTestCase):
     def test_template_project_uses_installed_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -3018,7 +3078,7 @@ class TestTemplateCommand(TestCase):
                 os.chdir(original_cwd)
 
 
-class TestEditCommand(TestCase):
+class TestEditCommand(BaseAtelierTestCase):
     def test_edit_project_creates_project_md(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

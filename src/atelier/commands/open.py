@@ -9,13 +9,13 @@ from typing import Callable
 
 from .. import (
     __version__,
+    agents,
     config,
     editor,
     exec,
     git,
     paths,
     project,
-    sessions,
     templates,
     workspace,
 )
@@ -661,10 +661,11 @@ def open_workspace(args: object) -> None:
         )
 
     agent_default = config_payload.agent.default
-    if agent_default != "codex":
-        die("only 'codex' is supported as the agent in v2")
+    agent_spec = agents.get_agent(agent_default)
+    if agent_spec is None:
+        die(f"unsupported agent {agent_default!r}")
 
-    agent_options = config_payload.agent.options.get("codex", [])
+    agent_options = config_payload.agent.options.get(agent_spec.name, [])
 
     if is_new_workspace and existing_branch:
         workspace.write_background_snapshot(
@@ -680,20 +681,38 @@ def open_workspace(args: object) -> None:
             workspace_target = workspace_policy_path
         exec.run_command([*editor_cmd, str(workspace_target)], cwd=workspace_dir)
 
-    session_id = sessions.find_codex_session(project_enlistment, workspace_branch)
+    session_id = agents.find_resume_session(
+        agent_spec, project_enlistment, workspace_branch
+    )
     if session_id:
-        say(f"Resuming Codex session {session_id}")
-        exec.run_command(
-            ["codex", "--cd", str(workspace_dir), *agent_options, "resume", session_id]
+        resume_command = agent_spec.build_resume_command(
+            workspace_dir, agent_options, session_id
         )
-    else:
-        opening_prompt = workspace.workspace_identifier(
-            project_enlistment, workspace_branch
-        )
-        say("Starting new Codex session")
-        exec.run_command(
-            ["codex", "--cd", str(workspace_dir), *agent_options, opening_prompt]
-        )
+        if resume_command is not None:
+            resume_cmd, resume_cwd = resume_command
+            say(f"Resuming {agent_spec.display_name} session {session_id}")
+            result = exec.run_command_status(resume_cmd, cwd=resume_cwd)
+            if result is not None and result.returncode == 0:
+                return
+            if result is None:
+                warn(
+                    f"failed to resume {agent_spec.display_name} session; "
+                    "command not found; starting new session"
+                )
+            else:
+                warn(
+                    f"failed to resume {agent_spec.display_name} session "
+                    f"(exit code {result.returncode}); starting new session"
+                )
+
+    opening_prompt = workspace.workspace_identifier(
+        project_enlistment, workspace_branch
+    )
+    say(f"Starting new {agent_spec.display_name} session")
+    start_cmd, start_cwd = agent_spec.build_start_command(
+        workspace_dir, agent_options, opening_prompt
+    )
+    exec.run_command(start_cmd, cwd=start_cwd)
 
 
 def resolve_implicit_workspace_name(repo_root: Path, _config_payload: object) -> str:

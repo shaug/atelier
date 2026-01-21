@@ -18,7 +18,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from . import __version__, paths, templates
+from . import __version__, agents, paths, templates
 from .editor import system_editor_default
 from .io import die, prompt, select
 from .models import (
@@ -494,7 +494,9 @@ def load_project_config(path: Path) -> ProjectConfig | None:
     if not system_config:
         return None
     user_config = load_project_user_config(user_path)
-    return merge_project_configs(system_config, user_config)
+    merged = merge_project_configs(system_config, user_config)
+    ensure_agent_available(merged.agent.default, label="project")
+    return merged
 
 
 def parse_workspace_config(
@@ -794,6 +796,25 @@ def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
     return payload
 
 
+def ensure_agent_available(
+    agent_name: str,
+    *,
+    available: tuple[str, ...] | None = None,
+    label: str | None = None,
+) -> tuple[str, ...]:
+    """Ensure at least one agent CLI is available and the configured agent exists."""
+    resolved = available or agents.available_agent_names()
+    if not resolved:
+        die(
+            "no supported agent CLIs found on PATH; "
+            "install at least one agent to use Atelier"
+        )
+    if agent_name not in resolved:
+        prefix = f"{label} " if label else ""
+        die(f"{prefix}configured agent {agent_name!r} is not available on PATH")
+    return resolved
+
+
 def _default_editor_command(config_payload: ProjectConfig | ProjectUserConfig) -> str:
     editor_prompt_default = None
     editor_default_default = config_payload.editor.default
@@ -824,11 +845,11 @@ def default_user_config() -> ProjectUserConfig:
     editor_options: dict[str, list[str]] = {}
     if editor_default:
         editor_options[editor_default] = editor_parts[1:]
-    agent_options = {"codex": []}
+    agent_options = {agents.DEFAULT_AGENT: []}
     return base.model_copy(
         update={
             "branch": base.branch,
-            "agent": AgentConfig(default="codex", options=agent_options),
+            "agent": AgentConfig(default=agents.DEFAULT_AGENT, options=agent_options),
             "editor": EditorConfig(default=editor_default, options=editor_options),
             "atelier": AtelierUserSection(upgrade="ask"),
         }
@@ -856,7 +877,8 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
     if not _path_has_value(payload, "agent", "default"):
         agent = agent.model_copy(update={"default": default_config.agent.default})
     agent_options = dict(agent.options)
-    agent_options.setdefault("codex", [])
+    if agent.default:
+        agent_options.setdefault(agent.default, [])
     agent = agent.model_copy(update={"options": agent_options})
 
     editor_config = parsed.editor
@@ -884,7 +906,9 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
             "atelier": atelier_section,
         }
     )
-    return merge_project_configs(ProjectSystemConfig(), parsed)
+    merged = merge_project_configs(ProjectSystemConfig(), parsed)
+    ensure_agent_available(merged.agent.default, label="installed defaults")
+    return merged
 
 
 def write_installed_defaults(
@@ -983,16 +1007,34 @@ def build_project_config(
     else:
         branch_history = branch_history_default
 
-    agent_default_default = existing_config.agent.default or "codex"
+    available_agents = agents.available_agent_names()
+    if not available_agents:
+        die(
+            "no supported agent CLIs found on PATH; "
+            "install at least one agent to use Atelier"
+        )
+    agent_default_default = existing_config.agent.default or agents.DEFAULT_AGENT
+    if not agents.is_supported_agent(agent_default_default):
+        agent_default_default = agents.DEFAULT_AGENT
     agent_arg = read_arg(args, "agent")
     if agent_arg is not None:
-        agent_default = str(agent_arg)
+        agent_default = agents.normalize_agent_name(str(agent_arg))
     elif should_prompt("agent", "default"):
-        agent_default = select("Agent", ("codex",), agent_default_default)
+        unique_agent = agents.unique_available_agent(available_agents)
+        if unique_agent is not None:
+            agent_default = unique_agent
+        else:
+            default_choice = (
+                agent_default_default
+                if agent_default_default in available_agents
+                else available_agents[0]
+            )
+            agent_default = select("Agent", available_agents, default_choice)
     else:
-        agent_default = agent_default_default
-    if agent_default != "codex":
-        die("only 'codex' is supported as the agent in v2")
+        agent_default = agents.normalize_agent_name(agent_default_default)
+    if not agents.is_supported_agent(agent_default):
+        die(f"unsupported agent {agent_default!r}")
+    ensure_agent_available(agent_default, available=available_agents)
 
     editor_prompt_default = _default_editor_command(existing_config)
     editor_arg = read_arg(args, "editor")
@@ -1023,7 +1065,7 @@ def build_project_config(
     atelier_managed_files = dict(existing_config.atelier.managed_files)
 
     agent_options = dict(existing_config.agent.options)
-    agent_options.setdefault("codex", [])
+    agent_options.setdefault(agent_default, [])
 
     editor_options = dict(existing_config.editor.options)
     if editor_input_options and editor_default:

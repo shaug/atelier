@@ -84,6 +84,15 @@ class AgentConfig(BaseModel):
     default: str = "codex"
     options: dict[str, list[str]] = Field(default_factory=dict)
 
+    @field_validator("default", mode="before")
+    @classmethod
+    def normalize_default(cls, value: object) -> object:
+        if value is None:
+            return "codex"
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
     @field_validator("options", mode="before")
     @classmethod
     def normalize_options(cls, value: object) -> dict[str, list[str]]:
@@ -93,7 +102,7 @@ class AgentConfig(BaseModel):
         for key, options in value.items():
             if not isinstance(options, list):
                 continue
-            normalized[str(key)] = [str(item) for item in options]
+            normalized[str(key).strip().lower()] = [str(item) for item in options]
         return normalized
 
 

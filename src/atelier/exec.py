@@ -67,3 +67,21 @@ def try_run_command(
         return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
     except FileNotFoundError:
         return None
+
+
+def run_command_status(
+    cmd: list[str], cwd: Path | None = None
+) -> subprocess.CompletedProcess[str] | None:
+    """Run a command and return the ``CompletedProcess`` or ``None`` if missing.
+
+    Args:
+        cmd: Command and arguments to execute.
+        cwd: Optional working directory.
+
+    Returns:
+        ``CompletedProcess`` on execution, otherwise ``None``.
+    """
+    try:
+        return subprocess.run(cmd, cwd=cwd, check=False)
+    except FileNotFoundError:
+        return None

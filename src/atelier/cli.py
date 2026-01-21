@@ -97,7 +97,13 @@ def init_command(
             help="branch history policy (manual|squash|merge|rebase)",
         ),
     ] = None,
-    agent: Annotated[str | None, typer.Option("--agent", help="agent name")] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option(
+            "--agent",
+            help="agent name",
+        ),
+    ] = None,
     editor: Annotated[
         str | None, typer.Option("--editor", help="editor command")
     ] = None,
@@ -108,7 +114,7 @@ def init_command(
         branch_prefix: Prefix for new workspace branches (optional).
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
-        agent: Agent name (currently only ``codex``).
+        agent: Agent name.
         editor: Editor command used to open ``SUCCESS.md``.
     Returns:
         None.
@@ -129,7 +135,7 @@ def init_command(
 
 @app.command(
     "open",
-    help="Create or open a workspace, ensure its checkout, then launch Codex.",
+    help="Create or open a workspace, ensure its checkout, then launch the agent.",
 )
 def open_command(
     workspace_name: Annotated[

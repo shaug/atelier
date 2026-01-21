@@ -36,6 +36,9 @@ development.
 - After integration, create the local finalization tag
   `atelier/<branch-name>/finalized` (do not push); `atelier clean` relies on it.
 
+Ensure the configured agent CLI is installed and authenticated (see
+`agent.default`).
+
 ## Agent Context
 
 - When operating in a workspace, treat it as the entire world.
