@@ -36,8 +36,8 @@ development.
 - Prefer small, reviewable changes over large refactors.
 - Avoid unrelated cleanup unless explicitly required.
 - After integration (as specified in `PERSIST.md`), create the local
-  finalization tag `atelier/<branch-name>/finalized` (do not push); `atelier
-  clean` relies on it.
+  finalization tag `atelier/<branch-name>/finalized` (do not push);
+  `atelier clean` relies on it.
 
 Ensure the configured agent CLI is installed and authenticated (see
 `agent.default`).

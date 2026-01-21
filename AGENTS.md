@@ -138,8 +138,8 @@ ______________________________________________________________________
 ## Commit Messages
 
 - Use Conventional Commits format: `<type>(<scope>): <subject>`
-- Allowed types: feat, fix, docs, refactor, test, chore, build, ci, perf,
-  style, revert
+- Allowed types: feat, fix, docs, refactor, test, chore, build, ci, perf, style,
+  revert
 - Subject is imperative, present tense, no trailing period.
 - Every commit must include a body that summarizes all changes since the
   previous commit. For the first commit, summarize the full change set.
