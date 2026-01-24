@@ -44,6 +44,7 @@ app = typer.Typer(
 )
 
 _COMPLETE_ENV = "_ATELIER_COMPLETE"
+_DEFAULT_BRANCH_EXCLUDES = {"main", "master"}
 
 
 def _ensure_completion_env() -> None:
@@ -100,10 +101,13 @@ def _resolve_completion_project(
 
 
 def _collect_local_branches(
-    repo_root: Path, git_path: str | None
+    repo_root: Path, git_path: str | None, prefix: str
 ) -> list[str]:
+    if not prefix:
+        return []
+    ref_glob = f"refs/heads/{prefix}*"
     cmd = git.git_command(
-        ["-C", str(repo_root), "for-each-ref", "--format=%(refname:short)", "refs/heads"],
+        ["-C", str(repo_root), "for-each-ref", "--format=%(refname:short)", ref_glob],
         git_path=git_path,
     )
     result = try_run_command(cmd)
@@ -113,7 +117,11 @@ def _collect_local_branches(
 
 
 def _filter_completion_candidates(values: list[str], incomplete: str) -> list[str]:
-    filtered = [value for value in values if value and value.startswith(incomplete)]
+    filtered = [
+        value
+        for value in values
+        if value and value.startswith(incomplete) and value not in _DEFAULT_BRANCH_EXCLUDES
+    ]
     seen: set[str] = set()
     deduped: list[str] = []
     for value in filtered:
@@ -142,7 +150,7 @@ def _workspace_name_shell_complete(
     except Exception:
         workspaces = []
     names = [item.get("name", "") for item in workspaces if item.get("name")]
-    names.extend(_collect_local_branches(repo_root, git_path))
+    names.extend(_collect_local_branches(repo_root, git_path, incomplete))
     return _filter_completion_candidates(names, incomplete)
 
 

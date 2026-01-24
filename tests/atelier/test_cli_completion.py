@@ -64,7 +64,28 @@ def test_workspace_completion_filters_and_dedupes(monkeypatch):
         lambda *args, **kwargs: [{"name": "feat/one"}, {"name": "bug/two"}],
     )
     monkeypatch.setattr(
-        cli, "_collect_local_branches", lambda *args, **kwargs: ["bug/two", "chore/three"]
+        cli,
+        "_collect_local_branches",
+        lambda *args, **kwargs: ["bug/two", "chore/three"],
     )
 
     assert cli._workspace_name_shell_complete(None, None, "b") == ["bug/two"]
+
+
+def test_workspace_completion_excludes_default_branches(monkeypatch):
+    config_payload = config.ProjectConfig()
+    monkeypatch.setattr(
+        cli,
+        "_resolve_completion_project",
+        lambda: (Path("/repo"), Path("/project"), config_payload, None),
+    )
+    monkeypatch.setattr(
+        cli.workspace,
+        "collect_workspaces",
+        lambda *args, **kwargs: [{"name": "main"}, {"name": "master"}],
+    )
+    monkeypatch.setattr(
+        cli, "_collect_local_branches", lambda *args, **kwargs: ["main", "master"]
+    )
+
+    assert cli._workspace_name_shell_complete(None, None, "m") == []
