@@ -346,6 +346,50 @@ def collect_workspace_template_updates(
     return updates
 
 
+def backfill_missing_workspace_files(
+    *,
+    workspace_dir: Path,
+    workspace_config: config.WorkspaceConfig,
+    project_dir: Path,
+) -> None:
+    workspace_label_text = workspace_config.workspace.branch
+    agents_path = workspace_dir / "AGENTS.md"
+    persist_path = workspace_dir / "PERSIST.md"
+    project_template_path = project_dir / paths.TEMPLATES_DIRNAME / "AGENTS.md"
+    canonical_agents = templates.workspace_agents_template(prefer_installed=True)
+
+    if not agents_path.exists():
+        if agents_path.is_symlink():
+            agents_path.unlink()
+        warn(
+            f"workspace {workspace_label_text} is missing AGENTS.md; "
+            "restoring managed file"
+        )
+        if project_template_path.exists():
+            link_or_copy(project_template_path, agents_path)
+            source_text = project_template_path.read_text(encoding="utf-8")
+        else:
+            source_text = canonical_agents
+            agents_path.write_text(source_text, encoding="utf-8")
+        if source_text == canonical_agents:
+            config.update_workspace_managed_files(
+                workspace_dir, {"AGENTS.md": config.hash_text(source_text)}
+            )
+
+    if not persist_path.exists():
+        if persist_path.is_symlink():
+            persist_path.unlink()
+        warn(
+            f"workspace {workspace_label_text} is missing PERSIST.md; "
+            "restoring managed file"
+        )
+        persist_text = templates.render_persist(
+            workspace_config.workspace.branch_pr,
+            workspace_config.workspace.branch_history,
+        )
+        persist_path.write_text(persist_text, encoding="utf-8")
+
+
 def open_workspace(args: object) -> None:
     """Create or open a workspace and launch the agent session.
 
@@ -532,6 +576,11 @@ def open_workspace(args: object) -> None:
             shutil.copyfile(workspace_policy_template, workspace_policy_target)
 
     if workspace_config is not None:
+        backfill_missing_workspace_files(
+            workspace_dir=workspace_dir,
+            workspace_config=workspace_config,
+            project_dir=project_dir,
+        )
         workspace_upgrade_policy = project_upgrade_policy
         if workspace_config.atelier.upgrade is not None:
             workspace_upgrade_policy = config.resolve_upgrade_policy(

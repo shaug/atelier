@@ -1107,8 +1107,80 @@ class TestOpenWorkspace:
                 assert workspace_path.read_text(encoding="utf-8") == "workspace stub\n"
                 assert int(agents_path.stat().st_mtime) == 1_000_000_000
                 assert int(workspace_path.stat().st_mtime) == 1_000_000_000
-                assert not (workspace_dir / "PERSIST.md").exists()
+                persist_content = (workspace_dir / "PERSIST.md").read_text(
+                    encoding="utf-8"
+                )
+                assert "Pull requests expected: no" in persist_content
+                assert "History policy: squash" in persist_content
                 assert not (workspace_dir / "BACKGROUND.md").exists()
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_backfills_missing_managed_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            workspace_branch = "scott/feat-demo"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
+            )
+            workspace_dir.mkdir(parents=True)
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
+            success_path = workspace_dir / "SUCCESS.md"
+            success_path.write_text("workspace stub\n", encoding="utf-8")
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir()
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    return None
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(stdout=RAW_ORIGIN),
+                    ),
+                    patch(
+                        "atelier.commands.open.workspace.resolve_workspace_target",
+                        return_value=(workspace_branch, workspace_dir, True),
+                    ),
+                    patch("atelier.git.git_is_repo", return_value=True),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.git.git_tag_exists", return_value=False),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+
+                assert (workspace_dir / "AGENTS.md").exists()
+                assert (workspace_dir / "PERSIST.md").exists()
+                assert success_path.read_text(encoding="utf-8") == "workspace stub\n"
+                agents_content = (workspace_dir / "AGENTS.md").read_text(
+                    encoding="utf-8"
+                )
+                assert "Atelier Agent Contract" in agents_content
+                persist_content = (workspace_dir / "PERSIST.md").read_text(
+                    encoding="utf-8"
+                )
+                assert "Pull requests expected: yes" in persist_content
+                assert "History policy: manual" in persist_content
             finally:
                 os.chdir(original_cwd)
 
