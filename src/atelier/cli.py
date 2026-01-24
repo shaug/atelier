@@ -7,10 +7,16 @@ Example:
     $ atelier --help
 """
 
+import os
+import sys
 from types import SimpleNamespace
 from typing import Annotated
 
 import typer
+try:
+    from click.shell_completion import split_arg_string
+except ImportError:  # pragma: no cover - legacy Click fallback
+    from click.parser import split_arg_string
 
 from . import __version__
 from .commands import clean as clean_cmd
@@ -33,6 +39,38 @@ app = typer.Typer(
         "or resume a workspace that owns its own checkout and agent session."
     ),
 )
+
+_COMPLETE_ENV = "_ATELIER_COMPLETE"
+
+
+def _ensure_completion_env() -> None:
+    """Fill missing completion vars so Click can parse completion requests."""
+    if _COMPLETE_ENV not in os.environ:
+        return
+    if "COMP_WORDS" in os.environ and "COMP_CWORD" in os.environ:
+        return
+
+    comp_line = os.environ.get("COMP_LINE")
+    comp_point = os.environ.get("COMP_POINT")
+    if comp_line is not None and comp_point is not None:
+        try:
+            point = int(comp_point)
+        except ValueError:
+            point = len(comp_line)
+        line = comp_line[:point]
+        words = split_arg_string(line)
+        if not words:
+            prog = os.path.basename(sys.argv[0]) if sys.argv else "atelier"
+            line = prog
+            words = [prog]
+        cword = len(words) if line.endswith(" ") else max(len(words) - 1, 0)
+        os.environ.setdefault("COMP_WORDS", line)
+        os.environ.setdefault("COMP_CWORD", str(cword))
+        return
+
+    prog = os.path.basename(sys.argv[0]) if sys.argv else "atelier"
+    os.environ.setdefault("COMP_WORDS", prog)
+    os.environ.setdefault("COMP_CWORD", "0")
 
 
 def _version_callback(value: bool) -> None:
@@ -558,6 +596,7 @@ def main() -> None:
         >>> callable(main)
         True
     """
+    _ensure_completion_env()
     app()
 
 
