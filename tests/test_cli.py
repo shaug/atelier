@@ -251,6 +251,8 @@ def make_fake_git(
                 return DummyResult(returncode=1, stdout="")
         if "ls-remote" in cmd:
             branch = cmd[-1]
+            if branch.startswith("refs/heads/"):
+                branch = branch[len("refs/heads/") :]
             output = normalized_remotes.get((repo_dir, branch), "")
             return DummyResult(returncode=0, stdout=output)
         return DummyResult(returncode=1, stdout="")
@@ -1361,6 +1363,68 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                         project_dir,
                         "scott/scott/feat-demo",
                         workspace_id_for(enlistment_path, "scott/scott/feat-demo"),
+                    ).exists()
+                )
+                self.assertTrue(any(cmd[:2] == ["git", "clone"] for cmd in commands))
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_prefers_exact_branch_match_over_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo_root = init_local_repo_without_feature(root)
+            subprocess.run(
+                ["git", "-C", str(repo_root), "checkout", "-b", "feature/demo"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_root), "checkout", "main"], check=True
+            )
+            enlistment_path = enlistment_path_for(repo_root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(repo_root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(workspace_name="feature/demo")
+                    )
+
+                workspace_branch = "feature/demo"
+                workspace_dir = paths.workspace_dir_for_branch(
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
+                )
+                workspace_config = config.load_workspace_config(
+                    paths.workspace_config_path(workspace_dir)
+                )
+                self.assertIsNotNone(workspace_config)
+                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
+                self.assertFalse(
+                    paths.workspace_dir_for_branch(
+                        project_dir,
+                        "scott/feature/demo",
+                        workspace_id_for(enlistment_path, "scott/feature/demo"),
                     ).exists()
                 )
                 self.assertTrue(any(cmd[:2] == ["git", "clone"] for cmd in commands))

@@ -334,12 +334,17 @@ def git_has_remote_branch(repo_dir: Path, branch: str) -> bool | None:
         >>> git_has_remote_branch(Path("."), "main") in {True, False, None}
         True
     """
+    ref = f"refs/heads/{branch}"
     result = run_git_command(
-        ["git", "-C", str(repo_dir), "ls-remote", "--heads", "origin", branch]
+        ["git", "-C", str(repo_dir), "ls-remote", "--heads", "origin", ref]
     )
     if result.returncode != 0:
         return None
-    return result.stdout.strip() != ""
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == ref:
+            return True
+    return False
 
 
 def git_ref_exists(repo_dir: Path, ref: str) -> bool:

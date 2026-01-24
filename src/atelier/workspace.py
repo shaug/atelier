@@ -134,6 +134,14 @@ def resolve_workspace_target(
         'feat/demo'
     """
     candidates = workspace_candidate_branches(name, branch_prefix, raw)
+    if (
+        not raw
+        and branch_prefix
+        and name
+        and not name.startswith(branch_prefix)
+        and _branch_exists(Path(project_enlistment), name)
+    ):
+        candidates = [name]
     for branch in candidates:
         found = find_workspace_for_branch(
             project_dir,
@@ -157,6 +165,28 @@ def resolve_workspace_target(
                 die("workspace branch does not match workspace directory")
         return branch, workspace_dir, True
     return branch, workspace_dir, False
+
+
+def _branch_exists(repo_dir: Path, branch: str) -> bool:
+    """Return whether a branch exists locally or on origin.
+
+    Args:
+        repo_dir: Repository directory to inspect.
+        branch: Branch name to check.
+
+    Returns:
+        ``True`` when the branch exists.
+    """
+    if not branch:
+        return False
+    if not git.git_is_repo(repo_dir):
+        return False
+    if git.git_ref_exists(repo_dir, f"refs/heads/{branch}"):
+        return True
+    if git.git_ref_exists(repo_dir, f"refs/remotes/origin/{branch}"):
+        return True
+    remote_exists = git.git_has_remote_branch(repo_dir, branch)
+    return remote_exists is True
 
 
 def normalize_workspace_name(value: str) -> str:
