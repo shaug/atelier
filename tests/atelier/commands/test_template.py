@@ -49,6 +49,39 @@ class TestTemplateCommand:
             finally:
                 os.chdir(original_cwd)
 
+    def test_template_project_installed_ignores_project_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            installed_template = data_dir / "templates" / "project" / "PROJECT.md"
+            installed_template.parent.mkdir(parents=True)
+            installed_template.write_text("installed project\n", encoding="utf-8")
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+            project_path = project_dir / "PROJECT.md"
+            project_path.write_text("project override\n", encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                buffer = io.StringIO()
+                with (
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("sys.stdout", buffer),
+                ):
+                    template_cmd.render_template(
+                        SimpleNamespace(target="project", installed=True, edit=False)
+                    )
+                assert buffer.getvalue().strip() == "installed project"
+            finally:
+                os.chdir(original_cwd)
+
     def test_template_project_uses_installed_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

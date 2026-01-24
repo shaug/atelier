@@ -657,23 +657,6 @@ def plan_workspace_persist(plan: UpgradePlan, target: WorkspaceTarget) -> None:
     )
 
 
-def plan_workspace_policy_rename(plan: UpgradePlan, target: WorkspaceTarget) -> None:
-    success_path = target.root / "SUCCESS.md"
-    legacy_path = target.root / "WORKSPACE.md"
-    if success_path.exists() or not legacy_path.exists():
-        return
-
-    def apply_rename() -> None:
-        legacy_path.rename(success_path)
-
-    plan.actions.append(
-        PlanAction(
-            description=f"Rename WORKSPACE.md to SUCCESS.md ({workspace_label(target)})",
-            apply=apply_rename,
-        )
-    )
-
-
 def plan_project_templates(plan: UpgradePlan, project: ProjectTarget) -> None:
     project_label_text = project_label(project)
     templates_root = project.root / paths.TEMPLATES_DIRNAME
@@ -838,7 +821,6 @@ def upgrade(args: object) -> None:
 
         for target in workspace_targets:
             plan_workspace_config_repair(plan, target)
-            plan_workspace_policy_rename(plan, target)
             plan_workspace_agents(plan, target)
             plan_workspace_persist(plan, target)
 

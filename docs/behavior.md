@@ -46,7 +46,7 @@ workspaces/<workspace-key>/
 ├─ PROJECT.md
 ├─ PERSIST.md
 ├─ BACKGROUND.md (optional)
-├─ SUCCESS.md (or legacy WORKSPACE.md)
+├─ SUCCESS.md
 ├─ config.sys.json
 ├─ config.user.json
 └─ repo/
@@ -78,8 +78,7 @@ into the split layout.
 
 - `AGENTS.md` is generated from the project templates; it is the entry point for
   agent instructions inside each workspace.
-- `SUCCESS.md` (or legacy `WORKSPACE.md`) is copied into new workspaces from the
-  project templates.
+- `SUCCESS.md` is copied into new workspaces from the project templates.
 - `PERSIST.md` is generated per workspace to describe integration expectations.
 - `BACKGROUND.md` is created only when a workspace is created from an existing
   branch.

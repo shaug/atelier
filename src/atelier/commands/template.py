@@ -73,7 +73,7 @@ def render_template(args: object) -> None:
 
     if target == "project":
         project_template_path = project_root / "PROJECT.md"
-        if project_template_path.exists():
+        if not installed and project_template_path.exists():
             text = project_template_path.read_text(encoding="utf-8")
         else:
             text = templates.project_md_template(prefer_installed=True)
