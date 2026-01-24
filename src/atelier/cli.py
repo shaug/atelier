@@ -13,14 +13,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated
 
+import click
 import typer
+
 try:
     from click.shell_completion import split_arg_string
 except ImportError:  # pragma: no cover - legacy Click fallback
     from click.parser import split_arg_string
 
-from . import __version__
-from . import config, git, paths, workspace
+from . import __version__, config, git, paths, workspace
 from .commands import clean as clean_cmd
 from .commands import config as config_cmd
 from .commands import edit as edit_cmd
@@ -120,7 +121,9 @@ def _filter_completion_candidates(values: list[str], incomplete: str) -> list[st
     filtered = [
         value
         for value in values
-        if value and value.startswith(incomplete) and value not in _DEFAULT_BRANCH_EXCLUDES
+        if value
+        and value.startswith(incomplete)
+        and value not in _DEFAULT_BRANCH_EXCLUDES
     ]
     seen: set[str] = set()
     deduped: list[str] = []
@@ -133,7 +136,7 @@ def _filter_completion_candidates(values: list[str], incomplete: str) -> list[st
 
 
 def _workspace_name_shell_complete(
-    _ctx: object, _param: object, incomplete: str
+    _ctx: click.Context, _args: list[str], incomplete: str
 ) -> list[str]:
     resolved = _resolve_completion_project()
     if not resolved:
@@ -151,9 +154,7 @@ def _workspace_name_shell_complete(
         workspaces = []
     names = [item.get("name", "") for item in workspaces if item.get("name")]
     names.extend(
-        _collect_local_branches(
-            repo_root, git_path, incomplete, allow_all=not names
-        )
+        _collect_local_branches(repo_root, git_path, incomplete, allow_all=not names)
     )
     return _filter_completion_candidates(names, incomplete)
 
@@ -348,7 +349,7 @@ def open_command(
         str | None,
         typer.Argument(
             help="workspace branch (defaults to current branch when criteria are met)",
-            shell_complete=_workspace_name_shell_complete,
+            autocompletion=_workspace_name_shell_complete,
         ),
     ] = None,
     raw: Annotated[

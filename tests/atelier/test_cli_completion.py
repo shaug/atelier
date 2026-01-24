@@ -48,7 +48,7 @@ def test_completion_env_fallbacks_to_prog(monkeypatch):
 def test_workspace_completion_returns_empty_without_project(monkeypatch):
     monkeypatch.setattr(cli, "_resolve_completion_project", lambda: None)
 
-    assert cli._workspace_name_shell_complete(None, None, "") == []
+    assert cli._workspace_name_shell_complete(None, [], "") == []
 
 
 def test_workspace_completion_filters_and_dedupes(monkeypatch):
@@ -69,7 +69,7 @@ def test_workspace_completion_filters_and_dedupes(monkeypatch):
         lambda *args, **kwargs: ["bug/two", "chore/three"],
     )
 
-    assert cli._workspace_name_shell_complete(None, None, "b") == ["bug/two"]
+    assert cli._workspace_name_shell_complete(None, [], "b") == ["bug/two"]
 
 
 def test_workspace_completion_excludes_default_branches(monkeypatch):
@@ -88,7 +88,7 @@ def test_workspace_completion_excludes_default_branches(monkeypatch):
         cli, "_collect_local_branches", lambda *args, **kwargs: ["main", "master"]
     )
 
-    assert cli._workspace_name_shell_complete(None, None, "m") == []
+    assert cli._workspace_name_shell_complete(None, [], "m") == []
 
 
 def test_workspace_completion_uses_branches_when_no_workspaces(monkeypatch):
@@ -98,9 +98,7 @@ def test_workspace_completion_uses_branches_when_no_workspaces(monkeypatch):
         "_resolve_completion_project",
         lambda: (Path("/repo"), Path("/project"), config_payload, None),
     )
-    monkeypatch.setattr(
-        cli.workspace, "collect_workspaces", lambda *args, **kwargs: []
-    )
+    monkeypatch.setattr(cli.workspace, "collect_workspaces", lambda *args, **kwargs: [])
 
     def fake_collect(repo_root, git_path, prefix, *, allow_all=False):
         assert allow_all is True
@@ -109,4 +107,4 @@ def test_workspace_completion_uses_branches_when_no_workspaces(monkeypatch):
 
     monkeypatch.setattr(cli, "_collect_local_branches", fake_collect)
 
-    assert cli._workspace_name_shell_complete(None, None, "") == ["feat/one"]
+    assert cli._workspace_name_shell_complete(None, [], "") == ["feat/one"]
