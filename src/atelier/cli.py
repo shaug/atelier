@@ -382,20 +382,6 @@ def open_command(
             help="ticket reference (repeatable or comma-separated)",
         ),
     ] = None,
-    ai_branch: Annotated[
-        bool,
-        typer.Option(
-            "--ai-branch",
-            help="use AI to suggest a workspace branch name (requires ai config)",
-        ),
-    ] = False,
-    ai_success: Annotated[
-        bool,
-        typer.Option(
-            "--ai-success",
-            help="use AI to draft SUCCESS.md from ticket context (requires ai config)",
-        ),
-    ] = False,
     edit: Annotated[
         bool | None,
         typer.Option(
@@ -420,8 +406,6 @@ def open_command(
         branch_pr: Override pull request expectation (true/false).
         branch_history: Override history policy (manual|squash|merge|rebase).
         ticket: Ticket reference(s) to attach to the workspace.
-        ai_branch: Suggest a workspace branch name using AI.
-        ai_success: Draft SUCCESS.md using AI.
         edit: Open (or skip) the workspace policy doc in editor.edit.
         yolo: Enable least-restrictive agent mode for this invocation.
 
@@ -438,8 +422,6 @@ def open_command(
             branch_pr=branch_pr,
             branch_history=branch_history,
             ticket=ticket,
-            ai_branch=ai_branch,
-            ai_success=ai_success,
             edit=edit,
             yolo=yolo,
         )

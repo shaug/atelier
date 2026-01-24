@@ -80,8 +80,6 @@ Additional config notes:
   PATH).
 - `project.provider` metadata is optional; when unset, provider integrations are
   skipped.
-- `ai.provider`/`ai.model` enable optional AI helpers for branch naming and
-  SUCCESS.md drafting (only used when requested via `atelier open --ai-*`).
 
 ## Templates and policy files
 
