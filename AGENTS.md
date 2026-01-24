@@ -159,6 +159,8 @@ After the workspace goals are met, run:
 - `just format`
 - `just lint`
 
+Doctests are collected only for curated modules listed in `tests/conftest.py`.
+
 If any command is missing or fails due to missing tooling, do not substitute
 alternatives; record the failure and reason.
 

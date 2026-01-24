@@ -17,6 +17,9 @@ authors = [{ name = "Atelier" }]
 [project.optional-dependencies]
 dev = ["mdformat>=0.7.0", "pytest>=8.0.0", "ruff>=0.1.0"]
 
+[tool.pytest.ini_options]
+doctest_optionflags = ["ELLIPSIS"]
+
 [project.scripts]
 atelier = "atelier.cli:main"
 
