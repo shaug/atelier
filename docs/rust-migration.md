@@ -14,30 +14,36 @@ cold-start latency and distribution ergonomics.
 ## Recommended Crates
 
 Core CLI and UX:
+
 - `clap` (derive): command-line parsing and help output.
 - `clap_complete`: generate completion scripts.
 - `dialoguer` or `inquire`: interactive prompts (with TTY detection).
 - `is-terminal`: determine whether to use interactive prompts.
 
 Config, serialization, and validation:
+
 - `serde`, `serde_json`: config files and templates.
 - `validator` or custom validation functions: Pydantic-like rules.
 - `thiserror`: error definitions.
 
 Filesystem and paths:
+
 - `directories` (or `directories-next`): `platformdirs` equivalent.
 - `fs-err`: richer filesystem errors.
 - `sha2`: SHA-256 for project/workspace keys and managed file hashes.
 
 Process and Git integration:
+
 - `std::process::Command`: subprocess invocation for Git and agent CLIs.
 - `which`: agent CLI detection.
 
 PTY and Codex session capture:
+
 - `portable-pty` (if cross-platform support is required).
 - `regex`: session parsing in PTY output.
 
 Testing:
+
 - `assert_cmd`, `predicates`: CLI-level tests.
 - `tempfile`: isolated filesystem fixtures.
 - `insta` (optional): snapshot tests for CLI output.
@@ -45,33 +51,41 @@ Testing:
 ## Key Choices (and Rationale)
 
 ### Git Operations: Shell Out to `git`
+
 Decision: use `git` subprocesses (not `git2/libgit2`).
 
 Rationale:
-- Best compatibility with user config, credential helpers, SSH setup, and
-  custom transports.
+
+- Best compatibility with user config, credential helpers, SSH setup, and custom
+  transports.
 - Minimizes surprising behavior for users with non-standard Git setups.
 
 Implications:
+
 - Slightly slower than in-process `git2`, but Git I/O dominates runtime
   regardless.
 - Requires Git on PATH (same as current behavior).
 
 ### CLI Flags and Completions: Match Typer
+
 Decision: implement the same flags and options, including:
+
 - `--show-completion`
 - `--install-completion`
 
 Implementation note:
+
 - `clap_complete` can generate scripts; we will replicate Typer's command-line
   UX by accepting the same global flags and (optionally) a shell name. When
   omitted, use environment-based detection as Typer does.
 
 ### PTY Capture
+
 Decision: plan for `portable-pty` for cross-platform parity, with a clear
 fallback strategy for Unix-only environments.
 
 Risk:
+
 - PTY handling has more moving parts than direct Unix `pty` + `termios`.
 - Requires careful I/O pumping, resizing, and raw mode handling.
 
@@ -93,6 +107,7 @@ The Rust implementation must preserve all on-disk conventions:
   overwrite prompts or silent upgrades.
 
 Potential pitfalls:
+
 - Path normalization differences between Python and Rust (especially around
   Unicode normalization, `Path` canonicalization, and `.resolve()` behavior).
 - Ensuring that legacy origin-based project keys are still recognized.
@@ -102,6 +117,7 @@ Potential pitfalls:
 Expected benefit: faster cold start and lower steady-state memory.
 
 Estimates (order-of-magnitude, platform-dependent):
+
 - Python CLI: typically 200-600 ms cold start due to interpreter + imports.
 - Rust CLI: typically 20-80 ms cold start for small binaries.
 
@@ -127,6 +143,7 @@ We should explicitly test compatibility against projects/workspaces created by
 the Python CLI since the Rust CLI will be a drop-in replacement.
 
 Recommended approach:
+
 - Fixture-based tests that load real on-disk data directory structures created
   by the Python CLI (both fresh and legacy).
 - Cross-version tests that run the Rust CLI against a data dir created by the
@@ -161,10 +178,12 @@ Rust-first project:
 ## Full Implementation Plan
 
 Phase 0: Scaffolding and parity strategy
+
 - Define command/flag matrix matching current CLI behavior.
 - Agree on data directory compatibility and hashing rules.
 
 Phase 1: Core libraries and types
+
 - Implement `paths`:
   - data directory resolution
   - project/workspace directory naming
@@ -175,6 +194,7 @@ Phase 1: Core libraries and types
   - validation and normalization logic (prefix, branch history, agent names)
 
 Phase 2: Git and process layer
+
 - Implement `exec` helpers:
   - run command
   - run git command
@@ -185,11 +205,13 @@ Phase 2: Git and process layer
   - default branch resolution
 
 Phase 3: Templates and policy files
+
 - Implement template copy/link behavior with symlink fallback.
 - Implement managed file hashing and upgrade policy logic.
 - Ensure template assets match current repo structure.
 
 Phase 4: Workspace mechanics
+
 - Implement workspace identifier and directory resolution.
 - Workspace creation and lookup logic:
   - candidate branches (prefix + raw)
@@ -197,6 +219,7 @@ Phase 4: Workspace mechanics
   - workspace config checks
 
 Phase 5: CLI commands (parity-focused)
+
 - `init`: register project, scaffold templates/config.
 - `new`: create repo + init + open.
 - `open`: resolve workspace, clone repo, create branch, policies, open editor,
@@ -211,21 +234,25 @@ Phase 5: CLI commands (parity-focused)
   - `--install-completion`
 
 Phase 6: Agent integration
+
 - Implement agent detection and option assembly.
 - Codex PTY capture and session parsing.
 - Resume metadata handling (session ID, resume command).
 
 Phase 7: Testing and validation
+
 - Unit tests for path normalization, hashing, config validation.
 - CLI tests for key flows: init/open/list/clean.
 - End-to-end tests on a temp repo with local git.
 
 Phase 8: Performance and polish
+
 - Measure cold-start with a simple benchmark harness.
 - Trim dependency weight where possible.
 - Ensure error messages remain user-friendly and familiar.
 
 Phase 9: Repository transition
+
 - Introduce Cargo build and CI workflows for Rust.
 - Update documentation and release tooling.
 - Remove or archive Python implementation once parity is confirmed.

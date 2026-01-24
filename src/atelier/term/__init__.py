@@ -10,6 +10,7 @@ from .base import (
     TerminalAdapter,
     WorkspaceState,
     build_workspace_state,
+    emit_title_escape,
     format_workspace_title,
     workspace_title,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "WorkspaceState",
     "apply_workspace_identity",
     "build_workspace_state",
+    "emit_title_escape",
     "format_workspace_title",
     "resolve_terminal_adapter",
     "workspace_title",

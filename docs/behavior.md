@@ -113,14 +113,19 @@ Additional config notes:
   - Creates workspace metadata and config when missing.
   - Clones the repo into `repo/` if missing, checks out the workspace branch,
     and optionally creates it.
+  - Prints a workspace banner (name + path).
   - Prompts to remove an existing finalization tag before reopening.
   - Opens the workspace policy doc on first creation, then resumes or starts the
     agent session.
+  - Exposes workspace identity via `ATELIER_*` environment variables for editors
+    and agents.
 
 - `atelier work` / `atelier shell` / `atelier exec`
 
   - Resolve an existing workspace repo and open the configured editor or shell.
   - Do not create new workspaces.
+  - `--set-title` emits a terminal title escape (best-effort).
+  - Exposes workspace identity via `ATELIER_*` environment variables.
 
 - `atelier list`
 

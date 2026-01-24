@@ -18,7 +18,9 @@ def test_new_creates_project_and_opens_workspace() -> None:
         opened: list[object] = []
         responses = iter(["", "", "", "", "", "", "", ""])
 
-        def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+        def fake_run(
+            cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None
+        ) -> None:
             commands.append((cmd, cwd))
 
         def fake_open(args: object) -> None:

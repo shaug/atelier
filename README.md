@@ -111,6 +111,29 @@ Atelier validates that the configured agent is available on your PATH (using
 - Best-effort session resumption when the agent CLI supports it
 - Opening prompt containing the workspace ID (Codex only)
 
+## Workspace identity environment variables
+
+Atelier sets these environment variables when launching editors, shells, and
+agents:
+
+- `ATELIER_WORKSPACE`: workspace branch name
+- `ATELIER_PROJECT`: project enlistment path (repo root)
+- `ATELIER_WORKSPACE_DIR`: workspace root directory
+
+Example shell prompt (bash/zsh):
+
+```sh
+PS1='${ATELIER_WORKSPACE:+[${ATELIER_WORKSPACE}] }\\w$ '
+```
+
+Example editor title (VS Code settings):
+
+```json
+{
+  "terminal.integrated.title": "${env:ATELIER_WORKSPACE} - ${env:ATELIER_PROJECT}"
+}
+```
+
 ## What the CLI Manages
 
 Atelier is intentionally small. The CLI:

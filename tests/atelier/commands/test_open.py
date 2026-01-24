@@ -35,6 +35,7 @@ def record_codex_command(commands: list[list[str]]):
         cmd: list[str],
         cwd: Path | None = None,
         allow_missing: bool = False,
+        env: dict[str, str] | None = None,
     ) -> codex.CodexRunResult:
         commands.append(cmd)
         return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
@@ -63,7 +64,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -427,7 +432,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -483,7 +492,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -534,10 +547,18 @@ class TestOpenWorkspace:
                 fake_codex = record_codex_command(commands)
                 status_calls: list[list[str]] = []
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
-                def fake_status(cmd: list[str], cwd: Path | None = None) -> DummyResult:
+                def fake_status(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> DummyResult:
                     status_calls.append(cmd)
                     return DummyResult(returncode=0)
 
@@ -617,7 +638,11 @@ class TestOpenWorkspace:
             try:
                 commands: list[list[str]] = []
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -670,10 +695,18 @@ class TestOpenWorkspace:
                 fake_codex = record_codex_command(commands)
                 status_calls: list[list[str]] = []
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
-                def fake_status(cmd: list[str], cwd: Path | None = None) -> DummyResult:
+                def fake_status(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> DummyResult:
                     status_calls.append(cmd)
                     return DummyResult(returncode=0)
 
@@ -723,10 +756,18 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
-                def fake_status(cmd: list[str], cwd: Path | None = None) -> DummyResult:
+                def fake_status(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> DummyResult:
                     return DummyResult(returncode=1)
 
                 with (
@@ -779,10 +820,18 @@ class TestOpenWorkspace:
                 fake_codex = record_codex_command(commands)
                 status_calls: list[list[str]] = []
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
-                def fake_status(cmd: list[str], cwd: Path | None = None) -> DummyResult:
+                def fake_status(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> DummyResult:
                     status_calls.append(cmd)
                     return DummyResult(returncode=0)
 
@@ -839,10 +888,18 @@ class TestOpenWorkspace:
                 fake_codex = record_codex_command(commands)
                 status_calls: list[list[str]] = []
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
-                def fake_status(cmd: list[str], cwd: Path | None = None) -> DummyResult:
+                def fake_status(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> DummyResult:
                     status_calls.append(cmd)
                     return DummyResult(returncode=1)
 
@@ -902,7 +959,11 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     return None
 
                 with (
@@ -955,7 +1016,11 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     return None
 
                 with (
@@ -994,7 +1059,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -1059,7 +1128,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -1115,7 +1188,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 def fake_current_branch(
@@ -1171,7 +1248,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -1218,7 +1299,11 @@ class TestOpenWorkspace:
                 fake_codex = record_codex_command(commands)
                 cwds: list[Path | None] = []
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
                     cwds.append(cwd)
 
@@ -1280,7 +1365,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -1331,7 +1420,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -1394,7 +1487,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -1456,7 +1553,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -1521,7 +1622,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -1572,7 +1677,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -1664,7 +1773,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -1732,7 +1845,11 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     return None
 
                 with (
@@ -1801,7 +1918,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     return None
 
                 with (
@@ -1868,7 +1989,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -1923,7 +2048,11 @@ class TestOpenWorkspace:
                 fake_codex = record_codex_command(commands)
                 confirm_calls: list[tuple[str, str]] = []
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 def fake_try(cmd: list[str], cwd: Path | None = None) -> DummyResult:
@@ -1991,7 +2120,11 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     return None
 
                 with (
@@ -2038,7 +2171,11 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     return None
 
                 with (
@@ -2071,7 +2208,11 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     return None
 
                 with (
@@ -2148,7 +2289,11 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     return None
 
                 with (
@@ -2196,7 +2341,11 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     return None
 
                 with (
@@ -2253,7 +2402,11 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     return None
 
                 with (
@@ -2305,7 +2458,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (
@@ -2382,7 +2539,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
                     if cmd[0] == "codex":
                         return
@@ -2453,7 +2614,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
                     if cmd[0] == "codex":
                         return
@@ -2496,7 +2661,11 @@ class TestOpenWorkspace:
                 commands: list[list[str]] = []
                 fake_codex = record_codex_command(commands)
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     commands.append(cmd)
 
                 with (

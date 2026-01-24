@@ -33,7 +33,11 @@ class TestEditCommand:
             try:
                 calls: list[list[str]] = []
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     calls.append(cmd)
 
                 with (
@@ -86,7 +90,11 @@ class TestEditCommand:
             try:
                 calls: list[list[str]] = []
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     calls.append(cmd)
 
                 with (

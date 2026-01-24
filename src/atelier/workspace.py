@@ -2,8 +2,10 @@
 
 import concurrent.futures
 import datetime as dt
+import os
 import uuid
 from pathlib import Path
+from typing import Mapping
 
 from . import __version__, config, git, templates
 from .io import die, link_or_copy, warn
@@ -16,6 +18,21 @@ from .paths import (
 )
 
 BACKGROUND_COMMIT_LIMIT = 20
+
+
+def workspace_environment(
+    project_enlistment: str,
+    workspace_branch: str,
+    workspace_dir: Path,
+    *,
+    base_env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Build environment variables for workspace-aware subprocesses."""
+    env = dict(base_env or os.environ)
+    env["ATELIER_WORKSPACE"] = workspace_branch
+    env["ATELIER_PROJECT"] = project_enlistment
+    env["ATELIER_WORKSPACE_DIR"] = str(workspace_dir)
+    return env
 
 
 def workspace_identifier(project_enlistment: str, workspace_branch: str) -> str:

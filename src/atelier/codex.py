@@ -16,6 +16,7 @@ import termios
 import tty
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 from .io import die
 
@@ -132,6 +133,7 @@ def run_codex_command(
     *,
     cwd: Path | None = None,
     allow_missing: bool = False,
+    env: Mapping[str, str] | None = None,
 ) -> CodexRunResult | None:
     """Run Codex with a PTY and capture session metadata."""
     if shutil.which(cmd[0]) is None:
@@ -139,7 +141,7 @@ def run_codex_command(
             return None
         die(f"missing required command: {cmd[0]}")
     capture = CodexSessionCapture()
-    returncode = _run_pty_command(cmd, cwd=cwd, capture=capture)
+    returncode = _run_pty_command(cmd, cwd=cwd, capture=capture, env=env)
     capture.finalize()
     return CodexRunResult(
         returncode=returncode,
@@ -149,13 +151,19 @@ def run_codex_command(
 
 
 def _run_pty_command(
-    cmd: list[str], *, cwd: Path | None, capture: CodexSessionCapture
+    cmd: list[str],
+    *,
+    cwd: Path | None,
+    capture: CodexSessionCapture,
+    env: Mapping[str, str] | None,
 ) -> int:
     pid, master_fd = pty.fork()
     if pid == 0:
         if cwd is not None:
             os.chdir(cwd)
-        os.execvp(cmd[0], cmd)
+        if env is None:
+            os.execvp(cmd[0], cmd)
+        os.execvpe(cmd[0], cmd, dict(env))
         os._exit(1)
     _apply_winsize(master_fd, pid)
     previous_winch = signal.getsignal(signal.SIGWINCH)

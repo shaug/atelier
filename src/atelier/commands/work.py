@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .. import config, editor, exec, git, paths, workspace
+from .. import config, editor, exec, git, paths, term, workspace
 from ..io import die
 
 
@@ -33,6 +33,7 @@ def open_workspace_repo(args: object) -> None:
         die("workspace branch must not be empty")
 
     project_root, project_config, enlistment_path = _resolve_project()
+    project_enlistment = project_config.project.enlistment or enlistment_path
 
     normalized = workspace.normalize_workspace_name(str(workspace_name))
     if not normalized:
@@ -58,4 +59,16 @@ def open_workspace_repo(args: object) -> None:
         die("workspace repo exists but is not a git repository")
 
     editor_cmd = editor.resolve_editor_command(project_config, role="work")
-    exec.run_command_detached([*editor_cmd, str(repo_dir)], cwd=workspace_dir)
+    env = workspace.workspace_environment(
+        project_enlistment,
+        branch,
+        workspace_dir,
+    )
+    if bool(getattr(args, "set_title", False)):
+        title = term.workspace_title(project_enlistment, branch)
+        term.emit_title_escape(title)
+    exec.run_command_detached(
+        [*editor_cmd, str(repo_dir)],
+        cwd=workspace_dir,
+        env=env,
+    )

@@ -205,6 +205,7 @@ def make_fake_git(
         text: bool = False,
         check: bool = False,
         cwd: Path | None = None,
+        env: dict[str, str] | None = None,
     ) -> DummyResult:
         if cmd[0] != "git":
             return DummyResult(returncode=1, stdout="")

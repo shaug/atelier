@@ -452,9 +452,15 @@ def work_command(
         str,
         typer.Argument(help="workspace branch to open"),
     ],
+    set_title: Annotated[
+        bool,
+        typer.Option("--set-title", help="emit a terminal title escape"),
+    ] = False,
 ) -> None:
     """Open the workspace repo in the configured work editor."""
-    work_cmd.open_workspace_repo(SimpleNamespace(workspace_name=workspace_name))
+    work_cmd.open_workspace_repo(
+        SimpleNamespace(workspace_name=workspace_name, set_title=set_title)
+    )
 
 
 @app.command("snapshot", help="Write a workspace snapshot summary.")
@@ -488,6 +494,10 @@ def shell_command(
         list[str] | None,
         typer.Argument(help="command to run in the workspace repo"),
     ] = None,
+    set_title: Annotated[
+        bool,
+        typer.Option("--set-title", help="emit a terminal title escape"),
+    ] = False,
 ) -> None:
     """Open a shell in the workspace repo or run a command there."""
     shell_cmd.open_workspace_shell(
@@ -495,6 +505,7 @@ def shell_command(
             workspace_name=workspace_name,
             shell=shell,
             command=command or [],
+            set_title=set_title,
         )
     )
 
@@ -512,6 +523,10 @@ def exec_command(
         list[str] | None,
         typer.Argument(help="command to run in the workspace repo"),
     ] = None,
+    set_title: Annotated[
+        bool,
+        typer.Option("--set-title", help="emit a terminal title escape"),
+    ] = False,
 ) -> None:
     """Run a command in the workspace repo (alias for shell command mode)."""
     shell_cmd.open_workspace_shell(
@@ -519,6 +534,7 @@ def exec_command(
             workspace_name=workspace_name,
             shell=None,
             command=command or [],
+            set_title=set_title,
         ),
         require_command=True,
     )

@@ -10,7 +10,7 @@ import os
 import shutil
 from pathlib import Path
 
-from .. import config, exec, git, paths, workspace
+from .. import config, exec, git, paths, term, workspace
 from ..io import die
 
 try:  # pragma: no cover - optional dependency
@@ -33,11 +33,12 @@ def _resolve_project() -> tuple[Path, config.ProjectConfig, str]:
     return project_root, config_payload, enlistment_path
 
 
-def _resolve_workspace_repo(workspace_name: str) -> tuple[str, Path, Path]:
+def _resolve_workspace_repo(workspace_name: str) -> tuple[str, Path, Path, str]:
     if not workspace_name:
         die("workspace branch must not be empty")
 
     project_root, project_config, enlistment_path = _resolve_project()
+    project_enlistment = project_config.project.enlistment or enlistment_path
 
     normalized = workspace.normalize_workspace_name(str(workspace_name))
     if not normalized:
@@ -62,7 +63,7 @@ def _resolve_workspace_repo(workspace_name: str) -> tuple[str, Path, Path]:
     if not git.git_is_repo(repo_dir, git_path=git_path):
         die("workspace repo exists but is not a git repository")
 
-    return branch, workspace_dir, repo_dir
+    return branch, workspace_dir, repo_dir, project_enlistment
 
 
 def _looks_like_path(value: str) -> bool:
@@ -110,8 +111,12 @@ def _resolve_shell_command(shell_override: str | None) -> list[str]:
     return [detected or _fallback_shell()]
 
 
-def _run_and_exit(cmd: list[str], cwd: Path) -> None:
-    result = exec.run_command_status(cmd, cwd=cwd)
+def _run_and_exit(
+    cmd: list[str],
+    cwd: Path,
+    env: dict[str, str],
+) -> None:
+    result = exec.run_command_status(cmd, cwd=cwd, env=env)
     if result is None:
         die(f"missing required command: {cmd[0]}")
     raise SystemExit(result.returncode)
@@ -123,11 +128,21 @@ def open_workspace_shell(args: object, *, require_command: bool = False) -> None
     shell_override = getattr(args, "shell", None)
     command = list(getattr(args, "command", []) or [])
 
-    _, _, repo_dir = _resolve_workspace_repo(str(workspace_name or ""))
+    branch, workspace_dir, repo_dir, project_enlistment = _resolve_workspace_repo(
+        str(workspace_name or "")
+    )
+    env = workspace.workspace_environment(
+        project_enlistment,
+        branch,
+        workspace_dir,
+    )
+    if bool(getattr(args, "set_title", False)):
+        title = term.workspace_title(project_enlistment, branch)
+        term.emit_title_escape(title)
 
     if require_command and not command:
         die("command required for 'atelier exec'")
 
     if command:
-        _run_and_exit(command, repo_dir)
-    _run_and_exit(_resolve_shell_command(shell_override), repo_dir)
+        _run_and_exit(command, repo_dir, env)
+    _run_and_exit(_resolve_shell_command(shell_override), repo_dir, env)

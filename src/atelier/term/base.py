@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,20 @@ def format_workspace_title(state: WorkspaceState) -> str:
     if state.status:
         return f"{state.title} ({state.status})"
     return state.title
+
+
+def emit_title_escape(title: str, *, stream: TextIO | None = None) -> bool:
+    """Emit a terminal title escape sequence when possible."""
+    stream = stream or sys.stdout
+    if not getattr(stream, "isatty", lambda: False)():
+        return False
+    safe_title = title.replace("\033", "")
+    try:
+        stream.write(f"\033]0;{safe_title}\007")
+        stream.flush()
+    except Exception:
+        return False
+    return True
 
 
 class TerminalAdapter:

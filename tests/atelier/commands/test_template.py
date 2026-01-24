@@ -247,7 +247,11 @@ class TestTemplateCommand:
             try:
                 calls: list[list[str]] = []
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     calls.append(cmd)
                     temp_path = Path(cmd[-1])
                     assert temp_path.read_text(encoding="utf-8") == "template stub\n"
@@ -294,7 +298,11 @@ class TestTemplateCommand:
             try:
                 calls: list[list[str]] = []
 
-                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
                     calls.append(cmd)
                     temp_path = Path(cmd[-1])
                     assert (

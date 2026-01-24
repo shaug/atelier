@@ -669,6 +669,12 @@ def open_workspace(args: object) -> None:
         die("workspace branch is required")
 
     term.apply_workspace_identity(project_enlistment, workspace_branch)
+    say(f"Workspace {workspace_branch} at {workspace_dir}")
+    workspace_env = workspace.workspace_environment(
+        project_enlistment,
+        workspace_branch,
+        workspace_dir,
+    )
 
     agents_path = workspace_dir / "AGENTS.md"
     persist_path = workspace_dir / "PERSIST.md"
@@ -1020,7 +1026,11 @@ def open_workspace(args: object) -> None:
             workspace_target = workspace_policy_path.relative_to(workspace_dir)
         except ValueError:
             workspace_target = workspace_policy_path
-        exec.run_command([*editor_cmd, str(workspace_target)], cwd=workspace_dir)
+        exec.run_command(
+            [*editor_cmd, str(workspace_target)],
+            cwd=workspace_dir,
+            env=workspace_env,
+        )
 
     workspace_uid: str | None = None
     if workspace_config is not None:
@@ -1055,7 +1065,10 @@ def open_workspace(args: object) -> None:
             say(f"Resuming {agent_spec.display_name} session")
         if agent_spec.name == "codex":
             result = codex.run_codex_command(
-                resume_cmd, cwd=resume_cwd, allow_missing=True
+                resume_cmd,
+                cwd=resume_cwd,
+                allow_missing=True,
+                env=workspace_env,
             )
             persist_codex_session(workspace_dir, result)
             if result is not None and result.returncode == 0:
@@ -1071,7 +1084,11 @@ def open_workspace(args: object) -> None:
                     f"(exit code {result.returncode}); starting new session"
                 )
         else:
-            result = exec.run_command_status(resume_cmd, cwd=resume_cwd)
+            result = exec.run_command_status(
+                resume_cmd,
+                cwd=resume_cwd,
+                env=workspace_env,
+            )
             if result is not None and result.returncode == 0:
                 return
             if result is None:
@@ -1097,14 +1114,14 @@ def open_workspace(args: object) -> None:
         workspace_dir, agent_options, opening_prompt
     )
     if agent_spec.name == "codex":
-        result = codex.run_codex_command(start_cmd, cwd=start_cwd)
+        result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=workspace_env)
         persist_codex_session(workspace_dir, result)
         if result is None:
             die(f"missing required command: {start_cmd[0]}")
         if result.returncode != 0:
             die(f"command failed: {' '.join(start_cmd)}")
     else:
-        exec.run_command(start_cmd, cwd=start_cwd)
+        exec.run_command(start_cmd, cwd=start_cwd, env=workspace_env)
 
 
 def resolve_implicit_workspace_name(
