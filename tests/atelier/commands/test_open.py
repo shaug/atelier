@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 import atelier
+import atelier.codex as codex
 import atelier.commands.open as open_cmd
 import atelier.config as config
 import atelier.git as git
@@ -29,6 +30,21 @@ from tests.atelier.helpers import (
 )
 
 
+def record_codex_command(commands: list[list[str]]):
+    def fake_codex(
+        cmd: list[str],
+        cwd: Path | None = None,
+        allow_missing: bool = False,
+    ) -> codex.CodexRunResult:
+        commands.append(cmd)
+        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+
+    return fake_codex
+
+
+fake_codex = record_codex_command([])
+
+
 class TestOpenWorkspace:
     def test_open_creates_workspace_and_launches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -45,12 +61,14 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -133,12 +151,14 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -154,6 +174,64 @@ class TestOpenWorkspace:
                 codex_commands = [cmd for cmd in commands if cmd and cmd[0] == "codex"]
                 assert codex_commands
                 assert any("--yolo" in cmd for cmd in codex_commands)
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_prefers_stored_codex_session_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            workspace_branch = "scott/feat-demo"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
+            )
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            write_workspace_config(
+                workspace_dir,
+                workspace_branch,
+                enlistment_path,
+                session={"agent": "codex", "id": "sess-123"},
+            )
+            (workspace_dir / "AGENTS.md").write_text("stub\n", encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session") as find_session,
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+
+                assert not find_session.called
+                assert any(
+                    cmd[:2] == ["codex", "--cd"]
+                    and "resume" in cmd
+                    and "sess-123" in cmd
+                    for cmd in commands
+                )
             finally:
                 os.chdir(original_cwd)
 
@@ -179,6 +257,7 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
                 status_calls: list[list[str]] = []
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
@@ -190,6 +269,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.exec.run_command_status", fake_status),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -227,6 +307,7 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
                 status_calls: list[list[str]] = []
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
@@ -242,6 +323,7 @@ class TestOpenWorkspace:
                         return_value=("codex", "claude", "gemini"),
                     ),
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.exec.run_command_status", fake_status),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -279,6 +361,7 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
@@ -292,6 +375,7 @@ class TestOpenWorkspace:
                         return_value=("codex", "claude", "gemini"),
                     ),
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.exec.run_command_status", fake_status),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -332,6 +416,7 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
                 status_calls: list[list[str]] = []
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
@@ -351,6 +436,7 @@ class TestOpenWorkspace:
                         return_value=Path("/tmp/aider.chat.history.md"),
                     ),
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.exec.run_command_status", fake_status),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -390,6 +476,7 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
                 status_calls: list[list[str]] = []
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
@@ -406,6 +493,7 @@ class TestOpenWorkspace:
                     ),
                     patch("atelier.agents.aider_chat_history_path", return_value=None),
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.exec.run_command_status", fake_status),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -459,6 +547,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -511,6 +600,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -542,12 +632,14 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -605,12 +697,14 @@ class TestOpenWorkspace:
             os.chdir(repo_root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -659,6 +753,7 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
@@ -670,6 +765,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_current_branch", fake_current_branch),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -711,12 +807,14 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_is_repo", return_value=True),
                     patch("atelier.git.git_current_branch", return_value="main"),
@@ -755,6 +853,7 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
                 cwds: list[Path | None] = []
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
@@ -763,6 +862,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_is_repo", return_value=True),
                     patch("atelier.git.git_current_branch", return_value="main"),
@@ -875,12 +975,14 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -920,12 +1022,14 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -1010,12 +1114,14 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
@@ -1083,6 +1189,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",
@@ -1208,12 +1315,14 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",
@@ -1260,6 +1369,7 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
                 confirm_calls: list[tuple[str, str]] = []
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
@@ -1274,6 +1384,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",
@@ -1334,6 +1445,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",
@@ -1380,6 +1492,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
@@ -1412,6 +1525,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",
@@ -1488,6 +1602,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",
@@ -1535,6 +1650,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",
@@ -1591,6 +1707,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",
@@ -1635,12 +1752,14 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",
@@ -1710,6 +1829,7 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
@@ -1724,6 +1844,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_is_repo", return_value=True),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -1779,6 +1900,7 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
@@ -1788,6 +1910,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
@@ -1820,12 +1943,14 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",

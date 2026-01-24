@@ -291,6 +291,26 @@ class ProjectUserConfig(BaseModel):
     atelier: AtelierUserSection = Field(default_factory=AtelierUserSection)
 
 
+class WorkspaceSession(BaseModel):
+    """Agent session metadata stored for a workspace.
+
+    Attributes:
+        agent: Agent name (e.g. ``codex``).
+        id: Captured session ID.
+        resume_command: Resume command string.
+
+    Example:
+        >>> WorkspaceSession(agent="codex", id="sess-1")
+        WorkspaceSession(...)
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    agent: str | None = None
+    id: str | None = None
+    resume_command: str | None = None
+
+
 class WorkspaceSection(BaseModel):
     """Workspace-specific configuration.
 
@@ -299,6 +319,7 @@ class WorkspaceSection(BaseModel):
         branch_pr: Whether pull requests are expected.
         branch_history: History policy (manual|squash|merge|rebase).
         id: Workspace identifier string.
+        session: Agent session metadata.
 
     Example:
         >>> WorkspaceSection(branch="feat/demo", branch_pr=True, branch_history="manual")
@@ -311,6 +332,7 @@ class WorkspaceSection(BaseModel):
     branch_pr: bool = True
     branch_history: BranchHistory = "manual"
     id: str | None = None
+    session: WorkspaceSession | None = None
 
     @field_validator("branch_history", mode="before")
     @classmethod

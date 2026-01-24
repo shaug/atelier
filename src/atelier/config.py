@@ -35,6 +35,7 @@ from .models import (
     ProjectSystemConfig,
     ProjectUserConfig,
     WorkspaceConfig,
+    WorkspaceSession,
     WorkspaceSystemConfig,
     WorkspaceUserConfig,
 )
@@ -408,6 +409,39 @@ def update_workspace_managed_files(
     managed.update(updates)
     atelier_section = atelier_section.model_copy(update={"managed_files": managed})
     workspace_config = workspace_config.model_copy(update={"atelier": atelier_section})
+    write_workspace_system_config(config_path, workspace_config)
+
+
+def update_workspace_session(
+    workspace_dir: Path,
+    *,
+    agent: str | None = None,
+    session_id: str | None = None,
+    resume_command: str | None = None,
+) -> None:
+    """Update the stored agent session metadata for a workspace."""
+    if agent is None and session_id is None and resume_command is None:
+        return
+    config_path = paths.workspace_config_sys_path(workspace_dir)
+    workspace_config = load_workspace_system_config(config_path)
+    if not workspace_config:
+        return
+    workspace_section = workspace_config.workspace
+    session = workspace_section.session or WorkspaceSession()
+    updates: dict[str, object] = {}
+    if agent is not None:
+        updates["agent"] = agent
+    if session_id is not None:
+        updates["id"] = session_id
+    if resume_command is not None:
+        updates["resume_command"] = resume_command
+    if not updates:
+        return
+    session = session.model_copy(update=updates)
+    workspace_section = workspace_section.model_copy(update={"session": session})
+    workspace_config = workspace_config.model_copy(
+        update={"workspace": workspace_section}
+    )
     write_workspace_system_config(config_path, workspace_config)
 
 

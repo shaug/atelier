@@ -14,6 +14,7 @@ from typing import Callable
 from .. import (
     __version__,
     agents,
+    codex,
     config,
     editor,
     exec,
@@ -225,6 +226,22 @@ def update_workspace_atelier(
         atelier_section = user_config.atelier.model_copy(update={"upgrade": upgrade})
         user_config = user_config.model_copy(update={"atelier": atelier_section})
         config.write_workspace_user_config(user_path, user_config)
+
+
+def persist_codex_session(
+    workspace_dir: Path, result: codex.CodexRunResult | None
+) -> None:
+    """Persist captured Codex session metadata when available."""
+    if result is None:
+        return
+    if not result.session_id and not result.resume_command:
+        return
+    config.update_workspace_session(
+        workspace_dir,
+        agent="codex",
+        session_id=result.session_id,
+        resume_command=result.resume_command,
+    )
 
 
 def collect_project_template_updates(
@@ -734,9 +751,19 @@ def open_workspace(args: object) -> None:
             workspace_target = workspace_policy_path
         exec.run_command([*editor_cmd, str(workspace_target)], cwd=workspace_dir)
 
-    session_id = agents.find_resume_session(
-        agent_spec, project_enlistment, workspace_branch
-    )
+    session_id: str | None = None
+    if agent_spec.name == "codex" and workspace_config is not None:
+        stored_session = workspace_config.workspace.session
+        if stored_session and stored_session.agent == agent_spec.name:
+            session_id = stored_session.id
+            if not session_id and stored_session.resume_command:
+                session_id, _ = codex.parse_codex_resume_line(
+                    stored_session.resume_command
+                )
+    if session_id is None:
+        session_id = agents.find_resume_session(
+            agent_spec, project_enlistment, workspace_branch
+        )
     resume_command = agent_spec.build_resume_command(
         workspace_dir, agent_options, session_id
     )
@@ -751,19 +778,37 @@ def open_workspace(args: object) -> None:
             say(f"Resuming {agent_spec.display_name} session {session_id}")
         else:
             say(f"Resuming {agent_spec.display_name} session")
-        result = exec.run_command_status(resume_cmd, cwd=resume_cwd)
-        if result is not None and result.returncode == 0:
-            return
-        if result is None:
-            warn(
-                f"failed to resume {agent_spec.display_name} session; "
-                "command not found; starting new session"
+        if agent_spec.name == "codex":
+            result = codex.run_codex_command(
+                resume_cmd, cwd=resume_cwd, allow_missing=True
             )
+            persist_codex_session(workspace_dir, result)
+            if result is not None and result.returncode == 0:
+                return
+            if result is None:
+                warn(
+                    f"failed to resume {agent_spec.display_name} session; "
+                    "command not found; starting new session"
+                )
+            else:
+                warn(
+                    f"failed to resume {agent_spec.display_name} session "
+                    f"(exit code {result.returncode}); starting new session"
+                )
         else:
-            warn(
-                f"failed to resume {agent_spec.display_name} session "
-                f"(exit code {result.returncode}); starting new session"
-            )
+            result = exec.run_command_status(resume_cmd, cwd=resume_cwd)
+            if result is not None and result.returncode == 0:
+                return
+            if result is None:
+                warn(
+                    f"failed to resume {agent_spec.display_name} session; "
+                    "command not found; starting new session"
+                )
+            else:
+                warn(
+                    f"failed to resume {agent_spec.display_name} session "
+                    f"(exit code {result.returncode}); starting new session"
+                )
     elif resume_reason is not None:
         warn(f"{resume_reason}; starting new session")
 
@@ -776,7 +821,15 @@ def open_workspace(args: object) -> None:
     start_cmd, start_cwd = agent_spec.build_start_command(
         workspace_dir, agent_options, opening_prompt
     )
-    exec.run_command(start_cmd, cwd=start_cwd)
+    if agent_spec.name == "codex":
+        result = codex.run_codex_command(start_cmd, cwd=start_cwd)
+        persist_codex_session(workspace_dir, result)
+        if result is None:
+            die(f"missing required command: {start_cmd[0]}")
+        if result.returncode != 0:
+            die(f"command failed: {' '.join(start_cmd)}")
+    else:
+        exec.run_command(start_cmd, cwd=start_cwd)
 
 
 def resolve_implicit_workspace_name(repo_root: Path, _config_payload: object) -> str:

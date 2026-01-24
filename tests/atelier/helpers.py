@@ -105,7 +105,10 @@ def write_open_config(root: Path, enlistment_path: str, **overrides: object) -> 
 
 
 def write_workspace_config(
-    workspace_dir: Path, branch: str, enlistment_path: str
+    workspace_dir: Path,
+    branch: str,
+    enlistment_path: str,
+    session: dict | None = None,
 ) -> None:
     payload = {
         "workspace": {
@@ -120,6 +123,8 @@ def write_workspace_config(
             "upgrade": "ask",
         },
     }
+    if session is not None:
+        payload["workspace"]["session"] = session
     parsed = config.WorkspaceConfig.model_validate(payload)
     config.write_workspace_config(paths.workspace_config_path(workspace_dir), parsed)
 
