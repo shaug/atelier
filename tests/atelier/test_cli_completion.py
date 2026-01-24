@@ -89,3 +89,24 @@ def test_workspace_completion_excludes_default_branches(monkeypatch):
     )
 
     assert cli._workspace_name_shell_complete(None, None, "m") == []
+
+
+def test_workspace_completion_uses_branches_when_no_workspaces(monkeypatch):
+    config_payload = config.ProjectConfig()
+    monkeypatch.setattr(
+        cli,
+        "_resolve_completion_project",
+        lambda: (Path("/repo"), Path("/project"), config_payload, None),
+    )
+    monkeypatch.setattr(
+        cli.workspace, "collect_workspaces", lambda *args, **kwargs: []
+    )
+
+    def fake_collect(repo_root, git_path, prefix, *, allow_all=False):
+        assert allow_all is True
+        assert prefix == ""
+        return ["feat/one", "main"]
+
+    monkeypatch.setattr(cli, "_collect_local_branches", fake_collect)
+
+    assert cli._workspace_name_shell_complete(None, None, "") == ["feat/one"]

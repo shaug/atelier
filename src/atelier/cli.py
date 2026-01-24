@@ -101,11 +101,11 @@ def _resolve_completion_project(
 
 
 def _collect_local_branches(
-    repo_root: Path, git_path: str | None, prefix: str
+    repo_root: Path, git_path: str | None, prefix: str, *, allow_all: bool = False
 ) -> list[str]:
-    if not prefix:
+    if not prefix and not allow_all:
         return []
-    ref_glob = f"refs/heads/{prefix}*"
+    ref_glob = "refs/heads" if not prefix else f"refs/heads/{prefix}*"
     cmd = git.git_command(
         ["-C", str(repo_root), "for-each-ref", "--format=%(refname:short)", ref_glob],
         git_path=git_path,
@@ -150,7 +150,11 @@ def _workspace_name_shell_complete(
     except Exception:
         workspaces = []
     names = [item.get("name", "") for item in workspaces if item.get("name")]
-    names.extend(_collect_local_branches(repo_root, git_path, incomplete))
+    names.extend(
+        _collect_local_branches(
+            repo_root, git_path, incomplete, allow_all=not names
+        )
+    )
     return _filter_completion_candidates(names, incomplete)
 
 
