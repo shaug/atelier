@@ -122,6 +122,7 @@ Additional config notes:
 
   - Resolve an existing workspace repo and open the configured editor or shell.
   - Do not create new workspaces.
+  - `--workspace` targets the workspace root instead of `repo/`.
   - `--set-title` emits a terminal title escape (best-effort).
   - Exposes workspace identity via `ATELIER_*` environment variables.
 

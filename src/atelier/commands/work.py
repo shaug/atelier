@@ -27,10 +27,11 @@ def _resolve_project() -> tuple[Path, config.ProjectConfig, str]:
 
 
 def open_workspace_repo(args: object) -> None:
-    """Open the workspace repo in the configured work editor."""
+    """Open the workspace repo (or root) in the configured work editor."""
     workspace_name = getattr(args, "workspace_name", None)
     if not workspace_name:
         die("workspace branch must not be empty")
+    workspace_root = bool(getattr(args, "workspace_root", False))
 
     project_root, project_config, enlistment_path = _resolve_project()
     project_enlistment = project_config.project.enlistment or enlistment_path
@@ -59,6 +60,7 @@ def open_workspace_repo(args: object) -> None:
         die("workspace repo exists but is not a git repository")
 
     editor_cmd = editor.resolve_editor_command(project_config, role="work")
+    target_path = workspace_dir if workspace_root else repo_dir
     env = workspace.workspace_environment(
         project_enlistment,
         branch,
@@ -68,7 +70,7 @@ def open_workspace_repo(args: object) -> None:
         title = term.workspace_title(project_enlistment, branch)
         term.emit_title_escape(title)
     exec.run_command_detached(
-        [*editor_cmd, str(repo_dir)],
+        [*editor_cmd, str(target_path)],
         cwd=workspace_dir,
         env=env,
     )

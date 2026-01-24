@@ -595,6 +595,7 @@ Open the workspace repo in the configured work editor.
 - Resolves the workspace using the project branch prefix (like `atelier open`)
 - Errors if the workspace does not exist
 - Opens `<workspace>/repo` using `editor.work`
+- `--workspace` opens `<workspace>` instead of `<workspace>/repo`
 - Does not block the CLI process
 - Sets `ATELIER_WORKSPACE`, `ATELIER_PROJECT`, and `ATELIER_WORKSPACE_DIR` for
   the editor process
@@ -611,7 +612,8 @@ Open a shell in the workspace repo or run a command there.
 - Must be run inside a Git repository
 - Resolves the workspace using the project branch prefix (like `atelier open`)
 - Errors if the workspace does not exist
-- Runs commands in `<workspace>/repo`
+- Runs commands in `<workspace>/repo` by default
+- `--workspace` runs commands in `<workspace>`
 - Never creates or modifies workspaces
 - Sets `ATELIER_WORKSPACE`, `ATELIER_PROJECT`, and `ATELIER_WORKSPACE_DIR` for
   the shell or command process
@@ -635,6 +637,7 @@ Run a command in the workspace repo.
 - Alias for `atelier shell` command-execution mode
 - Requires a command; errors if none is provided
 - Runs the command directly (no shell wrapping) in `<workspace>/repo`
+- `--workspace` runs the command in `<workspace>`
 - Supports `--set-title` and `ATELIER_*` environment variables
 
 ______________________________________________________________________

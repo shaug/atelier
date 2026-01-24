@@ -123,10 +123,11 @@ def _run_and_exit(
 
 
 def open_workspace_shell(args: object, *, require_command: bool = False) -> None:
-    """Open a shell in the workspace repo or run a command there."""
+    """Open a shell in the workspace repo/root or run a command there."""
     workspace_name = getattr(args, "workspace_name", None)
     shell_override = getattr(args, "shell", None)
     command = list(getattr(args, "command", []) or [])
+    workspace_root = bool(getattr(args, "workspace_root", False))
 
     branch, workspace_dir, repo_dir, project_enlistment = _resolve_workspace_repo(
         str(workspace_name or "")
@@ -136,6 +137,7 @@ def open_workspace_shell(args: object, *, require_command: bool = False) -> None
         branch,
         workspace_dir,
     )
+    target_dir = workspace_dir if workspace_root else repo_dir
     if bool(getattr(args, "set_title", False)):
         title = term.workspace_title(project_enlistment, branch)
         term.emit_title_escape(title)
@@ -144,5 +146,5 @@ def open_workspace_shell(args: object, *, require_command: bool = False) -> None
         die("command required for 'atelier exec'")
 
     if command:
-        _run_and_exit(command, repo_dir, env)
-    _run_and_exit(_resolve_shell_command(shell_override), repo_dir, env)
+        _run_and_exit(command, target_dir, env)
+    _run_and_exit(_resolve_shell_command(shell_override), target_dir, env)

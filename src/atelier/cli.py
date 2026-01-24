@@ -428,12 +428,18 @@ def open_command(
     )
 
 
-@app.command("work", help="Open the workspace repo in your work editor.")
+@app.command(
+    "work", help="Open the workspace repo (or root with --workspace) in your editor."
+)
 def work_command(
     workspace_name: Annotated[
         str,
         typer.Argument(help="workspace branch to open"),
     ],
+    workspace_root: Annotated[
+        bool,
+        typer.Option("--workspace", help="open the workspace root instead of repo"),
+    ] = False,
     set_title: Annotated[
         bool,
         typer.Option("--set-title", help="emit a terminal title escape"),
@@ -441,7 +447,11 @@ def work_command(
 ) -> None:
     """Open the workspace repo in the configured work editor."""
     work_cmd.open_workspace_repo(
-        SimpleNamespace(workspace_name=workspace_name, set_title=set_title)
+        SimpleNamespace(
+            workspace_name=workspace_name,
+            workspace_root=workspace_root,
+            set_title=set_title,
+        )
     )
 
 
@@ -461,7 +471,7 @@ def snapshot_command(
 
 @app.command(
     "shell",
-    help="Open a shell in the workspace repo or run a command there.",
+    help="Open a shell in the workspace repo (or root with --workspace).",
 )
 def shell_command(
     workspace_name: Annotated[
@@ -474,8 +484,14 @@ def shell_command(
     ] = None,
     command: Annotated[
         list[str] | None,
-        typer.Argument(help="command to run in the workspace repo"),
+        typer.Argument(
+            help="command to run in the workspace repo (or root with --workspace)"
+        ),
     ] = None,
+    workspace_root: Annotated[
+        bool,
+        typer.Option("--workspace", help="open the workspace root instead of repo"),
+    ] = False,
     set_title: Annotated[
         bool,
         typer.Option("--set-title", help="emit a terminal title escape"),
@@ -487,6 +503,7 @@ def shell_command(
             workspace_name=workspace_name,
             shell=shell,
             command=command or [],
+            workspace_root=workspace_root,
             set_title=set_title,
         )
     )
@@ -494,7 +511,7 @@ def shell_command(
 
 @app.command(
     "exec",
-    help="Run a command in the workspace repo (alias for shell command mode).",
+    help="Run a command in the workspace repo (or root with --workspace).",
 )
 def exec_command(
     workspace_name: Annotated[
@@ -503,8 +520,14 @@ def exec_command(
     ],
     command: Annotated[
         list[str] | None,
-        typer.Argument(help="command to run in the workspace repo"),
+        typer.Argument(
+            help="command to run in the workspace repo (or root with --workspace)"
+        ),
     ] = None,
+    workspace_root: Annotated[
+        bool,
+        typer.Option("--workspace", help="open the workspace root instead of repo"),
+    ] = False,
     set_title: Annotated[
         bool,
         typer.Option("--set-title", help="emit a terminal title escape"),
@@ -516,6 +539,7 @@ def exec_command(
             workspace_name=workspace_name,
             shell=None,
             command=command or [],
+            workspace_root=workspace_root,
             set_title=set_title,
         ),
         require_command=True,

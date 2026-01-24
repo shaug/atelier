@@ -226,6 +226,7 @@ Open a workspace repo in your work editor:
 
 ```sh
 atelier work <workspace-branch>
+atelier work <workspace-branch> --workspace
 ```
 
 Open a shell in a workspace repo (or run a command there):
@@ -234,6 +235,7 @@ Open a shell in a workspace repo (or run a command there):
 atelier shell <workspace-branch>
 atelier shell <workspace-branch> -- python -m http.server
 atelier exec <workspace-branch> -- python -m http.server
+atelier shell <workspace-branch> --workspace
 ```
 
 List workspaces:
@@ -437,17 +439,20 @@ atelier open feat/new-search --branch-history squash
 
 ### `atelier work <workspace-branch>`
 
-Open a workspace repo in `editor.work` without blocking the CLI.
+Open a workspace repo in `editor.work` without blocking the CLI. Use
+`--workspace` to open the workspace root instead of `repo/`.
 
 ### `atelier shell <workspace-branch> [--] [command ...]`
 
 Open a shell in the workspace repo, or run a command there. Use `--shell` to
-override the interactive shell selection.
+override the interactive shell selection. Use `--workspace` to run in the
+workspace root instead of `repo/`.
 
 ### `atelier exec <workspace-branch> [--] [command ...]`
 
 Run a command in the workspace repo. This is an alias for `atelier shell` in
-command-execution mode and requires a command.
+command-execution mode and requires a command. Use `--workspace` to run in the
+workspace root instead of `repo/`.
 
 ### `atelier list`
 
