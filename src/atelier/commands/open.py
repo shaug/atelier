@@ -941,6 +941,7 @@ def open_workspace(args: object) -> None:
     else:
         exec.run_command(start_cmd, cwd=start_cwd)
 
+
 def resolve_implicit_workspace_name(
     repo_root: Path,
     config_payload: object,
