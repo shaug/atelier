@@ -99,6 +99,9 @@ class TestOpenWorkspace:
                 assert "## Integration Strategy" in persist_content
                 assert "Pull requests expected: yes" in persist_content
                 assert "History policy: manual" in persist_content
+                assert workspace_config.atelier.managed_files.get(
+                    "PERSIST.md"
+                ) == config.hash_text(persist_content)
 
                 assert any(cmd[:2] == ["git", "clone"] for cmd in commands)
                 repo_path = (workspace_dir / "repo").resolve()

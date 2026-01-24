@@ -271,4 +271,6 @@ def render_persist(branch_pr: bool, branch_history: str) -> str:
         True
     """
     integration_strategy = render_integration_strategy(branch_pr, branch_history)
-    return persist_template().format(integration_strategy=integration_strategy)
+    return persist_template(prefer_installed=True).format(
+        integration_strategy=integration_strategy
+    )

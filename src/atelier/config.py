@@ -450,6 +450,21 @@ def managed_workspace_agents_updates(workspace_dir: Path) -> dict[str, str]:
     return {"AGENTS.md": hash_text(content)}
 
 
+def managed_workspace_persist_updates(workspace_dir: Path) -> dict[str, str]:
+    """Return managed hashes for workspace PERSIST files when canonical."""
+    persist_path = workspace_dir / "PERSIST.md"
+    if not persist_path.exists():
+        return {}
+    branch_pr, branch_history = read_workspace_branch_settings(workspace_dir)
+    if branch_pr is None or branch_history is None:
+        return {}
+    content = persist_path.read_text(encoding="utf-8")
+    canonical = templates.render_persist(branch_pr, branch_history)
+    if content != canonical:
+        return {}
+    return {"PERSIST.md": hash_text(content)}
+
+
 def parse_project_config(
     payload: dict, source: Path | str | None = None
 ) -> ProjectConfig:

@@ -311,7 +311,7 @@ def collect_workspace_template_updates(
         else:
             agents_path.write_text(source_text, encoding="utf-8")
 
-    return [
+    updates = [
         build_managed_template_update(
             description=f"Workspace AGENTS.md ({workspace_label_text})",
             path=agents_path,
@@ -322,6 +322,28 @@ def collect_workspace_template_updates(
             write_text=lambda text: agents_path.write_text(text, encoding="utf-8"),
         )
     ]
+
+    persist_path = workspace_dir / "PERSIST.md"
+    persist_key = "PERSIST.md"
+    persist_text = templates.render_persist(
+        workspace_config.workspace.branch_pr,
+        workspace_config.workspace.branch_history,
+    )
+
+    def update_persist_hash(value: str) -> None:
+        config.update_workspace_managed_files(workspace_dir, {persist_key: value})
+
+    updates.append(
+        build_managed_template_update(
+            description=f"Workspace PERSIST.md ({workspace_label_text})",
+            path=persist_path,
+            new_text=persist_text,
+            stored_hash=managed.get(persist_key),
+            update_hash=update_persist_hash,
+            write_text=lambda text: persist_path.write_text(text, encoding="utf-8"),
+        )
+    )
+    return updates
 
 
 def open_workspace(args: object) -> None:
@@ -488,9 +510,13 @@ def open_workspace(args: object) -> None:
             branch_history=effective_branch_history,
             upgrade_policy=project_upgrade_policy,
         )
-        config.update_workspace_managed_files(
-            workspace_dir, config.managed_workspace_agents_updates(workspace_dir)
+        workspace_managed_updates = config.managed_workspace_agents_updates(
+            workspace_dir
         )
+        workspace_managed_updates.update(
+            config.managed_workspace_persist_updates(workspace_dir)
+        )
+        config.update_workspace_managed_files(workspace_dir, workspace_managed_updates)
         success_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
         workspace_policy_template = (
             success_policy_template if success_policy_template.exists() else None

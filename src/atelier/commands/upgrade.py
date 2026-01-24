@@ -626,6 +626,37 @@ def plan_workspace_agents(plan: UpgradePlan, target: WorkspaceTarget) -> None:
     )
 
 
+def plan_workspace_persist(plan: UpgradePlan, target: WorkspaceTarget) -> None:
+    workspace_label_text = workspace_label(target)
+    branch_pr = target.config.workspace.branch_pr
+    branch_history = target.config.workspace.branch_history
+    if branch_pr is None or branch_history is None:
+        plan.skips.append(
+            PlanSkip(
+                description=f"Workspace PERSIST.md ({workspace_label_text})",
+                reason="missing branch settings",
+            )
+        )
+        return
+    canonical = templates.render_persist(branch_pr, branch_history)
+    managed = target.config.atelier.managed_files
+    persist_path = target.root / "PERSIST.md"
+    persist_key = "PERSIST.md"
+
+    def update_persist_hash(value: str) -> None:
+        config.update_workspace_managed_files(target.root, {persist_key: value})
+
+    plan_agents_file(
+        plan,
+        description=f"Workspace PERSIST.md ({workspace_label_text})",
+        file_path=persist_path,
+        canonical_text=canonical,
+        stored_hash=managed.get(persist_key),
+        update_hash=update_persist_hash,
+        write_text=lambda text: persist_path.write_text(text, encoding="utf-8"),
+    )
+
+
 def plan_workspace_policy_rename(plan: UpgradePlan, target: WorkspaceTarget) -> None:
     success_path = target.root / "SUCCESS.md"
     legacy_path = target.root / "WORKSPACE.md"
@@ -809,6 +840,7 @@ def upgrade(args: object) -> None:
             plan_workspace_config_repair(plan, target)
             plan_workspace_policy_rename(plan, target)
             plan_workspace_agents(plan, target)
+            plan_workspace_persist(plan, target)
 
     summarize_plan(plan, dry_run=dry_run)
     if not plan.actions:
