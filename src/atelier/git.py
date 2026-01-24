@@ -297,6 +297,27 @@ def git_is_clean(repo_dir: Path, *, git_path: str | None = None) -> bool | None:
     return result.stdout.strip() == ""
 
 
+def git_status_porcelain(repo_dir: Path, *, git_path: str | None = None) -> list[str]:
+    """Return porcelain status lines for the working tree.
+
+    Args:
+        repo_dir: Git repository directory.
+
+    Returns:
+        List of ``git status --porcelain`` lines (empty on error).
+
+    Example:
+        >>> isinstance(git_status_porcelain(Path(".")), list)
+        True
+    """
+    result = run_git_command(
+        git_command(["-C", str(repo_dir), "status", "--porcelain"], git_path=git_path)
+    )
+    if result.returncode != 0:
+        return []
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
 def git_upstream_branch(repo_dir: Path, *, git_path: str | None = None) -> str | None:
     """Return the upstream branch ref for the current branch.
 
@@ -585,6 +606,27 @@ def git_diff_stat(
             ["-C", str(repo_dir), "diff", "--stat", f"{base}..{branch}"],
             git_path=git_path,
         )
+    )
+    if result.returncode != 0:
+        return []
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def git_ls_files(repo_dir: Path, *, git_path: str | None = None) -> list[str]:
+    """Return tracked file paths from ``git ls-files``.
+
+    Args:
+        repo_dir: Git repository directory.
+
+    Returns:
+        List of tracked file paths (empty on error).
+
+    Example:
+        >>> isinstance(git_ls_files(Path(".")), list)
+        True
+    """
+    result = run_git_command(
+        git_command(["-C", str(repo_dir), "ls-files"], git_path=git_path)
     )
     if result.returncode != 0:
         return []

@@ -30,6 +30,7 @@ from .commands import list as list_cmd
 from .commands import new as new_cmd
 from .commands import open as open_cmd
 from .commands import shell as shell_cmd
+from .commands import snapshot as snapshot_cmd
 from .commands import template as template_cmd
 from .commands import upgrade as upgrade_cmd
 from .commands import work as work_cmd
@@ -426,6 +427,20 @@ def work_command(
 ) -> None:
     """Open the workspace repo in the configured work editor."""
     work_cmd.open_workspace_repo(SimpleNamespace(workspace_name=workspace_name))
+
+
+@app.command("snapshot", help="Write a workspace snapshot summary.")
+def snapshot_command(
+    workspace_name: Annotated[
+        str,
+        typer.Argument(
+            help="workspace branch to snapshot",
+            autocompletion=_workspace_name_shell_complete,
+        ),
+    ],
+) -> None:
+    """Write a snapshot summary for a workspace."""
+    snapshot_cmd.snapshot_workspace(SimpleNamespace(workspace_name=workspace_name))
 
 
 @app.command(
