@@ -6,6 +6,7 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.hypothesis/
 build/
 dist/
 src/atelier/_version.py
