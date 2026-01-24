@@ -1,4 +1,8 @@
-"""Implementation for the ``atelier shell`` command."""
+"""Implementation for the ``atelier shell`` command.
+
+Resolves the workspace repo and opens a shell or command using the configured
+defaults and platform detection.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,8 @@
-"""Implementation for the ``atelier open`` command."""
+"""Implementation for the ``atelier open`` command.
+
+``atelier open`` resolves or creates a workspace, ensures the repo checkout,
+handles template upgrades, and launches or resumes the agent session.
+"""
 
 import difflib
 import shutil

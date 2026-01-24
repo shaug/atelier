@@ -81,6 +81,11 @@ Read more in [docs/why-not-git-worktree.md](docs/why-not-git-worktree.md).
   initialize is a separate project), not Git origin
 - The filesystem is the source of truth
 
+## Behavior and Design Notes
+
+See [docs/behavior.md](docs/behavior.md) for the compact behavioral overview.
+Command-specific details live in module docstrings under `src/atelier/commands`.
+
 ## Agent Setup
 
 Atelier launches the agent CLI configured in `agent.default`. Install and

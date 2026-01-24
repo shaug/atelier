@@ -1,4 +1,7 @@
-"""Implementation for the ``atelier upgrade`` command."""
+"""Implementation for the ``atelier upgrade`` command.
+
+Applies managed template updates according to the configured upgrade policy.
+"""
 
 from __future__ import annotations
 

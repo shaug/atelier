@@ -1,4 +1,8 @@
-"""Implementation for the ``atelier work`` command."""
+"""Implementation for the ``atelier work`` command.
+
+Opens the workspace repo in the configured work editor without creating new
+workspaces.
+"""
 
 from __future__ import annotations
 

@@ -4,7 +4,8 @@ This repository defines **Atelier**, an installable CLI tool for managing
 workspace-based, agent-assisted development within a single project.
 
 Agents working in this repository are expected to help **implement Atelier v2**
-according to the specification in `docs/SPEC.md`.
+according to the behavior overview in `docs/behavior.md` and the module-level
+docstrings in `src/atelier`.
 
 ______________________________________________________________________
 
@@ -60,9 +61,9 @@ You should **not**:
 - auto-modify user files after creation
 - invent migration or upgrade systems
 - enforce coding conventions for managed projects
-- add features not explicitly described in the spec
+- add features not explicitly described in the behavior docs or code
 
-If a behavior is not in `docs/SPEC.md`, do not add it.
+If a behavior is not in `docs/behavior.md` or documented in code, do not add it.
 
 ______________________________________________________________________
 

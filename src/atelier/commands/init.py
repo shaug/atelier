@@ -1,4 +1,9 @@
-"""Implementation for the ``atelier init`` command."""
+"""Implementation for the ``atelier init`` command.
+
+``atelier init`` registers the current repo in the Atelier data directory,
+writes project configuration and templates, and avoids modifying the repo
+itself.
+"""
 
 from pathlib import Path
 

@@ -1,4 +1,8 @@
-"""Implementation for the ``atelier clean`` command."""
+"""Implementation for the ``atelier clean`` command.
+
+Workspace cleanup is gated by the finalization tag
+``atelier/<branch-name>/finalized`` unless explicitly overridden.
+"""
 
 import shutil
 from pathlib import Path
