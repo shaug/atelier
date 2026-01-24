@@ -38,12 +38,15 @@ def open_workspace_repo(args: object) -> None:
     if not normalized:
         die("workspace branch must not be empty")
 
+    git_path = config.resolve_git_path(project_config)
+
     branch, workspace_dir, exists = workspace.resolve_workspace_target(
         project_root,
         project_config.project.enlistment or enlistment_path,
         normalized,
         project_config.branch.prefix,
         False,
+        git_path,
     )
     if not exists:
         die(f"workspace not found: {normalized}")
@@ -51,7 +54,7 @@ def open_workspace_repo(args: object) -> None:
     repo_dir = workspace_dir / "repo"
     if not repo_dir.exists():
         die(f"workspace repo missing for {branch}")
-    if not git.git_is_repo(repo_dir):
+    if not git.git_is_repo(repo_dir, git_path=git_path):
         die("workspace repo exists but is not a git repository")
 
     editor_cmd = editor.resolve_editor_command(project_config, role="work")

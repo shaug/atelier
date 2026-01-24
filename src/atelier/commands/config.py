@@ -34,8 +34,18 @@ def _apply_user_sections(
     atelier_section = base.atelier.model_copy(
         update={"upgrade": updates.atelier.upgrade}
     )
+    project_section = base.project
+    project_updates: dict[str, object] = {}
+    for key in ("provider", "provider_url", "owner"):
+        value = getattr(updates.project, key, None)
+        if value is not None:
+            project_updates[key] = value
+    if project_updates:
+        project_section = project_section.model_copy(update=project_updates)
     return base.model_copy(
         update={
+            "project": project_section,
+            "git": updates.git,
             "branch": updates.branch,
             "agent": updates.agent,
             "editor": updates.editor,
@@ -95,6 +105,7 @@ def show_config(args: object) -> None:
             die(
                 "workspace config cannot be combined with --installed/--prompt/--reset/--edit"
             )
+        git_path = config.resolve_git_path(project_config)
         normalized = workspace.normalize_workspace_name(str(workspace_name))
         if not normalized:
             die("workspace branch must not be empty")
@@ -104,6 +115,7 @@ def show_config(args: object) -> None:
             normalized,
             project_config.branch.prefix,
             False,
+            git_path,
         )
         if not exists:
             die(f"workspace not found: {normalized}")

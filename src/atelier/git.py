@@ -2,6 +2,7 @@
 
 import json
 import re
+import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -26,6 +27,14 @@ def strip_git_suffix(path: str) -> str:
     if normalized.lower().endswith(".git"):
         return normalized[: -len(".git")]
     return normalized
+
+
+def git_command(args: list[str], *, git_path: str | None = None) -> list[str]:
+    """Build a git command using an optional executable path."""
+    resolved = git_path.strip() if isinstance(git_path, str) else ""
+    if not resolved:
+        resolved = "git"
+    return [resolved, *args]
 
 
 def normalize_origin_url(value: str) -> str:
@@ -77,7 +86,7 @@ def normalize_origin_url(value: str) -> str:
     return local_path.as_posix()
 
 
-def git_repo_root(start: Path) -> Path | None:
+def git_repo_root(start: Path, *, git_path: str | None = None) -> Path | None:
     """Return the git repository root for a starting path.
 
     Args:
@@ -90,7 +99,11 @@ def git_repo_root(start: Path) -> Path | None:
         >>> git_repo_root(Path(".")) is None or True
         True
     """
-    result = run_git_command(["git", "-C", str(start), "rev-parse", "--show-toplevel"])
+    result = run_git_command(
+        git_command(
+            ["-C", str(start), "rev-parse", "--show-toplevel"], git_path=git_path
+        )
+    )
     if result.returncode != 0:
         return None
     resolved = result.stdout.strip()
@@ -99,7 +112,7 @@ def git_repo_root(start: Path) -> Path | None:
     return Path(resolved)
 
 
-def git_origin_url(repo_dir: Path) -> str | None:
+def git_origin_url(repo_dir: Path, *, git_path: str | None = None) -> str | None:
     """Return the ``origin`` remote URL for a repository.
 
     Args:
@@ -113,7 +126,9 @@ def git_origin_url(repo_dir: Path) -> str | None:
         True
     """
     result = run_git_command(
-        ["git", "-C", str(repo_dir), "remote", "get-url", "origin"]
+        git_command(
+            ["-C", str(repo_dir), "remote", "get-url", "origin"], git_path=git_path
+        )
     )
     if result.returncode != 0:
         return None
@@ -121,7 +136,9 @@ def git_origin_url(repo_dir: Path) -> str | None:
     return origin or None
 
 
-def resolve_repo_origin(start: Path) -> tuple[Path, str, str]:
+def resolve_repo_origin(
+    start: Path, *, git_path: str | None = None
+) -> tuple[Path, str, str]:
     """Resolve the repo root, raw origin URL, and normalized origin.
 
     Args:
@@ -134,10 +151,10 @@ def resolve_repo_origin(start: Path) -> tuple[Path, str, str]:
         >>> resolve_repo_origin(Path("."))  # doctest: +SKIP
         (Path(\"/repo\"), \"git@...\", \"github.com/org/repo\")
     """
-    repo_root = git_repo_root(start)
+    repo_root = git_repo_root(start, git_path=git_path)
     if not repo_root:
         die("command must be run inside a git repository")
-    origin_raw = git_origin_url(repo_root)
+    origin_raw = git_origin_url(repo_root, git_path=git_path)
     if not origin_raw:
         die("repo missing origin remote")
     origin = normalize_origin_url(origin_raw)
@@ -163,7 +180,7 @@ def resolve_enlistment_path(repo_root: Path) -> str:
 
 
 def resolve_repo_enlistment(
-    start: Path,
+    start: Path, *, git_path: str | None = None
 ) -> tuple[Path, str, str | None, str | None]:
     """Resolve the repo root, enlistment path, and origin metadata.
 
@@ -177,16 +194,16 @@ def resolve_repo_enlistment(
         >>> resolve_repo_enlistment(Path("."))  # doctest: +SKIP
         (Path("/repo"), "/repo", "git@...", "github.com/org/repo")
     """
-    repo_root = git_repo_root(start)
+    repo_root = git_repo_root(start, git_path=git_path)
     if not repo_root:
         die("command must be run inside a git repository")
     enlistment_path = resolve_enlistment_path(repo_root)
-    origin_raw = git_origin_url(repo_root)
+    origin_raw = git_origin_url(repo_root, git_path=git_path)
     origin = normalize_origin_url(origin_raw) if origin_raw else None
     return repo_root, enlistment_path, origin_raw, origin
 
 
-def git_current_branch(repo_dir: Path) -> str | None:
+def git_current_branch(repo_dir: Path, *, git_path: str | None = None) -> str | None:
     """Return the current branch name.
 
     Args:
@@ -200,14 +217,17 @@ def git_current_branch(repo_dir: Path) -> str | None:
         True
     """
     result = run_git_command(
-        ["git", "-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"]
+        git_command(
+            ["-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"],
+            git_path=git_path,
+        )
     )
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
 
 
-def git_default_branch(repo_dir: Path) -> str | None:
+def git_default_branch(repo_dir: Path, *, git_path: str | None = None) -> str | None:
     """Determine the default branch for a repository.
 
     Args:
@@ -221,7 +241,10 @@ def git_default_branch(repo_dir: Path) -> str | None:
         True
     """
     result = run_git_command(
-        ["git", "-C", str(repo_dir), "symbolic-ref", "refs/remotes/origin/HEAD"]
+        git_command(
+            ["-C", str(repo_dir), "symbolic-ref", "refs/remotes/origin/HEAD"],
+            git_path=git_path,
+        )
     )
     if result.returncode == 0:
         ref = result.stdout.strip()
@@ -231,7 +254,11 @@ def git_default_branch(repo_dir: Path) -> str | None:
             if branch:
                 return branch
 
-    result = run_git_command(["git", "-C", str(repo_dir), "remote", "show", "origin"])
+    result = run_git_command(
+        git_command(
+            ["-C", str(repo_dir), "remote", "show", "origin"], git_path=git_path
+        )
+    )
     if result.returncode == 0:
         for line in result.stdout.splitlines():
             if "HEAD branch:" not in line:
@@ -241,15 +268,15 @@ def git_default_branch(repo_dir: Path) -> str | None:
             if branch:
                 return branch
 
-    if git_ref_exists(repo_dir, "refs/heads/main"):
+    if git_ref_exists(repo_dir, "refs/heads/main", git_path=git_path):
         return "main"
-    if git_ref_exists(repo_dir, "refs/heads/master"):
+    if git_ref_exists(repo_dir, "refs/heads/master", git_path=git_path):
         return "master"
 
-    return git_current_branch(repo_dir)
+    return git_current_branch(repo_dir, git_path=git_path)
 
 
-def git_is_clean(repo_dir: Path) -> bool | None:
+def git_is_clean(repo_dir: Path, *, git_path: str | None = None) -> bool | None:
     """Check whether the working tree is clean.
 
     Args:
@@ -262,13 +289,15 @@ def git_is_clean(repo_dir: Path) -> bool | None:
         >>> git_is_clean(Path(".")) in {True, False, None}
         True
     """
-    result = run_git_command(["git", "-C", str(repo_dir), "status", "--porcelain"])
+    result = run_git_command(
+        git_command(["-C", str(repo_dir), "status", "--porcelain"], git_path=git_path)
+    )
     if result.returncode != 0:
         return None
     return result.stdout.strip() == ""
 
 
-def git_upstream_branch(repo_dir: Path) -> str | None:
+def git_upstream_branch(repo_dir: Path, *, git_path: str | None = None) -> str | None:
     """Return the upstream branch ref for the current branch.
 
     Args:
@@ -282,22 +311,26 @@ def git_upstream_branch(repo_dir: Path) -> str | None:
         True
     """
     result = run_git_command(
-        [
-            "git",
-            "-C",
-            str(repo_dir),
-            "rev-parse",
-            "--abbrev-ref",
-            "--symbolic-full-name",
-            "@{u}",
-        ]
+        git_command(
+            [
+                "-C",
+                str(repo_dir),
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{u}",
+            ],
+            git_path=git_path,
+        )
     )
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
 
 
-def git_branch_fully_pushed(repo_dir: Path) -> bool | None:
+def git_branch_fully_pushed(
+    repo_dir: Path, *, git_path: str | None = None
+) -> bool | None:
     """Return whether the current branch matches its upstream.
 
     Args:
@@ -310,17 +343,19 @@ def git_branch_fully_pushed(repo_dir: Path) -> bool | None:
         >>> git_branch_fully_pushed(Path(".")) in {True, False, None}
         True
     """
-    upstream = git_upstream_branch(repo_dir)
+    upstream = git_upstream_branch(repo_dir, git_path=git_path)
     if not upstream:
         return None
-    head = git_rev_parse(repo_dir, "HEAD")
-    upstream_head = git_rev_parse(repo_dir, upstream)
+    head = git_rev_parse(repo_dir, "HEAD", git_path=git_path)
+    upstream_head = git_rev_parse(repo_dir, upstream, git_path=git_path)
     if not head or not upstream_head:
         return None
     return head == upstream_head
 
 
-def git_has_remote_branch(repo_dir: Path, branch: str) -> bool | None:
+def git_has_remote_branch(
+    repo_dir: Path, branch: str, *, git_path: str | None = None
+) -> bool | None:
     """Check whether a remote branch exists.
 
     Args:
@@ -336,7 +371,10 @@ def git_has_remote_branch(repo_dir: Path, branch: str) -> bool | None:
     """
     ref = f"refs/heads/{branch}"
     result = run_git_command(
-        ["git", "-C", str(repo_dir), "ls-remote", "--heads", "origin", ref]
+        git_command(
+            ["-C", str(repo_dir), "ls-remote", "--heads", "origin", ref],
+            git_path=git_path,
+        )
     )
     if result.returncode != 0:
         return None
@@ -347,7 +385,7 @@ def git_has_remote_branch(repo_dir: Path, branch: str) -> bool | None:
     return False
 
 
-def git_ref_exists(repo_dir: Path, ref: str) -> bool:
+def git_ref_exists(repo_dir: Path, ref: str, *, git_path: str | None = None) -> bool:
     """Check whether a git ref exists.
 
     Args:
@@ -362,12 +400,15 @@ def git_ref_exists(repo_dir: Path, ref: str) -> bool:
         True
     """
     result = run_git_command(
-        ["git", "-C", str(repo_dir), "show-ref", "--verify", "--quiet", ref]
+        git_command(
+            ["-C", str(repo_dir), "show-ref", "--verify", "--quiet", ref],
+            git_path=git_path,
+        )
     )
     return result.returncode == 0
 
 
-def git_tag_exists(repo_dir: Path, tag: str) -> bool:
+def git_tag_exists(repo_dir: Path, tag: str, *, git_path: str | None = None) -> bool:
     """Check whether a local tag exists.
 
     Args:
@@ -383,10 +424,12 @@ def git_tag_exists(repo_dir: Path, tag: str) -> bool:
     """
     if not tag:
         return False
-    return git_ref_exists(repo_dir, f"refs/tags/{tag}")
+    return git_ref_exists(repo_dir, f"refs/tags/{tag}", git_path=git_path)
 
 
-def git_rev_parse(repo_dir: Path, ref: str) -> str | None:
+def git_rev_parse(
+    repo_dir: Path, ref: str, *, git_path: str | None = None
+) -> str | None:
     """Resolve a ref to its commit hash.
 
     Args:
@@ -400,13 +443,15 @@ def git_rev_parse(repo_dir: Path, ref: str) -> str | None:
         >>> git_rev_parse(Path("."), "HEAD") is None or True
         True
     """
-    result = run_git_command(["git", "-C", str(repo_dir), "rev-parse", ref])
+    result = run_git_command(
+        git_command(["-C", str(repo_dir), "rev-parse", ref], git_path=git_path)
+    )
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
 
 
-def git_is_repo(repo_dir: Path) -> bool:
+def git_is_repo(repo_dir: Path, *, git_path: str | None = None) -> bool:
     """Return whether the path is inside a git work tree.
 
     Args:
@@ -420,12 +465,17 @@ def git_is_repo(repo_dir: Path) -> bool:
         True
     """
     result = run_git_command(
-        ["git", "-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"]
+        git_command(
+            ["-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
+            git_path=git_path,
+        )
     )
     return result.returncode == 0
 
 
-def git_commits_ahead(repo_dir: Path, base: str, branch: str) -> int | None:
+def git_commits_ahead(
+    repo_dir: Path, base: str, branch: str, *, git_path: str | None = None
+) -> int | None:
     """Count commits in ``branch`` that are not in ``base``.
 
     Args:
@@ -441,7 +491,10 @@ def git_commits_ahead(repo_dir: Path, base: str, branch: str) -> int | None:
         True
     """
     result = run_git_command(
-        ["git", "-C", str(repo_dir), "rev-list", "--count", f"{base}..{branch}"]
+        git_command(
+            ["-C", str(repo_dir), "rev-list", "--count", f"{base}..{branch}"],
+            git_path=git_path,
+        )
     )
     if result.returncode != 0:
         return None
@@ -451,7 +504,9 @@ def git_commits_ahead(repo_dir: Path, base: str, branch: str) -> int | None:
         return None
 
 
-def git_commit_messages(repo_dir: Path, base: str, branch: str) -> list[str]:
+def git_commit_messages(
+    repo_dir: Path, base: str, branch: str, *, git_path: str | None = None
+) -> list[str]:
     """Return commit messages for commits in ``branch`` not in ``base``.
 
     Args:
@@ -467,7 +522,10 @@ def git_commit_messages(repo_dir: Path, base: str, branch: str) -> list[str]:
         True
     """
     result = run_git_command(
-        ["git", "-C", str(repo_dir), "log", "--format=%B%x1f", f"{base}..{branch}"]
+        git_command(
+            ["-C", str(repo_dir), "log", "--format=%B%x1f", f"{base}..{branch}"],
+            git_path=git_path,
+        )
     )
     if result.returncode != 0:
         return []
@@ -477,7 +535,9 @@ def git_commit_messages(repo_dir: Path, base: str, branch: str) -> list[str]:
     return [msg.strip() for msg in raw.split("\x1f") if msg.strip()]
 
 
-def git_diff_name_status(repo_dir: Path, base: str, branch: str) -> list[str]:
+def git_diff_name_status(
+    repo_dir: Path, base: str, branch: str, *, git_path: str | None = None
+) -> list[str]:
     """Return ``git diff --name-status`` lines between two refs.
 
     Args:
@@ -493,14 +553,19 @@ def git_diff_name_status(repo_dir: Path, base: str, branch: str) -> list[str]:
         True
     """
     result = run_git_command(
-        ["git", "-C", str(repo_dir), "diff", "--name-status", f"{base}..{branch}"]
+        git_command(
+            ["-C", str(repo_dir), "diff", "--name-status", f"{base}..{branch}"],
+            git_path=git_path,
+        )
     )
     if result.returncode != 0:
         return []
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
-def git_diff_stat(repo_dir: Path, base: str, branch: str) -> list[str]:
+def git_diff_stat(
+    repo_dir: Path, base: str, branch: str, *, git_path: str | None = None
+) -> list[str]:
     """Return ``git diff --stat`` lines between two refs.
 
     Args:
@@ -516,14 +581,19 @@ def git_diff_stat(repo_dir: Path, base: str, branch: str) -> list[str]:
         True
     """
     result = run_git_command(
-        ["git", "-C", str(repo_dir), "diff", "--stat", f"{base}..{branch}"]
+        git_command(
+            ["-C", str(repo_dir), "diff", "--stat", f"{base}..{branch}"],
+            git_path=git_path,
+        )
     )
     if result.returncode != 0:
         return []
     return [line for line in result.stdout.splitlines() if line.strip()]
 
 
-def git_merge_base(repo_dir: Path, base: str, branch: str) -> str | None:
+def git_merge_base(
+    repo_dir: Path, base: str, branch: str, *, git_path: str | None = None
+) -> str | None:
     """Return the merge base hash between two refs.
 
     Args:
@@ -538,14 +608,23 @@ def git_merge_base(repo_dir: Path, base: str, branch: str) -> str | None:
         >>> git_merge_base(Path("."), "main", "HEAD") is None or True
         True
     """
-    result = run_git_command(["git", "-C", str(repo_dir), "merge-base", base, branch])
+    result = run_git_command(
+        git_command(
+            ["-C", str(repo_dir), "merge-base", base, branch], git_path=git_path
+        )
+    )
     if result.returncode != 0:
         return None
     return result.stdout.strip() or None
 
 
 def git_commit_subjects_since_merge_base(
-    repo_dir: Path, base: str, branch: str, limit: int = 20
+    repo_dir: Path,
+    base: str,
+    branch: str,
+    limit: int = 20,
+    *,
+    git_path: str | None = None,
 ) -> list[str]:
     """Return commit subjects since the merge base of two refs.
 
@@ -562,26 +641,30 @@ def git_commit_subjects_since_merge_base(
         >>> isinstance(git_commit_subjects_since_merge_base(Path("."), "main", "HEAD"), list)
         True
     """
-    merge_base = git_merge_base(repo_dir, base, branch)
+    merge_base = git_merge_base(repo_dir, base, branch, git_path=git_path)
     if not merge_base:
         return []
     result = run_git_command(
-        [
-            "git",
-            "-C",
-            str(repo_dir),
-            "log",
-            "--format=%s",
-            f"--max-count={max(0, limit)}",
-            f"{merge_base}..{branch}",
-        ]
+        git_command(
+            [
+                "-C",
+                str(repo_dir),
+                "log",
+                "--format=%s",
+                f"--max-count={max(0, limit)}",
+                f"{merge_base}..{branch}",
+            ],
+            git_path=git_path,
+        )
     )
     if result.returncode != 0:
         return []
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
-def git_head_matches_remote(repo_dir: Path, branch: str) -> bool | None:
+def git_head_matches_remote(
+    repo_dir: Path, branch: str, *, git_path: str | None = None
+) -> bool | None:
     """Return whether ``HEAD`` matches ``origin/<branch>``.
 
     Args:
@@ -596,13 +679,18 @@ def git_head_matches_remote(repo_dir: Path, branch: str) -> bool | None:
         True
     """
     remote_ref = f"origin/{branch}"
-    if not git_ref_exists(repo_dir, f"refs/remotes/{remote_ref}"):
+    if not git_ref_exists(repo_dir, f"refs/remotes/{remote_ref}", git_path=git_path):
         return None
-    head = git_rev_parse(repo_dir, "HEAD")
-    remote = git_rev_parse(repo_dir, remote_ref)
+    head = git_rev_parse(repo_dir, "HEAD", git_path=git_path)
+    remote = git_rev_parse(repo_dir, remote_ref, git_path=git_path)
     if not head or not remote:
         return None
     return head == remote
+
+
+def gh_available() -> bool:
+    """Return whether the GitHub CLI is available on PATH."""
+    return shutil.which("gh") is not None
 
 
 def gh_pr_message(repo_dir: Path) -> dict | None:

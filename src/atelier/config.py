@@ -118,16 +118,29 @@ def _backup_legacy_config(path: Path) -> None:
 
 def _split_project_payload(payload: dict) -> tuple[dict, dict]:
     user_payload: dict = {}
-    for key in ("branch", "agent", "editor", "tickets"):
+    for key in ("branch", "agent", "editor", "tickets", "git"):
         if key in payload:
             user_payload[key] = payload.get(key)
+    project_payload = payload.get("project")
+    if isinstance(project_payload, dict):
+        project_user: dict = {}
+        for key in ("provider", "provider_url", "owner"):
+            if key in project_payload:
+                project_user[key] = project_payload.get(key)
+        if project_user:
+            user_payload["project"] = project_user
     atelier_payload = dict(payload.get("atelier", {}) or {})
     upgrade = atelier_payload.pop("upgrade", None)
     if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
         user_payload["atelier"] = {"upgrade": upgrade}
     system_payload = dict(payload)
-    for key in ("branch", "agent", "editor"):
+    for key in ("branch", "agent", "editor", "tickets", "git"):
         system_payload.pop(key, None)
+    project_system = dict(system_payload.get("project", {}) or {})
+    for key in ("provider", "provider_url", "owner"):
+        project_system.pop(key, None)
+    if "project" in system_payload:
+        system_payload["project"] = project_system
     system_payload["atelier"] = atelier_payload
     return system_payload, user_payload
 
@@ -284,8 +297,21 @@ def merge_project_configs(
     system_payload = system_config.model_dump()
     user_payload = (user_config or ProjectUserConfig()).model_dump()
     merged = dict(system_payload)
-    for key in ("branch", "agent", "editor"):
+    for key in ("branch", "agent", "editor", "git"):
         merged[key] = user_payload.get(key, {})
+    system_project = system_payload.get("project", {}) if system_payload else {}
+    user_project = user_payload.get("project", {}) if user_payload else {}
+    if isinstance(system_project, dict):
+        project_payload = dict(system_project)
+    else:
+        project_payload = {}
+    if isinstance(user_project, dict):
+        for key in ("provider", "provider_url", "owner"):
+            value = user_project.get(key)
+            if value is not None:
+                project_payload[key] = value
+    if project_payload:
+        merged["project"] = project_payload
     system_atelier = system_payload.get("atelier", {}) if system_payload else {}
     user_atelier = user_payload.get("atelier", {}) if user_payload else {}
     merged_atelier = dict(system_atelier)
@@ -674,6 +700,32 @@ def resolve_branch_history(branch_config: BranchConfig) -> str:
     return branch_config.history
 
 
+def resolve_git_path(
+    config_payload: ProjectConfig | ProjectUserConfig | dict | None = None,
+) -> str:
+    """Resolve the git executable path from config payloads."""
+    if config_payload is None:
+        return "git"
+    if isinstance(config_payload, (ProjectConfig, ProjectUserConfig)):
+        path = config_payload.git.path
+        return path or "git"
+    if isinstance(config_payload, dict):
+        git_payload = config_payload.get("git")
+        if isinstance(git_payload, dict):
+            value = git_payload.get("path")
+            if isinstance(value, str):
+                value = value.strip()
+            return value or "git"
+    return "git"
+
+
+def is_github_provider(value: str | None) -> bool:
+    """Return whether the provider string identifies GitHub."""
+    if not value:
+        return False
+    return value.strip().lower() == "github"
+
+
 def normalize_upgrade_policy(value: object, source: str) -> str:
     """Normalize an upgrade policy string or fail with a helpful error.
 
@@ -831,23 +883,35 @@ def user_config_missing_fields(payload: dict | None) -> list[str]:
 def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
     """Return user-editable config sections as a dict."""
     if isinstance(config, ProjectUserConfig):
+        project = config.project
+        git_config = config.git
         branch = config.branch
         agent = config.agent
         editor_config = config.editor
         tickets = config.tickets
         upgrade = config.atelier.upgrade
     else:
+        project = config.project
+        git_config = config.git
         branch = config.branch
         agent = config.agent
         editor_config = config.editor
         tickets = config.tickets
         upgrade = config.atelier.upgrade
+    project_payload = {
+        key: value
+        for key in ("provider", "provider_url", "owner")
+        if (value := getattr(project, key, None)) is not None
+    }
     payload = {
         "branch": branch.model_dump(),
+        "git": git_config.model_dump(),
         "agent": agent.model_dump(),
         "editor": editor_config.model_dump(),
         "tickets": tickets.model_dump(),
     }
+    if project_payload:
+        payload["project"] = project_payload
     if upgrade is not None:
         payload["atelier"] = {"upgrade": upgrade}
     return payload
@@ -963,6 +1027,7 @@ def default_user_config() -> ProjectUserConfig:
     agent_options = {agents.DEFAULT_AGENT: []}
     return base.model_copy(
         update={
+            "git": base.git,
             "branch": base.branch,
             "agent": AgentConfig(default=agents.DEFAULT_AGENT, options=agent_options),
             "editor": EditorConfig(
@@ -1009,6 +1074,10 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
             update={"work": default_config.editor.work}
         )
 
+    git_config = parsed.git
+    if not _path_has_value(payload, "git", "path"):
+        git_config = git_config.model_copy(update={"path": default_config.git.path})
+
     atelier_section = parsed.atelier
     if not _path_has_value(payload, "atelier", "upgrade"):
         atelier_section = atelier_section.model_copy(
@@ -1020,6 +1089,7 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
             "branch": branch,
             "agent": agent,
             "editor": editor_config,
+            "git": git_config,
             "atelier": atelier_section,
         }
     )
@@ -1254,6 +1324,9 @@ def build_project_config(
     project_origin = origin or existing_config.project.origin
     project_repo_url = origin_raw or existing_config.project.repo_url
     project_allow_mainline = existing_config.project.allow_mainline_workspace
+    project_provider = existing_config.project.provider
+    project_provider_url = existing_config.project.provider_url
+    project_owner = existing_config.project.owner
 
     tickets_section = ticket_config.model_copy(
         update={
@@ -1269,7 +1342,11 @@ def build_project_config(
             origin=project_origin,
             repo_url=project_repo_url,
             allow_mainline_workspace=project_allow_mainline,
+            provider=project_provider,
+            provider_url=project_provider_url,
+            owner=project_owner,
         ),
+        git=existing_config.git,
         branch=BranchConfig(prefix=branch_prefix, pr=branch_pr, history=branch_history),
         agent=AgentConfig(default=agent_default, options=agent_options),
         editor=EditorConfig(edit=editor_edit, work=editor_work),

@@ -52,6 +52,32 @@ class BranchConfig(BaseModel):
         return value
 
 
+class GitSection(BaseModel):
+    """Git configuration for a project.
+
+    Attributes:
+        path: Git executable path (default ``git``).
+
+    Example:
+        >>> GitSection(path="/usr/bin/git")
+        GitSection(...)
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    path: str = "git"
+
+    @field_validator("path", mode="before")
+    @classmethod
+    def normalize_path(cls, value: object) -> object:
+        if value is None:
+            return "git"
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or "git"
+        return value
+
+
 class ProjectSection(BaseModel):
     """Project identification metadata.
 
@@ -60,6 +86,9 @@ class ProjectSection(BaseModel):
         origin: Normalized origin string.
         repo_url: Raw origin URL.
         allow_mainline_workspace: Allow a workspace on the default branch.
+        provider: Provider slug (e.g. ``github``) when set.
+        provider_url: Provider base URL (self-hosted).
+        owner: Provider owner/org when set.
 
     Example:
         >>> ProjectSection(enlistment="/repo", origin="github.com/org/repo")
@@ -72,6 +101,59 @@ class ProjectSection(BaseModel):
     origin: str | None = None
     repo_url: str | None = None
     allow_mainline_workspace: bool = False
+    provider: str | None = None
+    provider_url: str | None = None
+    owner: str | None = None
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def normalize_provider(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return normalized or None
+        return value
+
+    @field_validator("provider_url", "owner", mode="before")
+    @classmethod
+    def normalize_optional_strings(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+
+
+class ProjectProviderSection(BaseModel):
+    """User-managed provider metadata for a project."""
+
+    model_config = ConfigDict(extra="allow")
+
+    provider: str | None = None
+    provider_url: str | None = None
+    owner: str | None = None
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def normalize_provider(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return normalized or None
+        return value
+
+    @field_validator("provider_url", "owner", mode="before")
+    @classmethod
+    def normalize_optional_strings(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
 
 
 class AgentConfig(BaseModel):
@@ -310,6 +392,7 @@ class ProjectConfig(BaseModel):
 
     Attributes:
         project: Project metadata section.
+        git: Git configuration section.
         branch: Branch policy section.
         agent: Agent configuration section.
         editor: Editor configuration section.
@@ -323,6 +406,7 @@ class ProjectConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     project: ProjectSection = Field(default_factory=ProjectSection)
+    git: GitSection = Field(default_factory=GitSection)
     branch: BranchConfig = Field(default_factory=BranchConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
@@ -344,6 +428,8 @@ class ProjectUserConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    project: ProjectProviderSection = Field(default_factory=ProjectProviderSection)
+    git: GitSection = Field(default_factory=GitSection)
     branch: BranchConfig = Field(default_factory=BranchConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)

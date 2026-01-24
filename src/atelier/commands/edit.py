@@ -34,6 +34,7 @@ def edit_files(args: object) -> None:
 
     project_root, project_config, enlistment_path = _resolve_project()
     editor_cmd = editor.resolve_editor_command(project_config, role="edit")
+    git_path = config.resolve_git_path(project_config)
 
     if edit_project:
         project_path = project_root / "PROJECT.md"
@@ -53,6 +54,7 @@ def edit_files(args: object) -> None:
         normalized,
         project_config.branch.prefix,
         False,
+        git_path,
     )
     if not exists:
         die(f"workspace not found: {normalized}")

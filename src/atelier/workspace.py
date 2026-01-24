@@ -115,6 +115,7 @@ def resolve_workspace_target(
     name: str,
     branch_prefix: str,
     raw: bool,
+    git_path: str | None = None,
 ) -> tuple[str, Path, bool]:
     """Resolve the target workspace branch and directory.
 
@@ -145,7 +146,11 @@ def resolve_workspace_target(
             return name, workspace_dir, True
 
     candidates = workspace_candidate_branches(name, branch_prefix, raw)
-    if not raw and name and _branch_exists(Path(project_enlistment), name):
+    if (
+        not raw
+        and name
+        and _branch_exists(Path(project_enlistment), name, git_path=git_path)
+    ):
         candidates = [name]
     for branch in candidates:
         found = find_workspace_for_branch(
@@ -172,7 +177,7 @@ def resolve_workspace_target(
     return branch, workspace_dir, False
 
 
-def _branch_exists(repo_dir: Path, branch: str) -> bool:
+def _branch_exists(repo_dir: Path, branch: str, *, git_path: str | None = None) -> bool:
     """Return whether a branch exists locally or on origin.
 
     Args:
@@ -184,13 +189,13 @@ def _branch_exists(repo_dir: Path, branch: str) -> bool:
     """
     if not branch:
         return False
-    if not git.git_is_repo(repo_dir):
+    if not git.git_is_repo(repo_dir, git_path=git_path):
         return False
-    if git.git_ref_exists(repo_dir, f"refs/heads/{branch}"):
+    if git.git_ref_exists(repo_dir, f"refs/heads/{branch}", git_path=git_path):
         return True
-    if git.git_ref_exists(repo_dir, f"refs/remotes/origin/{branch}"):
+    if git.git_ref_exists(repo_dir, f"refs/remotes/origin/{branch}", git_path=git_path):
         return True
-    remote_exists = git.git_has_remote_branch(repo_dir, branch)
+    remote_exists = git.git_has_remote_branch(repo_dir, branch, git_path=git_path)
     return remote_exists is True
 
 
@@ -388,6 +393,9 @@ def append_workspace_branch_summary(
     repo_dir: Path,
     mainline_branch: str,
     workspace_branch: str,
+    *,
+    git_path: str | None = None,
+    provider: str | None = None,
 ) -> None:
     """Append branch sync status details to ``AGENTS.md``.
 
@@ -405,27 +413,39 @@ def append_workspace_branch_summary(
     """
     if not agents_path.exists():
         return
-    if not repo_dir.exists() or not git.git_is_repo(repo_dir):
+    if not repo_dir.exists() or not git.git_is_repo(repo_dir, git_path=git_path):
         warn("could not append branch summary to AGENTS.md (repo unavailable)")
         return
 
-    pr_message = git.gh_pr_message(repo_dir)
+    use_pr_snapshot = config.is_github_provider(provider) and git.gh_available()
+    pr_message = git.gh_pr_message(repo_dir) if use_pr_snapshot else None
     commit_messages = []
     if not pr_message:
         commit_messages = git.git_commit_messages(
-            repo_dir, mainline_branch, workspace_branch
+            repo_dir,
+            mainline_branch,
+            workspace_branch,
+            git_path=git_path,
         )
 
-    commits_ahead = git.git_commits_ahead(repo_dir, mainline_branch, workspace_branch)
-    diff_names = git.git_diff_name_status(repo_dir, mainline_branch, workspace_branch)
-    diff_stat = git.git_diff_stat(repo_dir, mainline_branch, workspace_branch)
+    commits_ahead = git.git_commits_ahead(
+        repo_dir, mainline_branch, workspace_branch, git_path=git_path
+    )
+    diff_names = git.git_diff_name_status(
+        repo_dir, mainline_branch, workspace_branch, git_path=git_path
+    )
+    diff_stat = git.git_diff_stat(
+        repo_dir, mainline_branch, workspace_branch, git_path=git_path
+    )
 
     checked_out = None
-    current_branch = git.git_current_branch(repo_dir)
+    current_branch = git.git_current_branch(repo_dir, git_path=git_path)
     if current_branch:
         checked_out = current_branch == workspace_branch
-    clean = git.git_is_clean(repo_dir)
-    remote_equal = git.git_head_matches_remote(repo_dir, workspace_branch)
+    clean = git.git_is_clean(repo_dir, git_path=git_path)
+    remote_equal = git.git_head_matches_remote(
+        repo_dir, workspace_branch, git_path=git_path
+    )
     up_to_date = workspace_up_to_date(checked_out, clean, remote_equal)
 
     today = dt.datetime.now(tz=dt.timezone.utc).strftime("%Y-%m-%d")
@@ -493,6 +513,9 @@ def write_background_snapshot(
     repo_dir: Path,
     mainline_branch: str,
     workspace_branch: str,
+    *,
+    git_path: str | None = None,
+    provider: str | None = None,
 ) -> None:
     """Write ``BACKGROUND.md`` for a workspace created from an existing branch.
 
@@ -507,7 +530,7 @@ def write_background_snapshot(
     """
     if background_path.exists():
         return
-    if not repo_dir.exists() or not git.git_is_repo(repo_dir):
+    if not repo_dir.exists() or not git.git_is_repo(repo_dir, git_path=git_path):
         warn("could not write BACKGROUND.md (repo unavailable)")
         return
 
@@ -522,7 +545,8 @@ def write_background_snapshot(
         f"- Mainline: `{mainline_branch}`",
     ]
 
-    pr_message = git.gh_pr_message(repo_dir)
+    use_pr_snapshot = config.is_github_provider(provider) and git.gh_available()
+    pr_message = git.gh_pr_message(repo_dir) if use_pr_snapshot else None
     if pr_message:
         title = pr_message.get("title")
         number = pr_message.get("number")
@@ -542,7 +566,11 @@ def write_background_snapshot(
             lines.append("- Body: (empty)")
     else:
         subjects = git.git_commit_subjects_since_merge_base(
-            repo_dir, mainline_branch, workspace_branch, limit=BACKGROUND_COMMIT_LIMIT
+            repo_dir,
+            mainline_branch,
+            workspace_branch,
+            limit=BACKGROUND_COMMIT_LIMIT,
+            git_path=git_path,
         )
         lines.extend(
             ["", f"## Commit Subjects since merge-base (generated {today})", ""]
@@ -560,6 +588,7 @@ def collect_workspaces(
     config_payload: config.ProjectConfig,
     with_status: bool = True,
     enlistment_repo_dir: Path | None = None,
+    git_path: str | None = None,
 ) -> list[dict]:
     """Collect workspace metadata for a project.
 
@@ -608,17 +637,21 @@ def collect_workspaces(
         if with_status:
             finalization_tag = finalization_tag_name(branch)
             if repo_dir.exists():
-                current_branch = git.git_current_branch(repo_dir)
+                current_branch = git.git_current_branch(repo_dir, git_path=git_path)
                 checked_out = current_branch == branch if current_branch else None
                 if current_branch and current_branch == branch:
-                    clean = git.git_is_clean(repo_dir)
+                    clean = git.git_is_clean(repo_dir, git_path=git_path)
                 else:
                     clean = None
-                pushed = git.git_has_remote_branch(repo_dir, branch)
-                finalized = git.git_tag_exists(repo_dir, finalization_tag)
+                pushed = git.git_has_remote_branch(repo_dir, branch, git_path=git_path)
+                finalized = git.git_tag_exists(
+                    repo_dir, finalization_tag, git_path=git_path
+                )
             if main_repo_dir is not None:
                 if finalized is not True:
-                    finalized = git.git_tag_exists(main_repo_dir, finalization_tag)
+                    finalized = git.git_tag_exists(
+                        main_repo_dir, finalization_tag, git_path=git_path
+                    )
         return {
             "name": workspace_name,
             "path": workspace_dir,

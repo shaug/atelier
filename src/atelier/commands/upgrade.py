@@ -80,16 +80,29 @@ def project_label_from_parts(root: Path, origin: str | None) -> str:
 
 def split_project_payload(payload: dict) -> tuple[dict, dict]:
     user_payload: dict = {}
-    for key in ("branch", "agent", "editor"):
+    for key in ("branch", "agent", "editor", "git"):
         if key in payload:
             user_payload[key] = payload.get(key)
+    project_payload = payload.get("project")
+    if isinstance(project_payload, dict):
+        project_user: dict = {}
+        for key in ("provider", "provider_url", "owner"):
+            if key in project_payload:
+                project_user[key] = project_payload.get(key)
+        if project_user:
+            user_payload["project"] = project_user
     atelier_payload = dict(payload.get("atelier", {}) or {})
     upgrade = atelier_payload.pop("upgrade", None)
     if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
         user_payload["atelier"] = {"upgrade": upgrade}
     system_payload = dict(payload)
-    for key in ("branch", "agent", "editor"):
+    for key in ("branch", "agent", "editor", "git"):
         system_payload.pop(key, None)
+    project_system = dict(system_payload.get("project", {}) or {})
+    for key in ("provider", "provider_url", "owner"):
+        project_system.pop(key, None)
+    if "project" in system_payload:
+        system_payload["project"] = project_system
     system_payload["atelier"] = atelier_payload
     return system_payload, user_payload
 
@@ -329,8 +342,9 @@ def _guess_branch_from_dirname(name: str, branch_prefix: str | None) -> str:
 
 def guess_workspace_branch(project: ProjectTarget, workspace_dir: Path) -> str:
     repo_dir = workspace_dir / "repo"
-    if repo_dir.exists() and git.git_is_repo(repo_dir):
-        branch = git.git_current_branch(repo_dir)
+    git_path = config.resolve_git_path(project.config)
+    if repo_dir.exists() and git.git_is_repo(repo_dir, git_path=git_path):
+        branch = git.git_current_branch(repo_dir, git_path=git_path)
         if branch and branch != "HEAD":
             return branch
     return _guess_branch_from_dirname(workspace_dir.name, project.config.branch.prefix)

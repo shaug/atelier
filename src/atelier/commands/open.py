@@ -506,6 +506,8 @@ def open_workspace(args: object) -> None:
         config_payload = config_payload.model_copy(update={"project": project_section})
         config.write_project_config(config_path, config_payload)
 
+    git_path = config.resolve_git_path(config_payload)
+
     project_upgrade_policy = config.resolve_upgrade_policy(
         config_payload.atelier.upgrade
     )
@@ -548,7 +550,7 @@ def open_workspace(args: object) -> None:
         if raw_branch:
             die("workspace branch is required when using --raw")
         workspace_name_input = resolve_implicit_workspace_name(
-            repo_root, config_payload
+            repo_root, config_payload, git_path=git_path
         )
         raw_branch = True
 
@@ -564,6 +566,7 @@ def open_workspace(args: object) -> None:
             workspace_name_input,
             branch_prefix,
             raw_branch,
+            git_path,
         )
     )
     if not workspace_branch:
@@ -702,13 +705,20 @@ def open_workspace(args: object) -> None:
     should_open_editor = is_new_workspace
     editor_cmd: list[str] | None = None
     if not repo_dir.exists():
-        exec.run_command(["git", "clone", project_repo_url, str(repo_dir)])
+        exec.run_command(
+            git.git_command(
+                ["clone", project_repo_url, str(repo_dir)], git_path=git_path
+            )
+        )
     else:
-        if not git.git_is_repo(repo_dir):
+        if not git.git_is_repo(repo_dir, git_path=git_path):
             die("repo exists but is not a git repository")
         if origin_raw is not None:
             remote_check = subprocess.run(
-                ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+                git.git_command(
+                    ["-C", str(repo_dir), "remote", "get-url", "origin"],
+                    git_path=git_path,
+                ),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -723,22 +733,25 @@ def open_workspace(args: object) -> None:
 
     if repo_dir.exists():
         finalization_tag = workspace.finalization_tag_name(workspace_branch)
-        if git.git_tag_exists(repo_dir, finalization_tag):
+        if git.git_tag_exists(repo_dir, finalization_tag, git_path=git_path):
             if confirm_remove_finalization_tag(workspace_branch, finalization_tag):
                 result = exec.try_run_command(
-                    ["git", "-C", str(repo_dir), "tag", "-d", finalization_tag]
+                    git.git_command(
+                        ["-C", str(repo_dir), "tag", "-d", finalization_tag],
+                        git_path=git_path,
+                    )
                 )
                 if result is None or result.returncode != 0:
                     warn("failed to delete finalization tag; continuing with open")
 
-    current_branch = git.git_current_branch(repo_dir)
+    current_branch = git.git_current_branch(repo_dir, git_path=git_path)
     if current_branch is None:
         die("failed to determine repo branch")
-    repo_clean = git.git_is_clean(repo_dir)
+    repo_clean = git.git_is_clean(repo_dir, git_path=git_path)
     if repo_clean is None:
         die("failed to determine repo status")
 
-    default_branch = git.git_default_branch(repo_dir)
+    default_branch = git.git_default_branch(repo_dir, git_path=git_path)
     if not default_branch:
         die("failed to determine default branch from repo")
     allow_mainline = config_payload.project.allow_mainline_workspace
@@ -763,40 +776,61 @@ def open_workspace(args: object) -> None:
             skip_workspace_checkout = True
 
     if not skip_default_checkout:
-        exec.run_command(["git", "-C", str(repo_dir), "checkout", default_branch])
+        exec.run_command(
+            git.git_command(
+                ["-C", str(repo_dir), "checkout", default_branch], git_path=git_path
+            )
+        )
 
-    local_branch = git.git_ref_exists(repo_dir, f"refs/heads/{workspace_branch}")
+    local_branch = git.git_ref_exists(
+        repo_dir, f"refs/heads/{workspace_branch}", git_path=git_path
+    )
     remote_branch = git.git_ref_exists(
-        repo_dir, f"refs/remotes/origin/{workspace_branch}"
+        repo_dir, f"refs/remotes/origin/{workspace_branch}", git_path=git_path
     )
     if not remote_branch:
-        remote_branch = git.git_has_remote_branch(repo_dir, workspace_branch) is True
+        remote_branch = (
+            git.git_has_remote_branch(repo_dir, workspace_branch, git_path=git_path)
+            is True
+        )
         if remote_branch:
             exec.run_command(
-                ["git", "-C", str(repo_dir), "fetch", "origin", workspace_branch]
+                git.git_command(
+                    ["-C", str(repo_dir), "fetch", "origin", workspace_branch],
+                    git_path=git_path,
+                )
             )
     existing_branch = local_branch or remote_branch
 
     if skip_workspace_checkout:
         pass
     elif local_branch:
-        exec.run_command(["git", "-C", str(repo_dir), "checkout", workspace_branch])
+        exec.run_command(
+            git.git_command(
+                ["-C", str(repo_dir), "checkout", workspace_branch], git_path=git_path
+            )
+        )
     elif remote_branch:
         exec.run_command(
-            [
-                "git",
-                "-C",
-                str(repo_dir),
-                "checkout",
-                "-b",
-                workspace_branch,
-                "--track",
-                f"origin/{workspace_branch}",
-            ]
+            git.git_command(
+                [
+                    "-C",
+                    str(repo_dir),
+                    "checkout",
+                    "-b",
+                    workspace_branch,
+                    "--track",
+                    f"origin/{workspace_branch}",
+                ],
+                git_path=git_path,
+            )
         )
     else:
         exec.run_command(
-            ["git", "-C", str(repo_dir), "checkout", "-b", workspace_branch]
+            git.git_command(
+                ["-C", str(repo_dir), "checkout", "-b", workspace_branch],
+                git_path=git_path,
+            )
         )
 
     agent_default = config_payload.agent.default
@@ -810,7 +844,12 @@ def open_workspace(args: object) -> None:
 
     if is_new_workspace and existing_branch:
         workspace.write_background_snapshot(
-            background_path, repo_dir, default_branch, workspace_branch
+            background_path,
+            repo_dir,
+            default_branch,
+            workspace_branch,
+            git_path=git_path,
+            provider=config_payload.project.provider,
         )
 
     if should_open_editor and workspace_policy_path is not None:
@@ -902,8 +941,12 @@ def open_workspace(args: object) -> None:
     else:
         exec.run_command(start_cmd, cwd=start_cwd)
 
-
-def resolve_implicit_workspace_name(repo_root: Path, config_payload: object) -> str:
+def resolve_implicit_workspace_name(
+    repo_root: Path,
+    config_payload: object,
+    *,
+    git_path: str | None = None,
+) -> str:
     """Resolve the current branch for implicit ``atelier open`` calls.
 
     The branch is accepted only when it is non-default (or explicitly allowed),
@@ -911,7 +954,7 @@ def resolve_implicit_workspace_name(repo_root: Path, config_payload: object) -> 
 
     Args:
         repo_root: Path to the git repository root.
-        _config_payload: Reserved for future use; currently ignored.
+        config_payload: Config payload used to check default-branch allowances.
 
     Returns:
         The current branch name when it meets the implicit-open criteria.
@@ -921,11 +964,11 @@ def resolve_implicit_workspace_name(repo_root: Path, config_payload: object) -> 
         >>> isinstance(repo_root := Path("."), Path)
         True
     """
-    default_branch = git.git_default_branch(repo_root)
+    default_branch = git.git_default_branch(repo_root, git_path=git_path)
     if not default_branch:
         die("failed to determine default branch from repo")
 
-    current_branch = git.git_current_branch(repo_root)
+    current_branch = git.git_current_branch(repo_root, git_path=git_path)
     if not current_branch:
         die("failed to determine current branch")
     allow_mainline = False
@@ -942,11 +985,11 @@ def resolve_implicit_workspace_name(repo_root: Path, config_payload: object) -> 
             f"current branch is {default_branch!r}"
         )
 
-    clean = git.git_is_clean(repo_root)
+    clean = git.git_is_clean(repo_root, git_path=git_path)
     if clean is not True:
         die("implicit open requires a clean working tree")
 
-    fully_pushed = git.git_branch_fully_pushed(repo_root)
+    fully_pushed = git.git_branch_fully_pushed(repo_root, git_path=git_path)
     if fully_pushed is None:
         die("implicit open requires the branch to be pushed to its upstream")
     if fully_pushed is False:

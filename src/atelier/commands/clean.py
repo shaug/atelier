@@ -44,7 +44,9 @@ def confirm_remote_delete(workspace_name: str) -> bool:
     )
 
 
-def resolve_workspace_finalized(item: dict, main_repo_dir: Path | None) -> bool | None:
+def resolve_workspace_finalized(
+    item: dict, main_repo_dir: Path | None, *, git_path: str | None = None
+) -> bool | None:
     """Resolve finalization status for a workspace item.
 
     Args:
@@ -62,9 +64,11 @@ def resolve_workspace_finalized(item: dict, main_repo_dir: Path | None) -> bool 
     repo_dir = item["repo_dir"]
     finalization_tag = workspace.finalization_tag_name(branch)
     if repo_dir.exists():
-        finalized = git.git_tag_exists(repo_dir, finalization_tag)
+        finalized = git.git_tag_exists(repo_dir, finalization_tag, git_path=git_path)
     if finalized is not True and main_repo_dir is not None:
-        finalized = git.git_tag_exists(main_repo_dir, finalization_tag)
+        finalized = git.git_tag_exists(
+            main_repo_dir, finalization_tag, git_path=git_path
+        )
     item["finalized"] = finalized
     return finalized
 
@@ -75,6 +79,8 @@ def delete_workspace_branch(
     default_branch: str,
     allow_remote_delete: bool,
     remote_exists: bool | None = None,
+    *,
+    git_path: str | None = None,
 ) -> None:
     """Delete local and remote workspace branches when possible.
 
@@ -95,13 +101,15 @@ def delete_workspace_branch(
     """
     if not repo_dir.exists():
         return
-    if not git.git_is_repo(repo_dir):
+    if not git.git_is_repo(repo_dir, git_path=git_path):
         return
 
-    current_branch = git.git_current_branch(repo_dir)
+    current_branch = git.git_current_branch(repo_dir, git_path=git_path)
     if current_branch == workspace_branch:
         result = exec.try_run_command(
-            ["git", "-C", str(repo_dir), "checkout", default_branch]
+            git.git_command(
+                ["-C", str(repo_dir), "checkout", default_branch], git_path=git_path
+            )
         )
         if result is None or result.returncode != 0:
             warn(
@@ -109,15 +117,22 @@ def delete_workspace_branch(
             )
             return
 
-    if git.git_ref_exists(repo_dir, f"refs/heads/{workspace_branch}"):
+    if git.git_ref_exists(
+        repo_dir, f"refs/heads/{workspace_branch}", git_path=git_path
+    ):
         result = exec.try_run_command(
-            ["git", "-C", str(repo_dir), "branch", "-D", workspace_branch]
+            git.git_command(
+                ["-C", str(repo_dir), "branch", "-D", workspace_branch],
+                git_path=git_path,
+            )
         )
         if result is None or result.returncode != 0:
             warn(f"failed to delete local branch {workspace_branch}")
 
     if remote_exists is None:
-        remote_exists = git.git_has_remote_branch(repo_dir, workspace_branch)
+        remote_exists = git.git_has_remote_branch(
+            repo_dir, workspace_branch, git_path=git_path
+        )
     if remote_exists is False:
         return
     if not allow_remote_delete:
@@ -127,7 +142,10 @@ def delete_workspace_branch(
         )
         return
     result = exec.try_run_command(
-        ["git", "-C", str(repo_dir), "push", "origin", "--delete", workspace_branch]
+        git.git_command(
+            ["-C", str(repo_dir), "push", "origin", "--delete", workspace_branch],
+            git_path=git_path,
+        )
     )
     if result is None or result.returncode != 0:
         warn(f"failed to delete remote branch {workspace_branch}")
@@ -159,6 +177,7 @@ def clean_workspaces(args: object) -> None:
         die("project enlistment does not match current repo path")
 
     branch_prefix = config_payload.branch.prefix
+    git_path = config.resolve_git_path(config_payload)
 
     requested = []
     requested_paths: dict[str, Path] = {}
@@ -174,6 +193,7 @@ def clean_workspaces(args: object) -> None:
             normalized,
             branch_prefix,
             False,
+            git_path,
         )
         if not exists:
             warn(f"workspace not found: {normalized}")
@@ -186,6 +206,7 @@ def clean_workspaces(args: object) -> None:
         config_payload,
         with_status=not (args.all or requested),
         enlistment_repo_dir=repo_root,
+        git_path=git_path,
     )
     if not workspaces and not requested:
         say("No workspaces found.")
@@ -233,19 +254,21 @@ def clean_workspaces(args: object) -> None:
             say(f"Skipped workspace {name}")
             continue
         if not getattr(args, "no_branch", False):
-            default_branch = git.git_default_branch(item["repo_dir"])
+            default_branch = git.git_default_branch(item["repo_dir"], git_path=git_path)
             if not default_branch:
                 warn(
                     "failed to determine default branch for "
                     f"{item['branch']}; skipping branch deletion"
                 )
             else:
-                finalized = resolve_workspace_finalized(item, repo_root)
+                finalized = resolve_workspace_finalized(
+                    item, repo_root, git_path=git_path
+                )
                 allow_remote_delete = finalized is True
                 remote_exists: bool | None = None
                 if not allow_remote_delete and args.all:
                     remote_exists = git.git_has_remote_branch(
-                        item["repo_dir"], item["branch"]
+                        item["repo_dir"], item["branch"], git_path=git_path
                     )
                     if remote_exists is not False:
                         if confirm_remote_delete(item["branch"]):
@@ -256,6 +279,7 @@ def clean_workspaces(args: object) -> None:
                     default_branch,
                     allow_remote_delete,
                     remote_exists=remote_exists,
+                    git_path=git_path,
                 )
         try:
             shutil.rmtree(item["path"])

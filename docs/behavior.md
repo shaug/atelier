@@ -74,6 +74,13 @@ workspace levels:
 A merged view is used at runtime. Legacy single-file configs are migrated once
 into the split layout.
 
+Additional config notes:
+
+- `git.path` optionally overrides the Git executable (defaults to `git` on
+  PATH).
+- `project.provider` metadata is optional; when unset, provider integrations are
+  skipped.
+
 ## Templates and policy files
 
 - `AGENTS.md` is generated from the project templates; it is the entry point for

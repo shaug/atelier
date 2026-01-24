@@ -124,7 +124,13 @@ left behind.
     "enlistment": "/path/to/gumshoe",
     "origin": "github.com/org/gumshoe",
     "repo_url": "git@github.com:org/gumshoe.git",
+    "provider": "github",
+    "provider_url": "https://github.example.com",
+    "owner": "org",
     "allow_mainline_workspace": false
+  },
+  "git": {
+    "path": "git"
   },
   "branch": {
     "prefix": "scott/",
@@ -164,6 +170,10 @@ left behind.
   available; it is not used for identity
 - `project.repo_url` is the last-seen clone URL for convenience
 - `project.allow_mainline_workspace` allows a workspace on the default branch
+- `project.provider` is optional; when unset, provider integrations are skipped
+- `project.provider_url` is optional metadata for self-hosted providers
+- `project.owner` is optional provider owner/org metadata
+- `git.path` is optional; defaults to `git` resolved via PATH
 - `branch.pr` controls whether integration is expected via pull request (default
   `true`)
 - `branch.history` defines expected history shape after integration (default
@@ -358,8 +368,8 @@ uses this tag by default.
 `BACKGROUND.md` is created only when a workspace is opened against an existing
 branch. It captures a best-effort snapshot at creation time:
 
-- If a PR exists, include its title/body (via `gh` when available; never fail if
-  unavailable).
+- If a GitHub PR exists and `project.provider == "github"`, include its
+  title/body (via `gh` when available; never fail if unavailable).
 - Otherwise, list a capped set of commit subjects since the merge-base with the
   default branch.
 

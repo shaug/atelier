@@ -43,12 +43,15 @@ def _resolve_workspace_repo(workspace_name: str) -> tuple[str, Path, Path]:
     if not normalized:
         die("workspace branch must not be empty")
 
+    git_path = config.resolve_git_path(project_config)
+
     branch, workspace_dir, exists = workspace.resolve_workspace_target(
         project_root,
         project_config.project.enlistment or enlistment_path,
         normalized,
         project_config.branch.prefix,
         False,
+        git_path,
     )
     if not exists:
         die(f"workspace not found: {normalized}")
@@ -56,7 +59,7 @@ def _resolve_workspace_repo(workspace_name: str) -> tuple[str, Path, Path]:
     repo_dir = workspace_dir / "repo"
     if not repo_dir.exists():
         die(f"workspace repo missing for {branch}")
-    if not git.git_is_repo(repo_dir):
+    if not git.git_is_repo(repo_dir, git_path=git_path):
         die("workspace repo exists but is not a git repository")
 
     return branch, workspace_dir, repo_dir

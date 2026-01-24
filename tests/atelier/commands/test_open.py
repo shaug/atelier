@@ -895,7 +895,9 @@ class TestOpenWorkspace:
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
 
-                def fake_current_branch(repo_dir: Path) -> str | None:
+                def fake_current_branch(
+                    repo_dir: Path, *, git_path: str | None = None
+                ) -> str | None:
                     if repo_dir == root:
                         return "feature/demo"
                     return "main"
@@ -1053,6 +1055,7 @@ class TestOpenWorkspace:
             os.chdir(root)
             try:
                 commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     commands.append(cmd)
@@ -1388,6 +1391,8 @@ class TestOpenWorkspace:
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
+                commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
 
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     return None

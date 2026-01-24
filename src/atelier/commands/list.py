@@ -29,11 +29,14 @@ def list_workspaces(args: object) -> None:
     if project_enlistment and project_enlistment != enlistment_path:
         die("project enlistment does not match current repo path")
 
+    git_path = config.resolve_git_path(config_payload)
+
     workspaces = workspace.collect_workspaces(
         project_root,
         config_payload,
         with_status=getattr(args, "status", False),
         enlistment_repo_dir=repo_root,
+        git_path=git_path,
     )
     if not workspaces:
         say("No workspaces found.")

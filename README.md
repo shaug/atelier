@@ -3,7 +3,8 @@
 Atelier is an installable CLI for workspace-based, agent-assisted development
 inside local Git repos. It turns each unit of work into its own workspace with a
 dedicated git checkout, explicit intent, and a predictable launch path for
-agents and humans.
+agents and humans. Atelier is Git-first by design; provider integrations are
+optional and best-effort.
 
 Atelier can manage multiple projects on one machine; each project is identified
 by its local enlistment path and stored under the Atelier data directory.
@@ -17,6 +18,9 @@ Atelier is:
 - a per-repo tool, not a global project manager
 - a workspace-first workflow, not a branch-switching helper
 - a convention with sharp edges, not a flexible framework
+
+Provider integrations are intentionally minimal: GitHub gets the best support,
+and other providers are best-effort when `project.provider` metadata is set.
 
 ## Inspiration
 
