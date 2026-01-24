@@ -509,6 +509,7 @@ atelier clean feat/old-branch refactor/api
 
 Options:
 
+- `--dry-run`: Show planned deletions without removing anything.
 - `--all` or `-A`: Delete all workspaces regardless of state (still confirms
   remote branch deletion for unfinalized workspaces).
 - `--force` or `-F`: Delete without confirmation prompts (except remote branch
@@ -519,6 +520,7 @@ Options:
 Examples:
 
 ```sh
+atelier clean --dry-run
 atelier clean --all --force
 atelier clean --no-branch feat/old-branch
 atelier clean --orphans

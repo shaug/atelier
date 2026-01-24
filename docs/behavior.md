@@ -144,6 +144,7 @@ Additional config notes:
     repo or the main enlistment to determine finalization.
   - Remote branch deletion is only allowed for finalized workspaces unless the
     user confirms otherwise.
+  - `--dry-run` prints planned deletions without removing anything.
   - `--orphans` removes orphaned workspaces (missing config or repo directory).
 
 - `atelier remove` / `atelier rm`

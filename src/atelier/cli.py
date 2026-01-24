@@ -625,6 +625,10 @@ def clean_command(
             help="delete orphaned workspaces (missing config or repo dir)",
         ),
     ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="show planned deletions only"),
+    ] = False,
     no_branch: Annotated[
         bool,
         typer.Option("--no-branch", help="do not delete workspace branches"),
@@ -654,6 +658,7 @@ def clean_command(
             all=all_,
             force=force,
             orphans=orphans,
+            dry_run=dry_run,
             no_branch=no_branch,
             workspace_names=workspace_names or [],
         )

@@ -88,6 +88,80 @@ class TestCleanWorkspaces:
             finally:
                 os.chdir(original_cwd)
 
+    def test_clean_dry_run_lists_planned_deletions(self, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
+            complete_branch = "scott/complete"
+            incomplete_branch = "scott/incomplete"
+            complete_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                complete_branch,
+                workspace_id_for(enlistment_path, complete_branch),
+            )
+            incomplete_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                incomplete_branch,
+                workspace_id_for(enlistment_path, incomplete_branch),
+            )
+            (complete_dir / "repo").mkdir(parents=True)
+            (incomplete_dir / "repo").mkdir(parents=True)
+            write_workspace_config(complete_dir, complete_branch, enlistment_path)
+            write_workspace_config(incomplete_dir, incomplete_branch, enlistment_path)
+
+            repo_complete = complete_dir / "repo"
+            repo_incomplete = incomplete_dir / "repo"
+            fake_run = make_fake_git(
+                branches={repo_complete: "scott/complete", repo_incomplete: "main"},
+                statuses={repo_complete: " M file.txt\n", repo_incomplete: ""},
+                remotes={
+                    (repo_complete, "scott/complete"): "",
+                    (
+                        repo_incomplete,
+                        "scott/incomplete",
+                    ): "abc\trefs/heads/scott/incomplete\n",
+                },
+                tags={
+                    repo_complete: {workspace.finalization_tag_name(complete_branch)}
+                },
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.exec.subprocess.run", fake_run),
+                    patch("atelier.commands.clean.confirm", side_effect=AssertionError),
+                    patch("atelier.exec.try_run_command", side_effect=AssertionError),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    clean_cmd.clean_workspaces(
+                        SimpleNamespace(
+                            all=False,
+                            force=False,
+                            dry_run=True,
+                            no_branch=False,
+                            workspace_names=[],
+                        )
+                    )
+                assert complete_dir.exists()
+                assert incomplete_dir.exists()
+                output = capsys.readouterr().out
+                assert "Planned deletions (dry-run):" in output
+                assert complete_branch in output
+                assert incomplete_branch not in output
+            finally:
+                os.chdir(original_cwd)
+
     def test_clean_default_deletes_finalized_when_tag_in_main_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -384,5 +458,55 @@ class TestCleanWorkspaces:
                 assert not missing_config_dir.exists()
                 assert not missing_repo_dir.exists()
                 assert ok_dir.exists()
+            finally:
+                os.chdir(original_cwd)
+
+    def test_clean_orphans_dry_run_skips_deletion(self, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
+
+            workspaces_root = project_dir / "workspaces"
+            missing_config_dir = workspaces_root / "missing-config"
+            (missing_config_dir / "repo").mkdir(parents=True)
+            missing_repo_dir = workspaces_root / "missing-repo"
+            missing_repo_dir.mkdir(parents=True)
+            write_workspace_config(missing_repo_dir, "scott/missing", enlistment_path)
+            ok_dir = workspaces_root / "ok"
+            (ok_dir / "repo").mkdir(parents=True)
+            write_workspace_config(ok_dir, "scott/ok", enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.commands.clean.confirm", side_effect=AssertionError),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    clean_cmd.clean_workspaces(
+                        SimpleNamespace(
+                            all=False,
+                            force=False,
+                            orphans=True,
+                            dry_run=True,
+                            no_branch=False,
+                            workspace_names=[],
+                        )
+                    )
+                assert missing_config_dir.exists()
+                assert missing_repo_dir.exists()
+                assert ok_dir.exists()
+                output = capsys.readouterr().out
+                assert "Planned deletions (dry-run):" in output
+                assert "missing-config" in output
+                assert "scott/missing" in output
             finally:
                 os.chdir(original_cwd)

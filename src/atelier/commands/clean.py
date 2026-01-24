@@ -212,6 +212,55 @@ def delete_workspace_branch(
         warn(f"failed to delete remote branch {workspace_branch}")
 
 
+def _summarize_orphan_plan(orphaned: list[dict]) -> None:
+    say("Planned deletions (dry-run):")
+    for item in orphaned:
+        name = item.get("name") or "<unknown>"
+        reason = item.get("reason")
+        if reason:
+            say(f"- Workspace {name} ({reason})")
+        else:
+            say(f"- Workspace {name}")
+
+
+def _summarize_clean_plan(
+    targets: list[dict],
+    main_repo_dir: Path | None,
+    *,
+    no_branch: bool,
+    include_unfinalized_remote: bool,
+    git_path: str | None,
+) -> None:
+    say("Planned deletions (dry-run):")
+    for item in targets:
+        name = item.get("name") or "<unknown>"
+        say(f"- Workspace {name}")
+        if no_branch:
+            continue
+        repo_dir = item.get("repo_dir")
+        if not isinstance(repo_dir, Path) or not repo_dir.exists():
+            continue
+        if not git.git_is_repo(repo_dir, git_path=git_path):
+            continue
+        default_branch = git.git_default_branch(repo_dir, git_path=git_path)
+        if not default_branch:
+            continue
+        branch = item.get("branch") or name
+        if git.git_ref_exists(repo_dir, f"refs/heads/{branch}", git_path=git_path):
+            say(f"- Local branch {branch}")
+        finalized = resolve_workspace_finalized(item, main_repo_dir, git_path=git_path)
+        allow_remote_delete = finalized is True
+        if not allow_remote_delete and not include_unfinalized_remote:
+            continue
+        remote_exists = item.get("pushed")
+        if remote_exists is None:
+            remote_exists = git.git_has_remote_branch(
+                repo_dir, branch, git_path=git_path
+            )
+        if remote_exists:
+            say(f"- Remote branch {branch}")
+
+
 def clean_workspaces(args: object) -> None:
     """Clean workspaces based on status or explicit targets.
 
@@ -244,12 +293,17 @@ def clean_workspaces(args: object) -> None:
     requested_paths: dict[str, Path] = {}
     requested_names = getattr(args, "workspace_names", []) or []
 
+    dry_run = bool(getattr(args, "dry_run", False))
+
     if getattr(args, "orphans", False):
         if args.all or requested_names:
             die("cannot combine --orphans with --all or workspace branches")
         orphaned = collect_orphaned_workspaces(project_root)
         if not orphaned:
             say("No orphaned workspaces found.")
+            return
+        if dry_run:
+            _summarize_orphan_plan(orphaned)
             return
         for item in orphaned:
             name = item["name"]
@@ -329,6 +383,16 @@ def clean_workspaces(args: object) -> None:
 
     if not targets:
         say("No workspaces to clean.")
+        return
+
+    if dry_run:
+        _summarize_clean_plan(
+            targets,
+            repo_root,
+            no_branch=getattr(args, "no_branch", False),
+            include_unfinalized_remote=bool(args.all),
+            git_path=git_path,
+        )
         return
 
     for item in targets:
