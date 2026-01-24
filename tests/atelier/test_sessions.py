@@ -35,6 +35,39 @@ class TestFindCodexSession:
 
             assert session == "session-new"
 
+    def test_ignores_prefix_overlaps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            sessions = home / ".codex" / "sessions"
+            sessions.mkdir(parents=True)
+
+            target = "atelier:01TEST:feat-demo"
+            exact = sessions / "session-exact.json"
+            overlap = sessions / "session-overlap.json"
+
+            exact.write_text(
+                json.dumps({"messages": [{"role": "user", "content": target}]}),
+                encoding="utf-8",
+            )
+            overlap.write_text(
+                json.dumps(
+                    {
+                        "messages": [
+                            {"role": "user", "content": f"{target}-extra"},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            now = os.path.getmtime(overlap)
+            os.utime(exact, (now - 100, now - 100))
+
+            with patch("atelier.sessions.Path.home", return_value=home):
+                session = sessions_mod.find_codex_session("01TEST", "feat-demo")
+
+            assert session == "session-exact"
+
     def test_returns_session_id_from_jsonl_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)

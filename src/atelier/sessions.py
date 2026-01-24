@@ -240,11 +240,11 @@ def iter_user_messages_from_record(data: dict) -> Iterator[str]:
 
 
 def session_contains_target(path: Path, target: str) -> bool:
-    """Check if the first command-line user message contains the target."""
+    """Check if the first command-line user message contains the target token."""
     message = read_first_user_message(path)
     if not message:
         return False
-    return target in message
+    return target in message.split()
 
 
 def find_codex_session(
