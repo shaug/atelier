@@ -133,14 +133,19 @@ def resolve_workspace_target(
         >>> resolve_workspace_target(Path("/tmp/project"), "/repo", "feat/demo", "", True)[0]
         'feat/demo'
     """
+    if not raw and name:
+        exact = find_workspace_for_branch(
+            project_dir,
+            project_enlistment,
+            name,
+            allow_missing_config=True,
+        )
+        if exact:
+            workspace_dir, _ = exact
+            return name, workspace_dir, True
+
     candidates = workspace_candidate_branches(name, branch_prefix, raw)
-    if (
-        not raw
-        and branch_prefix
-        and name
-        and not name.startswith(branch_prefix)
-        and _branch_exists(Path(project_enlistment), name)
-    ):
+    if not raw and name and _branch_exists(Path(project_enlistment), name):
         candidates = [name]
     for branch in candidates:
         found = find_workspace_for_branch(
