@@ -521,7 +521,10 @@ def write_background_snapshot(
 
 
 def collect_workspaces(
-    project_root: Path, config_payload: config.ProjectConfig, with_status: bool = True
+    project_root: Path,
+    config_payload: config.ProjectConfig,
+    with_status: bool = True,
+    enlistment_repo_dir: Path | None = None,
 ) -> list[dict]:
     """Collect workspace metadata for a project.
 
@@ -529,6 +532,7 @@ def collect_workspaces(
         project_root: Project directory path.
         config_payload: Project config payload.
         with_status: When true, compute status info from each workspace repo.
+        enlistment_repo_dir: Optional path to the current enlistment repo.
 
     Returns:
         List of workspace dicts with name, path, branch, and status fields.
@@ -540,6 +544,7 @@ def collect_workspaces(
     workspaces_root = project_root / WORKSPACES_DIRNAME
     if not workspaces_root.exists():
         return []
+    main_repo_dir = enlistment_repo_dir if enlistment_repo_dir else None
     workspace_configs: list[Path] = []
     for workspace_dir in sorted(workspaces_root.iterdir()):
         if not workspace_dir.is_dir():
@@ -565,15 +570,20 @@ def collect_workspaces(
         clean: bool | None = None
         pushed: bool | None = None
         finalized: bool | None = None
-        if with_status and repo_dir.exists():
-            current_branch = git.git_current_branch(repo_dir)
-            checked_out = current_branch == branch if current_branch else None
-            if current_branch and current_branch == branch:
-                clean = git.git_is_clean(repo_dir)
-            else:
-                clean = None
-            pushed = git.git_has_remote_branch(repo_dir, branch)
-            finalized = git.git_tag_exists(repo_dir, finalization_tag_name(branch))
+        if with_status:
+            finalization_tag = finalization_tag_name(branch)
+            if repo_dir.exists():
+                current_branch = git.git_current_branch(repo_dir)
+                checked_out = current_branch == branch if current_branch else None
+                if current_branch and current_branch == branch:
+                    clean = git.git_is_clean(repo_dir)
+                else:
+                    clean = None
+                pushed = git.git_has_remote_branch(repo_dir, branch)
+                finalized = git.git_tag_exists(repo_dir, finalization_tag)
+            if main_repo_dir is not None:
+                if finalized is not True:
+                    finalized = git.git_tag_exists(main_repo_dir, finalization_tag)
         return {
             "name": workspace_name,
             "path": workspace_dir,

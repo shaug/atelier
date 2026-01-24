@@ -87,7 +87,7 @@ def clean_workspaces(args: object) -> None:
         $ atelier clean --all --force
     """
     cwd = Path.cwd()
-    _, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
+    repo_root, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
     project_root = paths.project_dir_for_enlistment(enlistment_path, origin)
     config_path = paths.project_config_path(project_root)
     config_payload = config.load_project_config(config_path)
@@ -122,7 +122,10 @@ def clean_workspaces(args: object) -> None:
         requested_paths[branch] = workspace_dir
 
     workspaces = workspace.collect_workspaces(
-        project_root, config_payload, with_status=not (args.all or requested)
+        project_root,
+        config_payload,
+        with_status=not (args.all or requested),
+        enlistment_repo_dir=repo_root,
     )
     if not workspaces and not requested:
         say("No workspaces found.")

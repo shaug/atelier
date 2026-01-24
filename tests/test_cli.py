@@ -18,14 +18,13 @@ from typer.testing import CliRunner  # noqa: E402
 
 import atelier  # noqa: E402
 import atelier.cli as cli  # noqa: E402
-import atelier.commands.clean as clean_cmd  # noqa: E402
 import atelier.commands.config as config_cmd  # noqa: E402
 import atelier.commands.edit as edit_cmd  # noqa: E402
 import atelier.commands.init as init_cmd  # noqa: E402
-import atelier.commands.list as list_cmd  # noqa: E402
 import atelier.commands.open as open_cmd  # noqa: E402
 import atelier.commands.shell as shell_cmd  # noqa: E402
 import atelier.commands.template as template_cmd  # noqa: E402
+import atelier.commands.upgrade as upgrade_cmd  # noqa: E402
 import atelier.commands.work as work_cmd  # noqa: E402
 import atelier.config as config  # noqa: E402
 import atelier.editor as editor  # noqa: E402
@@ -579,364 +578,158 @@ class TestInitProject(BaseAtelierTestCase):
             self.assertFalse(paths.project_config_user_path(project_dir).exists())
 
 
-class TestListWorkspaces(BaseAtelierTestCase):
-    def test_list_reports_status(self) -> None:
+class TestUpgradeFlags(BaseAtelierTestCase):
+    def test_upgrade_flags(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_upgrade(args: SimpleNamespace) -> None:
+            captured["installed"] = args.installed
+            captured["dry_run"] = args.dry_run
+            captured["yes"] = args.yes
+            captured["workspaces"] = args.workspace_names
+
+        runner = CliRunner()
+        with patch("atelier.commands.upgrade.upgrade", fake_upgrade):
+            result = runner.invoke(
+                cli.app,
+                ["upgrade", "alpha", "beta", "--installed", "--dry-run", "--yes"],
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertTrue(captured["installed"])
+        self.assertTrue(captured["dry_run"])
+        self.assertTrue(captured["yes"])
+        self.assertEqual(captured["workspaces"], ["alpha", "beta"])
+
+
+class TestUpgradeLegacyEditorMigration(BaseAtelierTestCase):
+    def test_upgrade_migrates_legacy_project_user_editor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
+            enlistment_path = enlistment_path_for(root / "repo")
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
                 project_dir = paths.project_dir_for_enlistment(
                     enlistment_path, NORMALIZED_ORIGIN
                 )
-            write_project_config(project_dir, enlistment_path)
 
-            alpha_branch = "scott/alpha"
-            beta_branch = "scott/beta"
-            alpha_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                alpha_branch,
-                workspace_id_for(enlistment_path, alpha_branch),
-            )
-            beta_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                beta_branch,
-                workspace_id_for(enlistment_path, beta_branch),
-            )
-            (alpha_dir / "repo").mkdir(parents=True)
-            (beta_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
-            write_workspace_config(beta_dir, beta_branch, enlistment_path)
-
-            repo_alpha = alpha_dir / "repo"
-            repo_beta = beta_dir / "repo"
-            fake_run = make_fake_git(
-                branches={repo_alpha: "scott/alpha", repo_beta: "main"},
-                statuses={repo_alpha: "", repo_beta: " M file.txt\n"},
-                remotes={
-                    (repo_alpha, "scott/alpha"): "deadbeef\trefs/heads/scott/alpha\n",
-                    (repo_beta, "scott/beta"): "",
-                },
-            )
-
-            original_cwd = Path.cwd()
-            os.chdir(root)
-            try:
-                buffer = io.StringIO()
-                with (
-                    patch("atelier.exec.subprocess.run", fake_run),
-                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.git.git_repo_root", return_value=root),
-                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
-                    patch("sys.stdout", buffer),
-                ):
-                    list_cmd.list_workspaces(SimpleNamespace(status=True))
-                lines = [
-                    line.strip() for line in buffer.getvalue().splitlines() if line
-                ]
-                data = {
-                    line.split()[0]: line.split()
-                    for line in lines
-                    if line.split()[0] in {alpha_branch, beta_branch}
+                project_dir.mkdir(parents=True, exist_ok=True)
+                system_payload = {
+                    "project": {
+                        "enlistment": enlistment_path,
+                        "origin": NORMALIZED_ORIGIN,
+                        "repo_url": RAW_ORIGIN,
+                    },
+                    "atelier": {
+                        "version": "0.1.0",
+                        "created_at": "2026-01-01T00:00:00Z",
+                    },
                 }
-                self.assertEqual(data[alpha_branch][1:], ["yes", "yes", "yes"])
-                self.assertEqual(data[beta_branch][1:], ["no", "unknown", "no"])
-            finally:
-                os.chdir(original_cwd)
+                system_config = config.ProjectSystemConfig.model_validate(
+                    system_payload
+                )
+                config.write_project_system_config(
+                    paths.project_config_sys_path(project_dir), system_config
+                )
 
-    def test_list_default_only_names(self) -> None:
+                user_payload = {
+                    "agent": {"default": "codex", "options": {"codex": []}},
+                    "editor": {
+                        "default": "cursor",
+                        "options": {"cursor": ["--wait", "--new-window"]},
+                    },
+                }
+                user_path = paths.project_config_user_path(project_dir)
+                user_path.write_text(json.dumps(user_payload), encoding="utf-8")
+
+                args = SimpleNamespace(
+                    workspace_names=[],
+                    installed=False,
+                    all_projects=True,
+                    no_projects=False,
+                    no_workspaces=True,
+                    dry_run=False,
+                    yes=True,
+                )
+                upgrade_cmd.upgrade(args)
+
+                updated = json.loads(user_path.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    updated["editor"]["edit"],
+                    ["cursor", "--wait", "--new-window"],
+                )
+                self.assertEqual(
+                    updated["editor"]["work"],
+                    ["cursor", "--new-window"],
+                )
+                self.assertNotIn("default", updated["editor"])
+                self.assertNotIn("options", updated["editor"])
+                self.assertTrue(user_path.with_suffix(".json.bak").exists())
+
+    def test_upgrade_migrates_legacy_project_config_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
+            enlistment_path = enlistment_path_for(root / "repo")
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
                 project_dir = paths.project_dir_for_enlistment(
                     enlistment_path, NORMALIZED_ORIGIN
                 )
-            write_project_config(project_dir, enlistment_path)
-            alpha_branch = "scott/alpha"
-            beta_branch = "scott/beta"
-            alpha_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                alpha_branch,
-                workspace_id_for(enlistment_path, alpha_branch),
-            )
-            beta_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                beta_branch,
-                workspace_id_for(enlistment_path, beta_branch),
-            )
-            alpha_dir.mkdir(parents=True)
-            beta_dir.mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
-            write_workspace_config(beta_dir, beta_branch, enlistment_path)
+                project_dir.mkdir(parents=True, exist_ok=True)
+                legacy_payload = {
+                    "project": {
+                        "enlistment": enlistment_path,
+                        "origin": NORMALIZED_ORIGIN,
+                        "repo_url": RAW_ORIGIN,
+                    },
+                    "branch": {"prefix": "legacy/", "pr": False, "history": "merge"},
+                    "agent": {"default": "codex", "options": {"codex": []}},
+                    "editor": {
+                        "default": "cursor",
+                        "options": {"cursor": ["--wait", "--new-window"]},
+                    },
+                    "atelier": {
+                        "version": "0.1.0",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "upgrade": "manual",
+                    },
+                }
+                legacy_path = paths.project_config_legacy_path(project_dir)
+                legacy_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
 
-            original_cwd = Path.cwd()
-            os.chdir(root)
-            try:
-                buffer = io.StringIO()
-                with (
-                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.git.git_repo_root", return_value=root),
-                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
-                    patch("sys.stdout", buffer),
-                ):
-                    list_cmd.list_workspaces(SimpleNamespace())
-                lines = [
-                    line.strip() for line in buffer.getvalue().splitlines() if line
-                ]
-                self.assertEqual(lines, [alpha_branch, beta_branch])
-            finally:
-                os.chdir(original_cwd)
-
-
-class TestCleanWorkspaces(BaseAtelierTestCase):
-    def test_clean_default_deletes_finalized_only(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            enlistment_path = enlistment_path_for(root)
-            data_dir = root / "data"
-            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
+                args = SimpleNamespace(
+                    workspace_names=[],
+                    installed=False,
+                    all_projects=True,
+                    no_projects=False,
+                    no_workspaces=True,
+                    dry_run=False,
+                    yes=True,
                 )
-            write_project_config(project_dir, enlistment_path)
-            complete_branch = "scott/complete"
-            incomplete_branch = "scott/incomplete"
-            complete_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                complete_branch,
-                workspace_id_for(enlistment_path, complete_branch),
-            )
-            incomplete_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                incomplete_branch,
-                workspace_id_for(enlistment_path, incomplete_branch),
-            )
-            (complete_dir / "repo").mkdir(parents=True)
-            (incomplete_dir / "repo").mkdir(parents=True)
-            write_workspace_config(complete_dir, complete_branch, enlistment_path)
-            write_workspace_config(incomplete_dir, incomplete_branch, enlistment_path)
+                upgrade_cmd.upgrade(args)
 
-            repo_complete = complete_dir / "repo"
-            repo_incomplete = incomplete_dir / "repo"
-            fake_run = make_fake_git(
-                branches={repo_complete: "scott/complete", repo_incomplete: "main"},
-                statuses={repo_complete: " M file.txt\n", repo_incomplete: ""},
-                remotes={
-                    (repo_complete, "scott/complete"): "",
-                    (
-                        repo_incomplete,
-                        "scott/incomplete",
-                    ): "abc\trefs/heads/scott/incomplete\n",
-                },
-                tags={
-                    repo_complete: {workspace.finalization_tag_name(complete_branch)}
-                },
-            )
+                sys_path = paths.project_config_sys_path(project_dir)
+                user_path = paths.project_config_user_path(project_dir)
+                self.assertTrue(sys_path.exists())
+                self.assertTrue(user_path.exists())
+                self.assertFalse(legacy_path.exists())
+                self.assertTrue(legacy_path.with_suffix(".json.bak").exists())
 
-            original_cwd = Path.cwd()
-            os.chdir(root)
-            try:
-                responses = iter(["y"])
-                with (
-                    patch("atelier.exec.subprocess.run", fake_run),
-                    patch("atelier.git.git_default_branch", return_value="main"),
-                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.git.git_repo_root", return_value=root),
-                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
-                    patch("builtins.input", lambda _: next(responses)),
-                ):
-                    clean_cmd.clean_workspaces(
-                        SimpleNamespace(
-                            all=False,
-                            force=False,
-                            no_branch=False,
-                            workspace_names=[],
-                        )
-                    )
-                self.assertFalse(complete_dir.exists())
-                self.assertTrue(incomplete_dir.exists())
-            finally:
-                os.chdir(original_cwd)
-
-    def test_clean_all_flag_deletes_all(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            enlistment_path = enlistment_path_for(root)
-            data_dir = root / "data"
-            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
+                updated = json.loads(user_path.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    updated["editor"]["edit"],
+                    ["cursor", "--wait", "--new-window"],
                 )
-            write_project_config(project_dir, enlistment_path)
-            alpha_branch = "scott/alpha"
-            beta_branch = "scott/beta"
-            alpha_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                alpha_branch,
-                workspace_id_for(enlistment_path, alpha_branch),
-            )
-            beta_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                beta_branch,
-                workspace_id_for(enlistment_path, beta_branch),
-            )
-            (alpha_dir / "repo").mkdir(parents=True)
-            (beta_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
-            write_workspace_config(beta_dir, beta_branch, enlistment_path)
-
-            repo_alpha = alpha_dir / "repo"
-            repo_beta = beta_dir / "repo"
-            fake_run = make_fake_git(
-                branches={repo_alpha: "scott/alpha", repo_beta: "main"},
-                statuses={repo_alpha: " M file.txt\n", repo_beta: ""},
-                remotes={
-                    (repo_alpha, "scott/alpha"): "",
-                    (repo_beta, "scott/beta"): "abc\trefs/heads/scott/beta\n",
-                },
-            )
-
-            original_cwd = Path.cwd()
-            os.chdir(root)
-            try:
-                responses = iter(["y", "y"])
-                with (
-                    patch("atelier.exec.subprocess.run", fake_run),
-                    patch("atelier.git.git_default_branch", return_value="main"),
-                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.git.git_repo_root", return_value=root),
-                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
-                    patch("builtins.input", lambda _: next(responses)),
-                ):
-                    clean_cmd.clean_workspaces(
-                        SimpleNamespace(
-                            all=True,
-                            force=False,
-                            no_branch=False,
-                            workspace_names=[],
-                        )
-                    )
-                self.assertFalse(alpha_dir.exists())
-                self.assertFalse(beta_dir.exists())
-            finally:
-                os.chdir(original_cwd)
-
-    def test_clean_force_skips_prompt(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            enlistment_path = enlistment_path_for(root)
-            data_dir = root / "data"
-            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
+                self.assertEqual(
+                    updated["editor"]["work"],
+                    ["cursor", "--new-window"],
                 )
-            write_project_config(project_dir, enlistment_path)
-            alpha_branch = "scott/alpha"
-            alpha_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                alpha_branch,
-                workspace_id_for(enlistment_path, alpha_branch),
-            )
-            (alpha_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
+                self.assertNotIn("default", updated["editor"])
+                self.assertNotIn("options", updated["editor"])
 
-            repo_alpha = alpha_dir / "repo"
-            fake_run = make_fake_git(
-                branches={repo_alpha: "scott/alpha"},
-                statuses={repo_alpha: ""},
-                remotes={(repo_alpha, "scott/alpha"): "abc\trefs/heads/scott/alpha\n"},
-            )
 
-            original_cwd = Path.cwd()
-            os.chdir(root)
-            try:
-                with (
-                    patch("atelier.exec.subprocess.run", fake_run),
-                    patch("atelier.git.git_default_branch", return_value="main"),
-                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.git.git_repo_root", return_value=root),
-                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
-                    patch(
-                        "builtins.input",
-                        side_effect=AssertionError("prompted unexpectedly"),
-                    ),
-                ):
-                    clean_cmd.clean_workspaces(
-                        SimpleNamespace(
-                            all=True,
-                            force=True,
-                            no_branch=False,
-                            workspace_names=[],
-                        )
-                    )
-                self.assertFalse(alpha_dir.exists())
-            finally:
-                os.chdir(original_cwd)
-
-    def test_clean_positional_targets_only(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            enlistment_path = enlistment_path_for(root)
-            data_dir = root / "data"
-            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
-                )
-            write_project_config(project_dir, enlistment_path)
-            alpha_branch = "scott/alpha"
-            beta_branch = "scott/beta"
-            alpha_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                alpha_branch,
-                workspace_id_for(enlistment_path, alpha_branch),
-            )
-            beta_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                beta_branch,
-                workspace_id_for(enlistment_path, beta_branch),
-            )
-            (alpha_dir / "repo").mkdir(parents=True)
-            (beta_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
-            write_workspace_config(beta_dir, beta_branch, enlistment_path)
-
-            repo_alpha = alpha_dir / "repo"
-            repo_beta = beta_dir / "repo"
-            fake_run = make_fake_git(
-                branches={repo_alpha: "scott/alpha", repo_beta: "scott/beta"},
-                statuses={repo_alpha: "", repo_beta: ""},
-                remotes={
-                    (repo_alpha, "scott/alpha"): "abc\trefs/heads/scott/alpha\n",
-                    (repo_beta, "scott/beta"): "abc\trefs/heads/scott/beta\n",
-                },
-            )
-
-            original_cwd = Path.cwd()
-            os.chdir(root)
-            try:
-                with (
-                    patch("atelier.exec.subprocess.run", fake_run),
-                    patch("atelier.git.git_default_branch", return_value="main"),
-                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.git.git_repo_root", return_value=root),
-                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
-                ):
-                    clean_cmd.clean_workspaces(
-                        SimpleNamespace(
-                            all=False,
-                            force=True,
-                            no_branch=False,
-                            workspace_names=[beta_branch, "missing"],
-                        )
-                    )
-                self.assertTrue(alpha_dir.exists())
-                self.assertFalse(beta_dir.exists())
-            finally:
-                os.chdir(original_cwd)
-
-    def test_clean_handles_missing_workspace_config(self) -> None:
+class TestUpgradeWorkspaceConfigRepair(BaseAtelierTestCase):
+    def test_upgrade_repairs_missing_workspace_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -952,7 +745,17 @@ class TestCleanWorkspaces(BaseAtelierTestCase):
                 branch,
                 workspace_id_for(enlistment_path, branch),
             )
-            (workspace_dir / "repo").mkdir(parents=True, exist_ok=True)
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+
+            args = SimpleNamespace(
+                workspace_names=[branch],
+                installed=False,
+                all_projects=False,
+                no_projects=True,
+                no_workspaces=False,
+                dry_run=False,
+                yes=True,
+            )
 
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -962,142 +765,19 @@ class TestCleanWorkspaces(BaseAtelierTestCase):
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    clean_cmd.clean_workspaces(
-                        SimpleNamespace(
-                            all=False,
-                            force=True,
-                            no_branch=True,
-                            workspace_names=[branch],
-                        )
-                    )
-                self.assertFalse(workspace_dir.exists())
+                    upgrade_cmd.upgrade(args)
             finally:
                 os.chdir(original_cwd)
 
-    def test_clean_skips_branch_deletion_with_no_branch(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            enlistment_path = enlistment_path_for(root)
-            data_dir = root / "data"
-            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
-                )
-            write_project_config(project_dir, enlistment_path)
-            alpha_branch = "scott/alpha"
-            alpha_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                alpha_branch,
-                workspace_id_for(enlistment_path, alpha_branch),
+            sys_path = paths.workspace_config_sys_path(workspace_dir)
+            user_path = paths.workspace_config_user_path(workspace_dir)
+            self.assertTrue(sys_path.exists())
+            self.assertTrue(user_path.exists())
+            loaded = config.load_workspace_config(
+                paths.workspace_config_path(workspace_dir)
             )
-            (alpha_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
-
-            repo_alpha = alpha_dir / "repo"
-            fake_run = make_fake_git(
-                branches={repo_alpha: "scott/alpha"},
-                statuses={repo_alpha: ""},
-                remotes={(repo_alpha, "scott/alpha"): "abc\trefs/heads/scott/alpha\n"},
-            )
-
-            original_cwd = Path.cwd()
-            os.chdir(root)
-            try:
-                with (
-                    patch("atelier.exec.subprocess.run", fake_run),
-                    patch("atelier.git.git_default_branch", return_value="main"),
-                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.git.git_repo_root", return_value=root),
-                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
-                    patch(
-                        "atelier.commands.clean.delete_workspace_branch",
-                        side_effect=AssertionError("deleted branch unexpectedly"),
-                    ),
-                ):
-                    clean_cmd.clean_workspaces(
-                        SimpleNamespace(
-                            all=True,
-                            force=True,
-                            no_branch=True,
-                            workspace_names=[],
-                        )
-                    )
-                self.assertFalse(alpha_dir.exists())
-            finally:
-                os.chdir(original_cwd)
-
-    def test_clean_deletes_branch_by_default(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            enlistment_path = enlistment_path_for(root)
-            data_dir = root / "data"
-            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
-                )
-            write_project_config(project_dir, enlistment_path)
-            alpha_branch = "scott/alpha"
-            alpha_dir = paths.workspace_dir_for_branch(
-                project_dir,
-                alpha_branch,
-                workspace_id_for(enlistment_path, alpha_branch),
-            )
-            (alpha_dir / "repo").mkdir(parents=True)
-            write_workspace_config(alpha_dir, alpha_branch, enlistment_path)
-
-            repo_alpha = alpha_dir / "repo"
-            fake_run = make_fake_git(
-                branches={repo_alpha: "scott/alpha"},
-                statuses={repo_alpha: ""},
-                remotes={(repo_alpha, "scott/alpha"): "abc\trefs/heads/scott/alpha\n"},
-            )
-            deleted: list[tuple[str, str]] = []
-
-            def fake_delete(repo_dir: Path, branch: str, default_branch: str) -> None:
-                deleted.append((repo_dir.name, branch))
-
-            original_cwd = Path.cwd()
-            os.chdir(root)
-            try:
-                with (
-                    patch("atelier.exec.subprocess.run", fake_run),
-                    patch("atelier.git.git_default_branch", return_value="main"),
-                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.git.git_repo_root", return_value=root),
-                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
-                    patch(
-                        "atelier.commands.clean.delete_workspace_branch", fake_delete
-                    ),
-                ):
-                    clean_cmd.clean_workspaces(
-                        SimpleNamespace(
-                            all=True,
-                            force=True,
-                            no_branch=False,
-                            workspace_names=[],
-                        )
-                    )
-                self.assertEqual(deleted, [("repo", "scott/alpha")])
-            finally:
-                os.chdir(original_cwd)
-
-
-class TestCleanFlags(BaseAtelierTestCase):
-    def test_clean_short_flags(self) -> None:
-        captured: dict[str, object] = {}
-
-        def fake_clean(args: SimpleNamespace) -> None:
-            captured["all"] = args.all
-            captured["force"] = args.force
-
-        runner = CliRunner()
-        with patch("atelier.commands.clean.clean_workspaces", fake_clean):
-            result = runner.invoke(cli.app, ["clean", "-A", "-F"])
-
-        self.assertEqual(result.exit_code, 0)
-
-        self.assertTrue(captured["all"])
-        self.assertTrue(captured["force"])
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded.workspace.branch, branch)
 
 
 class TestFindCodexSession(BaseAtelierTestCase):
