@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 import pty
 import re
 import select
 import shlex
 import shutil
+import signal
+import struct
 import sys
 import termios
 import tty
@@ -154,6 +157,9 @@ def _run_pty_command(
             os.chdir(cwd)
         os.execvp(cmd[0], cmd)
         os._exit(1)
+    _apply_winsize(master_fd, pid)
+    previous_winch = signal.getsignal(signal.SIGWINCH)
+    signal.signal(signal.SIGWINCH, lambda signum, frame: _apply_winsize(master_fd, pid))
     try:
         mode = termios.tcgetattr(sys.stdin.fileno())
         tty.setraw(sys.stdin.fileno())
@@ -166,6 +172,7 @@ def _run_pty_command(
     finally:
         if restore and mode is not None:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, mode)
+        signal.signal(signal.SIGWINCH, previous_winch)
     os.close(master_fd)
     _, status = os.waitpid(pid, 0)
     return os.waitstatus_to_exitcode(status)
@@ -222,3 +229,47 @@ def _copy_with_capture(master_fd: int, capture: CodexSessionCapture) -> None:
                 stdin_avail = False
             else:
                 i_buf += data
+
+
+def _read_winsize() -> tuple[int, int, int, int] | None:
+    if sys.stdin.isatty():
+        return _winsize_from_fd(sys.stdin.fileno())
+    if sys.stdout.isatty():
+        return _winsize_from_fd(sys.stdout.fileno())
+    return _winsize_from_env()
+
+
+def _winsize_from_fd(fd: int) -> tuple[int, int, int, int] | None:
+    try:
+        packed = fcntl.ioctl(fd, termios.TIOCGWINSZ, struct.pack("HHHH", 0, 0, 0, 0))
+    except OSError:
+        return _winsize_from_env()
+    rows, cols, xpix, ypix = struct.unpack("HHHH", packed)
+    if rows <= 0 or cols <= 0:
+        return _winsize_from_env()
+    return rows, cols, xpix, ypix
+
+
+def _winsize_from_env() -> tuple[int, int, int, int] | None:
+    try:
+        rows = int(os.environ.get("LINES", "0"))
+        cols = int(os.environ.get("COLUMNS", "0"))
+    except ValueError:
+        return None
+    if rows <= 0 or cols <= 0:
+        return None
+    return rows, cols, 0, 0
+
+
+def _apply_winsize(master_fd: int, pid: int) -> None:
+    winsize = _read_winsize()
+    if winsize is None:
+        return
+    try:
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack("HHHH", *winsize))
+    except OSError:
+        return
+    try:
+        os.kill(pid, signal.SIGWINCH)
+    except OSError:
+        return
