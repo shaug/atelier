@@ -14,14 +14,13 @@ import atelier.paths as paths
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
     RAW_ORIGIN,
-    BaseAtelierTestCase,
     enlistment_path_for,
     workspace_id_for,
     write_project_config,
 )
 
 
-class TestUpgradeFlags(BaseAtelierTestCase):
+class TestUpgradeFlags:
     def test_upgrade_flags(self) -> None:
         captured: dict[str, object] = {}
 
@@ -38,14 +37,14 @@ class TestUpgradeFlags(BaseAtelierTestCase):
                 ["upgrade", "alpha", "beta", "--installed", "--dry-run", "--yes"],
             )
 
-        self.assertEqual(result.exit_code, 0)
-        self.assertTrue(captured["installed"])
-        self.assertTrue(captured["dry_run"])
-        self.assertTrue(captured["yes"])
-        self.assertEqual(captured["workspaces"], ["alpha", "beta"])
+        assert result.exit_code == 0
+        assert captured["installed"] is True
+        assert captured["dry_run"] is True
+        assert captured["yes"] is True
+        assert captured["workspaces"] == ["alpha", "beta"]
 
 
-class TestUpgradeLegacyEditorMigration(BaseAtelierTestCase):
+class TestUpgradeLegacyEditorMigration:
     def test_upgrade_migrates_legacy_project_user_editor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -97,17 +96,15 @@ class TestUpgradeLegacyEditorMigration(BaseAtelierTestCase):
                 upgrade_cmd.upgrade(args)
 
                 updated = json.loads(user_path.read_text(encoding="utf-8"))
-                self.assertEqual(
-                    updated["editor"]["edit"],
-                    ["cursor", "--wait", "--new-window"],
-                )
-                self.assertEqual(
-                    updated["editor"]["work"],
-                    ["cursor", "--new-window"],
-                )
-                self.assertNotIn("default", updated["editor"])
-                self.assertNotIn("options", updated["editor"])
-                self.assertTrue(user_path.with_suffix(".json.bak").exists())
+                assert updated["editor"]["edit"] == [
+                    "cursor",
+                    "--wait",
+                    "--new-window",
+                ]
+                assert updated["editor"]["work"] == ["cursor", "--new-window"]
+                assert "default" not in updated["editor"]
+                assert "options" not in updated["editor"]
+                assert user_path.with_suffix(".json.bak").exists()
 
     def test_upgrade_migrates_legacy_project_config_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -154,25 +151,23 @@ class TestUpgradeLegacyEditorMigration(BaseAtelierTestCase):
 
                 sys_path = paths.project_config_sys_path(project_dir)
                 user_path = paths.project_config_user_path(project_dir)
-                self.assertTrue(sys_path.exists())
-                self.assertTrue(user_path.exists())
-                self.assertFalse(legacy_path.exists())
-                self.assertTrue(legacy_path.with_suffix(".json.bak").exists())
+                assert sys_path.exists()
+                assert user_path.exists()
+                assert not legacy_path.exists()
+                assert legacy_path.with_suffix(".json.bak").exists()
 
                 updated = json.loads(user_path.read_text(encoding="utf-8"))
-                self.assertEqual(
-                    updated["editor"]["edit"],
-                    ["cursor", "--wait", "--new-window"],
-                )
-                self.assertEqual(
-                    updated["editor"]["work"],
-                    ["cursor", "--new-window"],
-                )
-                self.assertNotIn("default", updated["editor"])
-                self.assertNotIn("options", updated["editor"])
+                assert updated["editor"]["edit"] == [
+                    "cursor",
+                    "--wait",
+                    "--new-window",
+                ]
+                assert updated["editor"]["work"] == ["cursor", "--new-window"]
+                assert "default" not in updated["editor"]
+                assert "options" not in updated["editor"]
 
 
-class TestUpgradeWorkspaceConfigRepair(BaseAtelierTestCase):
+class TestUpgradeWorkspaceConfigRepair:
     def test_upgrade_repairs_missing_workspace_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -215,13 +210,13 @@ class TestUpgradeWorkspaceConfigRepair(BaseAtelierTestCase):
 
             sys_path = paths.workspace_config_sys_path(workspace_dir)
             user_path = paths.workspace_config_user_path(workspace_dir)
-            self.assertTrue(sys_path.exists())
-            self.assertTrue(user_path.exists())
+            assert sys_path.exists()
+            assert user_path.exists()
             loaded = config.load_workspace_config(
                 paths.workspace_config_path(workspace_dir)
             )
-            self.assertIsNotNone(loaded)
-            self.assertEqual(loaded.workspace.branch, branch)
+            assert loaded is not None
+            assert loaded.workspace.branch == branch
 
     def test_upgrade_repairs_orphaned_workspace_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -267,10 +262,10 @@ class TestUpgradeWorkspaceConfigRepair(BaseAtelierTestCase):
 
             sys_path = paths.workspace_config_sys_path(workspace_dir)
             user_path = paths.workspace_config_user_path(workspace_dir)
-            self.assertTrue(sys_path.exists())
-            self.assertTrue(user_path.exists())
+            assert sys_path.exists()
+            assert user_path.exists()
             loaded = config.load_workspace_config(
                 paths.workspace_config_path(workspace_dir)
             )
-            self.assertIsNotNone(loaded)
-            self.assertEqual(loaded.workspace.branch, branch)
+            assert loaded is not None
+            assert loaded.workspace.branch == branch

@@ -10,7 +10,6 @@ import atelier.workspace as workspace
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
     RAW_ORIGIN,
-    BaseAtelierTestCase,
     enlistment_path_for,
     make_fake_git,
     workspace_id_for,
@@ -19,7 +18,7 @@ from tests.atelier.helpers import (
 )
 
 
-class TestCleanWorkspaces(BaseAtelierTestCase):
+class TestCleanWorkspaces:
     def test_clean_default_deletes_finalized_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -84,8 +83,8 @@ class TestCleanWorkspaces(BaseAtelierTestCase):
                             workspace_names=[],
                         )
                     )
-                self.assertFalse(complete_dir.exists())
-                self.assertTrue(incomplete_dir.exists())
+                assert not complete_dir.exists()
+                assert incomplete_dir.exists()
             finally:
                 os.chdir(original_cwd)
 
@@ -151,8 +150,8 @@ class TestCleanWorkspaces(BaseAtelierTestCase):
                             workspace_names=[],
                         )
                     )
-                self.assertFalse(complete_dir.exists())
-                self.assertTrue(incomplete_dir.exists())
+                assert not complete_dir.exists()
+                assert incomplete_dir.exists()
             finally:
                 os.chdir(original_cwd)
 
@@ -212,7 +211,7 @@ class TestCleanWorkspaces(BaseAtelierTestCase):
                             workspace_names=[],
                         )
                     )
-                self.assertFalse(alpha_dir.exists())
-                self.assertFalse(beta_dir.exists())
+                assert not alpha_dir.exists()
+                assert not beta_dir.exists()
             finally:
                 os.chdir(original_cwd)

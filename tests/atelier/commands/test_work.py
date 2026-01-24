@@ -7,7 +7,6 @@ import atelier.commands.work as work_cmd
 import atelier.paths as paths
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
-    BaseAtelierTestCase,
     enlistment_path_for,
     workspace_id_for,
     write_open_config,
@@ -15,7 +14,7 @@ from tests.atelier.helpers import (
 )
 
 
-class TestWorkCommand(BaseAtelierTestCase):
+class TestWorkCommand:
     def test_work_opens_repo_with_work_editor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -60,8 +59,5 @@ class TestWorkCommand(BaseAtelierTestCase):
                     SimpleNamespace(workspace_name=workspace_branch)
                 )
 
-            self.assertEqual(
-                captured["cmd"],
-                ["code", str(repo_dir)],
-            )
-            self.assertEqual(captured["cwd"], workspace_dir)
+            assert captured["cmd"] == ["code", str(repo_dir)]
+            assert captured["cwd"] == workspace_dir

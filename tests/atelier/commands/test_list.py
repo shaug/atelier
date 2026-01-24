@@ -10,7 +10,6 @@ import atelier.paths as paths
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
     RAW_ORIGIN,
-    BaseAtelierTestCase,
     enlistment_path_for,
     make_fake_git,
     workspace_id_for,
@@ -19,7 +18,7 @@ from tests.atelier.helpers import (
 )
 
 
-class TestListWorkspaces(BaseAtelierTestCase):
+class TestListWorkspaces:
     def test_list_reports_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -79,8 +78,8 @@ class TestListWorkspaces(BaseAtelierTestCase):
                     for line in lines
                     if line.split()[0] in {alpha_branch, beta_branch}
                 }
-                self.assertEqual(data[alpha_branch][1:], ["yes", "yes", "yes"])
-                self.assertEqual(data[beta_branch][1:], ["no", "unknown", "no"])
+                assert data[alpha_branch][1:] == ["yes", "yes", "yes"]
+                assert data[beta_branch][1:] == ["no", "unknown", "no"]
             finally:
                 os.chdir(original_cwd)
 
@@ -125,6 +124,6 @@ class TestListWorkspaces(BaseAtelierTestCase):
                 lines = [
                     line.strip() for line in buffer.getvalue().splitlines() if line
                 ]
-                self.assertEqual(lines, [alpha_branch, beta_branch])
+                assert lines == [alpha_branch, beta_branch]
             finally:
                 os.chdir(original_cwd)

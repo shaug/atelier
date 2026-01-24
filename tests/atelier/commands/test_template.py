@@ -10,13 +10,12 @@ import atelier.paths as paths
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
     RAW_ORIGIN,
-    BaseAtelierTestCase,
     enlistment_path_for,
     write_open_config,
 )
 
 
-class TestTemplateCommand(BaseAtelierTestCase):
+class TestTemplateCommand:
     def test_template_project_prefers_project_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -46,7 +45,7 @@ class TestTemplateCommand(BaseAtelierTestCase):
                     template_cmd.render_template(
                         SimpleNamespace(target="project", installed=False, edit=False)
                     )
-                self.assertEqual(buffer.getvalue().strip(), "project override")
+                assert buffer.getvalue().strip() == "project override"
             finally:
                 os.chdir(original_cwd)
 
@@ -77,7 +76,7 @@ class TestTemplateCommand(BaseAtelierTestCase):
                     template_cmd.render_template(
                         SimpleNamespace(target="project", installed=False, edit=False)
                     )
-                self.assertEqual(buffer.getvalue().strip(), "installed project")
+                assert buffer.getvalue().strip() == "installed project"
             finally:
                 os.chdir(original_cwd)
 
@@ -111,7 +110,7 @@ class TestTemplateCommand(BaseAtelierTestCase):
                     template_cmd.render_template(
                         SimpleNamespace(target="workspace", installed=False, edit=False)
                     )
-                self.assertEqual(buffer.getvalue().strip(), "project success")
+                assert buffer.getvalue().strip() == "project success"
             finally:
                 os.chdir(original_cwd)
 
@@ -135,9 +134,7 @@ class TestTemplateCommand(BaseAtelierTestCase):
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     calls.append(cmd)
                     temp_path = Path(cmd[-1])
-                    self.assertEqual(
-                        temp_path.read_text(encoding="utf-8"), "template stub\n"
-                    )
+                    assert temp_path.read_text(encoding="utf-8") == "template stub\n"
                     temp_path.write_text("edited project\n", encoding="utf-8")
 
                 with (
@@ -154,12 +151,10 @@ class TestTemplateCommand(BaseAtelierTestCase):
                         SimpleNamespace(target="project", installed=False, edit=True)
                     )
 
-                self.assertTrue(project_path.exists())
-                self.assertEqual(
-                    project_path.read_text(encoding="utf-8"), "edited project\n"
-                )
-                self.assertTrue(calls)
-                self.assertNotIn(str(project_path), calls[0])
+                assert project_path.exists()
+                assert project_path.read_text(encoding="utf-8") == "edited project\n"
+                assert calls
+                assert str(project_path) not in calls[0]
             finally:
                 os.chdir(original_cwd)
 
@@ -186,8 +181,8 @@ class TestTemplateCommand(BaseAtelierTestCase):
                 def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
                     calls.append(cmd)
                     temp_path = Path(cmd[-1])
-                    self.assertEqual(
-                        temp_path.read_text(encoding="utf-8"), "installed success\n"
+                    assert (
+                        temp_path.read_text(encoding="utf-8") == "installed success\n"
                     )
                     temp_path.write_text("edited success\n", encoding="utf-8")
 
@@ -201,11 +196,9 @@ class TestTemplateCommand(BaseAtelierTestCase):
                         SimpleNamespace(target="workspace", installed=False, edit=True)
                     )
 
-                self.assertTrue(target_path.exists())
-                self.assertEqual(
-                    target_path.read_text(encoding="utf-8"), "edited success\n"
-                )
-                self.assertTrue(calls)
-                self.assertNotIn(str(target_path), calls[0])
+                assert target_path.exists()
+                assert target_path.read_text(encoding="utf-8") == "edited success\n"
+                assert calls
+                assert str(target_path) not in calls[0]
             finally:
                 os.chdir(original_cwd)

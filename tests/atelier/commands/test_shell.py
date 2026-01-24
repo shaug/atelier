@@ -3,11 +3,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 import atelier.commands.shell as shell_cmd
 import atelier.paths as paths
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
-    BaseAtelierTestCase,
     DummyResult,
     enlistment_path_for,
     workspace_id_for,
@@ -16,7 +17,7 @@ from tests.atelier.helpers import (
 )
 
 
-class TestShellCommand(BaseAtelierTestCase):
+class TestShellCommand:
     def test_shell_runs_command_in_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -54,7 +55,7 @@ class TestShellCommand(BaseAtelierTestCase):
                 patch("atelier.commands.shell.git.git_is_repo", return_value=True),
                 patch("atelier.commands.shell.exec.run_command_status", fake_run),
             ):
-                with self.assertRaises(SystemExit) as raised:
+                with pytest.raises(SystemExit) as raised:
                     shell_cmd.open_workspace_shell(
                         SimpleNamespace(
                             workspace_name=workspace_branch,
@@ -63,9 +64,9 @@ class TestShellCommand(BaseAtelierTestCase):
                         )
                     )
 
-            self.assertEqual(raised.exception.code, 5)
-            self.assertEqual(captured["cmd"], ["echo", "hello"])
-            self.assertEqual(captured["cwd"], repo_dir)
+            assert raised.value.code == 5
+            assert captured["cmd"] == ["echo", "hello"]
+            assert captured["cwd"] == repo_dir
 
     def test_shell_uses_override_for_interactive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -104,7 +105,7 @@ class TestShellCommand(BaseAtelierTestCase):
                 patch("atelier.commands.shell.git.git_is_repo", return_value=True),
                 patch("atelier.commands.shell.exec.run_command_status", fake_run),
             ):
-                with self.assertRaises(SystemExit) as raised:
+                with pytest.raises(SystemExit) as raised:
                     shell_cmd.open_workspace_shell(
                         SimpleNamespace(
                             workspace_name=workspace_branch,
@@ -113,9 +114,9 @@ class TestShellCommand(BaseAtelierTestCase):
                         )
                     )
 
-            self.assertEqual(raised.exception.code, 0)
-            self.assertEqual(captured["cmd"], ["zsh"])
-            self.assertEqual(captured["cwd"], repo_dir)
+            assert raised.value.code == 0
+            assert captured["cmd"] == ["zsh"]
+            assert captured["cwd"] == repo_dir
 
     def test_exec_requires_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -146,7 +147,7 @@ class TestShellCommand(BaseAtelierTestCase):
                 patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                 patch("atelier.commands.shell.git.git_is_repo", return_value=True),
             ):
-                with self.assertRaises(SystemExit):
+                with pytest.raises(SystemExit):
                     shell_cmd.open_workspace_shell(
                         SimpleNamespace(
                             workspace_name=workspace_branch,

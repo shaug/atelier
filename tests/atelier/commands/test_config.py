@@ -11,13 +11,12 @@ import atelier.paths as paths
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
     RAW_ORIGIN,
-    BaseAtelierTestCase,
     enlistment_path_for,
     write_open_config,
 )
 
 
-class TestConfigCommand(BaseAtelierTestCase):
+class TestConfigCommand:
     def test_config_prompt_updates_project_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -49,12 +48,12 @@ class TestConfigCommand(BaseAtelierTestCase):
                     )
                 config_path = paths.project_config_path(project_dir)
                 updated = config.load_project_config(config_path)
-                self.assertIsNotNone(updated)
-                self.assertEqual(updated.branch.prefix, "team/")
-                self.assertFalse(updated.branch.pr)
-                self.assertEqual(updated.branch.history, "rebase")
-                self.assertEqual(updated.editor.edit, ["vim", "-w"])
-                self.assertEqual(updated.editor.work, ["vim"])
+                assert updated is not None
+                assert updated.branch.prefix == "team/"
+                assert updated.branch.pr is False
+                assert updated.branch.history == "rebase"
+                assert updated.editor.edit == ["vim", "-w"]
+                assert updated.editor.work == ["vim"]
             finally:
                 os.chdir(original_cwd)
 
@@ -99,9 +98,9 @@ class TestConfigCommand(BaseAtelierTestCase):
                     )
                 config_path = paths.project_config_path(project_dir)
                 updated = config.load_project_config(config_path)
-                self.assertIsNotNone(updated)
-                self.assertEqual(updated.agent.default, "codex")
-                self.assertEqual(call_count["count"], 5)
+                assert updated is not None
+                assert updated.agent.default == "codex"
+                assert call_count["count"] == 5
             finally:
                 os.chdir(original_cwd)
 
@@ -153,10 +152,10 @@ class TestConfigCommand(BaseAtelierTestCase):
                     )
                 config_path = paths.project_config_path(project_dir)
                 updated = config.load_project_config(config_path)
-                self.assertIsNotNone(updated)
-                self.assertEqual(call_count["count"], 8)
-                self.assertFalse(updated.branch.pr)
-                self.assertEqual(updated.branch.history, "merge")
+                assert updated is not None
+                assert call_count["count"] == 8
+                assert updated.branch.pr is False
+                assert updated.branch.history == "merge"
             finally:
                 os.chdir(original_cwd)
 
@@ -199,12 +198,12 @@ class TestConfigCommand(BaseAtelierTestCase):
                     )
                 config_path = paths.project_config_path(project_dir)
                 updated = config.load_project_config(config_path)
-                self.assertIsNotNone(updated)
-                self.assertEqual(updated.branch.prefix, "installed/")
-                self.assertFalse(updated.branch.pr)
-                self.assertEqual(updated.branch.history, "squash")
-                self.assertEqual(updated.editor.edit, ["nano", "-w"])
-                self.assertEqual(updated.editor.work, ["nano"])
+                assert updated is not None
+                assert updated.branch.prefix == "installed/"
+                assert updated.branch.pr is False
+                assert updated.branch.history == "squash"
+                assert updated.editor.edit == ["nano", "-w"]
+                assert updated.editor.work == ["nano"]
             finally:
                 os.chdir(original_cwd)
 
@@ -242,11 +241,11 @@ class TestConfigCommand(BaseAtelierTestCase):
                 with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
                     installed_path = paths.installed_config_path()
                 stored = json.loads(installed_path.read_text(encoding="utf-8"))
-                self.assertEqual(stored["branch"]["prefix"], "prefs/")
-                self.assertTrue(stored["branch"]["pr"])
-                self.assertEqual(stored["branch"]["history"], "merge")
-                self.assertEqual(stored["editor"]["edit"], ["code", "-w"])
-                self.assertEqual(stored["editor"]["work"], ["code"])
+                assert stored["branch"]["prefix"] == "prefs/"
+                assert stored["branch"]["pr"] is True
+                assert stored["branch"]["history"] == "merge"
+                assert stored["editor"]["edit"] == ["code", "-w"]
+                assert stored["editor"]["work"] == ["code"]
             finally:
                 os.chdir(original_cwd)
 
@@ -297,12 +296,12 @@ class TestConfigCommand(BaseAtelierTestCase):
                 user_config = config.load_project_user_config(
                     paths.project_config_user_path(project_dir)
                 )
-                self.assertIsNotNone(user_config)
-                self.assertEqual(user_config.branch.prefix, "edited/")
-                self.assertFalse(user_config.branch.pr)
-                self.assertEqual(user_config.branch.history, "merge")
-                self.assertEqual(user_config.editor.edit, ["nano", "-w"])
-                self.assertEqual(user_config.editor.work, ["nano"])
-                self.assertEqual(user_config.atelier.upgrade, "manual")
+                assert user_config is not None
+                assert user_config.branch.prefix == "edited/"
+                assert user_config.branch.pr is False
+                assert user_config.branch.history == "merge"
+                assert user_config.editor.edit == ["nano", "-w"]
+                assert user_config.editor.work == ["nano"]
+                assert user_config.atelier.upgrade == "manual"
             finally:
                 os.chdir(original_cwd)

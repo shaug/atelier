@@ -1,33 +1,29 @@
 import hashlib
 import tempfile
 from pathlib import Path
-from unittest import TestCase
 from unittest.mock import patch
 
 import atelier.paths as paths
 
 
-class TestNormalizedDirNames(TestCase):
+class TestNormalizedDirNames:
     def test_project_dir_name_normalizes_enlistment_path(self) -> None:
         enlistment = "/path/to/gumshoe"
         expected_base = "gumshoe"
         expected_hash = hashlib.sha256(enlistment.encode("utf-8")).hexdigest()[:8]
-        self.assertEqual(
-            paths.project_dir_name(enlistment), f"{expected_base}-{expected_hash}"
-        )
+        assert paths.project_dir_name(enlistment) == f"{expected_base}-{expected_hash}"
 
     def test_workspace_dir_name_normalizes_branch(self) -> None:
         branch = " .feat/demo. "
         workspace_id = f"atelier:/repo:{branch}"
         expected_base = "feat-demo"
         expected_hash = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()[:8]
-        self.assertEqual(
-            paths.workspace_dir_name(branch, workspace_id),
-            f"{expected_base}-{expected_hash}",
+        assert paths.workspace_dir_name(branch, workspace_id) == (
+            f"{expected_base}-{expected_hash}"
         )
 
 
-class TestLegacyDirFallbacks(TestCase):
+class TestLegacyDirFallbacks:
     def test_project_dir_prefers_legacy_hash(self) -> None:
         origin = "github.com/org/repo"
         enlistment = "/repo"
@@ -36,8 +32,8 @@ class TestLegacyDirFallbacks(TestCase):
             legacy_dir = data_dir / paths.PROJECTS_DIRNAME / paths.project_key(origin)
             legacy_dir.mkdir(parents=True)
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                self.assertEqual(
-                    paths.project_dir_for_enlistment(enlistment, origin), legacy_dir
+                assert (
+                    paths.project_dir_for_enlistment(enlistment, origin) == legacy_dir
                 )
 
     def test_project_dir_uses_normalized_name_without_legacy(self) -> None:
@@ -51,9 +47,7 @@ class TestLegacyDirFallbacks(TestCase):
                     / paths.PROJECTS_DIRNAME
                     / paths.project_dir_name(enlistment)
                 )
-                self.assertEqual(
-                    paths.project_dir_for_enlistment(enlistment, origin), expected
-                )
+                assert paths.project_dir_for_enlistment(enlistment, origin) == expected
 
     def test_workspace_dir_prefers_legacy_hash(self) -> None:
         branch = "feat/demo"
@@ -64,9 +58,9 @@ class TestLegacyDirFallbacks(TestCase):
                 project_dir / paths.WORKSPACES_DIRNAME / paths.workspace_key(branch)
             )
             legacy_dir.mkdir(parents=True)
-            self.assertEqual(
-                paths.workspace_dir_for_branch(project_dir, branch, workspace_id),
-                legacy_dir,
+            assert (
+                paths.workspace_dir_for_branch(project_dir, branch, workspace_id)
+                == legacy_dir
             )
 
     def test_workspace_dir_uses_normalized_name_without_legacy(self) -> None:
@@ -79,7 +73,7 @@ class TestLegacyDirFallbacks(TestCase):
                 / paths.WORKSPACES_DIRNAME
                 / paths.workspace_dir_name(branch, workspace_id)
             )
-            self.assertEqual(
-                paths.workspace_dir_for_branch(project_dir, branch, workspace_id),
-                expected,
+            assert (
+                paths.workspace_dir_for_branch(project_dir, branch, workspace_id)
+                == expected
             )

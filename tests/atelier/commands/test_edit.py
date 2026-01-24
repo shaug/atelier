@@ -9,7 +9,6 @@ import atelier.paths as paths
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
     RAW_ORIGIN,
-    BaseAtelierTestCase,
     enlistment_path_for,
     workspace_id_for,
     write_open_config,
@@ -17,7 +16,7 @@ from tests.atelier.helpers import (
 )
 
 
-class TestEditCommand(BaseAtelierTestCase):
+class TestEditCommand:
     def test_edit_project_creates_project_md(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -52,12 +51,10 @@ class TestEditCommand(BaseAtelierTestCase):
                     )
 
                 project_path = project_dir / "PROJECT.md"
-                self.assertTrue(project_path.exists())
-                self.assertEqual(
-                    project_path.read_text(encoding="utf-8"), "project stub\n"
-                )
-                self.assertTrue(calls)
-                self.assertIn(str(project_path), calls[0])
+                assert project_path.exists()
+                assert project_path.read_text(encoding="utf-8") == "project stub\n"
+                assert calls
+                assert str(project_path) in calls[0]
             finally:
                 os.chdir(original_cwd)
 
@@ -103,11 +100,9 @@ class TestEditCommand(BaseAtelierTestCase):
                     )
 
                 success_path = workspace_dir / "SUCCESS.md"
-                self.assertTrue(success_path.exists())
-                self.assertEqual(
-                    success_path.read_text(encoding="utf-8"), "workspace success\n"
-                )
-                self.assertTrue(calls)
-                self.assertIn(str(success_path), calls[0])
+                assert success_path.exists()
+                assert success_path.read_text(encoding="utf-8") == "workspace success\n"
+                assert calls
+                assert str(success_path) in calls[0]
             finally:
                 os.chdir(original_cwd)

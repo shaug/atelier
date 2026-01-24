@@ -12,7 +12,8 @@ install-dev:
 
 # Run the test suite
 test:
-  uv run python -m unittest discover -s tests -t .
+  uv pip install -e .[dev]
+  uv run pytest
 
 # Run lint checks
 lint:

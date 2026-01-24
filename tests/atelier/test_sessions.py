@@ -2,13 +2,12 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from unittest import TestCase
 from unittest.mock import patch
 
 import atelier.sessions as sessions_mod
 
 
-class TestFindCodexSession(TestCase):
+class TestFindCodexSession:
     def test_returns_most_recent_match(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
@@ -34,7 +33,7 @@ class TestFindCodexSession(TestCase):
             with patch("atelier.sessions.Path.home", return_value=home):
                 session = sessions_mod.find_codex_session("01TEST", "feat-demo")
 
-            self.assertEqual(session, "session-new")
+            assert session == "session-new"
 
     def test_returns_session_id_from_jsonl_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -89,4 +88,4 @@ class TestFindCodexSession(TestCase):
             with patch("atelier.sessions.Path.home", return_value=home):
                 session = sessions_mod.find_codex_session("01TEST", "feat-demo")
 
-            self.assertEqual(session, session_id)
+            assert session == session_id

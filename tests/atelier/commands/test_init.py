@@ -4,19 +4,20 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 import atelier.commands.init as init_cmd
 import atelier.config as config
 import atelier.paths as paths
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
     RAW_ORIGIN,
-    BaseAtelierTestCase,
     enlistment_path_for,
     make_init_args,
 )
 
 
-class TestInitProject(BaseAtelierTestCase):
+class TestInitProject:
     def test_init_creates_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -43,20 +44,20 @@ class TestInitProject(BaseAtelierTestCase):
                     )
 
                 config_path = paths.project_config_path(project_dir)
-                self.assertTrue(config_path.exists())
+                assert config_path.exists()
                 config_payload = config.load_project_config(config_path)
-                self.assertIsNotNone(config_payload)
-                self.assertEqual(config_payload.project.enlistment, enlistment_path)
-                self.assertEqual(config_payload.project.origin, NORMALIZED_ORIGIN)
-                self.assertEqual(config_payload.project.repo_url, RAW_ORIGIN)
-                self.assertTrue(config_payload.branch.pr)
-                self.assertEqual(config_payload.branch.history, "manual")
-                self.assertEqual(config_payload.editor.edit, ["cursor", "-w"])
-                self.assertEqual(config_payload.editor.work, ["cursor"])
-                self.assertTrue((project_dir / "templates" / "AGENTS.md").exists())
-                self.assertFalse((project_dir / "AGENTS.md").exists())
-                self.assertTrue((project_dir / "PROJECT.md").exists())
-                self.assertTrue((project_dir / "workspaces").is_dir())
+                assert config_payload is not None
+                assert config_payload.project.enlistment == enlistment_path
+                assert config_payload.project.origin == NORMALIZED_ORIGIN
+                assert config_payload.project.repo_url == RAW_ORIGIN
+                assert config_payload.branch.pr is True
+                assert config_payload.branch.history == "manual"
+                assert config_payload.editor.edit == ["cursor", "-w"]
+                assert config_payload.editor.work == ["cursor"]
+                assert (project_dir / "templates" / "AGENTS.md").exists()
+                assert not (project_dir / "AGENTS.md").exists()
+                assert (project_dir / "PROJECT.md").exists()
+                assert (project_dir / "workspaces").is_dir()
             finally:
                 os.chdir(original_cwd)
 
@@ -88,9 +89,9 @@ class TestInitProject(BaseAtelierTestCase):
 
                 config_path = paths.project_config_path(project_dir)
                 config_payload = config.load_project_config(config_path)
-                self.assertIsNotNone(config_payload)
-                self.assertEqual(config_payload.editor.edit, ["cursor", "-w"])
-                self.assertEqual(config_payload.editor.work, ["cursor"])
+                assert config_payload is not None
+                assert config_payload.editor.edit == ["cursor", "-w"]
+                assert config_payload.editor.work == ["cursor"]
             finally:
                 os.chdir(original_cwd)
 
@@ -118,9 +119,9 @@ class TestInitProject(BaseAtelierTestCase):
 
                 config_path = paths.project_config_path(project_dir)
                 config_payload = config.load_project_config(config_path)
-                self.assertIsNotNone(config_payload)
-                self.assertEqual(config_payload.editor.edit, ["cursor", "-w"])
-                self.assertEqual(config_payload.editor.work, ["cursor"])
+                assert config_payload is not None
+                assert config_payload.editor.edit == ["cursor", "-w"]
+                assert config_payload.editor.work == ["cursor"]
             finally:
                 os.chdir(original_cwd)
 
@@ -150,9 +151,9 @@ class TestInitProject(BaseAtelierTestCase):
 
                 config_path = paths.project_config_path(project_dir)
                 config_payload = config.load_project_config(config_path)
-                self.assertIsNotNone(config_payload)
-                self.assertEqual(config_payload.editor.edit, ["nano", "-w"])
-                self.assertEqual(config_payload.editor.work, ["nano"])
+                assert config_payload is not None
+                assert config_payload.editor.edit == ["nano", "-w"]
+                assert config_payload.editor.work == ["nano"]
             finally:
                 os.chdir(original_cwd)
 
@@ -215,17 +216,17 @@ class TestInitProject(BaseAtelierTestCase):
 
                 config_path = paths.project_config_path(project_dir)
                 config_payload = config.load_project_config(config_path)
-                self.assertIsNotNone(config_payload)
-                self.assertEqual(config_payload.project.enlistment, enlistment_path)
-                self.assertEqual(config_payload.project.origin, NORMALIZED_ORIGIN)
-                self.assertEqual(config_payload.project.repo_url, RAW_ORIGIN)
-                self.assertEqual(config_payload.branch.prefix, "feat/")
-                self.assertFalse(config_payload.branch.pr)
-                self.assertEqual(config_payload.branch.history, "merge")
-                self.assertEqual(config_payload.agent.default, "codex")
-                self.assertEqual(config_payload.editor.edit, ["cursor", "-w"])
-                self.assertEqual(config_payload.editor.work, ["cursor"])
-                self.assertTrue((project_dir / "workspaces").is_dir())
+                assert config_payload is not None
+                assert config_payload.project.enlistment == enlistment_path
+                assert config_payload.project.origin == NORMALIZED_ORIGIN
+                assert config_payload.project.repo_url == RAW_ORIGIN
+                assert config_payload.branch.prefix == "feat/"
+                assert config_payload.branch.pr is False
+                assert config_payload.branch.history == "merge"
+                assert config_payload.agent.default == "codex"
+                assert config_payload.editor.edit == ["cursor", "-w"]
+                assert config_payload.editor.work == ["cursor"]
+                assert (project_dir / "workspaces").is_dir()
             finally:
                 os.chdir(original_cwd)
 
@@ -252,10 +253,10 @@ class TestInitProject(BaseAtelierTestCase):
                     )
 
                 template_path = project_dir / "templates" / "SUCCESS.md"
-                self.assertTrue(template_path.exists())
+                assert template_path.exists()
                 content = template_path.read_text(encoding="utf-8")
-                self.assertIn("SUCCESS.md", content)
-                self.assertFalse((project_dir / "templates" / "WORKSPACE.md").exists())
+                assert "SUCCESS.md" in content
+                assert not (project_dir / "templates" / "WORKSPACE.md").exists()
             finally:
                 os.chdir(original_cwd)
 
@@ -288,9 +289,9 @@ class TestInitProject(BaseAtelierTestCase):
             legacy_path = paths.project_config_legacy_path(project_dir)
             legacy_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
 
-            with self.assertRaises(SystemExit):
+            with pytest.raises(SystemExit):
                 config.load_project_config(paths.project_config_path(project_dir))
-            self.assertTrue(legacy_path.exists())
-            self.assertFalse(legacy_path.with_suffix(".json.bak").exists())
-            self.assertFalse(paths.project_config_sys_path(project_dir).exists())
-            self.assertFalse(paths.project_config_user_path(project_dir).exists())
+            assert legacy_path.exists()
+            assert not legacy_path.with_suffix(".json.bak").exists()
+            assert not paths.project_config_sys_path(project_dir).exists()
+            assert not paths.project_config_user_path(project_dir).exists()

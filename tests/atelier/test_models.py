@@ -1,11 +1,10 @@
 import tempfile
 from pathlib import Path
-from unittest import TestCase
 
 from atelier.models import ProjectUserConfig
 
 
-class TestEditorConfig(TestCase):
+class TestEditorConfig:
     def test_editor_config_accepts_string_commands(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             editor_path = Path(tmp) / "My Editor.app" / "Contents" / "MacOS" / "editor"
@@ -18,5 +17,5 @@ class TestEditorConfig(TestCase):
                 }
             }
             parsed = ProjectUserConfig.model_validate(payload)
-            self.assertEqual(parsed.editor.edit, [str(editor_path), "-w"])
-            self.assertEqual(parsed.editor.work, [str(editor_path)])
+            assert parsed.editor.edit == [str(editor_path), "-w"]
+            assert parsed.editor.work == [str(editor_path)]

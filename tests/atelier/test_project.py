@@ -1,12 +1,11 @@
 import tempfile
 from pathlib import Path
-from unittest import TestCase
 from unittest.mock import patch
 
 import atelier.project as project
 
 
-class TestInstalledTemplateCache(TestCase):
+class TestInstalledTemplateCache:
     def test_project_scaffold_prefers_installed_templates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -22,4 +21,4 @@ class TestInstalledTemplateCache(TestCase):
             content = (project_dir / "templates" / "AGENTS.md").read_text(
                 encoding="utf-8"
             )
-            self.assertEqual(content, "custom agents\n")
+            assert content == "custom agents\n"

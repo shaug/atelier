@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 import atelier
 import atelier.commands.open as open_cmd
 import atelier.config as config
@@ -16,7 +18,6 @@ import atelier.workspace as workspace
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
     RAW_ORIGIN,
-    BaseAtelierTestCase,
     DummyResult,
     enlistment_path_for,
     init_local_repo,
@@ -28,7 +29,7 @@ from tests.atelier.helpers import (
 )
 
 
-class TestOpenWorkspace(BaseAtelierTestCase):
+class TestOpenWorkspace:
     def test_open_creates_workspace_and_launches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -66,55 +67,51 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                self.assertTrue((workspace_dir / "AGENTS.md").exists())
-                self.assertTrue((workspace_dir / "PROJECT.md").exists())
-                self.assertTrue((workspace_dir / "PERSIST.md").exists())
-                self.assertTrue((workspace_dir / "SUCCESS.md").exists())
-                self.assertTrue(paths.workspace_config_path(workspace_dir).exists())
+                assert (workspace_dir / "AGENTS.md").exists()
+                assert (workspace_dir / "PROJECT.md").exists()
+                assert (workspace_dir / "PERSIST.md").exists()
+                assert (workspace_dir / "SUCCESS.md").exists()
+                assert paths.workspace_config_path(workspace_dir).exists()
 
                 workspace_config = config.load_workspace_config(
                     paths.workspace_config_path(workspace_dir)
                 )
-                self.assertIsNotNone(workspace_config)
-                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
+                assert workspace_config is not None
+                assert workspace_config.workspace.branch == workspace_branch
 
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
                     encoding="utf-8"
                 )
-                self.assertIn("Atelier Agent Contract", agents_content)
-                self.assertIn("SUCCESS.md", agents_content)
+                assert "Atelier Agent Contract" in agents_content
+                assert "SUCCESS.md" in agents_content
                 project_content = (project_dir / "PROJECT.md").read_text(
                     encoding="utf-8"
                 )
                 workspace_project_content = (workspace_dir / "PROJECT.md").read_text(
                     encoding="utf-8"
                 )
-                self.assertEqual(workspace_project_content, project_content)
-                self.assertIn("PERSIST.md", agents_content)
+                assert workspace_project_content == project_content
+                assert "PERSIST.md" in agents_content
 
                 persist_content = (workspace_dir / "PERSIST.md").read_text(
                     encoding="utf-8"
                 )
-                self.assertIn("## Integration Strategy", persist_content)
-                self.assertIn("Pull requests expected: yes", persist_content)
-                self.assertIn("History policy: manual", persist_content)
+                assert "## Integration Strategy" in persist_content
+                assert "Pull requests expected: yes" in persist_content
+                assert "History policy: manual" in persist_content
 
-                self.assertTrue(any(cmd[:2] == ["git", "clone"] for cmd in commands))
+                assert any(cmd[:2] == ["git", "clone"] for cmd in commands)
                 repo_path = (workspace_dir / "repo").resolve()
-                self.assertTrue(
-                    any(
-                        cmd[0] == "git"
-                        and any(
-                            Path(part).resolve() == repo_path
-                            for part in cmd
-                            if isinstance(part, str) and part.startswith("/")
-                        )
-                        for cmd in commands
+                assert any(
+                    cmd[0] == "git"
+                    and any(
+                        Path(part).resolve() == repo_path
+                        for part in cmd
+                        if isinstance(part, str) and part.startswith("/")
                     )
+                    for cmd in commands
                 )
-                self.assertTrue(
-                    any(cmd[0] == "codex" and "--cd" in cmd for cmd in commands)
-                )
+                assert any(cmd[0] == "codex" and "--cd" in cmd for cmd in commands)
             finally:
                 os.chdir(original_cwd)
 
@@ -161,10 +158,8 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                self.assertEqual(
-                    status_calls, [["claude", "--model", "sonnet", "--continue"]]
-                )
-                self.assertFalse(any(cmd and cmd[0] == "claude" for cmd in commands))
+                assert status_calls == [["claude", "--model", "sonnet", "--continue"]]
+                assert not any(cmd and cmd[0] == "claude" for cmd in commands)
             finally:
                 os.chdir(original_cwd)
 
@@ -215,10 +210,8 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                self.assertEqual(
-                    status_calls, [["gemini", "--model", "flash", "--resume"]]
-                )
-                self.assertFalse(any(cmd and cmd[0] == "gemini" for cmd in commands))
+                assert status_calls == [["gemini", "--model", "flash", "--resume"]]
+                assert not any(cmd and cmd[0] == "gemini" for cmd in commands)
             finally:
                 os.chdir(original_cwd)
 
@@ -271,7 +264,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 gemini_commands = [
                     cmd for cmd in commands if cmd and cmd[0] == "gemini"
                 ]
-                self.assertEqual(gemini_commands, [expected])
+                assert gemini_commands == [expected]
             finally:
                 os.chdir(original_cwd)
 
@@ -326,11 +319,10 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                self.assertEqual(
-                    status_calls,
-                    [["aider", "--model", "gpt-4", "--restore-chat-history"]],
-                )
-                self.assertFalse(any(cmd and cmd[0] == "aider" for cmd in commands))
+                assert status_calls == [
+                    ["aider", "--model", "gpt-4", "--restore-chat-history"]
+                ]
+                assert not any(cmd and cmd[0] == "aider" for cmd in commands)
             finally:
                 os.chdir(original_cwd)
 
@@ -382,9 +374,9 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                self.assertEqual(status_calls, [])
+                assert status_calls == []
                 aider_commands = [cmd for cmd in commands if cmd and cmd[0] == "aider"]
-                self.assertEqual(aider_commands, [["aider", "--model", "gpt-4"]])
+                assert aider_commands == [["aider", "--model", "gpt-4"]]
             finally:
                 os.chdir(original_cwd)
 
@@ -438,7 +430,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 os.chdir(original_cwd)
 
             updated = (templates_dir / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertEqual(updated, canonical)
+            assert updated == canonical
 
     def test_open_ask_policy_updates_when_confirmed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -491,7 +483,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 os.chdir(original_cwd)
 
             updated = (templates_dir / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertEqual(updated, canonical)
+            assert updated == canonical
 
     def test_open_with_prefixed_branch_does_not_double_prefix(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -535,16 +527,16 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 workspace_config = config.load_workspace_config(
                     paths.workspace_config_path(workspace_dir)
                 )
-                self.assertIsNotNone(workspace_config)
-                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
-                self.assertFalse(
+                assert workspace_config is not None
+                assert workspace_config.workspace.branch == workspace_branch
+                assert not (
                     paths.workspace_dir_for_branch(
                         project_dir,
                         "scott/scott/feat-demo",
                         workspace_id_for(enlistment_path, "scott/scott/feat-demo"),
                     ).exists()
                 )
-                self.assertTrue(any(cmd[:2] == ["git", "clone"] for cmd in commands))
+                assert any(cmd[:2] == ["git", "clone"] for cmd in commands)
             finally:
                 os.chdir(original_cwd)
 
@@ -597,16 +589,16 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 workspace_config = config.load_workspace_config(
                     paths.workspace_config_path(workspace_dir)
                 )
-                self.assertIsNotNone(workspace_config)
-                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
-                self.assertFalse(
+                assert workspace_config is not None
+                assert workspace_config.workspace.branch == workspace_branch
+                assert not (
                     paths.workspace_dir_for_branch(
                         project_dir,
                         "scott/feature/demo",
                         workspace_id_for(enlistment_path, "scott/feature/demo"),
                     ).exists()
                 )
-                self.assertTrue(any(cmd[:2] == ["git", "clone"] for cmd in commands))
+                assert any(cmd[:2] == ["git", "clone"] for cmd in commands)
             finally:
                 os.chdir(original_cwd)
 
@@ -656,9 +648,9 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 workspace_config = config.load_workspace_config(
                     paths.workspace_config_path(workspace_dir)
                 )
-                self.assertIsNotNone(workspace_config)
-                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
-                self.assertTrue(any(cmd[0] == "codex" for cmd in commands))
+                assert workspace_config is not None
+                assert workspace_config.workspace.branch == workspace_branch
+                assert any(cmd[0] == "codex" for cmd in commands)
             finally:
                 os.chdir(original_cwd)
 
@@ -702,7 +694,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     for index, cmd in enumerate(commands)
                     if cmd[:2] == ["git", "clone"]
                 )
-                self.assertLess(clone_index, editor_index)
+                assert clone_index < editor_index
             finally:
                 os.chdir(original_cwd)
 
@@ -743,13 +735,13 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 editor_index = next(
                     index for index, cmd in enumerate(commands) if cmd[:1] == ["true"]
                 )
-                self.assertEqual(commands[editor_index][-1], "SUCCESS.md")
+                assert commands[editor_index][-1] == "SUCCESS.md"
                 workspace_dir = paths.workspace_dir_for_branch(
                     project_dir,
                     "scott/feat-demo",
                     workspace_id_for(enlistment_path, "scott/feat-demo"),
                 )
-                self.assertEqual(cwds[editor_index], workspace_dir)
+                assert cwds[editor_index] == workspace_dir
             finally:
                 os.chdir(original_cwd)
 
@@ -808,7 +800,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                self.assertFalse(any(cmd[:1] == ["true"] for cmd in commands))
+                assert not any(cmd[:1] == ["true"] for cmd in commands)
             finally:
                 os.chdir(original_cwd)
 
@@ -853,9 +845,9 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                self.assertFalse((workspace_dir / "SUCCESS.md").exists())
-                self.assertFalse((project_dir / "templates").exists())
-                self.assertFalse(any(cmd[:1] == ["true"] for cmd in commands))
+                assert not (workspace_dir / "SUCCESS.md").exists()
+                assert not (project_dir / "templates").exists()
+                assert not any(cmd[:1] == ["true"] for cmd in commands)
             finally:
                 os.chdir(original_cwd)
 
@@ -940,11 +932,9 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                self.assertFalse(
-                    any(
-                        cmd == ["git", "-C", str(repo_dir), "checkout", "main"]
-                        for cmd in commands
-                    )
+                assert not any(
+                    cmd == ["git", "-C", str(repo_dir), "checkout", "main"]
+                    for cmd in commands
                 )
             finally:
                 os.chdir(original_cwd)
@@ -1022,16 +1012,12 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                self.assertEqual(
-                    agents_path.read_text(encoding="utf-8"), "agents stub\n"
-                )
-                self.assertEqual(
-                    workspace_path.read_text(encoding="utf-8"), "workspace stub\n"
-                )
-                self.assertEqual(int(agents_path.stat().st_mtime), 1_000_000_000)
-                self.assertEqual(int(workspace_path.stat().st_mtime), 1_000_000_000)
-                self.assertFalse((workspace_dir / "PERSIST.md").exists())
-                self.assertFalse((workspace_dir / "BACKGROUND.md").exists())
+                assert agents_path.read_text(encoding="utf-8") == "agents stub\n"
+                assert workspace_path.read_text(encoding="utf-8") == "workspace stub\n"
+                assert int(agents_path.stat().st_mtime) == 1_000_000_000
+                assert int(workspace_path.stat().st_mtime) == 1_000_000_000
+                assert not (workspace_dir / "PERSIST.md").exists()
+                assert not (workspace_dir / "BACKGROUND.md").exists()
             finally:
                 os.chdir(original_cwd)
 
@@ -1084,7 +1070,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
             finally:
                 os.chdir(original_cwd)
 
-            self.assertTrue(any(cmd[0] == "codex" for cmd in commands))
+            assert any(cmd[0] == "codex" for cmd in commands)
 
     def test_open_removes_finalization_tag_when_confirmed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1155,7 +1141,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 os.chdir(original_cwd)
 
             finalization_tag = workspace.finalization_tag_name(workspace_branch)
-            self.assertEqual(confirm_calls, [(workspace_branch, finalization_tag)])
+            assert confirm_calls == [(workspace_branch, finalization_tag)]
 
     def test_open_errors_when_repo_is_not_git_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1194,7 +1180,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    with self.assertRaises(SystemExit):
+                    with pytest.raises(SystemExit):
                         open_cmd.open_workspace(
                             SimpleNamespace(workspace_name="feat-demo")
                         )
@@ -1236,7 +1222,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    with self.assertRaises(SystemExit):
+                    with pytest.raises(SystemExit):
                         open_cmd.open_workspace(
                             SimpleNamespace(workspace_name="feat-demo")
                         )
@@ -1285,12 +1271,12 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                self.assertTrue((workspace_dir / "AGENTS.md").exists())
+                assert (workspace_dir / "AGENTS.md").exists()
                 workspace_config = config.load_workspace_config(
                     paths.workspace_config_path(workspace_dir)
                 )
-                self.assertIsNotNone(workspace_config)
-                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
+                assert workspace_config is not None
+                assert workspace_config.workspace.branch == workspace_branch
             finally:
                 os.chdir(original_cwd)
 
@@ -1360,11 +1346,9 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
                 success_template = workspace_dir / "SUCCESS.md"
-                self.assertTrue(success_template.exists())
-                self.assertEqual(
-                    success_template.read_text(encoding="utf-8"), success_content
-                )
-                self.assertFalse((workspace_dir / "WORKSPACE.md").exists())
+                assert success_template.exists()
+                assert success_template.read_text(encoding="utf-8") == success_content
+                assert not (workspace_dir / "WORKSPACE.md").exists()
             finally:
                 os.chdir(original_cwd)
 
@@ -1411,8 +1395,8 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 workspace_config = config.load_workspace_config(
                     paths.workspace_config_path(workspace_dir)
                 )
-                self.assertIsNotNone(workspace_config)
-                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
+                assert workspace_config is not None
+                assert workspace_config.workspace.branch == workspace_branch
             finally:
                 os.chdir(original_cwd)
 
@@ -1467,9 +1451,9 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 persist_content = (workspace_dir / "PERSIST.md").read_text(
                     encoding="utf-8"
                 )
-                self.assertIn("Pull requests expected: no", persist_content)
-                self.assertIn("History policy: squash", persist_content)
-                self.assertIn("collapsed into a single commit", persist_content)
+                assert "Pull requests expected: no" in persist_content
+                assert "History policy: squash" in persist_content
+                assert "collapsed into a single commit" in persist_content
             finally:
                 os.chdir(original_cwd)
 
@@ -1523,15 +1507,15 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 workspace_config = config.load_workspace_config(
                     paths.workspace_config_path(workspace_dir)
                 )
-                self.assertIsNotNone(workspace_config)
-                self.assertFalse(workspace_config.workspace.branch_pr)
-                self.assertEqual(workspace_config.workspace.branch_history, "merge")
+                assert workspace_config is not None
+                assert workspace_config.workspace.branch_pr is False
+                assert workspace_config.workspace.branch_history == "merge"
 
                 persist_content = (workspace_dir / "PERSIST.md").read_text(
                     encoding="utf-8"
                 )
-                self.assertIn("Pull requests expected: no", persist_content)
-                self.assertIn("History policy: merge", persist_content)
+                assert "Pull requests expected: no" in persist_content
+                assert "History policy: merge" in persist_content
             finally:
                 os.chdir(original_cwd)
 
@@ -1572,9 +1556,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                         background_content = (
                             workspace_dir / "BACKGROUND.md"
                         ).read_text(encoding="utf-8")
-                        self.assertIn(
-                            "Commit Subjects since merge-base", background_content
-                        )
+                        assert "Commit Subjects since merge-base" in background_content
                     subprocess.run(cmd, cwd=cwd, check=True)
 
                 with (
@@ -1587,12 +1569,12 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                self.assertTrue((workspace_dir / "BACKGROUND.md").exists())
+                assert (workspace_dir / "BACKGROUND.md").exists()
                 background_content = (workspace_dir / "BACKGROUND.md").read_text(
                     encoding="utf-8"
                 )
-                self.assertIn("Commit Subjects since merge-base", background_content)
-                self.assertIn("feat: demo change", background_content)
+                assert "Commit Subjects since merge-base" in background_content
+                assert "feat: demo change" in background_content
 
                 head = subprocess.run(
                     [
@@ -1607,8 +1589,8 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     text=True,
                     check=True,
                 )
-                self.assertEqual(head.stdout.strip(), "scott/feat-demo")
-                self.assertTrue(any(cmd[0] == "codex" for cmd in commands))
+                assert head.stdout.strip() == "scott/feat-demo"
+                assert any(cmd[0] == "codex" for cmd in commands)
             finally:
                 os.chdir(original_cwd)
 
@@ -1656,7 +1638,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                self.assertFalse((workspace_dir / "BACKGROUND.md").exists())
+                assert not (workspace_dir / "BACKGROUND.md").exists()
             finally:
                 os.chdir(original_cwd)
 
@@ -1709,16 +1691,14 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                 workspace_config = config.load_workspace_config(
                     paths.workspace_config_path(workspace_dir)
                 )
-                self.assertIsNotNone(workspace_config)
-                self.assertEqual(workspace_config.workspace.branch, workspace_branch)
-                self.assertTrue(
-                    any(
-                        len(cmd) >= 6
-                        and cmd[0] == "git"
-                        and cmd[1] == "-C"
-                        and cmd[3:6] == ["checkout", "-b", workspace_branch]
-                        for cmd in commands
-                    )
+                assert workspace_config is not None
+                assert workspace_config.workspace.branch == workspace_branch
+                assert any(
+                    len(cmd) >= 6
+                    and cmd[0] == "git"
+                    and cmd[1] == "-C"
+                    and cmd[3:6] == ["checkout", "-b", workspace_branch]
+                    for cmd in commands
                 )
             finally:
                 os.chdir(original_cwd)
@@ -1750,7 +1730,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    with self.assertRaises(SystemExit):
+                    with pytest.raises(SystemExit):
                         open_cmd.open_workspace(
                             SimpleNamespace(workspace_name="feat-demo")
                         )
@@ -1784,7 +1764,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    with self.assertRaises(SystemExit):
+                    with pytest.raises(SystemExit):
                         open_cmd.open_workspace(
                             SimpleNamespace(
                                 workspace_name="feat-demo",
@@ -1820,7 +1800,7 @@ class TestOpenWorkspace(BaseAtelierTestCase):
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
-                    with self.assertRaises(SystemExit):
+                    with pytest.raises(SystemExit):
                         open_cmd.open_workspace(
                             SimpleNamespace(workspace_name="feat-demo")
                         )

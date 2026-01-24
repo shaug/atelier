@@ -6,8 +6,6 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import TestCase
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -49,26 +47,6 @@ class DummyResult:
     def __init__(self, returncode: int = 0, stdout: str = "") -> None:
         self.returncode = returncode
         self.stdout = stdout
-
-
-class BaseAtelierTestCase(TestCase):
-    def setUp(self) -> None:
-        super().setUp()
-        patcher = patch(
-            "atelier.agents.available_agent_names",
-            return_value=("codex", "claude"),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        io_patcher = patch("atelier.io._use_questionary", return_value=False)
-        io_patcher.start()
-        self.addCleanup(io_patcher.stop)
-        input_patcher = patch(
-            "builtins.input",
-            side_effect=AssertionError("prompted unexpectedly"),
-        )
-        input_patcher.start()
-        self.addCleanup(input_patcher.stop)
 
 
 def write_project_config(project_dir: Path, enlistment_path: str) -> dict:

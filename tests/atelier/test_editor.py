@@ -1,24 +1,22 @@
 import tempfile
 from pathlib import Path
-from unittest import TestCase
+
+import pytest
 
 import atelier.editor as editor
 
 
-class TestResolveEditorCommand(TestCase):
+class TestResolveEditorCommand:
     def test_config_precedence(self) -> None:
         config = {"editor": {"edit": ["cursor", "-w"], "work": ["code"]}}
-        self.assertEqual(
-            editor.resolve_editor_command(config, role="edit"),
-            ["cursor", "-w"],
-        )
+        assert editor.resolve_editor_command(config, role="edit") == ["cursor", "-w"]
 
     def test_work_role(self) -> None:
         config = {"editor": {"edit": ["cursor", "-w"], "work": ["code"]}}
-        self.assertEqual(editor.resolve_editor_command(config, role="work"), ["code"])
+        assert editor.resolve_editor_command(config, role="work") == ["code"]
 
     def test_missing_role_errors(self) -> None:
-        with self.assertRaises(SystemExit):
+        with pytest.raises(SystemExit):
             editor.resolve_editor_command({"editor": {"edit": ["cursor"]}}, role="work")
 
     def test_string_command_with_space_path(self) -> None:
@@ -32,11 +30,10 @@ class TestResolveEditorCommand(TestCase):
                     "work": str(editor_path),
                 }
             }
-            self.assertEqual(
-                editor.resolve_editor_command(config_payload, role="edit"),
-                [str(editor_path), "-w"],
-            )
-            self.assertEqual(
-                editor.resolve_editor_command(config_payload, role="work"),
-                [str(editor_path)],
-            )
+            assert editor.resolve_editor_command(config_payload, role="edit") == [
+                str(editor_path),
+                "-w",
+            ]
+            assert editor.resolve_editor_command(config_payload, role="work") == [
+                str(editor_path)
+            ]

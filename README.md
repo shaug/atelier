@@ -453,7 +453,7 @@ uv run atelier --help
 Run tests:
 
 ```sh
-python -m unittest discover -s tests
+pytest
 ```
 
 ## License
