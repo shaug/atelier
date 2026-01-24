@@ -132,6 +132,13 @@ Additional config notes:
     repo or the main enlistment to determine finalization.
   - Remote branch deletion is only allowed for finalized workspaces unless the
     user confirms otherwise.
+  - `--orphans` removes orphaned workspaces (missing config or repo directory).
+
+- `atelier remove` / `atelier rm`
+
+  - Removes project data from the Atelier data directory.
+  - Supports removing a single project, all projects, or orphaned projects.
+  - Never touches user repos.
 
 - `atelier upgrade` / `atelier template` / `atelier edit`
 

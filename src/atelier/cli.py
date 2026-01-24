@@ -29,6 +29,7 @@ from .commands import init as init_cmd
 from .commands import list as list_cmd
 from .commands import new as new_cmd
 from .commands import open as open_cmd
+from .commands import remove as remove_cmd
 from .commands import shell as shell_cmd
 from .commands import snapshot as snapshot_cmd
 from .commands import template as template_cmd
@@ -542,6 +543,13 @@ def clean_command(
         bool,
         typer.Option("--force", "-F", help="delete without confirmation"),
     ] = False,
+    orphans: Annotated[
+        bool,
+        typer.Option(
+            "--orphans",
+            help="delete orphaned workspaces (missing config or repo dir)",
+        ),
+    ] = False,
     no_branch: Annotated[
         bool,
         typer.Option("--no-branch", help="do not delete workspace branches"),
@@ -558,6 +566,7 @@ def clean_command(
         force: Delete without confirmation prompts when true.
         no_branch: Skip deleting local/remote workspace branches when true.
         workspace_names: Workspace branches to delete (optional).
+        orphans: Delete orphaned workspaces when true.
 
     Returns:
         None.
@@ -569,9 +578,74 @@ def clean_command(
         SimpleNamespace(
             all=all_,
             force=force,
+            orphans=orphans,
             no_branch=no_branch,
             workspace_names=workspace_names or [],
         )
+    )
+
+
+@app.command(
+    "remove",
+    help="Remove Atelier project data from the local data directory.",
+)
+def remove_command(
+    project: Annotated[
+        str | None,
+        typer.Argument(help="project directory name to remove (optional)"),
+    ] = None,
+    all_: Annotated[
+        bool,
+        typer.Option("--all", help="remove all projects"),
+    ] = False,
+    installed: Annotated[
+        bool,
+        typer.Option("--installed", help="delete the entire Atelier data directory"),
+    ] = False,
+    orphans: Annotated[
+        bool,
+        typer.Option("--orphans", help="remove orphaned projects"),
+    ] = False,
+) -> None:
+    """Remove project data from the Atelier data directory."""
+    remove_cmd.remove_projects(
+        SimpleNamespace(
+            project=project,
+            all=all_,
+            installed=installed,
+            orphans=orphans,
+        )
+    )
+
+
+@app.command(
+    "rm",
+    help="Alias for remove.",
+)
+def rm_command(
+    project: Annotated[
+        str | None,
+        typer.Argument(help="project directory name to remove (optional)"),
+    ] = None,
+    all_: Annotated[
+        bool,
+        typer.Option("--all", help="remove all projects"),
+    ] = False,
+    installed: Annotated[
+        bool,
+        typer.Option("--installed", help="delete the entire Atelier data directory"),
+    ] = False,
+    orphans: Annotated[
+        bool,
+        typer.Option("--orphans", help="remove orphaned projects"),
+    ] = False,
+) -> None:
+    """Alias for remove."""
+    remove_command(
+        project=project,
+        all_=all_,
+        installed=installed,
+        orphans=orphans,
     )
 
 

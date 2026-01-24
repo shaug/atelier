@@ -340,3 +340,49 @@ class TestCleanWorkspaces:
                 )
             finally:
                 os.chdir(original_cwd)
+
+    def test_clean_orphans_removes_missing_config_or_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
+
+            workspaces_root = project_dir / "workspaces"
+            missing_config_dir = workspaces_root / "missing-config"
+            (missing_config_dir / "repo").mkdir(parents=True)
+            missing_repo_dir = workspaces_root / "missing-repo"
+            missing_repo_dir.mkdir(parents=True)
+            write_workspace_config(missing_repo_dir, "scott/missing", enlistment_path)
+            ok_dir = workspaces_root / "ok"
+            (ok_dir / "repo").mkdir(parents=True)
+            write_workspace_config(ok_dir, "scott/ok", enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                responses = iter(["y", "y"])
+                with (
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("builtins.input", lambda _: next(responses)),
+                ):
+                    clean_cmd.clean_workspaces(
+                        SimpleNamespace(
+                            all=False,
+                            force=False,
+                            orphans=True,
+                            no_branch=False,
+                            workspace_names=[],
+                        )
+                    )
+                assert not missing_config_dir.exists()
+                assert not missing_repo_dir.exists()
+                assert ok_dir.exists()
+            finally:
+                os.chdir(original_cwd)

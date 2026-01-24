@@ -226,6 +226,12 @@ Clean completed workspaces (finalization tag):
 atelier clean
 ```
 
+Remove orphaned workspaces (missing config or repo):
+
+```sh
+atelier clean --orphans
+```
+
 Delete specific workspaces and keep their branches:
 
 ```sh
@@ -455,13 +461,34 @@ Options:
 - `--force` or `-F`: Delete without confirmation prompts (except remote branch
   deletion for unfinalized workspaces).
 - `--no-branch`: Keep local/remote branches; delete only workspace folders.
+- `--orphans`: Delete orphaned workspaces (missing config or repo directory).
 
 Examples:
 
 ```sh
 atelier clean --all --force
 atelier clean --no-branch feat/old-branch
+atelier clean --orphans
 ```
+
+### `atelier remove` / `atelier rm`
+
+Remove project data from the Atelier data directory without touching user repos.
+
+Usage:
+
+```sh
+atelier remove
+atelier remove <project-dir-name>
+atelier remove --orphans
+```
+
+Options:
+
+- `--all`: Remove all projects.
+- `--installed`: Delete the entire Atelier data directory (projects +
+  templates).
+- `--orphans`: Remove orphaned projects (missing enlistment path).
 
 ## Development
 

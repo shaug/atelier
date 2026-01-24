@@ -44,6 +44,67 @@ def confirm_remote_delete(workspace_name: str) -> bool:
     )
 
 
+def _safe_load_json(path: Path) -> dict | None:
+    try:
+        return config.load_json(path)
+    except Exception as exc:
+        warn(f"failed to read {path}: {exc}")
+        return None
+
+
+def _workspace_branch_from_config(workspace_dir: Path) -> str | None:
+    candidates = [
+        paths.workspace_config_sys_path(workspace_dir),
+        paths.workspace_config_legacy_path(workspace_dir),
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        payload = _safe_load_json(path)
+        if not payload:
+            continue
+        workspace_payload = payload.get("workspace")
+        if not isinstance(workspace_payload, dict):
+            continue
+        branch = workspace_payload.get("branch")
+        if isinstance(branch, str):
+            branch = branch.strip()
+        if branch:
+            return branch
+    return None
+
+
+def collect_orphaned_workspaces(project_root: Path) -> list[dict]:
+    """Collect orphaned workspace directories (missing config or repo)."""
+    workspaces_root = paths.workspaces_root_for_project(project_root)
+    if not workspaces_root.exists():
+        return []
+    orphaned: list[dict] = []
+    for workspace_dir in sorted(workspaces_root.iterdir()):
+        if not workspace_dir.is_dir():
+            continue
+        sys_path = paths.workspace_config_sys_path(workspace_dir)
+        legacy_path = paths.workspace_config_legacy_path(workspace_dir)
+        repo_dir = workspace_dir / "repo"
+        reason = None
+        if not sys_path.exists() and not legacy_path.exists():
+            reason = "missing config"
+        elif not repo_dir.exists():
+            reason = "missing repo"
+        if reason:
+            name = _workspace_branch_from_config(workspace_dir) or workspace_dir.name
+            orphaned.append(
+                {
+                    "name": name,
+                    "path": workspace_dir,
+                    "repo_dir": repo_dir,
+                    "branch": name,
+                    "reason": reason,
+                }
+            )
+    return orphaned
+
+
 def resolve_workspace_finalized(
     item: dict, main_repo_dir: Path | None, *, git_path: str | None = None
 ) -> bool | None:
@@ -181,7 +242,29 @@ def clean_workspaces(args: object) -> None:
 
     requested = []
     requested_paths: dict[str, Path] = {}
-    for name in getattr(args, "workspace_names", []) or []:
+    requested_names = getattr(args, "workspace_names", []) or []
+
+    if getattr(args, "orphans", False):
+        if args.all or requested_names:
+            die("cannot combine --orphans with --all or workspace branches")
+        orphaned = collect_orphaned_workspaces(project_root)
+        if not orphaned:
+            say("No orphaned workspaces found.")
+            return
+        for item in orphaned:
+            name = item["name"]
+            if not args.force and not confirm_delete(name):
+                say(f"Skipped workspace {name}")
+                continue
+            try:
+                shutil.rmtree(item["path"])
+            except OSError as exc:
+                warn(f"failed to delete workspace {name}: {exc}")
+                continue
+            say(f"Deleted workspace {name}")
+        return
+
+    for name in requested_names:
         if not name.strip():
             continue
         normalized = workspace.normalize_workspace_name(name)
