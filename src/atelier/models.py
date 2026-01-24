@@ -155,9 +155,14 @@ class EditorConfig(BaseModel):
     def normalize_command(cls, value: object) -> list[str] | None:
         if value is None:
             return None
-        if not isinstance(value, list):
-            raise ValueError("editor commands must be lists of arguments")
-        return [str(item) for item in value]
+        from . import command as command_util
+
+        normalized = command_util.normalize_command(value)
+        if normalized is None:
+            raise ValueError(
+                "editor commands must be lists of arguments or command strings"
+            )
+        return normalized
 
 
 class AtelierSection(BaseModel):

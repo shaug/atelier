@@ -27,7 +27,6 @@ import atelier.commands.template as template_cmd  # noqa: E402
 import atelier.commands.upgrade as upgrade_cmd  # noqa: E402
 import atelier.commands.work as work_cmd  # noqa: E402
 import atelier.config as config  # noqa: E402
-import atelier.editor as editor  # noqa: E402
 import atelier.git as git  # noqa: E402
 import atelier.paths as paths  # noqa: E402
 import atelier.sessions as sessions_mod  # noqa: E402
@@ -277,23 +276,6 @@ class TestNormalizeOriginUrl(BaseAtelierTestCase):
     def test_ssh_scheme(self) -> None:
         value = "ssh://git@github.com/owner/repo.git"
         self.assertEqual(git.normalize_origin_url(value), "github.com/owner/repo")
-
-
-class TestResolveEditorCommand(BaseAtelierTestCase):
-    def test_config_precedence(self) -> None:
-        config = {"editor": {"edit": ["cursor", "-w"], "work": ["code"]}}
-        self.assertEqual(
-            editor.resolve_editor_command(config, role="edit"),
-            ["cursor", "-w"],
-        )
-
-    def test_work_role(self) -> None:
-        config = {"editor": {"edit": ["cursor", "-w"], "work": ["code"]}}
-        self.assertEqual(editor.resolve_editor_command(config, role="work"), ["code"])
-
-    def test_missing_role_errors(self) -> None:
-        with self.assertRaises(SystemExit):
-            editor.resolve_editor_command({"editor": {"edit": ["cursor"]}}, role="work")
 
 
 class TestInitProject(BaseAtelierTestCase):

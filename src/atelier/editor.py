@@ -1,8 +1,8 @@
 """Editor resolution utilities for Atelier."""
 
 import os
-import shlex
 
+from . import command as command_util
 from .io import die
 from .models import EditorConfig, ProjectConfig
 
@@ -58,8 +58,9 @@ def resolve_editor_command(
 
     if not command:
         die(f"missing editor.{role} command; run 'atelier config --prompt' to set it")
-    if isinstance(command, str):
-        command = shlex.split(command)
-    if not isinstance(command, list) or not command:
-        die(f"invalid editor.{role} command; must be a list of arguments")
-    return [str(item) for item in command]
+    normalized = command_util.normalize_command(command)
+    if normalized is None:
+        die(f"invalid editor.{role} command; must be a list of arguments or string")
+    if not normalized:
+        die(f"missing editor.{role} command; run 'atelier config --prompt' to set it")
+    return normalized

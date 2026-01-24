@@ -1,0 +1,46 @@
+import sys
+import tempfile
+from pathlib import Path
+from unittest import TestCase
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+import atelier.editor as editor  # noqa: E402
+
+
+class TestResolveEditorCommand(TestCase):
+    def test_config_precedence(self) -> None:
+        config = {"editor": {"edit": ["cursor", "-w"], "work": ["code"]}}
+        self.assertEqual(
+            editor.resolve_editor_command(config, role="edit"),
+            ["cursor", "-w"],
+        )
+
+    def test_work_role(self) -> None:
+        config = {"editor": {"edit": ["cursor", "-w"], "work": ["code"]}}
+        self.assertEqual(editor.resolve_editor_command(config, role="work"), ["code"])
+
+    def test_missing_role_errors(self) -> None:
+        with self.assertRaises(SystemExit):
+            editor.resolve_editor_command({"editor": {"edit": ["cursor"]}}, role="work")
+
+    def test_string_command_with_space_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            editor_path = Path(tmp) / "My Editor.app" / "Contents" / "MacOS" / "editor"
+            editor_path.parent.mkdir(parents=True, exist_ok=True)
+            editor_path.write_text("", encoding="utf-8")
+            config_payload = {
+                "editor": {
+                    "edit": f"{editor_path} -w",
+                    "work": str(editor_path),
+                }
+            }
+            self.assertEqual(
+                editor.resolve_editor_command(config_payload, role="edit"),
+                [str(editor_path), "-w"],
+            )
+            self.assertEqual(
+                editor.resolve_editor_command(config_payload, role="work"),
+                [str(editor_path)],
+            )

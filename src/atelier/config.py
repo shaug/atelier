@@ -19,6 +19,7 @@ from pathlib import Path
 from pydantic import BaseModel, ValidationError
 
 from . import __version__, agents, paths, templates
+from . import command as command_util
 from .editor import system_editor_default
 from .io import die, prompt, select
 from .models import (
@@ -823,15 +824,8 @@ def _strip_wait_flags(command: list[str]) -> list[str]:
 
 
 def _legacy_editor_command(default: object, options: object) -> list[str]:
-    command: list[str] = []
-    option_key: str | None = None
-    if isinstance(default, list) and default:
-        command = [str(item) for item in default]
-        option_key = str(default[0]).strip()
-    elif isinstance(default, str) and default.strip():
-        command = [part for part in shlex.split(default.strip()) if part]
-        if command:
-            option_key = command[0].strip()
+    command = command_util.normalize_command(default) or []
+    option_key: str | None = command[0].strip() if command else None
 
     extra: list[str] = []
     if isinstance(options, dict) and option_key:
@@ -884,7 +878,7 @@ def _default_edit_command(
     if shutil.which("code"):
         return ["code", "-w"]
     default = system_editor_default()
-    parts = shlex.split(default) if default else []
+    parts = command_util.normalize_command(default) or []
     return parts or ["vi"]
 
 
@@ -901,7 +895,7 @@ def _default_work_command(
         stripped = _strip_wait_flags(edit_command)
         return stripped or edit_command
     default = system_editor_default()
-    parts = shlex.split(default) if default else []
+    parts = command_util.normalize_command(default) or []
     return parts or ["vi"]
 
 
@@ -1141,12 +1135,12 @@ def build_project_config(
 
     editor_edit = existing_config.editor.edit
     if editor_edit_input is not None:
-        editor_parts = shlex.split(editor_edit_input)
+        editor_parts = command_util.normalize_command(editor_edit_input)
         editor_edit = editor_parts or None
 
     editor_work = existing_config.editor.work
     if editor_work_input is not None:
-        editor_parts = shlex.split(editor_work_input)
+        editor_parts = command_util.normalize_command(editor_work_input)
         editor_work = editor_parts or None
 
     atelier_created_at = existing_config.atelier.created_at or utc_now()
