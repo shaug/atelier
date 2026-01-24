@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import Mapping
 
-from .. import exec as exec_util
 from .base import TerminalAdapter
 
 
@@ -24,13 +24,17 @@ class WezTermAdapter(TerminalAdapter):
         return cls(pane_id=pane_id)
 
     def set_pane_title(self, title: str) -> bool:
-        cmd = [
-            "wezterm",
-            "cli",
-            "set-pane-title",
-            "--pane-id",
-            self.pane_id,
-            title,
-        ]
-        result = exec_util.try_run_command(cmd)
-        return bool(result and result.returncode == 0)
+        if not sys.stdout.isatty():
+            return False
+        safe = (
+            title.replace("\033", "")
+            .replace("\007", "")
+            .replace("\n", " ")
+            .replace("\r", " ")
+        )
+        try:
+            sys.stdout.write(f"\033]2;{safe}\007")
+            sys.stdout.flush()
+        except Exception:
+            return False
+        return True
