@@ -5,6 +5,7 @@ handles template upgrades, and launches or resumes the agent session.
 """
 
 import difflib
+import json
 import re
 import shutil
 import subprocess
@@ -26,7 +27,7 @@ from .. import (
     term,
     workspace,
 )
-from ..io import confirm, die, link_or_copy, say, warn
+from ..io import confirm, die, link_or_copy, prompt, say, warn
 
 
 def confirm_remove_finalization_tag(workspace_branch: str, tag: str) -> bool:
@@ -94,15 +95,121 @@ def append_ticket_section(path: Path, refs: list[str]) -> None:
     path.write_text(updated, encoding="utf-8")
 
 
-def normalize_ticket_workspace_name(value: str) -> str:
-    """Normalize a ticket name for workspace naming."""
+TICKET_TITLE_WORD_LIMIT = 4
+
+
+def normalize_ticket_slug(value: str) -> str:
+    """Normalize a ticket slug component."""
     lowered = value.strip().lower()
     if not lowered:
         return ""
-    dashed = re.sub(r"\s+", "-", lowered)
-    cleaned = re.sub(r"[^a-z0-9-]", "", dashed)
+    cleaned = re.sub(r"[^a-z0-9]+", "-", lowered)
     collapsed = re.sub(r"-{2,}", "-", cleaned).strip("-")
     return collapsed
+
+
+def limit_ticket_title_words(value: str, limit: int = TICKET_TITLE_WORD_LIMIT) -> str:
+    """Limit ticket title text to a fixed number of words."""
+    words = value.strip().split()
+    if not words:
+        return ""
+    return " ".join(words[:limit])
+
+
+def ticket_id_likely(value: str) -> bool:
+    """Return true when a token resembles a ticket identifier."""
+    return any(char.isdigit() for char in value)
+
+
+def split_ticket_reference(value: str) -> tuple[str, str | None]:
+    """Split a ticket reference into id and optional title."""
+    raw = value.strip()
+    if not raw:
+        return "", None
+    match = re.match(r"^(?P<id>\S+?)(?:\s*:\s*|\s+-\s+|\s+)(?P<title>.+)$", raw)
+    if match and ticket_id_likely(match.group("id")):
+        title = match.group("title").strip()
+        return match.group("id"), title or None
+    return raw, None
+
+
+def format_ticket_workspace_name(ticket_id: str, title: str | None) -> str:
+    """Render a workspace name from a ticket id and optional title."""
+    normalized_id = normalize_ticket_slug(ticket_id)
+    if not normalized_id:
+        return ""
+    normalized_title = ""
+    if title:
+        limited = limit_ticket_title_words(title)
+        normalized_title = normalize_ticket_slug(limited)
+    if normalized_title:
+        return f"{normalized_id}-{normalized_title}"
+    return normalized_id
+
+
+def github_repo_from_origin(origin: str | None) -> str | None:
+    """Extract the GitHub owner/repo from a normalized origin string."""
+    if not origin:
+        return None
+    marker = "github.com/"
+    if marker not in origin:
+        return None
+    return origin.split(marker, 1)[1] or None
+
+
+def parse_github_issue_ref(
+    value: str, default_repo: str | None
+) -> tuple[str | None, str] | None:
+    """Parse GitHub issue reference into repo + issue number."""
+    raw = value.strip()
+    if not raw:
+        return None
+    url_match = re.search(
+        r"github\.com/(?P<owner>[^/\s]+)/(?P<repo>[^/\s]+)/issues/(?P<number>\d+)",
+        raw,
+    )
+    if url_match:
+        repo = f"{url_match.group('owner')}/{url_match.group('repo')}"
+        return repo, url_match.group("number")
+    repo_match = re.match(r"(?P<repo>[^#\s]+)#(?P<number>\d+)$", raw)
+    if repo_match and "/" in repo_match.group("repo"):
+        return repo_match.group("repo"), repo_match.group("number")
+    number_match = re.match(r"#?(?P<number>\d+)$", raw)
+    if number_match:
+        return default_repo, number_match.group("number")
+    return None
+
+
+def resolve_ticket_title(
+    ticket_ref: str,
+    *,
+    ticket_provider: str,
+    default_project: str | None,
+    project_origin: str | None,
+    repo_root: Path,
+) -> str | None:
+    """Best-effort lookup of ticket titles for workspace naming."""
+    if ticket_provider != "github" or not git.gh_available():
+        return None
+    default_repo = default_project or github_repo_from_origin(project_origin)
+    parsed = parse_github_issue_ref(ticket_ref, default_repo)
+    if not parsed:
+        return None
+    repo, number = parsed
+    cmd = ["gh", "issue", "view", number, "--json", "title"]
+    if repo:
+        cmd.extend(["--repo", repo])
+    result = exec.try_run_command(cmd, cwd=repo_root)
+    if result is None or result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    title = payload.get("title")
+    if not title:
+        return None
+    return str(title)
 
 
 def render_ticket_success_template(
@@ -586,10 +693,25 @@ def open_workspace(args: object) -> None:
     if not workspace_name_input:
         if ticket_refs:
             ticket_name = ticket_refs[0]
-            normalized_ticket = normalize_ticket_workspace_name(ticket_name)
+            ticket_id, ticket_title = split_ticket_reference(ticket_name)
+            if not ticket_id:
+                die("ticket name did not produce a valid workspace name")
+            if not ticket_title:
+                ticket_title = resolve_ticket_title(
+                    ticket_name,
+                    ticket_provider=config_payload.tickets.provider or "none",
+                    default_project=config_payload.tickets.default_project,
+                    project_origin=project_origin,
+                    repo_root=repo_root,
+                )
+            if ticket_title is None:
+                ticket_title = prompt("Ticket title (optional)", allow_empty=True)
+                if ticket_title == "":
+                    ticket_title = None
+            normalized_ticket = format_ticket_workspace_name(ticket_id, ticket_title)
             if not normalized_ticket:
                 die("ticket name did not produce a valid workspace name")
-            workspace_name_input = f"$ticket-{normalized_ticket}"
+            workspace_name_input = normalized_ticket
         else:
             if raw_branch:
                 die("workspace branch is required when using --raw")

@@ -224,10 +224,13 @@ class TestOpenWorkspace:
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                 ):
                     open_cmd.open_workspace(
-                        SimpleNamespace(workspace_name=None, ticket=["Fix login!!!"])
+                        SimpleNamespace(
+                            workspace_name=None,
+                            ticket=["GH-123 Fix login!!! again right now"],
+                        )
                     )
 
-                workspace_branch = "scott/$ticket-fix-login"
+                workspace_branch = "scott/gh-123-fix-login-again-right"
                 workspace_dir = paths.workspace_dir_for_branch(
                     project_dir,
                     workspace_branch,
