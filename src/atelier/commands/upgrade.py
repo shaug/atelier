@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from .. import __version__, config, git, paths, templates, workspace
-from ..io import confirm, die, link_or_copy, say, warn
+from ..io import confirm, die, link_or_copy, say, select, warn
 
 
 @dataclass
@@ -302,6 +302,37 @@ def build_workspace_config(
     )
 
 
+def _strip_workspace_dir_hash(name: str) -> str:
+    parts = name.rsplit("-", 1)
+    if len(parts) == 2:
+        suffix = parts[1].lower()
+        if len(suffix) == 8 and all(char in "0123456789abcdef" for char in suffix):
+            base = parts[0]
+            if base:
+                return base
+    return name
+
+
+def _guess_branch_from_dirname(name: str, branch_prefix: str | None) -> str:
+    base = _strip_workspace_dir_hash(name)
+    if branch_prefix:
+        prefix_base = branch_prefix.rstrip("/")
+        if prefix_base and base.startswith(f"{prefix_base}-"):
+            remainder = base[len(prefix_base) + 1 :]
+            if remainder:
+                return f"{branch_prefix}{remainder}"
+    return base
+
+
+def guess_workspace_branch(project: ProjectTarget, workspace_dir: Path) -> str:
+    repo_dir = workspace_dir / "repo"
+    if repo_dir.exists() and git.git_is_repo(repo_dir):
+        branch = git.git_current_branch(repo_dir)
+        if branch and branch != "HEAD":
+            return branch
+    return _guess_branch_from_dirname(workspace_dir.name, project.config.branch.prefix)
+
+
 def plan_workspace_config_repair(plan: UpgradePlan, target: WorkspaceTarget) -> None:
     sys_path = paths.workspace_config_sys_path(target.root)
     user_path = paths.workspace_config_user_path(target.root)
@@ -337,21 +368,97 @@ def plan_workspace_config_repair(plan: UpgradePlan, target: WorkspaceTarget) -> 
 
 
 def collect_project_workspaces(project: ProjectTarget) -> list[WorkspaceTarget]:
-    items = workspace.collect_workspaces(
-        project.root, project.config, with_status=False
-    )
     targets: list[WorkspaceTarget] = []
-    for item in items:
-        workspace_root = item["path"]
-        workspace_config = config.load_workspace_config(
-            paths.workspace_config_path(workspace_root)
-        )
+    workspaces_root = project.root / paths.WORKSPACES_DIRNAME
+    if not workspaces_root.exists():
+        return targets
+    for workspace_root in sorted(workspaces_root.iterdir()):
+        if not workspace_root.is_dir():
+            continue
+        config_path = paths.workspace_config_path(workspace_root)
+        if not config_path.exists():
+            continue
+        workspace_config = config.load_workspace_config(config_path)
         if not workspace_config:
             warn(f"failed to load workspace config at {workspace_root}")
             continue
         targets.append(
             WorkspaceTarget(
                 project=project, root=workspace_root, config=workspace_config
+            )
+        )
+    return targets
+
+
+def collect_orphaned_workspaces(project: ProjectTarget) -> list[Path]:
+    workspaces_root = project.root / paths.WORKSPACES_DIRNAME
+    if not workspaces_root.exists():
+        return []
+    orphaned: list[Path] = []
+    for workspace_root in sorted(workspaces_root.iterdir()):
+        if not workspace_root.is_dir():
+            continue
+        config_path = paths.workspace_config_sys_path(workspace_root)
+        if not config_path.exists():
+            orphaned.append(workspace_root)
+    return orphaned
+
+
+def plan_orphaned_workspaces(
+    plan: UpgradePlan,
+    project: ProjectTarget,
+    orphaned: list[Path],
+    *,
+    auto_yes: bool,
+) -> list[WorkspaceTarget]:
+    targets: list[WorkspaceTarget] = []
+    for workspace_root in orphaned:
+        branch_guess = guess_workspace_branch(project, workspace_root)
+        if not branch_guess:
+            branch_guess = workspace_root.name
+        label = project_label(project)
+        prompt = (
+            "Workspace config missing for "
+            f"{workspace_root.name} ({label}); "
+            f"repair using branch '{branch_guess}' or remove it?"
+        )
+        if auto_yes:
+            choice = "repair"
+        else:
+            choice = select(prompt, ["repair", "remove", "skip"], default="repair")
+        if choice == "repair":
+            targets.append(
+                WorkspaceTarget(
+                    project=project,
+                    root=workspace_root,
+                    config=build_workspace_config(project, branch_guess),
+                )
+            )
+            continue
+        if choice == "remove":
+
+            def apply_remove(path: Path = workspace_root) -> None:
+                try:
+                    shutil.rmtree(path)
+                except OSError as exc:
+                    warn(f"failed to remove orphaned workspace at {path}: {exc}")
+
+            plan.actions.append(
+                PlanAction(
+                    description=(
+                        "Remove orphaned workspace directory "
+                        f"{workspace_root.name} ({label})"
+                    ),
+                    apply=apply_remove,
+                )
+            )
+            continue
+        plan.skips.append(
+            PlanSkip(
+                description=(
+                    f"Skip orphaned workspace directory {workspace_root.name} ({label})"
+                ),
+                reason="skipped",
             )
         )
     return targets
@@ -687,6 +794,13 @@ def upgrade(args: object) -> None:
         else:
             for project in projects:
                 workspace_targets.extend(collect_project_workspaces(project))
+                orphaned = collect_orphaned_workspaces(project)
+                if orphaned:
+                    workspace_targets.extend(
+                        plan_orphaned_workspaces(
+                            plan, project, orphaned, auto_yes=auto_yes
+                        )
+                    )
 
         for target in workspace_targets:
             plan_workspace_config_repair(plan, target)
