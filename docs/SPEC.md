@@ -516,6 +516,11 @@ Ensures a workspace exists and launches or resumes agent work.
    - Use `agent.options` and the agent command for execution
    - Codex runs with `--cd <workspace-dir>`; other agents run with the workspace
      as the current working directory
+9. Optionally apply terminal chrome (best-effort, decorative only):
+   - Detect WezTerm via `WEZTERM_PANE_ID` (or `WEZTERM_PANE`), Kitty via
+     `KITTY_WINDOW_ID`, or tmux via `TMUX`
+   - Set the active pane title to a workspace label (repo name + branch)
+   - Failure or missing capabilities must never affect correctness
 
 #### Flags
 

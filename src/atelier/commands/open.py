@@ -17,6 +17,7 @@ from .. import (
     paths,
     project,
     templates,
+    term,
     workspace,
 )
 from ..io import confirm, die, link_or_copy, say, warn
@@ -433,6 +434,8 @@ def open_workspace(args: object) -> None:
     )
     if not workspace_branch:
         die("workspace branch is required")
+
+    term.apply_workspace_identity(project_enlistment, workspace_branch)
 
     agents_path = workspace_dir / "AGENTS.md"
     persist_path = workspace_dir / "PERSIST.md"
