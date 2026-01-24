@@ -31,8 +31,6 @@ build-backend = "hatchling.build"
 packages = ["src/atelier"]
 include = ["src/atelier/templates/**"]
 
-[tool.hatch.build.targets.sdist]
-include = ["src/atelier/templates/**"]
 
 [tool.hatch.version]
 source = "vcs"
