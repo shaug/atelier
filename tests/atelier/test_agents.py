@@ -1,5 +1,4 @@
 import os
-import sys
 import tempfile
 from pathlib import Path
 from unittest import TestCase
@@ -7,12 +6,9 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
-from atelier import agents  # noqa: E402
-from atelier.agents import AgentSpec, get_agent  # noqa: E402
-from atelier.models import AgentConfig  # noqa: E402
+from atelier import agents
+from atelier.agents import AgentSpec, get_agent
+from atelier.models import AgentConfig
 
 
 class AgentSpecTestCase(TestCase):

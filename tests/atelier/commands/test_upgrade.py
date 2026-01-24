@@ -1,73 +1,24 @@
 import json
 import os
-import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import TestCase
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
+from typer.testing import CliRunner
 
-from typer.testing import CliRunner  # noqa: E402
-
-import atelier.cli as cli  # noqa: E402
-import atelier.commands.upgrade as upgrade_cmd  # noqa: E402
-import atelier.config as config  # noqa: E402
-import atelier.git as git  # noqa: E402
-import atelier.paths as paths  # noqa: E402
-import atelier.workspace as workspace  # noqa: E402
-
-RAW_ORIGIN = "git@github.com:org/repo.git"
-NORMALIZED_ORIGIN = git.normalize_origin_url(RAW_ORIGIN)
-
-
-def enlistment_path_for(path: Path) -> str:
-    return str(path.resolve())
-
-
-def workspace_id_for(enlistment_path: str, branch: str) -> str:
-    return workspace.workspace_identifier(enlistment_path, branch)
-
-
-class BaseAtelierTestCase(TestCase):
-    def setUp(self) -> None:
-        super().setUp()
-        patcher = patch(
-            "atelier.agents.available_agent_names",
-            return_value=("codex", "claude"),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        io_patcher = patch("atelier.io._use_questionary", return_value=False)
-        io_patcher.start()
-        self.addCleanup(io_patcher.stop)
-        input_patcher = patch(
-            "builtins.input",
-            side_effect=AssertionError("prompted unexpectedly"),
-        )
-        input_patcher.start()
-        self.addCleanup(input_patcher.stop)
-
-
-def write_project_config(project_dir: Path, enlistment_path: str) -> dict:
-    project_dir.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "project": {
-            "enlistment": enlistment_path,
-            "origin": NORMALIZED_ORIGIN,
-            "repo_url": RAW_ORIGIN,
-        },
-        "branch": {
-            "prefix": "scott/",
-            "pr": True,
-            "history": "manual",
-        },
-    }
-    parsed = config.ProjectConfig.model_validate(payload)
-    config.write_project_config(paths.project_config_path(project_dir), parsed)
-    return parsed.model_dump()
+import atelier.cli as cli
+import atelier.commands.upgrade as upgrade_cmd
+import atelier.config as config
+import atelier.paths as paths
+from tests.atelier.helpers import (
+    NORMALIZED_ORIGIN,
+    RAW_ORIGIN,
+    BaseAtelierTestCase,
+    enlistment_path_for,
+    workspace_id_for,
+    write_project_config,
+)
 
 
 class TestUpgradeFlags(BaseAtelierTestCase):

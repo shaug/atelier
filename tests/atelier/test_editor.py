@@ -1,12 +1,8 @@
-import sys
 import tempfile
 from pathlib import Path
 from unittest import TestCase
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
-import atelier.editor as editor  # noqa: E402
+import atelier.editor as editor
 
 
 class TestResolveEditorCommand(TestCase):

@@ -1,17 +1,13 @@
 import io
 import os
-import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
-import atelier.commands.list as list_cmd  # noqa: E402
-import atelier.paths as paths  # noqa: E402
-from tests.test_cli import (  # noqa: E402
+import atelier.commands.list as list_cmd
+import atelier.paths as paths
+from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
     RAW_ORIGIN,
     BaseAtelierTestCase,
