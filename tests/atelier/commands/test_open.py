@@ -150,8 +150,11 @@ class TestOpenWorkspace:
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
+                commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
                 with (
                     patch("atelier.exec.run_command", lambda *args, **kwargs: None),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),

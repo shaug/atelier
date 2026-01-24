@@ -16,7 +16,7 @@ def test_new_creates_project_and_opens_workspace() -> None:
         target_dir = root / "greenfield"
         commands: list[tuple[list[str], Path | None]] = []
         opened: list[object] = []
-        responses = iter(["", "", "", "", "", "", ""])
+        responses = iter(["", "", "", "", "", "", "", ""])
 
         def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
             commands.append((cmd, cwd))
