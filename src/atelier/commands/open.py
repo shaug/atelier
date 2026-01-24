@@ -15,6 +15,7 @@ from typing import Callable
 from .. import (
     __version__,
     agents,
+    ai,
     codex,
     config,
     editor,
@@ -24,6 +25,7 @@ from .. import (
     project,
     templates,
     term,
+    tickets,
     workspace,
 )
 from ..io import confirm, die, link_or_copy, say, warn
@@ -127,6 +129,14 @@ def project_success_is_custom(project_dir: Path) -> bool:
     success_content = success_path.read_text(encoding="utf-8")
     canonical = templates.success_md_template(prefer_installed=True)
     return success_content != canonical
+
+
+def load_success_context(root: Path) -> str | None:
+    """Load SUCCESS.md content from a directory when available."""
+    success_path = root / "SUCCESS.md"
+    if not success_path.exists():
+        return None
+    return success_path.read_text(encoding="utf-8").strip()
 
 
 @dataclass
@@ -582,21 +592,63 @@ def open_workspace(args: object) -> None:
     workspace_name_input = getattr(args, "workspace_name", None)
     raw_branch = bool(getattr(args, "raw", False))
     ticket_refs = normalize_ticket_refs(getattr(args, "ticket", None))
+    ai_branch = bool(getattr(args, "ai_branch", False))
+    ai_success = bool(getattr(args, "ai_success", False))
+    ai_config = config_payload.ai
+    ai_ready = ai.ai_enabled(ai_config)
+    if (ai_branch or ai_success) and not ai_ready:
+        reason = ai.ai_disabled_reason(ai_config)
+        warn(f"AI helpers requested but {reason or 'not configured'}; skipping")
+
+    ticket_context_text: str | None = None
+    if ai_ready and (ai_branch or ai_success) and ticket_refs:
+        ticket_config = config_payload.tickets
+        ticket_context = tickets.resolve_ticket_context(
+            ticket_refs[0],
+            provider=ticket_config.provider,
+            default_project=ticket_config.default_project,
+            project_origin=project_origin,
+            project_repo_url=project_repo_url,
+        )
+        ticket_context_text = tickets.format_ticket_context(ticket_context)
 
     if not workspace_name_input:
-        if ticket_refs:
-            ticket_name = ticket_refs[0]
-            normalized_ticket = normalize_ticket_workspace_name(ticket_name)
-            if not normalized_ticket:
-                die("ticket name did not produce a valid workspace name")
-            workspace_name_input = f"$ticket-{normalized_ticket}"
-        else:
-            if raw_branch:
-                die("workspace branch is required when using --raw")
-            workspace_name_input = resolve_implicit_workspace_name(
-                repo_root, config_payload, git_path=git_path
-            )
-            raw_branch = True
+        if ai_branch and ai_ready:
+            context_text = ticket_context_text
+            if context_text is None and ticket_refs:
+                context_text = f"Ticket: {ticket_refs[0]}"
+            if context_text is None and not ticket_refs:
+                context_text = load_success_context(cwd)
+            if not context_text:
+                warn(
+                    "AI branch suggestions requested but no ticket or SUCCESS.md "
+                    "context was found; skipping"
+                )
+            else:
+                suggestions = ai.suggest_branch_names(ai_config, context_text)
+                if suggestions:
+                    candidate = normalize_ticket_workspace_name(suggestions[0])
+                    if candidate:
+                        if ticket_refs and not candidate.startswith("$ticket-"):
+                            workspace_name_input = f"$ticket-{candidate}"
+                        else:
+                            workspace_name_input = candidate
+                if not workspace_name_input:
+                    warn("AI branch suggestions returned no usable result; skipping")
+        if not workspace_name_input:
+            if ticket_refs:
+                ticket_name = ticket_refs[0]
+                normalized_ticket = normalize_ticket_workspace_name(ticket_name)
+                if not normalized_ticket:
+                    die("ticket name did not produce a valid workspace name")
+                workspace_name_input = f"$ticket-{normalized_ticket}"
+            else:
+                if raw_branch:
+                    die("workspace branch is required when using --raw")
+                workspace_name_input = resolve_implicit_workspace_name(
+                    repo_root, config_payload, git_path=git_path
+                )
+                raw_branch = True
 
     workspace_name_input = workspace.normalize_workspace_name(str(workspace_name_input))
     if not workspace_name_input:
@@ -674,6 +726,22 @@ def open_workspace(args: object) -> None:
         config.update_workspace_managed_files(workspace_dir, workspace_managed_updates)
         workspace_policy_target = workspace_dir / "SUCCESS.md"
         if not workspace_policy_target.exists():
+            ai_success_text: str | None = None
+            if ai_success and ai_ready:
+                if not ticket_refs:
+                    warn(
+                        "AI SUCCESS drafting requested but no tickets were provided; "
+                        "skipping"
+                    )
+                else:
+                    context_text = ticket_context_text or f"Ticket: {ticket_refs[0]}"
+                    ai_success_text = ai.draft_success_md(ai_config, context_text)
+                    if ai_success_text:
+                        workspace_policy_target.write_text(
+                            ai_success_text, encoding="utf-8"
+                        )
+                    else:
+                        warn("AI SUCCESS drafting failed; falling back to templates")
             ticket_template_path = (
                 project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.ticket.md"
             )
@@ -681,47 +749,50 @@ def open_workspace(args: object) -> None:
             workspace_policy_text: str | None = None
             workspace_policy_template: Path | None = None
 
-            if ticket_refs:
-                if ticket_template_path.exists():
-                    workspace_policy_text = ticket_template_path.read_text(
-                        encoding="utf-8"
-                    )
-                elif not project_success_is_custom(project_dir):
-                    workspace_policy_text = templates.ticket_success_md_template(
-                        prefer_installed=True
-                    )
+            if ai_success_text is None:
+                if ticket_refs:
+                    if ticket_template_path.exists():
+                        workspace_policy_text = ticket_template_path.read_text(
+                            encoding="utf-8"
+                        )
+                    elif not project_success_is_custom(project_dir):
+                        workspace_policy_text = templates.ticket_success_md_template(
+                            prefer_installed=True
+                        )
+                    else:
+                        workspace_policy_template = (
+                            success_template_path
+                            if success_template_path.exists()
+                            else None
+                        )
                 else:
                     workspace_policy_template = (
                         success_template_path
                         if success_template_path.exists()
                         else None
                     )
-            else:
-                workspace_policy_template = (
-                    success_template_path if success_template_path.exists() else None
-                )
 
-            if workspace_policy_text is not None:
-                ticket_config = config_payload.tickets
-                ticket_provider = ticket_config.provider or "ticket"
-                if ticket_provider == "none":
-                    ticket_provider = "ticket"
-                ticket_id = ticket_refs[0] if ticket_refs else "unknown"
-                project_name = (
-                    ticket_config.default_project
-                    or project_section.origin
-                    or project_section.repo_url
-                    or project_dir.name
-                )
-                rendered = render_ticket_success_template(
-                    workspace_policy_text,
-                    ticket_provider=ticket_provider,
-                    ticket_id=ticket_id,
-                    project_name=project_name,
-                )
-                workspace_policy_target.write_text(rendered, encoding="utf-8")
-            elif workspace_policy_template is not None:
-                shutil.copyfile(workspace_policy_template, workspace_policy_target)
+                if workspace_policy_text is not None:
+                    ticket_config = config_payload.tickets
+                    ticket_provider = ticket_config.provider or "ticket"
+                    if ticket_provider == "none":
+                        ticket_provider = "ticket"
+                    ticket_id = ticket_refs[0] if ticket_refs else "unknown"
+                    project_name = (
+                        ticket_config.default_project
+                        or project_section.origin
+                        or project_section.repo_url
+                        or project_dir.name
+                    )
+                    rendered = render_ticket_success_template(
+                        workspace_policy_text,
+                        ticket_provider=ticket_provider,
+                        ticket_id=ticket_id,
+                        project_name=project_name,
+                    )
+                    workspace_policy_target.write_text(rendered, encoding="utf-8")
+                elif workspace_policy_template is not None:
+                    shutil.copyfile(workspace_policy_template, workspace_policy_target)
         workspace_config = config.load_workspace_config(workspace_config_file)
         if not workspace_config:
             die("failed to load workspace config")

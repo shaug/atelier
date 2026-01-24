@@ -17,6 +17,9 @@ UpgradePolicy = Literal["always", "ask", "manual"]
 TICKET_PROVIDER_VALUES = ("none", "github", "linear")
 TicketProvider = Literal["none", "github", "linear"]
 
+AI_PROVIDER_VALUES = ("none", "openai")
+AIProvider = Literal["none", "openai"]
+
 
 class BranchConfig(BaseModel):
     """Branch policy configuration for a project.
@@ -290,6 +293,43 @@ class TicketProviderConfig(BaseModel):
         return value
 
 
+class AIConfig(BaseModel):
+    """AI helper configuration for the project.
+
+    Attributes:
+        provider: AI provider name (none|openai).
+        model: Model name when using an AI provider.
+
+    Example:
+        >>> AIConfig(provider="openai", model="gpt-4o-mini")
+        AIConfig(...)
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    provider: AIProvider = "none"
+    model: str | None = None
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def normalize_provider(cls, value: object) -> object:
+        if value is None:
+            return "none"
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def normalize_model(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+
+
 class TicketRefs(BaseModel):
     """Ticket references stored in workspace config."""
 
@@ -396,6 +436,7 @@ class ProjectConfig(BaseModel):
         branch: Branch policy section.
         agent: Agent configuration section.
         editor: Editor configuration section.
+        ai: AI helper configuration section.
         atelier: Atelier metadata section.
 
     Example:
@@ -411,6 +452,7 @@ class ProjectConfig(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     tickets: TicketProviderConfig = Field(default_factory=TicketProviderConfig)
+    ai: AIConfig = Field(default_factory=AIConfig)
     atelier: AtelierSection = Field(default_factory=AtelierSection)
 
 
@@ -434,6 +476,7 @@ class ProjectUserConfig(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     tickets: TicketProviderConfig = Field(default_factory=TicketProviderConfig)
+    ai: AIConfig = Field(default_factory=AIConfig)
     atelier: AtelierUserSection = Field(default_factory=AtelierUserSection)
 
 

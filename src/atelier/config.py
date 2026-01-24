@@ -118,7 +118,7 @@ def _backup_legacy_config(path: Path) -> None:
 
 def _split_project_payload(payload: dict) -> tuple[dict, dict]:
     user_payload: dict = {}
-    for key in ("branch", "agent", "editor", "tickets", "git"):
+    for key in ("branch", "agent", "editor", "tickets", "git", "ai"):
         if key in payload:
             user_payload[key] = payload.get(key)
     project_payload = payload.get("project")
@@ -134,7 +134,7 @@ def _split_project_payload(payload: dict) -> tuple[dict, dict]:
     if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
         user_payload["atelier"] = {"upgrade": upgrade}
     system_payload = dict(payload)
-    for key in ("branch", "agent", "editor", "tickets", "git"):
+    for key in ("branch", "agent", "editor", "tickets", "git", "ai"):
         system_payload.pop(key, None)
     project_system = dict(system_payload.get("project", {}) or {})
     for key in ("provider", "provider_url", "owner"):
@@ -297,7 +297,7 @@ def merge_project_configs(
     system_payload = system_config.model_dump()
     user_payload = (user_config or ProjectUserConfig()).model_dump()
     merged = dict(system_payload)
-    for key in ("branch", "agent", "editor", "git"):
+    for key in ("branch", "agent", "editor", "git", "ai"):
         merged[key] = user_payload.get(key, {})
     system_project = system_payload.get("project", {}) if system_payload else {}
     user_project = user_payload.get("project", {}) if user_payload else {}
@@ -889,6 +889,7 @@ def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
         agent = config.agent
         editor_config = config.editor
         tickets = config.tickets
+        ai = config.ai
         upgrade = config.atelier.upgrade
     else:
         project = config.project
@@ -897,6 +898,7 @@ def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
         agent = config.agent
         editor_config = config.editor
         tickets = config.tickets
+        ai = config.ai
         upgrade = config.atelier.upgrade
     project_payload = {
         key: value
@@ -909,6 +911,7 @@ def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
         "agent": agent.model_dump(),
         "editor": editor_config.model_dump(),
         "tickets": tickets.model_dump(),
+        "ai": ai.model_dump(),
     }
     if project_payload:
         payload["project"] = project_payload
@@ -1313,6 +1316,8 @@ def build_project_config(
     if isinstance(ticket_namespace, str) and ticket_namespace.strip() == "":
         ticket_namespace = None
 
+    ai_section = existing_config.ai
+
     atelier_created_at = existing_config.atelier.created_at or utc_now()
     atelier_version = existing_config.atelier.version or __version__
     atelier_upgrade = resolve_upgrade_policy(existing_config.atelier.upgrade)
@@ -1351,6 +1356,7 @@ def build_project_config(
         agent=AgentConfig(default=agent_default, options=agent_options),
         editor=EditorConfig(edit=editor_edit, work=editor_work),
         tickets=tickets_section,
+        ai=ai_section,
         atelier=AtelierSection(
             version=atelier_version,
             created_at=atelier_created_at,

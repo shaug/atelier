@@ -50,6 +50,7 @@ def _apply_user_sections(
             "agent": updates.agent,
             "editor": updates.editor,
             "tickets": updates.tickets,
+            "ai": updates.ai,
             "atelier": atelier_section,
         }
     )

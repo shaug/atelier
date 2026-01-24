@@ -154,6 +154,10 @@ left behind.
       "code"
     ]
   },
+  "ai": {
+    "provider": "openai",
+    "model": "gpt-4o-mini"
+  },
   "atelier": {
     "version": "0.2.0",
     "created_at": "2026-01-15T01:10:00Z",
@@ -184,6 +188,9 @@ left behind.
 - `editor.work` should be non-blocking by default (omit `-w`)
 - `agent.options` are **static argv fragments only**
 - `editor.edit` and `editor.work` are **argv lists** (command + args)
+- `ai.provider`/`ai.model` enable optional AI helpers (see
+  `atelier open --ai-*`)
+- AI helpers require `OPENAI_API_KEY` when `ai.provider` is `openai`
 - No templating, interpolation, or logic is supported in config
 - Agent CLIs are assumed to be installed and authenticated by the user
 - Atelier validates that the configured agent is available on PATH (using
@@ -564,6 +571,9 @@ Ensures a workspace exists and launches or resumes agent work.
 - `--branch-history <manual|squash|merge|rebase>` overrides `branch.history` for
   new workspaces and is stored in the workspace config. For existing workspaces,
   the value must match the workspace config or `atelier open` errors.
+- `--ai-branch` uses AI to suggest a workspace branch name (requires `ai`
+  config).
+- `--ai-success` uses AI to draft `SUCCESS.md` from ticket context.
 - `--yolo` adds the agent's least-restrictive flag(s) for this invocation only
   and does not modify configs.
 

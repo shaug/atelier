@@ -257,6 +257,9 @@ atelier clean --all --force
   into each workspace.
 - Configuration lives in `config.sys.json`/`config.user.json` under the Atelier
   data directory.
+- Optional AI helpers can suggest branch names or draft `SUCCESS.md` when
+  `ai.provider`/`ai.model` are configured and `atelier open --ai-*` is used
+  (requires `OPENAI_API_KEY`).
 - Workspace directories are keyed by a stable hash of the branch name.
 
 ## CLI Reference
@@ -404,6 +407,9 @@ Options:
 - `--raw`: Treat the argument as the full branch name (no prefix lookup).
 - `--branch-pr`: Override pull request expectation for this workspace.
 - `--branch-history`: Override history policy for this workspace.
+- `--ai-branch`: Use AI to suggest a branch name (requires
+  `ai.provider`/`ai.model`).
+- `--ai-success`: Use AI to draft `SUCCESS.md` from ticket context.
 
 Examples:
 

@@ -296,6 +296,120 @@ class TestOpenWorkspace:
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_ai_success_uses_ai_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(
+                project_dir,
+                enlistment_path,
+                tickets={"provider": "github", "default_project": "org/repo"},
+                ai={"provider": "openai", "model": "gpt-4o-mini"},
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
+                with (
+                    patch("atelier.exec.run_command", lambda *args, **kwargs: None),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.ai.draft_success_md",
+                        return_value="# Success Contract\n\nAI Draft\n",
+                    ),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(
+                            workspace_name="feat-demo",
+                            ticket=["GH-123"],
+                            ai_success=True,
+                        )
+                    )
+
+                workspace_branch = "scott/feat-demo"
+                workspace_dir = paths.workspace_dir_for_branch(
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
+                )
+                success_content = (workspace_dir / "SUCCESS.md").read_text(
+                    encoding="utf-8"
+                )
+                assert "AI Draft" in success_content
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_ai_branch_uses_ai_suggestion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(
+                project_dir,
+                enlistment_path,
+                ai={"provider": "openai", "model": "gpt-4o-mini"},
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
+                with (
+                    patch("atelier.exec.run_command", lambda *args, **kwargs: None),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.ai.suggest_branch_names",
+                        return_value=["Fix login flow"],
+                    ),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(
+                            workspace_name=None,
+                            ticket=["GH-123"],
+                            ai_branch=True,
+                        )
+                    )
+
+                workspace_branch = "scott/$ticket-fix-login-flow"
+                workspace_dir = paths.workspace_dir_for_branch(
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
+                )
+                workspace_config = config.load_workspace_config(
+                    paths.workspace_config_path(workspace_dir)
+                )
+                assert workspace_config is not None
+                assert workspace_config.workspace.branch == workspace_branch
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_yolo_passes_through_to_codex(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

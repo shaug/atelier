@@ -80,7 +80,7 @@ def project_label_from_parts(root: Path, origin: str | None) -> str:
 
 def split_project_payload(payload: dict) -> tuple[dict, dict]:
     user_payload: dict = {}
-    for key in ("branch", "agent", "editor", "git"):
+    for key in ("branch", "agent", "editor", "git", "ai"):
         if key in payload:
             user_payload[key] = payload.get(key)
     project_payload = payload.get("project")
@@ -96,7 +96,7 @@ def split_project_payload(payload: dict) -> tuple[dict, dict]:
     if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
         user_payload["atelier"] = {"upgrade": upgrade}
     system_payload = dict(payload)
-    for key in ("branch", "agent", "editor", "git"):
+    for key in ("branch", "agent", "editor", "git", "ai"):
         system_payload.pop(key, None)
     project_system = dict(system_payload.get("project", {}) or {})
     for key in ("provider", "provider_url", "owner"):
