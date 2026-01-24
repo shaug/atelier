@@ -136,6 +136,57 @@ class TestOpenWorkspace:
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_records_tickets_for_new_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.exec.run_command", lambda *args, **kwargs: None),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(
+                            workspace_name="feat-demo",
+                            ticket=["GH-1, GH-2", "gh-1"],
+                        )
+                    )
+
+                workspace_branch = "scott/feat-demo"
+                workspace_dir = paths.workspace_dir_for_branch(
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
+                )
+                user_config = config.load_workspace_user_config(
+                    paths.workspace_config_user_path(workspace_dir)
+                )
+                assert user_config is not None
+                assert user_config.tickets.refs == ["GH-1", "GH-2"]
+                success_content = (workspace_dir / "SUCCESS.md").read_text(
+                    encoding="utf-8"
+                )
+                assert "## Tickets" in success_content
+                assert "- GH-1" in success_content
+                assert "- GH-2" in success_content
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_yolo_passes_through_to_codex(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

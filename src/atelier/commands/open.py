@@ -46,6 +46,53 @@ def confirm_remove_finalization_tag(workspace_branch: str, tag: str) -> bool:
     )
 
 
+def normalize_ticket_refs(values: list[str] | None) -> list[str]:
+    """Normalize ticket references, splitting comma-delimited inputs."""
+    if not values:
+        return []
+    refs: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        if raw is None:
+            continue
+        for part in str(raw).split(","):
+            ref = part.strip()
+            if not ref:
+                continue
+            normalized = ref.casefold()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            refs.append(ref)
+    return refs
+
+
+def merge_ticket_refs(existing: list[str], new: list[str]) -> list[str]:
+    """Merge ticket references, preserving order and deduping by case."""
+    merged: list[str] = []
+    seen: set[str] = set()
+    for ref in [*existing, *new]:
+        normalized = ref.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        merged.append(ref)
+    return merged
+
+
+def append_ticket_section(path: Path, refs: list[str]) -> None:
+    """Append a Tickets section to the SUCCESS.md file."""
+    if not path.exists():
+        warn(f"SUCCESS.md not found for tickets at {path}")
+        return
+    content = path.read_text(encoding="utf-8")
+    if content and not content.endswith("\n"):
+        content += "\n"
+    lines = ["", "## Tickets", "", *[f"- {ref}" for ref in refs]]
+    updated = content + "\n".join(lines).rstrip() + "\n"
+    path.write_text(updated, encoding="utf-8")
+
+
 @dataclass
 class ManagedTemplateUpdate:
     description: str
@@ -531,6 +578,7 @@ def open_workspace(args: object) -> None:
     workspace_config_exists = workspace_config_file.exists()
     is_new_workspace = not workspace_config_exists
     workspace_config: config.WorkspaceConfig | None = None
+    ticket_refs = normalize_ticket_refs(getattr(args, "ticket", None))
     if workspace_config_exists:
         workspace_config = config.load_workspace_config(workspace_config_file)
         if not workspace_config:
@@ -591,6 +639,23 @@ def open_workspace(args: object) -> None:
             and not workspace_policy_target.exists()
         ):
             shutil.copyfile(workspace_policy_template, workspace_policy_target)
+
+    if ticket_refs:
+        if not is_new_workspace:
+            warn("tickets were provided for an existing workspace; skipping")
+        else:
+            user_path = paths.workspace_config_user_path(workspace_dir)
+            user_config = (
+                config.load_workspace_user_config(user_path)
+                or config.WorkspaceUserConfig()
+            )
+            merged_refs = merge_ticket_refs(user_config.tickets.refs, ticket_refs)
+            tickets_section = user_config.tickets.model_copy(
+                update={"refs": merged_refs}
+            )
+            user_config = user_config.model_copy(update={"tickets": tickets_section})
+            config.write_workspace_user_config(user_path, user_config)
+            append_ticket_section(workspace_dir / "SUCCESS.md", merged_refs)
 
     if workspace_config is not None:
         backfill_missing_workspace_files(

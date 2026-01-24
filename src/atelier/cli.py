@@ -174,6 +174,13 @@ def open_command(
             help="override history policy (manual|squash|merge|rebase)",
         ),
     ] = None,
+    ticket: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--ticket",
+            help="ticket reference (repeatable or comma-separated)",
+        ),
+    ] = None,
     yolo: Annotated[
         bool,
         typer.Option(
@@ -190,6 +197,7 @@ def open_command(
         raw: Treat the argument as the full branch name (no prefix lookup).
         branch_pr: Override pull request expectation (true/false).
         branch_history: Override history policy (manual|squash|merge|rebase).
+        ticket: Ticket reference(s) to attach to the workspace.
         yolo: Enable least-restrictive agent mode for this invocation.
 
     Returns:
@@ -204,6 +212,7 @@ def open_command(
             raw=raw,
             branch_pr=branch_pr,
             branch_history=branch_history,
+            ticket=ticket,
             yolo=yolo,
         )
     )

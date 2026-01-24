@@ -24,6 +24,7 @@ from .editor import system_editor_default
 from .io import die, prompt, select
 from .models import (
     BRANCH_HISTORY_VALUES,
+    TICKET_PROVIDER_VALUES,
     UPGRADE_POLICY_VALUES,
     AgentConfig,
     AtelierSection,
@@ -117,7 +118,7 @@ def _backup_legacy_config(path: Path) -> None:
 
 def _split_project_payload(payload: dict) -> tuple[dict, dict]:
     user_payload: dict = {}
-    for key in ("branch", "agent", "editor"):
+    for key in ("branch", "agent", "editor", "tickets"):
         if key in payload:
             user_payload[key] = payload.get(key)
     atelier_payload = dict(payload.get("atelier", {}) or {})
@@ -135,6 +136,8 @@ def _split_workspace_payload(payload: dict) -> tuple[dict, dict]:
     atelier_payload = dict(payload.get("atelier", {}) or {})
     upgrade = atelier_payload.pop("upgrade", None)
     user_payload: dict = {}
+    if "tickets" in payload:
+        user_payload["tickets"] = payload.get("tickets")
     if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
         user_payload["atelier"] = {"upgrade": upgrade}
     system_payload = dict(payload)
@@ -817,6 +820,7 @@ def user_config_missing_fields(payload: dict | None) -> list[str]:
         ("agent", "default"),
         ("editor", "edit"),
         ("editor", "work"),
+        ("tickets", "provider"),
     ]
     for path in fields:
         if not _path_has_value(payload, *path):
@@ -830,16 +834,19 @@ def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
         branch = config.branch
         agent = config.agent
         editor_config = config.editor
+        tickets = config.tickets
         upgrade = config.atelier.upgrade
     else:
         branch = config.branch
         agent = config.agent
         editor_config = config.editor
+        tickets = config.tickets
         upgrade = config.atelier.upgrade
     payload = {
         "branch": branch.model_dump(),
         "agent": agent.model_dump(),
         "editor": editor_config.model_dump(),
+        "tickets": tickets.model_dump(),
     }
     if upgrade is not None:
         payload["atelier"] = {"upgrade": upgrade}
@@ -1192,6 +1199,50 @@ def build_project_config(
         editor_parts = command_util.normalize_command(editor_work_input)
         editor_work = editor_parts or None
 
+    ticket_config = existing_config.tickets
+    ticket_provider_default = ticket_config.provider or "none"
+    ticket_provider_arg = read_arg(args, "ticket_provider")
+    if ticket_provider_arg is not None:
+        ticket_provider = str(ticket_provider_arg).strip().lower()
+    elif should_prompt("tickets", "provider"):
+        ticket_provider = select(
+            "Ticket provider", TICKET_PROVIDER_VALUES, ticket_provider_default
+        )
+    else:
+        ticket_provider = ticket_provider_default
+    if ticket_provider not in TICKET_PROVIDER_VALUES:
+        die(f"unsupported ticket provider {ticket_provider!r}")
+
+    ticket_project_default = ticket_config.default_project or ""
+    ticket_project_arg = read_arg(args, "ticket_project")
+    if ticket_project_arg is not None:
+        ticket_project = str(ticket_project_arg)
+    elif ticket_provider != "none" and should_prompt("tickets", "default_project"):
+        ticket_project = prompt(
+            "Default ticket project (optional)",
+            ticket_project_default,
+            allow_empty=True,
+        )
+    else:
+        ticket_project = ticket_config.default_project
+    if isinstance(ticket_project, str) and ticket_project.strip() == "":
+        ticket_project = None
+
+    ticket_namespace_default = ticket_config.default_namespace or ""
+    ticket_namespace_arg = read_arg(args, "ticket_namespace")
+    if ticket_namespace_arg is not None:
+        ticket_namespace = str(ticket_namespace_arg)
+    elif ticket_provider != "none" and should_prompt("tickets", "default_namespace"):
+        ticket_namespace = prompt(
+            "Default ticket namespace (optional)",
+            ticket_namespace_default,
+            allow_empty=True,
+        )
+    else:
+        ticket_namespace = ticket_config.default_namespace
+    if isinstance(ticket_namespace, str) and ticket_namespace.strip() == "":
+        ticket_namespace = None
+
     atelier_created_at = existing_config.atelier.created_at or utc_now()
     atelier_version = existing_config.atelier.version or __version__
     atelier_upgrade = resolve_upgrade_policy(existing_config.atelier.upgrade)
@@ -1203,6 +1254,14 @@ def build_project_config(
     project_origin = origin or existing_config.project.origin
     project_repo_url = origin_raw or existing_config.project.repo_url
 
+    tickets_section = ticket_config.model_copy(
+        update={
+            "provider": ticket_provider,
+            "default_project": ticket_project,
+            "default_namespace": ticket_namespace,
+        }
+    )
+
     return ProjectConfig(
         project=ProjectSection(
             enlistment=enlistment_path,
@@ -1212,6 +1271,7 @@ def build_project_config(
         branch=BranchConfig(prefix=branch_prefix, pr=branch_pr, history=branch_history),
         agent=AgentConfig(default=agent_default, options=agent_options),
         editor=EditorConfig(edit=editor_edit, work=editor_work),
+        tickets=tickets_section,
         atelier=AtelierSection(
             version=atelier_version,
             created_at=atelier_created_at,

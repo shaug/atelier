@@ -39,6 +39,7 @@ def _apply_user_sections(
             "branch": updates.branch,
             "agent": updates.agent,
             "editor": updates.editor,
+            "tickets": updates.tickets,
             "atelier": atelier_section,
         }
     )

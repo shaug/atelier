@@ -27,7 +27,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -70,7 +70,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -104,7 +104,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "cursor -w", "cursor"])
+                responses = iter(["", "", "", "", "cursor -w", "cursor", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -134,7 +134,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -239,7 +239,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
