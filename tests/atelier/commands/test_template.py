@@ -147,6 +147,89 @@ class TestTemplateCommand:
             finally:
                 os.chdir(original_cwd)
 
+    def test_template_workspace_ticket_prefers_ticket_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+            project_template = project_dir / "templates" / "SUCCESS.ticket.md"
+            project_template.parent.mkdir(parents=True, exist_ok=True)
+            project_template.write_text("project ticket\n", encoding="utf-8")
+            installed_template = (
+                data_dir / "templates" / "workspace" / "SUCCESS.ticket.md"
+            )
+            installed_template.parent.mkdir(parents=True, exist_ok=True)
+            installed_template.write_text("installed ticket\n", encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                buffer = io.StringIO()
+                with (
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("sys.stdout", buffer),
+                ):
+                    template_cmd.render_template(
+                        SimpleNamespace(
+                            target="workspace",
+                            installed=False,
+                            ticket=True,
+                            edit=False,
+                        )
+                    )
+                assert buffer.getvalue().strip() == "project ticket"
+            finally:
+                os.chdir(original_cwd)
+
+    def test_template_project_ignores_ticket_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+            project_path = project_dir / "PROJECT.md"
+            project_path.write_text("project override\n", encoding="utf-8")
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                buffer = io.StringIO()
+                warnings: list[str] = []
+
+                with (
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                    patch(
+                        "atelier.commands.template.warn",
+                        lambda msg: warnings.append(msg),
+                    ),
+                    patch("sys.stdout", buffer),
+                ):
+                    template_cmd.render_template(
+                        SimpleNamespace(
+                            target="project",
+                            installed=False,
+                            ticket=True,
+                            edit=False,
+                        )
+                    )
+                assert buffer.getvalue().strip() == "project override"
+                assert warnings
+            finally:
+                os.chdir(original_cwd)
+
     def test_template_edit_creates_project_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from .. import config, editor, exec, git, paths, templates
-from ..io import die, say
+from ..io import die, say, warn
 
 TEMPLATE_TARGETS = {
     "project": ("project", "PROJECT.md"),
@@ -68,10 +68,13 @@ def render_template(args: object) -> None:
 
     installed = bool(getattr(args, "installed", False))
     edit_mode = bool(getattr(args, "edit", False))
+    ticket = bool(getattr(args, "ticket", False))
 
     project_root, project_config, _ = _resolve_project()
 
     if target == "project":
+        if ticket:
+            warn("ignoring --ticket for project templates")
         project_template_path = project_root / "PROJECT.md"
         if not installed and project_template_path.exists():
             text = project_template_path.read_text(encoding="utf-8")
@@ -79,12 +82,24 @@ def render_template(args: object) -> None:
             text = templates.project_md_template(prefer_installed=True)
         target_path = project_template_path
     else:
-        project_template_path = project_root / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
-        if not installed and project_template_path.exists():
-            text = project_template_path.read_text(encoding="utf-8")
+        if ticket:
+            project_template_path = (
+                project_root / paths.TEMPLATES_DIRNAME / "SUCCESS.ticket.md"
+            )
+            if not installed and project_template_path.exists():
+                text = project_template_path.read_text(encoding="utf-8")
+            else:
+                text = templates.ticket_success_md_template(prefer_installed=True)
+            target_path = project_template_path
         else:
-            text = templates.success_md_template(prefer_installed=True)
-        target_path = project_template_path
+            project_template_path = (
+                project_root / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
+            )
+            if not installed and project_template_path.exists():
+                text = project_template_path.read_text(encoding="utf-8")
+            else:
+                text = templates.success_md_template(prefer_installed=True)
+            target_path = project_template_path
 
     if not edit_mode:
         say(text)

@@ -661,6 +661,13 @@ def template_command(
         bool,
         typer.Option("--installed", help="use the installed template cache"),
     ] = False,
+    ticket: Annotated[
+        bool,
+        typer.Option(
+            "--ticket",
+            help="use the ticket SUCCESS.md template for workspace targets",
+        ),
+    ] = False,
     edit: Annotated[
         bool,
         typer.Option("--edit", help="open the resolved template in editor.edit"),
@@ -668,7 +675,7 @@ def template_command(
 ) -> None:
     """Print or edit templates for the current project."""
     template_cmd.render_template(
-        SimpleNamespace(target=target, installed=installed, edit=edit)
+        SimpleNamespace(target=target, installed=installed, ticket=ticket, edit=edit)
     )
 
 

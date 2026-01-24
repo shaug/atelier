@@ -190,6 +190,111 @@ class TestOpenWorkspace:
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_uses_ticket_name_for_workspace_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
+                with (
+                    patch("atelier.exec.run_command", lambda *args, **kwargs: None),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(workspace_name=None, ticket=["Fix login!!!"])
+                    )
+
+                workspace_branch = "scott/$ticket-fix-login"
+                workspace_dir = paths.workspace_dir_for_branch(
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
+                )
+                workspace_config = config.load_workspace_config(
+                    paths.workspace_config_path(workspace_dir)
+                )
+                assert workspace_config is not None
+                assert workspace_config.workspace.branch == workspace_branch
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_ticket_uses_ticket_success_template_when_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(
+                project_dir,
+                enlistment_path,
+                tickets={"provider": "github", "default_project": "org/repo"},
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
+                with (
+                    patch("atelier.exec.run_command", lambda *args, **kwargs: None),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.templates.ticket_success_md_template",
+                        return_value=(
+                            "Implement ${ticket-provider} ticket ${ticket-id} "
+                            "for project ${project-name} to completion.\n"
+                        ),
+                    ),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(
+                            workspace_name="feat-demo",
+                            ticket=["GH-123"],
+                        )
+                    )
+
+                workspace_branch = "scott/feat-demo"
+                workspace_dir = paths.workspace_dir_for_branch(
+                    project_dir,
+                    workspace_branch,
+                    workspace_id_for(enlistment_path, workspace_branch),
+                )
+                success_content = (workspace_dir / "SUCCESS.md").read_text(
+                    encoding="utf-8"
+                )
+                assert (
+                    "Implement github ticket GH-123 for project org/repo to completion."
+                ) in success_content
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_yolo_passes_through_to_codex(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

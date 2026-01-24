@@ -5,6 +5,7 @@ handles template upgrades, and launches or resumes the agent session.
 """
 
 import difflib
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -91,6 +92,41 @@ def append_ticket_section(path: Path, refs: list[str]) -> None:
     lines = ["", "## Tickets", "", *[f"- {ref}" for ref in refs]]
     updated = content + "\n".join(lines).rstrip() + "\n"
     path.write_text(updated, encoding="utf-8")
+
+
+def normalize_ticket_workspace_name(value: str) -> str:
+    """Normalize a ticket name for workspace naming."""
+    lowered = value.strip().lower()
+    if not lowered:
+        return ""
+    dashed = re.sub(r"\s+", "-", lowered)
+    cleaned = re.sub(r"[^a-z0-9-]", "", dashed)
+    collapsed = re.sub(r"-{2,}", "-", cleaned).strip("-")
+    return collapsed
+
+
+def render_ticket_success_template(
+    text: str,
+    *,
+    ticket_provider: str,
+    ticket_id: str,
+    project_name: str,
+) -> str:
+    return (
+        text.replace("${ticket-provider}", ticket_provider)
+        .replace("${ticket-id}", ticket_id)
+        .replace("${project-name}", project_name)
+    )
+
+
+def project_success_is_custom(project_dir: Path) -> bool:
+    """Return true when the project SUCCESS.md template is customized."""
+    success_path = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
+    if not success_path.exists():
+        return False
+    success_content = success_path.read_text(encoding="utf-8")
+    canonical = templates.success_md_template(prefer_installed=True)
+    return success_content != canonical
 
 
 @dataclass
@@ -545,14 +581,22 @@ def open_workspace(args: object) -> None:
 
     workspace_name_input = getattr(args, "workspace_name", None)
     raw_branch = bool(getattr(args, "raw", False))
+    ticket_refs = normalize_ticket_refs(getattr(args, "ticket", None))
 
     if not workspace_name_input:
-        if raw_branch:
-            die("workspace branch is required when using --raw")
-        workspace_name_input = resolve_implicit_workspace_name(
-            repo_root, config_payload, git_path=git_path
-        )
-        raw_branch = True
+        if ticket_refs:
+            ticket_name = ticket_refs[0]
+            normalized_ticket = normalize_ticket_workspace_name(ticket_name)
+            if not normalized_ticket:
+                die("ticket name did not produce a valid workspace name")
+            workspace_name_input = f"$ticket-{normalized_ticket}"
+        else:
+            if raw_branch:
+                die("workspace branch is required when using --raw")
+            workspace_name_input = resolve_implicit_workspace_name(
+                repo_root, config_payload, git_path=git_path
+            )
+            raw_branch = True
 
     workspace_name_input = workspace.normalize_workspace_name(str(workspace_name_input))
     if not workspace_name_input:
@@ -581,7 +625,6 @@ def open_workspace(args: object) -> None:
     workspace_config_exists = workspace_config_file.exists()
     is_new_workspace = not workspace_config_exists
     workspace_config: config.WorkspaceConfig | None = None
-    ticket_refs = normalize_ticket_refs(getattr(args, "ticket", None))
     if workspace_config_exists:
         workspace_config = config.load_workspace_config(workspace_config_file)
         if not workspace_config:
@@ -629,19 +672,56 @@ def open_workspace(args: object) -> None:
             config.managed_workspace_persist_updates(workspace_dir)
         )
         config.update_workspace_managed_files(workspace_dir, workspace_managed_updates)
-        success_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
-        workspace_policy_template = (
-            success_policy_template if success_policy_template.exists() else None
-        )
-        workspace_policy_target = (
-            workspace_dir / "SUCCESS.md" if workspace_policy_template else None
-        )
-        if (
-            workspace_policy_template is not None
-            and workspace_policy_target is not None
-            and not workspace_policy_target.exists()
-        ):
-            shutil.copyfile(workspace_policy_template, workspace_policy_target)
+        workspace_policy_target = workspace_dir / "SUCCESS.md"
+        if not workspace_policy_target.exists():
+            ticket_template_path = (
+                project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.ticket.md"
+            )
+            success_template_path = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
+            workspace_policy_text: str | None = None
+            workspace_policy_template: Path | None = None
+
+            if ticket_refs:
+                if ticket_template_path.exists():
+                    workspace_policy_text = ticket_template_path.read_text(
+                        encoding="utf-8"
+                    )
+                elif not project_success_is_custom(project_dir):
+                    workspace_policy_text = templates.ticket_success_md_template(
+                        prefer_installed=True
+                    )
+                else:
+                    workspace_policy_template = (
+                        success_template_path
+                        if success_template_path.exists()
+                        else None
+                    )
+            else:
+                workspace_policy_template = (
+                    success_template_path if success_template_path.exists() else None
+                )
+
+            if workspace_policy_text is not None:
+                ticket_config = config_payload.tickets
+                ticket_provider = ticket_config.provider or "ticket"
+                if ticket_provider == "none":
+                    ticket_provider = "ticket"
+                ticket_id = ticket_refs[0] if ticket_refs else "unknown"
+                project_name = (
+                    ticket_config.default_project
+                    or project_section.origin
+                    or project_section.repo_url
+                    or project_dir.name
+                )
+                rendered = render_ticket_success_template(
+                    workspace_policy_text,
+                    ticket_provider=ticket_provider,
+                    ticket_id=ticket_id,
+                    project_name=project_name,
+                )
+                workspace_policy_target.write_text(rendered, encoding="utf-8")
+            elif workspace_policy_template is not None:
+                shutil.copyfile(workspace_policy_template, workspace_policy_target)
 
     if ticket_refs:
         if not is_new_workspace:
