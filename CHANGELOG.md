@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.1](https://github.com/shaug/atelier/compare/v0.5.0...v0.5.1) (2026-01-24)
+
+
+### Bug Fixes
+
+* **exec:** normalize editor command inputs ([bd6107a](https://github.com/shaug/atelier/commit/bd6107ad18d59b69be6bfd1d96b7f8f33380c4c6)), closes [#59](https://github.com/shaug/atelier/issues/59)
+* prefer exact branch matches in open ([00f7f4b](https://github.com/shaug/atelier/commit/00f7f4b3453dfa9208a028a96a90c8ddc24895b5))
+* **upgrade:** handle orphaned workspace configs ([d5ba536](https://github.com/shaug/atelier/commit/d5ba536f9d1e3c66988a28e856bb3dcd6a1d41c8)), closes [#57](https://github.com/shaug/atelier/issues/57)
+
 ## [0.5.0](https://github.com/shaug/atelier/compare/v0.4.0...v0.5.0) (2026-01-21)
 
 ### Overview
