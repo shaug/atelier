@@ -32,7 +32,7 @@ from .commands import upgrade as upgrade_cmd
 from .commands import work as work_cmd
 
 app = typer.Typer(
-    add_completion=False,
+    add_completion=True,
     help=(
         "Workspace-first CLI for managing isolated, agent-assisted work. "
         "Use 'atelier init' to register a repo, then 'atelier open' to create "
