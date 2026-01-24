@@ -465,6 +465,7 @@ class WorkspaceSection(BaseModel):
         branch_pr: Whether pull requests are expected.
         branch_history: History policy (manual|squash|merge|rebase).
         id: Workspace identifier string.
+        uid: Unique workspace instance identifier.
         session: Agent session metadata.
 
     Example:
@@ -478,6 +479,7 @@ class WorkspaceSection(BaseModel):
     branch_pr: bool = True
     branch_history: BranchHistory = "manual"
     id: str | None = None
+    uid: str | None = None
     session: WorkspaceSession | None = None
 
     @field_validator("branch_history", mode="before")

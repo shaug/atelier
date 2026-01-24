@@ -96,6 +96,7 @@ class TestOpenWorkspace:
                 )
                 assert workspace_config is not None
                 assert workspace_config.workspace.branch == workspace_branch
+                assert workspace_config.workspace.uid
 
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
                     encoding="utf-8"

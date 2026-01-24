@@ -89,3 +89,38 @@ class TestFindCodexSession:
                 session = sessions_mod.find_codex_session("01TEST", "feat-demo")
 
             assert session == session_id
+
+    def test_respects_workspace_uid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            sessions = home / ".codex" / "sessions"
+            sessions.mkdir(parents=True)
+
+            target = "atelier:01TEST:feat-demo"
+            workspace_uid = "uid-123"
+            legacy = sessions / "session-legacy.json"
+            legacy.write_text(
+                json.dumps({"messages": [{"role": "user", "content": target}]}),
+                encoding="utf-8",
+            )
+
+            with patch("atelier.sessions.Path.home", return_value=home):
+                session = sessions_mod.find_codex_session(
+                    "01TEST", "feat-demo", workspace_uid
+                )
+
+            assert session is None
+
+            uid_target = f"{target}:{workspace_uid}"
+            uid_session = sessions / "session-uid.json"
+            uid_session.write_text(
+                json.dumps({"messages": [{"role": "user", "content": uid_target}]}),
+                encoding="utf-8",
+            )
+
+            with patch("atelier.sessions.Path.home", return_value=home):
+                session = sessions_mod.find_codex_session(
+                    "01TEST", "feat-demo", workspace_uid
+                )
+
+            assert session == "session-uid"

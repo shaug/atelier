@@ -62,7 +62,12 @@ def _append_session_section(
                     f"- Stored resume command: `{stored_session.resume_command}`"
                 )
 
-    discovered = sessions.find_codex_session(enlistment_path, workspace_branch)
+    workspace_uid = None
+    if workspace_config is not None:
+        workspace_uid = workspace_config.workspace.uid
+    discovered = sessions.find_codex_session(
+        enlistment_path, workspace_branch, workspace_uid
+    )
     if discovered:
         session_lines.append(f"- Discoverable Codex session id: `{discovered}`")
 

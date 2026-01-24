@@ -4,7 +4,7 @@ import json
 from collections.abc import Iterator
 from pathlib import Path
 
-from .workspace import workspace_identifier
+from .workspace import workspace_session_identifier
 
 
 def read_first_user_message(path: Path) -> str | None:
@@ -247,12 +247,15 @@ def session_contains_target(path: Path, target: str) -> bool:
     return target in message
 
 
-def find_codex_session(project_enlistment: str, workspace_branch: str) -> str | None:
+def find_codex_session(
+    project_enlistment: str, workspace_branch: str, workspace_uid: str | None = None
+) -> str | None:
     """Find the most recent Codex session for a workspace.
 
     Args:
         project_enlistment: Absolute path to the local enlistment.
         workspace_branch: Workspace branch name.
+        workspace_uid: Unique workspace instance identifier.
 
     Returns:
         Session ID string when found, otherwise ``None``.
@@ -264,7 +267,9 @@ def find_codex_session(project_enlistment: str, workspace_branch: str) -> str | 
     sessions_root = Path.home() / ".codex" / "sessions"
     if not sessions_root.exists():
         return None
-    target = workspace_identifier(project_enlistment, workspace_branch)
+    target = workspace_session_identifier(
+        project_enlistment, workspace_branch, workspace_uid
+    )
     matches: list[tuple[float, Path, str | None]] = []
     for path in sessions_root.rglob("*"):
         if path.suffix not in {".json", ".jsonl"}:

@@ -183,13 +183,18 @@ def unique_available_agent(available: Iterable[str]) -> str | None:
 
 
 def find_resume_session(
-    agent: AgentSpec, project_enlistment: str, workspace_branch: str
+    agent: AgentSpec,
+    project_enlistment: str,
+    workspace_branch: str,
+    workspace_uid: str | None = None,
 ) -> str | None:
     if agent.name != "codex":
         return None
     from . import sessions
 
-    return sessions.find_codex_session(project_enlistment, workspace_branch)
+    return sessions.find_codex_session(
+        project_enlistment, workspace_branch, workspace_uid
+    )
 
 
 def apply_yolo_options(agent: AgentSpec, options: list[str]) -> list[str]:

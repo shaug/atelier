@@ -722,6 +722,9 @@ def open_workspace(args: object) -> None:
                 workspace_policy_target.write_text(rendered, encoding="utf-8")
             elif workspace_policy_template is not None:
                 shutil.copyfile(workspace_policy_template, workspace_policy_target)
+        workspace_config = config.load_workspace_config(workspace_config_file)
+        if not workspace_config:
+            die("failed to load workspace config")
 
     if ticket_refs:
         if not is_new_workspace:
@@ -948,6 +951,10 @@ def open_workspace(args: object) -> None:
             workspace_target = workspace_policy_path
         exec.run_command([*editor_cmd, str(workspace_target)], cwd=workspace_dir)
 
+    workspace_uid: str | None = None
+    if workspace_config is not None:
+        workspace_uid = workspace_config.workspace.uid
+
     session_id: str | None = None
     if agent_spec.name == "codex" and workspace_config is not None:
         stored_session = workspace_config.workspace.session
@@ -959,7 +966,7 @@ def open_workspace(args: object) -> None:
                 )
     if session_id is None:
         session_id = agents.find_resume_session(
-            agent_spec, project_enlistment, workspace_branch
+            agent_spec, project_enlistment, workspace_branch, workspace_uid
         )
     resume_command = agent_spec.build_resume_command(
         workspace_dir, agent_options, session_id
@@ -1009,8 +1016,8 @@ def open_workspace(args: object) -> None:
     elif resume_reason is not None:
         warn(f"{resume_reason}; starting new session")
 
-    opening_prompt = workspace.workspace_identifier(
-        project_enlistment, workspace_branch
+    opening_prompt = workspace.workspace_session_identifier(
+        project_enlistment, workspace_branch, workspace_uid
     )
     if agent_spec.name != "codex":
         opening_prompt = ""

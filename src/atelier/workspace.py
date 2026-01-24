@@ -2,6 +2,7 @@
 
 import concurrent.futures
 import datetime as dt
+import uuid
 from pathlib import Path
 
 from . import __version__, config, git, templates
@@ -34,6 +35,34 @@ def workspace_identifier(project_enlistment: str, workspace_branch: str) -> str:
     enlistment = project_enlistment
     branch = workspace_branch.lstrip("/")
     return f"atelier:{enlistment}:{branch}"
+
+
+def workspace_session_identifier(
+    project_enlistment: str, workspace_branch: str, workspace_uid: str | None = None
+) -> str:
+    """Build the workspace session identifier string.
+
+    Args:
+        project_enlistment: Absolute path to the local enlistment.
+        workspace_branch: Workspace branch name.
+        workspace_uid: Unique workspace instance identifier.
+
+    Returns:
+        Workspace session identifier string.
+
+    Example:
+        >>> workspace_session_identifier("/repo", "feat/demo", "uid-1")
+        'atelier:/repo:feat/demo:uid-1'
+    """
+    base = workspace_identifier(project_enlistment, workspace_branch)
+    if workspace_uid:
+        return f"{base}:{workspace_uid}"
+    return base
+
+
+def generate_workspace_uid() -> str:
+    """Return a unique workspace instance identifier."""
+    return str(uuid.uuid4())
 
 
 def workspace_candidate_branches(name: str, branch_prefix: str, raw: bool) -> list[str]:
@@ -297,12 +326,14 @@ def ensure_workspace_metadata(
     workspace_config_exists = workspace_sys_path.exists()
     if not workspace_sys_path.exists():
         workspace_id = workspace_identifier(project_enlistment, workspace_branch)
+        workspace_uid = generate_workspace_uid()
         system_config = config.WorkspaceSystemConfig(
             workspace={
                 "branch": workspace_branch,
                 "branch_pr": branch_pr,
                 "branch_history": branch_history,
                 "id": workspace_id,
+                "uid": workspace_uid,
             },
             atelier={
                 "version": __version__,
