@@ -25,6 +25,7 @@ class AgentSpec:
     resume_subcommand: tuple[str, ...] | None = None
     resume_requires_session_id: bool = True
     version_args: tuple[str, ...] = ("--version",)
+    yolo_flags: tuple[str, ...] = ()
 
     def _base_command(
         self, workspace_dir: Path, options: list[str]
@@ -75,6 +76,7 @@ AGENTS: dict[str, AgentSpec] = {
         working_dir_mode="flag",
         working_dir_flag="--cd",
         resume_subcommand=("resume",),
+        yolo_flags=("--yolo",),
     ),
     "claude": AgentSpec(
         name="claude",
@@ -188,6 +190,17 @@ def find_resume_session(
     from . import sessions
 
     return sessions.find_codex_session(project_enlistment, workspace_branch)
+
+
+def apply_yolo_options(agent: AgentSpec, options: list[str]) -> list[str]:
+    """Return agent options with any yolo flags appended once."""
+    if not agent.yolo_flags:
+        return list(options)
+    merged = list(options)
+    for flag in agent.yolo_flags:
+        if flag not in merged:
+            merged.append(flag)
+    return merged
 
 
 def aider_chat_history_path(workspace_dir: Path) -> Path | None:

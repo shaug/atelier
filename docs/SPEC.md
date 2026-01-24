@@ -514,6 +514,8 @@ Ensures a workspace exists and launches or resumes agent work.
      start without an opening prompt (Aider avoids it because `--message` exits
      after sending one message).
    - Use `agent.options` and the agent command for execution
+   - When `--yolo` is set, add the agent's least-restrictive flag(s) for that
+     invocation only (no config changes)
    - Codex runs with `--cd <workspace-dir>`; other agents run with the workspace
      as the current working directory
 9. Optionally apply terminal chrome (best-effort, decorative only):
@@ -531,6 +533,8 @@ Ensures a workspace exists and launches or resumes agent work.
 - `--branch-history <manual|squash|merge|rebase>` overrides `branch.history` for
   new workspaces and is stored in the workspace config. For existing workspaces,
   the value must match the workspace config or `atelier open` errors.
+- `--yolo` adds the agent's least-restrictive flag(s) for this invocation only
+  and does not modify configs.
 
 #### Special Case: `atelier open` with no workspace branch
 

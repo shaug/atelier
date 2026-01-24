@@ -174,6 +174,13 @@ def open_command(
             help="override history policy (manual|squash|merge|rebase)",
         ),
     ] = None,
+    yolo: Annotated[
+        bool,
+        typer.Option(
+            "--yolo",
+            help="enable least-restrictive agent mode for this invocation",
+        ),
+    ] = False,
 ) -> None:
     """Open or create a workspace and launch the agent.
 
@@ -183,6 +190,7 @@ def open_command(
         raw: Treat the argument as the full branch name (no prefix lookup).
         branch_pr: Override pull request expectation (true/false).
         branch_history: Override history policy (manual|squash|merge|rebase).
+        yolo: Enable least-restrictive agent mode for this invocation.
 
     Returns:
         None.
@@ -196,6 +204,7 @@ def open_command(
             raw=raw,
             branch_pr=branch_pr,
             branch_history=branch_history,
+            yolo=yolo,
         )
     )
 

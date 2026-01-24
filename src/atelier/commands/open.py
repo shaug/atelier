@@ -645,7 +645,9 @@ def open_workspace(args: object) -> None:
     if agent_spec is None:
         die(f"unsupported agent {agent_default!r}")
 
-    agent_options = config_payload.agent.options.get(agent_spec.name, [])
+    agent_options = list(config_payload.agent.options.get(agent_spec.name, []))
+    if bool(getattr(args, "yolo", False)):
+        agent_options = agents.apply_yolo_options(agent_spec, agent_options)
 
     if is_new_workspace and existing_branch:
         workspace.write_background_snapshot(

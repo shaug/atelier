@@ -115,6 +115,45 @@ class TestOpenWorkspace:
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_yolo_passes_through_to_codex(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(workspace_name="feat-demo", yolo=True)
+                    )
+
+                codex_commands = [cmd for cmd in commands if cmd and cmd[0] == "codex"]
+                assert codex_commands
+                assert any("--yolo" in cmd for cmd in codex_commands)
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_resumes_claude_with_continue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
