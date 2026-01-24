@@ -392,7 +392,9 @@ and pushed.
 ### `atelier clean`
 
 Delete workspaces safely. By default, this removes only workspaces that have the
-local finalization tag `atelier/<branch-name>/finalized`.
+local finalization tag `atelier/<branch-name>/finalized`. Remote branches are
+deleted only for finalized workspaces; `--all` can target unfinalized ones but
+still asks for explicit confirmation before deleting their remote branches.
 
 Usage:
 
@@ -403,8 +405,10 @@ atelier clean feat/old-branch refactor/api
 
 Options:
 
-- `--all` or `-A`: Delete all workspaces regardless of state.
-- `--force` or `-F`: Delete without confirmation prompts.
+- `--all` or `-A`: Delete all workspaces regardless of state (still confirms
+  remote branch deletion for unfinalized workspaces).
+- `--force` or `-F`: Delete without confirmation prompts (except remote branch
+  deletion for unfinalized workspaces).
 - `--no-branch`: Keep local/remote branches; delete only workspace folders.
 
 Examples:

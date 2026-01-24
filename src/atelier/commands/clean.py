@@ -22,8 +22,55 @@ def confirm_delete(workspace_name: str) -> bool:
     return confirm(f"Delete workspace {workspace_name}?", default=False)
 
 
+def confirm_remote_delete(workspace_name: str) -> bool:
+    """Prompt to confirm remote branch deletion for unfinalized workspaces.
+
+    Args:
+        workspace_name: Workspace branch name to confirm.
+
+    Returns:
+        ``True`` when the user confirms deletion.
+
+    Example:
+        Delete remote branch feat/demo even though it is not finalized? [y/N]:
+    """
+    return confirm(
+        f"Delete remote branch {workspace_name} even though it is not finalized?",
+        default=False,
+    )
+
+
+def resolve_workspace_finalized(item: dict, main_repo_dir: Path | None) -> bool | None:
+    """Resolve finalization status for a workspace item.
+
+    Args:
+        item: Workspace metadata dict with ``branch`` and ``repo_dir`` entries.
+        main_repo_dir: Repo path for the main enlistment.
+
+    Returns:
+        ``True`` if finalized, ``False`` if not, or ``None`` on error.
+    """
+    finalized = item.get("finalized")
+    if finalized is not None:
+        return finalized
+
+    branch = item["branch"]
+    repo_dir = item["repo_dir"]
+    finalization_tag = workspace.finalization_tag_name(branch)
+    if repo_dir.exists():
+        finalized = git.git_tag_exists(repo_dir, finalization_tag)
+    if finalized is not True and main_repo_dir is not None:
+        finalized = git.git_tag_exists(main_repo_dir, finalization_tag)
+    item["finalized"] = finalized
+    return finalized
+
+
 def delete_workspace_branch(
-    repo_dir: Path, workspace_branch: str, default_branch: str
+    repo_dir: Path,
+    workspace_branch: str,
+    default_branch: str,
+    allow_remote_delete: bool,
+    remote_exists: bool | None = None,
 ) -> None:
     """Delete local and remote workspace branches when possible.
 
@@ -31,6 +78,8 @@ def delete_workspace_branch(
         repo_dir: Path to the workspace ``repo/`` directory.
         workspace_branch: Branch name to delete.
         default_branch: Default branch to switch to before deletion.
+        allow_remote_delete: Whether remote deletion is permitted.
+        remote_exists: Optional cached remote existence check.
 
     Returns:
         None.
@@ -63,8 +112,15 @@ def delete_workspace_branch(
         if result is None or result.returncode != 0:
             warn(f"failed to delete local branch {workspace_branch}")
 
-    remote_exists = git.git_has_remote_branch(repo_dir, workspace_branch)
+    if remote_exists is None:
+        remote_exists = git.git_has_remote_branch(repo_dir, workspace_branch)
     if remote_exists is False:
+        return
+    if not allow_remote_delete:
+        warn(
+            f"skipping remote branch deletion for {workspace_branch} "
+            "because the workspace is not finalized"
+        )
         return
     result = exec.try_run_command(
         ["git", "-C", str(repo_dir), "push", "origin", "--delete", workspace_branch]
@@ -180,8 +236,22 @@ def clean_workspaces(args: object) -> None:
                     f"{item['branch']}; skipping branch deletion"
                 )
             else:
+                finalized = resolve_workspace_finalized(item, repo_root)
+                allow_remote_delete = finalized is True
+                remote_exists: bool | None = None
+                if not allow_remote_delete and args.all:
+                    remote_exists = git.git_has_remote_branch(
+                        item["repo_dir"], item["branch"]
+                    )
+                    if remote_exists is not False:
+                        if confirm_remote_delete(item["branch"]):
+                            allow_remote_delete = True
                 delete_workspace_branch(
-                    item["repo_dir"], item["branch"], default_branch
+                    item["repo_dir"],
+                    item["branch"],
+                    default_branch,
+                    allow_remote_delete,
+                    remote_exists=remote_exists,
                 )
         try:
             shutil.rmtree(item["path"])

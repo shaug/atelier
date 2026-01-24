@@ -215,3 +215,128 @@ class TestCleanWorkspaces:
                 assert not beta_dir.exists()
             finally:
                 os.chdir(original_cwd)
+
+    def test_clean_all_force_confirms_remote_delete_for_unfinalized(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
+            branch = "scott/alpha"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                branch,
+                workspace_id_for(enlistment_path, branch),
+            )
+            (workspace_dir / "repo").mkdir(parents=True)
+            write_workspace_config(workspace_dir, branch, enlistment_path)
+
+            prompts: list[str] = []
+            run_calls: list[list[str]] = []
+
+            def fake_confirm(prompt: str, default: bool = False) -> bool:
+                prompts.append(prompt)
+                return False
+
+            def fake_try_run(cmd: list[str], cwd: Path | None = None):
+                run_calls.append(cmd)
+                return SimpleNamespace(returncode=0)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.commands.clean.confirm", side_effect=fake_confirm),
+                    patch("atelier.exec.try_run_command", side_effect=fake_try_run),
+                    patch("atelier.git.git_current_branch", return_value=None),
+                    patch("atelier.git.git_is_repo", return_value=True),
+                    patch("atelier.git.git_ref_exists", return_value=False),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_has_remote_branch", return_value=True),
+                    patch("atelier.git.git_tag_exists", return_value=False),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    clean_cmd.clean_workspaces(
+                        SimpleNamespace(
+                            all=True,
+                            force=True,
+                            no_branch=False,
+                            workspace_names=[],
+                        )
+                    )
+                assert not workspace_dir.exists()
+                assert any("remote branch" in prompt for prompt in prompts)
+                assert run_calls == []
+            finally:
+                os.chdir(original_cwd)
+
+    def test_clean_all_force_deletes_remote_when_confirmed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
+            branch = "scott/beta"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                branch,
+                workspace_id_for(enlistment_path, branch),
+            )
+            (workspace_dir / "repo").mkdir(parents=True)
+            write_workspace_config(workspace_dir, branch, enlistment_path)
+
+            prompts: list[str] = []
+            run_calls: list[list[str]] = []
+
+            def fake_confirm(prompt: str, default: bool = False) -> bool:
+                prompts.append(prompt)
+                return True
+
+            def fake_try_run(cmd: list[str], cwd: Path | None = None):
+                run_calls.append(cmd)
+                return SimpleNamespace(returncode=0)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.commands.clean.confirm", side_effect=fake_confirm),
+                    patch("atelier.exec.try_run_command", side_effect=fake_try_run),
+                    patch("atelier.git.git_current_branch", return_value=None),
+                    patch("atelier.git.git_is_repo", return_value=True),
+                    patch("atelier.git.git_ref_exists", return_value=False),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_has_remote_branch", return_value=True),
+                    patch("atelier.git.git_tag_exists", return_value=False),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    clean_cmd.clean_workspaces(
+                        SimpleNamespace(
+                            all=True,
+                            force=True,
+                            no_branch=False,
+                            workspace_names=[],
+                        )
+                    )
+                assert not workspace_dir.exists()
+                assert any("remote branch" in prompt for prompt in prompts)
+                assert any(
+                    cmd[:5]
+                    == ["git", "-C", str(workspace_dir / "repo"), "push", "origin"]
+                    and "--delete" in cmd
+                    for cmd in run_calls
+                )
+            finally:
+                os.chdir(original_cwd)
