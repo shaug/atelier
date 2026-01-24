@@ -59,6 +59,7 @@ class ProjectSection(BaseModel):
         enlistment: Absolute path to the local enlistment.
         origin: Normalized origin string.
         repo_url: Raw origin URL.
+        allow_mainline_workspace: Allow a workspace on the default branch.
 
     Example:
         >>> ProjectSection(enlistment="/repo", origin="github.com/org/repo")
@@ -70,6 +71,7 @@ class ProjectSection(BaseModel):
     enlistment: str | None = None
     origin: str | None = None
     repo_url: str | None = None
+    allow_mainline_workspace: bool = False
 
 
 class AgentConfig(BaseModel):

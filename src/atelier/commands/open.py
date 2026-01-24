@@ -741,6 +741,12 @@ def open_workspace(args: object) -> None:
     default_branch = git.git_default_branch(repo_dir)
     if not default_branch:
         die("failed to determine default branch from repo")
+    allow_mainline = config_payload.project.allow_mainline_workspace
+    if workspace_branch == default_branch and not allow_mainline:
+        die(
+            "workspace branch is the default branch; "
+            "use `atelier new` to create a mainline workspace"
+        )
 
     skip_default_checkout = False
     skip_workspace_checkout = False
@@ -897,11 +903,11 @@ def open_workspace(args: object) -> None:
         exec.run_command(start_cmd, cwd=start_cwd)
 
 
-def resolve_implicit_workspace_name(repo_root: Path, _config_payload: object) -> str:
+def resolve_implicit_workspace_name(repo_root: Path, config_payload: object) -> str:
     """Resolve the current branch for implicit ``atelier open`` calls.
 
-    The branch is accepted only when it is non-default, clean, and fully pushed
-    to its upstream.
+    The branch is accepted only when it is non-default (or explicitly allowed),
+    clean, and fully pushed to its upstream.
 
     Args:
         repo_root: Path to the git repository root.
@@ -922,7 +928,15 @@ def resolve_implicit_workspace_name(repo_root: Path, _config_payload: object) ->
     current_branch = git.git_current_branch(repo_root)
     if not current_branch:
         die("failed to determine current branch")
+    allow_mainline = False
+    project_section = getattr(config_payload, "project", None)
+    if project_section is not None:
+        allow_mainline = bool(
+            getattr(project_section, "allow_mainline_workspace", False)
+        )
     if current_branch == default_branch:
+        if allow_mainline:
+            return current_branch
         die(
             "implicit open requires a non-default branch; "
             f"current branch is {default_branch!r}"

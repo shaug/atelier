@@ -123,7 +123,8 @@ left behind.
   "project": {
     "enlistment": "/path/to/gumshoe",
     "origin": "github.com/org/gumshoe",
-    "repo_url": "git@github.com:org/gumshoe.git"
+    "repo_url": "git@github.com:org/gumshoe.git",
+    "allow_mainline_workspace": false
   },
   "branch": {
     "prefix": "scott/",
@@ -162,6 +163,7 @@ left behind.
 - `project.origin` is optional metadata derived from the git remote when
   available; it is not used for identity
 - `project.repo_url` is the last-seen clone URL for convenience
+- `project.allow_mainline_workspace` allows a workspace on the default branch
 - `branch.pr` controls whether integration is expected via pull request (default
   `true`)
 - `branch.history` defines expected history shape after integration (default
@@ -402,6 +404,15 @@ Atelier does not parse or modify these files after creation or copy.
 ______________________________________________________________________
 
 ## 9. CLI Commands (v2)
+
+### `atelier new [path]`
+
+Create a brand-new local Git repo and register it as an Atelier project.
+
+- Prompts for the same configuration inputs as `atelier init`.
+- Prompts for the default branch name (default `main`).
+- Initializes git with an empty initial commit.
+- Creates the first workspace on the mainline branch and opens `SUCCESS.md`.
 
 ### `atelier init`
 

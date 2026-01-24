@@ -153,6 +153,14 @@ Notes:
 
 ## Quick Start
 
+Create a brand-new local project:
+
+```sh
+atelier new [path]
+```
+
+If `path` is omitted, the current directory must be empty.
+
 Initialize a project:
 
 ```sh
@@ -247,6 +255,32 @@ atelier clean --all --force
 
 Use `atelier --help` to view all commands and options. Use `atelier --version`
 to print the installed version and exit.
+
+### `atelier new [path]`
+
+Create a new local Git repo, register it as an Atelier project, and open the
+first workspace on the default branch.
+
+Usage:
+
+```sh
+atelier new [path]
+```
+
+Options:
+
+- `--branch-prefix`: Prefix for workspace branches (e.g., `scott/`).
+- `--branch-pr`: Whether workspace branches require pull requests.
+- `--branch-history`: History policy (`manual`, `squash`, `merge`, `rebase`).
+- `--agent`: Agent name.
+- `--editor-edit`: Editor command for blocking edits (e.g., `subl -w`).
+- `--editor-work`: Editor command for opening the repo (e.g., `code`).
+
+Example:
+
+```sh
+atelier new ~/code/greenfield
+```
 
 ### `atelier init`
 
@@ -352,6 +386,8 @@ atelier open feat/new-search
 
 If no branch is provided, `atelier open` can take over the current branch only
 when the working tree is clean and the branch is fully pushed to its upstream.
+By default, `atelier open` rejects the default branch unless it was created via
+`atelier new`.
 
 Options:
 

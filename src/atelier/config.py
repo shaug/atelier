@@ -1253,6 +1253,7 @@ def build_project_config(
 
     project_origin = origin or existing_config.project.origin
     project_repo_url = origin_raw or existing_config.project.repo_url
+    project_allow_mainline = existing_config.project.allow_mainline_workspace
 
     tickets_section = ticket_config.model_copy(
         update={
@@ -1267,6 +1268,7 @@ def build_project_config(
             enlistment=enlistment_path,
             origin=project_origin,
             repo_url=project_repo_url,
+            allow_mainline_workspace=project_allow_mainline,
         ),
         branch=BranchConfig(prefix=branch_prefix, pr=branch_pr, history=branch_history),
         agent=AgentConfig(default=agent_default, options=agent_options),

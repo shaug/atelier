@@ -18,6 +18,7 @@ from .commands import config as config_cmd
 from .commands import edit as edit_cmd
 from .commands import init as init_cmd
 from .commands import list as list_cmd
+from .commands import new as new_cmd
 from .commands import open as open_cmd
 from .commands import shell as shell_cmd
 from .commands import template as template_cmd
@@ -132,6 +133,79 @@ def init_command(
     """
     init_cmd.init_project(
         SimpleNamespace(
+            branch_prefix=branch_prefix,
+            branch_pr=branch_pr,
+            branch_history=branch_history,
+            agent=agent,
+            editor_edit=editor_edit,
+            editor_work=editor_work,
+        )
+    )
+
+
+@app.command(
+    "new",
+    help="Create a new local repo, register it as a project, and open its workspace.",
+)
+def new_command(
+    path: Annotated[
+        str | None,
+        typer.Argument(help="path for the new project (optional)"),
+    ] = None,
+    branch_prefix: Annotated[
+        str | None,
+        typer.Option("--branch-prefix", help="prefix for workspace branches"),
+    ] = None,
+    branch_pr: Annotated[
+        str | None,
+        typer.Option(
+            "--branch-pr",
+            help="expect pull requests for workspace branches (true/false)",
+        ),
+    ] = None,
+    branch_history: Annotated[
+        str | None,
+        typer.Option(
+            "--branch-history",
+            help="branch history policy (manual|squash|merge|rebase)",
+        ),
+    ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option(
+            "--agent",
+            help="agent name",
+        ),
+    ] = None,
+    editor_edit: Annotated[
+        str | None,
+        typer.Option("--editor-edit", help="editor command for edit actions"),
+    ] = None,
+    editor_work: Annotated[
+        str | None,
+        typer.Option("--editor-work", help="editor command for work actions"),
+    ] = None,
+) -> None:
+    """Create a brand-new project and open the first workspace.
+
+    Args:
+        path: Path for the new project (optional).
+        branch_prefix: Prefix for new workspace branches (optional).
+        branch_pr: Whether workspace branches expect pull requests (true/false).
+        branch_history: History policy (manual|squash|merge|rebase).
+        agent: Agent name.
+        editor_edit: Editor command used for blocking edits (``SUCCESS.md``).
+        editor_work: Editor command used for opening the workspace repo.
+
+    Returns:
+        None.
+
+    Example:
+        $ atelier new ~/code/greenfield
+    """
+    new_cmd.new_project(
+        SimpleNamespace(
+            path=path,
             branch_prefix=branch_prefix,
             branch_pr=branch_pr,
             branch_history=branch_history,

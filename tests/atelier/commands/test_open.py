@@ -336,6 +336,92 @@ class TestOpenWorkspace:
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_rejects_default_branch_without_new_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.exec.run_command", lambda *_args, **_kw: None),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    with pytest.raises(SystemExit):
+                        open_cmd.open_workspace(
+                            SimpleNamespace(
+                                workspace_name="main",
+                                raw=True,
+                                branch_pr=None,
+                                branch_history=None,
+                                yolo=False,
+                            )
+                        )
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_allows_default_branch_with_new_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(
+                project_dir,
+                enlistment_path,
+                project={"allow_mainline_workspace": True},
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(
+                            workspace_name="main",
+                            raw=True,
+                            branch_pr=None,
+                            branch_history=None,
+                            yolo=False,
+                        )
+                    )
+
+                assert any(cmd[:2] == ["git", "clone"] for cmd in commands)
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_resumes_gemini_with_resume_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -973,6 +1059,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch("atelier.git.git_current_branch", return_value="main"),
                     patch("atelier.git.git_default_branch", return_value="main"),
@@ -1307,6 +1394,7 @@ class TestOpenWorkspace:
 
                 with (
                     patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
                     patch("atelier.sessions.find_codex_session", return_value=None),
                     patch(
                         "atelier.commands.open.subprocess.run",
