@@ -126,10 +126,16 @@ Additional config notes:
   - `--set-title` emits a terminal title escape (best-effort).
   - Exposes workspace identity via `ATELIER_*` environment variables.
 
+- `atelier describe`
+
+  - With no args, shows project overview plus a workspace summary table.
+  - With a workspace name, shows detailed status (clean/dirty, ahead/behind,
+    diffstat, last commit).
+  - Supports `--finalized`, `--no-finalized`, and `--format=json`.
+
 - `atelier list`
 
-  - Lists known workspaces, optionally including status
-    (clean/pushed/finalized).
+  - Lists known workspaces (names only).
 
 - `atelier clean`
 

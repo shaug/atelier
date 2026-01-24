@@ -556,6 +556,57 @@ def git_commit_messages(
     return [msg.strip() for msg in raw.split("\x1f") if msg.strip()]
 
 
+def git_last_commit(
+    repo_dir: Path, ref: str = "HEAD", *, git_path: str | None = None
+) -> dict[str, object] | None:
+    """Return metadata for the most recent commit at ``ref``.
+
+    Args:
+        repo_dir: Git repository directory.
+        ref: Ref to inspect (defaults to ``HEAD``).
+
+    Returns:
+        Dict with commit metadata or ``None`` on error.
+
+    Example:
+        >>> isinstance(git_last_commit(Path(".")), dict) or True
+        True
+    """
+    result = run_git_command(
+        git_command(
+            [
+                "-C",
+                str(repo_dir),
+                "log",
+                "-1",
+                "--format=%H%x1f%h%x1f%ct%x1f%an%x1f%s",
+                ref,
+            ],
+            git_path=git_path,
+        )
+    )
+    if result.returncode != 0:
+        return None
+    raw = result.stdout.strip()
+    if not raw:
+        return None
+    parts = raw.split("\x1f")
+    if len(parts) < 5:
+        return None
+    full_hash, short_hash, timestamp, author, subject = parts[:5]
+    commit: dict[str, object] = {
+        "hash": full_hash.strip(),
+        "short_hash": short_hash.strip(),
+        "author": author.strip(),
+        "subject": subject.strip(),
+    }
+    try:
+        commit["timestamp"] = int(timestamp.strip())
+    except ValueError:
+        commit["timestamp"] = None
+    return commit
+
+
 def git_diff_name_status(
     repo_dir: Path, base: str, branch: str, *, git_path: str | None = None
 ) -> list[str]:

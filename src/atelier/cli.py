@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover - legacy Click fallback
 from . import __version__, config, git, paths, workspace
 from .commands import clean as clean_cmd
 from .commands import config as config_cmd
+from .commands import describe as describe_cmd
 from .commands import edit as edit_cmd
 from .commands import init as init_cmd
 from .commands import list as list_cmd
@@ -547,27 +548,61 @@ def exec_command(
 
 
 @app.command("list", help="List workspaces for the current project.")
-def list_command(
-    status: Annotated[
-        bool,
-        typer.Option(
-            "--status",
-            help="include workspace status columns",
-        ),
-    ] = False,
-) -> None:
+def list_command() -> None:
     """List workspaces for the current project.
-
-    Args:
-        status: When true, include status columns in the output.
 
     Returns:
         None.
 
     Example:
-        $ atelier list --status
+        $ atelier list
     """
-    list_cmd.list_workspaces(SimpleNamespace(status=status))
+    list_cmd.list_workspaces(SimpleNamespace())
+
+
+@app.command(
+    "describe",
+    help="Show project overview or detailed workspace status.",
+)
+def describe_command(
+    workspace_name: Annotated[
+        str | None,
+        typer.Argument(
+            help="workspace branch to describe (optional)",
+            autocompletion=_workspace_name_shell_complete,
+        ),
+    ] = None,
+    finalized: Annotated[
+        bool,
+        typer.Option(
+            "--finalized",
+            help="only show finalized workspaces (project scope)",
+        ),
+    ] = False,
+    no_finalized: Annotated[
+        bool,
+        typer.Option(
+            "--no-finalized",
+            help="exclude finalized workspaces (project scope)",
+        ),
+    ] = False,
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            help="output format (table|json)",
+        ),
+    ] = "table",
+) -> None:
+    """Describe project or workspace status."""
+    describe_cmd.describe(
+        SimpleNamespace(
+            workspace_name=workspace_name,
+            finalized=finalized,
+            no_finalized=no_finalized,
+            format=format,
+        )
+    )
 
 
 @app.command(

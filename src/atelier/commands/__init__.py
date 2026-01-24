@@ -2,6 +2,7 @@
 
 from .clean import clean_workspaces
 from .config import show_config
+from .describe import describe
 from .edit import edit_files
 from .init import init_project
 from .list import list_workspaces
@@ -14,6 +15,7 @@ from .work import open_workspace_repo
 
 __all__ = [
     "clean_workspaces",
+    "describe",
     "edit_files",
     "init_project",
     "list_workspaces",

@@ -7,17 +7,7 @@ from ..io import die, say
 
 
 def list_workspaces(args: object) -> None:
-    """List workspaces for the current project.
-
-    Args:
-        args: CLI argument object with a ``status`` flag.
-
-    Returns:
-        None.
-
-    Example:
-        $ atelier list --status
-    """
+    """List workspaces for the current project."""
     cwd = Path.cwd()
     repo_root, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
     project_root = paths.project_dir_for_enlistment(enlistment_path, origin)
@@ -34,7 +24,7 @@ def list_workspaces(args: object) -> None:
     workspaces = workspace.collect_workspaces(
         project_root,
         config_payload,
-        with_status=getattr(args, "status", False),
+        with_status=False,
         enlistment_repo_dir=repo_root,
         git_path=git_path,
     )
@@ -42,26 +32,5 @@ def list_workspaces(args: object) -> None:
         say("No workspaces found.")
         return
 
-    if not getattr(args, "status", False):
-        for item in workspaces:
-            say(item["name"])
-        return
-
-    rows = [("workspace", "checked_out", "clean", "pushed")]
     for item in workspaces:
-        rows.append(
-            (
-                item["name"],
-                workspace.format_status(item["checked_out"]),
-                workspace.format_status(item["clean"]),
-                workspace.format_status(item["pushed"]),
-            )
-        )
-
-    widths = [max(len(row[index]) for row in rows) for index in range(len(rows[0]))]
-    for row in rows:
-        say(
-            "  ".join(
-                value.ljust(widths[index]) for index, value in enumerate(row)
-            ).rstrip()
-        )
+        say(item["name"])
