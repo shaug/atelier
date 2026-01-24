@@ -1,6 +1,8 @@
 import os
+from pathlib import Path
 
 import atelier.cli as cli
+import atelier.config as config
 
 
 def test_completion_env_uses_comp_line(monkeypatch):
@@ -41,3 +43,28 @@ def test_completion_env_fallbacks_to_prog(monkeypatch):
 
     assert os.environ["COMP_WORDS"] == "atelier"
     assert os.environ["COMP_CWORD"] == "0"
+
+
+def test_workspace_completion_returns_empty_without_project(monkeypatch):
+    monkeypatch.setattr(cli, "_resolve_completion_project", lambda: None)
+
+    assert cli._workspace_name_shell_complete(None, None, "") == []
+
+
+def test_workspace_completion_filters_and_dedupes(monkeypatch):
+    config_payload = config.ProjectConfig()
+    monkeypatch.setattr(
+        cli,
+        "_resolve_completion_project",
+        lambda: (Path("/repo"), Path("/project"), config_payload, None),
+    )
+    monkeypatch.setattr(
+        cli.workspace,
+        "collect_workspaces",
+        lambda *args, **kwargs: [{"name": "feat/one"}, {"name": "bug/two"}],
+    )
+    monkeypatch.setattr(
+        cli, "_collect_local_branches", lambda *args, **kwargs: ["bug/two", "chore/three"]
+    )
+
+    assert cli._workspace_name_shell_complete(None, None, "b") == ["bug/two"]

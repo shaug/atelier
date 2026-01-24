@@ -9,6 +9,7 @@ Example:
 
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated
 
@@ -19,6 +20,7 @@ except ImportError:  # pragma: no cover - legacy Click fallback
     from click.parser import split_arg_string
 
 from . import __version__
+from . import config, git, paths, workspace
 from .commands import clean as clean_cmd
 from .commands import config as config_cmd
 from .commands import edit as edit_cmd
@@ -30,6 +32,7 @@ from .commands import shell as shell_cmd
 from .commands import template as template_cmd
 from .commands import upgrade as upgrade_cmd
 from .commands import work as work_cmd
+from .exec import try_run_command
 
 app = typer.Typer(
     add_completion=True,
@@ -71,6 +74,76 @@ def _ensure_completion_env() -> None:
     prog = os.path.basename(sys.argv[0]) if sys.argv else "atelier"
     os.environ.setdefault("COMP_WORDS", prog)
     os.environ.setdefault("COMP_CWORD", "0")
+
+
+def _resolve_completion_project(
+    cwd: Path | None = None,
+) -> tuple[Path, Path, config.ProjectConfig, str | None] | None:
+    try:
+        repo_root, enlistment_path, _, origin = git.resolve_repo_enlistment(
+            cwd or Path.cwd()
+        )
+    except SystemExit:
+        return None
+    except Exception:
+        return None
+    project_root = paths.project_dir_for_enlistment(enlistment_path, origin)
+    config_path = paths.project_config_path(project_root)
+    config_payload = config.load_project_config(config_path)
+    if not config_payload:
+        return None
+    project_enlistment = config_payload.project.enlistment
+    if project_enlistment and project_enlistment != enlistment_path:
+        return None
+    git_path = config.resolve_git_path(config_payload)
+    return repo_root, project_root, config_payload, git_path
+
+
+def _collect_local_branches(
+    repo_root: Path, git_path: str | None
+) -> list[str]:
+    cmd = git.git_command(
+        ["-C", str(repo_root), "for-each-ref", "--format=%(refname:short)", "refs/heads"],
+        git_path=git_path,
+    )
+    result = try_run_command(cmd)
+    if not result or result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _filter_completion_candidates(values: list[str], incomplete: str) -> list[str]:
+    filtered = [value for value in values if value and value.startswith(incomplete)]
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in filtered:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
+def _workspace_name_shell_complete(
+    _ctx: object, _param: object, incomplete: str
+) -> list[str]:
+    resolved = _resolve_completion_project()
+    if not resolved:
+        return []
+    repo_root, project_root, config_payload, git_path = resolved
+    try:
+        workspaces = workspace.collect_workspaces(
+            project_root,
+            config_payload,
+            with_status=False,
+            enlistment_repo_dir=repo_root,
+            git_path=git_path,
+        )
+    except Exception:
+        workspaces = []
+    names = [item.get("name", "") for item in workspaces if item.get("name")]
+    names.extend(_collect_local_branches(repo_root, git_path))
+    return _filter_completion_candidates(names, incomplete)
 
 
 def _version_callback(value: bool) -> None:
@@ -263,6 +336,7 @@ def open_command(
         str | None,
         typer.Argument(
             help="workspace branch (defaults to current branch when criteria are met)",
+            shell_complete=_workspace_name_shell_complete,
         ),
     ] = None,
     raw: Annotated[
