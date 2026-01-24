@@ -568,10 +568,9 @@ def open_workspace(args: object) -> None:
     repo_dir = workspace_dir / "repo"
     project_repo_url = origin_raw or enlistment_path
 
-    should_open_editor = False
+    should_open_editor = is_new_workspace
     editor_cmd: list[str] | None = None
     if not repo_dir.exists():
-        should_open_editor = True
         exec.run_command(["git", "clone", project_repo_url, str(repo_dir)])
     else:
         if not git.git_is_repo(repo_dir):
