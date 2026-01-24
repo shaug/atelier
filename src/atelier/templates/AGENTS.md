@@ -13,16 +13,14 @@ development.
 
 - Work happens in isolated workspaces under the Atelier data directory.
 - Each workspace maps to one git branch and includes a `repo/` checkout.
-- Workspace intent and success criteria live in `SUCCESS.md` (or `WORKSPACE.md`
-  for legacy workspaces).
+- Workspace intent and success criteria live in `SUCCESS.md`.
 - All Atelier policy files for this workspace live alongside this file.
 
 ## Required Reading
 
 - `PROJECT.md` (if present) for project-wide rules that apply to every
   workspace; it is linked/copied into this workspace.
-- `SUCCESS.md` (or `WORKSPACE.md` for legacy workspaces) for workspace-specific
-  intent, scope, and completion criteria.
+- `SUCCESS.md` for workspace-specific intent, scope, and completion criteria.
 - `PERSIST.md` for how to finish and integrate this work, based ont he project's
   integration strategy with git and its remote repository.
 - `BACKGROUND.md` (if present) for context when a workspace is created from an
@@ -30,8 +28,7 @@ development.
 
 ## Execution Expectations
 
-- Complete the work described in `SUCCESS.md` (or `WORKSPACE.md` for legacy
-  workspaces) **to completion**.
+- Complete the work described in `SUCCESS.md` **to completion**.
 - Do not expand scope beyond what is written there.
 - Prefer small, reviewable changes over large refactors.
 - Avoid unrelated cleanup unless explicitly required.
@@ -50,7 +47,6 @@ Ensure the configured agent CLI is installed and authenticated (see
 ## Policy Precedence
 
 - `SUCCESS.md` rules take precedence over `PROJECT.md`.
-- For legacy workspaces, `WORKSPACE.md` is treated as equivalent.
 - `PROJECT.md` rules take precedence over this file.
 
 Before finalizing work in a workspace, read `PERSIST.md`.

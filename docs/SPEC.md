@@ -91,8 +91,6 @@ Notes:
 - `templates/AGENTS.md` is created by `atelier init` (or `atelier open` when
   needed) and stores the canonical `AGENTS.md` content.
 - `SUCCESS.md` is copied into new workspaces from `templates/SUCCESS.md`.
-- If `templates/SUCCESS.md` is missing and `templates/WORKSPACE.md` exists
-  (legacy), that file is copied into new workspaces as `WORKSPACE.md`.
 - `PERSIST.md` is created for every new workspace and is managed by Atelier.
 - `BACKGROUND.md` is created only when a workspace is created from an existing
   branch.
@@ -205,21 +203,20 @@ This project uses **Atelier**, a workspace-based workflow for agent-assisted dev
 
 - Work happens in isolated workspaces under the Atelier data directory.
 - Each workspace maps to one git branch and includes a `repo/` checkout.
-- Workspace intent and success criteria live in `SUCCESS.md` (or
-  `WORKSPACE.md` for legacy workspaces).
+- Workspace intent and success criteria live in `SUCCESS.md`.
 - All Atelier policy files for this workspace live alongside this file.
 
 ## Required Reading
 
 - `PROJECT.md` (if present) for project-wide rules; it is linked/copied into
   this workspace.
-- `SUCCESS.md` (or `WORKSPACE.md` for legacy workspaces) for workspace intent, scope, and completion criteria.
+- `SUCCESS.md` for workspace intent, scope, and completion criteria.
 - `PERSIST.md` for how to finish and integrate this work (created for new workspaces).
 - `BACKGROUND.md` (if present) for context when a workspace is created from an existing branch.
 
 ## Execution Expectations
 
-- Complete the work described in `SUCCESS.md` (or `WORKSPACE.md` for legacy workspaces) **to completion**.
+- Complete the work described in `SUCCESS.md` **to completion**.
 - Do not expand scope beyond what is written there.
 - Prefer small, reviewable changes over large refactors.
 - Avoid unrelated cleanup unless explicitly required.
@@ -235,7 +232,6 @@ Ensure the configured agent CLI is installed and authenticated
 ## Policy Precedence
 
 - `SUCCESS.md` rules take precedence over `PROJECT.md`.
-- For legacy workspaces, `WORKSPACE.md` is treated as equivalent.
 - `PROJECT.md` rules take precedence over this file.
 
 Before finalizing work in a workspace, read `PERSIST.md`.
@@ -296,21 +292,20 @@ This project uses **Atelier**, a workspace-based workflow for agent-assisted dev
 
 - Work happens in isolated workspaces under the Atelier data directory.
 - Each workspace maps to one git branch and includes a `repo/` checkout.
-- Workspace intent and success criteria live in `SUCCESS.md` (or
-  `WORKSPACE.md` for legacy workspaces).
+- Workspace intent and success criteria live in `SUCCESS.md`.
 - All Atelier policy files for this workspace live alongside this file.
 
 ## Required Reading
 
 - `PROJECT.md` (if present) for project-wide rules; it is linked/copied into this
   workspace.
-- `SUCCESS.md` (or `WORKSPACE.md` for legacy workspaces) for workspace intent, scope, and completion criteria.
+- `SUCCESS.md` for workspace intent, scope, and completion criteria.
 - `PERSIST.md` for how to finish and integrate this work (created for new workspaces).
 - `BACKGROUND.md` (if present) for context when a workspace is created from an existing branch.
 
 ## Execution Expectations
 
-- Complete the work described in `SUCCESS.md` (or `WORKSPACE.md` for legacy workspaces) **to completion**.
+- Complete the work described in `SUCCESS.md` **to completion**.
 - Do not expand scope beyond what is written there.
 - Prefer small, reviewable changes over large refactors.
 - Avoid unrelated cleanup unless explicitly required.
@@ -323,7 +318,6 @@ This project uses **Atelier**, a workspace-based workflow for agent-assisted dev
 ## Policy Precedence
 
 - `SUCCESS.md` rules take precedence over `PROJECT.md`.
-- For legacy workspaces, `WORKSPACE.md` is treated as equivalent.
 - `PROJECT.md` rules take precedence over this file.
 
 Before finalizing work in a workspace, read `PERSIST.md`.
@@ -332,7 +326,7 @@ After reading the applicable files, proceed with the work described there.
 ```
 
 Workspace intent and success criteria live in `SUCCESS.md`, which is fully
-user-owned. Legacy workspaces may still use `WORKSPACE.md`.
+user-owned.
 
 ### `PERSIST.md`
 
@@ -361,9 +355,8 @@ ______________________________________________________________________
 
 These user-owned files define additional agent behavior rules that are
 orthogonal to Atelier's core execution protocol. `PROJECT.md` is optional;
-`SUCCESS.md` is created for new workspaces but fully user-owned. `WORKSPACE.md`
-is legacy and treated as equivalent when present. `PERSIST.md` and
-`BACKGROUND.md` are managed by Atelier and do not participate in policy
+`SUCCESS.md` is created for new workspaces but fully user-owned. `PERSIST.md`
+and `BACKGROUND.md` are managed by Atelier and do not participate in policy
 precedence.
 
 ### `PROJECT.md`
@@ -385,7 +378,7 @@ precedence.
 
 If more than one policy file is present, higher precedence wins:
 
-1. `SUCCESS.md` (or legacy `WORKSPACE.md`)
+1. `SUCCESS.md`
 2. `PROJECT.md`
 3. `AGENTS.md`
 
@@ -410,8 +403,7 @@ Registers the current enlistment path as an Atelier project.
   missing)
 - Creates `templates/AGENTS.md` if missing
 - Creates `PROJECT.md` if missing (comment-only stub)
-- Creates `templates/SUCCESS.md` if missing (leaves legacy
-  `templates/WORKSPACE.md` untouched)
+- Creates `templates/SUCCESS.md` if missing
 - Creates the workspace root directory (`workspaces/`) if missing
 - Never modifies existing workspaces
 - Never writes files into the user repo
@@ -467,7 +459,7 @@ Open editable policy documents in `editor.edit`.
 #### Behavior
 
 - `atelier edit --project` opens `PROJECT.md`
-- `atelier edit <workspace>` opens `SUCCESS.md` (or legacy `WORKSPACE.md`)
+- `atelier edit <workspace>` opens `SUCCESS.md`
 - Creates the target file from templates when missing
 - `PERSIST.md` and `BACKGROUND.md` are not editable through this command
 
@@ -496,7 +488,6 @@ Ensures a workspace exists and launches or resumes agent work.
    - Create `PERSIST.md`
    - Create `BACKGROUND.md` when the workspace branch already exists
    - Copy `templates/SUCCESS.md` to `SUCCESS.md` when available
-   - Otherwise copy legacy `templates/WORKSPACE.md` to `WORKSPACE.md`
    - Open the chosen file in `editor.edit` (blocking)
 6. Existing workspaces are not modified
 7. Ensure `repo/` exists:
@@ -636,7 +627,6 @@ Atelier ships with internal templates for:
 
 - Canonical `AGENTS.md`
 - Workspace `SUCCESS.md`
-- Legacy workspace `WORKSPACE.md`
 - Workspace `PERSIST.md`
 - `PROJECT.md` (comment-only stub)
 
@@ -664,9 +654,7 @@ New projects default to `ask`. New workspaces inherit the project policy unless
 explicitly set.
 
 If a project provides `templates/SUCCESS.md`, that file is copied verbatim into
-new workspaces as `SUCCESS.md`. If `templates/SUCCESS.md` is missing and the
-legacy `templates/WORKSPACE.md` exists, that file is copied verbatim into new
-workspaces as `WORKSPACE.md`.
+new workspaces as `SUCCESS.md`.
 
 ______________________________________________________________________
 

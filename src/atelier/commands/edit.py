@@ -58,26 +58,17 @@ def edit_files(args: object) -> None:
         die(f"workspace not found: {normalized}")
 
     success_path = workspace_dir / "SUCCESS.md"
-    legacy_path = workspace_dir / "WORKSPACE.md"
     if success_path.exists():
         target_path = success_path
-    elif legacy_path.exists():
-        target_path = legacy_path
     else:
         template_path = project_root / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
         if template_path.exists():
             shutil.copyfile(template_path, success_path)
-            target_path = success_path
         else:
-            template_path = project_root / paths.TEMPLATES_DIRNAME / "WORKSPACE.md"
-            if template_path.exists():
-                shutil.copyfile(template_path, legacy_path)
-                target_path = legacy_path
-            else:
-                success_path.write_text(
-                    templates.success_md_template(prefer_installed=True),
-                    encoding="utf-8",
-                )
-                target_path = success_path
+            success_path.write_text(
+                templates.success_md_template(prefer_installed=True),
+                encoding="utf-8",
+            )
+        target_path = success_path
 
     exec.run_command([*editor_cmd, str(target_path)], cwd=workspace_dir)

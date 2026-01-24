@@ -488,16 +488,12 @@ def open_workspace(args: object) -> None:
             workspace_dir, config.managed_workspace_agents_updates(workspace_dir)
         )
         success_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
-        legacy_policy_template = project_dir / paths.TEMPLATES_DIRNAME / "WORKSPACE.md"
-        if success_policy_template.exists():
-            workspace_policy_template = success_policy_template
-            workspace_policy_target = workspace_dir / "SUCCESS.md"
-        elif legacy_policy_template.exists():
-            workspace_policy_template = legacy_policy_template
-            workspace_policy_target = workspace_dir / "WORKSPACE.md"
-        else:
-            workspace_policy_template = None
-            workspace_policy_target = None
+        workspace_policy_template = (
+            success_policy_template if success_policy_template.exists() else None
+        )
+        workspace_policy_target = (
+            workspace_dir / "SUCCESS.md" if workspace_policy_template else None
+        )
         if (
             workspace_policy_template is not None
             and workspace_policy_target is not None
@@ -536,11 +532,8 @@ def open_workspace(args: object) -> None:
 
     workspace_policy_path: Path | None = None
     success_policy_path = workspace_dir / "SUCCESS.md"
-    legacy_policy_path = workspace_dir / "WORKSPACE.md"
     if success_policy_path.exists():
         workspace_policy_path = success_policy_path
-    elif legacy_policy_path.exists():
-        workspace_policy_path = legacy_policy_path
 
     repo_dir = workspace_dir / "repo"
     project_repo_url = origin_raw or enlistment_path

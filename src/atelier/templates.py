@@ -9,7 +9,6 @@ TEMPLATE_PARTS: tuple[tuple[str, ...], ...] = (
     ("AGENTS.md",),
     ("project", "PROJECT.md"),
     ("workspace", "SUCCESS.md"),
-    ("workspace", "WORKSPACE.md"),
     ("workspace", "PERSIST.md"),
 )
 
@@ -150,19 +149,6 @@ def success_md_template(*, prefer_installed: bool = False) -> str:
         True
     """
     return read_template("workspace", "SUCCESS.md", prefer_installed=prefer_installed)
-
-
-def workspace_md_template(*, prefer_installed: bool = False) -> str:
-    """Return the legacy workspace ``WORKSPACE.md`` template text.
-
-    Returns:
-        Template text.
-
-    Example:
-        >>> "WORKSPACE" in workspace_md_template()
-        True
-    """
-    return read_template("workspace", "WORKSPACE.md", prefer_installed=prefer_installed)
 
 
 def persist_template(*, prefer_installed: bool = False) -> str:
