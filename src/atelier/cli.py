@@ -381,6 +381,13 @@ def open_command(
             help="ticket reference (repeatable or comma-separated)",
         ),
     ] = None,
+    edit: Annotated[
+        bool | None,
+        typer.Option(
+            "--edit/--no-edit",
+            help="open workspace policy doc in editor.edit",
+        ),
+    ] = None,
     yolo: Annotated[
         bool,
         typer.Option(
@@ -398,6 +405,7 @@ def open_command(
         branch_pr: Override pull request expectation (true/false).
         branch_history: Override history policy (manual|squash|merge|rebase).
         ticket: Ticket reference(s) to attach to the workspace.
+        edit: Open (or skip) the workspace policy doc in editor.edit.
         yolo: Enable least-restrictive agent mode for this invocation.
 
     Returns:
@@ -413,6 +421,7 @@ def open_command(
             branch_pr=branch_pr,
             branch_history=branch_history,
             ticket=ticket,
+            edit=edit,
             yolo=yolo,
         )
     )

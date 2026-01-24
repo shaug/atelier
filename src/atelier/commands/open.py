@@ -776,13 +776,20 @@ def open_workspace(args: object) -> None:
 
     workspace_policy_path: Path | None = None
     success_policy_path = workspace_dir / "SUCCESS.md"
+    legacy_policy_path = workspace_dir / "WORKSPACE.md"
     if success_policy_path.exists():
         workspace_policy_path = success_policy_path
+    elif legacy_policy_path.exists():
+        workspace_policy_path = legacy_policy_path
 
     repo_dir = workspace_dir / "repo"
     project_repo_url = origin_raw or enlistment_path
 
-    should_open_editor = is_new_workspace
+    edit_override = getattr(args, "edit", None)
+    if edit_override is None:
+        should_open_editor = is_new_workspace
+    else:
+        should_open_editor = bool(edit_override)
     editor_cmd: list[str] | None = None
     if not repo_dir.exists():
         exec.run_command(

@@ -1185,6 +1185,59 @@ class TestOpenWorkspace:
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_skips_editor_when_no_edit_for_new_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            workspace_branch = "scott/feat-demo"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
+            )
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir(parents=True)
+            subprocess.run(["git", "-C", str(repo_dir), "init"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "remote", "add", "origin", RAW_ORIGIN],
+                check=True,
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(workspace_name="feat-demo", edit=False)
+                    )
+
+                assert not any(cmd[:1] == ["true"] for cmd in commands)
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_skips_editor_when_repo_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1243,6 +1296,137 @@ class TestOpenWorkspace:
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 assert not any(cmd[:1] == ["true"] for cmd in commands)
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_opens_editor_with_edit_for_existing_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            config_payload = write_open_config(project_dir, enlistment_path)
+
+            workspace_branch = "scott/feat-demo"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
+            )
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir(parents=True)
+            subprocess.run(["git", "-C", str(repo_dir), "init"], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_dir),
+                    "remote",
+                    "add",
+                    "origin",
+                    config_payload["project"]["repo_url"],
+                ],
+                check=True,
+            )
+            (workspace_dir / "AGENTS.md").write_text("stub\n", encoding="utf-8")
+            (workspace_dir / "SUCCESS.md").write_text("policy\n", encoding="utf-8")
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(workspace_name="feat-demo", edit=True)
+                    )
+
+                editor_cmd = next(cmd for cmd in commands if cmd[:1] == ["true"])
+                assert editor_cmd[-1] == "SUCCESS.md"
+            finally:
+                os.chdir(original_cwd)
+
+    def test_open_edit_uses_legacy_workspace_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            config_payload = write_open_config(project_dir, enlistment_path)
+
+            workspace_branch = "scott/feat-demo"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
+            )
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir(parents=True)
+            subprocess.run(["git", "-C", str(repo_dir), "init"], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_dir),
+                    "remote",
+                    "add",
+                    "origin",
+                    config_payload["project"]["repo_url"],
+                ],
+                check=True,
+            )
+            (workspace_dir / "AGENTS.md").write_text("stub\n", encoding="utf-8")
+            (workspace_dir / "WORKSPACE.md").write_text("legacy\n", encoding="utf-8")
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
+
+                def fake_run(cmd: list[str], cwd: Path | None = None) -> None:
+                    commands.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(
+                        SimpleNamespace(workspace_name="feat-demo", edit=True)
+                    )
+
+                editor_cmd = next(cmd for cmd in commands if cmd[:1] == ["true"])
+                assert editor_cmd[-1] == "WORKSPACE.md"
+                assert not (workspace_dir / "SUCCESS.md").exists()
             finally:
                 os.chdir(original_cwd)
 
