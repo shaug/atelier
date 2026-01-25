@@ -1986,6 +1986,90 @@ class TestOpenWorkspace:
             finalization_tag = workspace.finalization_tag_name(workspace_branch)
             assert confirm_calls == [(workspace_branch, finalization_tag)]
 
+    def test_open_removes_main_repo_finalization_tag_when_confirmed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            workspace_branch = "scott/feat-demo"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
+            )
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir(parents=True)
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                delete_calls: list[Path] = []
+                confirm_calls: list[tuple[str, str]] = []
+                fake_codex = record_codex_command(commands)
+
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
+                    commands.append(cmd)
+
+                def fake_try(cmd: list[str], cwd: Path | None = None) -> DummyResult:
+                    delete_calls.append(Path(cmd[cmd.index("-C") + 1]))
+                    return DummyResult(returncode=0, stdout="")
+
+                def fake_confirm(workspace_branch: str, tag: str) -> bool:
+                    confirm_calls.append((workspace_branch, tag))
+                    return True
+
+                def fake_tag_exists(
+                    repo_dir: Path, tag: str, *, git_path: str | None = None
+                ) -> bool:
+                    return repo_dir == Path(enlistment_path)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch(
+                        "atelier.commands.open.subprocess.run",
+                        return_value=DummyResult(stdout=RAW_ORIGIN),
+                    ),
+                    patch(
+                        "atelier.commands.open.workspace.resolve_workspace_target",
+                        return_value=(workspace_branch, workspace_dir, True),
+                    ),
+                    patch("atelier.git.git_is_repo", return_value=True),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch.object(open_cmd.git, "git_tag_exists", fake_tag_exists),
+                    patch.object(
+                        open_cmd,
+                        "confirm_remove_finalization_tag",
+                        fake_confirm,
+                    ),
+                    patch.object(open_cmd.exec, "try_run_command", fake_try),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+            finally:
+                os.chdir(original_cwd)
+
+            finalization_tag = workspace.finalization_tag_name(workspace_branch)
+            assert confirm_calls == [(workspace_branch, finalization_tag)]
+            assert delete_calls == [Path(enlistment_path)]
+
     def test_open_errors_when_repo_is_not_git_repo(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

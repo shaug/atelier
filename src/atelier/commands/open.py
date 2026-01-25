@@ -951,16 +951,30 @@ def open_workspace(args: object) -> None:
 
     if repo_dir.exists():
         finalization_tag = workspace.finalization_tag_name(workspace_branch)
+        tag_locations: list[tuple[str, Path]] = []
         if git.git_tag_exists(repo_dir, finalization_tag, git_path=git_path):
-            if confirm_remove_finalization_tag(workspace_branch, finalization_tag):
+            tag_locations.append(("workspace repo", repo_dir))
+        if project_enlistment:
+            main_repo_dir = Path(project_enlistment)
+            if main_repo_dir != repo_dir and git.git_tag_exists(
+                main_repo_dir, finalization_tag, git_path=git_path
+            ):
+                tag_locations.append(("main enlistment repo", main_repo_dir))
+        if tag_locations and confirm_remove_finalization_tag(
+            workspace_branch, finalization_tag
+        ):
+            for label, tag_repo in tag_locations:
                 result = exec.try_run_command(
                     git.git_command(
-                        ["-C", str(repo_dir), "tag", "-d", finalization_tag],
+                        ["-C", str(tag_repo), "tag", "-d", finalization_tag],
                         git_path=git_path,
                     )
                 )
                 if result is None or result.returncode != 0:
-                    warn("failed to delete finalization tag; continuing with open")
+                    warn(
+                        f"failed to delete finalization tag in {label}; "
+                        "continuing with open"
+                    )
 
     current_branch = git.git_current_branch(repo_dir, git_path=git_path)
     if current_branch is None:
