@@ -166,6 +166,59 @@ class TestUpgradeLegacyEditorMigration:
                 assert "default" not in updated["editor"]
                 assert "options" not in updated["editor"]
 
+    def test_upgrade_migrates_legacy_project_tickets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            enlistment_path = enlistment_path_for(root / "repo")
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+
+                project_dir.mkdir(parents=True, exist_ok=True)
+                legacy_payload = {
+                    "project": {
+                        "enlistment": enlistment_path,
+                        "origin": NORMALIZED_ORIGIN,
+                        "repo_url": RAW_ORIGIN,
+                    },
+                    "agent": {"default": "codex", "options": {"codex": []}},
+                    "tickets": {
+                        "provider": "github",
+                        "default_project": "org/repo",
+                        "default_namespace": "org",
+                    },
+                    "atelier": {
+                        "version": "0.1.0",
+                        "created_at": "2026-01-01T00:00:00Z",
+                    },
+                }
+                legacy_path = paths.project_config_legacy_path(project_dir)
+                legacy_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
+
+                args = SimpleNamespace(
+                    workspace_names=[],
+                    installed=False,
+                    all_projects=True,
+                    no_projects=False,
+                    no_workspaces=True,
+                    dry_run=False,
+                    yes=True,
+                )
+                upgrade_cmd.upgrade(args)
+
+                sys_path = paths.project_config_sys_path(project_dir)
+                user_path = paths.project_config_user_path(project_dir)
+
+                updated = json.loads(user_path.read_text(encoding="utf-8"))
+                assert updated["tickets"]["provider"] == "github"
+                assert updated["tickets"]["default_project"] == "org/repo"
+                assert updated["tickets"]["default_namespace"] == "org"
+
+                system_payload = json.loads(sys_path.read_text(encoding="utf-8"))
+                assert "tickets" not in system_payload
+
 
 class TestUpgradeWorkspaceConfigRepair:
     def test_upgrade_repairs_missing_workspace_config(self) -> None:
