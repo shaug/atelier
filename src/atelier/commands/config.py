@@ -6,22 +6,9 @@ import json
 import tempfile
 from pathlib import Path
 
-from .. import config, editor, exec, git, paths, workspace
+from .. import config, editor, exec, paths
 from ..io import confirm, die, say
-
-
-def _resolve_project() -> tuple[Path, config.ProjectConfig, str]:
-    cwd = Path.cwd()
-    _, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
-    project_root = paths.project_dir_for_enlistment(enlistment_path, origin)
-    config_path = paths.project_config_path(project_root)
-    config_payload = config.load_project_config(config_path)
-    if not config_payload:
-        die("no Atelier project config found for this repo; run 'atelier init'")
-    project_enlistment = config_payload.project.enlistment
-    if project_enlistment and project_enlistment != enlistment_path:
-        die("project enlistment does not match current repo path")
-    return project_root, config_payload, enlistment_path
+from .resolve import resolve_current_project, resolve_workspace_target
 
 
 def _emit_json(payload: dict) -> None:
@@ -98,7 +85,7 @@ def show_config(args: object) -> None:
     if prompt_values and edit_values:
         die("--prompt and --edit cannot be combined")
 
-    project_root, project_config, enlistment_path = _resolve_project()
+    project_root, project_config, enlistment_path = resolve_current_project()
 
     if workspace_name:
         if installed or prompt_values or reset_values or edit_values:
@@ -106,19 +93,14 @@ def show_config(args: object) -> None:
                 "workspace config cannot be combined with --installed/--prompt/--reset/--edit"
             )
         git_path = config.resolve_git_path(project_config)
-        normalized = workspace.normalize_workspace_name(str(workspace_name))
-        if not normalized:
-            die("workspace branch must not be empty")
-        branch, workspace_dir, exists = workspace.resolve_workspace_target(
-            project_root,
-            project_config.project.enlistment or enlistment_path,
-            normalized,
-            project_config.branch.prefix,
-            False,
-            git_path,
+        branch, workspace_dir = resolve_workspace_target(
+            project_root=project_root,
+            project_config=project_config,
+            enlistment_path=enlistment_path,
+            workspace_name=str(workspace_name),
+            raw=False,
+            git_path=git_path,
         )
-        if not exists:
-            die(f"workspace not found: {normalized}")
         workspace_config = config.load_workspace_config(
             paths.workspace_config_path(workspace_dir)
         )

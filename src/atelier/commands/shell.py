@@ -11,8 +11,9 @@ import shutil
 from pathlib import Path
 
 from .. import command as command_util
-from .. import config, exec, git, paths, term, workspace
+from .. import config, exec, git, term, workspace
 from ..io import die
+from .resolve import resolve_current_project, resolve_workspace_target
 
 try:  # pragma: no cover - optional dependency
     import shellingham
@@ -20,43 +21,22 @@ except ImportError:  # pragma: no cover - optional dependency
     shellingham = None
 
 
-def _resolve_project() -> tuple[Path, config.ProjectConfig, str]:
-    cwd = Path.cwd()
-    _, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
-    project_root = paths.project_dir_for_enlistment(enlistment_path, origin)
-    config_path = paths.project_config_path(project_root)
-    config_payload = config.load_project_config(config_path)
-    if not config_payload:
-        die("no Atelier project config found for this repo; run 'atelier init'")
-    project_enlistment = config_payload.project.enlistment
-    if project_enlistment and project_enlistment != enlistment_path:
-        die("project enlistment does not match current repo path")
-    return project_root, config_payload, enlistment_path
-
-
 def _resolve_workspace_repo(workspace_name: str) -> tuple[str, Path, Path, str]:
     if not workspace_name:
         die("workspace branch must not be empty")
 
-    project_root, project_config, enlistment_path = _resolve_project()
+    project_root, project_config, enlistment_path = resolve_current_project()
     project_enlistment = project_config.project.enlistment or enlistment_path
 
-    normalized = workspace.normalize_workspace_name(str(workspace_name))
-    if not normalized:
-        die("workspace branch must not be empty")
-
     git_path = config.resolve_git_path(project_config)
-
-    branch, workspace_dir, exists = workspace.resolve_workspace_target(
-        project_root,
-        project_config.project.enlistment or enlistment_path,
-        normalized,
-        project_config.branch.prefix,
-        False,
-        git_path,
+    branch, workspace_dir = resolve_workspace_target(
+        project_root=project_root,
+        project_config=project_config,
+        enlistment_path=enlistment_path,
+        workspace_name=str(workspace_name),
+        raw=False,
+        git_path=git_path,
     )
-    if not exists:
-        die(f"workspace not found: {normalized}")
 
     repo_dir = workspace_dir / "repo"
     if not repo_dir.exists():

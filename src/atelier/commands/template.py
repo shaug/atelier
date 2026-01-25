@@ -6,27 +6,14 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from .. import config, editor, exec, git, paths, templates
+from .. import editor, exec, paths, templates
 from ..io import die, say, warn
+from .resolve import resolve_current_project
 
 TEMPLATE_TARGETS = {
     "project": ("project", "PROJECT.md"),
     "workspace": ("workspace", "SUCCESS.md"),
 }
-
-
-def _resolve_project() -> tuple[Path, config.ProjectConfig, str]:
-    cwd = Path.cwd()
-    _, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
-    project_root = paths.project_dir_for_enlistment(enlistment_path, origin)
-    config_path = paths.project_config_path(project_root)
-    config_payload = config.load_project_config(config_path)
-    if not config_payload:
-        die("no Atelier project config found for this repo; run 'atelier init'")
-    project_enlistment = config_payload.project.enlistment
-    if project_enlistment and project_enlistment != enlistment_path:
-        die("project enlistment does not match current repo path")
-    return project_root, config_payload, enlistment_path
 
 
 def _edit_template(
@@ -70,7 +57,7 @@ def render_template(args: object) -> None:
     edit_mode = bool(getattr(args, "edit", False))
     ticket = bool(getattr(args, "ticket", False))
 
-    project_root, project_config, _ = _resolve_project()
+    project_root, project_config, _ = resolve_current_project()
 
     if target == "project":
         if ticket:

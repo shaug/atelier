@@ -3,24 +3,10 @@
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
 
-from .. import config, editor, exec, git, paths, templates, workspace
+from .. import config, editor, exec, paths, templates
 from ..io import die
-
-
-def _resolve_project() -> tuple[Path, config.ProjectConfig, str]:
-    cwd = Path.cwd()
-    _, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
-    project_root = paths.project_dir_for_enlistment(enlistment_path, origin)
-    config_path = paths.project_config_path(project_root)
-    config_payload = config.load_project_config(config_path)
-    if not config_payload:
-        die("no Atelier project config found for this repo; run 'atelier init'")
-    project_enlistment = config_payload.project.enlistment
-    if project_enlistment and project_enlistment != enlistment_path:
-        die("project enlistment does not match current repo path")
-    return project_root, config_payload, enlistment_path
+from .resolve import resolve_current_project, resolve_workspace_target
 
 
 def edit_files(args: object) -> None:
@@ -32,7 +18,7 @@ def edit_files(args: object) -> None:
     if not edit_project and not workspace_name:
         die("must specify --project or a workspace branch")
 
-    project_root, project_config, enlistment_path = _resolve_project()
+    project_root, project_config, enlistment_path = resolve_current_project()
     editor_cmd = editor.resolve_editor_command(project_config, role="edit")
     git_path = config.resolve_git_path(project_config)
 
@@ -46,19 +32,14 @@ def edit_files(args: object) -> None:
         exec.run_command([*editor_cmd, str(project_path)], cwd=project_root)
         return
 
-    normalized = workspace.normalize_workspace_name(str(workspace_name))
-    if not normalized:
-        die("workspace branch must not be empty")
-    branch, workspace_dir, exists = workspace.resolve_workspace_target(
-        project_root,
-        project_config.project.enlistment or enlistment_path,
-        normalized,
-        project_config.branch.prefix,
-        False,
-        git_path,
+    branch, workspace_dir = resolve_workspace_target(
+        project_root=project_root,
+        project_config=project_config,
+        enlistment_path=enlistment_path,
+        workspace_name=str(workspace_name),
+        raw=False,
+        git_path=git_path,
     )
-    if not exists:
-        die(f"workspace not found: {normalized}")
 
     success_path = workspace_dir / "SUCCESS.md"
     if success_path.exists():

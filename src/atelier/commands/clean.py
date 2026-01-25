@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .. import config, exec, git, paths, workspace
 from ..io import confirm, die, say, warn
+from .resolve import resolve_current_project_with_repo_root
 
 
 def confirm_delete(workspace_name: str) -> bool:
@@ -274,17 +275,10 @@ def clean_workspaces(args: object) -> None:
     Example:
         $ atelier clean --all --yes
     """
-    cwd = Path.cwd()
-    repo_root, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
-    project_root = paths.project_dir_for_enlistment(enlistment_path, origin)
-    config_path = paths.project_config_path(project_root)
-    config_payload = config.load_project_config(config_path)
-    if not config_payload:
-        die("no Atelier project config found for this repo; run 'atelier init'")
-
+    project_root, config_payload, enlistment_path, repo_root = (
+        resolve_current_project_with_repo_root()
+    )
     project_enlistment = config_payload.project.enlistment
-    if project_enlistment and project_enlistment != enlistment_path:
-        die("project enlistment does not match current repo path")
 
     branch_prefix = config_payload.branch.prefix
     git_path = config.resolve_git_path(config_payload)
