@@ -218,6 +218,48 @@ class TestUpgradeWorkspaceConfigRepair:
             assert loaded is not None
             assert loaded.workspace.branch == branch
 
+
+class TestUpgradeTemplateComparison:
+    def test_upgrade_uses_installed_cache_when_modified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            enlistment_path = enlistment_path_for(root / "repo")
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+                write_project_config(project_dir, enlistment_path)
+
+                templates_dir = project_dir / "templates"
+                templates_dir.mkdir(parents=True, exist_ok=True)
+
+                custom_text = "custom agents\n"
+                (templates_dir / "AGENTS.md").write_text(custom_text, encoding="utf-8")
+
+                installed_path = data_dir / "templates" / "AGENTS.md"
+                installed_path.parent.mkdir(parents=True, exist_ok=True)
+                installed_path.write_text(custom_text, encoding="utf-8")
+
+                args = SimpleNamespace(
+                    workspace_names=[],
+                    installed=False,
+                    all_projects=True,
+                    no_projects=False,
+                    no_workspaces=True,
+                    dry_run=False,
+                    yes=True,
+                )
+                upgrade_cmd.upgrade(args)
+
+                updated = config.load_project_config(
+                    paths.project_config_path(project_dir)
+                )
+                assert updated is not None
+                assert updated.atelier.managed_files["templates/AGENTS.md"] == (
+                    config.hash_text(custom_text)
+                )
+
     def test_upgrade_repairs_orphaned_workspace_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

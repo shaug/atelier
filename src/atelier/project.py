@@ -42,7 +42,7 @@ def ensure_project_scaffold(project_dir: Path) -> None:
     if not agents_template_path.exists():
         ensure_dir(agents_template_path.parent)
         agents_template_path.write_text(
-            templates.agents_template(prefer_installed=True),
+            templates.agents_template(prefer_installed_if_modified=True),
             encoding="utf-8",
         )
         say("Created templates/AGENTS.md")
@@ -50,7 +50,8 @@ def ensure_project_scaffold(project_dir: Path) -> None:
     project_md_path = project_dir / "PROJECT.md"
     if not project_md_path.exists():
         project_md_path.write_text(
-            templates.project_md_template(prefer_installed=True), encoding="utf-8"
+            templates.project_md_template(prefer_installed_if_modified=True),
+            encoding="utf-8",
         )
         say("Created PROJECT.md")
 
@@ -58,6 +59,7 @@ def ensure_project_scaffold(project_dir: Path) -> None:
     if not success_template_path.exists():
         ensure_dir(success_template_path.parent)
         success_template_path.write_text(
-            templates.success_md_template(prefer_installed=True), encoding="utf-8"
+            templates.success_md_template(prefer_installed_if_modified=True),
+            encoding="utf-8",
         )
         say("Created templates/SUCCESS.md")

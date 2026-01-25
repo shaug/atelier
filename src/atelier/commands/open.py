@@ -232,7 +232,7 @@ def project_success_is_custom(project_dir: Path) -> bool:
     if not success_path.exists():
         return False
     success_content = success_path.read_text(encoding="utf-8")
-    canonical = templates.success_md_template(prefer_installed=True)
+    canonical = templates.success_md_template(prefer_installed_if_modified=True)
     return success_content != canonical
 
 
@@ -441,7 +441,7 @@ def collect_project_template_updates(
     templates_root = project_dir / paths.TEMPLATES_DIRNAME
     project_label_text = project_dir.name
 
-    agents_text = templates.agents_template(prefer_installed=True)
+    agents_text = templates.agents_template(prefer_installed_if_modified=True)
     template_agents_path = templates_root / "AGENTS.md"
     template_agents_key = f"{paths.TEMPLATES_DIRNAME}/AGENTS.md"
 
@@ -466,7 +466,7 @@ def collect_project_template_updates(
         )
     ]
 
-    success_text = templates.success_md_template(prefer_installed=True)
+    success_text = templates.success_md_template(prefer_installed_if_modified=True)
     template_success_path = templates_root / "SUCCESS.md"
     template_success_key = f"{paths.TEMPLATES_DIRNAME}/SUCCESS.md"
 
@@ -504,7 +504,9 @@ def collect_workspace_template_updates(
     if project_template_path.exists():
         source_text = project_template_path.read_text(encoding="utf-8")
     else:
-        source_text = templates.workspace_agents_template(prefer_installed=True)
+        source_text = templates.workspace_agents_template(
+            prefer_installed_if_modified=True
+        )
 
     agents_path = workspace_dir / "AGENTS.md"
     agents_key = "AGENTS.md"
@@ -563,7 +565,9 @@ def backfill_missing_workspace_files(
     agents_path = workspace_dir / "AGENTS.md"
     persist_path = workspace_dir / "PERSIST.md"
     project_template_path = project_dir / paths.TEMPLATES_DIRNAME / "AGENTS.md"
-    canonical_agents = templates.workspace_agents_template(prefer_installed=True)
+    canonical_agents = templates.workspace_agents_template(
+        prefer_installed_if_modified=True
+    )
 
     if not agents_path.exists():
         if agents_path.is_symlink():
@@ -816,7 +820,7 @@ def open_workspace(args: object) -> None:
                     )
                 elif not project_success_is_custom(project_dir):
                     workspace_policy_text = templates.ticket_success_md_template(
-                        prefer_installed=True
+                        prefer_installed_if_modified=True
                     )
                 else:
                     workspace_policy_template = (

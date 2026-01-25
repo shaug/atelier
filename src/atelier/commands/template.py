@@ -79,7 +79,7 @@ def render_template(args: object) -> None:
         if not installed and project_template_path.exists():
             text = project_template_path.read_text(encoding="utf-8")
         else:
-            text = templates.project_md_template(prefer_installed=True)
+            text = templates.project_md_template(prefer_installed_if_modified=True)
         target_path = project_template_path
     else:
         if ticket:
@@ -89,7 +89,9 @@ def render_template(args: object) -> None:
             if not installed and project_template_path.exists():
                 text = project_template_path.read_text(encoding="utf-8")
             else:
-                text = templates.ticket_success_md_template(prefer_installed=True)
+                text = templates.ticket_success_md_template(
+                    prefer_installed_if_modified=True
+                )
             target_path = project_template_path
         else:
             project_template_path = (
@@ -98,7 +100,7 @@ def render_template(args: object) -> None:
             if not installed and project_template_path.exists():
                 text = project_template_path.read_text(encoding="utf-8")
             else:
-                text = templates.success_md_template(prefer_installed=True)
+                text = templates.success_md_template(prefer_installed_if_modified=True)
             target_path = project_template_path
 
     if not edit_mode:

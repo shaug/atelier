@@ -546,7 +546,7 @@ def plan_project_agents(
     plan: UpgradePlan,
     project: ProjectTarget,
 ) -> None:
-    canonical = templates.agents_template()
+    canonical = templates.agents_template(prefer_installed_if_modified=True)
     managed = project.config.atelier.managed_files
     project_label_text = project_label(project)
 
@@ -603,7 +603,7 @@ def plan_project_agents(
 
 
 def plan_workspace_agents(plan: UpgradePlan, target: WorkspaceTarget) -> None:
-    canonical = templates.workspace_agents_template()
+    canonical = templates.workspace_agents_template(prefer_installed_if_modified=True)
     managed = target.config.atelier.managed_files
     workspace_label_text = workspace_label(target)
     project_template_path = target.project.root / paths.TEMPLATES_DIRNAME / "AGENTS.md"
@@ -679,7 +679,9 @@ def plan_project_templates(plan: UpgradePlan, project: ProjectTarget) -> None:
 
         def apply_create_success() -> None:
             paths.ensure_dir(success_path.parent)
-            success_text = templates.success_md_template(prefer_installed=True)
+            success_text = templates.success_md_template(
+                prefer_installed_if_modified=True
+            )
             success_path.write_text(success_text, encoding="utf-8")
             config.update_project_managed_files(
                 project.root,

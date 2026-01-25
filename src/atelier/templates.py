@@ -54,12 +54,18 @@ def read_installed_template(*parts: str) -> str | None:
     return path.read_text(encoding="utf-8")
 
 
-def read_template(*parts: str, prefer_installed: bool = False) -> str:
+def read_template(
+    *parts: str,
+    prefer_installed: bool = False,
+    prefer_installed_if_modified: bool = False,
+) -> str:
     """Read a template from the installed cache or packaged defaults.
 
     Args:
         *parts: Path components under ``atelier/templates``.
         prefer_installed: When true, read from the installed cache if present.
+        prefer_installed_if_modified: When true, prefer the installed cache only
+            if it differs from the packaged default.
 
     Returns:
         Template text.
@@ -68,7 +74,22 @@ def read_template(*parts: str, prefer_installed: bool = False) -> str:
         cached = read_installed_template(*parts)
         if cached is not None:
             return cached
+    if prefer_installed_if_modified:
+        cached = read_installed_template(*parts)
+        if cached is not None:
+            packaged = _read_template(*parts)
+            if cached != packaged:
+                return cached
+            return packaged
     return _read_template(*parts)
+
+
+def installed_template_modified(*parts: str) -> bool:
+    """Return true when the installed cache differs from packaged defaults."""
+    cached = read_installed_template(*parts)
+    if cached is None:
+        return False
+    return cached != _read_template(*parts)
 
 
 def refresh_installed_templates() -> list[Path]:
@@ -87,7 +108,11 @@ def refresh_installed_templates() -> list[Path]:
     return written
 
 
-def agents_template(*, prefer_installed: bool = False) -> str:
+def agents_template(
+    *,
+    prefer_installed: bool = False,
+    prefer_installed_if_modified: bool = False,
+) -> str:
     """Return the canonical ``AGENTS.md`` template text.
 
     Returns:
@@ -97,10 +122,18 @@ def agents_template(*, prefer_installed: bool = False) -> str:
         >>> "Atelier" in agents_template()
         True
     """
-    return read_template("AGENTS.md", prefer_installed=prefer_installed)
+    return read_template(
+        "AGENTS.md",
+        prefer_installed=prefer_installed,
+        prefer_installed_if_modified=prefer_installed_if_modified,
+    )
 
 
-def project_agents_template(*, prefer_installed: bool = False) -> str:
+def project_agents_template(
+    *,
+    prefer_installed: bool = False,
+    prefer_installed_if_modified: bool = False,
+) -> str:
     """Return the canonical ``AGENTS.md`` template text.
 
     Returns:
@@ -110,10 +143,18 @@ def project_agents_template(*, prefer_installed: bool = False) -> str:
         >>> "Atelier" in project_agents_template()
         True
     """
-    return read_template("AGENTS.md", prefer_installed=prefer_installed)
+    return read_template(
+        "AGENTS.md",
+        prefer_installed=prefer_installed,
+        prefer_installed_if_modified=prefer_installed_if_modified,
+    )
 
 
-def project_md_template(*, prefer_installed: bool = False) -> str:
+def project_md_template(
+    *,
+    prefer_installed: bool = False,
+    prefer_installed_if_modified: bool = False,
+) -> str:
     """Return the project-level ``PROJECT.md`` template text.
 
     Returns:
@@ -123,10 +164,19 @@ def project_md_template(*, prefer_installed: bool = False) -> str:
         >>> "PROJECT" in project_md_template()
         True
     """
-    return read_template("project", "PROJECT.md", prefer_installed=prefer_installed)
+    return read_template(
+        "project",
+        "PROJECT.md",
+        prefer_installed=prefer_installed,
+        prefer_installed_if_modified=prefer_installed_if_modified,
+    )
 
 
-def workspace_agents_template(*, prefer_installed: bool = False) -> str:
+def workspace_agents_template(
+    *,
+    prefer_installed: bool = False,
+    prefer_installed_if_modified: bool = False,
+) -> str:
     """Return the canonical ``AGENTS.md`` template text.
 
     Returns:
@@ -136,10 +186,18 @@ def workspace_agents_template(*, prefer_installed: bool = False) -> str:
         >>> "Atelier" in workspace_agents_template()
         True
     """
-    return read_template("AGENTS.md", prefer_installed=prefer_installed)
+    return read_template(
+        "AGENTS.md",
+        prefer_installed=prefer_installed,
+        prefer_installed_if_modified=prefer_installed_if_modified,
+    )
 
 
-def success_md_template(*, prefer_installed: bool = False) -> str:
+def success_md_template(
+    *,
+    prefer_installed: bool = False,
+    prefer_installed_if_modified: bool = False,
+) -> str:
     """Return the workspace ``SUCCESS.md`` template text.
 
     Returns:
@@ -149,10 +207,19 @@ def success_md_template(*, prefer_installed: bool = False) -> str:
         >>> "SUCCESS" in success_md_template()
         True
     """
-    return read_template("workspace", "SUCCESS.md", prefer_installed=prefer_installed)
+    return read_template(
+        "workspace",
+        "SUCCESS.md",
+        prefer_installed=prefer_installed,
+        prefer_installed_if_modified=prefer_installed_if_modified,
+    )
 
 
-def ticket_success_md_template(*, prefer_installed: bool = False) -> str:
+def ticket_success_md_template(
+    *,
+    prefer_installed: bool = False,
+    prefer_installed_if_modified: bool = False,
+) -> str:
     """Return the ticket-focused ``SUCCESS.md`` template text.
 
     Returns:
@@ -163,11 +230,18 @@ def ticket_success_md_template(*, prefer_installed: bool = False) -> str:
         True
     """
     return read_template(
-        "workspace", "SUCCESS.ticket.md", prefer_installed=prefer_installed
+        "workspace",
+        "SUCCESS.ticket.md",
+        prefer_installed=prefer_installed,
+        prefer_installed_if_modified=prefer_installed_if_modified,
     )
 
 
-def persist_template(*, prefer_installed: bool = False) -> str:
+def persist_template(
+    *,
+    prefer_installed: bool = False,
+    prefer_installed_if_modified: bool = False,
+) -> str:
     """Return the workspace ``PERSIST.md`` template text.
 
     Returns:
@@ -177,7 +251,12 @@ def persist_template(*, prefer_installed: bool = False) -> str:
         >>> "PERSIST" in persist_template()
         True
     """
-    return read_template("workspace", "PERSIST.md", prefer_installed=prefer_installed)
+    return read_template(
+        "workspace",
+        "PERSIST.md",
+        prefer_installed=prefer_installed,
+        prefer_installed_if_modified=prefer_installed_if_modified,
+    )
 
 
 def render_integration_strategy(branch_pr: bool, branch_history: str) -> str:
@@ -269,7 +348,7 @@ def render_workspace_agents() -> str:
         >>> "Atelier" in render_workspace_agents()
         True
     """
-    return workspace_agents_template(prefer_installed=True)
+    return workspace_agents_template(prefer_installed_if_modified=True)
 
 
 def render_persist(branch_pr: bool, branch_history: str) -> str:
@@ -287,6 +366,6 @@ def render_persist(branch_pr: bool, branch_history: str) -> str:
         True
     """
     integration_strategy = render_integration_strategy(branch_pr, branch_history)
-    return persist_template(prefer_installed=True).format(
+    return persist_template(prefer_installed_if_modified=True).format(
         integration_strategy=integration_strategy
     )

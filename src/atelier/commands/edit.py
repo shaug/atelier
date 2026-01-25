@@ -40,7 +40,8 @@ def edit_files(args: object) -> None:
         project_path = project_root / "PROJECT.md"
         if not project_path.exists():
             project_path.write_text(
-                templates.project_md_template(prefer_installed=True), encoding="utf-8"
+                templates.project_md_template(prefer_installed_if_modified=True),
+                encoding="utf-8",
             )
         exec.run_command([*editor_cmd, str(project_path)], cwd=project_root)
         return
@@ -68,7 +69,7 @@ def edit_files(args: object) -> None:
             shutil.copyfile(template_path, success_path)
         else:
             success_path.write_text(
-                templates.success_md_template(prefer_installed=True),
+                templates.success_md_template(prefer_installed_if_modified=True),
                 encoding="utf-8",
             )
         target_path = success_path

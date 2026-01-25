@@ -476,7 +476,7 @@ def update_workspace_session(
 
 def managed_project_agents_updates(project_dir: Path) -> dict[str, str]:
     """Return managed hashes for project AGENTS templates when canonical."""
-    canonical = templates.agents_template(prefer_installed=True)
+    canonical = templates.agents_template(prefer_installed_if_modified=True)
     updates: dict[str, str] = {}
     candidates = [
         (
@@ -493,7 +493,9 @@ def managed_project_agents_updates(project_dir: Path) -> dict[str, str]:
     success_path = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
     if success_path.exists():
         success_content = success_path.read_text(encoding="utf-8")
-        success_canonical = templates.success_md_template(prefer_installed=True)
+        success_canonical = templates.success_md_template(
+            prefer_installed_if_modified=True
+        )
         if success_content == success_canonical:
             updates[f"{paths.TEMPLATES_DIRNAME}/SUCCESS.md"] = hash_text(
                 success_content
@@ -507,7 +509,7 @@ def managed_workspace_agents_updates(workspace_dir: Path) -> dict[str, str]:
     if not agents_path.exists():
         return {}
     content = agents_path.read_text(encoding="utf-8")
-    canonical = templates.workspace_agents_template(prefer_installed=True)
+    canonical = templates.workspace_agents_template(prefer_installed_if_modified=True)
     if content != canonical:
         return {}
     return {"AGENTS.md": hash_text(content)}

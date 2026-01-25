@@ -709,6 +709,9 @@ auto-updates existing files without an explicit policy.
 New projects default to `ask`. New workspaces inherit the project policy unless
 explicitly set.
 
+Use `atelier upgrade --installed` to refresh the installed template cache to the
+current packaged defaults.
+
 If a project provides `templates/SUCCESS.md`, that file is copied verbatim into
 new workspaces as `SUCCESS.md`. If `templates/SUCCESS.md` is missing and the
 legacy `templates/WORKSPACE.md` exists, that file is copied verbatim into new
