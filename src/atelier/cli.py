@@ -595,7 +595,7 @@ def describe_command(
     ] = "table",
 ) -> None:
     """Describe project or workspace status."""
-    describe_cmd.describe(
+    describe_cmd(
         SimpleNamespace(
             workspace_name=workspace_name,
             finalized=finalized,
