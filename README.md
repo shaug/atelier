@@ -284,7 +284,8 @@ atelier clean --all --yes
 - `SUCCESS.md` is the execution contract for each workspace.
 - `AGENTS.md` is a managed, static prologue created in each workspace.
 - `PERSIST.md` records integration guidance and the finalization tag
-  (`atelier/<branch-name>/finalized`) used by `atelier clean`.
+  (`atelier/<branch-name>/finalized`) used by `atelier clean`, plus the
+  publish/persist/finalize vocabulary agents should recognize.
 - `BACKGROUND.md` captures context when opening an existing branch.
 - `PROJECT.md` is an optional policy overlay for agents and is linked/copied
   into each workspace.

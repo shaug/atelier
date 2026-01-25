@@ -338,6 +338,59 @@ def render_integration_strategy(branch_pr: bool, branch_history: str) -> str:
     return "\n".join(lines)
 
 
+def render_publish_instructions(branch_pr: bool, branch_history: str) -> str:
+    """Render publishing guidance for a workspace.
+
+    Args:
+        branch_pr: Whether pull requests are expected.
+        branch_history: History policy (manual|squash|merge|rebase).
+
+    Returns:
+        Rendered markdown string.
+    """
+    lines = [
+        "- Before publish/persist/finalize, run the required workspace checks "
+        "(tests/formatting/linting/etc.) described in PROJECT.md, SUCCESS.md, or "
+        "the repo's AGENTS.md. Do not proceed if they fail unless the user "
+        "explicitly asks to ignore the failures.",
+        '- "publish" means publish only; do not finalize or tag.',
+        '- "persist" means save progress to the remote per the publish model '
+        "without finalizing.",
+        '- "finalize" means ensure the workspace is published first (perform '
+        "publishing if needed), then integrate onto the default branch (merge a "
+        "PR or rebase/merge as configured), push, and tag only after publishing "
+        "is complete.",
+    ]
+    if branch_pr:
+        lines.extend(
+            [
+                '- When `branch.pr` is true, "persist" means commit and push to the '
+                "workspace branch but do not create or update a pull request yet.",
+                '- When `branch.pr` is true, "publish" means commit, push, and '
+                "create or update the pull request.",
+                "- Publishing is complete only after the workspace branch is pushed "
+                "and the pull request is created or updated.",
+                "- Do not finalize until publishing is complete.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                '- When `branch.pr` is false, "persist" means the same thing as '
+                '"publish" (commit, update the default branch per the history '
+                "policy, and push).",
+                "- Publishing is complete only after the default branch has been "
+                "updated locally (per the history policy) and pushed to the remote.",
+                "- When publishing to the default branch, if the push is rejected "
+                "because the default branch moved, update your local default branch "
+                "and re-apply the workspace changes according to the history policy "
+                f"({branch_history}), then push again.",
+                "- Do not finalize until publishing is complete.",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def render_workspace_agents() -> str:
     """Render ``AGENTS.md`` for a new workspace.
 
@@ -366,6 +419,8 @@ def render_persist(branch_pr: bool, branch_history: str) -> str:
         True
     """
     integration_strategy = render_integration_strategy(branch_pr, branch_history)
+    publish_instructions = render_publish_instructions(branch_pr, branch_history)
     return persist_template(prefer_installed_if_modified=True).format(
-        integration_strategy=integration_strategy
+        integration_strategy=integration_strategy,
+        publish_instructions=publish_instructions,
     )

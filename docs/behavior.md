@@ -94,6 +94,20 @@ Additional config notes:
 - Upgrade policy (`always`, `ask`, `manual`) controls whether template updates
   are applied automatically, with prompts when needed.
 
+## Agent publish vocabulary
+
+Atelier workspaces use consistent command words in `PERSIST.md`/`AGENTS.md`:
+
+- `publish`: publish only (no finalization/tagging). If `branch.pr` is true,
+  commit, push, and create/update the PR. If `branch.pr` is false, commit,
+  integrate onto the default branch per the history policy, and push.
+- `persist`: save progress without finalizing. If `branch.pr` is true, commit
+  and push the workspace branch only (no PR). If `branch.pr` is false, treat it
+  the same as `publish`.
+- `finalize`: ensure publishing is complete (perform publish if needed), then
+  integrate onto the default branch (merge PR or rebase/merge as configured),
+  push the default branch, and create the local finalization tag.
+
 ## Command behavior
 
 - `atelier init`

@@ -11,10 +11,15 @@ Read this file before finalizing work or integrating changes.
 
 {integration_strategy}
 
+## Publishing
+
+{publish_instructions}
+
 ## Finalization
 
-After integration, identify the integration commit on the default branch and
-create the local finalization tag:
+After publishing is complete, integrate changes onto the default branch per the
+history policy, push the default branch to the remote, then identify the
+integration commit and create the local finalization tag.
 
 - Manual: wait for explicit instruction to finalize after the merge lands.
 - Squash: tag the single squash commit created on the default branch.
