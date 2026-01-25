@@ -1170,6 +1170,52 @@ class TestOpenWorkspace:
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_resolves_relative_origin_for_clone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            relative_origin = "../origin"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_open_config(project_dir, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                commands: list[list[str]] = []
+                fake_codex = record_codex_command(commands)
+
+                def fake_run(
+                    cmd: list[str],
+                    cwd: Path | None = None,
+                    env: dict[str, str] | None = None,
+                ) -> None:
+                    commands.append(cmd)
+
+                with (
+                    patch("atelier.exec.run_command", fake_run),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.git.git_current_branch", return_value="main"),
+                    patch("atelier.git.git_default_branch", return_value="main"),
+                    patch("atelier.git.git_is_clean", return_value=True),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=relative_origin),
+                ):
+                    open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
+
+                clone_cmd = next(
+                    cmd for cmd in commands if cmd[:2] == ["git", "clone"]
+                )
+                expected_origin = str((root / relative_origin).resolve())
+                assert clone_cmd[2] == expected_origin
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_editor_uses_workspace_relative_workspace_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

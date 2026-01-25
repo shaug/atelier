@@ -86,6 +86,44 @@ def normalize_origin_url(value: str) -> str:
     return local_path.as_posix()
 
 
+def resolve_relative_origin_path(origin_raw: str, repo_root: Path) -> str | None:
+    """Resolve relative local origin paths against the repo root.
+
+    Args:
+        origin_raw: Raw origin URL string from git.
+        repo_root: Absolute path to the enlistment repo root.
+
+    Returns:
+        Absolute filesystem path string when the origin is a relative local path,
+        otherwise ``None``.
+    """
+    raw = origin_raw.strip()
+    if not raw:
+        return None
+
+    if re.match(r"^[^@]+@[^:]+:.+$", raw):
+        return None
+
+    if "://" in raw:
+        parsed = urlparse(raw)
+        scheme = (parsed.scheme or "").lower()
+        if scheme == "file":
+            local_path = Path(parsed.path).expanduser()
+            if not local_path.is_absolute():
+                return str((repo_root / local_path).resolve())
+        return None
+
+    if "/" in raw and " " not in raw:
+        head = raw.split("/", 1)[0]
+        if head and not head.startswith(".") and "." in head:
+            return None
+
+    local_path = Path(raw).expanduser()
+    if local_path.is_absolute():
+        return None
+    return str((repo_root / local_path).resolve())
+
+
 def git_repo_root(start: Path, *, git_path: str | None = None) -> Path | None:
     """Return the git repository root for a starting path.
 

@@ -915,6 +915,11 @@ def open_workspace(args: object) -> None:
 
     repo_dir = workspace_dir / "repo"
     project_repo_url = origin_raw or enlistment_path
+    clone_repo_url = project_repo_url
+    if origin_raw is not None:
+        resolved_origin = git.resolve_relative_origin_path(origin_raw, repo_root)
+        if resolved_origin:
+            clone_repo_url = resolved_origin
 
     edit_override = getattr(args, "edit", None)
     if edit_override is None:
@@ -924,9 +929,7 @@ def open_workspace(args: object) -> None:
     editor_cmd: list[str] | None = None
     if not repo_dir.exists():
         exec.run_command(
-            git.git_command(
-                ["clone", project_repo_url, str(repo_dir)], git_path=git_path
-            )
+            git.git_command(["clone", clone_repo_url, str(repo_dir)], git_path=git_path)
         )
     else:
         if not git.git_is_repo(repo_dir, git_path=git_path):
