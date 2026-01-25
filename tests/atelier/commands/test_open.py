@@ -1208,9 +1208,7 @@ class TestOpenWorkspace:
                 ):
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
-                clone_cmd = next(
-                    cmd for cmd in commands if cmd[:2] == ["git", "clone"]
-                )
+                clone_cmd = next(cmd for cmd in commands if cmd[:2] == ["git", "clone"])
                 expected_origin = str((root / relative_origin).resolve())
                 assert clone_cmd[2] == expected_origin
             finally:
