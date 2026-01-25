@@ -78,7 +78,7 @@ class TestCleanWorkspaces:
                     clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=False,
-                            force=False,
+                            yes=False,
                             no_branch=False,
                             workspace_names=[],
                         )
@@ -147,7 +147,7 @@ class TestCleanWorkspaces:
                     clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=False,
-                            force=False,
+                            yes=False,
                             dry_run=True,
                             no_branch=False,
                             workspace_names=[],
@@ -219,7 +219,7 @@ class TestCleanWorkspaces:
                     clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=False,
-                            force=False,
+                            yes=False,
                             no_branch=False,
                             workspace_names=[],
                         )
@@ -280,7 +280,7 @@ class TestCleanWorkspaces:
                     clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=True,
-                            force=False,
+                            yes=False,
                             no_branch=False,
                             workspace_names=[],
                         )
@@ -290,7 +290,7 @@ class TestCleanWorkspaces:
             finally:
                 os.chdir(original_cwd)
 
-    def test_clean_all_force_confirms_remote_delete_for_unfinalized(self) -> None:
+    def test_clean_all_yes_confirms_remote_delete_for_unfinalized(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -339,7 +339,7 @@ class TestCleanWorkspaces:
                     clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=True,
-                            force=True,
+                            yes=True,
                             no_branch=False,
                             workspace_names=[],
                         )
@@ -350,7 +350,7 @@ class TestCleanWorkspaces:
             finally:
                 os.chdir(original_cwd)
 
-    def test_clean_all_force_deletes_remote_when_confirmed(self) -> None:
+    def test_clean_all_yes_deletes_remote_when_confirmed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -399,7 +399,7 @@ class TestCleanWorkspaces:
                     clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=True,
-                            force=True,
+                            yes=True,
                             no_branch=False,
                             workspace_names=[],
                         )
@@ -449,7 +449,7 @@ class TestCleanWorkspaces:
                     clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=False,
-                            force=False,
+                            yes=False,
                             orphans=True,
                             no_branch=False,
                             workspace_names=[],
@@ -494,7 +494,7 @@ class TestCleanWorkspaces:
                     clean_cmd.clean_workspaces(
                         SimpleNamespace(
                             all=False,
-                            force=False,
+                            yes=False,
                             orphans=True,
                             dry_run=True,
                             no_branch=False,

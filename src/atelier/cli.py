@@ -614,9 +614,9 @@ def clean_command(
         bool,
         typer.Option("--all", "-A", help="delete all workspaces regardless of state"),
     ] = False,
-    force: Annotated[
+    yes: Annotated[
         bool,
-        typer.Option("--force", "-F", help="delete without confirmation"),
+        typer.Option("--yes", "-y", help="delete without confirmation"),
     ] = False,
     orphans: Annotated[
         bool,
@@ -642,7 +642,7 @@ def clean_command(
 
     Args:
         all_: Delete all workspaces regardless of state when true.
-        force: Delete without confirmation prompts when true.
+        yes: Delete without confirmation prompts when true.
         no_branch: Skip deleting local/remote workspace branches when true.
         workspace_names: Workspace branches to delete (optional).
         orphans: Delete orphaned workspaces when true.
@@ -651,12 +651,12 @@ def clean_command(
         None.
 
     Example:
-        $ atelier clean --all --force
+        $ atelier clean --all --yes
     """
     clean_cmd.clean_workspaces(
         SimpleNamespace(
             all=all_,
-            force=force,
+            yes=yes,
             orphans=orphans,
             dry_run=dry_run,
             no_branch=no_branch,

@@ -274,7 +274,7 @@ atelier clean --no-branch feat/login refactor/api
 Delete everything without prompting:
 
 ```sh
-atelier clean --all --force
+atelier clean --all --yes
 ```
 
 ## Notes
@@ -512,7 +512,7 @@ Options:
 - `--dry-run`: Show planned deletions without removing anything.
 - `--all` or `-A`: Delete all workspaces regardless of state (still confirms
   remote branch deletion for unfinalized workspaces).
-- `--force` or `-F`: Delete without confirmation prompts (except remote branch
+- `--yes` or `-y`: Delete without confirmation prompts (except remote branch
   deletion for unfinalized workspaces).
 - `--no-branch`: Keep local/remote branches; delete only workspace folders.
 - `--orphans`: Delete orphaned workspaces (missing config or repo directory).
@@ -521,7 +521,7 @@ Examples:
 
 ```sh
 atelier clean --dry-run
-atelier clean --all --force
+atelier clean --all --yes
 atelier clean --no-branch feat/old-branch
 atelier clean --orphans
 ```

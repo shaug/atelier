@@ -265,14 +265,14 @@ def clean_workspaces(args: object) -> None:
     """Clean workspaces based on status or explicit targets.
 
     Args:
-        args: CLI argument object with ``all``, ``force``, ``no_branch``, and
+        args: CLI argument object with ``all``, ``yes``, ``no_branch``, and
             ``workspace_names`` fields.
 
     Returns:
         None.
 
     Example:
-        $ atelier clean --all --force
+        $ atelier clean --all --yes
     """
     cwd = Path.cwd()
     repo_root, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
@@ -307,7 +307,7 @@ def clean_workspaces(args: object) -> None:
             return
         for item in orphaned:
             name = item["name"]
-            if not args.force and not confirm_delete(name):
+            if not _skip_confirm(args) and not confirm_delete(name):
                 say(f"Skipped workspace {name}")
                 continue
             try:
@@ -397,7 +397,7 @@ def clean_workspaces(args: object) -> None:
 
     for item in targets:
         name = item["name"]
-        if not args.force and not confirm_delete(name):
+        if not _skip_confirm(args) and not confirm_delete(name):
             say(f"Skipped workspace {name}")
             continue
         if not getattr(args, "no_branch", False):
@@ -434,3 +434,8 @@ def clean_workspaces(args: object) -> None:
             warn(f"failed to delete workspace {name}: {exc}")
             continue
         say(f"Deleted workspace {name}")
+
+
+def _skip_confirm(args: object) -> bool:
+    """Return True when confirmations should be skipped."""
+    return bool(getattr(args, "yes", False) or getattr(args, "force", False))
