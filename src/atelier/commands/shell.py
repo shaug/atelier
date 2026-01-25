@@ -10,6 +10,7 @@ import os
 import shutil
 from pathlib import Path
 
+from .. import command as command_util
 from .. import config, exec, git, paths, term, workspace
 from ..io import die
 
@@ -106,7 +107,10 @@ def _fallback_shell() -> str:
 
 def _resolve_shell_command(shell_override: str | None) -> list[str]:
     if shell_override:
-        return [shell_override]
+        normalized = command_util.normalize_command(shell_override)
+        if normalized:
+            return normalized
+        return [str(shell_override)]
     detected = _detect_shell()
     return [detected or _fallback_shell()]
 
