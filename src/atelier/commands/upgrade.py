@@ -302,6 +302,7 @@ def build_workspace_config(
     if not enlistment:
         die("project enlistment is required to repair workspaces")
     workspace_id = workspace.workspace_identifier(enlistment, branch)
+    workspace_uid = workspace.generate_workspace_uid()
     upgrade_policy = config.resolve_upgrade_policy(project.config.atelier.upgrade)
     return config.WorkspaceConfig(
         workspace={
@@ -309,6 +310,7 @@ def build_workspace_config(
             "branch_pr": project.config.branch.pr,
             "branch_history": project.config.branch.history,
             "id": workspace_id,
+            "uid": workspace_uid,
         },
         atelier={
             "version": __version__,

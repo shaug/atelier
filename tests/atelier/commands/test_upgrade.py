@@ -270,6 +270,7 @@ class TestUpgradeWorkspaceConfigRepair:
             )
             assert loaded is not None
             assert loaded.workspace.branch == branch
+            assert loaded.workspace.uid is not None
 
 
 class TestUpgradeTemplateComparison:
@@ -364,3 +365,4 @@ class TestUpgradeTemplateComparison:
             )
             assert loaded is not None
             assert loaded.workspace.branch == branch
+            assert loaded.workspace.uid is not None
