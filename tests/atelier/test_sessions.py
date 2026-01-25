@@ -123,6 +123,25 @@ class TestFindCodexSession:
 
             assert session == session_id
 
+    def test_reads_session_id_after_other_jsonl_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            session_id = "019bbe1b-1c3c-7ef0-b7e6-61477c74ceb1"
+            session_file = Path(tmp) / "session.jsonl"
+            session_file.write_text(
+                json.dumps({"type": "response_item", "payload": {"type": "noop"}})
+                + "\n"
+                + json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {"id": session_id},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            assert sessions_mod.read_session_id(session_file) == session_id
+
     def test_respects_workspace_uid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)

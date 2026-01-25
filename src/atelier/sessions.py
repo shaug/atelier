@@ -106,7 +106,8 @@ def read_session_id(path: Path) -> str | None:
                             session_id = payload.get("id")
                             if session_id:
                                 return str(session_id)
-                    return None
+                        return None
+                return None
         except OSError:
             return None
     return None
