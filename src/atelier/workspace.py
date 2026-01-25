@@ -676,25 +676,47 @@ def collect_workspaces(
             warn(f"failed to load workspace config at {config_path}")
             return None
         branch = payload.workspace.branch
+        branch_pr = payload.workspace.branch_pr
+        branch_history = payload.workspace.branch_history
+        if branch_pr is None:
+            branch_pr = config_payload.branch.pr
+        if branch_history is None:
+            branch_history = config_payload.branch.history
         workspace_name = branch
         repo_dir = workspace_dir / "repo"
+        repo_available = False
         checked_out: bool | None = None
         clean: bool | None = None
         pushed: bool | None = None
         finalized: bool | None = None
+        mainline_branch: str | None = None
+        ahead: int | None = None
+        behind: int | None = None
         if with_status:
             finalization_tag = finalization_tag_name(branch)
-            if repo_dir.exists():
+            if repo_dir.exists() and git.git_is_repo(repo_dir, git_path=git_path):
+                repo_available = True
                 current_branch = git.git_current_branch(repo_dir, git_path=git_path)
                 checked_out = current_branch == branch if current_branch else None
                 if current_branch and current_branch == branch:
                     clean = git.git_is_clean(repo_dir, git_path=git_path)
                 else:
                     clean = None
-                pushed = git.git_has_remote_branch(repo_dir, branch, git_path=git_path)
+                if branch_pr is True:
+                    pushed = git.git_has_remote_branch(
+                        repo_dir, branch, git_path=git_path
+                    )
                 finalized = git.git_tag_exists(
                     repo_dir, finalization_tag, git_path=git_path
                 )
+                mainline_branch = git.git_default_branch(repo_dir, git_path=git_path)
+                if mainline_branch:
+                    ahead = git.git_commits_ahead(
+                        repo_dir, mainline_branch, branch, git_path=git_path
+                    )
+                    behind = git.git_commits_ahead(
+                        repo_dir, branch, mainline_branch, git_path=git_path
+                    )
             if main_repo_dir is not None:
                 if finalized is not True:
                     finalized = git.git_tag_exists(
@@ -705,10 +727,18 @@ def collect_workspaces(
             "path": workspace_dir,
             "repo_dir": repo_dir,
             "branch": branch,
+            "repo_available": repo_available,
+            "branch_pr": branch_pr,
+            "branch_history": branch_history,
             "checked_out": checked_out,
             "clean": clean,
             "pushed": pushed,
             "finalized": finalized,
+            "mainline": {
+                "branch": mainline_branch,
+                "ahead": ahead,
+                "behind": behind,
+            },
         }
 
     max_workers = min(8, len(workspace_configs))

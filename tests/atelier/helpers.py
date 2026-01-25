@@ -109,12 +109,14 @@ def write_workspace_config(
     branch: str,
     enlistment_path: str,
     session: dict | None = None,
+    branch_pr: bool = True,
+    branch_history: str = "manual",
 ) -> None:
     payload = {
         "workspace": {
             "branch": branch,
-            "branch_pr": True,
-            "branch_history": "manual",
+            "branch_pr": branch_pr,
+            "branch_history": branch_history,
             "id": workspace_id_for(enlistment_path, branch),
         },
         "atelier": {

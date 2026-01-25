@@ -152,6 +152,10 @@ def _describe_workspace(
         paths.workspace_config_path(workspace_dir)
     )
 
+    branch_pr, branch_history = _resolve_publish_settings(
+        project_config, workspace_config
+    )
+
     detail = _workspace_detail(
         branch,
         workspace_dir,
@@ -159,6 +163,8 @@ def _describe_workspace(
         repo_root,
         git_path,
         workspace_config,
+        branch_pr,
+        branch_history,
     )
 
     if finalized and detail.get("finalized") is not True:
@@ -213,6 +219,14 @@ def _project_info(
 
 
 def _workspace_summary(item: dict) -> dict[str, object]:
+    state = _derive_workspace_state(
+        finalized=item.get("finalized"),
+        repo_available=item.get("repo_available"),
+        branch_pr=item.get("branch_pr"),
+        branch_history=item.get("branch_history"),
+        pushed=item.get("pushed"),
+        mainline=item.get("mainline"),
+    )
     return {
         "name": item.get("name"),
         "branch": item.get("branch"),
@@ -220,10 +234,15 @@ def _workspace_summary(item: dict) -> dict[str, object]:
         "repo_dir": str(item.get("repo_dir"))
         if item.get("repo_dir") is not None
         else None,
+        "repo_available": item.get("repo_available"),
+        "branch_pr": item.get("branch_pr"),
+        "branch_history": item.get("branch_history"),
         "checked_out": item.get("checked_out"),
         "clean": item.get("clean"),
         "pushed": item.get("pushed"),
         "finalized": item.get("finalized"),
+        "state": state,
+        "mainline": item.get("mainline"),
     }
 
 
@@ -234,6 +253,8 @@ def _workspace_detail(
     repo_root: Path,
     git_path: str | None,
     workspace_config: config.WorkspaceConfig | None,
+    branch_pr: bool | None,
+    branch_history: str | None,
 ) -> dict[str, object]:
     checked_out = None
     clean = None
@@ -249,7 +270,8 @@ def _workspace_detail(
         current_branch = git.git_current_branch(repo_dir, git_path=git_path)
         checked_out = current_branch == branch if current_branch else None
         clean = git.git_is_clean(repo_dir, git_path=git_path)
-        pushed = git.git_has_remote_branch(repo_dir, branch, git_path=git_path)
+        if branch_pr is True:
+            pushed = git.git_has_remote_branch(repo_dir, branch, git_path=git_path)
         finalization_tag = workspace.finalization_tag_name(branch)
         finalized = git.git_tag_exists(repo_dir, finalization_tag, git_path=git_path)
         if finalized is not True:
@@ -269,17 +291,33 @@ def _workspace_detail(
             )
         last_commit = git.git_last_commit(repo_dir, branch, git_path=git_path)
 
+    state = _derive_workspace_state(
+        finalized=finalized,
+        repo_available=repo_dir is not None,
+        branch_pr=branch_pr,
+        branch_history=branch_history,
+        pushed=pushed,
+        mainline={
+            "branch": mainline_branch,
+            "ahead": ahead,
+            "behind": behind,
+        },
+    )
+
     return {
         "name": branch,
         "branch": branch,
         "path": str(workspace_dir),
         "repo_dir": str(repo_dir) if repo_dir is not None else None,
         "repo_available": repo_dir is not None,
+        "branch_pr": branch_pr,
+        "branch_history": branch_history,
         "checked_out": checked_out,
         "clean": clean,
         "dirty": None if clean is None else not clean,
         "pushed": pushed,
         "finalized": finalized,
+        "state": state,
         "mainline": {
             "branch": mainline_branch,
             "ahead": ahead,
@@ -289,6 +327,22 @@ def _workspace_detail(
         "last_commit": last_commit,
         "session": _workspace_session(workspace_config),
     }
+
+
+def _resolve_publish_settings(
+    project_config: config.ProjectConfig,
+    workspace_config: config.WorkspaceConfig | None,
+) -> tuple[bool | None, str | None]:
+    branch_pr = None
+    branch_history = None
+    if workspace_config is not None:
+        branch_pr = workspace_config.workspace.branch_pr
+        branch_history = workspace_config.workspace.branch_history
+    if branch_pr is None:
+        branch_pr = project_config.branch.pr
+    if branch_history is None:
+        branch_history = project_config.branch.history
+    return branch_pr, branch_history
 
 
 def _workspace_session(
@@ -342,12 +396,70 @@ def _display_value(value: object) -> str:
     return str(value)
 
 
+def _format_publish_mode(branch_pr: bool | None, branch_history: str | None) -> str:
+    if branch_pr is None and branch_history is None:
+        return "unknown"
+    if branch_pr is None:
+        pr_label = "unknown"
+    else:
+        pr_label = "pr" if branch_pr else "direct"
+    if branch_history:
+        return f"{pr_label}, {branch_history}"
+    return pr_label
+
+
+def _derive_workspace_state(
+    *,
+    finalized: bool | None,
+    repo_available: bool | None,
+    branch_pr: bool | None,
+    branch_history: str | None,
+    pushed: bool | None,
+    mainline: dict[str, object] | None,
+) -> str:
+    if finalized is True:
+        return "finalized"
+    if repo_available is False:
+        return "repo missing"
+    if mainline is None:
+        return "unknown"
+    ahead = mainline.get("ahead")
+    behind = mainline.get("behind")
+    if not isinstance(ahead, int) or not isinstance(behind, int):
+        return "unknown"
+    history = branch_history or "manual"
+    needs_rebase = history in {"rebase", "squash"} and behind > 0
+    if branch_pr is True:
+        if ahead > 0 and pushed is False:
+            return "needs push"
+        if needs_rebase:
+            return "needs rebase"
+        if ahead == 0:
+            return "no changes"
+        return "ready for pr"
+    if ahead == 0:
+        if needs_rebase:
+            return "needs rebase"
+        return "no changes"
+    if needs_rebase:
+        return "needs rebase"
+    return "needs integration"
+
+
 def _render_project_table(
     project_info: dict[str, object],
     workspaces: list[dict[str, object]],
     counts: dict[str, int],
 ) -> None:
     console = Console()
+
+    def resolve_branch_pr(item: dict[str, object]) -> bool | None:
+        value = item.get("branch_pr")
+        if value is None:
+            value = project_info.get("branch_pr")
+        return value
+
+    show_pushed = any(resolve_branch_pr(item) is True for item in workspaces)
 
     overview = Table(title="Project Overview", box=box.SIMPLE, show_header=False)
     overview.add_column("Field", style="bold")
@@ -373,7 +485,8 @@ def _render_project_table(
     overview.add_row("Checked out", _display_value(counts.get("checked_out")))
     overview.add_row("Clean", _display_value(counts.get("clean")))
     overview.add_row("Dirty", _display_value(counts.get("dirty")))
-    overview.add_row("Pushed", _display_value(counts.get("pushed")))
+    if show_pushed:
+        overview.add_row("Pushed", _display_value(counts.get("pushed")))
     console.print(overview)
 
     if not workspaces:
@@ -382,17 +495,30 @@ def _render_project_table(
 
     table = Table(title="Workspaces", box=box.SIMPLE)
     table.add_column("Workspace", no_wrap=True)
+    table.add_column("State", no_wrap=True)
+    table.add_column("Finalized", justify="center")
     table.add_column("Checked out", justify="center")
     table.add_column("Clean", justify="center")
-    table.add_column("Pushed", justify="center")
-    table.add_column("Finalized", justify="center")
+    if show_pushed:
+        table.add_column("Pushed", justify="center")
     for item in workspaces:
+        finalized = item.get("finalized") is True
+        branch_pr = resolve_branch_pr(item) is True
         table.add_row(
             str(item.get("name", "")),
-            workspace.format_status(item.get("checked_out")),
-            workspace.format_status(item.get("clean")),
-            workspace.format_status(item.get("pushed")),
+            _display_value(item.get("state")),
             workspace.format_status(item.get("finalized")),
+            "" if finalized else workspace.format_status(item.get("checked_out")),
+            "" if finalized else workspace.format_status(item.get("clean")),
+            *(
+                [
+                    ""
+                    if finalized or not branch_pr
+                    else workspace.format_status(item.get("pushed"))
+                ]
+                if show_pushed
+                else []
+            ),
         )
     console.print(table)
 
@@ -402,6 +528,13 @@ def _render_workspace_table(
     detail: dict[str, object],
 ) -> None:
     console = Console()
+    finalized = detail.get("finalized") is True
+    branch_pr = detail.get("branch_pr")
+    if branch_pr is None:
+        branch_pr = project_info.get("branch_pr")
+    branch_history = detail.get("branch_history")
+    if branch_history is None:
+        branch_history = project_info.get("branch_history")
 
     project_table = Table(title="Project", box=box.SIMPLE, show_header=False)
     project_table.add_column("Field", style="bold")
@@ -422,16 +555,27 @@ def _render_workspace_table(
     workspace_table.add_row("Name", _display_value(detail.get("name")))
     workspace_table.add_row("Path", _display_value(detail.get("path")))
     workspace_table.add_row("Repo", _display_value(detail.get("repo_dir")))
-    workspace_table.add_row(
-        "Checked out", workspace.format_status(detail.get("checked_out"))
-    )
-    workspace_table.add_row("Clean", workspace.format_status(detail.get("clean")))
-    workspace_table.add_row("Pushed", workspace.format_status(detail.get("pushed")))
+    workspace_table.add_row("Publish", _format_publish_mode(branch_pr, branch_history))
     workspace_table.add_row(
         "Finalized", workspace.format_status(detail.get("finalized"))
     )
-    workspace_table.add_row("Last commit", _format_commit(detail.get("last_commit")))
+    workspace_table.add_row("State", _display_value(detail.get("state")))
+    if not finalized:
+        workspace_table.add_row(
+            "Checked out", workspace.format_status(detail.get("checked_out"))
+        )
+        workspace_table.add_row("Clean", workspace.format_status(detail.get("clean")))
+        if branch_pr is True:
+            workspace_table.add_row(
+                "Pushed", workspace.format_status(detail.get("pushed"))
+            )
+        workspace_table.add_row(
+            "Last commit", _format_commit(detail.get("last_commit"))
+        )
     console.print(workspace_table)
+
+    if finalized:
+        return
 
     mainline = detail.get("mainline") or {}
     mainline_table = Table(

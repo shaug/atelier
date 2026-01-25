@@ -221,8 +221,117 @@ class TestDescribeWorkspace:
                 assert workspace_payload["clean"] is False
                 assert workspace_payload["pushed"] is True
                 assert workspace_payload["finalized"] is False
+                assert workspace_payload["branch_pr"] is True
+                assert workspace_payload["branch_history"] == "manual"
+                assert workspace_payload["state"] == "ready for pr"
                 assert workspace_payload["mainline"]["ahead"] == 3
                 assert workspace_payload["mainline"]["behind"] == 1
                 assert workspace_payload["last_commit"]["subject"] == "feat: add demo"
+            finally:
+                os.chdir(original_cwd)
+
+    def test_workspace_json_detail_skips_pushed_when_local_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            write_project_config(project_dir, enlistment_path)
+
+            branch = "scott/alpha"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                branch,
+                workspace_id_for(enlistment_path, branch),
+            )
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir(parents=True)
+            write_workspace_config(
+                workspace_dir,
+                branch,
+                enlistment_path,
+                branch_pr=False,
+                branch_history="rebase",
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                buffer = io.StringIO()
+                with (
+                    patch(
+                        "atelier.paths.atelier_data_dir",
+                        return_value=data_dir,
+                    ),
+                    patch(
+                        "atelier.commands.describe.git.resolve_repo_enlistment",
+                        return_value=(
+                            root,
+                            enlistment_path,
+                            RAW_ORIGIN,
+                            NORMALIZED_ORIGIN,
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.describe.git.git_is_repo",
+                        return_value=True,
+                    ),
+                    patch(
+                        "atelier.commands.describe.git.git_current_branch",
+                        return_value=branch,
+                    ),
+                    patch(
+                        "atelier.commands.describe.git.git_is_clean",
+                        return_value=True,
+                    ),
+                    patch(
+                        "atelier.commands.describe.git.git_has_remote_branch",
+                    ) as pushed_mock,
+                    patch(
+                        "atelier.commands.describe.git.git_tag_exists",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.describe.git.git_default_branch",
+                        return_value="main",
+                    ),
+                    patch(
+                        "atelier.commands.describe.git.git_commits_ahead",
+                        side_effect=[0, 0],
+                    ),
+                    patch(
+                        "atelier.commands.describe.git.git_diff_stat",
+                        return_value=[],
+                    ),
+                    patch(
+                        "atelier.commands.describe.git.git_last_commit",
+                        return_value={
+                            "hash": "deadbeef",
+                            "short_hash": "deadbeef",
+                            "timestamp": 1700000000,
+                            "author": "Test User",
+                            "subject": "feat: add demo",
+                        },
+                    ),
+                    patch("sys.stdout", buffer),
+                ):
+                    describe_cmd(
+                        SimpleNamespace(
+                            workspace_name=branch,
+                            finalized=False,
+                            no_finalized=False,
+                            format="json",
+                        )
+                    )
+                payload = json.loads(buffer.getvalue())
+                workspace_payload = payload["workspace"]
+                assert workspace_payload["pushed"] is None
+                assert workspace_payload["branch_pr"] is False
+                assert workspace_payload["branch_history"] == "rebase"
+                assert workspace_payload["state"] == "no changes"
+                pushed_mock.assert_not_called()
             finally:
                 os.chdir(original_cwd)
