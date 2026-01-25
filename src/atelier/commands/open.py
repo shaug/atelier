@@ -1003,6 +1003,11 @@ def open_workspace(args: object) -> None:
     skip_default_checkout = False
     skip_workspace_checkout = False
     if not repo_clean:
+        if current_branch == default_branch and workspace_branch != default_branch:
+            die(
+                "repo has uncommitted changes on default branch "
+                f"{default_branch!r}; commit/stash before switching"
+            )
         if current_branch not in {default_branch, workspace_branch}:
             die(
                 "repo has uncommitted changes on "

@@ -1730,6 +1730,91 @@ class TestOpenWorkspace:
             finally:
                 os.chdir(original_cwd)
 
+    def test_open_errors_on_dirty_default_branch(self, capsys) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            config_payload = write_open_config(project_dir, enlistment_path)
+
+            workspace_branch = "scott/feat-demo"
+            workspace_dir = paths.workspace_dir_for_branch(
+                project_dir,
+                workspace_branch,
+                workspace_id_for(enlistment_path, workspace_branch),
+            )
+            repo_dir = workspace_dir / "repo"
+            repo_dir.mkdir(parents=True)
+            subprocess.run(["git", "-C", str(repo_dir), "init"], check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_dir),
+                    "config",
+                    "user.email",
+                    "test@example.com",
+                ],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "config", "user.name", "Test User"],
+                check=True,
+            )
+            (repo_dir / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo_dir), "add", "README.md"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "commit", "-m", "chore: init"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "branch", "-M", "main"], check=True
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "branch", "scott/feat-demo"], check=True
+            )
+            (repo_dir / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_dir),
+                    "remote",
+                    "add",
+                    "origin",
+                    config_payload["project"]["repo_url"],
+                ],
+                check=True,
+            )
+            (workspace_dir / "AGENTS.md").write_text("stub\n", encoding="utf-8")
+            write_workspace_config(workspace_dir, workspace_branch, enlistment_path)
+
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                with (
+                    patch("atelier.exec.run_command", lambda *_args, **_kw: None),
+                    patch("atelier.codex.run_codex_command", fake_codex),
+                    patch("atelier.sessions.find_codex_session", return_value=None),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    with pytest.raises(SystemExit):
+                        open_cmd.open_workspace(
+                            SimpleNamespace(workspace_name="feat-demo")
+                        )
+
+                err = capsys.readouterr().err
+                assert "uncommitted changes on default branch" in err
+                assert "commit/stash before switching" in err
+            finally:
+                os.chdir(original_cwd)
+
     def test_open_does_not_modify_existing_workspace_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
