@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.6.0](https://github.com/shaug/atelier/compare/v0.5.0...v0.6.0) (2026-01-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove atelier snapshot command and related tests.
+
+### Features
+
+* add atelier new command ([8a6c4ad](https://github.com/shaug/atelier/commit/8a6c4ad4b490ce7161beba250d3fd2392109fa85))
+* add workspace snapshot command ([a8364d0](https://github.com/shaug/atelier/commit/a8364d048c565b78d9d0f937fe76463371746cb7))
+* **ai:** add optional helpers for workspace open ([7e87f39](https://github.com/shaug/atelier/commit/7e87f3911dd4013956ea537a1bc65c9ab26714f7))
+* **clean:** add dry-run preview ([62bcadd](https://github.com/shaug/atelier/commit/62bcaddd2ab0446fe40e0ab4f9490b153d80f03d))
+* **cli:** add describe command ([808ac4d](https://github.com/shaug/atelier/commit/808ac4dbad63a261265b7789982229929a01d5ed)), closes [#46](https://github.com/shaug/atelier/issues/46)
+* **cli:** add remove command and orphan cleanup ([c6f577a](https://github.com/shaug/atelier/commit/c6f577a52d6526ce982e751e6210a11549f8560b)), closes [#51](https://github.com/shaug/atelier/issues/51)
+* **cli:** add workspace root option ([9b2de34](https://github.com/shaug/atelier/commit/9b2de342b767fafe9c20f89581e2b92957ef6cc2)), closes [#47](https://github.com/shaug/atelier/issues/47)
+* **cli:** complete workspace names ([3fde23b](https://github.com/shaug/atelier/commit/3fde23b081470ac2921bf7a814c0ce605e69bf4a))
+* **codex:** capture session id via pty ([75297bb](https://github.com/shaug/atelier/commit/75297bb0fc089d59e73b6514fd295fd05807fefd)), closes [#33](https://github.com/shaug/atelier/issues/33)
+* **config:** add git path and provider metadata ([4cee306](https://github.com/shaug/atelier/commit/4cee30654360371a448ec84c1feca6be691eb946)), closes [#44](https://github.com/shaug/atelier/issues/44)
+* **config:** add ticket support ([6b7e5f1](https://github.com/shaug/atelier/commit/6b7e5f1293df50027d8cdf990c06db9709918c36))
+* **open:** add per-invocation yolo flag ([393b71a](https://github.com/shaug/atelier/commit/393b71a3e5cff1ed6143b85b99466c939c22772b))
+* **open:** derive ticket workspace names ([3015e21](https://github.com/shaug/atelier/commit/3015e21c9881fdaced9a5f904bd299f2538e4862))
+* **open:** enhance ticket workspace defaults ([336ef38](https://github.com/shaug/atelier/commit/336ef38d2dc9d6e4209bbe45f0c1f7242b7752ac))
+* remove snapshot command ([5e8224b](https://github.com/shaug/atelier/commit/5e8224bdd96775c82dc432b378837d2f16e6e259))
+* **templates:** align upgrade comparisons ([daa3aeb](https://github.com/shaug/atelier/commit/daa3aebc025acbde09c2afe0cc460bd709c304d9)), closes [#73](https://github.com/shaug/atelier/issues/73)
+* **term:** add iTerm2 title adapter ([b807538](https://github.com/shaug/atelier/commit/b807538acd2fb0d2eed75f2c5b92d915870cc60b))
+* **terminal:** add optional terminal adapter layer ([c3930da](https://github.com/shaug/atelier/commit/c3930da97f0badf70f171db9438a76d4a70573b5)), closes [#60](https://github.com/shaug/atelier/issues/60)
+* **test:** add curated doctest collection ([1f78691](https://github.com/shaug/atelier/commit/1f786916dcd945a1ce31f036e6f42ec7d4f601ff))
+* **workspace:** add workspace identity helpers ([35153ca](https://github.com/shaug/atelier/commit/35153cadd278d9c8985a27425f5e0144c02d8699)), closes [#50](https://github.com/shaug/atelier/issues/50)
+* **workspaces:** remove legacy WORKSPACE.md support ([9532515](https://github.com/shaug/atelier/commit/953251534bace38581acc4d4cbf390cc707e40ae)), closes [#34](https://github.com/shaug/atelier/issues/34) [#35](https://github.com/shaug/atelier/issues/35)
+* **workspace:** track base sha for committed work ([11d0358](https://github.com/shaug/atelier/commit/11d03589d71db266e8173a6dc40ca3ea2eb5f82c))
+
+
+### Bug Fixes
+
+* **clean:** guard remote branch deletion ([5897248](https://github.com/shaug/atelier/commit/5897248ac7fc47dacd8c7fb5cc1e6563ab666d0e))
+* **cli:** fallback to branches when no workspaces ([7d56258](https://github.com/shaug/atelier/commit/7d562589b31ed17b2f391d9880ce74509d96223e))
+* **cli:** handle shell completion env ([b779970](https://github.com/shaug/atelier/commit/b77997001b4566ad6e02cd56e3710f7c9c7b91f2))
+* **cli:** show completion options ([818e6de](https://github.com/shaug/atelier/commit/818e6de3df438700f9004968194c335cdf7f84d6))
+* **codex:** sync pty window size ([6d33456](https://github.com/shaug/atelier/commit/6d33456c336d9313d1b311fce95de1c2709c73d9))
+* **exec:** normalize editor command inputs ([bd6107a](https://github.com/shaug/atelier/commit/bd6107ad18d59b69be6bfd1d96b7f8f33380c4c6)), closes [#59](https://github.com/shaug/atelier/issues/59)
+* isolate codex sessions per workspace uid ([82ff375](https://github.com/shaug/atelier/commit/82ff375b774f7f9f3ee9c7699fe7f780a4464521))
+* **open:** clear finalization tags in both repos ([b759186](https://github.com/shaug/atelier/commit/b75918694b02a68bf973279fbcaa4b5631cad26f)), closes [#70](https://github.com/shaug/atelier/issues/70)
+* **open:** open success doc for new workspaces ([9e26f52](https://github.com/shaug/atelier/commit/9e26f524da0308e5ca3f3906599f34fc5b3d09a3)), closes [#38](https://github.com/shaug/atelier/issues/38)
+* **open:** prefer exact branch matches ([89091e2](https://github.com/shaug/atelier/commit/89091e258423fdd958eb6fd82e8dd4e58266db3b)), closes [#58](https://github.com/shaug/atelier/issues/58)
+* prefer exact branch matches in open ([00f7f4b](https://github.com/shaug/atelier/commit/00f7f4b3453dfa9208a028a96a90c8ddc24895b5))
+* **sessions:** require exact workspace token ([503e60a](https://github.com/shaug/atelier/commit/503e60a5862ef57ce6d42b32644fac2d749bad31)), closes [#53](https://github.com/shaug/atelier/issues/53)
+* **sessions:** scan jsonl for session_meta ([bf2a29a](https://github.com/shaug/atelier/commit/bf2a29a9940c58010cdabdd86a9f62c301cb2264)), closes [#71](https://github.com/shaug/atelier/issues/71)
+* **shell:** normalize --shell override ([9fe023d](https://github.com/shaug/atelier/commit/9fe023de2fd8685873c31d4dc0aea87d508d9288))
+* **template:** honor installed cache for template rendering ([1a1f3b3](https://github.com/shaug/atelier/commit/1a1f3b33708379389af7de049999da4455718925)), closes [#40](https://github.com/shaug/atelier/issues/40)
+* **upgrade:** handle orphaned workspace configs ([d5ba536](https://github.com/shaug/atelier/commit/d5ba536f9d1e3c66988a28e856bb3dcd6a1d41c8)), closes [#57](https://github.com/shaug/atelier/issues/57)
+* **upgrade:** migrate tickets in legacy config ([d29c30e](https://github.com/shaug/atelier/commit/d29c30ee38b00a3625b73b10b31cd67dc5e56b92))
+* **upgrade:** prompt on modified files ([f89e04b](https://github.com/shaug/atelier/commit/f89e04bfcec17accbc5d31767ccfb27efe33c781))
+* **upgrade:** prompt to remove legacy AGENTS ([2d5183a](https://github.com/shaug/atelier/commit/2d5183a23cffd7b24a68ab9ffd7582e0fde6e4d5))
+* **wezterm:** set pane title via OSC ([c6d67eb](https://github.com/shaug/atelier/commit/c6d67eb794f90665f752102fd489987058d47928))
+
+
+### Performance Improvements
+
+* **cli:** speed workspace completions ([3e2ef97](https://github.com/shaug/atelier/commit/3e2ef97ccf3c2ea999f8796170a38fe3ab0b5f04))
+
+
+### Miscellaneous Chores
+
+* release 0.6.0 ([d311b77](https://github.com/shaug/atelier/commit/d311b7798ddd9e27962b77fed22e08f619e18154))
+
 ## [0.5.0](https://github.com/shaug/atelier/compare/v0.4.0...v0.5.0) (2026-01-21)
 
 ### Overview
