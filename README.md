@@ -158,7 +158,8 @@ Atelier is intentionally small. The CLI:
       ├─ PROJECT.md
       ├─ templates/
       │  ├─ AGENTS.md
-      │  └─ SUCCESS.md
+      │  ├─ SUCCESS.md
+      │  └─ SUCCESS.ticket.md
       └─ workspaces/
          └─ <workspace-key>/
             ├─ AGENTS.md
@@ -394,7 +395,7 @@ atelier template success
 Options:
 
 - `--installed`: Use the installed template cache.
-- `--ticket`: Use the ticket SUCCESS.md template for workspace targets.
+- `--ticket`: Use the ticket `SUCCESS.md` template for workspace targets.
 - `--edit`: Open the resolved template in `editor.edit`.
 
 Examples:
@@ -402,6 +403,7 @@ Examples:
 ```sh
 atelier template workspace --edit
 atelier template workspace --installed
+atelier template workspace --ticket --edit
 ```
 
 ### `atelier edit [workspace-branch]`
@@ -444,8 +446,7 @@ Options:
 - `--raw`: Treat the argument as the full branch name (no prefix lookup).
 - `--branch-pr`: Override pull request expectation for this workspace.
 - `--branch-history`: Override history policy for this workspace.
-- `--ticket`: Ticket reference (repeatable or comma-separated). When no branch
-  is provided, the first ticket can be used to name the workspace.
+- `--ticket`: Ticket reference(s) to attach to the workspace.
 - `--edit` / `--no-edit`: Force or skip opening the policy doc in `editor.edit`.
 - `--yolo`: Enable the least-restrictive agent mode for this invocation.
 
@@ -455,6 +456,31 @@ Examples:
 atelier open scott/feat/new-search --raw
 atelier open feat/new-search --branch-history squash
 ```
+
+### Ticket-based workflows
+
+Atelier can attach ticket references to workspaces and use them for naming and
+templates.
+
+- Configure tickets in `config.user.json` (or `atelier config --prompt`) under
+  `tickets`:
+  - `provider`: `none|github|linear` (default `none`)
+  - `default_project`: optional default project (for GitHub, owner/repo)
+  - `default_namespace`: optional namespace for providers that need one (unused
+    in naming today)
+- `atelier open --ticket` accepts repeatable or comma-separated references. If
+  no branch is provided, the first ticket reference drives workspace naming.
+- Ticket refs can include a title (`GH-123 Fix login`, `GH-123: Fix login`).
+  Titles are trimmed to four words and slugified for the branch name.
+- With `tickets.provider=github` and `gh` installed, Atelier looks up the issue
+  title for naming; otherwise it prompts for an optional title.
+- For new workspaces, `--ticket` uses `templates/SUCCESS.ticket.md` when
+  present; otherwise it uses the built-in ticket template unless the project's
+  `templates/SUCCESS.md` has been customized. The ticket template renders
+  `${ticket-provider}`, `${ticket-id}`, and `${project-name}` and appends a
+  `## Tickets` section with the references.
+- Ticket refs are stored in the workspace `config.user.json` under
+  `tickets.refs`.
 
 ### `atelier work <workspace-branch>`
 

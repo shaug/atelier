@@ -34,7 +34,8 @@ Project directory (under the Atelier data dir):
       ├─ PROJECT.md
       ├─ templates/
       │  ├─ AGENTS.md
-      │  └─ SUCCESS.md
+      │  ├─ SUCCESS.md
+      │  └─ SUCCESS.ticket.md
       └─ workspaces/
 ```
 
@@ -80,6 +81,11 @@ Additional config notes:
   PATH).
 - `project.provider` metadata is optional; when unset, provider integrations are
   skipped.
+- `tickets.provider` controls ticket workflows (`none`, `github`, `linear`).
+  `atelier config --prompt` asks for the provider; when it is not `none`, it
+  also prompts for optional `tickets.default_project` and
+  `tickets.default_namespace` (reserved for providers that need a namespace and
+  not used for naming today).
 - Workspaces capture a base marker (`workspace.base`) with the default branch
   head SHA at creation time; it is used to detect committed work even after
   squash/rebase workflows and is never auto-updated.
@@ -89,6 +95,9 @@ Additional config notes:
 - `AGENTS.md` is generated from the project templates; it is the entry point for
   agent instructions inside each workspace.
 - `SUCCESS.md` is copied into new workspaces from the project templates.
+- `SUCCESS.ticket.md` is an optional ticket-focused template used when
+  `atelier open --ticket` creates a new workspace. It supports
+  `${ticket-provider}`, `${ticket-id}`, and `${project-name}` placeholders.
 - `PERSIST.md` is generated per workspace to describe integration expectations.
 - `BACKGROUND.md` is created only when a workspace is created from an existing
   branch.
@@ -124,15 +133,19 @@ Atelier workspaces use consistent command words in `PERSIST.md`/`AGENTS.md`:
   - Resolves a workspace name (prefixed unless `--raw`).
   - Implicit open is allowed only when the current branch is non-default, clean,
     and fully pushed to its upstream.
-  - `--ticket` can be repeated (or comma-separated) to attach ticket refs. When
-    no branch is provided, the first ticket can be used to derive the workspace
-    name; new workspaces also seed `SUCCESS.md` using the ticket template.
+  - `--ticket` can be repeated (or comma-separated) to attach ticket refs.
   - Ensures project scaffolding and handles template upgrades per policy.
   - Creates workspace metadata and config when missing.
   - Clones the repo into `repo/` if missing, checks out the workspace branch,
     and optionally creates it.
   - Prints a workspace banner (name + path).
   - Prompts to remove an existing finalization tag before reopening.
+  - When `--ticket` is supplied, the first ticket reference can drive workspace
+    naming when no branch is provided (best-effort GitHub title lookup when
+    `tickets.provider=github` and `gh` is available; otherwise prompts for an
+    optional title). New workspaces render the ticket template when available,
+    append a `## Tickets` section to `SUCCESS.md`, and store refs in the
+    workspace config.
   - Opens the workspace policy doc on first creation unless `--no-edit` is set
     (or forced via `--edit`), then resumes or starts the agent session.
   - `--yolo` adds the least-restrictive agent flags for that invocation.
@@ -200,6 +213,13 @@ Atelier workspaces use consistent command words in `PERSIST.md`/`AGENTS.md`:
   - `--all-projects` targets every project in the data dir.
   - `--no-projects` or `--no-workspaces` restricts what gets upgraded.
   - `--dry-run` shows planned changes; `--yes` applies without confirmation.
+
+- `atelier template` / `atelier edit`
+
+  - Provide explicit control over template updates and editing of project or
+    workspace policy documents.
+  - `atelier template --ticket` prints/edits the `SUCCESS.ticket.md` template
+    for workspace targets.
 
 ## Non-goals
 
