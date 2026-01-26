@@ -771,6 +771,9 @@ Upgrade project/workspace metadata and templates.
 - `--no-workspaces` skips workspace upgrades
 - `--dry-run` prints planned changes without applying them
 - `--yes` applies without confirmation prompts
+- `--keep-modified` skips upgrading files modified since the last upgrade
+- When a managed file is modified, prompt before overwriting it unless
+  `--keep-modified` (or `--yes` to accept).
 
 ______________________________________________________________________
 

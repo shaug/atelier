@@ -743,6 +743,13 @@ def upgrade_command(
         bool,
         typer.Option("--dry-run", help="show planned changes only"),
     ] = False,
+    keep_modified: Annotated[
+        bool,
+        typer.Option(
+            "--keep-modified",
+            help="skip upgrading files that were modified since the last upgrade",
+        ),
+    ] = False,
     yes: Annotated[
         bool,
         typer.Option("--yes", help="apply without confirmation"),
@@ -757,6 +764,7 @@ def upgrade_command(
             no_projects=no_projects,
             no_workspaces=no_workspaces,
             dry_run=dry_run,
+            keep_modified=keep_modified,
             yes=yes,
         )
     )

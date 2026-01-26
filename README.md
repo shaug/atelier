@@ -617,6 +617,7 @@ Options:
 - `--no-projects`: Skip project upgrades.
 - `--no-workspaces`: Skip workspace upgrades.
 - `--dry-run`: Show planned changes only.
+- `--keep-modified`: Skip upgrading files modified since the last upgrade.
 - `--yes`: Apply without confirmation.
 
 ## Development

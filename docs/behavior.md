@@ -213,6 +213,7 @@ Atelier workspaces use consistent command words in `PERSIST.md`/`AGENTS.md`:
   - `--all-projects` targets every project in the data dir.
   - `--no-projects` or `--no-workspaces` restricts what gets upgraded.
   - `--dry-run` shows planned changes; `--yes` applies without confirmation.
+  - Prompts before overwriting modified managed files unless `--keep-modified`.
 
 - `atelier template` / `atelier edit`
 

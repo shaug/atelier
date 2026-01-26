@@ -491,6 +491,8 @@ def plan_agents_file(
     canonical_text: str,
     stored_hash: str | None,
     update_hash: Callable[[str], None] | None,
+    auto_yes: bool,
+    keep_modified: bool,
     create: Callable[[], None] | None = None,
     write_text: Callable[[str], None] | None = None,
     replacement_text: str | None = None,
@@ -519,8 +521,16 @@ def plan_agents_file(
         unmodified = current_text == canonical_text
 
     if not unmodified:
-        plan.skips.append(PlanSkip(description=description, reason="modified"))
-        return
+        if keep_modified:
+            plan.skips.append(PlanSkip(description=description, reason="modified"))
+            return
+        if not auto_yes:
+            prompt = (
+                f"{description} appears modified. Overwrite with the latest template?"
+            )
+            if not confirm(prompt):
+                plan.skips.append(PlanSkip(description=description, reason="kept"))
+                return
 
     if current_text != canonical_text:
 
@@ -547,6 +557,9 @@ def plan_agents_file(
 def plan_project_agents(
     plan: UpgradePlan,
     project: ProjectTarget,
+    *,
+    auto_yes: bool,
+    keep_modified: bool,
 ) -> None:
     canonical = templates.agents_template(prefer_installed_if_modified=True)
     managed = project.config.atelier.managed_files
@@ -565,6 +578,8 @@ def plan_project_agents(
         canonical_text=canonical,
         stored_hash=managed.get(template_key),
         update_hash=update_template_hash,
+        auto_yes=auto_yes,
+        keep_modified=keep_modified,
         write_text=lambda text: template_agents_path.write_text(text, encoding="utf-8"),
     )
 
@@ -604,7 +619,13 @@ def plan_project_agents(
                 )
 
 
-def plan_workspace_agents(plan: UpgradePlan, target: WorkspaceTarget) -> None:
+def plan_workspace_agents(
+    plan: UpgradePlan,
+    target: WorkspaceTarget,
+    *,
+    auto_yes: bool,
+    keep_modified: bool,
+) -> None:
     canonical = templates.workspace_agents_template(prefer_installed_if_modified=True)
     managed = target.config.atelier.managed_files
     workspace_label_text = workspace_label(target)
@@ -636,13 +657,21 @@ def plan_workspace_agents(plan: UpgradePlan, target: WorkspaceTarget) -> None:
         canonical_text=canonical,
         stored_hash=managed.get(agents_key),
         update_hash=agents_hash_updater,
+        auto_yes=auto_yes,
+        keep_modified=keep_modified,
         create=create_agents,
         write_text=lambda text: agents_path.write_text(text, encoding="utf-8"),
         replacement_text=source_text,
     )
 
 
-def plan_workspace_persist(plan: UpgradePlan, target: WorkspaceTarget) -> None:
+def plan_workspace_persist(
+    plan: UpgradePlan,
+    target: WorkspaceTarget,
+    *,
+    auto_yes: bool,
+    keep_modified: bool,
+) -> None:
     workspace_label_text = workspace_label(target)
     branch_pr = target.config.workspace.branch_pr
     branch_history = target.config.workspace.branch_history
@@ -669,6 +698,8 @@ def plan_workspace_persist(plan: UpgradePlan, target: WorkspaceTarget) -> None:
         canonical_text=canonical,
         stored_hash=managed.get(persist_key),
         update_hash=update_persist_hash,
+        auto_yes=auto_yes,
+        keep_modified=keep_modified,
         write_text=lambda text: persist_path.write_text(text, encoding="utf-8"),
     )
 
@@ -763,6 +794,7 @@ def upgrade(args: object) -> None:
     no_workspaces = bool(getattr(args, "no_workspaces", False))
     dry_run = bool(getattr(args, "dry_run", False))
     auto_yes = bool(getattr(args, "yes", False))
+    keep_modified = bool(getattr(args, "keep_modified", False))
 
     if all_projects and no_projects:
         die("--all-projects and --no-projects cannot be combined")
@@ -814,7 +846,12 @@ def upgrade(args: object) -> None:
     if projects and not no_projects:
         for project in projects:
             plan_project_templates(plan, project)
-            plan_project_agents(plan, project)
+            plan_project_agents(
+                plan,
+                project,
+                auto_yes=auto_yes,
+                keep_modified=keep_modified,
+            )
             if refresh_project_templates:
                 plan_project_template_refresh(plan, project)
 
@@ -839,8 +876,18 @@ def upgrade(args: object) -> None:
 
         for target in workspace_targets:
             plan_workspace_config_repair(plan, target)
-            plan_workspace_agents(plan, target)
-            plan_workspace_persist(plan, target)
+            plan_workspace_agents(
+                plan,
+                target,
+                auto_yes=auto_yes,
+                keep_modified=keep_modified,
+            )
+            plan_workspace_persist(
+                plan,
+                target,
+                auto_yes=auto_yes,
+                keep_modified=keep_modified,
+            )
 
     summarize_plan(plan, dry_run=dry_run)
     if not plan.actions:
