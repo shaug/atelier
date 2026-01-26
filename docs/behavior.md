@@ -124,14 +124,18 @@ Atelier workspaces use consistent command words in `PERSIST.md`/`AGENTS.md`:
   - Resolves a workspace name (prefixed unless `--raw`).
   - Implicit open is allowed only when the current branch is non-default, clean,
     and fully pushed to its upstream.
+  - `--ticket` can be repeated (or comma-separated) to attach ticket refs. When
+    no branch is provided, the first ticket can be used to derive the workspace
+    name; new workspaces also seed `SUCCESS.md` using the ticket template.
   - Ensures project scaffolding and handles template upgrades per policy.
   - Creates workspace metadata and config when missing.
   - Clones the repo into `repo/` if missing, checks out the workspace branch,
     and optionally creates it.
   - Prints a workspace banner (name + path).
   - Prompts to remove an existing finalization tag before reopening.
-  - Opens the workspace policy doc on first creation, then resumes or starts the
-    agent session.
+  - Opens the workspace policy doc on first creation unless `--no-edit` is set
+    (or forced via `--edit`), then resumes or starts the agent session.
+  - `--yolo` adds the least-restrictive agent flags for that invocation.
   - Exposes workspace identity via `ATELIER_*` environment variables for editors
     and agents.
 
@@ -141,7 +145,32 @@ Atelier workspaces use consistent command words in `PERSIST.md`/`AGENTS.md`:
   - Do not create new workspaces.
   - `--workspace` targets the workspace root instead of `repo/`.
   - `--set-title` emits a terminal title escape (best-effort).
+  - `atelier shell --shell` overrides the interactive shell selection.
   - Exposes workspace identity via `ATELIER_*` environment variables.
+
+- `atelier config`
+
+  - Prints merged project config or workspace config when a branch is provided.
+  - `--installed`, `--prompt`, `--reset`, and `--edit` operate on user-editable
+    defaults (no workspace branch allowed with those flags).
+
+- `atelier template`
+
+  - Prints or edits templates for `project`, `workspace`, or `success` targets.
+  - `--ticket` selects the ticket SUCCESS.md template for workspace targets.
+  - `--installed` uses the installed template cache; `--edit` opens in
+    `editor.edit`.
+
+- `atelier edit`
+
+  - Opens `PROJECT.md` (`--project`) or a workspace `SUCCESS.md` in
+    `editor.edit`.
+
+- `atelier snapshot`
+
+  - Writes a `SNAPSHOT.md` file in the workspace root.
+  - Captures the policy files, git status, mainline diff summary, and
+    best-effort agent session metadata.
 
 - `atelier describe`
 
@@ -170,10 +199,13 @@ Atelier workspaces use consistent command words in `PERSIST.md`/`AGENTS.md`:
   - Supports removing a single project, all projects, or orphaned projects.
   - Never touches user repos.
 
-- `atelier upgrade` / `atelier template` / `atelier edit`
+- `atelier upgrade`
 
-  - Provide explicit control over template updates and editing of project or
-    workspace policy documents.
+  - Applies managed template and config migrations for projects/workspaces.
+  - `--installed` refreshes the installed template cache.
+  - `--all-projects` targets every project in the data dir.
+  - `--no-projects` or `--no-workspaces` restricts what gets upgraded.
+  - `--dry-run` shows planned changes; `--yes` applies without confirmation.
 
 ## Non-goals
 

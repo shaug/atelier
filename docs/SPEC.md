@@ -154,6 +154,11 @@ left behind.
       "code"
     ]
   },
+  "tickets": {
+    "provider": "github",
+    "default_project": "org/repo",
+    "default_namespace": "org"
+  },
   "atelier": {
     "version": "0.2.0",
     "created_at": "2026-01-15T01:10:00Z",
@@ -184,6 +189,10 @@ left behind.
 - `editor.work` should be non-blocking by default (omit `-w`)
 - `agent.options` are **static argv fragments only**
 - `editor.edit` and `editor.work` are **argv lists** (command + args)
+- `tickets.provider` controls ticket lookups for `atelier open --ticket`
+  (supported values: `none`, `github`, `linear`)
+- `tickets.default_project` and `tickets.default_namespace` provide defaults for
+  ticket resolution when supported
 - No templating, interpolation, or logic is supported in config
 - Agent CLIs are assumed to be installed and authenticated by the user
 - Atelier validates that the configured agent is available on PATH (using
@@ -492,6 +501,8 @@ Print or edit the templates used to seed new documents.
 - `workspace`/`success` resolves the `SUCCESS.md` template
 - Resolution order: project template → installed cache → built-in default
 - `--installed` bypasses the project template (redundant for `project`)
+- `--ticket` resolves `SUCCESS.ticket.md` for workspace targets (ignored for
+  `project`)
 - `--edit` opens the resolved template in `editor.edit`, creating the file when
   missing
 
@@ -576,6 +587,12 @@ Ensures a workspace exists and launches or resumes agent work.
 - `--branch-history <manual|squash|merge|rebase>` overrides `branch.history` for
   new workspaces and is stored in the workspace config. For existing workspaces,
   the value must match the workspace config or `atelier open` errors.
+- `--ticket <ref>` attaches ticket references (repeatable or comma-separated).
+  When no branch is provided, the first ticket can be used to derive the
+  workspace name; new workspaces also seed `SUCCESS.md` from the ticket template
+  when available.
+- `--edit` / `--no-edit` forces or skips opening the policy doc in `editor.edit`
+  for the current invocation.
 - `--yolo` adds the agent's least-restrictive flag(s) for this invocation only
   and does not modify configs.
 
@@ -647,6 +664,92 @@ Run a command in the workspace repo.
 - Runs the command directly (no shell wrapping) in `<workspace>/repo`
 - `--workspace` runs the command in `<workspace>`
 - Supports `--set-title` and `ATELIER_*` environment variables
+
+______________________________________________________________________
+
+### `atelier snapshot <workspace-branch>`
+
+Write a workspace snapshot to `SNAPSHOT.md`.
+
+#### Behavior
+
+- Must be run inside a Git repository
+- Resolves the workspace using the project branch prefix (like `atelier open`)
+- Writes `SNAPSHOT.md` in the workspace root
+- Includes policy docs, git status, mainline comparison, tracked file list, and
+  best-effort session metadata
+
+______________________________________________________________________
+
+### `atelier describe [workspace-branch]`
+
+Show project overview or detailed workspace status.
+
+#### Behavior
+
+- Must be run inside a Git repository
+- With no workspace name, prints a project summary plus a workspace table
+- With a workspace name, prints detailed status (clean/dirty, ahead/behind,
+  diffstat, last commit)
+- `--finalized` shows only finalized workspaces in the project summary
+- `--no-finalized` excludes finalized workspaces in the project summary
+- `--format table|json` controls the output format
+
+______________________________________________________________________
+
+### `atelier list`
+
+List workspaces for the current project.
+
+#### Behavior
+
+- Must be run inside a Git repository
+- Prints workspace branch names (one per line)
+
+______________________________________________________________________
+
+### `atelier clean [workspace-branch ...]`
+
+Delete workspace directories safely.
+
+#### Behavior
+
+- Must be run inside a Git repository
+- Defaults to finalized workspaces (local finalization tag)
+- `--dry-run` shows planned deletions without removing anything
+- `--all`/`-A` includes unfinalized workspaces
+- `--yes`/`-y` skips confirmation prompts
+- `--no-branch` preserves local and remote branches
+- `--orphans` removes orphaned workspaces (missing config or repo)
+
+______________________________________________________________________
+
+### `atelier remove [project-dir-name]` / `atelier rm`
+
+Remove project metadata from the Atelier data directory.
+
+#### Behavior
+
+- `--all` removes all projects
+- `--installed` deletes the entire Atelier data directory
+- `--orphans` removes orphaned projects (missing enlistment path)
+- Never deletes user repos
+
+______________________________________________________________________
+
+### `atelier upgrade [workspace-branch ...]`
+
+Upgrade project/workspace metadata and templates.
+
+#### Behavior
+
+- Must be run inside a Git repository unless `--all-projects` is used
+- `--installed` refreshes the installed template cache
+- `--all-projects` targets every project in the data directory
+- `--no-projects` skips project upgrades
+- `--no-workspaces` skips workspace upgrades
+- `--dry-run` prints planned changes without applying them
+- `--yes` applies without confirmation prompts
 
 ______________________________________________________________________
 

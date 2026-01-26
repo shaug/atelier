@@ -369,6 +369,7 @@ Options:
 - `--installed`: Operate on installed defaults instead of the current project.
 - `--prompt`: Prompt for user-editable settings (branch/agent/editor roles).
 - `--reset`: Reset user-editable settings to installed defaults.
+- `--edit`: Edit user config in `editor.edit`.
 
 Examples:
 
@@ -393,6 +394,7 @@ atelier template success
 Options:
 
 - `--installed`: Use the installed template cache.
+- `--ticket`: Use the ticket SUCCESS.md template for workspace targets.
 - `--edit`: Open the resolved template in `editor.edit`.
 
 Examples:
@@ -412,6 +414,10 @@ Usage:
 atelier edit --project
 atelier edit scott/feat/new-search
 ```
+
+Options:
+
+- `--project`: Edit `PROJECT.md` for the current project.
 
 ### `atelier open [workspace-branch]`
 
@@ -438,6 +444,10 @@ Options:
 - `--raw`: Treat the argument as the full branch name (no prefix lookup).
 - `--branch-pr`: Override pull request expectation for this workspace.
 - `--branch-history`: Override history policy for this workspace.
+- `--ticket`: Ticket reference (repeatable or comma-separated). When no branch
+  is provided, the first ticket can be used to name the workspace.
+- `--edit` / `--no-edit`: Force or skip opening the policy doc in `editor.edit`.
+- `--yolo`: Enable the least-restrictive agent mode for this invocation.
 
 Examples:
 
@@ -451,17 +461,43 @@ atelier open feat/new-search --branch-history squash
 Open a workspace repo in `editor.work` without blocking the CLI. Use
 `--workspace` to open the workspace root instead of `repo/`.
 
+Options:
+
+- `--workspace`: Open the workspace root instead of `repo/`.
+- `--set-title`: Emit a terminal title escape.
+
 ### `atelier shell <workspace-branch> [--] [command ...]`
 
 Open a shell in the workspace repo, or run a command there. Use `--shell` to
 override the interactive shell selection. Use `--workspace` to run in the
 workspace root instead of `repo/`.
 
+Options:
+
+- `--shell`: Shell path or name for interactive mode.
+- `--workspace`: Run in the workspace root instead of `repo/`.
+- `--set-title`: Emit a terminal title escape.
+
 ### `atelier exec <workspace-branch> [--] [command ...]`
 
 Run a command in the workspace repo. This is an alias for `atelier shell` in
 command-execution mode and requires a command. Use `--workspace` to run in the
 workspace root instead of `repo/`.
+
+Options:
+
+- `--workspace`: Run in the workspace root instead of `repo/`.
+- `--set-title`: Emit a terminal title escape.
+
+### `atelier snapshot <workspace-branch>`
+
+Write a workspace snapshot (`SNAPSHOT.md`) with current status details.
+
+Usage:
+
+```sh
+atelier snapshot <workspace-branch>
+```
 
 ### `atelier describe [workspace-branch]`
 
@@ -545,6 +581,27 @@ Options:
 - `--installed`: Delete the entire Atelier data directory (projects +
   templates).
 - `--orphans`: Remove orphaned projects (missing enlistment path).
+
+### `atelier upgrade [workspace-branch ...]`
+
+Upgrade project/workspace metadata and templates safely.
+
+Usage:
+
+```sh
+atelier upgrade
+atelier upgrade feat/old-branch
+atelier upgrade --all-projects --dry-run
+```
+
+Options:
+
+- `--installed`: Refresh the installed template cache.
+- `--all-projects`: Upgrade all projects in the data directory.
+- `--no-projects`: Skip project upgrades.
+- `--no-workspaces`: Skip workspace upgrades.
+- `--dry-run`: Show planned changes only.
+- `--yes`: Apply without confirmation.
 
 ## Development
 
