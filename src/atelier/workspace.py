@@ -82,6 +82,64 @@ def generate_workspace_uid() -> str:
     return str(uuid.uuid4())
 
 
+def capture_workspace_base(
+    project_enlistment: str, *, git_path: str | None = None
+) -> dict[str, str] | None:
+    """Capture the default-branch head SHA for a new workspace."""
+    repo_dir = Path(project_enlistment)
+    if not repo_dir.exists() or not git.git_is_repo(repo_dir, git_path=git_path):
+        return None
+    default_branch = git.git_default_branch(repo_dir, git_path=git_path)
+    if not default_branch:
+        return None
+    sha = git.git_rev_parse(repo_dir, default_branch, git_path=git_path)
+    if not sha:
+        sha = git.git_rev_parse(
+            repo_dir, f"refs/remotes/origin/{default_branch}", git_path=git_path
+        )
+    if not sha:
+        return None
+    return {
+        "default_branch": default_branch,
+        "sha": sha,
+        "captured_at": config.utc_now(),
+    }
+
+
+def workspace_base_payload(
+    workspace_config: config.WorkspaceConfig | None,
+) -> dict[str, str] | None:
+    """Return base metadata from a workspace config, if available."""
+    if workspace_config is None:
+        return None
+    base = workspace_config.workspace.base
+    if base is None:
+        return None
+    return {
+        "default_branch": base.default_branch,
+        "sha": base.sha,
+        "captured_at": base.captured_at,
+    }
+
+
+def workspace_committed_work(
+    repo_dir: Path | None,
+    workspace_branch: str,
+    base_sha: str | None,
+    *,
+    git_path: str | None = None,
+) -> tuple[int | None, bool | None]:
+    """Return commit count and committed-work flag relative to a base SHA."""
+    if repo_dir is None or not base_sha:
+        return None, None
+    count = git.git_commits_ahead(
+        repo_dir, base_sha, workspace_branch, git_path=git_path
+    )
+    if count is None:
+        return None, None
+    return count, count > 0
+
+
 def workspace_candidate_branches(name: str, branch_prefix: str, raw: bool) -> list[str]:
     """Generate candidate branch names for a workspace lookup.
 
@@ -317,6 +375,7 @@ def ensure_workspace_metadata(
     branch_pr: bool,
     branch_history: str,
     upgrade_policy: str | None,
+    git_path: str | None = None,
 ) -> None:
     """Ensure workspace config and managed workspace files exist.
 
@@ -331,6 +390,7 @@ def ensure_workspace_metadata(
         branch_pr: Whether pull requests are expected.
         branch_history: History policy (manual|squash|merge|rebase).
         upgrade_policy: Template upgrade policy (always|ask|manual).
+        git_path: Optional git executable path.
 
     Returns:
         None.
@@ -344,14 +404,18 @@ def ensure_workspace_metadata(
     if not workspace_sys_path.exists():
         workspace_id = workspace_identifier(project_enlistment, workspace_branch)
         workspace_uid = generate_workspace_uid()
+        base_payload = capture_workspace_base(project_enlistment, git_path=git_path)
+        workspace_section = {
+            "branch": workspace_branch,
+            "branch_pr": branch_pr,
+            "branch_history": branch_history,
+            "id": workspace_id,
+            "uid": workspace_uid,
+        }
+        if base_payload:
+            workspace_section["base"] = base_payload
         system_config = config.WorkspaceSystemConfig(
-            workspace={
-                "branch": workspace_branch,
-                "branch_pr": branch_pr,
-                "branch_history": branch_history,
-                "id": workspace_id,
-                "uid": workspace_uid,
-            },
+            workspace=workspace_section,
             atelier={
                 "version": __version__,
                 "created_at": config.utc_now(),
@@ -678,6 +742,7 @@ def collect_workspaces(
         branch = payload.workspace.branch
         branch_pr = payload.workspace.branch_pr
         branch_history = payload.workspace.branch_history
+        base = workspace_base_payload(payload)
         if branch_pr is None:
             branch_pr = config_payload.branch.pr
         if branch_history is None:
@@ -692,6 +757,8 @@ def collect_workspaces(
         mainline_branch: str | None = None
         ahead: int | None = None
         behind: int | None = None
+        work_commits: int | None = None
+        committed_work: bool | None = None
         if with_status:
             finalization_tag = finalization_tag_name(branch)
             if repo_dir.exists() and git.git_is_repo(repo_dir, git_path=git_path):
@@ -717,6 +784,13 @@ def collect_workspaces(
                     behind = git.git_commits_ahead(
                         repo_dir, branch, mainline_branch, git_path=git_path
                     )
+                base_sha = base.get("sha") if base else None
+                work_commits, committed_work = workspace_committed_work(
+                    repo_dir,
+                    branch,
+                    base_sha,
+                    git_path=git_path,
+                )
             if main_repo_dir is not None:
                 if finalized is not True:
                     finalized = git.git_tag_exists(
@@ -734,6 +808,9 @@ def collect_workspaces(
             "clean": clean,
             "pushed": pushed,
             "finalized": finalized,
+            "base": base,
+            "work_commits": work_commits,
+            "committed_work": committed_work,
             "mainline": {
                 "branch": mainline_branch,
                 "ahead": ahead,

@@ -280,6 +280,11 @@ enlistment path to form the workspace ID.
     "branch_pr": true,
     "branch_history": "manual",
     "id": "atelier:/path/to/gumshoe:scott/feat-org-api-keys",
+    "base": {
+      "default_branch": "main",
+      "sha": "f5a1d2e3c4b5a6d7e8f9a0b1c2d3e4f5a6b7c8d9",
+      "captured_at": "2026-01-15T02:03:00Z"
+    },
     "session": {
       "agent": "codex",
       "id": "sess-123",
@@ -294,6 +299,9 @@ enlistment path to form the workspace ID.
 }
 ```
 
+`workspace.base` is optional, system-managed metadata captured at workspace
+creation. It records the default branch head SHA to help detect committed work
+even after squash/rebase workflows. It is captured once and never auto-updated.
 `workspace.session` is optional, system-managed metadata used for agent session
 resumption and may be updated by `atelier open`.
 

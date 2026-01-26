@@ -796,6 +796,7 @@ def open_workspace(args: object) -> None:
             branch_pr=effective_branch_pr,
             branch_history=effective_branch_history,
             upgrade_policy=project_upgrade_policy,
+            git_path=git_path,
         )
         workspace_managed_updates = config.managed_workspace_agents_updates(
             workspace_dir

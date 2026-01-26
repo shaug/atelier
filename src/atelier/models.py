@@ -457,6 +457,36 @@ class WorkspaceSession(BaseModel):
     resume_command: str | None = None
 
 
+class WorkspaceBase(BaseModel):
+    """Workspace base marker captured at creation time.
+
+    Attributes:
+        default_branch: Default branch name at capture time.
+        sha: Commit SHA captured from the default branch head.
+        captured_at: ISO-8601 UTC timestamp for when the base was recorded.
+
+    Example:
+        >>> WorkspaceBase(default_branch="main", sha="abc123")
+        WorkspaceBase(...)
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    default_branch: str | None = None
+    sha: str | None = None
+    captured_at: str | None = None
+
+    @field_validator("default_branch", "sha", "captured_at", mode="before")
+    @classmethod
+    def normalize_optional_strings(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+
+
 class WorkspaceSection(BaseModel):
     """Workspace-specific configuration.
 
@@ -466,6 +496,7 @@ class WorkspaceSection(BaseModel):
         branch_history: History policy (manual|squash|merge|rebase).
         id: Workspace identifier string.
         uid: Unique workspace instance identifier.
+        base: Captured base branch metadata.
         session: Agent session metadata.
 
     Example:
@@ -480,6 +511,7 @@ class WorkspaceSection(BaseModel):
     branch_history: BranchHistory = "manual"
     id: str | None = None
     uid: str | None = None
+    base: WorkspaceBase | None = None
     session: WorkspaceSession | None = None
 
     @field_validator("branch_history", mode="before")

@@ -211,6 +211,7 @@ def _workspace_summary(item: dict) -> dict[str, object]:
         branch_pr=item.get("branch_pr"),
         branch_history=item.get("branch_history"),
         pushed=item.get("pushed"),
+        committed_work=item.get("committed_work"),
         mainline=item.get("mainline"),
     )
     return {
@@ -227,6 +228,9 @@ def _workspace_summary(item: dict) -> dict[str, object]:
         "clean": item.get("clean"),
         "pushed": item.get("pushed"),
         "finalized": item.get("finalized"),
+        "base": item.get("base"),
+        "work_commits": item.get("work_commits"),
+        "committed_work": item.get("committed_work"),
         "state": state,
         "mainline": item.get("mainline"),
     }
@@ -251,6 +255,9 @@ def _workspace_detail(
     behind = None
     diff_stat: list[str] = []
     last_commit: dict[str, object] | None = None
+    base = workspace.workspace_base_payload(workspace_config)
+    work_commits: int | None = None
+    committed_work: bool | None = None
 
     if repo_dir is not None:
         current_branch = git.git_current_branch(repo_dir, git_path=git_path)
@@ -275,6 +282,13 @@ def _workspace_detail(
             diff_stat = git.git_diff_stat(
                 repo_dir, mainline_branch, branch, git_path=git_path
             )
+        base_sha = base.get("sha") if base else None
+        work_commits, committed_work = workspace.workspace_committed_work(
+            repo_dir,
+            branch,
+            base_sha,
+            git_path=git_path,
+        )
         last_commit = git.git_last_commit(repo_dir, branch, git_path=git_path)
 
     state = _derive_workspace_state(
@@ -283,6 +297,7 @@ def _workspace_detail(
         branch_pr=branch_pr,
         branch_history=branch_history,
         pushed=pushed,
+        committed_work=committed_work,
         mainline={
             "branch": mainline_branch,
             "ahead": ahead,
@@ -303,6 +318,9 @@ def _workspace_detail(
         "dirty": None if clean is None else not clean,
         "pushed": pushed,
         "finalized": finalized,
+        "base": base,
+        "work_commits": work_commits,
+        "committed_work": committed_work,
         "state": state,
         "mainline": {
             "branch": mainline_branch,
@@ -401,6 +419,7 @@ def _derive_workspace_state(
     branch_pr: bool | None,
     branch_history: str | None,
     pushed: bool | None,
+    committed_work: bool | None,
     mainline: dict[str, object] | None,
 ) -> str:
     if finalized is True:
@@ -426,6 +445,8 @@ def _derive_workspace_state(
     if ahead == 0:
         if needs_rebase:
             return "needs rebase"
+        if committed_work is True:
+            return "work done"
         return "no changes"
     if needs_rebase:
         return "needs rebase"
@@ -482,6 +503,7 @@ def _render_project_table(
     table = Table(title="Workspaces", box=box.SIMPLE)
     table.add_column("Workspace", no_wrap=True)
     table.add_column("State", no_wrap=True)
+    table.add_column("Work", justify="center")
     table.add_column("Finalized", justify="center")
     table.add_column("Checked out", justify="center")
     table.add_column("Clean", justify="center")
@@ -493,6 +515,7 @@ def _render_project_table(
         table.add_row(
             str(item.get("name", "")),
             _display_value(item.get("state")),
+            workspace.format_status(item.get("committed_work")),
             workspace.format_status(item.get("finalized")),
             "" if finalized else workspace.format_status(item.get("checked_out")),
             "" if finalized else workspace.format_status(item.get("clean")),
@@ -545,7 +568,16 @@ def _render_workspace_table(
     workspace_table.add_row(
         "Finalized", workspace.format_status(detail.get("finalized"))
     )
+    if detail.get("base") is not None:
+        workspace_table.add_row("Starting point", _format_base(detail.get("base")))
     workspace_table.add_row("State", _display_value(detail.get("state")))
+    workspace_table.add_row(
+        "Committed work", workspace.format_status(detail.get("committed_work"))
+    )
+    if detail.get("work_commits") is not None:
+        workspace_table.add_row(
+            "Work commits", _display_value(detail.get("work_commits"))
+        )
     if not finalized:
         workspace_table.add_row(
             "Checked out", workspace.format_status(detail.get("checked_out"))
@@ -594,4 +626,19 @@ def _format_commit(value: object) -> str:
         return str(short_hash)
     if subject:
         return str(subject)
+    return "unknown"
+
+
+def _format_base(value: object) -> str:
+    if not isinstance(value, dict):
+        return "unknown"
+    branch = value.get("default_branch") or ""
+    sha = value.get("sha") or ""
+    short_sha = sha[:8] if isinstance(sha, str) and sha else ""
+    if branch and short_sha:
+        return f"{branch}@{short_sha}"
+    if branch:
+        return str(branch)
+    if short_sha:
+        return str(short_sha)
     return "unknown"

@@ -80,6 +80,9 @@ Additional config notes:
   PATH).
 - `project.provider` metadata is optional; when unset, provider integrations are
   skipped.
+- Workspaces capture a base marker (`workspace.base`) with the default branch
+  head SHA at creation time; it is used to detect committed work even after
+  squash/rebase workflows and is never auto-updated.
 
 ## Templates and policy files
 

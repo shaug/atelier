@@ -2,9 +2,15 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import atelier.git as git
 import atelier.paths as paths
 import atelier.workspace as workspace
-from tests.atelier.helpers import enlistment_path_for, write_workspace_config
+from tests.atelier.helpers import (
+    enlistment_path_for,
+    init_local_repo,
+    init_local_repo_without_feature,
+    write_workspace_config,
+)
 
 
 def test_resolve_workspace_target_prefers_exact_workspace_before_prefix() -> None:
@@ -46,3 +52,27 @@ def test_resolve_workspace_target_prefers_exact_workspace_before_prefix() -> Non
         assert branch == exact_branch
         assert workspace_dir == exact_dir
         assert exists is True
+
+
+def test_capture_workspace_base_records_default_branch_head() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = init_local_repo_without_feature(root)
+        base = workspace.capture_workspace_base(str(repo))
+        assert base is not None
+        assert base.get("default_branch") == "main"
+        assert base.get("sha") == git.git_rev_parse(repo, "main")
+        assert base.get("captured_at")
+
+
+def test_workspace_committed_work_counts_commits_since_base() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        repo = init_local_repo(root)
+        base_sha = git.git_rev_parse(repo, "main")
+        assert base_sha is not None
+        work_commits, committed_work = workspace.workspace_committed_work(
+            repo, "scott/feat-demo", base_sha
+        )
+        assert work_commits == 1
+        assert committed_work is True
