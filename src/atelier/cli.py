@@ -32,7 +32,6 @@ from .commands import new as new_cmd
 from .commands import open as open_cmd
 from .commands import remove as remove_cmd
 from .commands import shell as shell_cmd
-from .commands import snapshot as snapshot_cmd
 from .commands import template as template_cmd
 from .commands import upgrade as upgrade_cmd
 from .commands import work as work_cmd
@@ -454,20 +453,6 @@ def work_command(
             set_title=set_title,
         )
     )
-
-
-@app.command("snapshot", help="Write a workspace snapshot summary.")
-def snapshot_command(
-    workspace_name: Annotated[
-        str,
-        typer.Argument(
-            help="workspace branch to snapshot",
-            autocompletion=_workspace_name_shell_complete,
-        ),
-    ],
-) -> None:
-    """Write a snapshot summary for a workspace."""
-    snapshot_cmd.snapshot_workspace(SimpleNamespace(workspace_name=workspace_name))
 
 
 @app.command(

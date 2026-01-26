@@ -9,7 +9,6 @@ from .list import list_workspaces
 from .new import new_project
 from .open import open_workspace
 from .shell import open_workspace_shell
-from .snapshot import snapshot_workspace
 from .template import render_template
 from .work import open_workspace_repo
 
@@ -25,5 +24,4 @@ __all__ = [
     "open_workspace_shell",
     "render_template",
     "show_config",
-    "snapshot_workspace",
 ]
