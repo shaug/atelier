@@ -489,16 +489,6 @@ Options:
 - `--workspace`: Run in the workspace root instead of `repo/`.
 - `--set-title`: Emit a terminal title escape.
 
-### `atelier snapshot <workspace-branch>`
-
-Write a workspace snapshot (`SNAPSHOT.md`) with current status details.
-
-Usage:
-
-```sh
-atelier snapshot <workspace-branch>
-```
-
 ### `atelier describe [workspace-branch]`
 
 Show project overview or detailed workspace status. With no workspace argument,

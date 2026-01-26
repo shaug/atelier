@@ -667,20 +667,6 @@ Run a command in the workspace repo.
 
 ______________________________________________________________________
 
-### `atelier snapshot <workspace-branch>`
-
-Write a workspace snapshot to `SNAPSHOT.md`.
-
-#### Behavior
-
-- Must be run inside a Git repository
-- Resolves the workspace using the project branch prefix (like `atelier open`)
-- Writes `SNAPSHOT.md` in the workspace root
-- Includes policy docs, git status, mainline comparison, tracked file list, and
-  best-effort session metadata
-
-______________________________________________________________________
-
 ### `atelier describe [workspace-branch]`
 
 Show project overview or detailed workspace status.

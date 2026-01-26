@@ -166,12 +166,6 @@ Atelier workspaces use consistent command words in `PERSIST.md`/`AGENTS.md`:
   - Opens `PROJECT.md` (`--project`) or a workspace `SUCCESS.md` in
     `editor.edit`.
 
-- `atelier snapshot`
-
-  - Writes a `SNAPSHOT.md` file in the workspace root.
-  - Captures the policy files, git status, mainline diff summary, and
-    best-effort agent session metadata.
-
 - `atelier describe`
 
   - With no args, shows project overview plus a workspace summary table.
