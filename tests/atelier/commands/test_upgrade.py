@@ -415,6 +415,99 @@ class TestUpgradeTemplateComparison:
                 confirm.assert_not_called()
                 assert template_path.read_text(encoding="utf-8") == "custom agents\n"
 
+    def test_upgrade_prompts_to_remove_modified_legacy_project_agents(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            enlistment_path = enlistment_path_for(root / "repo")
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+                write_project_config(project_dir, enlistment_path)
+
+                templates_dir = project_dir / "templates"
+                templates_dir.mkdir(parents=True, exist_ok=True)
+                canonical = templates.agents_template(prefer_installed_if_modified=True)
+                (templates_dir / "AGENTS.md").write_text(canonical, encoding="utf-8")
+                (templates_dir / "SUCCESS.md").write_text(
+                    templates.success_md_template(prefer_installed_if_modified=True),
+                    encoding="utf-8",
+                )
+                config.update_project_managed_files(
+                    project_dir,
+                    {"templates/AGENTS.md": config.hash_text(canonical)},
+                )
+
+                legacy_path = project_dir / "AGENTS.md"
+                legacy_path.write_text("legacy agents\n", encoding="utf-8")
+
+                args = SimpleNamespace(
+                    workspace_names=[],
+                    installed=False,
+                    all_projects=True,
+                    no_projects=False,
+                    no_workspaces=True,
+                    dry_run=False,
+                    keep_modified=False,
+                    yes=False,
+                )
+                confirm_mock = patch(
+                    "atelier.commands.upgrade.confirm",
+                    side_effect=[True, True],
+                )
+                with confirm_mock as confirm:
+                    upgrade_cmd.upgrade(args)
+
+                assert not legacy_path.exists()
+                assert any(
+                    "legacy project AGENTS.md" in str(call.args[0])
+                    for call in confirm.call_args_list
+                )
+
+    def test_upgrade_keep_modified_skips_legacy_agents_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            enlistment_path = enlistment_path_for(root / "repo")
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+                write_project_config(project_dir, enlistment_path)
+
+                templates_dir = project_dir / "templates"
+                templates_dir.mkdir(parents=True, exist_ok=True)
+                canonical = templates.agents_template(prefer_installed_if_modified=True)
+                (templates_dir / "AGENTS.md").write_text(canonical, encoding="utf-8")
+                (templates_dir / "SUCCESS.md").write_text(
+                    templates.success_md_template(prefer_installed_if_modified=True),
+                    encoding="utf-8",
+                )
+                config.update_project_managed_files(
+                    project_dir,
+                    {"templates/AGENTS.md": config.hash_text(canonical)},
+                )
+
+                legacy_path = project_dir / "AGENTS.md"
+                legacy_path.write_text("legacy agents\n", encoding="utf-8")
+
+                args = SimpleNamespace(
+                    workspace_names=[],
+                    installed=False,
+                    all_projects=True,
+                    no_projects=False,
+                    no_workspaces=True,
+                    dry_run=False,
+                    keep_modified=True,
+                    yes=False,
+                )
+                with patch("atelier.commands.upgrade.confirm") as confirm:
+                    upgrade_cmd.upgrade(args)
+
+                confirm.assert_not_called()
+                assert legacy_path.exists()
+
     def test_upgrade_repairs_orphaned_workspace_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

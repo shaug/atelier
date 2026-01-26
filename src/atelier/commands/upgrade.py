@@ -611,12 +611,32 @@ def plan_project_agents(
                     )
                 )
             else:
-                plan.skips.append(
-                    PlanSkip(
-                        description=remove_description,
-                        reason="modified",
+                if keep_modified:
+                    plan.skips.append(
+                        PlanSkip(
+                            description=remove_description,
+                            reason="modified",
+                        )
                     )
-                )
+                    return
+                remove = auto_yes
+                if not auto_yes:
+                    prompt = f"{remove_description} appears modified. Remove it?"
+                    remove = confirm(prompt)
+                if remove:
+                    plan.actions.append(
+                        PlanAction(
+                            description=remove_description,
+                            apply=legacy_agents_path.unlink,
+                        )
+                    )
+                else:
+                    plan.skips.append(
+                        PlanSkip(
+                            description=remove_description,
+                            reason="kept",
+                        )
+                    )
 
 
 def plan_workspace_agents(
