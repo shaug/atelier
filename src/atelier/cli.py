@@ -161,6 +161,27 @@ def _workspace_name_shell_complete(
     return _filter_completion_candidates(names, incomplete)
 
 
+def _workspace_only_shell_complete(
+    _ctx: click.Context, _args: list[str], incomplete: str
+) -> list[str]:
+    resolved = _resolve_completion_project()
+    if not resolved:
+        return []
+    repo_root, project_root, config_payload, git_path = resolved
+    try:
+        workspaces = workspace.collect_workspaces(
+            project_root,
+            config_payload,
+            with_status=False,
+            enlistment_repo_dir=repo_root,
+            git_path=git_path,
+        )
+    except Exception:
+        return []
+    names = [item.get("name", "") for item in workspaces if item.get("name")]
+    return _filter_completion_candidates(names, incomplete)
+
+
 def _version_callback(value: bool) -> None:
     """Handle the ``--version`` option and exit early.
 
@@ -434,7 +455,10 @@ def open_command(
 def work_command(
     workspace_name: Annotated[
         str,
-        typer.Argument(help="workspace branch to open"),
+        typer.Argument(
+            help="workspace branch to open",
+            autocompletion=_workspace_only_shell_complete,
+        ),
     ],
     workspace_root: Annotated[
         bool,
@@ -462,7 +486,10 @@ def work_command(
 def shell_command(
     workspace_name: Annotated[
         str,
-        typer.Argument(help="workspace branch to open"),
+        typer.Argument(
+            help="workspace branch to open",
+            autocompletion=_workspace_only_shell_complete,
+        ),
     ],
     shell: Annotated[
         str | None,
@@ -502,7 +529,10 @@ def shell_command(
 def exec_command(
     workspace_name: Annotated[
         str,
-        typer.Argument(help="workspace branch to open"),
+        typer.Argument(
+            help="workspace branch to open",
+            autocompletion=_workspace_only_shell_complete,
+        ),
     ],
     command: Annotated[
         list[str] | None,
@@ -554,7 +584,7 @@ def describe_command(
         str | None,
         typer.Argument(
             help="workspace branch to describe (optional)",
-            autocompletion=_workspace_name_shell_complete,
+            autocompletion=_workspace_only_shell_complete,
         ),
     ] = None,
     finalized: Annotated[
@@ -620,7 +650,10 @@ def clean_command(
     ] = False,
     workspace_names: Annotated[
         list[str] | None,
-        typer.Argument(help="workspace branches to delete"),
+        typer.Argument(
+            help="workspace branches to delete",
+            autocompletion=_workspace_only_shell_complete,
+        ),
     ] = None,
 ) -> None:
     """Delete workspaces safely based on their status or explicit targets.
@@ -721,7 +754,10 @@ def rm_command(
 def upgrade_command(
     workspace_names: Annotated[
         list[str] | None,
-        typer.Argument(help="workspace branches to upgrade"),
+        typer.Argument(
+            help="workspace branches to upgrade",
+            autocompletion=_workspace_only_shell_complete,
+        ),
     ] = None,
     installed: Annotated[
         bool,
@@ -776,6 +812,7 @@ def config_command(
         str | None,
         typer.Argument(
             help="workspace branch to show config for (optional)",
+            autocompletion=_workspace_only_shell_complete,
         ),
     ] = None,
     installed: Annotated[
@@ -839,7 +876,10 @@ def template_command(
 def edit_command(
     workspace_name: Annotated[
         str | None,
-        typer.Argument(help="workspace branch to edit SUCCESS.md"),
+        typer.Argument(
+            help="workspace branch to edit SUCCESS.md",
+            autocompletion=_workspace_only_shell_complete,
+        ),
     ] = None,
     project: Annotated[
         bool,

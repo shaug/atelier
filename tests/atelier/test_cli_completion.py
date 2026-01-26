@@ -51,6 +51,12 @@ def test_workspace_completion_returns_empty_without_project(monkeypatch):
     assert cli._workspace_name_shell_complete(None, [], "") == []
 
 
+def test_workspace_only_completion_returns_empty_without_project(monkeypatch):
+    monkeypatch.setattr(cli, "_resolve_completion_project", lambda: None)
+
+    assert cli._workspace_only_shell_complete(None, [], "") == []
+
+
 def test_workspace_completion_filters_and_dedupes(monkeypatch):
     config_payload = config.ProjectConfig()
     monkeypatch.setattr(
@@ -108,3 +114,24 @@ def test_workspace_completion_uses_branches_when_no_workspaces(monkeypatch):
     monkeypatch.setattr(cli, "_collect_local_branches", fake_collect)
 
     assert cli._workspace_name_shell_complete(None, [], "") == ["feat/one"]
+
+
+def test_workspace_only_completion_ignores_branches(monkeypatch):
+    config_payload = config.ProjectConfig()
+    monkeypatch.setattr(
+        cli,
+        "_resolve_completion_project",
+        lambda: (Path("/repo"), Path("/project"), config_payload, None),
+    )
+    monkeypatch.setattr(
+        cli.workspace,
+        "collect_workspaces",
+        lambda *args, **kwargs: [{"name": "feat/one"}, {"name": "bug/two"}],
+    )
+
+    def raise_if_called(*args, **kwargs):
+        raise AssertionError("branches should not be collected")
+
+    monkeypatch.setattr(cli, "_collect_local_branches", raise_if_called)
+
+    assert cli._workspace_only_shell_complete(None, [], "b") == ["bug/two"]
