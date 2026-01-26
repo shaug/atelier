@@ -1,0 +1,228 @@
+# CLI Starter Kit Spec (Generic)
+
+This document defines a reusable, non-domain-specific blueprint for building a
+Python CLI app that mirrors the tooling, workflow, and ergonomics of a mature
+developer-facing command line tool. It avoids any project-specific naming or
+functionality and is intended to be unambiguous for implementation by an LLM.
+
+Use this spec verbatim as a foundation for a new, similar CLI.
+
+## Goals
+
+- Deterministic, explicit CLI behavior with minimal hidden side effects.
+- Clear separation between system-managed state and user-managed preferences.
+- Consistent filesystem layout and predictable scaffolding.
+- Excellent developer ergonomics: testable, linted, formatted, packaged.
+
+## Non-Goals
+
+- Background daemons, watchers, or auto-updaters.
+- Implicit repo modifications or stealth config changes.
+- Global registries or per-machine services outside the project scope.
+
+## Runtime Stack (Recommended)
+
+- Python 3.11+
+- CLI framework: Typer (Click-based)
+- Data modeling/validation: Pydantic v2
+- Prompts: Questionary (TTY-only, with input() fallback)
+- Data directories: Platformdirs
+- Optional: Rich for styled output (only if it materially improves UX)
+
+## Project Layout
+
+```
+.
+├─ docs/
+│  └─ starter-kit.md
+├─ src/
+│  └─ appname/
+│     ├─ __init__.py
+│     ├─ cli.py
+│     ├─ commands/
+│     │  ├─ __init__.py
+│     │  └─ <command>.py
+│     ├─ config.py
+│     ├─ models.py
+│     ├─ io.py
+│     ├─ paths.py
+│     ├─ exec.py
+│     └─ templates/
+│        └─ ...
+├─ tests/
+│  ├─ conftest.py
+│  └─ appname/
+│     ├─ commands/
+│     │  └─ test_<command>.py
+│     └─ test_<module>.py
+├─ pyproject.toml
+├─ justfile
+└─ uv.lock
+```
+
+## CLI Structure
+
+### Entry Point
+
+- Provide a single top-level CLI binary via `pyproject.toml`.
+- Use a `main()` entry in `src/appname/cli.py`.
+- Register subcommands by importing `src/appname/commands/*`.
+
+### Global Options
+
+- Include a `--version` flag that exits immediately.
+- Ensure `--help` is available on the root and all subcommands.
+
+### Shell Completion Support
+
+- Enable Click/Typer completion on the root app.
+- Provide completion for arguments that represent existing names (e.g. workspace
+  names, branch names, or other entities) by scanning local state.
+- Support the standard completion environment variables Click expects, and
+  normalize them when missing so completions work across shells.
+
+## Configuration & State Model
+
+### Split Config
+
+Two JSON files should exist wherever state is stored:
+
+- `config.sys.json` (system-managed): IDs, timestamps, checksums, and metadata.
+- `config.user.json` (user-managed): preferences and user choices.
+
+### Merge Rules
+
+- At runtime, merge these two views into a single effective config.
+- Validate both with Pydantic models and fail loudly with clear errors.
+- If legacy single-file config exists, migrate once into the split layout.
+
+### Managed Files Policy
+
+- For template files that are copied or generated, store checksums in system
+  config to detect user edits.
+- Upgrades to managed files must be opt-in and explicit (policy values:
+  `always`, `ask`, `manual`).
+
+## Filesystem Layout
+
+Define a deterministic, stable layout under the user data directory:
+
+```
+<data-dir>/
+└─ projects/
+   └─ <project-key>/
+      ├─ config.sys.json
+      ├─ config.user.json
+      ├─ templates/
+      └─ workspaces/
+         └─ <workspace-key>/
+            ├─ config.sys.json
+            ├─ config.user.json
+            └─ repo/   (checkout or working directory)
+```
+
+Key derivation should be stable across runs (e.g., base name + short hash of a
+stable identifier). Keys must be deterministic and safe for filesystem names.
+
+## IO & Prompting
+
+- Use a prompt helper that picks Questionary when TTY is available, and falls
+  back to `input()` otherwise.
+- Ensure all prompts are explicit and easy to abort.
+- Confirmations default to "no" when destructive.
+
+## Testing
+
+- Use pytest with a clean, deterministic test environment.
+- Doctests are opt-in: only collect doctests for curated modules listed in
+  `tests/conftest.py`.
+- Patch prompt functions to avoid accidental blocking in tests.
+- Favor property-based tests for normalization and parsing helpers.
+
+## Linting & Formatting
+
+- Lint and format with Ruff.
+- Format Markdown with mdformat.
+- Provide `just` recipes for `test`, `lint`, and `format`.
+
+## Packaging & Distribution
+
+- Use `uv` for dependency management and development workflows.
+- Use `hatchling` as the build backend, with VCS versioning.
+- Package templates inside the wheel if they are required at runtime.
+- The CLI should be installable via `pip` or `uv tool install`.
+
+## Commands and Modules (Generic Contract)
+
+Each command module should:
+
+- Implement one CLI command only.
+- Contain the command’s business logic; CLI should only parse args and delegate.
+- Avoid side effects outside the project’s data directory.
+- Fail fast with clear error messages.
+
+## Suggested `justfile`
+
+```
+install:
+  uv tool install --editable . --upgrade --reinstall
+  uv build
+  uv tool update-shell
+
+install-dev:
+  uv venv
+  uv pip install -e .[dev]
+
+test:
+  uv pip install -e .[dev]
+  uv run pytest
+
+lint:
+  uv run ruff check .
+  uv run mdformat --check --wrap 80 .
+
+format:
+  uv run ruff check --select I,RUF022 --fix .
+  uv run ruff format .
+  uv run mdformat --wrap 80 .
+```
+
+## Suggested `pyproject.toml` (Key Sections)
+
+```
+[project]
+name = "appname"
+dynamic = ["version"]
+requires-python = ">=3.11"
+dependencies = [
+  "platformdirs>=4.0.0",
+  "pydantic>=2.0.0",
+  "questionary>=2.0.0",
+  "typer>=0.9.0",
+]
+
+[project.optional-dependencies]
+dev = ["hypothesis>=6.0.0", "mdformat>=0.7.0", "pytest>=8.0.0", "ruff>=0.1.0"]
+
+[project.scripts]
+appname = "appname.cli:main"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/appname"]
+include = ["src/appname/templates/**"]
+
+[tool.hatch.version]
+source = "vcs"
+tag-pattern = "v(?P<version>.+)"
+```
+
+## Implementation Notes
+
+- Keep all behavior deterministic and discoverable through help text and docs.
+- The CLI should never modify user repositories except explicitly requested
+  working directories/checkouts.
+- Standardize error output, and use a single module for all user-facing IO.
