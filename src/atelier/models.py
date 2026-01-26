@@ -370,6 +370,25 @@ class AtelierSystemSection(BaseModel):
         return normalized
 
 
+class SkillMetadata(BaseModel):
+    """Metadata stored for an Atelier-managed skill."""
+
+    model_config = ConfigDict(extra="allow")
+
+    version: str | None = None
+    hash: str | None = None
+
+    @field_validator("version", "hash", mode="before")
+    @classmethod
+    def normalize_optional_strings(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+
+
 class AtelierUserSection(BaseModel):
     """User-managed Atelier metadata stored in configs."""
 
@@ -535,6 +554,7 @@ class WorkspaceConfig(BaseModel):
     Attributes:
         workspace: Workspace section.
         atelier: Atelier metadata section.
+        skills: Skill metadata mapping.
 
     Example:
         >>> WorkspaceConfig(workspace=WorkspaceSection(branch="feat/demo"))
@@ -545,6 +565,7 @@ class WorkspaceConfig(BaseModel):
 
     workspace: WorkspaceSection
     tickets: TicketRefs = Field(default_factory=TicketRefs)
+    skills: dict[str, SkillMetadata] = Field(default_factory=dict)
     atelier: AtelierSection = Field(default_factory=AtelierSection)
 
 
@@ -554,6 +575,7 @@ class WorkspaceSystemConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     workspace: WorkspaceSection
+    skills: dict[str, SkillMetadata] = Field(default_factory=dict)
     atelier: AtelierSystemSection = Field(default_factory=AtelierSystemSection)
 
 

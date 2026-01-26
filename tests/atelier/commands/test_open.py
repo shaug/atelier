@@ -14,6 +14,7 @@ import atelier.commands.open as open_cmd
 import atelier.config as config
 import atelier.git as git
 import atelier.paths as paths
+import atelier.skills as skills
 import atelier.templates as templates
 import atelier.workspace as workspace
 from tests.atelier.helpers import (
@@ -94,6 +95,7 @@ class TestOpenWorkspace:
                 assert (workspace_dir / "PROJECT.md").exists()
                 assert (workspace_dir / "PERSIST.md").exists()
                 assert (workspace_dir / "SUCCESS.md").exists()
+                assert (workspace_dir / "skills").exists()
                 assert paths.workspace_config_path(workspace_dir).exists()
 
                 workspace_config = config.load_workspace_config(
@@ -102,6 +104,11 @@ class TestOpenWorkspace:
                 assert workspace_config is not None
                 assert workspace_config.workspace.branch == workspace_branch
                 assert workspace_config.workspace.uid
+                assert set(workspace_config.skills).issuperset(
+                    set(skills.list_packaged_skills())
+                )
+                for name in skills.list_packaged_skills():
+                    assert (workspace_dir / "skills" / name / "SKILL.md").exists()
 
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
                     encoding="utf-8"

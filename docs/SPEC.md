@@ -438,8 +438,8 @@ precedence.
 If more than one policy file is present, higher precedence wins:
 
 1. `SUCCESS.md` (or legacy `WORKSPACE.md`)
-2. `PROJECT.md`
-3. `AGENTS.md`
+1. `PROJECT.md`
+1. `AGENTS.md`
 
 Atelier does not parse or modify these files after creation or copy.
 
@@ -548,53 +548,53 @@ Ensures a workspace exists and launches or resumes agent work.
 
 #### Behavior
 
-01. Locate the git repo root and resolve the enlistment path (and origin when
-    available)
-02. Resolve or create the Atelier project in the data directory
-03. Resolve the workspace branch name and workspace key (branch name plus a
-    short hash of the workspace ID)
-04. Ensure workspace directory exists under `workspaces/<workspace-key>/`
-05. Print a workspace banner (workspace branch + path)
-06. If workspace is new:
-    - Generate `config.sys.json` and `config.user.json`
-    - Create workspace `AGENTS.md` (symlink to `templates/AGENTS.md` when
-      possible)
-    - Create workspace `PROJECT.md` by linking/copying the project-level
-      `PROJECT.md`
-    - Create `PERSIST.md`
-    - Create `BACKGROUND.md` when the workspace branch already exists
-    - Copy `templates/SUCCESS.md` to `SUCCESS.md` when available
-    - Otherwise copy legacy `templates/WORKSPACE.md` to `WORKSPACE.md`
-    - When `--ticket` is provided, prefer `templates/SUCCESS.ticket.md` when it
-      exists; otherwise use the built-in ticket template unless the project's
-      `templates/SUCCESS.md` is customized. Render ticket placeholders and
-      append a `## Tickets` section to `SUCCESS.md`.
-    - Open the chosen file in `editor.edit` (blocking)
-07. Existing workspaces are not modified
-08. Ensure `repo/` exists:
-    - Clone repo if missing
-    - If the finalization tag `atelier/<branch-name>/finalized` exists, prompt
-      to remove it (continue either way)
-    - Checkout default branch
-    - Create workspace branch if missing
-09. Launch agent:
-    - Attempt to resume an existing session when supported (Codex uses local
-      session transcripts; Claude uses `--continue`; Gemini uses `--resume`;
-      Copilot uses `--continue`; others start fresh)
-    - Otherwise start a new session; only Codex receives an opening prompt
-      containing the workspace ID (used for session discovery). Other agents
-      start without an opening prompt (Aider avoids it because `--message` exits
-      after sending one message).
-    - Codex is launched via a PTY wrapper that captures the resume command or
-      session ID printed on exit and persists it in the workspace config.
-    - Use `agent.options` and the agent command for execution
-    - When `--yolo` is set, add the agent's least-restrictive flag(s) for that
-      invocation only (no config changes)
-    - Codex runs with `--cd <workspace-dir>`; other agents run with the
-      workspace as the current working directory
-    - Set `ATELIER_WORKSPACE`, `ATELIER_PROJECT`, and `ATELIER_WORKSPACE_DIR`
-      for editors and agent sessions
-10. Optionally apply terminal chrome (best-effort, decorative only):
+1. Locate the git repo root and resolve the enlistment path (and origin when
+   available)
+1. Resolve or create the Atelier project in the data directory
+1. Resolve the workspace branch name and workspace key (branch name plus a short
+   hash of the workspace ID)
+1. Ensure workspace directory exists under `workspaces/<workspace-key>/`
+1. Print a workspace banner (workspace branch + path)
+1. If workspace is new:
+   - Generate `config.sys.json` and `config.user.json`
+   - Create workspace `AGENTS.md` (symlink to `templates/AGENTS.md` when
+     possible)
+   - Create workspace `PROJECT.md` by linking/copying the project-level
+     `PROJECT.md`
+   - Create `PERSIST.md`
+   - Create `BACKGROUND.md` when the workspace branch already exists
+   - Copy `templates/SUCCESS.md` to `SUCCESS.md` when available
+   - Otherwise copy legacy `templates/WORKSPACE.md` to `WORKSPACE.md`
+   - When `--ticket` is provided, prefer `templates/SUCCESS.ticket.md` when it
+     exists; otherwise use the built-in ticket template unless the project's
+     `templates/SUCCESS.md` is customized. Render ticket placeholders and append
+     a `## Tickets` section to `SUCCESS.md`.
+   - Open the chosen file in `editor.edit` (blocking)
+1. Existing workspaces are not modified
+1. Ensure `repo/` exists:
+   - Clone repo if missing
+   - If the finalization tag `atelier/<branch-name>/finalized` exists, prompt to
+     remove it (continue either way)
+   - Checkout default branch
+   - Create workspace branch if missing
+1. Launch agent:
+   - Attempt to resume an existing session when supported (Codex uses local
+     session transcripts; Claude uses `--continue`; Gemini uses `--resume`;
+     Copilot uses `--continue`; others start fresh)
+   - Otherwise start a new session; only Codex receives an opening prompt
+     containing the workspace ID (used for session discovery). Other agents
+     start without an opening prompt (Aider avoids it because `--message` exits
+     after sending one message).
+   - Codex is launched via a PTY wrapper that captures the resume command or
+     session ID printed on exit and persists it in the workspace config.
+   - Use `agent.options` and the agent command for execution
+   - When `--yolo` is set, add the agent's least-restrictive flag(s) for that
+     invocation only (no config changes)
+   - Codex runs with `--cd <workspace-dir>`; other agents run with the workspace
+     as the current working directory
+   - Set `ATELIER_WORKSPACE`, `ATELIER_PROJECT`, and `ATELIER_WORKSPACE_DIR` for
+     editors and agent sessions
+1. Optionally apply terminal chrome (best-effort, decorative only):
 
 - Detect WezTerm via `WEZTERM_PANE_ID` (or `WEZTERM_PANE`), Kitty via
   `KITTY_WINDOW_ID`, tmux via `TMUX`, or iTerm2 via `TERM_PROGRAM=iTerm.app`

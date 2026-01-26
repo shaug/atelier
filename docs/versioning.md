@@ -11,9 +11,9 @@ Atelier uses Conventional Commits and Release Please to drive SemVer releases.
 ## Release flow
 
 1. Release Please runs on pushes to `main` and opens/updates a Release PR.
-2. The Release PR updates `CHANGELOG.md` and `.release-please-manifest.json`.
-3. Merging the Release PR creates the `vX.Y.Z` tag and a GitHub Release.
-4. The release-artifacts workflow builds sdist + wheel and uploads them to the
+1. The Release PR updates `CHANGELOG.md` and `.release-please-manifest.json`.
+1. Merging the Release PR creates the `vX.Y.Z` tag and a GitHub Release.
+1. The release-artifacts workflow builds sdist + wheel and uploads them to the
    Release.
 
 Note: if you want the release-artifacts workflow to run on the release event,

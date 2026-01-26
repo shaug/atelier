@@ -416,6 +416,7 @@ def ensure_workspace_metadata(
             workspace_section["base"] = base_payload
         system_config = config.WorkspaceSystemConfig(
             workspace=workspace_section,
+            skills={},
             atelier={
                 "version": __version__,
                 "created_at": config.utc_now(),

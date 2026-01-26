@@ -30,7 +30,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/atelier"]
-include = ["src/atelier/templates/**"]
+include = ["src/atelier/templates/**", "src/atelier/skills/**"]
 
 
 [tool.hatch.version]

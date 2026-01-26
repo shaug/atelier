@@ -48,6 +48,8 @@ workspaces/<workspace-key>/
 ├─ PERSIST.md
 ├─ BACKGROUND.md (optional)
 ├─ SUCCESS.md
+├─ skills/
+│  └─ <skill-name>/SKILL.md
 ├─ config.sys.json
 ├─ config.user.json
 └─ repo/
@@ -89,6 +91,8 @@ Additional config notes:
 - Workspaces capture a base marker (`workspace.base`) with the default branch
   head SHA at creation time; it is used to detect committed work even after
   squash/rebase workflows and is never auto-updated.
+- Workspace skill metadata is stored in `config.sys.json` under `skills`, keyed
+  by skill name with version and hash metadata.
 
 ## Templates and policy files
 

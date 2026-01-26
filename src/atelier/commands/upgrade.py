@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from .. import __version__, config, git, paths, templates, workspace
+from .. import __version__, config, git, paths, skills, templates, workspace
 from ..io import confirm, die, link_or_copy, say, select, warn
 
 
@@ -362,6 +362,7 @@ def plan_workspace_config_repair(plan: UpgradePlan, target: WorkspaceTarget) -> 
         if not sys_path.exists():
             system_config = config.WorkspaceSystemConfig(
                 workspace=target.config.workspace.model_dump(),
+                skills=target.config.skills,
                 atelier={
                     "version": __version__,
                     "created_at": config.utc_now(),
@@ -724,6 +725,49 @@ def plan_workspace_persist(
     )
 
 
+def plan_workspace_skills(
+    plan: UpgradePlan,
+    target: WorkspaceTarget,
+    *,
+    auto_yes: bool,
+    keep_modified: bool,
+) -> None:
+    workspace_label_text = workspace_label(target)
+    state = skills.workspace_skill_state(target.root, target.config.skills)
+    if not state.needs_install and not state.needs_metadata:
+        return
+
+    description = f"Workspace skills ({workspace_label_text})"
+    if state.needs_install:
+        if not state.unmodified:
+            if keep_modified:
+                plan.skips.append(PlanSkip(description=description, reason="modified"))
+                return
+            if not auto_yes:
+                prompt = (
+                    f"{description} appear modified. Replace with the latest skill set?"
+                )
+                if not confirm(prompt):
+                    plan.skips.append(PlanSkip(description=description, reason="kept"))
+                    return
+
+        def apply_update() -> None:
+            metadata = skills.install_workspace_skills(target.root)
+            config.replace_workspace_skills_metadata(target.root, metadata)
+
+        plan.actions.append(PlanAction(description=description, apply=apply_update))
+        return
+
+    if state.needs_metadata:
+
+        def apply_record() -> None:
+            config.replace_workspace_skills_metadata(
+                target.root, skills.packaged_skill_metadata()
+            )
+
+        plan.actions.append(PlanAction(description=description, apply=apply_record))
+
+
 def plan_project_templates(plan: UpgradePlan, project: ProjectTarget) -> None:
     project_label_text = project_label(project)
     templates_root = project.root / paths.TEMPLATES_DIRNAME
@@ -903,6 +947,12 @@ def upgrade(args: object) -> None:
                 keep_modified=keep_modified,
             )
             plan_workspace_persist(
+                plan,
+                target,
+                auto_yes=auto_yes,
+                keep_modified=keep_modified,
+            )
+            plan_workspace_skills(
                 plan,
                 target,
                 auto_yes=auto_yes,

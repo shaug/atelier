@@ -23,6 +23,7 @@ from .. import (
     git,
     paths,
     project,
+    skills,
     templates,
     term,
     workspace,
@@ -368,6 +369,40 @@ def apply_upgrade_policy(
                 changed = True
             continue
     return changed
+
+
+def apply_workspace_skill_updates(
+    *,
+    workspace_dir: Path,
+    workspace_label: str,
+    stored_metadata: dict[str, object],
+    policy: str,
+    skip_command: str,
+) -> None:
+    state = skills.workspace_skill_state(workspace_dir, stored_metadata)
+    if state.needs_install:
+        if policy == "always":
+            if state.unmodified:
+                metadata = skills.install_workspace_skills(workspace_dir)
+                config.replace_workspace_skills_metadata(workspace_dir, metadata)
+            else:
+                warn(
+                    "skipping workspace skills upgrade because they appear modified; "
+                    f"run `{skip_command}` to upgrade them manually"
+                )
+        elif policy == "ask":
+            prompt_text = (
+                f"Replace workspace skills for {workspace_label} with the latest "
+                "version?"
+            )
+            if confirm(prompt_text):
+                metadata = skills.install_workspace_skills(workspace_dir)
+                config.replace_workspace_skills_metadata(workspace_dir, metadata)
+        return
+    if state.needs_metadata:
+        config.replace_workspace_skills_metadata(
+            workspace_dir, skills.packaged_skill_metadata()
+        )
 
 
 def update_project_atelier(
@@ -858,6 +893,8 @@ def open_workspace(args: object) -> None:
         workspace_config = config.load_workspace_config(workspace_config_file)
         if not workspace_config:
             die("failed to load workspace config")
+        skills_metadata = skills.install_workspace_skills(workspace_dir)
+        config.replace_workspace_skills_metadata(workspace_dir, skills_metadata)
 
     if ticket_refs:
         if not is_new_workspace:
@@ -902,6 +939,15 @@ def open_workspace(args: object) -> None:
             apply_upgrade_policy(
                 policy=workspace_upgrade_policy,
                 items=workspace_updates,
+                skip_command=(
+                    f"atelier upgrade {workspace_config.workspace.branch} --installed"
+                ),
+            )
+            apply_workspace_skill_updates(
+                workspace_dir=workspace_dir,
+                workspace_label=workspace_config.workspace.branch,
+                stored_metadata=workspace_config.skills,
+                policy=workspace_upgrade_policy,
                 skip_command=(
                     f"atelier upgrade {workspace_config.workspace.branch} --installed"
                 ),

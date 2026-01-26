@@ -35,6 +35,7 @@ from .models import (
     ProjectSection,
     ProjectSystemConfig,
     ProjectUserConfig,
+    SkillMetadata,
     WorkspaceConfig,
     WorkspaceSession,
     WorkspaceSystemConfig,
@@ -438,6 +439,40 @@ def update_workspace_managed_files(
     managed.update(updates)
     atelier_section = atelier_section.model_copy(update={"managed_files": managed})
     workspace_config = workspace_config.model_copy(update={"atelier": atelier_section})
+    write_workspace_system_config(config_path, workspace_config)
+
+
+def update_workspace_skills_metadata(
+    workspace_dir: Path, updates: dict[str, dict[str, str] | SkillMetadata]
+) -> None:
+    """Update skill metadata in a workspace config."""
+    if not updates:
+        return
+    normalized: dict[str, SkillMetadata] = {}
+    for name, entry in updates.items():
+        normalized[name] = SkillMetadata.model_validate(entry)
+    config_path = paths.workspace_config_sys_path(workspace_dir)
+    workspace_config = load_workspace_system_config(config_path)
+    if not workspace_config:
+        die("no workspace config found for skill metadata updates")
+    skills = dict(workspace_config.skills)
+    skills.update(normalized)
+    workspace_config = workspace_config.model_copy(update={"skills": skills})
+    write_workspace_system_config(config_path, workspace_config)
+
+
+def replace_workspace_skills_metadata(
+    workspace_dir: Path, skills: dict[str, dict[str, str] | SkillMetadata]
+) -> None:
+    """Replace skill metadata in a workspace config."""
+    normalized: dict[str, SkillMetadata] = {}
+    for name, entry in skills.items():
+        normalized[name] = SkillMetadata.model_validate(entry)
+    config_path = paths.workspace_config_sys_path(workspace_dir)
+    workspace_config = load_workspace_system_config(config_path)
+    if not workspace_config:
+        die("no workspace config found for skill metadata updates")
+    workspace_config = workspace_config.model_copy(update={"skills": normalized})
     write_workspace_system_config(config_path, workspace_config)
 
 

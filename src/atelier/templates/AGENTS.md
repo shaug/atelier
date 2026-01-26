@@ -26,6 +26,14 @@ development.
 - `BACKGROUND.md` (if present) for context when a workspace is created from an
   existing branch.
 
+## Skills
+
+- Atelier-managed skills live under `./skills/` in the workspace.
+- Each skill directory contains an authoritative `SKILL.md`.
+- Skills under `./skills/` must not be modified.
+- If a skill name conflicts with external tools or global skills, the
+  Atelier-managed skill takes precedence.
+
 ## Execution Expectations
 
 - Complete the work described in `SUCCESS.md` **to completion**.
