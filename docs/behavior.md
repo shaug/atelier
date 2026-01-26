@@ -151,6 +151,8 @@ Atelier workspaces use consistent command words in `PERSIST.md`/`AGENTS.md`:
   - `--yolo` adds the least-restrictive agent flags for that invocation.
   - Exposes workspace identity via `ATELIER_*` environment variables for editors
     and agents.
+  - Applies terminal chrome when supported (WezTerm, Kitty, tmux, iTerm2), with
+    iTerm2 setting session titles (OSC 1) and tab/window titles (OSC 2).
 
 - `atelier work` / `atelier shell` / `atelier exec`
 

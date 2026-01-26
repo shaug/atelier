@@ -36,6 +36,12 @@ def test_resolve_terminal_adapter_tmux_when_available() -> None:
         assert adapter.name == "tmux"
 
 
+def test_resolve_terminal_adapter_iterm2_when_available() -> None:
+    with patch.dict(os.environ, {"TERM_PROGRAM": "iTerm.app"}, clear=True):
+        adapter = term.resolve_terminal_adapter()
+        assert adapter.name == "iterm2"
+
+
 def test_resolve_terminal_adapter_noop_when_missing() -> None:
     with patch.dict(os.environ, {}, clear=True):
         adapter = term.resolve_terminal_adapter()

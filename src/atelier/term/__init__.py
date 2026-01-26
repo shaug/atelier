@@ -32,6 +32,7 @@ def resolve_terminal_adapter(
     env: Mapping[str, str] | None = None,
 ) -> TerminalAdapter:
     """Return the best adapter based on terminal environment variables."""
+    from .iterm2 import Iterm2Adapter
     from .kitty import KittyAdapter
     from .tmux import TmuxAdapter
     from .wezterm import WezTermAdapter
@@ -48,6 +49,10 @@ def resolve_terminal_adapter(
 
     if env.get("TMUX"):
         return TmuxAdapter()
+
+    iterm2_adapter = Iterm2Adapter.from_env(env)
+    if iterm2_adapter is not None:
+        return iterm2_adapter
 
     return NoOpAdapter()
 

@@ -597,8 +597,11 @@ Ensures a workspace exists and launches or resumes agent work.
 10. Optionally apply terminal chrome (best-effort, decorative only):
 
 - Detect WezTerm via `WEZTERM_PANE_ID` (or `WEZTERM_PANE`), Kitty via
-  `KITTY_WINDOW_ID`, or tmux via `TMUX`
+  `KITTY_WINDOW_ID`, tmux via `TMUX`, or iTerm2 via `TERM_PROGRAM=iTerm.app`
 - Set the active pane title to a workspace label (repo name + branch)
+- For iTerm2, set the session title via OSC 1 and tab/window title via OSC 2
+  (best-effort; iTerm2 may ignore tab/window titles when disabled in
+  preferences)
 - Failure or missing capabilities must never affect correctness
 
 #### Ticket naming and title lookup
