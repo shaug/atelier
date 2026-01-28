@@ -939,10 +939,12 @@ def open_workspace(args: object) -> None:
     else:
         should_open_editor = bool(edit_override)
     editor_cmd: list[str] | None = None
+    repo_fresh_clone = False
     if not repo_dir.exists():
         exec.run_command(
             git.git_command(["clone", clone_repo_url, str(repo_dir)], git_path=git_path)
         )
+        repo_fresh_clone = True
     else:
         if not git.git_is_repo(repo_dir, git_path=git_path):
             die("repo exists but is not a git repository")
@@ -1041,17 +1043,18 @@ def open_workspace(args: object) -> None:
         repo_dir, f"refs/remotes/origin/{workspace_branch}", git_path=git_path
     )
     if not remote_branch:
-        remote_branch = (
-            git.git_has_remote_branch(repo_dir, workspace_branch, git_path=git_path)
-            is True
-        )
-        if remote_branch:
-            exec.run_command(
-                git.git_command(
-                    ["-C", str(repo_dir), "fetch", "origin", workspace_branch],
-                    git_path=git_path,
-                )
+        if not repo_fresh_clone:
+            remote_branch = (
+                git.git_has_remote_branch(repo_dir, workspace_branch, git_path=git_path)
+                is True
             )
+            if remote_branch:
+                exec.run_command(
+                    git.git_command(
+                        ["-C", str(repo_dir), "fetch", "origin", workspace_branch],
+                        git_path=git_path,
+                    )
+                )
     existing_branch = local_branch or remote_branch
 
     if skip_workspace_checkout:

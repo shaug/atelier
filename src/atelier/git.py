@@ -294,7 +294,8 @@ def git_default_branch(repo_dir: Path, *, git_path: str | None = None) -> str | 
 
     result = run_git_command(
         git_command(
-            ["-C", str(repo_dir), "remote", "show", "origin"], git_path=git_path
+            ["-C", str(repo_dir), "remote", "show", "-n", "origin"],
+            git_path=git_path,
         )
     )
     if result.returncode == 0:
@@ -303,7 +304,7 @@ def git_default_branch(repo_dir: Path, *, git_path: str | None = None) -> str | 
                 continue
             _, value = line.split(":", 1)
             branch = value.strip()
-            if branch:
+            if branch and not (branch.startswith("(") and branch.endswith(")")):
                 return branch
 
     if git_ref_exists(repo_dir, "refs/heads/main", git_path=git_path):
