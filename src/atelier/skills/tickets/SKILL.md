@@ -21,6 +21,8 @@ reading or updating ticket metadata.
 - Ticket identifiers must be explicit and validated.
 - Workspace ticket references must reflect user-provided IDs.
 - External updates must be confirmed before execution.
+- Delegate provider-specific issue operations to the `github-issues` or `linear`
+  skill.
 
 ## Prohibited Actions
 

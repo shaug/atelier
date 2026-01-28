@@ -35,4 +35,5 @@ workflows.
 ## Notes
 
 Use the GitHub CLI or provider APIs as appropriate, but always verify the
-resulting state before returning success.
+resulting state before returning success. Delegate issue workflows to the
+`github-issues` skill.
