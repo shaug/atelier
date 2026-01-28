@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.0](https://github.com/shaug/atelier/compare/v0.6.0...v0.7.0) (2026-01-28)
+
+
+### Features
+
+* **skills:** add github-issues skill ([8199d77](https://github.com/shaug/atelier/commit/8199d7744fb0fff6baffeb138606def058928155)), closes [#88](https://github.com/shaug/atelier/issues/88)
+* **skills:** add github-prs skill ([66b23fe](https://github.com/shaug/atelier/commit/66b23fed70edc8d29cb1cbe693d4eef0b9636795)), closes [#89](https://github.com/shaug/atelier/issues/89)
+* **skills:** add workspace-managed skills ([d928c5c](https://github.com/shaug/atelier/commit/d928c5c0776e38be32d1d987ec0ce86739d58f60))
+* **skills:** reauthor publish workflow ([b14428d](https://github.com/shaug/atelier/commit/b14428d4b99889d7f07581e5f569c4e7f07a5077))
+* **skills:** reauthor tickets skill ([f0d31b3](https://github.com/shaug/atelier/commit/f0d31b3b0a69ce624e3e94274b50583b5ffcac5f)), closes [#87](https://github.com/shaug/atelier/issues/87)
+
+
+### Bug Fixes
+
+* **cli:** scope workspace completion ([86e1c91](https://github.com/shaug/atelier/commit/86e1c91c55e8564ca4b1ebb2e0120175459b7ddf))
+* **open:** avoid git network hangs ([7ffebf4](https://github.com/shaug/atelier/commit/7ffebf40f3552af0bf31ee66d75afa75886c21ad))
+
 ## [0.6.0](https://github.com/shaug/atelier/compare/v0.5.0...v0.6.0) (2026-01-26)
 
 ### ⚠ BREAKING CHANGES
