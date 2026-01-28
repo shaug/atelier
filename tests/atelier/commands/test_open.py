@@ -31,6 +31,13 @@ from tests.atelier.helpers import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _disable_network_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Avoid network-backed Git/GitHub calls in this test module."""
+    monkeypatch.setattr(git, "git_has_remote_branch", lambda *args, **kwargs: False)
+    monkeypatch.setattr(git, "gh_available", lambda: False)
+
+
 def record_codex_command(commands: list[list[str]]):
     def fake_codex(
         cmd: list[str],
