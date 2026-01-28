@@ -367,7 +367,6 @@ def workspace_branch_for_dir(workspace_dir: Path) -> str:
 def ensure_workspace_metadata(
     workspace_dir: Path,
     agents_path: Path,
-    persist_path: Path,
     workspace_config_file: Path,
     project_root: Path,
     project_enlistment: str,
@@ -382,7 +381,6 @@ def ensure_workspace_metadata(
     Args:
         workspace_dir: Workspace directory path.
         agents_path: Path to ``AGENTS.md`` in the workspace.
-        persist_path: Path to ``PERSIST.md`` in the workspace.
         workspace_config_file: Path to workspace ``config.sys.json``.
         project_root: Project directory path.
         project_enlistment: Absolute path to the local enlistment.
@@ -396,11 +394,10 @@ def ensure_workspace_metadata(
         None.
 
     Example:
-        >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/PERSIST.md"), Path("/tmp/workspace/config.sys.json"), Path("/tmp/project"), "/repo", "feat/demo", True, "manual", "ask")
+        >>> ensure_workspace_metadata(Path("/tmp/workspace"), Path("/tmp/workspace/AGENTS.md"), Path("/tmp/workspace/config.sys.json"), Path("/tmp/project"), "/repo", "feat/demo", True, "manual", "ask")
     """
     workspace_sys_path = workspace_config_file
     workspace_user_path = workspace_config_user_path(workspace_dir)
-    workspace_config_exists = workspace_sys_path.exists()
     if not workspace_sys_path.exists():
         workspace_id = workspace_identifier(project_enlistment, workspace_branch)
         workspace_uid = generate_workspace_uid()
@@ -428,16 +425,6 @@ def ensure_workspace_metadata(
         user_config = config.WorkspaceUserConfig(atelier={"upgrade": upgrade_policy})
         config.write_workspace_user_config(workspace_user_path, user_config)
 
-    if workspace_config_exists:
-        stored_pr, stored_history = config.read_workspace_branch_settings(workspace_dir)
-        if stored_pr is None or stored_history is None:
-            die("workspace missing branch settings")
-        integration_pr = stored_pr
-        integration_history = stored_history
-    else:
-        integration_pr = branch_pr
-        integration_history = branch_history
-
     if not agents_path.exists():
         template_override = project_root / TEMPLATES_DIRNAME / "AGENTS.md"
         if template_override.exists():
@@ -451,12 +438,6 @@ def ensure_workspace_metadata(
     workspace_project_path = workspace_dir / "PROJECT.md"
     if project_md_path.exists() and not workspace_project_path.exists():
         link_or_copy(project_md_path, workspace_project_path)
-
-    if not persist_path.exists():
-        persist_path.write_text(
-            templates.render_persist(integration_pr, integration_history),
-            encoding="utf-8",
-        )
 
 
 def workspace_up_to_date(

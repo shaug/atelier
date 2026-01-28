@@ -45,7 +45,6 @@ Workspace directory:
 workspaces/<workspace-key>/
 ├─ AGENTS.md
 ├─ PROJECT.md
-├─ PERSIST.md
 ├─ BACKGROUND.md (optional)
 ├─ SUCCESS.md
 ├─ skills/
@@ -102,7 +101,8 @@ Additional config notes:
 - `SUCCESS.ticket.md` is an optional ticket-focused template used when
   `atelier open --ticket` creates a new workspace. It supports
   `${ticket-provider}`, `${ticket-id}`, and `${project-name}` placeholders.
-- `PERSIST.md` is generated per workspace to describe integration expectations.
+- Publish/persist/finalize semantics are determined by the `publish` skill using
+  workspace config.
 - `BACKGROUND.md` is created only when a workspace is created from an existing
   branch.
 - Managed template hashes are stored under `atelier.managed_files` to determine
@@ -112,7 +112,8 @@ Additional config notes:
 
 ## Agent publish vocabulary
 
-Atelier workspaces use consistent command words in `PERSIST.md`/`AGENTS.md`:
+Atelier workspaces use consistent command words enforced by the `publish` skill
+(derived from workspace config):
 
 - `publish`: publish only (no finalization/tagging). If `branch.pr` is true,
   commit, push, and create/update the PR. If `branch.pr` is false, commit,

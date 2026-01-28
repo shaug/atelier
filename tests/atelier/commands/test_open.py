@@ -93,7 +93,6 @@ class TestOpenWorkspace:
                 )
                 assert (workspace_dir / "AGENTS.md").exists()
                 assert (workspace_dir / "PROJECT.md").exists()
-                assert (workspace_dir / "PERSIST.md").exists()
                 assert (workspace_dir / "SUCCESS.md").exists()
                 assert (workspace_dir / "skills").exists()
                 assert paths.workspace_config_path(workspace_dir).exists()
@@ -122,17 +121,7 @@ class TestOpenWorkspace:
                     encoding="utf-8"
                 )
                 assert workspace_project_content == project_content
-                assert "PERSIST.md" in agents_content
-
-                persist_content = (workspace_dir / "PERSIST.md").read_text(
-                    encoding="utf-8"
-                )
-                assert "## Integration Strategy" in persist_content
-                assert "Pull requests expected: yes" in persist_content
-                assert "History policy: manual" in persist_content
-                assert workspace_config.atelier.managed_files.get(
-                    "PERSIST.md"
-                ) == config.hash_text(persist_content)
+                assert not (workspace_dir / "PERSIST.md").exists()
 
                 assert any(cmd[:2] == ["git", "clone"] for cmd in commands)
                 repo_path = (workspace_dir / "repo").resolve()
@@ -1904,11 +1893,7 @@ class TestOpenWorkspace:
                 assert workspace_path.read_text(encoding="utf-8") == "workspace stub\n"
                 assert int(agents_path.stat().st_mtime) == 1_000_000_000
                 assert int(workspace_path.stat().st_mtime) == 1_000_000_000
-                persist_content = (workspace_dir / "PERSIST.md").read_text(
-                    encoding="utf-8"
-                )
-                assert "Pull requests expected: no" in persist_content
-                assert "History policy: squash" in persist_content
+                assert not (workspace_dir / "PERSIST.md").exists()
                 assert not (workspace_dir / "BACKGROUND.md").exists()
             finally:
                 os.chdir(original_cwd)
@@ -1974,17 +1959,12 @@ class TestOpenWorkspace:
                     open_cmd.open_workspace(SimpleNamespace(workspace_name="feat-demo"))
 
                 assert (workspace_dir / "AGENTS.md").exists()
-                assert (workspace_dir / "PERSIST.md").exists()
                 assert success_path.read_text(encoding="utf-8") == "workspace stub\n"
                 agents_content = (workspace_dir / "AGENTS.md").read_text(
                     encoding="utf-8"
                 )
                 assert "Atelier Agent Contract" in agents_content
-                persist_content = (workspace_dir / "PERSIST.md").read_text(
-                    encoding="utf-8"
-                )
-                assert "Pull requests expected: yes" in persist_content
-                assert "History policy: manual" in persist_content
+                assert not (workspace_dir / "PERSIST.md").exists()
             finally:
                 os.chdir(original_cwd)
 
@@ -2488,7 +2468,7 @@ class TestOpenWorkspace:
             finally:
                 os.chdir(original_cwd)
 
-    def test_open_renders_direct_integration_strategy(self) -> None:
+    def test_open_records_direct_integration_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -2541,12 +2521,13 @@ class TestOpenWorkspace:
                     workspace_branch,
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
-                persist_content = (workspace_dir / "PERSIST.md").read_text(
-                    encoding="utf-8"
+                workspace_config = config.load_workspace_config(
+                    paths.workspace_config_path(workspace_dir)
                 )
-                assert "Pull requests expected: no" in persist_content
-                assert "History policy: squash" in persist_content
-                assert "collapsed into a single commit" in persist_content
+                assert workspace_config is not None
+                assert workspace_config.workspace.branch_pr is False
+                assert workspace_config.workspace.branch_history == "squash"
+                assert not (workspace_dir / "PERSIST.md").exists()
             finally:
                 os.chdir(original_cwd)
 
@@ -2610,11 +2591,7 @@ class TestOpenWorkspace:
                 assert workspace_config.workspace.branch_pr is False
                 assert workspace_config.workspace.branch_history == "merge"
 
-                persist_content = (workspace_dir / "PERSIST.md").read_text(
-                    encoding="utf-8"
-                )
-                assert "Pull requests expected: no" in persist_content
-                assert "History policy: merge" in persist_content
+                assert not (workspace_dir / "PERSIST.md").exists()
             finally:
                 os.chdir(original_cwd)
 

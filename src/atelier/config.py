@@ -442,6 +442,28 @@ def update_workspace_managed_files(
     write_workspace_system_config(config_path, workspace_config)
 
 
+def remove_workspace_managed_files(workspace_dir: Path, keys: set[str]) -> None:
+    """Remove managed file hashes from a workspace config."""
+    if not keys:
+        return
+    config_path = paths.workspace_config_sys_path(workspace_dir)
+    workspace_config = load_workspace_system_config(config_path)
+    if not workspace_config:
+        die("no workspace config found for managed file updates")
+    atelier_section = workspace_config.atelier
+    managed = dict(atelier_section.managed_files)
+    updated = False
+    for key in keys:
+        if key in managed:
+            managed.pop(key)
+            updated = True
+    if not updated:
+        return
+    atelier_section = atelier_section.model_copy(update={"managed_files": managed})
+    workspace_config = workspace_config.model_copy(update={"atelier": atelier_section})
+    write_workspace_system_config(config_path, workspace_config)
+
+
 def update_workspace_skills_metadata(
     workspace_dir: Path, updates: dict[str, dict[str, str] | SkillMetadata]
 ) -> None:
@@ -548,21 +570,6 @@ def managed_workspace_agents_updates(workspace_dir: Path) -> dict[str, str]:
     if content != canonical:
         return {}
     return {"AGENTS.md": hash_text(content)}
-
-
-def managed_workspace_persist_updates(workspace_dir: Path) -> dict[str, str]:
-    """Return managed hashes for workspace PERSIST files when canonical."""
-    persist_path = workspace_dir / "PERSIST.md"
-    if not persist_path.exists():
-        return {}
-    branch_pr, branch_history = read_workspace_branch_settings(workspace_dir)
-    if branch_pr is None or branch_history is None:
-        return {}
-    content = persist_path.read_text(encoding="utf-8")
-    canonical = templates.render_persist(branch_pr, branch_history)
-    if content != canonical:
-        return {}
-    return {"PERSIST.md": hash_text(content)}
 
 
 def parse_project_config(

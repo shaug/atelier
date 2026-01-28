@@ -36,6 +36,16 @@ def _default_agent_patches(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(builtins, "input", fail_input)
 
 
+@pytest.fixture(autouse=True)
+def _git_non_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Avoid hanging git network prompts in tests (e.g., ls-remote over SSH).
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+    monkeypatch.setenv(
+        "GIT_SSH_COMMAND",
+        "ssh -o BatchMode=yes -o ConnectTimeout=5",
+    )
+
+
 def pytest_collect_file(
     parent: pytest.Collector, file_path: Path
 ) -> DoctestModule | None:

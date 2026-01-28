@@ -98,8 +98,7 @@ The Rust implementation must preserve all on-disk conventions:
   - `projects/<project-key>/`
   - `workspaces/<workspace-key>/`
   - `config.sys.json`, `config.user.json`
-  - policy files (`AGENTS.md`, `PROJECT.md`, `SUCCESS.md`, `PERSIST.md`,
-    `BACKGROUND.md`)
+  - policy files (`AGENTS.md`, `PROJECT.md`, `SUCCESS.md`, `BACKGROUND.md`)
 - Hashing rules:
   - short SHA-256 suffixes for project/workspace directory names
   - stable workspace ID: `atelier:<enlistment-path>:<branch>`

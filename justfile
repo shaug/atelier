@@ -27,14 +27,20 @@ install-dev:
 test:
   uv pip install -e .[dev]
   uv run pytest
+  bash tests/shell/run.sh
+
+# Run integration evals (requires codex CLI on PATH)
+test-integration:
+  python evals/run-publish-skill-evals.py
 
 # Run lint checks
 lint:
   uv run ruff check .
-  uv run mdformat --check --wrap 80 .
+  uv run --extra dev mdformat --check --wrap 80 .
+  uv run --extra dev shellcheck -x src/atelier/skills/publish/scripts/*.sh
 
 # Auto-format code
 format:
   uv run ruff check --select I,RUF022 --fix .
   uv run ruff format .
-  uv run mdformat --wrap 80 .
+  uv run --extra dev mdformat --wrap 80 .

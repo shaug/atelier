@@ -74,7 +74,6 @@ Notes:
 workspaces/<workspace-key>/
 ├─ AGENTS.md
 ├─ PROJECT.md
-├─ PERSIST.md
 ├─ BACKGROUND.md (optional)
 ├─ SUCCESS.md
 ├─ config.sys.json
@@ -96,7 +95,8 @@ Notes:
 - `SUCCESS.md` is copied into new workspaces from `templates/SUCCESS.md`.
 - If `templates/SUCCESS.md` is missing and `templates/WORKSPACE.md` exists
   (legacy), that file is copied into new workspaces as `WORKSPACE.md`.
-- `PERSIST.md` is created for every new workspace and is managed by Atelier.
+- Publish/persist/finalize semantics are derived from workspace config and
+  executed via the `publish` skill.
 - `BACKGROUND.md` is created only when a workspace is created from an existing
   branch.
 - `<workspace-key>` is the normalized branch name plus a short SHA-256 of the
@@ -242,7 +242,6 @@ This project uses **Atelier**, a workspace-based workflow for agent-assisted dev
 - `PROJECT.md` (if present) for project-wide rules; it is linked/copied into
   this workspace.
 - `SUCCESS.md` (or `WORKSPACE.md` for legacy workspaces) for workspace intent, scope, and completion criteria.
-- `PERSIST.md` for how to finish and integrate this work (created for new workspaces).
 - `BACKGROUND.md` (if present) for context when a workspace is created from an existing branch.
 
 ## Execution Expectations
@@ -266,7 +265,7 @@ Ensure the configured agent CLI is installed and authenticated
 - For legacy workspaces, `WORKSPACE.md` is treated as equivalent.
 - `PROJECT.md` rules take precedence over this file.
 
-Before finalizing work in a workspace, read `PERSIST.md`.
+Before finalizing work in a workspace, use the `publish` skill.
 
 After reading the applicable files, proceed with the work described there.
 ```
@@ -335,7 +334,7 @@ ______________________________________________________________________
 
 This file is the **standard prologue** for each workspace. It is identical
 across projects and workspaces, and it does not include integration strategy.
-Integration guidance is in `PERSIST.md`.
+Integration guidance is handled by the `publish` skill using workspace config.
 
 ### Standard Prologue (v2)
 
@@ -357,7 +356,6 @@ This project uses **Atelier**, a workspace-based workflow for agent-assisted dev
 - `PROJECT.md` (if present) for project-wide rules; it is linked/copied into this
   workspace.
 - `SUCCESS.md` (or `WORKSPACE.md` for legacy workspaces) for workspace intent, scope, and completion criteria.
-- `PERSIST.md` for how to finish and integrate this work (created for new workspaces).
 - `BACKGROUND.md` (if present) for context when a workspace is created from an existing branch.
 
 ## Execution Expectations
@@ -378,7 +376,7 @@ This project uses **Atelier**, a workspace-based workflow for agent-assisted dev
 - For legacy workspaces, `WORKSPACE.md` is treated as equivalent.
 - `PROJECT.md` rules take precedence over this file.
 
-Before finalizing work in a workspace, read `PERSIST.md`.
+Before finalizing work in a workspace, use the `publish` skill.
 
 After reading the applicable files, proceed with the work described there.
 ```
@@ -386,12 +384,12 @@ After reading the applicable files, proceed with the work described there.
 Workspace intent and success criteria live in `SUCCESS.md`, which is fully
 user-owned. Legacy workspaces may still use `WORKSPACE.md`.
 
-### `PERSIST.md`
+### Publish skill
 
-`PERSIST.md` is created for every new workspace and is managed by Atelier. It
-records the integration strategy derived from workspace settings (`branch.pr`
-and `branch.history`). Read it before finishing or integrating work. It also
-instructs the user to create a local finalization tag
+Publishing and integration guidance lives in the `publish` skill. The skill
+derives its decisions from workspace config (`branch_pr`, `branch_history`, and
+`workspace.base.default_branch`) and executes publish/persist/finalize workflows
+accordingly. It also instructs the user to create the local finalization tag
 `atelier/<branch-name>/finalized` on the integration commit; `atelier clean`
 uses this tag by default.
 
@@ -414,9 +412,8 @@ ______________________________________________________________________
 These user-owned files define additional agent behavior rules that are
 orthogonal to Atelier's core execution protocol. `PROJECT.md` is optional;
 `SUCCESS.md` is created for new workspaces but fully user-owned. `WORKSPACE.md`
-is legacy and treated as equivalent when present. `PERSIST.md` and
-`BACKGROUND.md` are managed by Atelier and do not participate in policy
-precedence.
+is legacy and treated as equivalent when present. `BACKGROUND.md` is managed by
+Atelier and does not participate in policy precedence.
 
 ### `PROJECT.md`
 
@@ -536,7 +533,7 @@ Open editable policy documents in `editor.edit`.
 - `atelier edit --project` opens `PROJECT.md`
 - `atelier edit <workspace>` opens `SUCCESS.md` (or legacy `WORKSPACE.md`)
 - Creates the target file from templates when missing
-- `PERSIST.md` and `BACKGROUND.md` are not editable through this command
+- `BACKGROUND.md` is not editable through this command
 
 ______________________________________________________________________
 
@@ -561,7 +558,6 @@ Ensures a workspace exists and launches or resumes agent work.
      possible)
    - Create workspace `PROJECT.md` by linking/copying the project-level
      `PROJECT.md`
-   - Create `PERSIST.md`
    - Create `BACKGROUND.md` when the workspace branch already exists
    - Copy `templates/SUCCESS.md` to `SUCCESS.md` when available
    - Otherwise copy legacy `templates/WORKSPACE.md` to `WORKSPACE.md`
@@ -822,7 +818,6 @@ Atelier ships with internal templates for:
 - Workspace `SUCCESS.md`
 - Ticket `SUCCESS.ticket.md`
 - Legacy workspace `WORKSPACE.md`
-- Workspace `PERSIST.md`
 - `PROJECT.md` (comment-only stub)
 
 `<project-dir>` refers to the Atelier project directory under the data dir.

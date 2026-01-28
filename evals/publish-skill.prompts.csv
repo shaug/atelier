@@ -1,0 +1,4 @@
+id,should_trigger,expected_commands,prompt
+publish-explicit,true,"resolve_publish_plan.py;ensure_clean_tree.sh",Use the publish skill to persist this workspace. Run required checks only if the skill requires them and report the resolved plan before doing git operations.
+publish-implicit,true,"resolve_publish_plan.py",Please publish this workspace following Atelier rules and report what plan you used.
+non-publish,false,"",Summarize SUCCESS.md in one paragraph.

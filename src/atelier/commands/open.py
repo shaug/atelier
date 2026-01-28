@@ -567,26 +567,6 @@ def collect_workspace_template_updates(
         )
     ]
 
-    persist_path = workspace_dir / "PERSIST.md"
-    persist_key = "PERSIST.md"
-    persist_text = templates.render_persist(
-        workspace_config.workspace.branch_pr,
-        workspace_config.workspace.branch_history,
-    )
-
-    def update_persist_hash(value: str) -> None:
-        config.update_workspace_managed_files(workspace_dir, {persist_key: value})
-
-    updates.append(
-        build_managed_template_update(
-            description=f"Workspace PERSIST.md ({workspace_label_text})",
-            path=persist_path,
-            new_text=persist_text,
-            stored_hash=managed.get(persist_key),
-            update_hash=update_persist_hash,
-            write_text=lambda text: persist_path.write_text(text, encoding="utf-8"),
-        )
-    )
     return updates
 
 
@@ -598,7 +578,6 @@ def backfill_missing_workspace_files(
 ) -> None:
     workspace_label_text = workspace_config.workspace.branch
     agents_path = workspace_dir / "AGENTS.md"
-    persist_path = workspace_dir / "PERSIST.md"
     project_template_path = project_dir / paths.TEMPLATES_DIRNAME / "AGENTS.md"
     canonical_agents = templates.workspace_agents_template(
         prefer_installed_if_modified=True
@@ -621,19 +600,6 @@ def backfill_missing_workspace_files(
             config.update_workspace_managed_files(
                 workspace_dir, {"AGENTS.md": config.hash_text(source_text)}
             )
-
-    if not persist_path.exists():
-        if persist_path.is_symlink():
-            persist_path.unlink()
-        warn(
-            f"workspace {workspace_label_text} is missing PERSIST.md; "
-            "restoring managed file"
-        )
-        persist_text = templates.render_persist(
-            workspace_config.workspace.branch_pr,
-            workspace_config.workspace.branch_history,
-        )
-        persist_path.write_text(persist_text, encoding="utf-8")
 
 
 def open_workspace(args: object) -> None:
@@ -786,7 +752,6 @@ def open_workspace(args: object) -> None:
     )
 
     agents_path = workspace_dir / "AGENTS.md"
-    persist_path = workspace_dir / "PERSIST.md"
     background_path = workspace_dir / "BACKGROUND.md"
     workspace_config_file = paths.workspace_config_path(workspace_dir)
     workspace_config_exists = workspace_config_file.exists()
@@ -823,7 +788,6 @@ def open_workspace(args: object) -> None:
         workspace.ensure_workspace_metadata(
             workspace_dir=workspace_dir,
             agents_path=agents_path,
-            persist_path=persist_path,
             workspace_config_file=workspace_config_file,
             project_root=project_dir,
             project_enlistment=project_enlistment,
@@ -835,9 +799,6 @@ def open_workspace(args: object) -> None:
         )
         workspace_managed_updates = config.managed_workspace_agents_updates(
             workspace_dir
-        )
-        workspace_managed_updates.update(
-            config.managed_workspace_persist_updates(workspace_dir)
         )
         config.update_workspace_managed_files(workspace_dir, workspace_managed_updates)
         workspace_policy_target = workspace_dir / "SUCCESS.md"

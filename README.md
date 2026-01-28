@@ -143,7 +143,7 @@ Atelier is intentionally small. The CLI:
 - maintains minimal `config.sys.json`/`config.user.json` state for projects and
   workspaces
 - bootstraps policy/context files (`AGENTS.md`, `PROJECT.md`, `SUCCESS.md`,
-  `PERSIST.md`, `BACKGROUND.md`)
+  `BACKGROUND.md`) and installs workspace skills
 - clones the repo and checks out workspace branches on demand
 - launches your editor and configured agent in a predictable way
 
@@ -164,7 +164,6 @@ Atelier is intentionally small. The CLI:
          └─ <workspace-key>/
             ├─ AGENTS.md
             ├─ PROJECT.md
-            ├─ PERSIST.md
             ├─ BACKGROUND.md (optional)
             ├─ SUCCESS.md
             ├─ config.sys.json
@@ -215,8 +214,8 @@ Use `--raw` to treat the argument as the full branch name (no prefix lookup).
 `atelier open` will:
 
 - create the workspace if needed
-- generate `AGENTS.md`, `SUCCESS.md`, `PERSIST.md`, and config files (plus
-  `BACKGROUND.md` when the branch already exists)
+- generate `AGENTS.md`, `SUCCESS.md`, and config files (plus `BACKGROUND.md`
+  when the branch already exists)
 - clone the repo into `repo/` and create the workspace branch
 - prompt to remove the finalization tag `atelier/<branch-name>/finalized` if
   present (continuing either way)
@@ -284,9 +283,9 @@ atelier clean --all --yes
   (`always`, `ask`, `manual`).
 - `SUCCESS.md` is the execution contract for each workspace.
 - `AGENTS.md` is a managed, static prologue created in each workspace.
-- `PERSIST.md` records integration guidance and the finalization tag
-  (`atelier/<branch-name>/finalized`) used by `atelier clean`, plus the
-  publish/persist/finalize vocabulary agents should recognize.
+- The `publish` skill records integration guidance derived from workspace config
+  and the finalization tag (`atelier/<branch-name>/finalized`) used by
+  `atelier clean`.
 - `BACKGROUND.md` captures context when opening an existing branch.
 - `PROJECT.md` is an optional policy overlay for agents and is linked/copied
   into each workspace.
@@ -425,7 +424,7 @@ Options:
 
 Create or open a workspace, ensuring its `repo/` checkout exists, open
 `editor.edit` for new workspaces (`SUCCESS.md` by default), then launch the
-configured agent. New workspaces include managed `AGENTS.md`/`PERSIST.md`, and
+configured agent. New workspaces include managed `AGENTS.md`, and
 `BACKGROUND.md` when the branch already exists. If the workspace repo has the
 finalization tag `atelier/<branch-name>/finalized`, `atelier open` will prompt
 to remove it but continues either way.
@@ -639,11 +638,15 @@ Common tasks (requires `just`):
 just install
 just install-dev
 just test
+just test-integration
 just lint
 just format
 ```
 
 Install `just` with `brew install just` or `cargo install just`.
+
+`just test-integration` runs publish-skill evals and requires the `codex` CLI to
+be installed and authenticated.
 
 ```sh
 uv venv
@@ -660,6 +663,7 @@ Run tests:
 
 ```sh
 pytest
+bash tests/shell/run.sh
 ```
 
 ## License

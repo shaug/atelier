@@ -13,3 +13,4 @@ src/atelier/_version.py
 /.venv/
 .vscode/
 uv.lock
+evals/artifacts/

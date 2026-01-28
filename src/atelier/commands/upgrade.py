@@ -686,43 +686,46 @@ def plan_workspace_agents(
     )
 
 
-def plan_workspace_persist(
+def plan_workspace_persist_removal(
     plan: UpgradePlan,
     target: WorkspaceTarget,
     *,
     auto_yes: bool,
     keep_modified: bool,
 ) -> None:
-    workspace_label_text = workspace_label(target)
-    branch_pr = target.config.workspace.branch_pr
-    branch_history = target.config.workspace.branch_history
-    if branch_pr is None or branch_history is None:
-        plan.skips.append(
-            PlanSkip(
-                description=f"Workspace PERSIST.md ({workspace_label_text})",
-                reason="missing branch settings",
-            )
-        )
-        return
-    canonical = templates.render_persist(branch_pr, branch_history)
-    managed = target.config.atelier.managed_files
     persist_path = target.root / "PERSIST.md"
-    persist_key = "PERSIST.md"
-
-    def update_persist_hash(value: str) -> None:
-        config.update_workspace_managed_files(target.root, {persist_key: value})
-
-    plan_agents_file(
-        plan,
-        description=f"Workspace PERSIST.md ({workspace_label_text})",
-        file_path=persist_path,
-        canonical_text=canonical,
-        stored_hash=managed.get(persist_key),
-        update_hash=update_persist_hash,
-        auto_yes=auto_yes,
-        keep_modified=keep_modified,
-        write_text=lambda text: persist_path.write_text(text, encoding="utf-8"),
+    if not persist_path.exists() and not persist_path.is_symlink():
+        return
+    workspace_label_text = workspace_label(target)
+    description = f"Remove workspace PERSIST.md ({workspace_label_text})"
+    managed = target.config.atelier.managed_files
+    stored_hash = managed.get("PERSIST.md")
+    current_hash: str | None = None
+    if persist_path.exists() and persist_path.is_file():
+        current_hash = hash_text(file_text(persist_path))
+    is_modified = stored_hash is None or (
+        current_hash is not None and stored_hash != current_hash
     )
+
+    if is_modified and keep_modified:
+        plan.skips.append(PlanSkip(description=description, reason="modified"))
+        return
+
+    remove = auto_yes
+    if is_modified and not auto_yes:
+        prompt = f"{description} appears modified. Remove it?"
+        remove = confirm(prompt)
+
+    if not remove:
+        plan.skips.append(PlanSkip(description=description, reason="kept"))
+        return
+
+    def apply_remove() -> None:
+        if persist_path.exists() or persist_path.is_symlink():
+            persist_path.unlink()
+        config.remove_workspace_managed_files(target.root, {"PERSIST.md"})
+
+    plan.actions.append(PlanAction(description=description, apply=apply_remove))
 
 
 def plan_workspace_skills(
@@ -946,7 +949,7 @@ def upgrade(args: object) -> None:
                 auto_yes=auto_yes,
                 keep_modified=keep_modified,
             )
-            plan_workspace_persist(
+            plan_workspace_persist_removal(
                 plan,
                 target,
                 auto_yes=auto_yes,

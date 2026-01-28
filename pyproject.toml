@@ -16,10 +16,20 @@ keywords = ["workspace", "git", "agents"]
 authors = [{ name = "Atelier" }]
 
 [project.optional-dependencies]
-dev = ["hypothesis>=6.0.0", "mdformat>=0.7.0", "pytest>=8.0.0", "ruff>=0.1.0"]
+dev = [
+  "hypothesis>=6.0.0",
+  "mdformat>=0.7.0",
+  "mdformat-frontmatter",
+  "pytest>=8.0.0",
+  "ruff>=0.1.0",
+  "shellcheck-py",
+]
 
 [tool.pytest.ini_options]
 doctest_optionflags = ["ELLIPSIS"]
+
+[tool.mdformat]
+extensions = ["frontmatter"]
 
 [project.scripts]
 atelier = "atelier.cli:main"
