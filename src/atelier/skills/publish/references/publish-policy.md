@@ -60,5 +60,5 @@ policy (rebase/merge/squash), then push again.
 
 ## PR coordination
 
-When `branch_pr` is true, delegate PR creation or updates to the `github` skill.
-Validate results after mutation.
+When `branch_pr` is true, delegate PR creation or updates to the `github-prs`
+skill. Validate results after mutation.

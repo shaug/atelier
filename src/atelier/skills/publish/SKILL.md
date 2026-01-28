@@ -36,8 +36,8 @@ description: >-
 1. Prepare commits with git as needed. Do not mutate state with `atelier`.
 1. Execute the operation per the resolved plan:
    - If `branch_pr` is true, push the workspace branch for all operations, and
-     use the `github` skill to create/update PRs for publish/finalize. Integrate
-     only on finalize.
+     use the `github-prs` skill to create/update PRs for publish/finalize.
+     Integrate only on finalize.
    - If `branch_pr` is false, integrate onto `default_branch` per
      `branch_history` for publish/persist/finalize, then push the default
      branch.

@@ -1,0 +1,46 @@
+---
+name: github-prs
+description: >-
+  Create, update, retarget, and inspect GitHub pull requests with deterministic
+  scripts and the GitHub CLI. Use when Codex needs to open or update a PR for a
+  branch, set PR title/body/labels, retarget a PR base branch, or read PR status
+  and metadata for a specific repo/head/base.
+---
+
+# Manage GitHub pull requests
+
+## Inputs
+
+- repo: GitHub repository slug (e.g., `owner/name`).
+- base: base branch name for the PR (target branch).
+- head: head branch name for the PR (source branch).
+- title: PR title string.
+- body: PR body string.
+- labels: comma-separated label list (use an empty string to clear labels).
+
+## Steps
+
+1. Read [references/github-cli.md](references/github-cli.md) for GitHub CLI
+   behavior and JSON field notes.
+1. Create or update a PR with:
+   `scripts/create_or_update_pr.py --repo <repo> --base <base> --head <head> --title <title> --body <body> --labels <labels>`
+1. Retarget the PR base branch with:
+   `scripts/retarget_pr_base.py --repo <repo> --head <head> --base <base>`
+1. Read PR status/metadata with:
+   `scripts/read_pr_status.py --repo <repo> --head <head>`
+
+## Invariants
+
+- Provide all parameters explicitly; do not infer repo, base, or head.
+- Keep label updates deterministic by matching the exact label set provided.
+- Fail fast when no matching PR exists for an update or status read.
+
+## Prohibited actions
+
+- Do not mutate local git state or push branches.
+- Do not edit files outside of explicit PR metadata operations.
+- Do not modify repository settings or secrets.
+
+## Allowed verification calls
+
+- `gh pr view <number|branch> --repo <repo> --json ...`

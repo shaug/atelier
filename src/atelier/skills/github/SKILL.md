@@ -2,38 +2,26 @@
 
 ## Purpose
 
-Provide deterministic operations for GitHub pull requests used by Atelier
-workflows.
+Route GitHub workflows to the dedicated skills that implement them.
 
 ## Supported Operations
 
-- create: open a pull request for a workspace branch.
-- update: change PR base, title, or description when required.
-- inspect: read PR status and metadata for verification.
-
-## Owned State
-
-- Pull request metadata (title, body, base, labels) for the workspace branch.
+- delegate: map PR workflows to `github-prs` and issue workflows to
+  `github-issues`.
 
 ## Invariants
 
-- Operations must be explicit and parameterized (no inferred intent).
-- PR mutations must reflect the workspace branch state.
-- Changes must be idempotent when re-run with the same parameters.
+- Keep operations explicit and parameterized; do not infer repo, base, or head.
+- Preserve clear separation between PR and issue responsibilities.
 
 ## Prohibited Actions
 
+- Do not create, update, retarget, or inspect pull requests here.
+- Do not create, update, read, or close issues here.
 - Do not invoke `atelier` to mutate state.
-- Do not modify local workspace files unless explicitly required for the PR.
-- Do not change repository settings outside the PR scope.
-
-## Allowed Verification Calls
-
-- `atelier describe --format=json`
-- `atelier list --format=json`
+- Do not change repository settings outside delegated scope.
 
 ## Notes
 
-Use the GitHub CLI or provider APIs as appropriate, but always verify the
-resulting state before returning success. Delegate issue workflows to the
-`github-issues` skill.
+Use `github-prs` for pull request workflows and `github-issues` for issue
+workflows.
