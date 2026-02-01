@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .. import beads, config
+from .. import beads, config, worktrees
 from ..io import die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
 
@@ -146,3 +146,9 @@ def start_worker(args: object) -> None:
     changeset_id = changeset.get("id") or ""
     changeset_title = changeset.get("title") or ""
     say(f"Next changeset: {changeset_id} {changeset_title}")
+    branch, mapping = worktrees.ensure_changeset_branch(
+        project_root, selected_epic, changeset_id
+    )
+    worktree_path = project_root / mapping.worktree_path
+    say(f"Worktree: {worktree_path}")
+    say(f"Changeset branch: {branch}")

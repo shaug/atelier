@@ -9,6 +9,7 @@ from platformdirs import user_data_dir
 ATELIER_APP_NAME = "atelier"
 PROJECTS_DIRNAME = "projects"
 WORKSPACES_DIRNAME = "workspaces"
+WORKTREES_DIRNAME = "worktrees"
 TEMPLATES_DIRNAME = "templates"
 SKILLS_DIRNAME = "skills"
 BEADS_DIRNAME = ".beads"

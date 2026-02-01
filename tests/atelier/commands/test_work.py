@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import atelier.commands.work as work_cmd
 import atelier.config as config
+import atelier.worktrees as worktrees
 
 
 def _fake_project_payload() -> config.ProjectConfig:
@@ -28,6 +29,12 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
             return epics
         return changesets
 
+    mapping = worktrees.WorktreeMapping(
+        epic_id="atelier-epic",
+        worktree_path="worktrees/atelier-epic",
+        changesets={"atelier-epic.1": "atelier-epic-1"},
+    )
+
     with (
         patch(
             "atelier.commands.work.resolve_current_project_with_repo_root",
@@ -43,6 +50,10 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
             return_value=Path("/beads"),
         ),
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.commands.work.worktrees.ensure_changeset_branch",
+            return_value=("atelier-epic-1", mapping),
+        ),
         patch("atelier.commands.work.prompt", return_value="atelier-epic"),
         patch("atelier.commands.work.say"),
     ):
@@ -73,6 +84,12 @@ def test_work_auto_picks_ready_or_in_progress() -> None:
             return in_progress_epics
         return changesets
 
+    mapping = worktrees.WorktreeMapping(
+        epic_id="atelier-epic",
+        worktree_path="worktrees/atelier-epic",
+        changesets={"atelier-epic.1": "atelier-epic-1"},
+    )
+
     with (
         patch(
             "atelier.commands.work.resolve_current_project_with_repo_root",
@@ -88,6 +105,10 @@ def test_work_auto_picks_ready_or_in_progress() -> None:
             return_value=Path("/beads"),
         ),
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.commands.work.worktrees.ensure_changeset_branch",
+            return_value=("atelier-epic-1", mapping),
+        ),
         patch("atelier.commands.work.say"),
     ):
         work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
@@ -107,6 +128,12 @@ def test_work_uses_explicit_epic_id() -> None:
         calls.append(args)
         return changesets
 
+    mapping = worktrees.WorktreeMapping(
+        epic_id="atelier-epic",
+        worktree_path="worktrees/atelier-epic",
+        changesets={"atelier-epic.1": "atelier-epic-1"},
+    )
+
     with (
         patch(
             "atelier.commands.work.resolve_current_project_with_repo_root",
@@ -122,6 +149,10 @@ def test_work_uses_explicit_epic_id() -> None:
             return_value=Path("/beads"),
         ),
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.commands.work.worktrees.ensure_changeset_branch",
+            return_value=("atelier-epic-1", mapping),
+        ),
         patch("atelier.commands.work.say"),
     ):
         work_cmd.start_worker(SimpleNamespace(epic_id="atelier-epic", mode="prompt"))
