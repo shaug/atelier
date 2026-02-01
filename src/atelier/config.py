@@ -763,6 +763,25 @@ def resolve_git_path(
     return "git"
 
 
+def detect_beads_location(repo_root: Path) -> str:
+    """Detect the Beads location for a repo.
+
+    Prefers the repo's Beads store when present, otherwise falls back to the
+    project-level store.
+    """
+    if (repo_root / paths.BEADS_DIRNAME).exists():
+        return "repo"
+    return "project"
+
+
+def resolve_beads_root(project_dir: Path, repo_root: Path) -> Path:
+    """Resolve the Beads root directory based on discovery rules."""
+    location = detect_beads_location(repo_root)
+    if location == "repo":
+        return repo_root / paths.BEADS_DIRNAME
+    return paths.project_beads_dir(project_dir)
+
+
 def is_github_provider(value: str | None) -> bool:
     """Return whether the provider string identifies GitHub."""
     if not value:
@@ -1380,6 +1399,13 @@ def build_project_config(
         }
     )
 
+    beads_location = existing_config.beads.location
+    if not beads_location:
+        beads_location = detect_beads_location(Path(enlistment_path))
+    beads_section = existing_config.beads.model_copy(
+        update={"location": beads_location}
+    )
+
     return ProjectConfig(
         project=ProjectSection(
             enlistment=enlistment_path,
@@ -1395,6 +1421,7 @@ def build_project_config(
         agent=AgentConfig(default=agent_default, options=agent_options),
         editor=EditorConfig(edit=editor_edit, work=editor_work),
         tickets=tickets_section,
+        beads=beads_section,
         atelier=AtelierSection(
             version=atelier_version,
             created_at=atelier_created_at,

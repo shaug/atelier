@@ -77,3 +77,9 @@ class TestLegacyDirFallbacks:
                 paths.workspace_dir_for_branch(project_dir, branch, workspace_id)
                 == expected
             )
+
+
+class TestBeadsPaths:
+    def test_project_beads_dir_uses_beads_dirname(self) -> None:
+        project_dir = Path("/tmp/project")
+        assert paths.project_beads_dir(project_dir) == project_dir / paths.BEADS_DIRNAME

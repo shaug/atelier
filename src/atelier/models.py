@@ -17,6 +17,9 @@ UpgradePolicy = Literal["always", "ask", "manual"]
 TICKET_PROVIDER_VALUES = ("none", "github", "linear")
 TicketProvider = Literal["none", "github", "linear"]
 
+BEADS_LOCATION_VALUES = ("repo", "project")
+BeadsLocation = Literal["repo", "project"]
+
 
 class BranchConfig(BaseModel):
     """Branch policy configuration for a project.
@@ -305,6 +308,24 @@ class TicketRefs(BaseModel):
         return [str(item) for item in value if item is not None]
 
 
+class BeadsSection(BaseModel):
+    """Beads configuration for a project."""
+
+    model_config = ConfigDict(extra="allow")
+
+    location: BeadsLocation | None = None
+
+    @field_validator("location", mode="before")
+    @classmethod
+    def normalize_location(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return normalized or None
+        return value
+
+
 class AtelierSection(BaseModel):
     """Metadata for Atelier itself stored in configs.
 
@@ -430,6 +451,7 @@ class ProjectConfig(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     tickets: TicketProviderConfig = Field(default_factory=TicketProviderConfig)
+    beads: BeadsSection = Field(default_factory=BeadsSection)
     atelier: AtelierSection = Field(default_factory=AtelierSection)
 
 
@@ -439,6 +461,7 @@ class ProjectSystemConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     project: ProjectSection = Field(default_factory=ProjectSection)
+    beads: BeadsSection = Field(default_factory=BeadsSection)
     atelier: AtelierSystemSection = Field(default_factory=AtelierSystemSection)
 
 

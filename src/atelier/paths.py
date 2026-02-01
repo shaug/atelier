@@ -11,6 +11,7 @@ PROJECTS_DIRNAME = "projects"
 WORKSPACES_DIRNAME = "workspaces"
 TEMPLATES_DIRNAME = "templates"
 SKILLS_DIRNAME = "skills"
+BEADS_DIRNAME = ".beads"
 LEGACY_CONFIG_FILENAME = "config.json"
 PROJECT_CONFIG_SYS_FILENAME = "config.sys.json"
 PROJECT_CONFIG_USER_FILENAME = "config.user.json"
@@ -65,6 +66,19 @@ def installed_config_path() -> Path:
         Path to the installed defaults config file.
     """
     return atelier_data_dir() / INSTALLED_CONFIG_USER_FILENAME
+
+
+def project_beads_dir(project_dir: Path) -> Path:
+    """Return the Beads directory for a project.
+
+    Returns:
+        Path to the project-scoped Beads directory.
+
+    Example:
+        >>> project_beads_dir(Path(\"/tmp/project\")).name == BEADS_DIRNAME
+        True
+    """
+    return project_dir / BEADS_DIRNAME
 
 
 def installed_legacy_config_path() -> Path:

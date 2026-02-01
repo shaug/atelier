@@ -635,6 +635,7 @@ def open_workspace(args: object) -> None:
     project_origin = project_section.origin
     project_repo_url = project_section.repo_url
     updates: dict[str, object] = {}
+    needs_write = False
 
     if not project_enlistment:
         updates["enlistment"] = enlistment_path
@@ -652,6 +653,17 @@ def open_workspace(args: object) -> None:
     if updates:
         project_section = project_section.model_copy(update=updates)
         config_payload = config_payload.model_copy(update={"project": project_section})
+        needs_write = True
+
+    beads_location = config.detect_beads_location(repo_root)
+    if config_payload.beads.location != beads_location:
+        beads_section = config_payload.beads.model_copy(
+            update={"location": beads_location}
+        )
+        config_payload = config_payload.model_copy(update={"beads": beads_section})
+        needs_write = True
+
+    if needs_write:
         config.write_project_config(config_path, config_payload)
 
     git_path = config.resolve_git_path(config_payload)
