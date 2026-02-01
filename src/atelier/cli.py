@@ -30,6 +30,7 @@ from .commands import init as init_cmd
 from .commands import list as list_cmd
 from .commands import new as new_cmd
 from .commands import open as open_cmd
+from .commands import plan as plan_cmd
 from .commands import remove as remove_cmd
 from .commands import shell as shell_cmd
 from .commands import template as template_cmd
@@ -449,34 +450,38 @@ def open_command(
     )
 
 
-@app.command(
-    "work", help="Open the workspace repo (or root with --workspace) in your editor."
-)
-def work_command(
-    workspace_name: Annotated[
-        str,
-        typer.Argument(
-            help="workspace branch to open",
-            autocompletion=_workspace_only_shell_complete,
+@app.command("plan", help="Start a planner session for Beads epics.")
+def plan_command(
+    create_epic: Annotated[
+        bool,
+        typer.Option(
+            "--create-epic",
+            help="open an interactive bead form to create a new epic",
         ),
-    ],
-    workspace_root: Annotated[
-        bool,
-        typer.Option("--workspace", help="open the workspace root instead of repo"),
-    ] = False,
-    set_title: Annotated[
-        bool,
-        typer.Option("--set-title", help="emit a terminal title escape"),
     ] = False,
 ) -> None:
-    """Open the workspace repo in the configured work editor."""
-    work_cmd.open_workspace_repo(
-        SimpleNamespace(
-            workspace_name=workspace_name,
-            workspace_root=workspace_root,
-            set_title=set_title,
-        )
-    )
+    """Start a planner session."""
+    plan_cmd.run_planner(SimpleNamespace(create_epic=create_epic))
+
+
+@app.command("work", help="Start a worker session for the next changeset.")
+def work_command(
+    epic_id: Annotated[
+        str | None,
+        typer.Argument(
+            help="epic bead id to work on (optional)",
+        ),
+    ] = None,
+    mode: Annotated[
+        str | None,
+        typer.Option(
+            "--mode",
+            help="worker selection mode: prompt or auto (defaults to ATELIER_MODE)",
+        ),
+    ] = None,
+) -> None:
+    """Start a worker session."""
+    work_cmd.start_worker(SimpleNamespace(epic_id=epic_id, mode=mode))
 
 
 @app.command(

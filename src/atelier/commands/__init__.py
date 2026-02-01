@@ -8,9 +8,10 @@ from .init import init_project
 from .list import list_workspaces
 from .new import new_project
 from .open import open_workspace
+from .plan import run_planner
 from .shell import open_workspace_shell
 from .template import render_template
-from .work import open_workspace_repo
+from .work import start_worker
 
 __all__ = [
     "clean_workspaces",
@@ -20,8 +21,9 @@ __all__ = [
     "list_workspaces",
     "new_project",
     "open_workspace",
-    "open_workspace_repo",
     "open_workspace_shell",
     "render_template",
+    "run_planner",
     "show_config",
+    "start_worker",
 ]
