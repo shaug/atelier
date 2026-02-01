@@ -19,6 +19,7 @@ ______________________________________________________________________
 - Maintain compatibility with repos that already use Beads.
 - Enforce human-shaped changesets and reviewability.
 - Run workers manually with no background agents.
+- No backwards compatibility requirements for legacy workspaces.
 
 ______________________________________________________________________
 
