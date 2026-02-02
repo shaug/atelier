@@ -5,10 +5,7 @@ from pathlib import Path
 
 from . import paths
 
-TEMPLATE_PARTS: tuple[tuple[str, ...], ...] = (
-    ("AGENTS.md",),
-    ("agent", "AGENTS.md"),
-)
+TEMPLATE_PARTS: tuple[tuple[str, ...], ...] = (("agent", "AGENTS.md"),)
 
 
 def _read_template(*parts: str) -> str:
@@ -21,7 +18,7 @@ def _read_template(*parts: str) -> str:
         Template text.
 
     Example:
-        >>> isinstance(_read_template("AGENTS.md"), str)
+        >>> isinstance(_read_template("agent", "AGENTS.md"), str)
         True
     """
     return (
@@ -105,27 +102,6 @@ def refresh_installed_templates() -> list[Path]:
     return written
 
 
-def agents_template(
-    *,
-    prefer_installed: bool = False,
-    prefer_installed_if_modified: bool = False,
-) -> str:
-    """Return the canonical ``AGENTS.md`` template text.
-
-    Returns:
-        Template text.
-
-    Example:
-        >>> "Atelier" in agents_template()
-        True
-    """
-    return read_template(
-        "AGENTS.md",
-        prefer_installed=prefer_installed,
-        prefer_installed_if_modified=prefer_installed_if_modified,
-    )
-
-
 def agent_home_template(
     *,
     prefer_installed: bool = False,
@@ -138,58 +114,3 @@ def agent_home_template(
         prefer_installed=prefer_installed,
         prefer_installed_if_modified=prefer_installed_if_modified,
     )
-
-
-def project_agents_template(
-    *,
-    prefer_installed: bool = False,
-    prefer_installed_if_modified: bool = False,
-) -> str:
-    """Return the canonical ``AGENTS.md`` template text.
-
-    Returns:
-        Template text.
-
-    Example:
-        >>> "Atelier" in project_agents_template()
-        True
-    """
-    return read_template(
-        "AGENTS.md",
-        prefer_installed=prefer_installed,
-        prefer_installed_if_modified=prefer_installed_if_modified,
-    )
-
-
-def workspace_agents_template(
-    *,
-    prefer_installed: bool = False,
-    prefer_installed_if_modified: bool = False,
-) -> str:
-    """Return the canonical ``AGENTS.md`` template text.
-
-    Returns:
-        Template text.
-
-    Example:
-        >>> "Atelier" in workspace_agents_template()
-        True
-    """
-    return read_template(
-        "AGENTS.md",
-        prefer_installed=prefer_installed,
-        prefer_installed_if_modified=prefer_installed_if_modified,
-    )
-
-
-def render_workspace_agents() -> str:
-    """Render ``AGENTS.md`` for a new workspace.
-
-    Returns:
-        Workspace ``AGENTS.md`` content.
-
-    Example:
-        >>> "Atelier" in render_workspace_agents()
-        True
-    """
-    return workspace_agents_template(prefer_installed_if_modified=True)

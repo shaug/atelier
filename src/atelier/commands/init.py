@@ -1,8 +1,7 @@
 """Implementation for the ``atelier init`` command.
 
 ``atelier init`` registers the current repo in the Atelier data directory,
-writes project configuration and templates, and avoids modifying the repo
-itself.
+writes project configuration, and avoids modifying the repo itself.
 """
 
 from pathlib import Path
@@ -60,9 +59,6 @@ def init_project(args: object) -> None:
     project.ensure_project_dirs(project_dir)
     config.write_project_config(config_path, payload)
     project.ensure_project_scaffold(project_dir)
-    config.update_project_managed_files(
-        project_dir, config.managed_project_agents_updates(project_dir)
-    )
 
     if confirm("Add project-wide policy for agents?", default=False):
         beads_root = config.resolve_beads_root(project_dir, Path(enlistment_path))

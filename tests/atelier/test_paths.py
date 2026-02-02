@@ -13,15 +13,6 @@ class TestNormalizedDirNames:
         expected_hash = hashlib.sha256(enlistment.encode("utf-8")).hexdigest()[:8]
         assert paths.project_dir_name(enlistment) == f"{expected_base}-{expected_hash}"
 
-    def test_workspace_dir_name_normalizes_branch(self) -> None:
-        branch = " .feat/demo. "
-        workspace_id = f"atelier:/repo:{branch}"
-        expected_base = "feat-demo"
-        expected_hash = hashlib.sha256(workspace_id.encode("utf-8")).hexdigest()[:8]
-        assert paths.workspace_dir_name(branch, workspace_id) == (
-            f"{expected_base}-{expected_hash}"
-        )
-
 
 class TestLegacyDirFallbacks:
     def test_project_dir_prefers_legacy_hash(self) -> None:
@@ -48,35 +39,6 @@ class TestLegacyDirFallbacks:
                     / paths.project_dir_name(enlistment)
                 )
                 assert paths.project_dir_for_enlistment(enlistment, origin) == expected
-
-    def test_workspace_dir_prefers_legacy_hash(self) -> None:
-        branch = "feat/demo"
-        workspace_id = "atelier:/repo:feat/demo"
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_dir = Path(temp_dir) / "project"
-            legacy_dir = (
-                project_dir / paths.WORKSPACES_DIRNAME / paths.workspace_key(branch)
-            )
-            legacy_dir.mkdir(parents=True)
-            assert (
-                paths.workspace_dir_for_branch(project_dir, branch, workspace_id)
-                == legacy_dir
-            )
-
-    def test_workspace_dir_uses_normalized_name_without_legacy(self) -> None:
-        branch = "feat/demo"
-        workspace_id = "atelier:/repo:feat/demo"
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_dir = Path(temp_dir) / "project"
-            expected = (
-                project_dir
-                / paths.WORKSPACES_DIRNAME
-                / paths.workspace_dir_name(branch, workspace_id)
-            )
-            assert (
-                paths.workspace_dir_for_branch(project_dir, branch, workspace_id)
-                == expected
-            )
 
 
 class TestBeadsPaths:

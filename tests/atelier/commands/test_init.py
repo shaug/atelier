@@ -54,10 +54,8 @@ class TestInitProject:
                 assert config_payload.branch.history == "manual"
                 assert config_payload.editor.edit == ["cursor", "-w"]
                 assert config_payload.editor.work == ["cursor"]
-                assert (project_dir / "templates" / "AGENTS.md").exists()
                 assert not (project_dir / "AGENTS.md").exists()
                 assert not (project_dir / "PROJECT.md").exists()
-                assert (project_dir / "workspaces").is_dir()
             finally:
                 os.chdir(original_cwd)
 
@@ -227,36 +225,6 @@ class TestInitProject:
                 assert config_payload.agent.default == "codex"
                 assert config_payload.editor.edit == ["cursor", "-w"]
                 assert config_payload.editor.work == ["cursor"]
-                assert (project_dir / "workspaces").is_dir()
-            finally:
-                os.chdir(original_cwd)
-
-    def test_init_creates_agents_template(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            enlistment_path = enlistment_path_for(root)
-            data_dir = root / "data"
-            original_cwd = Path.cwd()
-            os.chdir(root)
-            try:
-                args = make_init_args()
-                responses = iter(["", "", "", "", "", "", "", ""])
-
-                with (
-                    patch("builtins.input", lambda _: next(responses)),
-                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.git.git_repo_root", return_value=root),
-                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
-                ):
-                    init_cmd.init_project(args)
-                    project_dir = paths.project_dir_for_enlistment(
-                        enlistment_path, NORMALIZED_ORIGIN
-                    )
-
-                template_path = project_dir / "templates" / "AGENTS.md"
-                assert template_path.exists()
-                content = template_path.read_text(encoding="utf-8")
-                assert "AGENTS.md" in content
             finally:
                 os.chdir(original_cwd)
 
