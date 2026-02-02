@@ -23,6 +23,7 @@ def test_packaged_skills_include_core_set() -> None:
         "mail_mark_read",
         "changeset_review",
         "plan_create_epic",
+        "plan_split_tasks",
     }.issubset(names)
 
 
@@ -48,5 +49,6 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "mail_mark_read",
             "changeset_review",
             "plan_create_epic",
+            "plan_split_tasks",
         ):
             assert (workspace_dir / "skills" / name / "SKILL.md").exists()
