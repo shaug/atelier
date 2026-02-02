@@ -7,7 +7,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import atelier.git as git
-import atelier.paths as paths
 import atelier.workspace as workspace
 
 WHITESPACE = " \t\r\n"
