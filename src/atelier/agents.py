@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Iterable, Literal, Mapping
 
 WorkingDirMode = Literal["cwd", "flag"]
 
@@ -173,6 +173,18 @@ def available_agents() -> dict[str, str | None]:
 
 def available_agent_names() -> tuple[str, ...]:
     return tuple(available_agents().keys())
+
+
+def agent_environment(
+    agent_id: str, *, base_env: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    """Return environment variables for agent identity injection."""
+    env = dict(base_env or os.environ)
+    if agent_id:
+        env["ATELIER_AGENT_ID"] = agent_id
+        env["BD_ACTOR"] = agent_id
+        env["BEADS_AGENT_NAME"] = agent_id
+    return env
 
 
 def unique_available_agent(available: Iterable[str]) -> str | None:

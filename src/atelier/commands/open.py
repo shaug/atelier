@@ -12,6 +12,7 @@ from typing import Callable
 
 from .. import (
     __version__,
+    agent_home,
     agents,
     codex,
     config,
@@ -515,10 +516,15 @@ def open_workspace(args: object) -> None:
 
     term.apply_workspace_identity(project_enlistment, workspace_branch)
     say(f"Workspace {workspace_branch} at {workspace_dir}")
+    agent_identity = agent_home.resolve_agent_home(
+        project_dir, config_payload, role="worker"
+    ).agent_id
+    base_env = agents.agent_environment(agent_identity)
     workspace_env = workspace.workspace_environment(
         project_enlistment,
         workspace_branch,
         workspace_dir,
+        base_env=base_env,
     )
 
     agents_path = workspace_dir / "AGENTS.md"
