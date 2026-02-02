@@ -54,7 +54,7 @@ policy (rebase/merge/squash), then push again.
 
 ## Allowed verification calls
 
-- `atelier describe --format=json`
+- `atelier status --format=json`
 - `atelier list --format=json`
 
 ## PR coordination

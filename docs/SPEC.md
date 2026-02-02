@@ -103,7 +103,7 @@ stored as records with metadata, labels, and parent/child relationships.
 - `atelier edit`: open the selected worktree in `editor.work`.
 - `atelier shell` / `atelier exec`: run a shell or command inside the worktree.
 - `atelier config`: view or update project config.
-- `atelier describe`: show project or workspace status.
+- `atelier status`: show hooks, claims, and changeset status.
 - `atelier list`: list available workspaces (root branches).
 - `atelier gc`: clean up stale hooks and orphaned worktrees.
 - `atelier clean`: delete finalized worktrees when explicitly requested.

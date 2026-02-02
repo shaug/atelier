@@ -25,7 +25,6 @@ except ImportError:  # pragma: no cover - legacy Click fallback
 from . import __version__, beads, config, git, paths
 from .commands import clean as clean_cmd
 from .commands import config as config_cmd
-from .commands import describe as describe_cmd
 from .commands import edit as edit_cmd
 from .commands import gc as gc_cmd
 from .commands import init as init_cmd
@@ -34,6 +33,7 @@ from .commands import new as new_cmd
 from .commands import plan as plan_cmd
 from .commands import policy as policy_cmd
 from .commands import shell as shell_cmd
+from .commands import status as status_cmd
 from .commands import work as work_cmd
 from .exec import try_run_command
 from .io import warn
@@ -531,32 +531,8 @@ def list_command() -> None:
     list_cmd.list_workspaces(SimpleNamespace())
 
 
-@app.command(
-    "describe",
-    help="Show project overview or detailed workspace status.",
-)
-def describe_command(
-    workspace_name: Annotated[
-        str | None,
-        typer.Argument(
-            help="workspace branch to describe (optional)",
-            autocompletion=_workspace_only_shell_complete,
-        ),
-    ] = None,
-    finalized: Annotated[
-        bool,
-        typer.Option(
-            "--finalized",
-            help="only show finalized workspaces (project scope)",
-        ),
-    ] = False,
-    no_finalized: Annotated[
-        bool,
-        typer.Option(
-            "--no-finalized",
-            help="exclude finalized workspaces (project scope)",
-        ),
-    ] = False,
+@app.command("status", help="Show epics, hooks, and changeset status.")
+def status_command(
     format: Annotated[
         str,
         typer.Option(
@@ -565,15 +541,8 @@ def describe_command(
         ),
     ] = "table",
 ) -> None:
-    """Describe project or workspace status."""
-    describe_cmd(
-        SimpleNamespace(
-            workspace_name=workspace_name,
-            finalized=finalized,
-            no_finalized=no_finalized,
-            format=format,
-        )
-    )
+    """Show project status for epics, hooks, and changesets."""
+    status_cmd(SimpleNamespace(format=format))
 
 
 @app.command(

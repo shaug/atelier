@@ -215,13 +215,11 @@ atelier exec <workspace-branch> -- python -m http.server
 atelier shell <workspace-branch> --workspace
 ```
 
-Describe project/workspaces:
+Show project status:
 
 ```sh
-atelier describe
-atelier describe --finalized
-atelier describe <workspace-branch>
-atelier describe <workspace-branch> --format=json
+atelier status
+atelier status --format=json
 ```
 
 List workspaces:
@@ -439,25 +437,19 @@ Options:
 - `--workspace`: Run in the worktree root instead of the default repo path.
 - `--set-title`: Emit a terminal title escape.
 
-### `atelier describe [workspace-branch]`
+### `atelier status`
 
-Show project overview or detailed workspace status. With no workspace argument,
-prints a project overview plus a workspace summary table. When a workspace is
-provided, includes clean/dirty, ahead/behind, diffstat, and last commit details.
+Show project status for epics, hooks, and changesets.
 
 Usage:
 
 ```sh
-atelier describe
-atelier describe --finalized
-atelier describe <workspace-branch>
-atelier describe <workspace-branch> --format=json
+atelier status
+atelier status --format=json
 ```
 
 Options:
 
-- `--finalized`: Show only finalized workspaces in the project summary.
-- `--no-finalized`: Exclude finalized workspaces from the project summary.
 - `--format=json`: Emit deterministic JSON output.
 
 ### `atelier list`

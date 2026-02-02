@@ -117,10 +117,9 @@ epics and changesets, including labels and metadata.
 
   - Prints or updates project configuration.
 
-- `atelier describe`
+- `atelier status`
 
-  - Shows project or workspace status, including branch cleanliness and recent
-    commits where available.
+  - Shows project status for epics, hooks, and changesets.
 
 - `atelier list`
 

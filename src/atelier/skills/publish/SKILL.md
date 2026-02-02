@@ -43,7 +43,7 @@ description: >-
 1. For finalize, create the finalization tag:
    - Run `scripts/create_finalization_tag.sh <repo_path> <branch>`.
 1. Verify results using read-only commands and git:
-   - `atelier describe --format=json`
+   - `atelier status --format=json`
    - `atelier list --format=json`
    - `scripts/ensure_clean_tree.sh <repo_path>`
 
