@@ -172,7 +172,15 @@ def _list_ready_changesets(
     epic_id: str, *, beads_root: Path, repo_root: Path
 ) -> list[dict[str, object]]:
     return beads.run_bd_json(
-        ["ready", "--parent", epic_id, "--label", "at:changeset"],
+        [
+            "ready",
+            "--parent",
+            epic_id,
+            "--label",
+            "at:changeset",
+            "--label",
+            "cs:ready",
+        ],
         beads_root=beads_root,
         cwd=repo_root,
     )
