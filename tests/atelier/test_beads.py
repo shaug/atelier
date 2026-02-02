@@ -122,3 +122,29 @@ def test_mark_message_read_updates_labels() -> None:
     called_args = run_command.call_args.args[0]
     assert "update" in called_args
     assert "--remove-label" in called_args
+
+
+def test_update_changeset_review_updates_description() -> None:
+    issue = {"id": "atelier-99", "description": "scope: demo\n"}
+    captured: dict[str, str] = {}
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        return [issue]
+
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
+        captured["id"] = issue_id
+        captured["description"] = description
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+    ):
+        beads.update_changeset_review(
+            "atelier-99",
+            beads.changesets.ReviewMetadata(pr_state="review"),
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert captured["id"] == "atelier-99"
+    assert "pr_state: review" in captured["description"]

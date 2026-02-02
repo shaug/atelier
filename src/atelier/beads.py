@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from . import exec, messages
+from . import changesets, exec, messages
 from .io import die
 
 
@@ -297,4 +297,26 @@ def mark_message_read(
         ["update", message_id, "--remove-label", "at:unread"],
         beads_root=beads_root,
         cwd=cwd,
+    )
+
+
+def update_changeset_review(
+    changeset_id: str,
+    metadata: changesets.ReviewMetadata,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    """Update review metadata fields for a changeset bead."""
+    issues = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"changeset not found: {changeset_id}")
+    issue = issues[0]
+    description = issue.get("description")
+    updated = changesets.apply_review_metadata(
+        description if isinstance(description, str) else "",
+        metadata,
+    )
+    _update_issue_description(
+        changeset_id, updated, beads_root=beads_root, cwd=cwd
     )
