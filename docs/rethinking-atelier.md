@@ -374,6 +374,10 @@ Use `cs:` labels only for intent and non-derivable state:
 - **cs:merged**: integrated/merged.
 - **cs:abandoned**: closed without integration.
 
+When a PR is merged or closed without merge, update labels to add
+`cs:merged`/`cs:abandoned` and clear active labels (`cs:ready`, `cs:planned`,
+`cs:in_progress`).
+
 PR-derived (computed) states:
 
 - **pushed**: remote branch exists, no PR yet.
