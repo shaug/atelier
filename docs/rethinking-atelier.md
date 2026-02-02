@@ -322,7 +322,9 @@ Claiming an epic means:
 - agent.hook_bead = <epic-id>
 
 The hook should be stored in the agent bead’s hook slot (bd slot set/clear) as
-the authoritative source of truth. Only one hook per agent.
+the authoritative source of truth. `hook_bead` in the description is a legacy
+fallback and may be backfilled into the slot during reads. Only one hook per
+agent.
 
 ### Pinned vs Hooked
 

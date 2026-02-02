@@ -40,6 +40,12 @@ worktree_path: <path>
 external_tickets: <json list>
 ```
 
+Agent hook storage:
+
+- Store the active hook in the agent bead slot
+  (`bd slot set <agent> hook <epic>`).
+- Keep `hook_bead` in the description only as a legacy fallback/backfill field.
+
 ## Messages
 
 Message beads are first-class. Use YAML frontmatter in the description and
