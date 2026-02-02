@@ -142,13 +142,9 @@ ______________________________________________________________________
 
 - Shows hooks, claims, queue state, and progress for epics/changesets.
 
-### `atelier gc` / `atelier prune`
+### `atelier gc`
 
 - Clears stale hooks, stale claims, and abandoned queues.
-
-### `atelier mail`
-
-- Overseer tools for message beads (optional).
 
 Agents should not call the `atelier` CLI directly. Agents use skills only.
 

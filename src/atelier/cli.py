@@ -27,16 +27,13 @@ from .commands import clean as clean_cmd
 from .commands import config as config_cmd
 from .commands import describe as describe_cmd
 from .commands import edit as edit_cmd
+from .commands import gc as gc_cmd
 from .commands import init as init_cmd
 from .commands import list as list_cmd
-from .commands import mail as mail_cmd
 from .commands import new as new_cmd
 from .commands import plan as plan_cmd
-from .commands import remove as remove_cmd
-from .commands import shell as shell_cmd
 from .commands import policy as policy_cmd
-from .commands import template as template_cmd
-from .commands import upgrade as upgrade_cmd
+from .commands import shell as shell_cmd
 from .commands import work as work_cmd
 from .exec import try_run_command
 from .io import warn
@@ -49,9 +46,6 @@ app = typer.Typer(
         "a worker session against the next ready changeset."
     ),
 )
-mail_app = typer.Typer(help="Mail tools for message beads.")
-app.add_typer(mail_app, name="mail")
-
 _COMPLETE_ENV = "_ATELIER_COMPLETE"
 _DEFAULT_BRANCH_EXCLUDES = {"main", "master"}
 
@@ -441,77 +435,6 @@ def work_command(
     work_cmd.start_worker(SimpleNamespace(epic_id=epic_id, mode=mode))
 
 
-@mail_app.command("inbox", help="List message beads assigned to an agent.")
-def mail_inbox_command(
-    agent: Annotated[
-        str | None,
-        typer.Option("--agent", help="agent id to filter inbox (defaults to current)"),
-    ] = None,
-    all_messages: Annotated[
-        bool,
-        typer.Option("--all", help="include read messages"),
-    ] = False,
-) -> None:
-    """List message beads for the agent inbox."""
-    mail_cmd.inbox(SimpleNamespace(agent=agent, all=all_messages))
-
-
-@mail_app.command("send", help="Send a message bead to an agent.")
-def mail_send_command(
-    to: Annotated[
-        str,
-        typer.Option("--to", help="recipient agent id"),
-    ],
-    subject: Annotated[
-        str,
-        typer.Option("--subject", help="message subject line"),
-    ],
-    body: Annotated[
-        str | None,
-        typer.Option("--body", help="message body text"),
-    ] = None,
-    body_file: Annotated[
-        Path | None,
-        typer.Option("--body-file", help="path to a file with message body"),
-    ] = None,
-    sender: Annotated[
-        str | None,
-        typer.Option("--from", help="sender agent id override"),
-    ] = None,
-    thread: Annotated[
-        str | None,
-        typer.Option("--thread", help="thread bead id"),
-    ] = None,
-    reply_to: Annotated[
-        str | None,
-        typer.Option("--reply-to", help="reply-to message id"),
-    ] = None,
-) -> None:
-    """Send a message bead."""
-    mail_cmd.send_mail(
-        SimpleNamespace(
-            to=to,
-            subject=subject,
-            body=body,
-            body_file=body_file,
-            sender=sender,
-            thread=thread,
-            reply_to=reply_to,
-        )
-    )
-
-
-@mail_app.command("mark-read", help="Mark a message bead as read.")
-def mail_mark_read_command(
-    message_id: Annotated[
-        str,
-        typer.Argument(help="message bead id to mark read"),
-    ],
-) -> None:
-    """Mark a message bead as read."""
-    mail_cmd.mark_read(SimpleNamespace(message_id=message_id))
-
-
 @app.command(
     "shell",
     help="Open a shell in the workspace repo (or root with --workspace).",
@@ -717,123 +640,39 @@ def clean_command(
 
 
 @app.command(
-    "remove",
-    help="Remove Atelier project data from the local data directory.",
+    "gc",
+    help="Clean up stale hooks, claims, and orphaned worktrees.",
 )
-def remove_command(
-    project: Annotated[
-        str | None,
-        typer.Argument(help="project directory name to remove (optional)"),
-    ] = None,
-    all_: Annotated[
-        bool,
-        typer.Option("--all", help="remove all projects"),
-    ] = False,
-    installed: Annotated[
-        bool,
-        typer.Option("--installed", help="delete the entire Atelier data directory"),
-    ] = False,
-    orphans: Annotated[
-        bool,
-        typer.Option("--orphans", help="remove orphaned projects"),
-    ] = False,
-) -> None:
-    """Remove project data from the Atelier data directory."""
-    remove_cmd.remove_projects(
-        SimpleNamespace(
-            project=project,
-            all=all_,
-            installed=installed,
-            orphans=orphans,
-        )
-    )
-
-
-@app.command(
-    "rm",
-    help="Alias for remove.",
-)
-def rm_command(
-    project: Annotated[
-        str | None,
-        typer.Argument(help="project directory name to remove (optional)"),
-    ] = None,
-    all_: Annotated[
-        bool,
-        typer.Option("--all", help="remove all projects"),
-    ] = False,
-    installed: Annotated[
-        bool,
-        typer.Option("--installed", help="delete the entire Atelier data directory"),
-    ] = False,
-    orphans: Annotated[
-        bool,
-        typer.Option("--orphans", help="remove orphaned projects"),
-    ] = False,
-) -> None:
-    """Alias for remove."""
-    remove_command(
-        project=project,
-        all_=all_,
-        installed=installed,
-        orphans=orphans,
-    )
-
-
-@app.command(
-    "upgrade",
-    help="Upgrade project/workspace metadata and templates safely.",
-)
-def upgrade_command(
-    workspace_names: Annotated[
-        list[str] | None,
-        typer.Argument(
-            help="workspace branches to upgrade",
-            autocompletion=_workspace_only_shell_complete,
+def gc_command(
+    stale_hours: Annotated[
+        float,
+        typer.Option(
+            "--stale-hours",
+            help="consider heartbeats older than this many hours stale",
         ),
-    ] = None,
-    installed: Annotated[
+    ] = 24.0,
+    stale_if_missing_heartbeat: Annotated[
         bool,
-        typer.Option("--installed", help="refresh the installed template cache"),
-    ] = False,
-    all_projects: Annotated[
-        bool,
-        typer.Option("--all-projects", help="upgrade all projects in the data dir"),
-    ] = False,
-    no_projects: Annotated[
-        bool,
-        typer.Option("--no-projects", help="skip project upgrades"),
-    ] = False,
-    no_workspaces: Annotated[
-        bool,
-        typer.Option("--no-workspaces", help="skip workspace upgrades"),
+        typer.Option(
+            "--stale-if-missing-heartbeat",
+            help="treat missing heartbeats as stale",
+        ),
     ] = False,
     dry_run: Annotated[
         bool,
-        typer.Option("--dry-run", help="show planned changes only"),
-    ] = False,
-    keep_modified: Annotated[
-        bool,
-        typer.Option(
-            "--keep-modified",
-            help="skip upgrading files that were modified since the last upgrade",
-        ),
+        typer.Option("--dry-run", help="show planned actions only"),
     ] = False,
     yes: Annotated[
         bool,
         typer.Option("--yes", help="apply without confirmation"),
     ] = False,
 ) -> None:
-    """Upgrade project/workspace metadata to current conventions."""
-    upgrade_cmd.upgrade(
+    """Garbage collect stale hooks and orphaned worktrees."""
+    gc_cmd.gc(
         SimpleNamespace(
-            workspace_names=workspace_names or [],
-            installed=installed,
-            all_projects=all_projects,
-            no_projects=no_projects,
-            no_workspaces=no_workspaces,
+            stale_hours=stale_hours,
+            stale_if_missing_heartbeat=stale_if_missing_heartbeat,
             dry_run=dry_run,
-            keep_modified=keep_modified,
             yes=yes,
         )
     )
@@ -874,27 +713,6 @@ def config_command(
             reset=reset,
             edit=edit,
         )
-    )
-
-
-@app.command("template", help="Print or edit Atelier templates.")
-def template_command(
-    target: Annotated[
-        str,
-        typer.Argument(help="template target (agents)"),
-    ],
-    installed: Annotated[
-        bool,
-        typer.Option("--installed", help="use the installed template cache"),
-    ] = False,
-    edit: Annotated[
-        bool,
-        typer.Option("--edit", help="open the resolved template in editor.edit"),
-    ] = False,
-) -> None:
-    """Print or edit templates for the current project."""
-    template_cmd.render_template(
-        SimpleNamespace(target=target, installed=installed, edit=edit)
     )
 
 

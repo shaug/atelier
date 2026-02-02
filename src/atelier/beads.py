@@ -86,6 +86,11 @@ def _parse_description_fields(description: str | None) -> dict[str, str]:
     return fields
 
 
+def parse_description_fields(description: str | None) -> dict[str, str]:
+    """Parse key/value fields from a bead description."""
+    return _parse_description_fields(description)
+
+
 def workspace_label(root_branch: str) -> str:
     """Return the workspace label for a root branch."""
     return f"workspace:{root_branch}"
@@ -184,6 +189,26 @@ def update_workspace_root_branch(
     _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
     refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
     return refreshed[0] if refreshed else issue
+
+
+def clear_agent_hook(
+    agent_bead_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    """Clear the hooked epic id on the agent bead description."""
+    issues = run_bd_json(["show", agent_bead_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"agent bead not found: {agent_bead_id}")
+    issue = issues[0]
+    description = issue.get("description")
+    updated = _update_description_field(
+        description if isinstance(description, str) else "",
+        key="hook_bead",
+        value=None,
+    )
+    _update_issue_description(agent_bead_id, updated, beads_root=beads_root, cwd=cwd)
 
 
 def list_policy_beads(

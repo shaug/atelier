@@ -66,7 +66,9 @@ def init_project(args: object) -> None:
 
     if confirm("Add project-wide policy for agents?", default=False):
         beads_root = config.resolve_beads_root(project_dir, Path(enlistment_path))
-        beads.run_bd_command(["prime"], beads_root=beads_root, cwd=Path(enlistment_path))
+        beads.run_bd_command(
+            ["prime"], beads_root=beads_root, cwd=Path(enlistment_path)
+        )
         planner_issue = beads.list_policy_beads(
             policy.ROLE_PLANNER, beads_root=beads_root, cwd=Path(enlistment_path)
         )
@@ -76,9 +78,7 @@ def init_project(args: object) -> None:
         planner_body = (
             beads.extract_policy_body(planner_issue[0]) if planner_issue else ""
         )
-        worker_body = (
-            beads.extract_policy_body(worker_issue[0]) if worker_issue else ""
-        )
+        worker_body = beads.extract_policy_body(worker_issue[0]) if worker_issue else ""
         combined, split = policy.build_combined_policy(planner_body, worker_body)
         text = policy.edit_policy_text(combined, project_config=payload, cwd=cwd)
         if text.strip():
@@ -97,7 +97,10 @@ def init_project(args: object) -> None:
                 issue_id = planner_issue[0].get("id")
                 if isinstance(issue_id, str) and issue_id:
                     beads.update_policy_bead(
-                        issue_id, planner_text, beads_root=beads_root, cwd=Path(enlistment_path)
+                        issue_id,
+                        planner_text,
+                        beads_root=beads_root,
+                        cwd=Path(enlistment_path),
                     )
             else:
                 beads.create_policy_bead(
@@ -110,7 +113,10 @@ def init_project(args: object) -> None:
                 issue_id = worker_issue[0].get("id")
                 if isinstance(issue_id, str) and issue_id:
                     beads.update_policy_bead(
-                        issue_id, worker_text, beads_root=beads_root, cwd=Path(enlistment_path)
+                        issue_id,
+                        worker_text,
+                        beads_root=beads_root,
+                        cwd=Path(enlistment_path),
                     )
             else:
                 beads.create_policy_bead(

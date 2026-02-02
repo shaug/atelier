@@ -58,7 +58,7 @@ Atelier splits configuration into two JSON files at the project level:
 - `config.sys.json` (system-managed): IDs, timestamps, managed-file hashes, and
   other metadata.
 - `config.user.json` (user-managed): branch prefix, agent/editor configuration,
-  upgrade policy, and per-project preferences.
+  and per-project preferences.
 
 Editor roles:
 
@@ -117,10 +117,6 @@ epics and changesets, including labels and metadata.
 
   - Prints or updates project configuration.
 
-- `atelier template`
-
-  - Prints or edits the `AGENTS.md` template.
-
 - `atelier describe`
 
   - Shows project or workspace status, including branch cleanliness and recent
@@ -135,6 +131,6 @@ epics and changesets, including labels and metadata.
   - Removes worktrees marked finalized (via publish tooling) or when explicitly
     requested.
 
-- `atelier remove`
+- `atelier gc`
 
-  - Deletes project data from the Atelier data directory.
+  - Cleans up stale hooks, claims, and orphaned worktrees.

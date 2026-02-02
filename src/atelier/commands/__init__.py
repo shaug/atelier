@@ -10,19 +10,17 @@ from .open import open_workspace
 from .plan import run_planner
 from .policy import edit_policy
 from .shell import open_workspace_shell
-from .template import render_template
 from .work import start_worker
 
 __all__ = [
     "clean_workspaces",
     "describe",
+    "edit_policy",
     "init_project",
     "list_workspaces",
     "new_project",
     "open_workspace",
-    "edit_policy",
     "open_workspace_shell",
-    "render_template",
     "run_planner",
     "show_config",
     "start_worker",

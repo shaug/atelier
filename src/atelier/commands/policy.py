@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import agent_home, beads, config, policy
-from ..io import die, select, say
+from ..io import die, say, select
 from .resolve import resolve_current_project_with_repo_root
 
 
@@ -38,7 +38,8 @@ def _resolve_role_choice(
     worker_body = policy.normalize_policy_text(worker_body)
     if planner_body and worker_body and planner_body != worker_body:
         return select(
-            "Edit policy for", [policy.ROLE_PLANNER, policy.ROLE_WORKER, policy.ROLE_BOTH]
+            "Edit policy for",
+            [policy.ROLE_PLANNER, policy.ROLE_WORKER, policy.ROLE_BOTH],
         )
     return policy.ROLE_BOTH
 
@@ -75,20 +76,20 @@ def edit_policy(args: object) -> None:
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
 
     planner_issue = _select_policy_issue(
-        beads.list_policy_beads(policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root),
+        beads.list_policy_beads(
+            policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
+        ),
         role=policy.ROLE_PLANNER,
     )
     worker_issue = _select_policy_issue(
-        beads.list_policy_beads(policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root),
+        beads.list_policy_beads(
+            policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root
+        ),
         role=policy.ROLE_WORKER,
     )
 
-    planner_body = (
-        beads.extract_policy_body(planner_issue) if planner_issue else ""
-    )
-    worker_body = (
-        beads.extract_policy_body(worker_issue) if worker_issue else ""
-    )
+    planner_body = beads.extract_policy_body(planner_issue) if planner_issue else ""
+    worker_body = beads.extract_policy_body(worker_issue) if worker_issue else ""
 
     role_choice = _resolve_role_choice(role_flag, planner_body, worker_body)
 

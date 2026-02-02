@@ -1,0 +1,258 @@
+"""Garbage collection for stale Atelier state."""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+from dataclasses import dataclass
+from pathlib import Path
+
+from .. import beads, config, worktrees
+from ..io import confirm, say, warn
+from .resolve import resolve_current_project_with_repo_root
+
+
+@dataclass(frozen=True)
+class GcAction:
+    description: str
+    apply: callable
+
+
+def _parse_rfc3339(value: str | None) -> dt.datetime | None:
+    if not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw.replace("Z", "+00:00")
+    try:
+        parsed = dt.datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed
+
+
+def _issue_labels(issue: dict[str, object]) -> set[str]:
+    labels = issue.get("labels")
+    if not isinstance(labels, list):
+        return set()
+    return {str(label) for label in labels if label}
+
+
+def _try_show_issue(
+    issue_id: str, *, beads_root: Path, cwd: Path
+) -> dict[str, object] | None:
+    result = beads.run_bd_command(
+        ["show", issue_id, "--json"], beads_root=beads_root, cwd=cwd, allow_failure=True
+    )
+    if result.returncode != 0:
+        return None
+    raw = result.stdout.strip() if result.stdout else ""
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(payload, list) and payload:
+        return payload[0] if isinstance(payload[0], dict) else None
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+def _release_epic(epic: dict[str, object], *, beads_root: Path, cwd: Path) -> None:
+    epic_id = str(epic.get("id") or "")
+    if not epic_id:
+        return
+    labels = _issue_labels(epic)
+    status = str(epic.get("status") or "")
+    args = ["update", epic_id, "--assignee", ""]
+    if "at:hooked" in labels:
+        args.extend(["--remove-label", "at:hooked"])
+    if status and status not in {"closed", "done"}:
+        args.extend(["--status", "open"])
+    beads.run_bd_command(args, beads_root=beads_root, cwd=cwd, allow_failure=True)
+
+
+def _gc_hooks(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    stale_hours: float,
+    include_missing_heartbeat: bool,
+) -> list[GcAction]:
+    now = dt.datetime.now(tz=dt.timezone.utc)
+    stale_delta = dt.timedelta(hours=stale_hours)
+    actions: list[GcAction] = []
+
+    agent_issues = beads.run_bd_json(
+        ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
+    )
+    agents: dict[str, dict[str, object]] = {}
+    for issue in agent_issues:
+        description = issue.get("description")
+        fields = beads.parse_description_fields(
+            description if isinstance(description, str) else ""
+        )
+        agent_id = fields.get("agent_id") or issue.get("title")
+        if not isinstance(agent_id, str) or not agent_id:
+            continue
+        agent_id = agent_id.strip()
+        if not agent_id:
+            continue
+        agents[agent_id] = {
+            "issue": issue,
+            "fields": fields,
+            "hook_bead": fields.get("hook_bead"),
+            "heartbeat_at": fields.get("heartbeat_at"),
+        }
+
+    epics = beads.run_bd_json(
+        ["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root
+    )
+
+    for agent_id, payload in agents.items():
+        hook_bead = payload.get("hook_bead")
+        if not isinstance(hook_bead, str) or not hook_bead:
+            continue
+        heartbeat_raw = payload.get("heartbeat_at")
+        heartbeat = _parse_rfc3339(
+            heartbeat_raw if isinstance(heartbeat_raw, str) else None
+        )
+        stale = False
+        if heartbeat is None:
+            stale = include_missing_heartbeat
+        else:
+            stale = now - heartbeat > stale_delta
+        if not stale:
+            continue
+        issue = payload.get("issue")
+        issue_id = issue.get("id") if isinstance(issue, dict) else None
+        if not isinstance(issue_id, str) or not issue_id:
+            continue
+        epic = _try_show_issue(hook_bead, beads_root=beads_root, cwd=repo_root)
+        description = f"Release stale hook for {agent_id} (epic {hook_bead})"
+
+        def _apply_release(
+            agent_bead_id: str = issue_id,
+            epic_issue: dict[str, object] | None = epic,
+        ) -> None:
+            if epic_issue:
+                _release_epic(epic_issue, beads_root=beads_root, cwd=repo_root)
+            beads.clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
+
+        actions.append(GcAction(description=description, apply=_apply_release))
+
+    for epic in epics:
+        labels = _issue_labels(epic)
+        assignee = epic.get("assignee")
+        epic_id = epic.get("id")
+        if "at:hooked" not in labels and not assignee:
+            continue
+        if not isinstance(epic_id, str) or not epic_id:
+            continue
+        assignee_id = assignee if isinstance(assignee, str) else ""
+        agent_info = agents.get(assignee_id) if assignee_id else None
+        hook_bead = agent_info.get("hook_bead") if agent_info else None
+        if not agent_info or hook_bead != epic_id:
+            description = f"Release orphaned epic hook {epic_id}"
+
+            def _apply_unhook(epic_issue: dict[str, object] = epic) -> None:
+                _release_epic(epic_issue, beads_root=beads_root, cwd=repo_root)
+
+            actions.append(GcAction(description=description, apply=_apply_unhook))
+    return actions
+
+
+def _gc_orphan_worktrees(
+    *,
+    project_dir: Path,
+    beads_root: Path,
+    repo_root: Path,
+    git_path: str,
+) -> list[GcAction]:
+    actions: list[GcAction] = []
+    meta_dir = worktrees.worktrees_root(project_dir) / worktrees.METADATA_DIRNAME
+    if not meta_dir.exists():
+        return actions
+    for path in meta_dir.glob("*.json"):
+        mapping = worktrees.load_mapping(path)
+        if not mapping:
+            continue
+        epic_id = mapping.epic_id
+        if not epic_id:
+            continue
+        epic = _try_show_issue(epic_id, beads_root=beads_root, cwd=repo_root)
+        if epic is not None:
+            continue
+        description = f"Remove orphaned worktree for epic {epic_id}"
+
+        def _apply_remove(
+            epic: str = epic_id,
+            mapping_path: Path = path,
+        ) -> None:
+            worktrees.remove_git_worktree(
+                project_dir, repo_root, epic, git_path=git_path
+            )
+            mapping_path.unlink(missing_ok=True)
+
+        actions.append(GcAction(description=description, apply=_apply_remove))
+    return actions
+
+
+def gc(args: object) -> None:
+    """Garbage collect stale hooks and orphaned worktrees."""
+    project_root, project_config, _enlistment, repo_root = (
+        resolve_current_project_with_repo_root()
+    )
+    project_data_dir = config.resolve_project_data_dir(project_root, project_config)
+    beads_root = config.resolve_beads_root(project_data_dir, repo_root)
+
+    stale_hours = getattr(args, "stale_hours", 24.0)
+    try:
+        stale_hours = float(stale_hours)
+    except (TypeError, ValueError):
+        warn("invalid --stale-hours value; defaulting to 24")
+        stale_hours = 24.0
+    if stale_hours < 0:
+        stale_hours = 0
+
+    dry_run = bool(getattr(args, "dry_run", False))
+    yes = bool(getattr(args, "yes", False))
+    include_missing_heartbeat = bool(getattr(args, "stale_if_missing_heartbeat", False))
+
+    actions: list[GcAction] = []
+    actions.extend(
+        _gc_hooks(
+            beads_root=beads_root,
+            repo_root=repo_root,
+            stale_hours=stale_hours,
+            include_missing_heartbeat=include_missing_heartbeat,
+        )
+    )
+    actions.extend(
+        _gc_orphan_worktrees(
+            project_dir=project_data_dir,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            git_path=config.resolve_git_path(project_config),
+        )
+    )
+
+    if not actions:
+        say("No GC actions needed.")
+        return
+
+    for action in actions:
+        if dry_run:
+            say(f"Would: {action.description}")
+            continue
+        if yes or confirm(f"{action.description}?", default=False):
+            action.apply()
+            say(f"Done: {action.description}")
+        else:
+            say(f"Skipped: {action.description}")

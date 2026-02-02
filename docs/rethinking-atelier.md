@@ -466,9 +466,7 @@ User-facing commands should be minimal:
 - `atelier work` -> start worker session
 - `atelier edit` -> open a workspace repo in the work editor
 - `atelier status` -> show hooks, claims, queue state
-- `atelier gc` / `atelier prune` -> cleanup stale hooks, claims, channels,
-  queues
-- `atelier mail` -> optional overseer mail tools
+- `atelier gc` -> cleanup stale hooks, claims, channels, queues
 
 Agents should not call `atelier` directly. Agents use skills only.
 
@@ -564,7 +562,7 @@ Must instruct:
 - On startup: claim epic, hook it, and begin work immediately.
 - If no epic is available: check mail, then idle.
 
-## Cleanup (atelier gc / prune)
+## Cleanup (atelier gc)
 
 Should handle:
 

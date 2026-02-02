@@ -6,7 +6,8 @@ import re
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from . import beads, editor, exec as exec_util
+from . import beads, editor
+from . import exec as exec_util
 from .agent_home import AGENT_INSTRUCTIONS_FILENAME, AgentHome
 from .io import die
 from .models import ProjectConfig
@@ -40,9 +41,7 @@ def normalize_policy_text(value: str | None) -> str:
     return value.rstrip("\n")
 
 
-def build_combined_policy(
-    planner_text: str, worker_text: str
-) -> tuple[str, bool]:
+def build_combined_policy(planner_text: str, worker_text: str) -> tuple[str, bool]:
     """Return combined policy text and whether it contains split markers."""
     planner_text = normalize_policy_text(planner_text)
     worker_text = normalize_policy_text(worker_text)
@@ -93,7 +92,9 @@ def edit_policy_text(
 ) -> str:
     """Open a temp file in the editor and return the edited text."""
     editor_cmd = editor.resolve_editor_command(project_config, role="edit")
-    with NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".md") as handle:
+    with NamedTemporaryFile(
+        "w", encoding="utf-8", delete=False, suffix=".md"
+    ) as handle:
         handle.write(initial_text.rstrip("\n") + ("\n" if initial_text else ""))
         temp_path = Path(handle.name)
     try:
@@ -115,9 +116,7 @@ def apply_policy_block(content: str, *, role: str, body: str | None) -> str:
     """Insert or update the policy block in AGENTS.md content."""
     start = f"<!-- ATELIER_POLICY_START role:{role} -->"
     end = f"<!-- ATELIER_POLICY_END role:{role} -->"
-    pattern = re.compile(
-        re.escape(start) + r".*?" + re.escape(end), re.DOTALL
-    )
+    pattern = re.compile(re.escape(start) + r".*?" + re.escape(end), re.DOTALL)
     body_text = normalize_policy_text(body)
     if not body_text:
         updated = pattern.sub("", content)

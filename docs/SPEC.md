@@ -95,7 +95,7 @@ stored as records with metadata, labels, and parent/child relationships.
 
 ## 6. Command Semantics
 
-- `atelier init`: register the current repo and write project config/templates.
+- `atelier init`: register the current repo and write project config.
 - `atelier plan`: create epics and changesets; assign `workspace.root_branch`.
 - `atelier policy`: edit project-wide policy for planners/workers.
 - `atelier work`: select/claim an epic, pick the next ready changeset, and
@@ -103,8 +103,7 @@ stored as records with metadata, labels, and parent/child relationships.
 - `atelier edit`: open the selected worktree in `editor.work`.
 - `atelier shell` / `atelier exec`: run a shell or command inside the worktree.
 - `atelier config`: view or update project config.
-- `atelier template`: view or edit the `AGENTS.md` template.
 - `atelier describe`: show project or workspace status.
 - `atelier list`: list available workspaces (root branches).
+- `atelier gc`: clean up stale hooks and orphaned worktrees.
 - `atelier clean`: delete finalized worktrees when explicitly requested.
-- `atelier remove`: delete project data from the Atelier data directory.

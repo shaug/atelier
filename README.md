@@ -256,8 +256,6 @@ atelier clean --all --yes
 
 ## Notes
 
-- Template upgrades are governed by `atelier.upgrade` (`always`, `ask`,
-  `manual`).
 - The epic record is the execution contract for each workspace.
 - `AGENTS.md` is a managed prologue used to configure agents.
 - `atelier policy` edits the project-wide policy shared by planning and work
@@ -353,28 +351,6 @@ Examples:
 atelier config --prompt
 atelier config --reset
 atelier config --installed --prompt
-```
-
-### `atelier template agents`
-
-Print or edit templates used to seed new documents.
-
-Usage:
-
-```sh
-atelier template agents
-```
-
-Options:
-
-- `--installed`: Use the installed template cache.
-- `--edit`: Open the resolved template in `editor.edit`.
-
-Examples:
-
-```sh
-atelier template agents --edit
-atelier template agents --installed
 ```
 
 ### `atelier policy`
@@ -527,45 +503,21 @@ atelier clean --no-branch feat/old-branch
 atelier clean --orphans
 ```
 
-### `atelier remove` / `atelier rm`
+### `atelier gc`
 
-Remove project data from the Atelier data directory without touching user repos.
-
-Usage:
-
-```sh
-atelier remove
-atelier remove <project-dir-name>
-atelier remove --orphans
-```
-
-Options:
-
-- `--all`: Remove all projects.
-- `--installed`: Delete the entire Atelier data directory (projects +
-  templates).
-- `--orphans`: Remove orphaned projects (missing enlistment path).
-
-### `atelier upgrade [workspace-branch ...]`
-
-Upgrade project/workspace metadata and templates safely.
+Clean up stale hooks and orphaned worktrees.
 
 Usage:
 
 ```sh
-atelier upgrade
-atelier upgrade feat/old-branch
-atelier upgrade --all-projects --dry-run
+atelier gc
 ```
 
 Options:
 
-- `--installed`: Refresh the installed template cache.
-- `--all-projects`: Upgrade all projects in the data directory.
-- `--no-projects`: Skip project upgrades.
-- `--no-workspaces`: Skip workspace upgrades.
-- `--dry-run`: Show planned changes only.
-- `--keep-modified`: Skip upgrading files modified since the last upgrade.
+- `--stale-hours`: Treat heartbeats older than this many hours as stale.
+- `--stale-if-missing-heartbeat`: Treat missing heartbeats as stale.
+- `--dry-run`: Show planned actions without applying them.
 - `--yes`: Apply without confirmation.
 
 ## Development
