@@ -43,7 +43,7 @@ description: >-
 
 - Required checks succeeded (or explicit user override recorded).
 - Working tree is clean before and after mutations.
-- Branch/PR state matches the workspace config-derived plan.
+- Branch/PR state matches the project config-derived plan.
 - Repo is clean after publish/persist.
 
 ## Failure paths
@@ -51,9 +51,9 @@ description: >-
 - If required checks fail and no explicit override exists, stop and report
   failures.
 - If the working tree is dirty, stop and request cleanup or commit.
-- If workspace config is missing `branch_pr` or `branch_history`, stop and
+- If project config is missing `branch_pr` or `branch_history`, stop and
   request repair.
-- If `default_branch` is required but missing, stop and request workspace config
+- If `default_branch` is required but missing, stop and request project config
   repair.
 - If push or integration fails, follow recovery steps in
   [references/publish-policy.md](references/publish-policy.md).

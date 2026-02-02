@@ -35,7 +35,8 @@ description: >-
 
 ## Notes
 
-- Beads is the source of truth for intent and sequencing. Atelier-specific
-  execution metadata belongs in workspace config, not in Beads.
+- Beads is the source of truth for intent and sequencing. Execution metadata
+  should live in Atelier's project store and be derived from git/PR state
+  rather than custom Beads schema.
 - Use labels and description fields according to
   [references/beads-conventions.md](references/beads-conventions.md).

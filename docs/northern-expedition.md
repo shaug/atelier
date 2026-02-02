@@ -178,7 +178,8 @@ Beads repos.
 - Storing execution metadata directly in Beads beyond description fields,
   labels, and comments.
 
-All Atelier-specific execution metadata should live in workspace config.
+Atelier-specific execution metadata should live in Atelier's project store and
+be derived from git/PR state where possible.
 
 ______________________________________________________________________
 
@@ -201,19 +202,19 @@ ______________________________________________________________________
 ### Phase 1 — Beads Foundation
 
 - Detect Beads location (repo or project-level).
-- Track epic bead id in workspace config.
+- Track epic bead id in worktree/branch metadata.
 - Add `atelier plan` and `atelier work` entrypoints.
 - Add planner/worker AGENTS.md scaffolding.
 
 ### Phase 2 — Changesets + Sequencing
 
 - Plan creates child beads (changesets) + dependency graph.
-- Workspace stores changeset-branch mapping.
+- Track changeset branch mapping in Beads metadata/labels.
 - `atelier work` starts on the next ready changeset for the chosen epic.
 
 ### Phase 3 — Review Lifecycle
 
-- Encode PR/review state in workspace config.
+- Encode PR/review state via Beads labels/comments.
 - Skills update Beads comments/labels for review state.
 - Remove legacy finalization tags from the workflow.
 
