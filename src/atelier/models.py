@@ -344,6 +344,7 @@ class AtelierSection(BaseModel):
 
     version: str | None = None
     created_at: str | None = None
+    data_dir: str | None = None
     upgrade: UpgradePolicy | None = None
     managed_files: dict[str, str] = Field(default_factory=dict)
 
@@ -354,6 +355,16 @@ class AtelierSection(BaseModel):
             return None
         if isinstance(value, str):
             return value.strip().lower()
+        return value
+
+    @field_validator("data_dir", mode="before")
+    @classmethod
+    def normalize_data_dir(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
         return value
 
     @field_validator("managed_files", mode="before")
@@ -376,6 +387,7 @@ class AtelierSystemSection(BaseModel):
 
     version: str | None = None
     created_at: str | None = None
+    data_dir: str | None = None
     managed_files: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("managed_files", mode="before")
@@ -389,6 +401,16 @@ class AtelierSystemSection(BaseModel):
                 continue
             normalized[str(key)] = str(item)
         return normalized
+
+    @field_validator("data_dir", mode="before")
+    @classmethod
+    def normalize_system_data_dir(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
 
 
 class SkillMetadata(BaseModel):

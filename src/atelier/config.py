@@ -1380,6 +1380,11 @@ def build_project_config(
     atelier_version = existing_config.atelier.version or __version__
     atelier_upgrade = resolve_upgrade_policy(existing_config.atelier.upgrade)
     atelier_managed_files = dict(existing_config.atelier.managed_files)
+    atelier_data_dir = existing_config.atelier.data_dir
+    if not atelier_data_dir:
+        atelier_data_dir = str(
+            paths.project_dir_for_enlistment(enlistment_path, origin)
+        )
 
     agent_options = dict(existing_config.agent.options)
     agent_options.setdefault(agent_default, [])
@@ -1425,6 +1430,7 @@ def build_project_config(
         atelier=AtelierSection(
             version=atelier_version,
             created_at=atelier_created_at,
+            data_dir=atelier_data_dir,
             upgrade=atelier_upgrade,
             managed_files=atelier_managed_files,
         ),
