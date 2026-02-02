@@ -104,8 +104,10 @@ def _gc_hooks(
         agent_id = agent_id.strip()
         if not agent_id:
             continue
+        issue_id = issue.get("id") if isinstance(issue, dict) else None
         agents[agent_id] = {
             "issue": issue,
+            "issue_id": issue_id,
             "fields": fields,
             "hook_bead": fields.get("hook_bead"),
             "heartbeat_at": fields.get("heartbeat_at"),
@@ -151,13 +153,63 @@ def _gc_hooks(
         labels = _issue_labels(epic)
         assignee = epic.get("assignee")
         epic_id = epic.get("id")
-        if "at:hooked" not in labels and not assignee:
+        description = epic.get("description")
+        fields = beads.parse_description_fields(
+            description if isinstance(description, str) else ""
+        )
+        claim_expires_raw = fields.get("claim_expires_at")
+        claim_expires_at = _parse_rfc3339(
+            claim_expires_raw if isinstance(claim_expires_raw, str) else None
+        )
+        if "at:hooked" not in labels and not assignee and claim_expires_at is None:
             continue
         if not isinstance(epic_id, str) or not epic_id:
             continue
+        status = str(epic.get("status") or "").lower()
         assignee_id = assignee if isinstance(assignee, str) else ""
         agent_info = agents.get(assignee_id) if assignee_id else None
         hook_bead = agent_info.get("hook_bead") if agent_info else None
+        if claim_expires_at is not None and claim_expires_at <= now:
+            description = f"Release expired claim for epic {epic_id}"
+
+            def _apply_expired(
+                epic_issue: dict[str, object] = epic,
+                agent_payload: dict[str, object] | None = agent_info,
+                epic_id_value: str = epic_id,
+            ) -> None:
+                _release_epic(epic_issue, beads_root=beads_root, cwd=repo_root)
+                if agent_payload and agent_payload.get("hook_bead") == epic_id_value:
+                    agent_issue_id = agent_payload.get("issue_id")
+                    if isinstance(agent_issue_id, str) and agent_issue_id:
+                        beads.clear_agent_hook(
+                            agent_issue_id, beads_root=beads_root, cwd=repo_root
+                        )
+
+            actions.append(GcAction(description=description, apply=_apply_expired))
+            continue
+
+        if claim_expires_at is not None and "at:hooked" not in labels and not assignee:
+            continue
+
+        if status in {"closed", "done"} and ("at:hooked" in labels or assignee):
+            description = f"Release closed epic hook {epic_id}"
+
+            def _apply_closed(
+                epic_issue: dict[str, object] = epic,
+                agent_payload: dict[str, object] | None = agent_info,
+                epic_id_value: str = epic_id,
+            ) -> None:
+                _release_epic(epic_issue, beads_root=beads_root, cwd=repo_root)
+                if agent_payload and agent_payload.get("hook_bead") == epic_id_value:
+                    agent_issue_id = agent_payload.get("issue_id")
+                    if isinstance(agent_issue_id, str) and agent_issue_id:
+                        beads.clear_agent_hook(
+                            agent_issue_id, beads_root=beads_root, cwd=repo_root
+                        )
+
+            actions.append(GcAction(description=description, apply=_apply_closed))
+            continue
+
         if not agent_info or hook_bead != epic_id:
             description = f"Release orphaned epic hook {epic_id}"
 
