@@ -1,6 +1,7 @@
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import atelier.worktrees as worktrees
 
@@ -22,3 +23,32 @@ def test_ensure_changeset_branch_writes_mapping() -> None:
         assert payload["epic_id"] == "epic"
         assert payload["changesets"]["epic.1"] == "epic-1"
         assert mapping.worktree_path == "worktrees/epic"
+
+
+def test_ensure_git_worktree_creates_when_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        repo_root = Path(tmp) / "repo"
+        project_dir.mkdir(parents=True)
+        repo_root.mkdir(parents=True)
+
+        def fake_ref_exists(
+            _repo: Path, ref: str, *, git_path: str | None = None
+        ) -> bool:
+            return ref == "refs/remotes/origin/main"
+
+        with (
+            patch(
+                "atelier.worktrees.git.git_default_branch", return_value="main"
+            ),
+            patch(
+                "atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists
+            ),
+            patch("atelier.worktrees.exec_util.run_command") as run_command,
+        ):
+            worktree_path = worktrees.ensure_git_worktree(
+                project_dir, repo_root, "epic"
+            )
+
+        assert worktree_path == project_dir / "worktrees" / "epic"
+        assert run_command.called

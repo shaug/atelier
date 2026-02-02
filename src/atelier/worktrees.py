@@ -6,8 +6,11 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import paths
+from . import exec as exec_util
+from . import git, paths
 from .io import die
+
+METADATA_DIRNAME = ".meta"
 
 
 @dataclass(frozen=True)
@@ -29,7 +32,7 @@ def worktree_dir(project_dir: Path, epic_id: str) -> Path:
 
 def mapping_path(project_dir: Path, epic_id: str) -> Path:
     """Return the mapping file path for an epic worktree."""
-    return worktree_dir(project_dir, epic_id) / "worktree.json"
+    return worktrees_root(project_dir) / METADATA_DIRNAME / f"{epic_id}.json"
 
 
 def load_mapping(path: Path) -> WorktreeMapping | None:
@@ -76,9 +79,8 @@ def ensure_worktree_mapping(project_dir: Path, epic_id: str) -> WorktreeMapping:
         die("epic id must not be empty")
     root = worktrees_root(project_dir)
     paths.ensure_dir(root)
-    target_dir = worktree_dir(project_dir, epic_id)
-    paths.ensure_dir(target_dir)
     path = mapping_path(project_dir, epic_id)
+    paths.ensure_dir(path.parent)
     mapping = load_mapping(path)
     if mapping is not None:
         return mapping
@@ -118,3 +120,47 @@ def ensure_changeset_branch(
     )
     write_mapping(mapping_path(project_dir, epic_id), updated)
     return branch, updated
+
+
+def ensure_git_worktree(
+    project_dir: Path,
+    repo_root: Path,
+    epic_id: str,
+    *,
+    git_path: str | None = None,
+) -> Path:
+    """Ensure a git worktree exists for the epic and return its path."""
+    mapping = ensure_worktree_mapping(project_dir, epic_id)
+    worktree_path = project_dir / mapping.worktree_path
+    if worktree_path.exists():
+        if (worktree_path / ".git").exists():
+            return worktree_path
+        die(f"worktree path exists but is not a git worktree: {worktree_path}")
+
+    default_branch = git.git_default_branch(repo_root, git_path=git_path)
+    if not default_branch:
+        die("failed to determine default branch for worktree")
+
+    local_ref = f"refs/heads/{default_branch}"
+    remote_ref = f"refs/remotes/origin/{default_branch}"
+    has_local = git.git_ref_exists(repo_root, local_ref, git_path=git_path)
+    has_remote = git.git_ref_exists(repo_root, remote_ref, git_path=git_path)
+
+    if has_local:
+        args = ["-C", str(repo_root), "worktree", "add", str(worktree_path), default_branch]
+    elif has_remote:
+        args = [
+            "-C",
+            str(repo_root),
+            "worktree",
+            "add",
+            "-b",
+            default_branch,
+            str(worktree_path),
+            f"origin/{default_branch}",
+        ]
+    else:
+        die(f"default branch {default_branch!r} not found for worktree")
+
+    exec_util.run_command(git.git_command(args, git_path=git_path))
+    return worktree_path

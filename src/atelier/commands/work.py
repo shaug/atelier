@@ -148,6 +148,10 @@ def start_worker(args: object) -> None:
     changeset_id = changeset.get("id") or ""
     changeset_title = changeset.get("title") or ""
     say(f"Next changeset: {changeset_id} {changeset_title}")
+    git_path = config.resolve_git_path(project_config)
+    worktrees.ensure_git_worktree(
+        project_data_dir, repo_root, selected_epic, git_path=git_path
+    )
     branch, mapping = worktrees.ensure_changeset_branch(
         project_data_dir, selected_epic, changeset_id
     )
