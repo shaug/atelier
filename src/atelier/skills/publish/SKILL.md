@@ -51,8 +51,8 @@ description: >-
 - If required checks fail and no explicit override exists, stop and report
   failures.
 - If the working tree is dirty, stop and request cleanup or commit.
-- If project config is missing `branch_pr` or `branch_history`, stop and
-  request repair.
+- If project config is missing `branch_pr` or `branch_history`, stop and request
+  repair.
 - If `default_branch` is required but missing, stop and request project config
   repair.
 - If push or integration fails, follow recovery steps in
