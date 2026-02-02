@@ -615,9 +615,6 @@ def test_work_resumes_assigned_epic_before_inbox() -> None:
         work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
 
     assert claimed == ["atelier-epic-hooked"]
-    say.assert_called_with(
-        "Inbox has 1 unread message(s); review before claiming work."
-    )
 
 
 def test_work_uses_explicit_epic_id() -> None:

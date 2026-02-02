@@ -288,7 +288,7 @@ def start_worker(args: object) -> None:
         if not epic_id and not hooked_epic:
             issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
             assigned = _filter_epics(issues, assignee=agent.agent_id)
-            assigned = _sort_by_recency(assigned)
+            assigned = _sort_by_created_at(assigned)
             if assigned:
                 candidate = assigned[0].get("id")
                 if candidate:
