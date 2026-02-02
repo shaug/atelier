@@ -9,6 +9,7 @@ projects. Stick to core Beads fields so existing Beads repos remain compatible.
 - `at:changeset` for changeset tasks
 - `at:task` / `at:subtask` for supporting work
 - `at:draft` for epics that are not claimable
+- `at:hooked` for epics claimed by an agent
 - `at:message` for message beads
 
 ## Status

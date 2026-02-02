@@ -129,7 +129,7 @@ def start_worker(args: object) -> None:
     agent = agent_home.resolve_agent_home(
         project_data_dir, project_config, role="worker"
     )
-    beads.ensure_agent_bead(
+    agent_bead = beads.ensure_agent_bead(
         agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
     )
 
@@ -147,6 +147,15 @@ def start_worker(args: object) -> None:
         selected_epic = _select_epic_prompt(issues)
 
     say(f"Selected epic: {selected_epic}")
+    beads.claim_epic(
+        selected_epic, agent.agent_id, beads_root=beads_root, cwd=repo_root
+    )
+    agent_bead_id = agent_bead.get("id")
+    if not isinstance(agent_bead_id, str) or not agent_bead_id:
+        die("failed to resolve agent bead id")
+    beads.set_agent_hook(
+        agent_bead_id, selected_epic, beads_root=beads_root, cwd=repo_root
+    )
     changeset = _next_changeset(
         epic_id=selected_epic, beads_root=beads_root, repo_root=repo_root
     )
