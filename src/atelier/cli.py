@@ -392,20 +392,13 @@ def open_command(
 
 @app.command("plan", help="Start a planner session for Beads epics.")
 def plan_command(
-    create_epic: Annotated[
-        bool,
-        typer.Option(
-            "--create-epic",
-            help="open an interactive bead form to create a new epic",
-        ),
-    ] = False,
     epic_id: Annotated[
         str | None,
         typer.Option("--epic-id", help="existing epic bead id to plan against"),
     ] = None,
 ) -> None:
     """Start a planner session."""
-    plan_cmd.run_planner(SimpleNamespace(create_epic=create_epic, epic_id=epic_id))
+    plan_cmd.run_planner(SimpleNamespace(epic_id=epic_id))
 
 
 @app.command(
