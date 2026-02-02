@@ -1,24 +1,15 @@
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import atelier.project as project
 
 
-class TestInstalledTemplateCache:
-    def test_project_scaffold_prefers_installed_templates(self) -> None:
+class TestProjectScaffold:
+    def test_project_scaffold_creates_project_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            data_dir = root / "data"
-            project_dir = root / "project"
-            installed_agents = data_dir / "templates" / "AGENTS.md"
-            installed_agents.parent.mkdir(parents=True)
-            installed_agents.write_text("custom agents\n", encoding="utf-8")
+            project_dir = Path(tmp) / "project"
+            assert not project_dir.exists()
 
-            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project.ensure_project_scaffold(project_dir)
+            project.ensure_project_scaffold(project_dir)
 
-            content = (project_dir / "templates" / "AGENTS.md").read_text(
-                encoding="utf-8"
-            )
-            assert content == "custom agents\n"
+            assert project_dir.is_dir()

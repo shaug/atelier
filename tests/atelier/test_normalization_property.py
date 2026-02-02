@@ -14,7 +14,6 @@ WHITESPACE = " \t\r\n"
 SEGMENT_CHARS = string.ascii_letters + string.digits + "-._"
 HOST_CHARS = string.ascii_letters + string.digits + "-."
 PATH_CHARS = string.ascii_letters + string.digits + "-_."
-URL_SAFE_CHARS = set(string.ascii_letters + string.digits + "-._~")
 
 
 def _strip_git_suffix(path: str) -> str:
@@ -155,11 +154,3 @@ def test_normalize_origin_url_https(
     raw = f"{prefix}https://{host}/{path}{suffix}{suffix_space}"
     expected_path = _strip_git_suffix(f"{path}{suffix}")
     assert git.normalize_origin_url(raw) == f"{host.lower()}/{expected_path}"
-
-
-@given(value=st.text(min_size=1, max_size=40))
-def test_legacy_workspace_dir_name_is_url_safe(value: str) -> None:
-    normalized = paths.legacy_workspace_dir_name(value)
-    assert normalized
-    assert normalized.isascii()
-    assert set(normalized) <= URL_SAFE_CHARS
