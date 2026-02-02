@@ -519,7 +519,7 @@ def test_work_stops_for_unread_inbox() -> None:
         patch(
             "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
         ),
-        patch("atelier.commands.work.say") as say,
+        patch("atelier.commands.work.say"),
     ):
         work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
 
