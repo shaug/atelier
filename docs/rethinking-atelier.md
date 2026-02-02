@@ -69,6 +69,9 @@ Prompt mode flow:
 1. Ask the user to select an epic ID.
 1. Claim the selected epic.
 
+If the agent already has assigned epics, prompt mode lists them under “Resume
+epics” (most recent first) and allows selecting one to reattach.
+
 Auto mode flow:
 
 1. Claim the next eligible *ready* epic.
