@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 _FIELDS = ("pr_url", "pr_number", "pr_state", "review_owner")
+_MERGED_LABEL = "cs:merged"
+_ABANDONED_LABEL = "cs:abandoned"
+_ACTIVE_LABELS = {"cs:ready", "cs:planned", "cs:in_progress"}
 
 
 @dataclass(frozen=True)
@@ -69,4 +72,21 @@ def apply_review_metadata(description: str, metadata: ReviewMetadata) -> str:
     updated = _set_field(updated, "pr_number", metadata.pr_number)
     updated = _set_field(updated, "pr_state", metadata.pr_state)
     updated = _set_field(updated, "review_owner", metadata.review_owner)
+    return updated
+
+
+def update_labels_for_pr_state(labels: set[str], pr_state: str | None) -> set[str]:
+    """Return labels updated to reflect review lifecycle state."""
+    normalized = pr_state.strip().lower() if isinstance(pr_state, str) else ""
+    updated = set(labels)
+    if normalized == "merged":
+        updated.add(_MERGED_LABEL)
+        updated.discard(_ABANDONED_LABEL)
+        updated.difference_update(_ACTIVE_LABELS)
+        return updated
+    if normalized in {"closed", "abandoned"}:
+        updated.add(_ABANDONED_LABEL)
+        updated.discard(_MERGED_LABEL)
+        updated.difference_update(_ACTIVE_LABELS)
+        return updated
     return updated

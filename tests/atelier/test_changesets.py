@@ -22,3 +22,23 @@ def test_apply_review_metadata_updates_description() -> None:
     assert "pr_number: 2" in updated
     assert "pr_state: review" in updated
     assert "review_owner: alice" in updated
+
+
+def test_update_labels_for_pr_state_merged() -> None:
+    labels = {"cs:ready", "cs:in_progress", "at:changeset"}
+    updated = changesets.update_labels_for_pr_state(labels, "merged")
+    assert "cs:merged" in updated
+    assert "cs:abandoned" not in updated
+    assert "cs:ready" not in updated
+    assert "cs:planned" not in updated
+    assert "cs:in_progress" not in updated
+    assert "at:changeset" in updated
+
+
+def test_update_labels_for_pr_state_abandoned() -> None:
+    labels = {"cs:ready", "cs:in_progress"}
+    updated = changesets.update_labels_for_pr_state(labels, "abandoned")
+    assert "cs:abandoned" in updated
+    assert "cs:merged" not in updated
+    assert "cs:ready" not in updated
+    assert "cs:in_progress" not in updated
