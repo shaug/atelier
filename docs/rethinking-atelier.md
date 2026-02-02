@@ -351,38 +351,30 @@ agent role. The workflow can be implemented via skills and/or molecules.
 
 ### Changeset Lifecycle (Review Projects)
 
-Changesets move through a deterministic lifecycle in review-based projects.
-Store the lifecycle fields on the changeset bead description (key: value) so
-they remain visible and auditable.
+Changesets move through a deterministic lifecycle, but PR states are computed
+from Git/PR data rather than stored as bead labels or description fields.
 
-Recommended states (map to `pr_state`):
+Use `cs:` labels only for intent and non-derivable state:
 
-- **planned**: changeset bead exists but no branch/PR yet.
-- **in_progress**: branch exists and work is underway.
-- **review**: PR opened and awaiting review.
-- **changes_requested**: review feedback requires updates.
-- **approved**: review approved and ready to merge.
-- **merged**: PR merged or integrated.
+- **cs:planned**: changeset bead exists but no branch/PR yet.
+- **cs:ready**: ready to be claimed by a worker.
+- **cs:in_progress**: work underway (local commits allowed).
+- **cs:merged**: integrated/merged.
+- **cs:abandoned**: closed without integration.
 
-Suggested fields:
+PR-derived (computed) states:
 
-```
-pr_url: <url>
-pr_number: <id>
-pr_state: planned|in_progress|review|changes_requested|approved|merged
-review_owner: <identity>
-```
+- **pushed**: remote branch exists, no PR yet.
+- **draft-pr**: PR exists and is draft.
+- **in-review**: PR ready *and* a non-bot reviewer assigned.
+- **approved**: PR has approvals (even if unresolved threads remain).
+- **merged**: PR merged.
 
-`publish` should advance `pr_state` from `planned`/`in_progress` to `review`
-once a PR exists. `finalize` (or integration) should advance `pr_state` to
-`merged` when the PR is integrated.
+Rules:
 
-Recommended bead fields for changesets (key: value in description):
-
-- pr_url: <url>
-- pr_number: <id>
-- pr_state: open|review|changes_requested|approved|merged
-- review_owner: <identity>
+- No separate “changes requested” state.
+- For non-review projects, use `cs:merged` when integrated and `cs:abandoned`
+  when closed without integration.
 
 In PR-based workflows, each changeset bead maps to:
 
