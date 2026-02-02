@@ -71,11 +71,18 @@ def test_claim_epic_updates_assignee_and_status() -> None:
 def test_set_agent_hook_updates_description() -> None:
     issue = {"id": "atelier-agent", "description": "role: worker\n"}
     captured: dict[str, str] = {}
+    called: dict[str, list[str]] = {}
 
     def fake_json(
         args: list[str], *, beads_root: Path, cwd: Path
     ) -> list[dict[str, object]]:
         return [issue]
+
+    def fake_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> CompletedProcess[str]:
+        called["args"] = args
+        return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
     def fake_update(
         issue_id: str, description: str, *, beads_root: Path, cwd: Path
@@ -85,6 +92,7 @@ def test_set_agent_hook_updates_description() -> None:
 
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
         patch("atelier.beads._update_issue_description", side_effect=fake_update),
     ):
         beads.set_agent_hook(
@@ -96,6 +104,57 @@ def test_set_agent_hook_updates_description() -> None:
 
     assert captured["id"] == "atelier-agent"
     assert "hook_bead: atelier-epic" in captured["description"]
+    assert called["args"][:3] == ["slot", "set", "atelier-agent"]
+
+
+def test_get_agent_hook_prefers_slot() -> None:
+    issue = {"id": "atelier-agent", "description": "hook_bead: epic-2\n"}
+
+    def fake_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> CompletedProcess[str]:
+        return CompletedProcess(
+            args=args, returncode=0, stdout='{"hook":"epic-1"}\n', stderr=""
+        )
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        return [issue]
+
+    with (
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+    ):
+        hook = beads.get_agent_hook(
+            "atelier-agent", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+
+    assert hook == "epic-1"
+
+
+def test_get_agent_hook_falls_back_to_description() -> None:
+    issue = {"id": "atelier-agent", "description": "hook_bead: epic-2\n"}
+
+    def fake_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> CompletedProcess[str]:
+        return CompletedProcess(args=args, returncode=1, stdout="", stderr="err")
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        return [issue]
+
+    with (
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+    ):
+        hook = beads.get_agent_hook(
+            "atelier-agent", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+
+    assert hook == "epic-2"
 
 
 def test_create_message_bead_renders_frontmatter() -> None:

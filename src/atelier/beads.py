@@ -15,6 +15,7 @@ from .io import die
 POLICY_LABEL = "at:policy"
 POLICY_SCOPE_LABEL = "scope:project"
 EXTERNAL_TICKETS_KEY = "external_tickets"
+HOOK_SLOT_NAME = "hook"
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,90 @@ def _parse_description_fields(description: str | None) -> dict[str, str]:
 def parse_description_fields(description: str | None) -> dict[str, str]:
     """Parse key/value fields from a bead description."""
     return _parse_description_fields(description)
+
+
+def _normalize_hook_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned or cleaned.lower() == "null":
+            return None
+        return cleaned
+    if isinstance(value, (int, float)):
+        return str(value)
+    return None
+
+
+def _extract_hook_from_slot_payload(payload: object) -> str | None:
+    if isinstance(payload, str):
+        return _normalize_hook_value(payload)
+    if isinstance(payload, list):
+        for item in payload:
+            hook = _extract_hook_from_slot_payload(item)
+            if hook:
+                return hook
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if "hook" in payload:
+        return _extract_hook_from_slot_payload(payload.get("hook"))
+    if "slots" in payload and isinstance(payload["slots"], dict):
+        return _extract_hook_from_slot_payload(payload["slots"].get("hook"))
+    if "id" in payload:
+        return _normalize_hook_value(payload.get("id"))
+    if "issue_id" in payload:
+        return _normalize_hook_value(payload.get("issue_id"))
+    if "bead_id" in payload:
+        return _normalize_hook_value(payload.get("bead_id"))
+    if "bead" in payload:
+        return _normalize_hook_value(payload.get("bead"))
+    return None
+
+
+def _slot_show_hook(
+    agent_bead_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> str | None:
+    result = run_bd_command(
+        ["slot", "show", agent_bead_id, "--json"],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
+    if result.returncode != 0:
+        return None
+    raw = result.stdout.strip() if result.stdout else ""
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return _extract_hook_from_slot_payload(payload)
+
+
+def get_agent_hook(
+    agent_bead_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> str | None:
+    """Return the currently hooked epic id for an agent bead."""
+    slot_hook = _slot_show_hook(agent_bead_id, beads_root=beads_root, cwd=cwd)
+    if slot_hook:
+        return slot_hook
+    issues = run_bd_json(["show", agent_bead_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        return None
+    issue = issues[0]
+    description = issue.get("description")
+    fields = _parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    return _normalize_hook_value(fields.get("hook_bead"))
 
 
 def workspace_label(root_branch: str) -> str:
@@ -358,6 +443,12 @@ def clear_agent_hook(
     issues = run_bd_json(["show", agent_bead_id], beads_root=beads_root, cwd=cwd)
     if not issues:
         die(f"agent bead not found: {agent_bead_id}")
+    run_bd_command(
+        ["slot", "clear", agent_bead_id, HOOK_SLOT_NAME],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
     issue = issues[0]
     description = issue.get("description")
     updated = _update_description_field(
@@ -605,6 +696,12 @@ def set_agent_hook(
     issues = run_bd_json(["show", agent_bead_id], beads_root=beads_root, cwd=cwd)
     if not issues:
         die(f"agent bead not found: {agent_bead_id}")
+    run_bd_command(
+        ["slot", "set", agent_bead_id, HOOK_SLOT_NAME, epic_id],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
     issue = issues[0]
     description = issue.get("description")
     updated = _update_description_field(

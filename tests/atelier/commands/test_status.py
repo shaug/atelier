@@ -106,6 +106,10 @@ def test_status_json_summary() -> None:
                 side_effect=fake_run_bd_json,
             ),
             patch(
+                "atelier.commands.status.beads.get_agent_hook",
+                return_value="epic-1",
+            ),
+            patch(
                 "atelier.commands.status.worktrees.load_mapping",
                 side_effect=fake_load_mapping,
             ),

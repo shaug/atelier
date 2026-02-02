@@ -37,7 +37,9 @@ def status(args: object) -> None:
         ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
     )
 
-    agents, hook_map = _build_agent_payloads(agent_issues)
+    agents, hook_map = _build_agent_payloads(
+        agent_issues, beads_root=beads_root, repo_root=repo_root
+    )
     epics = _build_epic_payloads(
         epic_issues,
         hook_map=hook_map,
@@ -77,6 +79,9 @@ def status(args: object) -> None:
 
 def _build_agent_payloads(
     issues: list[dict[str, object]],
+    *,
+    beads_root: Path,
+    repo_root: Path,
 ) -> tuple[list[dict[str, object]], dict[str, list[str]]]:
     payloads: list[dict[str, object]] = []
     hook_map: dict[str, list[str]] = {}
@@ -90,7 +95,14 @@ def _build_agent_payloads(
             agent_id = str(agent_id)
         agent_id = agent_id.strip()
         role = fields.get("role_type") or fields.get("role")
-        hook_bead = fields.get("hook_bead")
+        hook_bead = None
+        issue_id = issue.get("id")
+        if isinstance(issue_id, str) and issue_id:
+            hook_bead = beads.get_agent_hook(
+                issue_id, beads_root=beads_root, cwd=repo_root
+            )
+        if not hook_bead:
+            hook_bead = fields.get("hook_bead")
         heartbeat_at = fields.get("heartbeat_at")
         labels = _issue_labels(issue)
         payload = {

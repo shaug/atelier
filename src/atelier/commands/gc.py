@@ -106,11 +106,18 @@ def _gc_hooks(
         if not agent_id:
             continue
         issue_id = issue.get("id") if isinstance(issue, dict) else None
+        hook_bead = None
+        if isinstance(issue_id, str) and issue_id:
+            hook_bead = beads.get_agent_hook(
+                issue_id, beads_root=beads_root, cwd=repo_root
+            )
+        if not hook_bead:
+            hook_bead = fields.get("hook_bead")
         agents[agent_id] = {
             "issue": issue,
             "issue_id": issue_id,
             "fields": fields,
-            "hook_bead": fields.get("hook_bead"),
+            "hook_bead": hook_bead,
             "heartbeat_at": fields.get("heartbeat_at"),
         }
 

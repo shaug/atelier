@@ -13,9 +13,9 @@ description: >-
 
 ## Steps
 
-1. Show the agent bead:
-   - `bd show <agent_bead_id>`
-1. Read the `hook_bead` field from the description.
+1. Show the agent bead slots:
+   - `bd slot show <agent_bead_id>`
+1. Read the `hook` slot (fallback to `hook_bead` in description if empty).
 
 ## Verification
 
