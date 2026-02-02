@@ -12,7 +12,7 @@ description: >-
 - agent_bead_id: Bead id for the agent.
 - mode: prompt|auto (defaults to auto for idle startup).
 - beads_dir: Optional Beads store path (defaults to repo .beads).
-- queue: Optional mail queue name to check when idle.
+- queue: Optional message queue name to check when idle.
 
 ## Steps
 
@@ -22,8 +22,8 @@ description: >-
    - Verify the epic exists and is still assigned to `agent_id`.
    - Resume work on that epic (do not claim a new one).
 1. If no hook is present:
-   - Check inbox/queue (`mail_inbox`, `mail_queue_claim`) and handle any
-     messages; stop if a message requires action before claiming new work.
+   - Check inbox/queue (message beads) and handle any messages; stop if a
+     message requires action before claiming new work.
 1. If still idle:
    - List eligible epics (`bd list --label at:epic`) and filter out drafts.
    - In auto mode: pick the oldest ready epic; if none, pick the oldest

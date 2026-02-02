@@ -431,7 +431,7 @@ sync/approval workflows.
 
 ## Startup Contract (Enforcement)
 
-The startup contract (“check hook → if hooked, run it → if empty, check mail”)
+The startup contract (“check hook → if hooked, run it → if empty, check inbox”)
 should be enforced via:
 
 - Per-agent `AGENTS.md` in `<atelier-data>/agents/<name>/`.
@@ -440,8 +440,10 @@ should be enforced via:
 
 AGENTS.md is the primary source of behavior; skills are the execution mechanism.
 Use the `startup_contract` skill to sequence hook checks, inbox handling, and
-claiming new epics. If no eligible epics exist, emit a `NEEDS-DECISION` message
-to the overseer.
+claiming new epics. The fallback ordering is: resume hooked epic, then stop if
+there are unread message beads, then choose a new epic (auto = oldest ready,
+else oldest assigned; prompt = user selection). If no eligible epics exist, emit
+a `NEEDS-DECISION` message to the overseer.
 
 ## Claiming Strategy (Atomicity)
 
