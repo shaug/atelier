@@ -142,6 +142,94 @@ def ensure_changeset_branch(
     return branch, updated
 
 
+def ensure_changeset_checkout(
+    worktree_path: Path,
+    branch: str,
+    *,
+    root_branch: str,
+    git_path: str | None = None,
+) -> None:
+    """Ensure the changeset branch exists and is checked out in the worktree."""
+    if not branch or not root_branch:
+        die("changeset branch and root branch must not be empty")
+    if not worktree_path.exists():
+        die("worktree path missing; run 'atelier work' first")
+    if not (worktree_path / ".git").exists():
+        die("worktree path is not a git worktree")
+
+    default_branch = git.git_default_branch(worktree_path, git_path=git_path)
+    if not default_branch:
+        die("failed to determine default branch for worktree")
+
+    root_ref = f"refs/heads/{root_branch}"
+    if not git.git_ref_exists(worktree_path, root_ref, git_path=git_path):
+        remote_root = f"refs/remotes/origin/{root_branch}"
+        if git.git_ref_exists(worktree_path, remote_root, git_path=git_path):
+            exec_util.run_command(
+                git.git_command(
+                    [
+                        "-C",
+                        str(worktree_path),
+                        "checkout",
+                        "-b",
+                        root_branch,
+                        "--track",
+                        f"origin/{root_branch}",
+                    ],
+                    git_path=git_path,
+                )
+            )
+        else:
+            exec_util.run_command(
+                git.git_command(
+                    [
+                        "-C",
+                        str(worktree_path),
+                        "checkout",
+                        "-b",
+                        root_branch,
+                        default_branch,
+                    ],
+                    git_path=git_path,
+                )
+            )
+
+    branch_ref = f"refs/heads/{branch}"
+    if git.git_ref_exists(worktree_path, branch_ref, git_path=git_path):
+        exec_util.run_command(
+            git.git_command(
+                ["-C", str(worktree_path), "checkout", branch],
+                git_path=git_path,
+            )
+        )
+        return
+
+    remote_branch = f"refs/remotes/origin/{branch}"
+    if git.git_ref_exists(worktree_path, remote_branch, git_path=git_path):
+        exec_util.run_command(
+            git.git_command(
+                [
+                    "-C",
+                    str(worktree_path),
+                    "checkout",
+                    "-b",
+                    branch,
+                    "--track",
+                    f"origin/{branch}",
+                ],
+                git_path=git_path,
+            )
+        )
+        return
+
+    exec_util.run_command(
+        git.git_command(
+            ["-C", str(worktree_path), "checkout", "-b", branch, root_branch],
+            git_path=git_path,
+        )
+    )
+
+
 def ensure_git_worktree(
     project_dir: Path,
     repo_root: Path,

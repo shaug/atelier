@@ -56,6 +56,7 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
             "atelier.commands.work.worktrees.ensure_changeset_branch",
             return_value=("feat/root-atelier-epic.1", mapping),
         ),
+        patch("atelier.commands.work.worktrees.ensure_changeset_checkout"),
         patch("atelier.commands.work.worktrees.ensure_git_worktree"),
         patch(
             "atelier.commands.work.beads.ensure_agent_bead",
@@ -125,6 +126,7 @@ def test_work_auto_picks_ready_epic() -> None:
             "atelier.commands.work.worktrees.ensure_changeset_branch",
             return_value=("feat/root-atelier-epic.1", mapping),
         ),
+        patch("atelier.commands.work.worktrees.ensure_changeset_checkout"),
         patch("atelier.commands.work.worktrees.ensure_git_worktree"),
         patch(
             "atelier.commands.work.beads.ensure_agent_bead",
@@ -184,6 +186,7 @@ def test_work_uses_explicit_epic_id() -> None:
             "atelier.commands.work.worktrees.ensure_changeset_branch",
             return_value=("feat/root-atelier-epic.1", mapping),
         ),
+        patch("atelier.commands.work.worktrees.ensure_changeset_checkout"),
         patch("atelier.commands.work.worktrees.ensure_git_worktree"),
         patch(
             "atelier.commands.work.beads.ensure_agent_bead",

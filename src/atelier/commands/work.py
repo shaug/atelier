@@ -210,5 +210,11 @@ def start_worker(args: object) -> None:
         root_branch=root_branch_value,
     )
     worktree_path = project_data_dir / mapping.worktree_path
+    worktrees.ensure_changeset_checkout(
+        worktree_path,
+        branch,
+        root_branch=root_branch_value,
+        git_path=git_path,
+    )
     say(f"Worktree: {worktree_path}")
     say(f"Changeset branch: {branch}")

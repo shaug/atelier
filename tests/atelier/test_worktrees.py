@@ -81,3 +81,32 @@ def test_remove_git_worktree_calls_git_remove() -> None:
 
         assert removed is True
         assert run_command.called
+
+
+def test_ensure_changeset_checkout_creates_branches() -> None:
+    worktree_path = Path("/repo/worktree")
+    calls: list[list[str]] = []
+
+    def fake_ref_exists(_repo: Path, ref: str, *, git_path: str | None = None) -> bool:
+        if ref == "refs/remotes/origin/feat/root":
+            return True
+        return False
+
+    def fake_run(cmd: list[str]) -> None:
+        calls.append(cmd)
+
+    with (
+        patch("atelier.worktrees.git.git_default_branch", return_value="main"),
+        patch("atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists),
+        patch("atelier.worktrees.exec_util.run_command", side_effect=fake_run),
+        patch("atelier.worktrees.Path.exists", return_value=True),
+    ):
+        worktrees.ensure_changeset_checkout(
+            worktree_path,
+            "feat/root-epic.1",
+            root_branch="feat/root",
+        )
+
+    assert calls
+    assert any("checkout" in item for item in calls[0])
+    assert any("checkout" in item for item in calls[-1])
