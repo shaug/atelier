@@ -60,6 +60,7 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
         ),
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.commands.work.beads.run_bd_command"),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
         patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
@@ -163,6 +164,7 @@ def test_work_prompt_allows_resume_epic() -> None:
         ),
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.commands.work.beads.run_bd_command"),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
         patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
@@ -244,6 +246,7 @@ def test_work_auto_picks_ready_epic() -> None:
         ),
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.commands.work.beads.run_bd_command"),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
         patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
@@ -349,6 +352,7 @@ def test_work_auto_falls_back_to_oldest_unfinished() -> None:
         ),
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.commands.work.beads.run_bd_command"),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
         patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
@@ -470,6 +474,53 @@ def test_work_resumes_hooked_epic() -> None:
     assert calls[0][0] == "show"
     assert calls[1][0] == "ready"
     assert claimed == ["atelier-epic"]
+
+
+def test_work_stops_for_unread_inbox() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/agent",
+        role="worker",
+        path=Path("/project/agents/worker"),
+    )
+
+    with (
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.work.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.work.beads.run_bd_command"),
+        patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
+        patch(
+            "atelier.commands.work.beads.list_inbox_messages",
+            return_value=[{"id": "msg-1"}],
+        ),
+        patch(
+            "atelier.commands.work.beads.ensure_agent_bead",
+            return_value={"id": "atelier-agent"},
+        ),
+        patch("atelier.commands.work.policy.sync_agent_home_policy"),
+        patch("atelier.commands.work.beads.claim_epic") as claim_epic,
+        patch(
+            "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
+        ),
+        patch("atelier.commands.work.say") as say,
+    ):
+        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
+
+    claim_epic.assert_not_called()
+    say.assert_called_with(
+        "Inbox has 1 unread message(s); review before claiming work."
+    )
 
 
 def test_work_uses_explicit_epic_id() -> None:

@@ -231,6 +231,18 @@ def _mark_changeset_in_progress(
     )
 
 
+def _check_inbox_before_claim(
+    agent_id: str, *, beads_root: Path, repo_root: Path
+) -> bool:
+    inbox = beads.list_inbox_messages(
+        agent_id, beads_root=beads_root, cwd=repo_root, unread_only=True
+    )
+    if inbox:
+        say(f"Inbox has {len(inbox)} unread message(s); review before claiming work.")
+        return True
+    return False
+
+
 def start_worker(args: object) -> None:
     """Start a worker session by selecting an epic and changeset."""
     project_root, project_config, _enlistment, repo_root = (
@@ -272,6 +284,10 @@ def start_worker(args: object) -> None:
         elif hooked_epic:
             selected_epic = hooked_epic
             say(f"Resuming hooked epic: {selected_epic}")
+        elif _check_inbox_before_claim(
+            agent.agent_id, beads_root=beads_root, repo_root=repo_root
+        ):
+            return
         elif mode == "auto":
             selected_epic = _select_epic_auto(
                 beads_root=beads_root, repo_root=repo_root, agent_id=agent.agent_id
