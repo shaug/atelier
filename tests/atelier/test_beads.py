@@ -265,6 +265,63 @@ def test_epic_changeset_summary_ready_to_close() -> None:
     assert summary.ready_to_close is True
 
 
+def test_close_epic_if_complete_closes_and_clears_hook() -> None:
+    changesets = [{"labels": ["cs:merged"]}]
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:2] == ["list", "--parent"]:
+            return changesets
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command") as run_command,
+        patch("atelier.beads.clear_agent_hook") as clear_hook,
+    ):
+        result = beads.close_epic_if_complete(
+            "epic-1",
+            "agent-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            confirm=lambda _summary: True,
+        )
+
+    assert result is True
+    run_command.assert_called_with(
+        ["close", "epic-1"], beads_root=Path("/beads"), cwd=Path("/repo")
+    )
+    clear_hook.assert_called_once()
+
+
+def test_close_epic_if_complete_respects_confirm() -> None:
+    changesets = [{"labels": ["cs:merged"]}]
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:2] == ["list", "--parent"]:
+            return changesets
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command") as run_command,
+        patch("atelier.beads.clear_agent_hook"),
+    ):
+        result = beads.close_epic_if_complete(
+            "epic-1",
+            "agent-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            confirm=lambda _summary: False,
+        )
+
+    assert result is False
+    run_command.assert_not_called()
+
+
 def test_update_changeset_review_updates_description() -> None:
     issue = {"id": "atelier-99", "description": "scope: demo\n"}
     captured: dict[str, str] = {}

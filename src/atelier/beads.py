@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -771,6 +772,26 @@ def epic_changeset_summary(
         cwd=cwd,
     )
     return summarize_changesets(changesets)
+
+
+def close_epic_if_complete(
+    epic_id: str,
+    agent_bead_id: str | None,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    confirm: Callable[[ChangesetSummary], bool] | None = None,
+) -> bool:
+    """Close an epic and clear hook if all changesets are complete."""
+    summary = epic_changeset_summary(epic_id, beads_root=beads_root, cwd=cwd)
+    if not summary.ready_to_close:
+        return False
+    if confirm is not None and not confirm(summary):
+        return False
+    run_bd_command(["close", epic_id], beads_root=beads_root, cwd=cwd)
+    if agent_bead_id:
+        clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=cwd)
+    return True
 
 
 def set_agent_hook(
