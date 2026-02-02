@@ -128,8 +128,8 @@ Atelier is intentionally small. The CLI:
 - registers a local enlistment as a project in the Atelier data directory
 - creates per-epic worktrees under the data directory
 - maintains minimal `config.sys.json`/`config.user.json` state for projects
-- bootstraps policy/context files (`AGENTS.md`, `PROJECT.md`) and installs
-  workspace skills
+- stores optional project-wide policy for agents
+- bootstraps policy/context files (`AGENTS.md`) and installs workspace skills
 - tracks changeset branch mappings for each workspace
 - launches your editor and shells in a predictable way
 
@@ -141,7 +141,6 @@ Atelier is intentionally small. The CLI:
    └─ <project-key>/
       ├─ config.sys.json
       ├─ config.user.json
-      ├─ PROJECT.md
       ├─ templates/
       │  ├─ AGENTS.md
       └─ worktrees/
@@ -261,10 +260,11 @@ atelier clean --all --yes
   `manual`).
 - The epic record is the execution contract for each workspace.
 - `AGENTS.md` is a managed prologue used to configure agents.
+- `atelier policy` edits the project-wide policy shared by planning and work
+  agents.
 - The `publish` skill records integration guidance derived from workspace config
   and the finalization tag (`atelier/<branch-name>/finalized`) used by
   `atelier clean`.
-- `PROJECT.md` is an optional policy overlay for agents.
 - Configuration lives in `config.sys.json`/`config.user.json` under the Atelier
   data directory.
 - Worktrees live under the data directory and are keyed by epic id.
@@ -355,14 +355,13 @@ atelier config --reset
 atelier config --installed --prompt
 ```
 
-### `atelier template <project|agents>`
+### `atelier template agents`
 
 Print or edit templates used to seed new documents.
 
 Usage:
 
 ```sh
-atelier template project
 atelier template agents
 ```
 
@@ -377,6 +376,20 @@ Examples:
 atelier template agents --edit
 atelier template agents --installed
 ```
+
+### `atelier policy`
+
+Edit project-wide agent policy.
+
+Usage:
+
+```sh
+atelier policy
+```
+
+Options:
+
+- `--role`: Select policy role (`planner`, `worker`, or `both`).
 
 ### `atelier edit <workspace-branch>`
 

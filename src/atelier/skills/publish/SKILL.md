@@ -16,12 +16,12 @@ description: >-
 - operation: `publish` | `persist` | `finalize`.
 - workspace_root: path to the workspace root (default: `.`).
 - repo_path: path to the workspace repo (default: `<workspace_root>/repo`).
-- required_checks: explicit commands from `PROJECT.md` or `repo/AGENTS.md`.
+- required_checks: explicit commands from `repo/AGENTS.md`.
 - allow_check_failures: only if the user explicitly asks to ignore failures.
 
 ## Steps
 
-1. Read policy sources: `PROJECT.md`, `repo/AGENTS.md`.
+1. Read policy sources: `repo/AGENTS.md`.
 1. Load [references/publish-policy.md](references/publish-policy.md) for
    semantics, invariants, and recovery rules.
 1. Resolve publish settings from workspace config:

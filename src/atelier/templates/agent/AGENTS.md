@@ -14,5 +14,5 @@ This directory is the persistent home for a single agent identity.
 
 ## Notes
 
-- Do not store repo-specific instructions here.
-- Use this file for durable agent behavior and identity only.
+- Project policy (if configured) is injected below for this agent role.
+- Use this file for durable agent behavior and identity guidelines.

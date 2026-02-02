@@ -99,7 +99,7 @@ class TestOpenWorkspace:
                     workspace_id_for(enlistment_path, workspace_branch),
                 )
                 assert (workspace_dir / "AGENTS.md").exists()
-                assert (workspace_dir / "PROJECT.md").exists()
+                assert not (workspace_dir / "PROJECT.md").exists()
                 assert not (workspace_dir / "SUCCESS.md").exists()
                 assert (workspace_dir / "skills").exists()
                 assert paths.workspace_config_path(workspace_dir).exists()
@@ -120,13 +120,6 @@ class TestOpenWorkspace:
                     encoding="utf-8"
                 )
                 assert "Atelier Agent Contract" in agents_content
-                project_content = (project_dir / "PROJECT.md").read_text(
-                    encoding="utf-8"
-                )
-                workspace_project_content = (workspace_dir / "PROJECT.md").read_text(
-                    encoding="utf-8"
-                )
-                assert workspace_project_content == project_content
                 assert not (workspace_dir / "PERSIST.md").exists()
 
                 assert any(cmd[:2] == ["git", "clone"] for cmd in commands)

@@ -434,11 +434,6 @@ def ensure_workspace_metadata(
                 templates.render_workspace_agents(), encoding="utf-8"
             )
 
-    project_md_path = project_root / "PROJECT.md"
-    workspace_project_path = workspace_dir / "PROJECT.md"
-    if project_md_path.exists() and not workspace_project_path.exists():
-        link_or_copy(project_md_path, workspace_project_path)
-
 
 def workspace_up_to_date(
     checked_out: bool | None, clean: bool | None, remote_equal: bool | None

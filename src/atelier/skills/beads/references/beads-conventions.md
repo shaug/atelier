@@ -12,6 +12,7 @@ projects. Stick to core Beads fields so existing Beads repos remain compatible.
 - `at:hooked` for epics claimed by an agent
 - `at:message` for message beads
 - `at:unread` for unread message beads
+- `at:policy` for project-wide agent policy
 
 ## Status
 

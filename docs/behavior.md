@@ -36,7 +36,6 @@ Project directory (under the Atelier data dir):
    └─ <project-key>/
       ├─ config.sys.json
       ├─ config.user.json
-      ├─ PROJECT.md
       ├─ templates/
       │  └─ AGENTS.md
       └─ worktrees/
@@ -75,7 +74,6 @@ Branch prefix:
 
 - `AGENTS.md` is managed from the project templates and used as the agent
   prologue.
-- `PROJECT.md` is an optional policy overlay for agents.
 - No `SUCCESS.md` or ticket templates are created.
 
 ## Planning store
@@ -89,11 +87,16 @@ epics and changesets, including labels and metadata.
 
   - Registers the current repo as a project in the data directory.
   - Writes project config and templates.
+  - Optionally prompts for project-wide policy and stores it.
 
 - `atelier plan`
 
   - Creates epics, tasks, and changesets in the planning store.
   - Suggests and validates a `workspace.root_branch` value.
+
+- `atelier policy`
+
+  - Edits project-wide policy shared by planner/worker agents.
 
 - `atelier work`
 
@@ -116,7 +119,7 @@ epics and changesets, including labels and metadata.
 
 - `atelier template`
 
-  - Prints or edits `AGENTS.md` and `PROJECT.md` templates.
+  - Prints or edits the `AGENTS.md` template.
 
 - `atelier describe`
 

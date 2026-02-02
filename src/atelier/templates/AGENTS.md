@@ -18,12 +18,12 @@ development.
 
 ## Required Reading
 
-- `PROJECT.md` (if present) for project-wide rules that apply to every
-  workspace; it is linked/copied into this workspace.
 - The epic bead (and its changesets) for workspace intent, scope, and completion
   criteria.
+- Project policy (if present) for agent-wide rules.
 - `BACKGROUND.md` (if present) for context when a workspace is created from an
   existing branch.
+- `repo/AGENTS.md` (if present) for repository-specific rules.
 
 ## Skills
 
@@ -46,9 +46,8 @@ development.
 ## Publishing and Finalization Commands
 
 - Before publish/persist/finalize, run the required workspace checks
-  (tests/formatting/linting/etc.) described in `PROJECT.md` or the repo's
-  `AGENTS.md`. Do not proceed if they fail unless the user explicitly asks to
-  ignore the failures.
+  (tests/formatting/linting/etc.) described in the repo's `AGENTS.md`. Do not
+  proceed if they fail unless the user explicitly asks to ignore the failures.
 - Use the `publish` skill for publish/persist/finalize semantics derived from
   the workspace config.
 
@@ -62,8 +61,8 @@ Ensure the configured agent CLI is installed and authenticated (see
 
 ## Policy Precedence
 
-- Epic bead rules take precedence over `PROJECT.md`.
-- `PROJECT.md` rules take precedence over this file.
+- Epic bead rules take precedence over `repo/AGENTS.md`.
+- `repo/AGENTS.md` rules take precedence over this file.
 
 Before finalizing work in a workspace, use the `publish` skill.
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from .. import agent_home, beads, config
+from .. import agent_home, beads, config, policy
 from .. import root_branch as root_branch_util
 from ..io import confirm, die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
@@ -26,6 +26,9 @@ def run_planner(args: object) -> None:
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
     beads.ensure_agent_bead(
         agent.agent_id, beads_root=beads_root, cwd=repo_root, role="planner"
+    )
+    policy.sync_agent_home_policy(
+        agent, role=policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
     )
 
     if bool(getattr(args, "create_epic", False)):

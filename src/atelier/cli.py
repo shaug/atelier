@@ -34,6 +34,7 @@ from .commands import new as new_cmd
 from .commands import plan as plan_cmd
 from .commands import remove as remove_cmd
 from .commands import shell as shell_cmd
+from .commands import policy as policy_cmd
 from .commands import template as template_cmd
 from .commands import upgrade as upgrade_cmd
 from .commands import work as work_cmd
@@ -880,7 +881,7 @@ def config_command(
 def template_command(
     target: Annotated[
         str,
-        typer.Argument(help="template target (project|agents)"),
+        typer.Argument(help="template target (agents)"),
     ],
     installed: Annotated[
         bool,
@@ -895,6 +896,17 @@ def template_command(
     template_cmd.render_template(
         SimpleNamespace(target=target, installed=installed, edit=edit)
     )
+
+
+@app.command("policy", help="Edit project-wide agent policy.")
+def policy_command(
+    role: Annotated[
+        str | None,
+        typer.Option("--role", help="policy role (planner|worker|both)"),
+    ] = None,
+) -> None:
+    """Edit project-wide policy stored in the planning store."""
+    policy_cmd.edit_policy(SimpleNamespace(role=role))
 
 
 @app.command("edit", help="Open the workspace repo in the work editor.")

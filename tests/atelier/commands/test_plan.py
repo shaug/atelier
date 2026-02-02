@@ -66,4 +66,5 @@ def test_plan_create_epic_uses_form() -> None:
 
     assert calls
     assert calls[0][0] == "prime"
-    assert calls[1][0] == "create-form"
+    assert calls[1][0] == "list"
+    assert calls[2][0] == "create-form"

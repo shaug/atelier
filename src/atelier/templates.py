@@ -8,7 +8,6 @@ from . import paths
 TEMPLATE_PARTS: tuple[tuple[str, ...], ...] = (
     ("AGENTS.md",),
     ("agent", "AGENTS.md"),
-    ("project", "PROJECT.md"),
 )
 
 
@@ -157,28 +156,6 @@ def project_agents_template(
     """
     return read_template(
         "AGENTS.md",
-        prefer_installed=prefer_installed,
-        prefer_installed_if_modified=prefer_installed_if_modified,
-    )
-
-
-def project_md_template(
-    *,
-    prefer_installed: bool = False,
-    prefer_installed_if_modified: bool = False,
-) -> str:
-    """Return the project-level ``PROJECT.md`` template text.
-
-    Returns:
-        Template text.
-
-    Example:
-        >>> "PROJECT" in project_md_template()
-        True
-    """
-    return read_template(
-        "project",
-        "PROJECT.md",
         prefer_installed=prefer_installed,
         prefer_installed_if_modified=prefer_installed_if_modified,
     )

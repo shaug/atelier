@@ -11,6 +11,9 @@ from tempfile import NamedTemporaryFile
 from . import changesets, exec, messages
 from .io import die
 
+POLICY_LABEL = "at:policy"
+POLICY_SCOPE_LABEL = "scope:project"
+
 
 def beads_env(beads_root: Path) -> dict[str, str]:
     """Return an environment mapping with BEADS_DIR set."""
@@ -86,6 +89,11 @@ def _parse_description_fields(description: str | None) -> dict[str, str]:
 def workspace_label(root_branch: str) -> str:
     """Return the workspace label for a root branch."""
     return f"workspace:{root_branch}"
+
+
+def policy_role_label(role: str) -> str:
+    """Return the policy role label."""
+    return f"role:{role}"
 
 
 def extract_workspace_root_branch(issue: dict[str, object]) -> str | None:
@@ -176,6 +184,73 @@ def update_workspace_root_branch(
     _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
     refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
     return refreshed[0] if refreshed else issue
+
+
+def list_policy_beads(
+    role: str | None, *, beads_root: Path, cwd: Path
+) -> list[dict[str, object]]:
+    """List project policy beads for the given role."""
+    args = ["list", "--label", POLICY_LABEL, "--label", POLICY_SCOPE_LABEL]
+    if role:
+        args.extend(["--label", policy_role_label(role)])
+    return run_bd_json(args, beads_root=beads_root, cwd=cwd)
+
+
+def extract_policy_body(issue: dict[str, object]) -> str:
+    """Extract the policy body from a bead."""
+    description = issue.get("description")
+    if isinstance(description, str):
+        return description.rstrip("\n")
+    return ""
+
+
+def create_policy_bead(
+    role: str,
+    body: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> str:
+    """Create a project policy bead for the role and return its id."""
+    title = f"Project policy ({role})"
+    with NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+        handle.write(body.rstrip("\n") + "\n" if body else "")
+        temp_path = Path(handle.name)
+    try:
+        args = [
+            "create",
+            "--type",
+            "policy",
+            "--label",
+            POLICY_LABEL,
+            "--label",
+            POLICY_SCOPE_LABEL,
+            "--label",
+            policy_role_label(role),
+            "--title",
+            title,
+            "--body-file",
+            str(temp_path),
+            "--silent",
+        ]
+        result = run_bd_command(args, beads_root=beads_root, cwd=cwd)
+    finally:
+        temp_path.unlink(missing_ok=True)
+    issue_id = result.stdout.strip() if result.stdout else ""
+    if not issue_id:
+        die("failed to create policy bead")
+    return issue_id
+
+
+def update_policy_bead(
+    issue_id: str,
+    body: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    """Update a project policy bead body."""
+    _update_issue_description(issue_id, body, beads_root=beads_root, cwd=cwd)
 
 
 def _update_description_field(

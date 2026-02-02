@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .. import agent_home, beads, config, root_branch, worktrees
+from .. import agent_home, beads, config, policy, root_branch, worktrees
 from ..io import die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
 
@@ -133,6 +133,9 @@ def start_worker(args: object) -> None:
     )
     agent_bead = beads.ensure_agent_bead(
         agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
+    )
+    policy.sync_agent_home_policy(
+        agent, role=policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root
     )
 
     epic_id = getattr(args, "epic_id", None)

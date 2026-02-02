@@ -27,7 +27,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -56,7 +56,7 @@ class TestInitProject:
                 assert config_payload.editor.work == ["cursor"]
                 assert (project_dir / "templates" / "AGENTS.md").exists()
                 assert not (project_dir / "AGENTS.md").exists()
-                assert (project_dir / "PROJECT.md").exists()
+                assert not (project_dir / "PROJECT.md").exists()
                 assert (project_dir / "workspaces").is_dir()
             finally:
                 os.chdir(original_cwd)
@@ -70,7 +70,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -104,7 +104,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "cursor -w", "cursor", ""])
+                responses = iter(["", "", "", "", "cursor -w", "cursor", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -134,7 +134,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -208,6 +208,7 @@ class TestInitProject:
                         "builtins.input",
                         side_effect=AssertionError("prompt should not be called"),
                     ),
+                    patch("atelier.commands.init.confirm", return_value=False),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
@@ -239,7 +240,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),

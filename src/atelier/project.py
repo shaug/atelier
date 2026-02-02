@@ -46,11 +46,3 @@ def ensure_project_scaffold(project_dir: Path) -> None:
             encoding="utf-8",
         )
         say("Created templates/AGENTS.md")
-
-    project_md_path = project_dir / "PROJECT.md"
-    if not project_md_path.exists():
-        project_md_path.write_text(
-            templates.project_md_template(prefer_installed_if_modified=True),
-            encoding="utf-8",
-        )
-        say("Created PROJECT.md")

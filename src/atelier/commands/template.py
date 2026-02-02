@@ -11,7 +11,6 @@ from ..io import die, say
 from .resolve import resolve_current_project
 
 TEMPLATE_TARGETS = {
-    "project": ("project", "PROJECT.md"),
     "agents": ("AGENTS.md",),
 }
 
@@ -49,27 +48,19 @@ def render_template(args: object) -> None:
     """Render or edit templates for the current project."""
     target = getattr(args, "target", None)
     if target not in TEMPLATE_TARGETS:
-        die("template target must be one of: project, agents")
+        die("template target must be one of: agents")
 
     installed = bool(getattr(args, "installed", False))
     edit_mode = bool(getattr(args, "edit", False))
 
     project_root, project_config, _ = resolve_current_project()
 
-    if target == "project":
-        project_template_path = project_root / "PROJECT.md"
-        if not installed and project_template_path.exists():
-            text = project_template_path.read_text(encoding="utf-8")
-        else:
-            text = templates.project_md_template(prefer_installed_if_modified=True)
-        target_path = project_template_path
+    project_template_path = project_root / paths.TEMPLATES_DIRNAME / "AGENTS.md"
+    if not installed and project_template_path.exists():
+        text = project_template_path.read_text(encoding="utf-8")
     else:
-        project_template_path = project_root / paths.TEMPLATES_DIRNAME / "AGENTS.md"
-        if not installed and project_template_path.exists():
-            text = project_template_path.read_text(encoding="utf-8")
-        else:
-            text = templates.agents_template(prefer_installed_if_modified=True)
-        target_path = project_template_path
+        text = templates.agents_template(prefer_installed_if_modified=True)
+    target_path = project_template_path
 
     if not edit_mode:
         say(text)
