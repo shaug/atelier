@@ -155,8 +155,7 @@ def _select_epic_prompt(issues: list[dict[str, object]], *, agent_id: str) -> st
     return selection
 
 
-def _select_epic_auto(*, beads_root: Path, repo_root: Path, agent_id: str) -> str:
-    issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
+def _select_epic_auto(issues: list[dict[str, object]], *, agent_id: str) -> str:
     ready = _filter_epics(issues, require_unassigned=True)
     if ready:
         ready = _sort_by_created_at(ready)
@@ -270,6 +269,8 @@ def start_worker(args: object) -> None:
         if not isinstance(agent_bead_id, str) or not agent_bead_id:
             die("failed to resolve agent bead id")
         hooked_epic = None
+        assigned_epic = None
+        issues: list[dict[str, object]] | None = None
         if not epic_id:
             hooked_epic = _resolve_hooked_epic(
                 agent_bead_id,
@@ -277,6 +278,14 @@ def start_worker(args: object) -> None:
                 beads_root=beads_root,
                 repo_root=repo_root,
             )
+        if not epic_id and not hooked_epic:
+            issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
+            assigned = _filter_epics(issues, assignee=agent.agent_id)
+            assigned = _sort_by_recency(assigned)
+            if assigned:
+                candidate = assigned[0].get("id")
+                if candidate:
+                    assigned_epic = str(candidate)
         if epic_id:
             selected_epic = str(epic_id).strip()
             if not selected_epic:
@@ -284,16 +293,20 @@ def start_worker(args: object) -> None:
         elif hooked_epic:
             selected_epic = hooked_epic
             say(f"Resuming hooked epic: {selected_epic}")
+        elif assigned_epic:
+            selected_epic = assigned_epic
+            say(f"Resuming assigned epic: {selected_epic}")
         elif _check_inbox_before_claim(
             agent.agent_id, beads_root=beads_root, repo_root=repo_root
         ):
             return
         elif mode == "auto":
-            selected_epic = _select_epic_auto(
-                beads_root=beads_root, repo_root=repo_root, agent_id=agent.agent_id
-            )
+            if issues is None:
+                issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
+            selected_epic = _select_epic_auto(issues, agent_id=agent.agent_id)
         else:
-            issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
+            if issues is None:
+                issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
             selected_epic = _select_epic_prompt(issues, agent_id=agent.agent_id)
 
         say(f"Selected epic: {selected_epic}")
