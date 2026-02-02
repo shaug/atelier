@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal, Mapping
@@ -185,6 +186,25 @@ def agent_environment(
         env["BD_ACTOR"] = agent_id
         env["BEADS_AGENT_NAME"] = agent_id
     return env
+
+
+@contextmanager
+def scoped_agent_env(agent_id: str) -> Iterable[None]:
+    """Temporarily set agent identity environment variables."""
+    keys = ("ATELIER_AGENT_ID", "BD_ACTOR", "BEADS_AGENT_NAME")
+    previous = {key: os.environ.get(key) for key in keys}
+    if agent_id:
+        os.environ["ATELIER_AGENT_ID"] = agent_id
+        os.environ["BD_ACTOR"] = agent_id
+        os.environ["BEADS_AGENT_NAME"] = agent_id
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def unique_available_agent(available: Iterable[str]) -> str | None:

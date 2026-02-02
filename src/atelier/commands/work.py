@@ -155,110 +155,111 @@ def start_worker(args: object) -> None:
     agent = agent_home.resolve_agent_home(
         project_data_dir, project_config, role="worker"
     )
-    os.environ["ATELIER_AGENT_ID"] = agent.agent_id
-    os.environ.setdefault("BD_ACTOR", agent.agent_id)
-    os.environ.setdefault("BEADS_AGENT_NAME", agent.agent_id)
-    beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
-    agent_bead = beads.ensure_agent_bead(
-        agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
-    )
-    policy.sync_agent_home_policy(
-        agent, role=policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root
-    )
 
-    epic_id = getattr(args, "epic_id", None)
-    mode = _normalize_mode(getattr(args, "mode", None))
+    with agents.scoped_agent_env(agent.agent_id):
+        beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
+        agent_bead = beads.ensure_agent_bead(
+            agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
+        )
+        policy.sync_agent_home_policy(
+            agent, role=policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root
+        )
 
-    if epic_id:
-        selected_epic = str(epic_id).strip()
-        if not selected_epic:
-            die("epic id must not be empty")
-    elif mode == "auto":
-        selected_epic = _select_epic_auto(beads_root=beads_root, repo_root=repo_root)
-    else:
-        issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
-        selected_epic = _select_epic_prompt(issues)
+        epic_id = getattr(args, "epic_id", None)
+        mode = _normalize_mode(getattr(args, "mode", None))
 
-    say(f"Selected epic: {selected_epic}")
-    epic_issue = beads.claim_epic(
-        selected_epic, agent.agent_id, beads_root=beads_root, cwd=repo_root
-    )
-    root_branch_value = beads.extract_workspace_root_branch(epic_issue)
-    if not root_branch_value:
-        root_branch_value = root_branch.prompt_root_branch(
-            title=str(epic_issue.get("title") or selected_epic),
-            branch_prefix=project_config.branch.prefix,
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
-        beads.update_workspace_root_branch(
-            selected_epic, root_branch_value, beads_root=beads_root, cwd=repo_root
-        )
-    agent_bead_id = agent_bead.get("id")
-    if not isinstance(agent_bead_id, str) or not agent_bead_id:
-        die("failed to resolve agent bead id")
-    beads.set_agent_hook(
-        agent_bead_id, selected_epic, beads_root=beads_root, cwd=repo_root
-    )
-    changeset = _next_changeset(
-        epic_id=selected_epic, beads_root=beads_root, repo_root=repo_root
-    )
-    changeset_id = changeset.get("id") or ""
-    changeset_title = changeset.get("title") or ""
-    say(f"Next changeset: {changeset_id} {changeset_title}")
-    if changeset_id:
-        _mark_changeset_in_progress(
-            changeset_id, beads_root=beads_root, repo_root=repo_root
-        )
-    git_path = config.resolve_git_path(project_config)
-    worktrees.ensure_git_worktree(
-        project_data_dir,
-        repo_root,
-        selected_epic,
-        root_branch=root_branch_value,
-        git_path=git_path,
-    )
-    branch, mapping = worktrees.ensure_changeset_branch(
-        project_data_dir,
-        selected_epic,
-        changeset_id,
-        root_branch=root_branch_value,
-    )
-    worktree_path = project_data_dir / mapping.worktree_path
-    worktrees.ensure_changeset_checkout(
-        worktree_path,
-        branch,
-        root_branch=root_branch_value,
-        git_path=git_path,
-    )
-    say(f"Worktree: {worktree_path}")
-    say(f"Changeset branch: {branch}")
+        if epic_id:
+            selected_epic = str(epic_id).strip()
+            if not selected_epic:
+                die("epic id must not be empty")
+        elif mode == "auto":
+            selected_epic = _select_epic_auto(
+                beads_root=beads_root, repo_root=repo_root
+            )
+        else:
+            issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
+            selected_epic = _select_epic_prompt(issues)
 
-    agent_spec = agents.get_agent(project_config.agent.default)
-    if agent_spec is None:
-        die(f"unsupported agent {project_config.agent.default!r}")
-    agent_options = list(project_config.agent.options.get(agent_spec.name, []))
-    project_enlistment = project_config.project.enlistment or _enlistment
-    env = workspace.workspace_environment(
-        project_enlistment,
-        root_branch_value,
-        worktree_path,
-        base_env=agents.agent_environment(agent.agent_id),
-    )
-    opening_prompt = ""
-    if agent_spec.name == "codex":
-        opening_prompt = workspace.workspace_session_identifier(
-            project_enlistment, root_branch_value, changeset_id or None
+        say(f"Selected epic: {selected_epic}")
+        epic_issue = beads.claim_epic(
+            selected_epic, agent.agent_id, beads_root=beads_root, cwd=repo_root
         )
-    say(f"Starting {agent_spec.display_name} session")
-    start_cmd, start_cwd = agent_spec.build_start_command(
-        worktree_path, agent_options, opening_prompt
-    )
-    if agent_spec.name == "codex":
-        result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
-        if result is None:
-            die(f"missing required command: {start_cmd[0]}")
-        if result.returncode != 0:
-            die(f"command failed: {' '.join(start_cmd)}")
-    else:
-        exec.run_command(start_cmd, cwd=start_cwd, env=env)
+        root_branch_value = beads.extract_workspace_root_branch(epic_issue)
+        if not root_branch_value:
+            root_branch_value = root_branch.prompt_root_branch(
+                title=str(epic_issue.get("title") or selected_epic),
+                branch_prefix=project_config.branch.prefix,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            beads.update_workspace_root_branch(
+                selected_epic, root_branch_value, beads_root=beads_root, cwd=repo_root
+            )
+        agent_bead_id = agent_bead.get("id")
+        if not isinstance(agent_bead_id, str) or not agent_bead_id:
+            die("failed to resolve agent bead id")
+        beads.set_agent_hook(
+            agent_bead_id, selected_epic, beads_root=beads_root, cwd=repo_root
+        )
+        changeset = _next_changeset(
+            epic_id=selected_epic, beads_root=beads_root, repo_root=repo_root
+        )
+        changeset_id = changeset.get("id") or ""
+        changeset_title = changeset.get("title") or ""
+        say(f"Next changeset: {changeset_id} {changeset_title}")
+        if changeset_id:
+            _mark_changeset_in_progress(
+                changeset_id, beads_root=beads_root, repo_root=repo_root
+            )
+        git_path = config.resolve_git_path(project_config)
+        worktrees.ensure_git_worktree(
+            project_data_dir,
+            repo_root,
+            selected_epic,
+            root_branch=root_branch_value,
+            git_path=git_path,
+        )
+        branch, mapping = worktrees.ensure_changeset_branch(
+            project_data_dir,
+            selected_epic,
+            changeset_id,
+            root_branch=root_branch_value,
+        )
+        worktree_path = project_data_dir / mapping.worktree_path
+        worktrees.ensure_changeset_checkout(
+            worktree_path,
+            branch,
+            root_branch=root_branch_value,
+            git_path=git_path,
+        )
+        say(f"Worktree: {worktree_path}")
+        say(f"Changeset branch: {branch}")
+
+        agent_spec = agents.get_agent(project_config.agent.default)
+        if agent_spec is None:
+            die(f"unsupported agent {project_config.agent.default!r}")
+        agent_options = list(project_config.agent.options.get(agent_spec.name, []))
+        project_enlistment = project_config.project.enlistment or _enlistment
+        env = workspace.workspace_environment(
+            project_enlistment,
+            root_branch_value,
+            worktree_path,
+            base_env=agents.agent_environment(agent.agent_id),
+        )
+        opening_prompt = ""
+        if agent_spec.name == "codex":
+            opening_prompt = workspace.workspace_session_identifier(
+                project_enlistment, root_branch_value, changeset_id or None
+            )
+        say(f"Starting {agent_spec.display_name} session")
+        start_cmd, start_cwd = agent_spec.build_start_command(
+            worktree_path, agent_options, opening_prompt
+        )
+        if agent_spec.name == "codex":
+            result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
+            if result is None:
+                die(f"missing required command: {start_cmd[0]}")
+            if result.returncode != 0:
+                die(f"command failed: {' '.join(start_cmd)}")
+        else:
+            exec.run_command(start_cmd, cwd=start_cwd, env=env)

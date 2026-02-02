@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from .. import agent_home, beads, config, policy
+from .. import agent_home, agents, beads, config, policy
 from .. import root_branch as root_branch_util
 from ..io import confirm, die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
@@ -22,57 +21,57 @@ def run_planner(args: object) -> None:
     agent = agent_home.resolve_agent_home(
         project_data_dir, project_config, role="planner"
     )
-    os.environ["ATELIER_AGENT_ID"] = agent.agent_id
-    os.environ.setdefault("BD_ACTOR", agent.agent_id)
-    os.environ.setdefault("BEADS_AGENT_NAME", agent.agent_id)
 
-    say("Beads planning session")
-    beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
-    beads.ensure_agent_bead(
-        agent.agent_id, beads_root=beads_root, cwd=repo_root, role="planner"
-    )
-    policy.sync_agent_home_policy(
-        agent, role=policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
-    )
-
-    if bool(getattr(args, "create_epic", False)):
-        beads.run_bd_command(
-            ["create-form", "--type", "epic", "--label", "at:epic"],
-            beads_root=beads_root,
-            cwd=repo_root,
+    with agents.scoped_agent_env(agent.agent_id):
+        say("Beads planning session")
+        beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
+        beads.ensure_agent_bead(
+            agent.agent_id, beads_root=beads_root, cwd=repo_root, role="planner"
         )
-        return
-
-    epic_id = getattr(args, "epic_id", None)
-    if not epic_id:
-        epic_id = _create_epic(
-            beads_root=beads_root,
-            repo_root=repo_root,
-            branch_prefix=project_config.branch.prefix,
-        )
-    if not epic_id:
-        die("epic id is required to continue planning")
-
-    epic = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
-    if not epic:
-        die(f"epic not found: {epic_id}")
-    epic_issue = epic[0]
-    root_branch = beads.extract_workspace_root_branch(epic_issue)
-    if not root_branch:
-        root_branch_value = root_branch_util.prompt_root_branch(
-            title=str(epic_issue.get("title") or epic_id),
-            branch_prefix=project_config.branch.prefix,
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
-        beads.update_workspace_root_branch(
-            epic_id, root_branch_value, beads_root=beads_root, cwd=repo_root
+        policy.sync_agent_home_policy(
+            agent, role=policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
         )
 
-    if confirm("Add tasks under this epic?", default=True):
-        _create_tasks(epic_id, beads_root=beads_root, repo_root=repo_root)
-    if confirm("Add changesets under this epic?", default=True):
-        _create_changesets(epic_id, beads_root=beads_root, repo_root=repo_root)
+        if bool(getattr(args, "create_epic", False)):
+            beads.run_bd_command(
+                ["create-form", "--type", "epic", "--label", "at:epic"],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+            return
+
+        epic_id = getattr(args, "epic_id", None)
+        if not epic_id:
+            epic_id = _create_epic(
+                beads_root=beads_root,
+                repo_root=repo_root,
+                branch_prefix=project_config.branch.prefix,
+            )
+        if not epic_id:
+            die("epic id is required to continue planning")
+
+        epic = beads.run_bd_json(
+            ["show", epic_id], beads_root=beads_root, cwd=repo_root
+        )
+        if not epic:
+            die(f"epic not found: {epic_id}")
+        epic_issue = epic[0]
+        root_branch = beads.extract_workspace_root_branch(epic_issue)
+        if not root_branch:
+            root_branch_value = root_branch_util.prompt_root_branch(
+                title=str(epic_issue.get("title") or epic_id),
+                branch_prefix=project_config.branch.prefix,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            beads.update_workspace_root_branch(
+                epic_id, root_branch_value, beads_root=beads_root, cwd=repo_root
+            )
+
+        if confirm("Add tasks under this epic?", default=True):
+            _create_tasks(epic_id, beads_root=beads_root, repo_root=repo_root)
+        if confirm("Add changesets under this epic?", default=True):
+            _create_changesets(epic_id, beads_root=beads_root, repo_root=repo_root)
 
 
 def _create_epic(*, beads_root: Path, repo_root: Path, branch_prefix: str) -> str:
