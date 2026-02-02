@@ -164,3 +164,27 @@ def ensure_git_worktree(
 
     exec_util.run_command(git.git_command(args, git_path=git_path))
     return worktree_path
+
+
+def remove_git_worktree(
+    project_dir: Path,
+    repo_root: Path,
+    epic_id: str,
+    *,
+    git_path: str | None = None,
+    force: bool = False,
+) -> bool:
+    """Remove the git worktree for an epic, returning true if removed."""
+    mapping = ensure_worktree_mapping(project_dir, epic_id)
+    worktree_path = project_dir / mapping.worktree_path
+    if not worktree_path.exists():
+        return False
+    if not (worktree_path / ".git").exists():
+        die(f"worktree path is not a git worktree: {worktree_path}")
+
+    args = ["-C", str(repo_root), "worktree", "remove"]
+    if force:
+        args.append("--force")
+    args.append(str(worktree_path))
+    exec_util.run_command(git.git_command(args, git_path=git_path))
+    return True

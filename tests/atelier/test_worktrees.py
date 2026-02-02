@@ -52,3 +52,33 @@ def test_ensure_git_worktree_creates_when_missing() -> None:
 
         assert worktree_path == project_dir / "worktrees" / "epic"
         assert run_command.called
+
+
+def test_remove_git_worktree_noop_when_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        repo_root = Path(tmp) / "repo"
+        project_dir.mkdir(parents=True)
+        repo_root.mkdir(parents=True)
+        with patch("atelier.worktrees.exec_util.run_command") as run_command:
+            removed = worktrees.remove_git_worktree(project_dir, repo_root, "epic")
+        assert removed is False
+        assert not run_command.called
+
+
+def test_remove_git_worktree_calls_git_remove() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        repo_root = Path(tmp) / "repo"
+        project_dir.mkdir(parents=True)
+        repo_root.mkdir(parents=True)
+        mapping = worktrees.ensure_worktree_mapping(project_dir, "epic")
+        worktree_path = project_dir / mapping.worktree_path
+        worktree_path.mkdir(parents=True)
+        (worktree_path / ".git").write_text("gitdir: /tmp\n", encoding="utf-8")
+
+        with patch("atelier.worktrees.exec_util.run_command") as run_command:
+            removed = worktrees.remove_git_worktree(project_dir, repo_root, "epic")
+
+        assert removed is True
+        assert run_command.called
