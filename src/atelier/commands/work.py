@@ -189,6 +189,31 @@ def _next_changeset(
     return changesets[0]
 
 
+def _resolve_hooked_epic(
+    agent_bead_id: str,
+    agent_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> str | None:
+    hook_id = beads.get_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
+    if not hook_id:
+        return None
+    issues = beads.run_bd_json(["show", hook_id], beads_root=beads_root, cwd=repo_root)
+    if not issues:
+        return None
+    epic = issues[0]
+    status = str(epic.get("status") or "").lower()
+    if status in {"closed", "done"}:
+        return None
+    assignee = epic.get("assignee")
+    if assignee and assignee != agent_id:
+        return None
+    if assignee != agent_id:
+        return None
+    return hook_id
+
+
 def _mark_changeset_in_progress(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> None:
@@ -229,10 +254,24 @@ def start_worker(args: object) -> None:
         epic_id = getattr(args, "epic_id", None)
         mode = _normalize_mode(getattr(args, "mode", None))
 
+        agent_bead_id = agent_bead.get("id")
+        if not isinstance(agent_bead_id, str) or not agent_bead_id:
+            die("failed to resolve agent bead id")
+        hooked_epic = None
+        if not epic_id:
+            hooked_epic = _resolve_hooked_epic(
+                agent_bead_id,
+                agent.agent_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
         if epic_id:
             selected_epic = str(epic_id).strip()
             if not selected_epic:
                 die("epic id must not be empty")
+        elif hooked_epic:
+            selected_epic = hooked_epic
+            say(f"Resuming hooked epic: {selected_epic}")
         elif mode == "auto":
             selected_epic = _select_epic_auto(
                 beads_root=beads_root, repo_root=repo_root, agent_id=agent.agent_id
@@ -256,9 +295,6 @@ def start_worker(args: object) -> None:
             beads.update_workspace_root_branch(
                 selected_epic, root_branch_value, beads_root=beads_root, cwd=repo_root
             )
-        agent_bead_id = agent_bead.get("id")
-        if not isinstance(agent_bead_id, str) or not agent_bead_id:
-            die("failed to resolve agent bead id")
         beads.set_agent_hook(
             agent_bead_id, selected_epic, beads_root=beads_root, cwd=repo_root
         )
