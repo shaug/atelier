@@ -196,7 +196,6 @@ Plan epics and changesets:
 
 ```sh
 atelier plan
-atelier plan --create-epic
 ```
 
 Open a workspace worktree in your editor:
@@ -380,18 +379,17 @@ Options:
 
 ### `atelier plan`
 
-Start a planner session for epics.
+Start a planner session for epics. Planner sessions run in a dedicated worktree
+and use the agent runtime for interactive planning.
 
 Usage:
 
 ```sh
 atelier plan
-atelier plan --create-epic
 ```
 
 Options:
 
-- `--create-epic`: Open an interactive form to create a new epic.
 - `--epic-id`: Plan against an existing epic id.
 
 ### `atelier open [workspace-branch] [--] [command ...]`

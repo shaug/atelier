@@ -58,6 +58,12 @@ Responsibilities:
 - Close completed tasks and the epic.
 - Clear hook on completion.
 
+Epic completion rule:
+
+- When all changesets under an epic are either `cs:merged` or `cs:abandoned`,
+  evaluate whether any additional work needs to be defined. If not, close the
+  epic. If more work is required, create new changesets before closing.
+
 ### Worker Modes
 
 Workers can run in one of two modes:

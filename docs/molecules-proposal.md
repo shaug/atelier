@@ -1,5 +1,24 @@
 # Molecules Integration Proposal
 
+## What are molecules?
+
+Molecules are optional workflow instances that capture a multi-step process
+around a bead (for example: “address feedback → re-run checks → resubmit”). They
+provide structured state for a process that otherwise lives in human context and
+PR comments.
+
+### Molecules with Beads
+
+Molecules can attach to a bead (epic or changeset) and persist their current
+state alongside the bead. Atelier should treat molecules as additive metadata:
+if molecule fields are present, surface them; if absent, ignore them.
+
+Reference documentation:
+
+```
+https://github.com/steveyegge/beads/blob/main/docs/MOLECULES.md
+```
+
 ## Summary
 
 Introduce optional molecules as a workflow layer that can be attached to epics
