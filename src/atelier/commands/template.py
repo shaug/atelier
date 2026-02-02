@@ -7,12 +7,12 @@ import tempfile
 from pathlib import Path
 
 from .. import editor, exec, paths, templates
-from ..io import die, say, warn
+from ..io import die, say
 from .resolve import resolve_current_project
 
 TEMPLATE_TARGETS = {
     "project": ("project", "PROJECT.md"),
-    "workspace": ("workspace", "SUCCESS.md"),
+    "agents": ("AGENTS.md",),
 }
 
 
@@ -48,20 +48,15 @@ def _edit_template(
 def render_template(args: object) -> None:
     """Render or edit templates for the current project."""
     target = getattr(args, "target", None)
-    if target == "success":
-        target = "workspace"
     if target not in TEMPLATE_TARGETS:
-        die("template target must be one of: project, workspace, success")
+        die("template target must be one of: project, agents")
 
     installed = bool(getattr(args, "installed", False))
     edit_mode = bool(getattr(args, "edit", False))
-    ticket = bool(getattr(args, "ticket", False))
 
     project_root, project_config, _ = resolve_current_project()
 
     if target == "project":
-        if ticket:
-            warn("ignoring --ticket for project templates")
         project_template_path = project_root / "PROJECT.md"
         if not installed and project_template_path.exists():
             text = project_template_path.read_text(encoding="utf-8")
@@ -69,26 +64,12 @@ def render_template(args: object) -> None:
             text = templates.project_md_template(prefer_installed_if_modified=True)
         target_path = project_template_path
     else:
-        if ticket:
-            project_template_path = (
-                project_root / paths.TEMPLATES_DIRNAME / "SUCCESS.ticket.md"
-            )
-            if not installed and project_template_path.exists():
-                text = project_template_path.read_text(encoding="utf-8")
-            else:
-                text = templates.ticket_success_md_template(
-                    prefer_installed_if_modified=True
-                )
-            target_path = project_template_path
+        project_template_path = project_root / paths.TEMPLATES_DIRNAME / "AGENTS.md"
+        if not installed and project_template_path.exists():
+            text = project_template_path.read_text(encoding="utf-8")
         else:
-            project_template_path = (
-                project_root / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
-            )
-            if not installed and project_template_path.exists():
-                text = project_template_path.read_text(encoding="utf-8")
-            else:
-                text = templates.success_md_template(prefer_installed_if_modified=True)
-            target_path = project_template_path
+            text = templates.agents_template(prefer_installed_if_modified=True)
+        target_path = project_template_path
 
     if not edit_mode:
         say(text)

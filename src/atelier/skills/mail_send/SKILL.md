@@ -21,7 +21,7 @@ description: >-
 
 1. Render the message description with YAML frontmatter (use
    `atelier.messages.render_message`).
-2. Create the message bead:
+1. Create the message bead:
    - `bd create --type task --label at:message --label at:unread --title <subject> --assignee <to> --body-file <path>`
 
 ## Verification

@@ -547,16 +547,6 @@ def managed_project_agents_updates(project_dir: Path) -> dict[str, str]:
         content = path.read_text(encoding="utf-8")
         if content == canonical:
             updates[rel_path] = hash_text(content)
-    success_path = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
-    if success_path.exists():
-        success_content = success_path.read_text(encoding="utf-8")
-        success_canonical = templates.success_md_template(
-            prefer_installed_if_modified=True
-        )
-        if success_content == success_canonical:
-            updates[f"{paths.TEMPLATES_DIRNAME}/SUCCESS.md"] = hash_text(
-                success_content
-            )
     return updates
 
 
@@ -763,9 +753,7 @@ def resolve_git_path(
     return "git"
 
 
-def resolve_project_data_dir(
-    project_root: Path, project_config: ProjectConfig
-) -> Path:
+def resolve_project_data_dir(project_root: Path, project_config: ProjectConfig) -> Path:
     """Resolve the data directory for a project."""
     data_dir = project_config.atelier.data_dir
     if data_dir:

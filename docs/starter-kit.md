@@ -94,7 +94,7 @@ Two JSON files should exist wherever state is stored:
 
 - At runtime, merge these two views into a single effective config.
 - Validate both with Pydantic models and fail loudly with clear errors.
-- If legacy single-file config exists, migrate once into the split layout.
+- If a single-file config exists, migrate once into the split layout.
 
 ### Managed Files Policy
 
@@ -114,11 +114,11 @@ Define a deterministic, stable layout under the user data directory:
       ├─ config.sys.json
       ├─ config.user.json
       ├─ templates/
-      └─ workspaces/
-         └─ <workspace-key>/
-            ├─ config.sys.json
-            ├─ config.user.json
-            └─ repo/   (checkout or working directory)
+      └─ worktrees/
+         ├─ .meta/
+         │  └─ <unit-id>.json
+         └─ <unit-id>/
+            └─ <git worktree checkout>
 ```
 
 Key derivation should be stable across runs (e.g., base name + short hash of a

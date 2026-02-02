@@ -20,17 +20,26 @@ def test_plan_create_epic_uses_form() -> None:
     )
     calls: list[list[str]] = []
 
-    def fake_run_bd_command(args, *, beads_root: Path, cwd: Path, allow_failure: bool = False):
+    def fake_run_bd_command(
+        args, *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ):
         calls.append(args)
+
         class Result:
             stdout = ""
             returncode = 0
+
         return Result()
 
     with (
         patch(
             "atelier.commands.plan.resolve_current_project_with_repo_root",
-            return_value=(Path("/project"), _fake_project_payload(), "/repo", Path("/repo")),
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
         ),
         patch(
             "atelier.commands.plan.config.resolve_project_data_dir",

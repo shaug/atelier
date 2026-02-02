@@ -11,16 +11,17 @@ development.
 
 ## How Work Is Organized
 
-- Work happens in isolated workspaces under the Atelier data directory.
-- Each workspace maps to one git branch and includes a `repo/` checkout.
-- Workspace intent and success criteria live in `SUCCESS.md`.
+- Work happens in isolated worktrees under the Atelier data directory.
+- Each workspace is associated with a top-level Bead (epic) and its changesets.
+- Beads are the source of truth for intent, scope, and status.
 - All Atelier policy files for this workspace live alongside this file.
 
 ## Required Reading
 
 - `PROJECT.md` (if present) for project-wide rules that apply to every
   workspace; it is linked/copied into this workspace.
-- `SUCCESS.md` for workspace-specific intent, scope, and completion criteria.
+- The epic bead (and its changesets) for workspace intent, scope, and completion
+  criteria.
 - `BACKGROUND.md` (if present) for context when a workspace is created from an
   existing branch.
 
@@ -34,7 +35,7 @@ development.
 
 ## Execution Expectations
 
-- Complete the work described in `SUCCESS.md` **to completion**.
+- Complete the work described in the epic bead **to completion**.
 - Do not expand scope beyond what is written there.
 - Prefer small, reviewable changes over large refactors.
 - Avoid unrelated cleanup unless explicitly required.
@@ -45,9 +46,9 @@ development.
 ## Publishing and Finalization Commands
 
 - Before publish/persist/finalize, run the required workspace checks
-  (tests/formatting/linting/etc.) described in `PROJECT.md`, `SUCCESS.md`, or
-  the repo's `AGENTS.md`. Do not proceed if they fail unless the user explicitly
-  asks to ignore the failures.
+  (tests/formatting/linting/etc.) described in `PROJECT.md` or the repo's
+  `AGENTS.md`. Do not proceed if they fail unless the user explicitly asks to
+  ignore the failures.
 - Use the `publish` skill for publish/persist/finalize semantics derived from
   the workspace config.
 
@@ -61,7 +62,7 @@ Ensure the configured agent CLI is installed and authenticated (see
 
 ## Policy Precedence
 
-- `SUCCESS.md` rules take precedence over `PROJECT.md`.
+- Epic bead rules take precedence over `PROJECT.md`.
 - `PROJECT.md` rules take precedence over this file.
 
 Before finalizing work in a workspace, use the `publish` skill.

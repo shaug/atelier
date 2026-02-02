@@ -32,7 +32,8 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
     mapping = worktrees.WorktreeMapping(
         epic_id="atelier-epic",
         worktree_path="worktrees/atelier-epic",
-        changesets={"atelier-epic.1": "atelier-epic-1"},
+        root_branch="feat/root",
+        changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
     )
 
     with (
@@ -52,14 +53,21 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
-            return_value=("atelier-epic-1", mapping),
+            return_value=("feat/root-atelier-epic.1", mapping),
         ),
         patch("atelier.commands.work.worktrees.ensure_git_worktree"),
         patch(
             "atelier.commands.work.beads.ensure_agent_bead",
             return_value={"id": "atelier-agent"},
         ),
-        patch("atelier.commands.work.beads.claim_epic"),
+        patch(
+            "atelier.commands.work.beads.claim_epic",
+            return_value={
+                "id": "atelier-epic",
+                "title": "Epic",
+                "description": "workspace.root_branch: feat/root\n",
+            },
+        ),
         patch("atelier.commands.work.beads.set_agent_hook"),
         patch("atelier.commands.work.agent_home.resolve_agent_home"),
         patch("atelier.commands.work.prompt", return_value="atelier-epic"),
@@ -95,7 +103,8 @@ def test_work_auto_picks_ready_or_in_progress() -> None:
     mapping = worktrees.WorktreeMapping(
         epic_id="atelier-epic",
         worktree_path="worktrees/atelier-epic",
-        changesets={"atelier-epic.1": "atelier-epic-1"},
+        root_branch="feat/root",
+        changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
     )
 
     with (
@@ -115,14 +124,21 @@ def test_work_auto_picks_ready_or_in_progress() -> None:
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
-            return_value=("atelier-epic-1", mapping),
+            return_value=("feat/root-atelier-epic.1", mapping),
         ),
         patch("atelier.commands.work.worktrees.ensure_git_worktree"),
         patch(
             "atelier.commands.work.beads.ensure_agent_bead",
             return_value={"id": "atelier-agent"},
         ),
-        patch("atelier.commands.work.beads.claim_epic"),
+        patch(
+            "atelier.commands.work.beads.claim_epic",
+            return_value={
+                "id": "atelier-epic",
+                "title": "Epic",
+                "description": "workspace.root_branch: feat/root\n",
+            },
+        ),
         patch("atelier.commands.work.beads.set_agent_hook"),
         patch("atelier.commands.work.agent_home.resolve_agent_home"),
         patch("atelier.commands.work.say"),
@@ -147,7 +163,8 @@ def test_work_uses_explicit_epic_id() -> None:
     mapping = worktrees.WorktreeMapping(
         epic_id="atelier-epic",
         worktree_path="worktrees/atelier-epic",
-        changesets={"atelier-epic.1": "atelier-epic-1"},
+        root_branch="feat/root",
+        changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
     )
 
     with (
@@ -167,14 +184,21 @@ def test_work_uses_explicit_epic_id() -> None:
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
-            return_value=("atelier-epic-1", mapping),
+            return_value=("feat/root-atelier-epic.1", mapping),
         ),
         patch("atelier.commands.work.worktrees.ensure_git_worktree"),
         patch(
             "atelier.commands.work.beads.ensure_agent_bead",
             return_value={"id": "atelier-agent"},
         ),
-        patch("atelier.commands.work.beads.claim_epic"),
+        patch(
+            "atelier.commands.work.beads.claim_epic",
+            return_value={
+                "id": "atelier-epic",
+                "title": "Epic",
+                "description": "workspace.root_branch: feat/root\n",
+            },
+        ),
         patch("atelier.commands.work.beads.set_agent_hook"),
         patch("atelier.commands.work.agent_home.resolve_agent_home"),
         patch("atelier.commands.work.say"),

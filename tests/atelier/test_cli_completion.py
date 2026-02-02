@@ -7,27 +7,27 @@ import atelier.config as config
 
 def test_completion_env_uses_comp_line(monkeypatch):
     monkeypatch.setenv("_ATELIER_COMPLETE", "zsh_complete")
-    monkeypatch.setenv("COMP_LINE", "atelier open rus")
-    monkeypatch.setenv("COMP_POINT", str(len("atelier open rus")))
+    monkeypatch.setenv("COMP_LINE", "atelier work rus")
+    monkeypatch.setenv("COMP_POINT", str(len("atelier work rus")))
     monkeypatch.delenv("COMP_WORDS", raising=False)
     monkeypatch.delenv("COMP_CWORD", raising=False)
 
     cli._ensure_completion_env()
 
-    assert os.environ["COMP_WORDS"] == "atelier open rus"
+    assert os.environ["COMP_WORDS"] == "atelier work rus"
     assert os.environ["COMP_CWORD"] == "2"
 
 
 def test_completion_env_handles_trailing_space(monkeypatch):
     monkeypatch.setenv("_ATELIER_COMPLETE", "zsh_complete")
-    monkeypatch.setenv("COMP_LINE", "atelier open ")
-    monkeypatch.setenv("COMP_POINT", str(len("atelier open ")))
+    monkeypatch.setenv("COMP_LINE", "atelier work ")
+    monkeypatch.setenv("COMP_POINT", str(len("atelier work ")))
     monkeypatch.delenv("COMP_WORDS", raising=False)
     monkeypatch.delenv("COMP_CWORD", raising=False)
 
     cli._ensure_completion_env()
 
-    assert os.environ["COMP_WORDS"] == "atelier open "
+    assert os.environ["COMP_WORDS"] == "atelier work "
     assert os.environ["COMP_CWORD"] == "2"
 
 
@@ -65,14 +65,9 @@ def test_workspace_completion_filters_and_dedupes(monkeypatch):
         lambda: (Path("/repo"), Path("/project"), config_payload, None),
     )
     monkeypatch.setattr(
-        cli.workspace,
-        "collect_workspaces",
-        lambda *args, **kwargs: [{"name": "feat/one"}, {"name": "bug/two"}],
-    )
-    monkeypatch.setattr(
         cli,
-        "_collect_local_branches",
-        lambda *args, **kwargs: ["bug/two", "chore/three"],
+        "_collect_workspace_root_branches",
+        lambda *args, **kwargs: ["feat/one", "bug/two", "bug/two"],
     )
 
     assert cli._workspace_name_shell_complete(None, [], "b") == ["bug/two"]
@@ -86,37 +81,15 @@ def test_workspace_completion_excludes_default_branches(monkeypatch):
         lambda: (Path("/repo"), Path("/project"), config_payload, None),
     )
     monkeypatch.setattr(
-        cli.workspace,
-        "collect_workspaces",
-        lambda *args, **kwargs: [{"name": "main"}, {"name": "master"}],
-    )
-    monkeypatch.setattr(
-        cli, "_collect_local_branches", lambda *args, **kwargs: ["main", "master"]
+        cli,
+        "_collect_workspace_root_branches",
+        lambda *args, **kwargs: ["main", "master"],
     )
 
     assert cli._workspace_name_shell_complete(None, [], "m") == []
 
 
-def test_workspace_completion_uses_branches_when_no_workspaces(monkeypatch):
-    config_payload = config.ProjectConfig()
-    monkeypatch.setattr(
-        cli,
-        "_resolve_completion_project",
-        lambda: (Path("/repo"), Path("/project"), config_payload, None),
-    )
-    monkeypatch.setattr(cli.workspace, "collect_workspaces", lambda *args, **kwargs: [])
-
-    def fake_collect(repo_root, git_path, prefix, *, allow_all=False):
-        assert allow_all is True
-        assert prefix == ""
-        return ["feat/one", "main"]
-
-    monkeypatch.setattr(cli, "_collect_local_branches", fake_collect)
-
-    assert cli._workspace_name_shell_complete(None, [], "") == ["feat/one"]
-
-
-def test_workspace_only_completion_ignores_branches(monkeypatch):
+def test_workspace_only_completion_returns_root_branches(monkeypatch):
     config_payload = config.ProjectConfig()
     monkeypatch.setattr(
         cli,
@@ -124,14 +97,9 @@ def test_workspace_only_completion_ignores_branches(monkeypatch):
         lambda: (Path("/repo"), Path("/project"), config_payload, None),
     )
     monkeypatch.setattr(
-        cli.workspace,
-        "collect_workspaces",
-        lambda *args, **kwargs: [{"name": "feat/one"}, {"name": "bug/two"}],
+        cli,
+        "_collect_workspace_root_branches",
+        lambda *args, **kwargs: ["feat/one", "bug/two"],
     )
-
-    def raise_if_called(*args, **kwargs):
-        raise AssertionError("branches should not be collected")
-
-    monkeypatch.setattr(cli, "_collect_local_branches", raise_if_called)
 
     assert cli._workspace_only_shell_complete(None, [], "b") == ["bug/two"]

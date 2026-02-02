@@ -230,7 +230,7 @@ class TestInitProject:
             finally:
                 os.chdir(original_cwd)
 
-    def test_init_creates_success_template(self) -> None:
+    def test_init_creates_agents_template(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             enlistment_path = enlistment_path_for(root)
@@ -252,11 +252,10 @@ class TestInitProject:
                         enlistment_path, NORMALIZED_ORIGIN
                     )
 
-                template_path = project_dir / "templates" / "SUCCESS.md"
+                template_path = project_dir / "templates" / "AGENTS.md"
                 assert template_path.exists()
                 content = template_path.read_text(encoding="utf-8")
-                assert "SUCCESS.md" in content
-                assert not (project_dir / "templates" / "WORKSPACE.md").exists()
+                assert "AGENTS.md" in content
             finally:
                 os.chdir(original_cwd)
 

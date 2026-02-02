@@ -2,7 +2,7 @@
 
 Atelier is an installable CLI for workspace-based, agent-assisted development
 inside local Git repos. It turns each unit of work into its own workspace with a
-dedicated git checkout, explicit intent, and a predictable launch path for
+dedicated git worktree, explicit intent, and a predictable launch path for
 agents and humans. Atelier is Git-first by design; provider integrations are
 optional and best-effort.
 
@@ -58,29 +58,11 @@ The name is meant to signal craft and collaboration, not art, magic, or opacity.
 
 Read more in [docs/atelier-name.md](docs/atelier-name.md).
 
-## Why not `git worktree`?
-
-Atelier does not use `git worktree` by default.
-
-While `git worktree` is excellent for managing multiple checkouts of a
-repository and optimizing storage, it operates at a lower abstraction level than
-Atelier.
-
-Atelier's primary abstraction is a *workspace*—a unit of intent, execution, and
-lifecycle—not just another checkout.
-
-Full, independent repositories provide clearer isolation, simpler cleanup, and
-more predictable behavior than shared state for both humans and coding agents.
-
-Disk is cheap. Cognitive overhead and invisible coupling are not.
-
-Read more in [docs/why-not-git-worktree.md](docs/why-not-git-worktree.md).
-
 ## Core Ideas
 
 - One workspace = one unit of work = one branch
-- Intent is captured before code (in `SUCCESS.md`)
-- Workspaces are isolated directories with their own `repo/`
+- Intent is captured before code (epic planning)
+- Workspaces are isolated worktrees with their own git checkout
 - Projects are identified by their local enlistment path (each repo you
   initialize is a separate project), not Git origin
 - The filesystem is the source of truth
@@ -89,6 +71,11 @@ Read more in [docs/why-not-git-worktree.md](docs/why-not-git-worktree.md).
 
 See [docs/behavior.md](docs/behavior.md) for the compact behavioral overview.
 Command-specific details live in module docstrings under `src/atelier/commands`.
+
+## Requirements
+
+- Git (for worktrees and branch operations)
+- `bd` on your PATH (Atelier's local planning store)
 
 ## Agent Setup
 
@@ -139,13 +126,12 @@ Example editor title (VS Code settings):
 Atelier is intentionally small. The CLI:
 
 - registers a local enlistment as a project in the Atelier data directory
-- creates workspace folders keyed by branch name plus a stable hash
-- maintains minimal `config.sys.json`/`config.user.json` state for projects and
-  workspaces
-- bootstraps policy/context files (`AGENTS.md`, `PROJECT.md`, `SUCCESS.md`,
-  `BACKGROUND.md`) and installs workspace skills
-- clones the repo and checks out workspace branches on demand
-- launches your editor and configured agent in a predictable way
+- creates per-epic worktrees under the data directory
+- maintains minimal `config.sys.json`/`config.user.json` state for projects
+- bootstraps policy/context files (`AGENTS.md`, `PROJECT.md`) and installs
+  workspace skills
+- tracks changeset branch mappings for each workspace
+- launches your editor and shells in a predictable way
 
 ## Project Layout
 
@@ -158,25 +144,18 @@ Atelier is intentionally small. The CLI:
       ├─ PROJECT.md
       ├─ templates/
       │  ├─ AGENTS.md
-      │  ├─ SUCCESS.md
-      │  └─ SUCCESS.ticket.md
-      └─ workspaces/
-         └─ <workspace-key>/
-            ├─ AGENTS.md
-            ├─ PROJECT.md
-            ├─ BACKGROUND.md (optional)
-            ├─ SUCCESS.md
-            ├─ config.sys.json
-            ├─ config.user.json
-            └─ repo/
+      └─ worktrees/
+         ├─ .meta/
+         │  └─ <epic-id>.json
+         └─ <epic-id>/
+            └─ <git worktree checkout>
 ```
 
 Notes:
 
 - `<project-key>` is the enlistment basename plus a short SHA-256 of the full
   enlistment path.
-- `<workspace-key>` is the normalized branch name plus a short SHA-256 of the
-  full workspace ID.
+- Worktrees are keyed by epic id; mappings live in `worktrees/.meta/`.
 
 ## Quick Start
 
@@ -200,36 +179,35 @@ and does not write files into the repo.
 You can run `atelier init` in multiple repos; each enlistment becomes its own
 project entry.
 
-Open or create a workspace:
+Start a worker session (select epic + next changeset):
 
 ```sh
-atelier open [workspace-branch]
+atelier work
+atelier work at-epic123
+atelier work --mode auto
 ```
 
-If no branch is provided, Atelier will take over the current branch only when
-the working tree is clean and the branch is fully pushed to its upstream.
+`atelier work` will:
 
-Use `--raw` to treat the argument as the full branch name (no prefix lookup).
+- claim or select the epic to work on
+- pick the next ready changeset
+- ensure the worktree and changeset branch mapping exist
 
-`atelier open` will:
-
-- create the workspace if needed
-- generate `AGENTS.md`, `SUCCESS.md`, and config files (plus `BACKGROUND.md`
-  when the branch already exists)
-- clone the repo into `repo/` and create the workspace branch
-- prompt to remove the finalization tag `atelier/<branch-name>/finalized` if
-  present (continuing either way)
-- open `editor.edit` for new workspaces (`SUCCESS.md` by default), then launch
-  the configured agent
-
-Open a workspace repo in your work editor:
+Plan epics and changesets:
 
 ```sh
-atelier work <workspace-branch>
-atelier work <workspace-branch> --workspace
+atelier plan
+atelier plan --create-epic
 ```
 
-Open a shell in a workspace repo (or run a command there):
+Open a workspace worktree in your editor:
+
+```sh
+atelier edit <workspace-branch>
+atelier edit <workspace-branch> --workspace
+```
+
+Open a shell in a workspace worktree (or run a command there):
 
 ```sh
 atelier shell <workspace-branch>
@@ -279,19 +257,17 @@ atelier clean --all --yes
 
 ## Notes
 
-- Template upgrades on `atelier open` are governed by `atelier.upgrade`
-  (`always`, `ask`, `manual`).
-- `SUCCESS.md` is the execution contract for each workspace.
-- `AGENTS.md` is a managed, static prologue created in each workspace.
+- Template upgrades are governed by `atelier.upgrade` (`always`, `ask`,
+  `manual`).
+- The epic record is the execution contract for each workspace.
+- `AGENTS.md` is a managed prologue used to configure agents.
 - The `publish` skill records integration guidance derived from workspace config
   and the finalization tag (`atelier/<branch-name>/finalized`) used by
   `atelier clean`.
-- `BACKGROUND.md` captures context when opening an existing branch.
-- `PROJECT.md` is an optional policy overlay for agents and is linked/copied
-  into each workspace.
+- `PROJECT.md` is an optional policy overlay for agents.
 - Configuration lives in `config.sys.json`/`config.user.json` under the Atelier
   data directory.
-- Workspace directories are keyed by a stable hash of the branch name.
+- Worktrees live under the data directory and are keyed by epic id.
 
 ## CLI Reference
 
@@ -379,7 +355,7 @@ atelier config --reset
 atelier config --installed --prompt
 ```
 
-### `atelier template <project|workspace|success>`
+### `atelier template <project|agents>`
 
 Print or edit templates used to seed new documents.
 
@@ -387,131 +363,91 @@ Usage:
 
 ```sh
 atelier template project
-atelier template workspace
-atelier template success
+atelier template agents
 ```
 
 Options:
 
 - `--installed`: Use the installed template cache.
-- `--ticket`: Use the ticket `SUCCESS.md` template for workspace targets.
 - `--edit`: Open the resolved template in `editor.edit`.
 
 Examples:
 
 ```sh
-atelier template workspace --edit
-atelier template workspace --installed
-atelier template workspace --ticket --edit
+atelier template agents --edit
+atelier template agents --installed
 ```
 
-### `atelier edit [workspace-branch]`
+### `atelier edit <workspace-branch>`
 
-Open editable docs in `editor.edit`.
+Open the workspace repo in the configured work editor.
 
 Usage:
 
 ```sh
-atelier edit --project
-atelier edit scott/feat/new-search
+atelier edit feat/new-search
 ```
-
-Options:
-
-- `--project`: Edit `PROJECT.md` for the current project.
-
-### `atelier open [workspace-branch]`
-
-Create or open a workspace, ensuring its `repo/` checkout exists, open
-`editor.edit` for new workspaces (`SUCCESS.md` by default), then launch the
-configured agent. New workspaces include managed `AGENTS.md`, and
-`BACKGROUND.md` when the branch already exists. If the workspace repo has the
-finalization tag `atelier/<branch-name>/finalized`, `atelier open` will prompt
-to remove it but continues either way.
-
-Usage:
-
-```sh
-atelier open feat/new-search
-```
-
-If no branch is provided, `atelier open` can take over the current branch only
-when the working tree is clean and the branch is fully pushed to its upstream.
-By default, `atelier open` rejects the default branch unless it was created via
-`atelier new`.
 
 Options:
 
 - `--raw`: Treat the argument as the full branch name (no prefix lookup).
-- `--branch-pr`: Override pull request expectation for this workspace.
-- `--branch-history`: Override history policy for this workspace.
-- `--ticket`: Ticket reference(s) to attach to the workspace.
-- `--edit` / `--no-edit`: Force or skip opening the policy doc in `editor.edit`.
-- `--yolo`: Enable the least-restrictive agent mode for this invocation.
+- `--workspace`: Open the worktree root instead of the default repo path.
+- `--set-title`: Emit a terminal title escape (best-effort).
 
-Examples:
+### `atelier work [epic-id]`
+
+Start a worker session for the next ready changeset. If no epic id is provided,
+Atelier selects one based on `--mode` (prompt or auto).
+
+Usage:
 
 ```sh
-atelier open scott/feat/new-search --raw
-atelier open feat/new-search --branch-history squash
+atelier work
+atelier work at-epic123
+atelier work --mode auto
 ```
-
-### Ticket-based workflows
-
-Atelier can attach ticket references to workspaces and use them for naming and
-templates.
-
-- Configure tickets in `config.user.json` (or `atelier config --prompt`) under
-  `tickets`:
-  - `provider`: `none|github|linear` (default `none`)
-  - `default_project`: optional default project (for GitHub, owner/repo)
-  - `default_namespace`: optional namespace for providers that need one (unused
-    in naming today)
-- `atelier open --ticket` accepts repeatable or comma-separated references. If
-  no branch is provided, the first ticket reference drives workspace naming.
-- Ticket refs can include a title (`GH-123 Fix login`, `GH-123: Fix login`).
-  Titles are trimmed to four words and slugified for the branch name.
-- With `tickets.provider=github` and `gh` installed, Atelier looks up the issue
-  title for naming; otherwise it prompts for an optional title.
-- For new workspaces, `--ticket` uses `templates/SUCCESS.ticket.md` when
-  present; otherwise it uses the built-in ticket template unless the project's
-  `templates/SUCCESS.md` has been customized. The ticket template renders
-  `${ticket-provider}`, `${ticket-id}`, and `${project-name}` and appends a
-  `## Tickets` section with the references.
-- Ticket refs are stored in the workspace `config.user.json` under
-  `tickets.refs`.
-
-### `atelier work <workspace-branch>`
-
-Open a workspace repo in `editor.work` without blocking the CLI. Use
-`--workspace` to open the workspace root instead of `repo/`.
 
 Options:
 
-- `--workspace`: Open the workspace root instead of `repo/`.
-- `--set-title`: Emit a terminal title escape.
+- `--mode`: Worker selection mode (`prompt` or `auto`).
+
+### `atelier plan`
+
+Start a planner session for epics.
+
+Usage:
+
+```sh
+atelier plan
+atelier plan --create-epic
+```
+
+Options:
+
+- `--create-epic`: Open an interactive form to create a new epic.
+- `--epic-id`: Plan against an existing epic id.
 
 ### `atelier shell <workspace-branch> [--] [command ...]`
 
-Open a shell in the workspace repo, or run a command there. Use `--shell` to
+Open a shell in a workspace worktree, or run a command there. Use `--shell` to
 override the interactive shell selection. Use `--workspace` to run in the
-workspace root instead of `repo/`.
+worktree root instead of the default repo path.
 
 Options:
 
 - `--shell`: Shell path or name for interactive mode.
-- `--workspace`: Run in the workspace root instead of `repo/`.
+- `--workspace`: Run in the worktree root instead of the default repo path.
 - `--set-title`: Emit a terminal title escape.
 
 ### `atelier exec <workspace-branch> [--] [command ...]`
 
-Run a command in the workspace repo. This is an alias for `atelier shell` in
+Run a command in a workspace worktree. This is an alias for `atelier shell` in
 command-execution mode and requires a command. Use `--workspace` to run in the
-workspace root instead of `repo/`.
+worktree root instead of the default repo path.
 
 Options:
 
-- `--workspace`: Run in the workspace root instead of `repo/`.
+- `--workspace`: Run in the worktree root instead of the default repo path.
 - `--set-title`: Emit a terminal title escape.
 
 ### `atelier describe [workspace-branch]`

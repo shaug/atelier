@@ -16,9 +16,9 @@ description: >-
 
 1. Close the epic:
    - `bd close <epic_id>`
-2. Show the agent bead:
+1. Show the agent bead:
    - `bd show <agent_bead_id>`
-3. Clear the hook in the agent bead description:
+1. Clear the hook in the agent bead description:
    - Write a new description with `hook_bead: null` (use `--body-file`).
 
 ## Verification

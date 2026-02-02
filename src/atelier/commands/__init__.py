@@ -3,7 +3,6 @@
 from .clean import clean_workspaces
 from .config import show_config
 from .describe import describe
-from .edit import edit_files
 from .init import init_project
 from .list import list_workspaces
 from .new import new_project
@@ -16,7 +15,6 @@ from .work import start_worker
 __all__ = [
     "clean_workspaces",
     "describe",
-    "edit_files",
     "init_project",
     "list_workspaces",
     "new_project",

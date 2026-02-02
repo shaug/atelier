@@ -20,7 +20,8 @@ description: >-
 
 1. Create the epic bead:
    - `bd create --type epic --label at:epic --title <title> --acceptance <acceptance> --description "<scope/changeset_strategy>" [--design <design>]`
-2. Use `--notes` or `--append-notes` for addendums instead of rewriting the description.
+1. Use `--notes` or `--append-notes` for addendums instead of rewriting the
+   description.
 
 ## Verification
 

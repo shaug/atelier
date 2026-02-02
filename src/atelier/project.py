@@ -54,12 +54,3 @@ def ensure_project_scaffold(project_dir: Path) -> None:
             encoding="utf-8",
         )
         say("Created PROJECT.md")
-
-    success_template_path = templates_dir / "SUCCESS.md"
-    if not success_template_path.exists():
-        ensure_dir(success_template_path.parent)
-        success_template_path.write_text(
-            templates.success_md_template(prefer_installed_if_modified=True),
-            encoding="utf-8",
-        )
-        say("Created templates/SUCCESS.md")

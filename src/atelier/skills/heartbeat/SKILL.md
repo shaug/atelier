@@ -16,7 +16,7 @@ description: >-
 
 1. Show the agent bead:
    - `bd show <agent_bead_id>`
-2. Update the description with `heartbeat_at: <timestamp>` (use `--body-file`).
+1. Update the description with `heartbeat_at: <timestamp>` (use `--body-file`).
 
 ## Verification
 

@@ -7,6 +7,7 @@ Example:
     $ atelier --help
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -21,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover - legacy Click fallback
     from click.parser import split_arg_string
 
-from . import __version__, config, git, paths, workspace
+from . import __version__, beads, config, git, paths
 from .commands import clean as clean_cmd
 from .commands import config as config_cmd
 from .commands import describe as describe_cmd
@@ -30,7 +31,6 @@ from .commands import init as init_cmd
 from .commands import list as list_cmd
 from .commands import mail as mail_cmd
 from .commands import new as new_cmd
-from .commands import open as open_cmd
 from .commands import plan as plan_cmd
 from .commands import remove as remove_cmd
 from .commands import shell as shell_cmd
@@ -38,13 +38,14 @@ from .commands import template as template_cmd
 from .commands import upgrade as upgrade_cmd
 from .commands import work as work_cmd
 from .exec import try_run_command
+from .io import warn
 
 app = typer.Typer(
     add_completion=True,
     help=(
         "Workspace-first CLI for managing isolated, agent-assisted work. "
-        "Use 'atelier init' to register a repo, then 'atelier open' to create "
-        "or resume a workspace that owns its own checkout and agent session."
+        "Use 'atelier init' to register a repo, then 'atelier work' to start "
+        "a worker session against the next ready changeset."
     ),
 )
 mail_app = typer.Typer(help="Mail tools for message beads.")
@@ -107,20 +108,35 @@ def _resolve_completion_project(
     return repo_root, project_root, config_payload, git_path
 
 
-def _collect_local_branches(
-    repo_root: Path, git_path: str | None, prefix: str, *, allow_all: bool = False
-) -> list[str]:
-    if not prefix and not allow_all:
-        return []
-    ref_glob = "refs/heads" if not prefix else f"refs/heads/{prefix}*"
-    cmd = git.git_command(
-        ["-C", str(repo_root), "for-each-ref", "--format=%(refname:short)", ref_glob],
-        git_path=git_path,
-    )
-    result = try_run_command(cmd)
+def _collect_workspace_root_branches(repo_root: Path, *, beads_root: Path) -> list[str]:
+    cmd = ["bd", "list", "--label", "at:epic", "--json"]
+    result = try_run_command(cmd, cwd=repo_root, env=beads.beads_env(beads_root))
     if not result or result.returncode != 0:
         return []
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    raw = result.stdout.strip() if result.stdout else ""
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(payload, dict):
+        issues = [payload]
+    elif isinstance(payload, list):
+        issues = payload
+    else:
+        return []
+    roots: list[str] = []
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        status = str(issue.get("status") or "").lower()
+        if status and status not in {"open", "in_progress", "ready"}:
+            continue
+        root_branch = beads.extract_workspace_root_branch(issue)
+        if root_branch:
+            roots.append(root_branch)
+    return roots
 
 
 def _filter_completion_candidates(values: list[str], incomplete: str) -> list[str]:
@@ -147,21 +163,10 @@ def _workspace_name_shell_complete(
     resolved = _resolve_completion_project()
     if not resolved:
         return []
-    repo_root, project_root, config_payload, git_path = resolved
-    try:
-        workspaces = workspace.collect_workspaces(
-            project_root,
-            config_payload,
-            with_status=False,
-            enlistment_repo_dir=repo_root,
-            git_path=git_path,
-        )
-    except Exception:
-        workspaces = []
-    names = [item.get("name", "") for item in workspaces if item.get("name")]
-    names.extend(
-        _collect_local_branches(repo_root, git_path, incomplete, allow_all=not names)
-    )
+    repo_root, project_root, config_payload, _git_path = resolved
+    project_data_dir = config.resolve_project_data_dir(project_root, config_payload)
+    beads_root = config.resolve_beads_root(project_data_dir, repo_root)
+    names = _collect_workspace_root_branches(repo_root, beads_root=beads_root)
     return _filter_completion_candidates(names, incomplete)
 
 
@@ -171,18 +176,10 @@ def _workspace_only_shell_complete(
     resolved = _resolve_completion_project()
     if not resolved:
         return []
-    repo_root, project_root, config_payload, git_path = resolved
-    try:
-        workspaces = workspace.collect_workspaces(
-            project_root,
-            config_payload,
-            with_status=False,
-            enlistment_repo_dir=repo_root,
-            git_path=git_path,
-        )
-    except Exception:
-        return []
-    names = [item.get("name", "") for item in workspaces if item.get("name")]
+    repo_root, project_root, config_payload, _git_path = resolved
+    project_data_dir = config.resolve_project_data_dir(project_root, config_payload)
+    beads_root = config.resolve_beads_root(project_data_dir, repo_root)
+    names = _collect_workspace_root_branches(repo_root, beads_root=beads_root)
     return _filter_completion_candidates(names, incomplete)
 
 
@@ -274,7 +271,7 @@ def init_command(
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
         agent: Agent name.
-        editor_edit: Editor command used for blocking edits (``SUCCESS.md``).
+        editor_edit: Editor command used for blocking edits (policy docs).
         editor_work: Editor command used for opening the workspace repo.
     Returns:
         None.
@@ -345,7 +342,7 @@ def new_command(
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
         agent: Agent name.
-        editor_edit: Editor command used for blocking edits (``SUCCESS.md``).
+        editor_edit: Editor command used for blocking edits (policy docs).
         editor_work: Editor command used for opening the workspace repo.
 
     Returns:
@@ -369,88 +366,37 @@ def new_command(
 
 @app.command(
     "open",
-    help="Create or open a workspace, ensure its checkout, then launch the agent.",
+    help="Deprecated: use 'atelier work' instead.",
 )
 def open_command(
-    workspace_name: Annotated[
+    epic_id: Annotated[
         str | None,
         typer.Argument(
-            help="workspace branch (defaults to current branch when criteria are met)",
-            autocompletion=_workspace_name_shell_complete,
+            help="epic bead id to work on (optional)",
         ),
     ] = None,
-    raw: Annotated[
-        bool,
-        typer.Option(
-            "--raw",
-            help="treat the argument as the full branch name",
-        ),
-    ] = False,
-    branch_pr: Annotated[
+    mode: Annotated[
         str | None,
         typer.Option(
-            "--branch-pr",
-            help="override pull request expectation (true/false)",
+            "--mode",
+            help="worker selection mode: prompt or auto (defaults to ATELIER_MODE)",
         ),
     ] = None,
-    branch_history: Annotated[
-        str | None,
-        typer.Option(
-            "--branch-history",
-            help="override history policy (manual|squash|merge|rebase)",
-        ),
-    ] = None,
-    ticket: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--ticket",
-            help="ticket reference (repeatable or comma-separated)",
-        ),
-    ] = None,
-    edit: Annotated[
-        bool | None,
-        typer.Option(
-            "--edit/--no-edit",
-            help="open workspace policy doc in editor.edit",
-        ),
-    ] = None,
-    yolo: Annotated[
-        bool,
-        typer.Option(
-            "--yolo",
-            help="enable least-restrictive agent mode for this invocation",
-        ),
-    ] = False,
 ) -> None:
-    """Open or create a workspace and launch the agent.
+    """Deprecated alias for ``atelier work``.
 
     Args:
-        workspace_name: Workspace branch name. When omitted, the current branch
-            may be used if it meets the implicit-open criteria.
-        raw: Treat the argument as the full branch name (no prefix lookup).
-        branch_pr: Override pull request expectation (true/false).
-        branch_history: Override history policy (manual|squash|merge|rebase).
-        ticket: Ticket reference(s) to attach to the workspace.
-        edit: Open (or skip) the workspace policy doc in editor.edit.
-        yolo: Enable least-restrictive agent mode for this invocation.
+        epic_id: Epic bead id to work on (optional).
+        mode: Worker selection mode (prompt or auto).
 
     Returns:
         None.
 
     Example:
-        $ atelier open feat/new-search
+        $ atelier work
     """
-    open_cmd.open_workspace(
-        SimpleNamespace(
-            workspace_name=workspace_name,
-            raw=raw,
-            branch_pr=branch_pr,
-            branch_history=branch_history,
-            ticket=ticket,
-            edit=edit,
-            yolo=yolo,
-        )
-    )
+    warn("`atelier open` is deprecated; use `atelier work` instead.")
+    work_cmd.start_worker(SimpleNamespace(epic_id=epic_id, mode=mode))
 
 
 @app.command("plan", help="Start a planner session for Beads epics.")
@@ -471,7 +417,10 @@ def plan_command(
     plan_cmd.run_planner(SimpleNamespace(create_epic=create_epic, epic_id=epic_id))
 
 
-@app.command("work", help="Start a worker session for the next changeset.")
+@app.command(
+    "work",
+    help="Start a worker session for the next ready changeset.",
+)
 def work_command(
     epic_id: Annotated[
         str | None,
@@ -556,7 +505,7 @@ def mail_mark_read_command(
     message_id: Annotated[
         str,
         typer.Argument(help="message bead id to mark read"),
-    ]
+    ],
 ) -> None:
     """Mark a message bead as read."""
     mail_cmd.mark_read(SimpleNamespace(message_id=message_id))
@@ -931,18 +880,11 @@ def config_command(
 def template_command(
     target: Annotated[
         str,
-        typer.Argument(help="template target (project|workspace|success)"),
+        typer.Argument(help="template target (project|agents)"),
     ],
     installed: Annotated[
         bool,
         typer.Option("--installed", help="use the installed template cache"),
-    ] = False,
-    ticket: Annotated[
-        bool,
-        typer.Option(
-            "--ticket",
-            help="use the ticket SUCCESS.md template for workspace targets",
-        ),
     ] = False,
     edit: Annotated[
         bool,
@@ -951,26 +893,44 @@ def template_command(
 ) -> None:
     """Print or edit templates for the current project."""
     template_cmd.render_template(
-        SimpleNamespace(target=target, installed=installed, ticket=ticket, edit=edit)
+        SimpleNamespace(target=target, installed=installed, edit=edit)
     )
 
 
-@app.command("edit", help="Open editable project/workspace documents.")
+@app.command("edit", help="Open the workspace repo in the work editor.")
 def edit_command(
     workspace_name: Annotated[
         str | None,
         typer.Argument(
-            help="workspace branch to edit SUCCESS.md",
+            help="workspace branch to open (optional)",
             autocompletion=_workspace_only_shell_complete,
         ),
     ] = None,
-    project: Annotated[
+    raw: Annotated[
         bool,
-        typer.Option("--project", help="edit PROJECT.md for the current project"),
+        typer.Option(
+            "--raw",
+            help="treat the argument as the full branch name",
+        ),
+    ] = False,
+    workspace_root: Annotated[
+        bool,
+        typer.Option("--workspace", help="open the workspace root instead of repo"),
+    ] = False,
+    set_title: Annotated[
+        bool,
+        typer.Option("--set-title", help="emit a terminal title escape"),
     ] = False,
 ) -> None:
-    """Open editable project/workspace documents."""
-    edit_cmd.edit_files(SimpleNamespace(workspace_name=workspace_name, project=project))
+    """Open the workspace repo in the configured work editor."""
+    edit_cmd.open_workspace_editor(
+        SimpleNamespace(
+            workspace_name=workspace_name,
+            raw=raw,
+            workspace_root=workspace_root,
+            set_title=set_title,
+        )
+    )
 
 
 def main() -> None:

@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from .. import agent_home, beads, config
+from .. import root_branch as root_branch_util
 from ..io import confirm, die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
 
@@ -37,9 +38,29 @@ def run_planner(args: object) -> None:
 
     epic_id = getattr(args, "epic_id", None)
     if not epic_id:
-        epic_id = _create_epic(beads_root=beads_root, repo_root=repo_root)
+        epic_id = _create_epic(
+            beads_root=beads_root,
+            repo_root=repo_root,
+            branch_prefix=project_config.branch.prefix,
+        )
     if not epic_id:
         die("epic id is required to continue planning")
+
+    epic = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
+    if not epic:
+        die(f"epic not found: {epic_id}")
+    epic_issue = epic[0]
+    root_branch = beads.extract_workspace_root_branch(epic_issue)
+    if not root_branch:
+        root_branch_value = root_branch_util.prompt_root_branch(
+            title=str(epic_issue.get("title") or epic_id),
+            branch_prefix=project_config.branch.prefix,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        beads.update_workspace_root_branch(
+            epic_id, root_branch_value, beads_root=beads_root, cwd=repo_root
+        )
 
     if confirm("Add tasks under this epic?", default=True):
         _create_tasks(epic_id, beads_root=beads_root, repo_root=repo_root)
@@ -47,14 +68,21 @@ def run_planner(args: object) -> None:
         _create_changesets(epic_id, beads_root=beads_root, repo_root=repo_root)
 
 
-def _create_epic(*, beads_root: Path, repo_root: Path) -> str:
+def _create_epic(*, beads_root: Path, repo_root: Path, branch_prefix: str) -> str:
     title = prompt("Epic title", required=True)
+    root_branch_value = root_branch_util.prompt_root_branch(
+        title=title,
+        branch_prefix=branch_prefix,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
     acceptance = prompt("Acceptance criteria", required=True)
     scope = prompt("Scope (optional)", allow_empty=True)
     changeset_strategy = prompt("Changeset strategy (optional)", allow_empty=True)
     design = prompt("Design notes/link (optional)", allow_empty=True)
 
     description_lines = []
+    description_lines.append(f"workspace.root_branch: {root_branch_value}")
     if scope:
         description_lines.append(f"scope: {scope}")
     if changeset_strategy:
@@ -69,6 +97,8 @@ def _create_epic(*, beads_root: Path, repo_root: Path) -> str:
         "epic",
         "--label",
         "at:epic",
+        "--label",
+        beads.workspace_label(root_branch_value),
         "--title",
         title,
         "--acceptance",

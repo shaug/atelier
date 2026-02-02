@@ -15,7 +15,7 @@ description: >-
 
 1. Show the agent bead:
    - `bd show <agent_bead_id>`
-2. Read the `hook_bead` field from the description.
+1. Read the `hook_bead` field from the description.
 
 ## Verification
 

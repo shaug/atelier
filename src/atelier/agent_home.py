@@ -97,9 +97,7 @@ def ensure_agent_home(
 
     stored = _load_metadata(home_dir)
     if stored is None or stored.agent_id != agent_id or stored.role != role:
-        stored = AgentHome(
-            name=agent_name, agent_id=agent_id, role=role, path=home_dir
-        )
+        stored = AgentHome(name=agent_name, agent_id=agent_id, role=role, path=home_dir)
         _write_metadata(home_dir, stored)
     return stored
 

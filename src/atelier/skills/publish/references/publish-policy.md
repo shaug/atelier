@@ -40,9 +40,8 @@ policy (rebase/merge/squash), then push again.
 
 ## Invariants
 
-- Run required checks from `PROJECT.md`, `SUCCESS.md`, or `repo/AGENTS.md`
-  before publish/persist/finalize unless the user explicitly says to ignore
-  failures.
+- Run required checks from `PROJECT.md` or `repo/AGENTS.md` before
+  publish/persist/finalize unless the user explicitly says to ignore failures.
 - Keep the working tree clean before and after publish operations.
 - Do not finalize without explicit user instruction.
 - The skill owns mutation; `atelier` may only be used for read-only

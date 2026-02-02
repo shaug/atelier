@@ -17,6 +17,7 @@ METADATA_DIRNAME = ".meta"
 class WorktreeMapping:
     epic_id: str
     worktree_path: str
+    root_branch: str
     changesets: dict[str, str]
 
 
@@ -44,11 +45,14 @@ def load_mapping(path: Path) -> WorktreeMapping | None:
         return None
     epic_id = payload.get("epic_id")
     worktree_path = payload.get("worktree_path")
+    root_branch = payload.get("root_branch")
     changesets = payload.get("changesets")
     if not isinstance(epic_id, str) or not epic_id:
         return None
     if not isinstance(worktree_path, str) or not worktree_path:
         return None
+    if not isinstance(root_branch, str):
+        root_branch = ""
     if not isinstance(changesets, dict):
         changesets = {}
     normalized = {
@@ -59,6 +63,7 @@ def load_mapping(path: Path) -> WorktreeMapping | None:
     return WorktreeMapping(
         epic_id=epic_id,
         worktree_path=worktree_path,
+        root_branch=root_branch,
         changesets=normalized,
     )
 
@@ -68,54 +73,69 @@ def write_mapping(path: Path, mapping: WorktreeMapping) -> None:
     payload = {
         "epic_id": mapping.epic_id,
         "worktree_path": mapping.worktree_path,
+        "root_branch": mapping.root_branch,
         "changesets": mapping.changesets,
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def ensure_worktree_mapping(project_dir: Path, epic_id: str) -> WorktreeMapping:
+def ensure_worktree_mapping(
+    project_dir: Path, epic_id: str, root_branch: str
+) -> WorktreeMapping:
     """Ensure a worktree mapping exists and return it."""
     if not epic_id:
         die("epic id must not be empty")
+    if not root_branch:
+        die("root branch must not be empty")
     root = worktrees_root(project_dir)
     paths.ensure_dir(root)
     path = mapping_path(project_dir, epic_id)
     paths.ensure_dir(path.parent)
     mapping = load_mapping(path)
     if mapping is not None:
+        if mapping.root_branch and mapping.root_branch != root_branch:
+            die("root branch does not match existing worktree mapping")
+        if not mapping.root_branch:
+            updated = WorktreeMapping(
+                epic_id=mapping.epic_id,
+                worktree_path=mapping.worktree_path,
+                root_branch=root_branch,
+                changesets=mapping.changesets,
+            )
+            write_mapping(path, updated)
+            return updated
         return mapping
     relative_path = f"{paths.WORKTREES_DIRNAME}/{epic_id}"
     mapping = WorktreeMapping(
-        epic_id=epic_id, worktree_path=relative_path, changesets={}
+        epic_id=epic_id,
+        worktree_path=relative_path,
+        root_branch=root_branch,
+        changesets={},
     )
     write_mapping(path, mapping)
     return mapping
 
 
-def derive_changeset_branch(epic_id: str, changeset_id: str) -> str:
+def derive_changeset_branch(root_branch: str, changeset_id: str) -> str:
     """Derive a deterministic branch name for a changeset bead."""
-    if not epic_id or not changeset_id:
-        die("epic id and changeset id must not be empty")
-    prefix = f"{epic_id}."
-    if changeset_id.startswith(prefix):
-        suffix = changeset_id[len(prefix) :]
-        if suffix:
-            return f"{epic_id}-{suffix}"
-    return f"{epic_id}-{changeset_id}"
+    if not root_branch or not changeset_id:
+        die("root branch and changeset id must not be empty")
+    return f"{root_branch}-{changeset_id}"
 
 
 def ensure_changeset_branch(
-    project_dir: Path, epic_id: str, changeset_id: str
+    project_dir: Path, epic_id: str, changeset_id: str, *, root_branch: str
 ) -> tuple[str, WorktreeMapping]:
     """Ensure a changeset branch mapping exists and return it."""
-    mapping = ensure_worktree_mapping(project_dir, epic_id)
+    mapping = ensure_worktree_mapping(project_dir, epic_id, root_branch)
     branch = mapping.changesets.get(changeset_id)
     if branch:
         return branch, mapping
-    branch = derive_changeset_branch(epic_id, changeset_id)
+    branch = derive_changeset_branch(root_branch, changeset_id)
     updated = WorktreeMapping(
         epic_id=mapping.epic_id,
         worktree_path=mapping.worktree_path,
+        root_branch=mapping.root_branch,
         changesets={**mapping.changesets, changeset_id: branch},
     )
     write_mapping(mapping_path(project_dir, epic_id), updated)
@@ -127,10 +147,11 @@ def ensure_git_worktree(
     repo_root: Path,
     epic_id: str,
     *,
+    root_branch: str,
     git_path: str | None = None,
 ) -> Path:
     """Ensure a git worktree exists for the epic and return its path."""
-    mapping = ensure_worktree_mapping(project_dir, epic_id)
+    mapping = ensure_worktree_mapping(project_dir, epic_id, root_branch)
     worktree_path = project_dir / mapping.worktree_path
     if worktree_path.exists():
         if (worktree_path / ".git").exists():
@@ -147,7 +168,14 @@ def ensure_git_worktree(
     has_remote = git.git_ref_exists(repo_root, remote_ref, git_path=git_path)
 
     if has_local:
-        args = ["-C", str(repo_root), "worktree", "add", str(worktree_path), default_branch]
+        args = [
+            "-C",
+            str(repo_root),
+            "worktree",
+            "add",
+            str(worktree_path),
+            default_branch,
+        ]
     elif has_remote:
         args = [
             "-C",
@@ -175,7 +203,9 @@ def remove_git_worktree(
     force: bool = False,
 ) -> bool:
     """Remove the git worktree for an epic, returning true if removed."""
-    mapping = ensure_worktree_mapping(project_dir, epic_id)
+    mapping = load_mapping(mapping_path(project_dir, epic_id))
+    if mapping is None:
+        return False
     worktree_path = project_dir / mapping.worktree_path
     if not worktree_path.exists():
         return False

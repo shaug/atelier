@@ -572,6 +572,10 @@ def plan_project_agents(
     def update_template_hash(value: str) -> None:
         config.update_project_managed_files(project.root, {template_key: value})
 
+    def write_template(text: str) -> None:
+        paths.ensure_dir(template_agents_path.parent)
+        template_agents_path.write_text(text, encoding="utf-8")
+
     plan_agents_file(
         plan,
         description=f"Project template AGENTS.md ({project_label_text})",
@@ -581,7 +585,7 @@ def plan_project_agents(
         update_hash=update_template_hash,
         auto_yes=auto_yes,
         keep_modified=keep_modified,
-        write_text=lambda text: template_agents_path.write_text(text, encoding="utf-8"),
+        write_text=write_template,
     )
 
     legacy_agents_path = project.root / "AGENTS.md"
@@ -772,28 +776,8 @@ def plan_workspace_skills(
 
 
 def plan_project_templates(plan: UpgradePlan, project: ProjectTarget) -> None:
-    project_label_text = project_label(project)
-    templates_root = project.root / paths.TEMPLATES_DIRNAME
-    success_path = templates_root / "SUCCESS.md"
-    if not success_path.exists():
-
-        def apply_create_success() -> None:
-            paths.ensure_dir(success_path.parent)
-            success_text = templates.success_md_template(
-                prefer_installed_if_modified=True
-            )
-            success_path.write_text(success_text, encoding="utf-8")
-            config.update_project_managed_files(
-                project.root,
-                {f"{paths.TEMPLATES_DIRNAME}/SUCCESS.md": hash_text(success_text)},
-            )
-
-        plan.actions.append(
-            PlanAction(
-                description=f"Create templates/SUCCESS.md ({project_label_text})",
-                apply=apply_create_success,
-            )
-        )
+    # SUCCESS.md templates are removed in the beads-first model.
+    return
 
 
 def plan_project_template_refresh(plan: UpgradePlan, project: ProjectTarget) -> None:
@@ -804,11 +788,6 @@ def plan_project_template_refresh(plan: UpgradePlan, project: ProjectTarget) -> 
             "AGENTS.md",
             lambda: templates.agents_template(prefer_installed=True),
             f"{paths.TEMPLATES_DIRNAME}/AGENTS.md",
-        ),
-        (
-            "SUCCESS.md",
-            lambda: templates.success_md_template(prefer_installed=True),
-            f"{paths.TEMPLATES_DIRNAME}/SUCCESS.md",
         ),
     ]
     for filename, read_text, managed_key in refresh_targets:

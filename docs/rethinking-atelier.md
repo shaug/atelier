@@ -464,6 +464,7 @@ User-facing commands should be minimal:
 
 - `atelier plan` -> start planner session
 - `atelier work` -> start worker session
+- `atelier edit` -> open a workspace repo in the work editor
 - `atelier status` -> show hooks, claims, queue state
 - `atelier gc` / `atelier prune` -> cleanup stale hooks, claims, channels,
   queues

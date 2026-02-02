@@ -68,6 +68,116 @@ def _normalize_description(description: str | None) -> str:
     return description.rstrip("\n")
 
 
+def _parse_description_fields(description: str | None) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    if not description:
+        return fields
+    for line in description.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        if not key:
+            continue
+        fields[key] = value.strip()
+    return fields
+
+
+def workspace_label(root_branch: str) -> str:
+    """Return the workspace label for a root branch."""
+    return f"workspace:{root_branch}"
+
+
+def extract_workspace_root_branch(issue: dict[str, object]) -> str | None:
+    """Extract the workspace root branch from a bead."""
+    description = issue.get("description")
+    fields = _parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    root_branch = fields.get("workspace.root_branch")
+    if root_branch:
+        return root_branch
+    labels = issue.get("labels")
+    if isinstance(labels, list):
+        for label in labels:
+            if isinstance(label, str) and label.startswith("workspace:"):
+                return label[len("workspace:") :]
+    return None
+
+
+def list_epics_by_workspace_label(
+    root_branch: str, *, beads_root: Path, cwd: Path
+) -> list[dict[str, object]]:
+    """List epic beads with the workspace label."""
+    return run_bd_json(
+        ["list", "--label", "at:epic", "--label", workspace_label(root_branch)],
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+
+
+def find_epics_by_root_branch(
+    root_branch: str, *, beads_root: Path, cwd: Path
+) -> list[dict[str, object]]:
+    """Find epic beads by root branch label or description."""
+    issues = list_epics_by_workspace_label(root_branch, beads_root=beads_root, cwd=cwd)
+    if issues:
+        return issues
+    issues = run_bd_json(
+        ["list", "--label", "at:epic"],
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+    return [
+        issue for issue in issues if extract_workspace_root_branch(issue) == root_branch
+    ]
+
+
+def update_workspace_root_branch(
+    epic_id: str,
+    root_branch: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    allow_override: bool = False,
+) -> dict[str, object]:
+    """Update the workspace root branch field + label for an epic."""
+    issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"epic not found: {epic_id}")
+    issue = issues[0]
+    current = extract_workspace_root_branch(issue)
+    if current and current != root_branch and not allow_override:
+        die("workspace root branch already set; override not permitted")
+
+    description = issue.get("description")
+    updated = _update_description_field(
+        description if isinstance(description, str) else "",
+        key="workspace.root_branch",
+        value=root_branch,
+    )
+    label = workspace_label(root_branch)
+    labels = issue.get("labels") if isinstance(issue.get("labels"), list) else []
+    labels = [label for label in labels if isinstance(label, str)]
+    remove_labels = [
+        existing
+        for existing in labels
+        if existing.startswith("workspace:") and existing != label
+    ]
+
+    if label not in labels or remove_labels:
+        args = ["update", epic_id]
+        if label not in labels:
+            args.extend(["--add-label", label])
+        for existing in remove_labels:
+            args.extend(["--remove-label", existing])
+        run_bd_command(args, beads_root=beads_root, cwd=cwd)
+
+    _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
+    refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    return refreshed[0] if refreshed else issue
+
+
 def _update_description_field(
     description: str | None, *, key: str, value: str | None
 ) -> str:
@@ -238,9 +348,7 @@ def set_agent_hook(
         key="hook_bead",
         value=epic_id,
     )
-    _update_issue_description(
-        agent_bead_id, updated, beads_root=beads_root, cwd=cwd
-    )
+    _update_issue_description(agent_bead_id, updated, beads_root=beads_root, cwd=cwd)
 
 
 def create_message_bead(
@@ -267,7 +375,9 @@ def create_message_bead(
     ]
     if assignee:
         args.extend(["--assignee", assignee])
-    issue_id = _create_issue_with_body(args, description, beads_root=beads_root, cwd=cwd)
+    issue_id = _create_issue_with_body(
+        args, description, beads_root=beads_root, cwd=cwd
+    )
     issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
     return issues[0] if issues else {"id": issue_id, "title": subject}
 
@@ -317,6 +427,4 @@ def update_changeset_review(
         description if isinstance(description, str) else "",
         metadata,
     )
-    _update_issue_description(
-        changeset_id, updated, beads_root=beads_root, cwd=cwd
-    )
+    _update_issue_description(changeset_id, updated, beads_root=beads_root, cwd=cwd)

@@ -1,13 +1,10 @@
-"""Implementation for the ``atelier open`` command.
+"""Legacy workspace open implementation.
 
 ``atelier open`` resolves or creates a workspace, ensures the repo checkout,
 handles template upgrades, and launches or resumes the agent session.
 """
 
 import difflib
-import json
-import re
-import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,7 +15,6 @@ from .. import (
     agents,
     codex,
     config,
-    editor,
     exec,
     git,
     paths,
@@ -28,7 +24,7 @@ from .. import (
     term,
     workspace,
 )
-from ..io import confirm, die, link_or_copy, prompt, say, warn
+from ..io import confirm, die, link_or_copy, say, warn
 
 
 def confirm_remove_finalization_tag(workspace_branch: str, tag: str) -> bool:
@@ -47,194 +43,6 @@ def confirm_remove_finalization_tag(workspace_branch: str, tag: str) -> bool:
         "Remove it before continuing?",
         default=False,
     )
-
-
-def normalize_ticket_refs(values: list[str] | None) -> list[str]:
-    """Normalize ticket references, splitting comma-delimited inputs."""
-    if not values:
-        return []
-    refs: list[str] = []
-    seen: set[str] = set()
-    for raw in values:
-        if raw is None:
-            continue
-        for part in str(raw).split(","):
-            ref = part.strip()
-            if not ref:
-                continue
-            normalized = ref.casefold()
-            if normalized in seen:
-                continue
-            seen.add(normalized)
-            refs.append(ref)
-    return refs
-
-
-def merge_ticket_refs(existing: list[str], new: list[str]) -> list[str]:
-    """Merge ticket references, preserving order and deduping by case."""
-    merged: list[str] = []
-    seen: set[str] = set()
-    for ref in [*existing, *new]:
-        normalized = ref.casefold()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        merged.append(ref)
-    return merged
-
-
-def append_ticket_section(path: Path, refs: list[str]) -> None:
-    """Append a Tickets section to the SUCCESS.md file."""
-    if not path.exists():
-        warn(f"SUCCESS.md not found for tickets at {path}")
-        return
-    content = path.read_text(encoding="utf-8")
-    if content and not content.endswith("\n"):
-        content += "\n"
-    lines = ["", "## Tickets", "", *[f"- {ref}" for ref in refs]]
-    updated = content + "\n".join(lines).rstrip() + "\n"
-    path.write_text(updated, encoding="utf-8")
-
-
-TICKET_TITLE_WORD_LIMIT = 4
-
-
-def normalize_ticket_slug(value: str) -> str:
-    """Normalize a ticket slug component."""
-    lowered = value.strip().lower()
-    if not lowered:
-        return ""
-    cleaned = re.sub(r"[^a-z0-9]+", "-", lowered)
-    collapsed = re.sub(r"-{2,}", "-", cleaned).strip("-")
-    return collapsed
-
-
-def limit_ticket_title_words(value: str, limit: int = TICKET_TITLE_WORD_LIMIT) -> str:
-    """Limit ticket title text to a fixed number of words."""
-    words = value.strip().split()
-    if not words:
-        return ""
-    return " ".join(words[:limit])
-
-
-def ticket_id_likely(value: str) -> bool:
-    """Return true when a token resembles a ticket identifier."""
-    return any(char.isdigit() for char in value)
-
-
-def split_ticket_reference(value: str) -> tuple[str, str | None]:
-    """Split a ticket reference into id and optional title."""
-    raw = value.strip()
-    if not raw:
-        return "", None
-    match = re.match(r"^(?P<id>\S+?)(?:\s*:\s*|\s+-\s+|\s+)(?P<title>.+)$", raw)
-    if match and ticket_id_likely(match.group("id")):
-        title = match.group("title").strip()
-        return match.group("id"), title or None
-    return raw, None
-
-
-def format_ticket_workspace_name(ticket_id: str, title: str | None) -> str:
-    """Render a workspace name from a ticket id and optional title."""
-    normalized_id = normalize_ticket_slug(ticket_id)
-    if not normalized_id:
-        return ""
-    normalized_title = ""
-    if title:
-        limited = limit_ticket_title_words(title)
-        normalized_title = normalize_ticket_slug(limited)
-    if normalized_title:
-        return f"{normalized_id}-{normalized_title}"
-    return normalized_id
-
-
-def github_repo_from_origin(origin: str | None) -> str | None:
-    """Extract the GitHub owner/repo from a normalized origin string."""
-    if not origin:
-        return None
-    marker = "github.com/"
-    if marker not in origin:
-        return None
-    return origin.split(marker, 1)[1] or None
-
-
-def parse_github_issue_ref(
-    value: str, default_repo: str | None
-) -> tuple[str | None, str] | None:
-    """Parse GitHub issue reference into repo + issue number."""
-    raw = value.strip()
-    if not raw:
-        return None
-    url_match = re.search(
-        r"github\.com/(?P<owner>[^/\s]+)/(?P<repo>[^/\s]+)/issues/(?P<number>\d+)",
-        raw,
-    )
-    if url_match:
-        repo = f"{url_match.group('owner')}/{url_match.group('repo')}"
-        return repo, url_match.group("number")
-    repo_match = re.match(r"(?P<repo>[^#\s]+)#(?P<number>\d+)$", raw)
-    if repo_match and "/" in repo_match.group("repo"):
-        return repo_match.group("repo"), repo_match.group("number")
-    number_match = re.match(r"#?(?P<number>\d+)$", raw)
-    if number_match:
-        return default_repo, number_match.group("number")
-    return None
-
-
-def resolve_ticket_title(
-    ticket_ref: str,
-    *,
-    ticket_provider: str,
-    default_project: str | None,
-    project_origin: str | None,
-    repo_root: Path,
-) -> str | None:
-    """Best-effort lookup of ticket titles for workspace naming."""
-    if ticket_provider != "github" or not git.gh_available():
-        return None
-    default_repo = default_project or github_repo_from_origin(project_origin)
-    parsed = parse_github_issue_ref(ticket_ref, default_repo)
-    if not parsed:
-        return None
-    repo, number = parsed
-    cmd = ["gh", "issue", "view", number, "--json", "title"]
-    if repo:
-        cmd.extend(["--repo", repo])
-    result = exec.try_run_command(cmd, cwd=repo_root)
-    if result is None or result.returncode != 0:
-        return None
-    try:
-        payload = json.loads(result.stdout or "{}")
-    except json.JSONDecodeError:
-        return None
-    title = payload.get("title")
-    if not title:
-        return None
-    return str(title)
-
-
-def render_ticket_success_template(
-    text: str,
-    *,
-    ticket_provider: str,
-    ticket_id: str,
-    project_name: str,
-) -> str:
-    return (
-        text.replace("${ticket-provider}", ticket_provider)
-        .replace("${ticket-id}", ticket_id)
-        .replace("${project-name}", project_name)
-    )
-
-
-def project_success_is_custom(project_dir: Path) -> bool:
-    """Return true when the project SUCCESS.md template is customized."""
-    success_path = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
-    if not success_path.exists():
-        return False
-    success_content = success_path.read_text(encoding="utf-8")
-    canonical = templates.success_md_template(prefer_installed_if_modified=True)
-    return success_content != canonical
 
 
 @dataclass
@@ -487,7 +295,7 @@ def collect_project_template_updates(
         paths.ensure_dir(template_agents_path.parent)
         template_agents_path.write_text(agents_text, encoding="utf-8")
 
-    updates: list[ManagedTemplateUpdate] = [
+    return [
         build_managed_template_update(
             description=f"Project templates/AGENTS.md ({project_label_text})",
             path=template_agents_path,
@@ -500,32 +308,6 @@ def collect_project_template_updates(
             ),
         )
     ]
-
-    success_text = templates.success_md_template(prefer_installed_if_modified=True)
-    template_success_path = templates_root / "SUCCESS.md"
-    template_success_key = f"{paths.TEMPLATES_DIRNAME}/SUCCESS.md"
-
-    def update_success_hash(value: str) -> None:
-        config.update_project_managed_files(project_dir, {template_success_key: value})
-
-    def create_success_template() -> None:
-        paths.ensure_dir(template_success_path.parent)
-        template_success_path.write_text(success_text, encoding="utf-8")
-
-    updates.append(
-        build_managed_template_update(
-            description=f"Project templates/SUCCESS.md ({project_label_text})",
-            path=template_success_path,
-            new_text=success_text,
-            stored_hash=managed.get(template_success_key),
-            update_hash=update_success_hash,
-            create=create_success_template,
-            write_text=lambda text: template_success_path.write_text(
-                text, encoding="utf-8"
-            ),
-        )
-    )
-    return updates
 
 
 def collect_workspace_template_updates(
@@ -705,37 +487,13 @@ def open_workspace(args: object) -> None:
 
     workspace_name_input = getattr(args, "workspace_name", None)
     raw_branch = bool(getattr(args, "raw", False))
-    ticket_refs = normalize_ticket_refs(getattr(args, "ticket", None))
-
     if not workspace_name_input:
-        if ticket_refs:
-            ticket_name = ticket_refs[0]
-            ticket_id, ticket_title = split_ticket_reference(ticket_name)
-            if not ticket_id:
-                die("ticket name did not produce a valid workspace name")
-            if not ticket_title:
-                ticket_title = resolve_ticket_title(
-                    ticket_name,
-                    ticket_provider=config_payload.tickets.provider or "none",
-                    default_project=config_payload.tickets.default_project,
-                    project_origin=project_origin,
-                    repo_root=repo_root,
-                )
-            if ticket_title is None:
-                ticket_title = prompt("Ticket title (optional)", allow_empty=True)
-                if ticket_title == "":
-                    ticket_title = None
-            normalized_ticket = format_ticket_workspace_name(ticket_id, ticket_title)
-            if not normalized_ticket:
-                die("ticket name did not produce a valid workspace name")
-            workspace_name_input = normalized_ticket
-        else:
-            if raw_branch:
-                die("workspace branch is required when using --raw")
-            workspace_name_input = resolve_implicit_workspace_name(
-                repo_root, config_payload, git_path=git_path
-            )
-            raw_branch = True
+        if raw_branch:
+            die("workspace branch is required when using --raw")
+        workspace_name_input = resolve_implicit_workspace_name(
+            repo_root, config_payload, git_path=git_path
+        )
+        raw_branch = True
 
     workspace_name_input = workspace.normalize_workspace_name(str(workspace_name_input))
     if not workspace_name_input:
@@ -813,78 +571,11 @@ def open_workspace(args: object) -> None:
             workspace_dir
         )
         config.update_workspace_managed_files(workspace_dir, workspace_managed_updates)
-        workspace_policy_target = workspace_dir / "SUCCESS.md"
-        if not workspace_policy_target.exists():
-            ticket_template_path = (
-                project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.ticket.md"
-            )
-            success_template_path = project_dir / paths.TEMPLATES_DIRNAME / "SUCCESS.md"
-            workspace_policy_text: str | None = None
-            workspace_policy_template: Path | None = None
-
-            if ticket_refs:
-                if ticket_template_path.exists():
-                    workspace_policy_text = ticket_template_path.read_text(
-                        encoding="utf-8"
-                    )
-                elif not project_success_is_custom(project_dir):
-                    workspace_policy_text = templates.ticket_success_md_template(
-                        prefer_installed_if_modified=True
-                    )
-                else:
-                    workspace_policy_template = (
-                        success_template_path
-                        if success_template_path.exists()
-                        else None
-                    )
-            else:
-                workspace_policy_template = (
-                    success_template_path if success_template_path.exists() else None
-                )
-
-            if workspace_policy_text is not None:
-                ticket_config = config_payload.tickets
-                ticket_provider = ticket_config.provider or "ticket"
-                if ticket_provider == "none":
-                    ticket_provider = "ticket"
-                ticket_id = ticket_refs[0] if ticket_refs else "unknown"
-                project_name = (
-                    ticket_config.default_project
-                    or project_section.origin
-                    or project_section.repo_url
-                    or project_dir.name
-                )
-                rendered = render_ticket_success_template(
-                    workspace_policy_text,
-                    ticket_provider=ticket_provider,
-                    ticket_id=ticket_id,
-                    project_name=project_name,
-                )
-                workspace_policy_target.write_text(rendered, encoding="utf-8")
-            elif workspace_policy_template is not None:
-                shutil.copyfile(workspace_policy_template, workspace_policy_target)
         workspace_config = config.load_workspace_config(workspace_config_file)
         if not workspace_config:
             die("failed to load workspace config")
         skills_metadata = skills.install_workspace_skills(workspace_dir)
         config.replace_workspace_skills_metadata(workspace_dir, skills_metadata)
-
-    if ticket_refs:
-        if not is_new_workspace:
-            warn("tickets were provided for an existing workspace; skipping")
-        else:
-            user_path = paths.workspace_config_user_path(workspace_dir)
-            user_config = (
-                config.load_workspace_user_config(user_path)
-                or config.WorkspaceUserConfig()
-            )
-            merged_refs = merge_ticket_refs(user_config.tickets.refs, ticket_refs)
-            tickets_section = user_config.tickets.model_copy(
-                update={"refs": merged_refs}
-            )
-            user_config = user_config.model_copy(update={"tickets": tickets_section})
-            config.write_workspace_user_config(user_path, user_config)
-            append_ticket_section(workspace_dir / "SUCCESS.md", merged_refs)
 
     if workspace_config is not None:
         backfill_missing_workspace_files(
@@ -929,14 +620,6 @@ def open_workspace(args: object) -> None:
                 workspace_dir, version=__version__, upgrade=workspace_upgrade_policy
             )
 
-    workspace_policy_path: Path | None = None
-    success_policy_path = workspace_dir / "SUCCESS.md"
-    legacy_policy_path = workspace_dir / "WORKSPACE.md"
-    if success_policy_path.exists():
-        workspace_policy_path = success_policy_path
-    elif legacy_policy_path.exists():
-        workspace_policy_path = legacy_policy_path
-
     repo_dir = workspace_dir / "repo"
     project_repo_url = origin_raw or enlistment_path
     clone_repo_url = project_repo_url
@@ -945,12 +628,6 @@ def open_workspace(args: object) -> None:
         if resolved_origin:
             clone_repo_url = resolved_origin
 
-    edit_override = getattr(args, "edit", None)
-    if edit_override is None:
-        should_open_editor = is_new_workspace
-    else:
-        should_open_editor = bool(edit_override)
-    editor_cmd: list[str] | None = None
     repo_fresh_clone = False
     if not repo_dir.exists():
         exec.run_command(
@@ -1117,19 +794,6 @@ def open_workspace(args: object) -> None:
             workspace_branch,
             git_path=git_path,
             provider=config_payload.project.provider,
-        )
-
-    if should_open_editor and workspace_policy_path is not None:
-        if editor_cmd is None:
-            editor_cmd = editor.resolve_editor_command(config_payload, role="edit")
-        try:
-            workspace_target = workspace_policy_path.relative_to(workspace_dir)
-        except ValueError:
-            workspace_target = workspace_policy_path
-        exec.run_command(
-            [*editor_cmd, str(workspace_target)],
-            cwd=workspace_dir,
-            env=workspace_env,
         )
 
     workspace_uid: str | None = None

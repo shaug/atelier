@@ -342,9 +342,6 @@ class TestUpgradeTemplateComparison:
                 canonical = templates.agents_template(prefer_installed_if_modified=True)
                 template_path = templates_dir / "AGENTS.md"
                 template_path.write_text("custom agents\n", encoding="utf-8")
-                (templates_dir / "SUCCESS.md").write_text(
-                    "custom success\n", encoding="utf-8"
-                )
 
                 config.update_project_managed_files(
                     project_dir,
@@ -390,9 +387,6 @@ class TestUpgradeTemplateComparison:
                 canonical = templates.agents_template(prefer_installed_if_modified=True)
                 template_path = templates_dir / "AGENTS.md"
                 template_path.write_text("custom agents\n", encoding="utf-8")
-                (templates_dir / "SUCCESS.md").write_text(
-                    "custom success\n", encoding="utf-8"
-                )
 
                 config.update_project_managed_files(
                     project_dir,
@@ -430,10 +424,6 @@ class TestUpgradeTemplateComparison:
                 templates_dir.mkdir(parents=True, exist_ok=True)
                 canonical = templates.agents_template(prefer_installed_if_modified=True)
                 (templates_dir / "AGENTS.md").write_text(canonical, encoding="utf-8")
-                (templates_dir / "SUCCESS.md").write_text(
-                    templates.success_md_template(prefer_installed_if_modified=True),
-                    encoding="utf-8",
-                )
                 config.update_project_managed_files(
                     project_dir,
                     {"templates/AGENTS.md": config.hash_text(canonical)},
@@ -480,10 +470,6 @@ class TestUpgradeTemplateComparison:
                 templates_dir.mkdir(parents=True, exist_ok=True)
                 canonical = templates.agents_template(prefer_installed_if_modified=True)
                 (templates_dir / "AGENTS.md").write_text(canonical, encoding="utf-8")
-                (templates_dir / "SUCCESS.md").write_text(
-                    templates.success_md_template(prefer_installed_if_modified=True),
-                    encoding="utf-8",
-                )
                 config.update_project_managed_files(
                     project_dir,
                     {"templates/AGENTS.md": config.hash_text(canonical)},

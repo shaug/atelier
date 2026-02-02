@@ -41,11 +41,7 @@ def test_config_agent_identity_is_used_when_env_missing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"
         project_dir.mkdir(parents=True)
-        config_payload = ProjectConfig(
-            agent=AgentConfig(identity="atelier/worker/bob")
-        )
-        home = agent_home.resolve_agent_home(
-            project_dir, config_payload, role="worker"
-        )
+        config_payload = ProjectConfig(agent=AgentConfig(identity="atelier/worker/bob"))
+        home = agent_home.resolve_agent_home(project_dir, config_payload, role="worker")
     assert home.name == "bob"
     assert home.agent_id == "atelier/worker/bob"

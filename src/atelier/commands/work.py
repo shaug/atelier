@@ -1,6 +1,7 @@
-"""Implementation for the ``atelier work`` command.
+"""Worker session command implementation.
 
 Starts a worker session by selecting an epic and its next ready changeset.
+Used by ``atelier work``.
 """
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .. import agent_home, beads, config, worktrees
+from .. import agent_home, beads, config, root_branch, worktrees
 from ..io import die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
 
@@ -35,7 +36,7 @@ def _filter_epics(issues: list[dict[str, object]]) -> list[dict[str, object]]:
     filtered: list[dict[str, object]] = []
     for issue in issues:
         status = str(issue.get("status") or "")
-        if status not in {"open", "in_progress"}:
+        if status not in {"open", "in_progress", "ready"}:
             continue
         labels = _issue_labels(issue)
         if "at:draft" in labels:
@@ -59,7 +60,8 @@ def _select_epic_prompt(issues: list[dict[str, object]]) -> str:
         issue_id = issue.get("id") or ""
         status = issue.get("status") or "unknown"
         title = issue.get("title") or ""
-        say(f"- {issue_id} [{status}] {title}")
+        root_branch_value = beads.extract_workspace_root_branch(issue) or "unset"
+        say(f"- {issue_id} [{status}] {root_branch_value} {title}")
     selection = prompt("Epic id")
     selection = selection.strip()
     if not selection:
@@ -147,9 +149,20 @@ def start_worker(args: object) -> None:
         selected_epic = _select_epic_prompt(issues)
 
     say(f"Selected epic: {selected_epic}")
-    beads.claim_epic(
+    epic_issue = beads.claim_epic(
         selected_epic, agent.agent_id, beads_root=beads_root, cwd=repo_root
     )
+    root_branch_value = beads.extract_workspace_root_branch(epic_issue)
+    if not root_branch_value:
+        root_branch_value = root_branch.prompt_root_branch(
+            title=str(epic_issue.get("title") or selected_epic),
+            branch_prefix=project_config.branch.prefix,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        beads.update_workspace_root_branch(
+            selected_epic, root_branch_value, beads_root=beads_root, cwd=repo_root
+        )
     agent_bead_id = agent_bead.get("id")
     if not isinstance(agent_bead_id, str) or not agent_bead_id:
         die("failed to resolve agent bead id")
@@ -164,10 +177,17 @@ def start_worker(args: object) -> None:
     say(f"Next changeset: {changeset_id} {changeset_title}")
     git_path = config.resolve_git_path(project_config)
     worktrees.ensure_git_worktree(
-        project_data_dir, repo_root, selected_epic, git_path=git_path
+        project_data_dir,
+        repo_root,
+        selected_epic,
+        root_branch=root_branch_value,
+        git_path=git_path,
     )
     branch, mapping = worktrees.ensure_changeset_branch(
-        project_data_dir, selected_epic, changeset_id
+        project_data_dir,
+        selected_epic,
+        changeset_id,
+        root_branch=root_branch_value,
     )
     worktree_path = project_data_dir / mapping.worktree_path
     say(f"Worktree: {worktree_path}")

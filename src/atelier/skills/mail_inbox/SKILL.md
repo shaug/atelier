@@ -17,7 +17,7 @@ description: >-
 
 1. List messages assigned to the agent:
    - `bd list --label at:message --assignee <agent_id> [--label at:unread]`
-2. Parse frontmatter from each message description if needed.
+1. Parse frontmatter from each message description if needed.
 
 ## Verification
 

@@ -23,9 +23,7 @@ def test_build_project_config_sets_data_dir() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         data_dir = Path(tmp) / "data"
         with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-            with patch(
-                "atelier.agents.available_agent_names", return_value=("codex",)
-            ):
+            with patch("atelier.agents.available_agent_names", return_value=("codex",)):
                 payload = config.build_project_config(
                     {},
                     "/repo",
@@ -42,7 +40,6 @@ def test_build_project_config_sets_data_dir() -> None:
 
 def test_resolve_project_data_dir_prefers_config() -> None:
     config_payload = ProjectConfig(atelier=AtelierSection(data_dir="/custom"))
-    assert (
-        config.resolve_project_data_dir(Path("/project"), config_payload)
-        == Path("/custom")
+    assert config.resolve_project_data_dir(Path("/project"), config_payload) == Path(
+        "/custom"
     )

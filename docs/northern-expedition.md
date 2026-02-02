@@ -19,17 +19,17 @@ ______________________________________________________________________
 - Maintain compatibility with repos that already use Beads.
 - Enforce human-shaped changesets and reviewability.
 - Run workers manually with no background agents.
-- No backwards compatibility requirements for legacy workspaces.
+- Backwards compatibility is not a goal.
 
 ______________________________________________________________________
 
-## Current State (Baseline)
+## Current State
 
-- Work is organized by workspaces (branch + workspace directory + repo clone).
-- Intent lives in SUCCESS.md in each workspace.
-- `atelier open` creates workspaces and starts agents.
+- Work is organized by epics, worktrees, and changeset branches.
+- Intent lives in epic records with `workspace.root_branch` metadata.
+- `atelier work` starts worker sessions.
 - `publish` and finalization tags encode integration state.
-- There is no first-class notion of changesets or sequencing.
+- Changesets are planned, sequenced, and mapped to branches.
 
 ______________________________________________________________________
 
@@ -41,7 +41,7 @@ ______________________________________________________________________
 - Changesets are child Beads issues (tasks) under that epic.
 - Dependencies inside Beads define the changeset sequence.
 - Beads also carries coordination state: hooks, claims, and messaging.
-- SUCCESS.md is no longer created for new workspaces.
+- SUCCESS.md is not part of the workflow.
 
 ### Workspaces as Worktrees
 
@@ -85,11 +85,10 @@ ______________________________________________________________________
 
 ## Changeset Branch Naming
 
-Default naming should be stable and derived from the changeset bead id:
+Default naming should be stable and derived from the root branch:
 
 ```
-<epic-id>-1
-<epic-id>-2
+<root-branch>-<changeset-id>
 ```
 
 Branch names are treated as immutable once created. If scope changes materially,
@@ -133,6 +132,11 @@ ______________________________________________________________________
 - With an explicit epic id: claim and hook that epic.
 - Without args: prompt (or auto mode) to claim the next eligible epic.
 - Starts work on the next ready changeset for the chosen epic.
+- `atelier open` is not part of the primary workflow.
+
+### `atelier edit`
+
+- Open the workspace repo in the configured work editor.
 
 ### `atelier status`
 
@@ -238,5 +242,5 @@ ______________________________________________________________________
 - Every workspace is backed by a Beads epic.
 - Every changeset is a Beads task with dependencies.
 - `atelier work` lands on the next ready changeset for the chosen epic.
-- SUCCESS.md is no longer required for new workspaces.
+- SUCCESS.md is not required for new workspaces.
 - Integration state is explicit and reviewable without guesswork.

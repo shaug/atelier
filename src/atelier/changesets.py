@@ -62,9 +62,7 @@ def parse_review_metadata(description: str) -> ReviewMetadata:
     )
 
 
-def apply_review_metadata(
-    description: str, metadata: ReviewMetadata
-) -> str:
+def apply_review_metadata(description: str, metadata: ReviewMetadata) -> str:
     """Return a description updated with review metadata fields."""
     updated = description
     updated = _set_field(updated, "pr_url", metadata.pr_url)

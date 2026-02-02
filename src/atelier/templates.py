@@ -9,8 +9,6 @@ TEMPLATE_PARTS: tuple[tuple[str, ...], ...] = (
     ("AGENTS.md",),
     ("agent", "AGENTS.md"),
     ("project", "PROJECT.md"),
-    ("workspace", "SUCCESS.md"),
-    ("workspace", "SUCCESS.ticket.md"),
 )
 
 
@@ -202,50 +200,6 @@ def workspace_agents_template(
     """
     return read_template(
         "AGENTS.md",
-        prefer_installed=prefer_installed,
-        prefer_installed_if_modified=prefer_installed_if_modified,
-    )
-
-
-def success_md_template(
-    *,
-    prefer_installed: bool = False,
-    prefer_installed_if_modified: bool = False,
-) -> str:
-    """Return the workspace ``SUCCESS.md`` template text.
-
-    Returns:
-        Template text.
-
-    Example:
-        >>> "SUCCESS" in success_md_template()
-        True
-    """
-    return read_template(
-        "workspace",
-        "SUCCESS.md",
-        prefer_installed=prefer_installed,
-        prefer_installed_if_modified=prefer_installed_if_modified,
-    )
-
-
-def ticket_success_md_template(
-    *,
-    prefer_installed: bool = False,
-    prefer_installed_if_modified: bool = False,
-) -> str:
-    """Return the ticket-focused ``SUCCESS.md`` template text.
-
-    Returns:
-        Template text.
-
-    Example:
-        >>> "ticket" in ticket_success_md_template()
-        True
-    """
-    return read_template(
-        "workspace",
-        "SUCCESS.ticket.md",
         prefer_installed=prefer_installed,
         prefer_installed_if_modified=prefer_installed_if_modified,
     )

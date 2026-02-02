@@ -16,9 +16,13 @@ def test_ensure_agent_bead_returns_existing() -> None:
 
 def test_ensure_agent_bead_creates_when_missing() -> None:
     def fake_command(*_args, **_kwargs) -> CompletedProcess[str]:
-        return CompletedProcess(args=["bd"], returncode=0, stdout="atelier-2\n", stderr="")
+        return CompletedProcess(
+            args=["bd"], returncode=0, stdout="atelier-2\n", stderr=""
+        )
 
-    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
         if args[0] == "show":
             return [{"id": "atelier-2", "title": "agent"}]
         return []
@@ -38,7 +42,9 @@ def test_ensure_agent_bead_creates_when_missing() -> None:
 def test_claim_epic_updates_assignee_and_status() -> None:
     issue = {"id": "atelier-9", "labels": [], "assignee": None}
 
-    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
         return [issue]
 
     with (
@@ -46,7 +52,10 @@ def test_claim_epic_updates_assignee_and_status() -> None:
         patch("atelier.beads.run_bd_command") as run_command,
     ):
         beads.claim_epic(
-            "atelier-9", "atelier/worker/alice", beads_root=Path("/beads"), cwd=Path("/repo")
+            "atelier-9",
+            "atelier/worker/alice",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
         )
 
     called_args = run_command.call_args.args[0]
@@ -59,10 +68,14 @@ def test_set_agent_hook_updates_description() -> None:
     issue = {"id": "atelier-agent", "description": "role: worker\n"}
     captured: dict[str, str] = {}
 
-    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
         return [issue]
 
-    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
+    def fake_update(
+        issue_id: str, description: str, *, beads_root: Path, cwd: Path
+    ) -> None:
         captured["id"] = issue_id
         captured["description"] = description
 
@@ -128,10 +141,14 @@ def test_update_changeset_review_updates_description() -> None:
     issue = {"id": "atelier-99", "description": "scope: demo\n"}
     captured: dict[str, str] = {}
 
-    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
         return [issue]
 
-    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
+    def fake_update(
+        issue_id: str, description: str, *, beads_root: Path, cwd: Path
+    ) -> None:
         captured["id"] = issue_id
         captured["description"] = description
 

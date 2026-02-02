@@ -17,9 +17,9 @@ description: >-
 
 1. Create task beads under the epic:
    - `bd create --parent <epic_id> --type task --label at:task --title <title> --acceptance <acceptance>`
-2. Create subtasks under the task when needed:
+1. Create subtasks under the task when needed:
    - `bd create --parent <task_id> --type task --label at:subtask --title <title> --acceptance <acceptance>`
-3. Use `--notes` for follow-up details instead of editing descriptions.
+1. Use `--notes` for follow-up details instead of editing descriptions.
 
 ## Verification
 

@@ -21,7 +21,12 @@ def test_mail_send_creates_message() -> None:
     with (
         patch(
             "atelier.commands.mail.resolve_current_project_with_repo_root",
-            return_value=(Path("/project"), _fake_project_payload(), "/repo", Path("/repo")),
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
         ),
         patch(
             "atelier.commands.mail.config.resolve_project_data_dir",
@@ -66,7 +71,12 @@ def test_mail_inbox_lists_messages() -> None:
     with (
         patch(
             "atelier.commands.mail.resolve_current_project_with_repo_root",
-            return_value=(Path("/project"), _fake_project_payload(), "/repo", Path("/repo")),
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
         ),
         patch(
             "atelier.commands.mail.config.resolve_project_data_dir",
@@ -95,7 +105,12 @@ def test_mail_mark_read_updates_message() -> None:
     with (
         patch(
             "atelier.commands.mail.resolve_current_project_with_repo_root",
-            return_value=(Path("/project"), _fake_project_payload(), "/repo", Path("/repo")),
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
         ),
         patch(
             "atelier.commands.mail.config.resolve_project_data_dir",

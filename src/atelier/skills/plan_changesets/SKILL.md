@@ -24,8 +24,8 @@ description: >-
 
 1. For each changeset, create a bead:
    - `bd create --parent <epic_id> --type task --label at:changeset --title <title> --acceptance <acceptance>`
-2. Record guardrails in the changeset description or notes.
-3. If a changeset violates guardrails, pause and request explicit approval.
+1. Record guardrails in the changeset description or notes.
+1. If a changeset violates guardrails, pause and request explicit approval.
 
 ## Verification
 

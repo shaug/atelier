@@ -17,9 +17,9 @@ description: >-
 
 1. Release the epic:
    - `bd update <epic_id> --assignee "" --status open --remove-label at:hooked`
-2. Load the agent bead description:
+1. Load the agent bead description:
    - `bd show <agent_bead_id>`
-3. Clear the hook in the agent bead description:
+1. Clear the hook in the agent bead description:
    - Write a new description with `hook_bead: null` (use `--body-file`).
 
 ## Verification

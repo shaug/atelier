@@ -1,25 +1,30 @@
 # Atelier Behavior and Design Notes
 
-This document captures the intended behavior of the Atelier CLI without the full
-weight of a formal specification. Module-level docstrings (especially in
-`src/atelier/commands`) provide additional, command-specific details.
+This document captures the current behavior of the Atelier CLI. It is a compact
+overview; command-specific details live in module docstrings under
+`src/atelier/commands`.
 
 ## Purpose
 
-Atelier is a local, installable CLI for managing workspace-based development in
-one Git repo at a time. Each workspace is an isolated unit of work tied to a
-single branch and (optionally) an agent session.
+Atelier is a local CLI for workspace-based development inside a single Git repo
+at a time. Each workspace is a unit of intent with its own worktree checkout and
+changeset branches.
 
 Atelier prioritizes explicit intent, predictable filesystem layout, and minimal
 side effects inside the user's repo.
 
 ## Core concepts
 
-- Project: identified by the absolute path to a local enlistment.
-- Workspace: one branch + one workspace directory + one repo checkout.
-- Workspace ID: `atelier:<enlistment-path>:<branch>` (stable identifier used for
-  naming).
-- Data directory: determined via `platformdirs` (user data dir for `atelier`).
+- **Project**: Identified by the absolute path to a local enlistment. Project
+  state lives under the Atelier data directory.
+- **Epic**: Top-level unit of intent that owns a workspace root branch.
+- **Changeset**: Child unit under an epic; each changeset is a branch derived
+  from the root branch.
+- **Workspace root branch**: User-facing branch name for the epic. Stored as
+  `workspace.root_branch` in epic metadata and labeled
+  `workspace:<root_branch>`.
+- **Worktree**: A per-epic git worktree checkout stored under the data
+  directory. Worktree mappings live under `worktrees/.meta/`.
 
 ## Filesystem layout
 
@@ -33,204 +38,100 @@ Project directory (under the Atelier data dir):
       ├─ config.user.json
       ├─ PROJECT.md
       ├─ templates/
-      │  ├─ AGENTS.md
-      │  ├─ SUCCESS.md
-      │  └─ SUCCESS.ticket.md
-      └─ workspaces/
-```
-
-Workspace directory:
-
-```
-workspaces/<workspace-key>/
-├─ AGENTS.md
-├─ PROJECT.md
-├─ BACKGROUND.md (optional)
-├─ SUCCESS.md
-├─ skills/
-│  └─ <skill-name>/SKILL.md
-├─ config.sys.json
-├─ config.user.json
-└─ repo/
+      │  └─ AGENTS.md
+      └─ worktrees/
+         ├─ .meta/
+         │  └─ <epic-id>.json
+         └─ <epic-id>/
+            └─ <git worktree checkout>
 ```
 
 Notes:
 
-- `<project-key>` is derived from the enlistment basename plus a short hash of
-  the full enlistment path (legacy origin-based keys are still recognized).
-- `<workspace-key>` is derived from the branch name plus a short hash of the
-  workspace ID (legacy branch-only keys are still recognized).
-- `PROJECT.md` and templates live under the project directory; workspaces get
-  copies at creation time.
+- `<project-key>` is the enlistment basename plus a short hash of the full
+  enlistment path.
+- Worktrees are keyed by epic id; mappings live in `worktrees/.meta/`.
 
-## Config files
+## Configuration
 
-Atelier splits configuration into two JSON files at both the project and
-workspace levels:
+Atelier splits configuration into two JSON files at the project level:
 
 - `config.sys.json` (system-managed): IDs, timestamps, managed-file hashes, and
   other metadata.
-- `config.user.json` (user-managed): branch defaults, agent/editor
-  configuration, and upgrade policy.
+- `config.user.json` (user-managed): branch prefix, agent/editor configuration,
+  upgrade policy, and per-project preferences.
 
-A merged view is used at runtime. Legacy single-file configs are migrated once
-into the split layout.
+Editor roles:
 
-Additional config notes:
+- `editor.edit` for blocking edits.
+- `editor.work` for opening worktrees in an editor.
 
-- `git.path` optionally overrides the Git executable (defaults to `git` on
-  PATH).
-- `project.provider` metadata is optional; when unset, provider integrations are
-  skipped.
-- `tickets.provider` controls ticket workflows (`none`, `github`, `linear`).
-  `atelier config --prompt` asks for the provider; when it is not `none`, it
-  also prompts for optional `tickets.default_project` and
-  `tickets.default_namespace` (reserved for providers that need a namespace and
-  not used for naming today).
-- Workspaces capture a base marker (`workspace.base`) with the default branch
-  head SHA at creation time; it is used to detect committed work even after
-  squash/rebase workflows and is never auto-updated.
-- Workspace skill metadata is stored in `config.sys.json` under `skills`, keyed
-  by skill name with version and hash metadata.
+Branch prefix:
+
+- Used during planning to suggest root branch names.
+- Used during fuzzy resolution when the user types a workspace name.
 
 ## Templates and policy files
 
-- `AGENTS.md` is generated from the project templates; it is the entry point for
-  agent instructions inside each workspace.
-- `SUCCESS.md` is copied into new workspaces from the project templates.
-- `SUCCESS.ticket.md` is an optional ticket-focused template used when
-  `atelier open --ticket` creates a new workspace. It supports
-  `${ticket-provider}`, `${ticket-id}`, and `${project-name}` placeholders.
-- Publish/persist/finalize semantics are determined by the `publish` skill using
-  workspace config.
-- `BACKGROUND.md` is created only when a workspace is created from an existing
-  branch.
-- Managed template hashes are stored under `atelier.managed_files` to determine
-  whether a template is user-modified.
-- Upgrade policy (`always`, `ask`, `manual`) controls whether template updates
-  are applied automatically, with prompts when needed.
+- `AGENTS.md` is managed from the project templates and used as the agent
+  prologue.
+- `PROJECT.md` is an optional policy overlay for agents.
+- No `SUCCESS.md` or ticket templates are created.
 
-## Agent publish vocabulary
+## Planning store
 
-Atelier workspaces use consistent command words enforced by the `publish` skill
-(derived from workspace config):
+Atelier requires `bd` on the PATH. It is used as the local planning store for
+epics and changesets, including labels and metadata.
 
-- `publish`: publish only (no finalization/tagging). If `branch.pr` is true,
-  commit, push, and create/update the PR. If `branch.pr` is false, commit,
-  integrate onto the default branch per the history policy, and push.
-- `persist`: save progress without finalizing. If `branch.pr` is true, commit
-  and push the workspace branch only (no PR). If `branch.pr` is false, treat it
-  the same as `publish`.
-- `finalize`: ensure publishing is complete (perform publish if needed), then
-  integrate onto the default branch (merge PR or rebase/merge as configured),
-  push the default branch, and create the local finalization tag.
-
-## Command behavior
+## Command behavior (high level)
 
 - `atelier init`
 
   - Registers the current repo as a project in the data directory.
-  - Writes project config, templates, and scaffold files.
-  - Does not modify the repo itself.
+  - Writes project config and templates.
 
-- `atelier open`
+- `atelier plan`
 
-  - Resolves a workspace name (prefixed unless `--raw`).
-  - Implicit open is allowed only when the current branch is non-default, clean,
-    and fully pushed to its upstream.
-  - `--ticket` can be repeated (or comma-separated) to attach ticket refs.
-  - Ensures project scaffolding and handles template upgrades per policy.
-  - Creates workspace metadata and config when missing.
-  - Clones the repo into `repo/` if missing, checks out the workspace branch,
-    and optionally creates it.
-  - Prints a workspace banner (name + path).
-  - Prompts to remove an existing finalization tag before reopening.
-  - When `--ticket` is supplied, the first ticket reference can drive workspace
-    naming when no branch is provided (best-effort GitHub title lookup when
-    `tickets.provider=github` and `gh` is available; otherwise prompts for an
-    optional title). New workspaces render the ticket template when available,
-    append a `## Tickets` section to `SUCCESS.md`, and store refs in the
-    workspace config.
-  - Opens the workspace policy doc on first creation unless `--no-edit` is set
-    (or forced via `--edit`), then resumes or starts the agent session.
-  - `--yolo` adds the least-restrictive agent flags for that invocation.
-  - Exposes workspace identity via `ATELIER_*` environment variables for editors
-    and agents.
-  - Applies terminal chrome when supported (WezTerm, Kitty, tmux, iTerm2), with
-    iTerm2 setting session titles (OSC 1) and tab/window titles (OSC 2).
+  - Creates epics, tasks, and changesets in the planning store.
+  - Suggests and validates a `workspace.root_branch` value.
 
-- `atelier work` / `atelier shell` / `atelier exec`
+- `atelier work`
 
-  - Resolve an existing workspace repo and open the configured editor or shell.
-  - Do not create new workspaces.
-  - `--workspace` targets the workspace root instead of `repo/`.
-  - `--set-title` emits a terminal title escape (best-effort).
-  - `atelier shell --shell` overrides the interactive shell selection.
-  - Exposes workspace identity via `ATELIER_*` environment variables.
-
-- `atelier config`
-
-  - Prints merged project config or workspace config when a branch is provided.
-  - `--installed`, `--prompt`, `--reset`, and `--edit` operate on user-editable
-    defaults (no workspace branch allowed with those flags).
-
-- `atelier template`
-
-  - Prints or edits templates for `project`, `workspace`, or `success` targets.
-  - `--ticket` selects the ticket SUCCESS.md template for workspace targets.
-  - `--installed` uses the installed template cache; `--edit` opens in
-    `editor.edit`.
+  - Selects or claims an epic and its next ready changeset.
+  - Ensures the epic worktree exists.
+  - Creates/records the changeset branch mapping.
 
 - `atelier edit`
 
-  - Opens `PROJECT.md` (`--project`) or a workspace `SUCCESS.md` in
-    `editor.edit`.
+  - Opens the selected workspace worktree in `editor.work`.
+  - Prompts for a workspace when none is provided.
+
+- `atelier shell` / `atelier exec`
+
+  - Runs an interactive shell or command in the worktree.
+
+- `atelier config`
+
+  - Prints or updates project configuration.
+
+- `atelier template`
+
+  - Prints or edits `AGENTS.md` and `PROJECT.md` templates.
 
 - `atelier describe`
 
-  - With no args, shows project overview plus a workspace summary table.
-  - With a workspace name, shows detailed status (clean/dirty, ahead/behind,
-    diffstat, last commit).
-  - Supports `--finalized`, `--no-finalized`, and `--format=json`.
+  - Shows project or workspace status, including branch cleanliness and recent
+    commits where available.
 
 - `atelier list`
 
-  - Lists known workspaces (names only).
+  - Lists available workspaces (root branches) for the current project.
 
 - `atelier clean`
 
-  - Defaults to cleaning finalized workspaces.
-  - Uses the finalization tag `atelier/<branch-name>/finalized` in the workspace
-    repo or the main enlistment to determine finalization.
-  - Remote branch deletion is only allowed for finalized workspaces unless the
-    user confirms otherwise.
-  - `--dry-run` prints planned deletions without removing anything.
-  - `--orphans` removes orphaned workspaces (missing config or repo directory).
+  - Removes worktrees marked finalized (via publish tooling) or when explicitly
+    requested.
 
-- `atelier remove` / `atelier rm`
+- `atelier remove`
 
-  - Removes project data from the Atelier data directory.
-  - Supports removing a single project, all projects, or orphaned projects.
-  - Never touches user repos.
-
-- `atelier upgrade`
-
-  - Applies managed template and config migrations for projects/workspaces.
-  - `--installed` refreshes the installed template cache.
-  - `--all-projects` targets every project in the data dir.
-  - `--no-projects` or `--no-workspaces` restricts what gets upgraded.
-  - `--dry-run` shows planned changes; `--yes` applies without confirmation.
-  - Prompts before overwriting modified managed files unless `--keep-modified`.
-
-- `atelier template` / `atelier edit`
-
-  - Provide explicit control over template updates and editing of project or
-    workspace policy documents.
-  - `atelier template --ticket` prints/edits the `SUCCESS.ticket.md` template
-    for workspace targets.
-
-## Non-goals
-
-- No background services or daemons.
-- No implicit modifications to user repos beyond the workspace checkouts.
-- No automatic upgrades of user-owned files without explicit policy.
+  - Deletes project data from the Atelier data directory.
