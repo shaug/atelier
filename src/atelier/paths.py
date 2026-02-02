@@ -12,6 +12,7 @@ WORKSPACES_DIRNAME = "workspaces"
 WORKTREES_DIRNAME = "worktrees"
 TEMPLATES_DIRNAME = "templates"
 SKILLS_DIRNAME = "skills"
+AGENTS_DIRNAME = "agents"
 BEADS_DIRNAME = ".beads"
 LEGACY_CONFIG_FILENAME = "config.json"
 PROJECT_CONFIG_SYS_FILENAME = "config.sys.json"
@@ -80,6 +81,21 @@ def project_beads_dir(project_dir: Path) -> Path:
         True
     """
     return project_dir / BEADS_DIRNAME
+
+
+def project_worktrees_dir(project_dir: Path) -> Path:
+    """Return the worktrees directory for a project."""
+    return project_dir / WORKTREES_DIRNAME
+
+
+def project_skills_dir(project_dir: Path) -> Path:
+    """Return the skills directory for a project."""
+    return project_dir / SKILLS_DIRNAME
+
+
+def project_agents_dir(project_dir: Path) -> Path:
+    """Return the agents directory for a project."""
+    return project_dir / AGENTS_DIRNAME
 
 
 def installed_legacy_config_path() -> Path:

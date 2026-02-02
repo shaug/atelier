@@ -121,10 +121,11 @@ def _next_changeset(
 
 def start_worker(args: object) -> None:
     """Start a worker session by selecting an epic and changeset."""
-    project_root, _project_config, _enlistment, repo_root = (
+    project_root, project_config, _enlistment, repo_root = (
         resolve_current_project_with_repo_root()
     )
-    beads_root = config.resolve_beads_root(project_root, repo_root)
+    project_data_dir = config.resolve_project_data_dir(project_root, project_config)
+    beads_root = config.resolve_beads_root(project_data_dir, repo_root)
 
     epic_id = getattr(args, "epic_id", None)
     mode = _normalize_mode(getattr(args, "mode", None))
@@ -147,8 +148,8 @@ def start_worker(args: object) -> None:
     changeset_title = changeset.get("title") or ""
     say(f"Next changeset: {changeset_id} {changeset_title}")
     branch, mapping = worktrees.ensure_changeset_branch(
-        project_root, selected_epic, changeset_id
+        project_data_dir, selected_epic, changeset_id
     )
-    worktree_path = project_root / mapping.worktree_path
+    worktree_path = project_data_dir / mapping.worktree_path
     say(f"Worktree: {worktree_path}")
     say(f"Changeset branch: {branch}")

@@ -19,7 +19,7 @@ class WorktreeMapping:
 
 def worktrees_root(project_dir: Path) -> Path:
     """Return the root directory for worktrees."""
-    return project_dir / paths.WORKTREES_DIRNAME
+    return paths.project_worktrees_dir(project_dir)
 
 
 def worktree_dir(project_dir: Path, epic_id: str) -> Path:

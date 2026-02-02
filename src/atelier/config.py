@@ -763,6 +763,16 @@ def resolve_git_path(
     return "git"
 
 
+def resolve_project_data_dir(
+    project_root: Path, project_config: ProjectConfig
+) -> Path:
+    """Resolve the data directory for a project."""
+    data_dir = project_config.atelier.data_dir
+    if data_dir:
+        return Path(data_dir)
+    return project_root
+
+
 def detect_beads_location(repo_root: Path) -> str:
     """Detect the Beads location for a repo.
 

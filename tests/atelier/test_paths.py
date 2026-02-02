@@ -83,3 +83,26 @@ class TestBeadsPaths:
     def test_project_beads_dir_uses_beads_dirname(self) -> None:
         project_dir = Path("/tmp/project")
         assert paths.project_beads_dir(project_dir) == project_dir / paths.BEADS_DIRNAME
+
+
+class TestDataDirPaths:
+    def test_project_worktrees_dir_uses_worktrees_dirname(self) -> None:
+        project_dir = Path("/tmp/project")
+        assert (
+            paths.project_worktrees_dir(project_dir)
+            == project_dir / paths.WORKTREES_DIRNAME
+        )
+
+    def test_project_skills_dir_uses_skills_dirname(self) -> None:
+        project_dir = Path("/tmp/project")
+        assert (
+            paths.project_skills_dir(project_dir)
+            == project_dir / paths.SKILLS_DIRNAME
+        )
+
+    def test_project_agents_dir_uses_agents_dirname(self) -> None:
+        project_dir = Path("/tmp/project")
+        assert (
+            paths.project_agents_dir(project_dir)
+            == project_dir / paths.AGENTS_DIRNAME
+        )
