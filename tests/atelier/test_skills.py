@@ -13,6 +13,11 @@ def test_packaged_skills_include_core_set() -> None:
         "github-prs",
         "tickets",
         "beads",
+        "claim_epic",
+        "release_epic",
+        "hook_status",
+        "heartbeat",
+        "work_done",
     }.issubset(names)
 
 
@@ -28,5 +33,10 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "github-prs",
             "tickets",
             "beads",
+            "claim_epic",
+            "release_epic",
+            "hook_status",
+            "heartbeat",
+            "work_done",
         ):
             assert (workspace_dir / "skills" / name / "SKILL.md").exists()
