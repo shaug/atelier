@@ -14,14 +14,15 @@ description: >-
 
 ## Steps
 
+1. Verify all changesets are complete:
+   - `bd list --parent <epic_id> --label at:changeset`
+   - Ensure every changeset is `cs:merged` or `cs:abandoned`.
 1. Close the epic:
    - `bd close <epic_id>`
-1. Show the agent bead:
-   - `bd show <agent_bead_id>`
-1. Clear the hook in the agent bead description:
-   - Write a new description with `hook_bead: null` (use `--body-file`).
+1. Clear the hook slot on the agent bead:
+   - `bd slot clear <agent_bead_id> hook`
 
 ## Verification
 
 - Epic is closed.
-- Agent bead description includes `hook_bead: null`.
+- Agent hook slot is empty.

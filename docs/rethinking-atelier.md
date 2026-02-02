@@ -62,7 +62,9 @@ Epic completion rule:
 
 - When all changesets under an epic are either `cs:merged` or `cs:abandoned`,
   evaluate whether any additional work needs to be defined. If not, close the
-  epic. If more work is required, create new changesets before closing.
+  epic. If more work is required, create new changesets before closing. Status
+  output reports `ready_to_close` when no remaining changesets exist; use
+  `work_done` to close the epic and clear the hook.
 
 ### Worker Modes
 
