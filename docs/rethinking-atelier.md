@@ -77,7 +77,8 @@ Auto mode flow:
 
 Auto mode default should prefer new ready epics over unfinished work. Users can
 explicitly target unfinished epics via command-line or by reusing an existing
-session.
+session. Auto mode selects the oldest ready epic first (by created time), then
+falls back to the oldest unfinished epic already assigned to the agent.
 
 ## Atelier Data Directory
 
