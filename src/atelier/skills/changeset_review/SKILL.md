@@ -12,8 +12,7 @@ description: >-
 - changeset_id: Bead id of the changeset.
 - pr_url: Optional PR URL.
 - pr_number: Optional PR number.
-- pr_state: Optional PR state (open, review, changes_requested, approved,
-  merged).
+- pr_state: Optional PR state (pushed, draft-pr, in-review, approved, merged).
 - review_owner: Optional reviewer identity.
 - beads_dir: Optional Beads store path.
 
