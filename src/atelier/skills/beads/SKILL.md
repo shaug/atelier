@@ -26,6 +26,9 @@ description: >-
    - `bd ready --parent <epic-id> --label at:changeset`
 1. Show issue details when needed:
    - `bd show <issue-id>`
+1. When creating new issues, prefer explicit fields:
+   - `bd create --acceptance ... --design ... --estimate ... --priority ...`
+   - use `--notes` / `--append-notes` for addendums without rewriting descriptions
 1. Sync Beads after changes or before ending a session:
    - `bd sync`
 

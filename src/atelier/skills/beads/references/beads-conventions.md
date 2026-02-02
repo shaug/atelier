@@ -17,6 +17,14 @@ projects. Stick to core Beads fields so existing Beads repos remain compatible.
 - If custom statuses are not supported, represent `hooked` / `pinned` as labels
   and keep status at `open`.
 
+## Core fields
+
+- Use `--acceptance` for acceptance criteria (do not embed in description).
+- Use `--design` for design notes (link or embed design docs).
+- Use `--estimate` for time estimates (minutes).
+- Use `--priority` (default P2 unless specified).
+- Use `--notes` / `--append-notes` for addendums without rewriting descriptions.
+
 ## Description fields
 
 Use key: value lines in descriptions for structured fields (human-readable and
@@ -24,7 +32,6 @@ machine-parsable). Example:
 
 ```
 scope: <short scope>
-acceptance: <exit criteria>
 changeset_strategy: <rules>
 worktree_path: <path>
 ```
