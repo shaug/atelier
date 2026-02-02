@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from . import exec
+from . import exec, messages
 from .io import die
 
 
@@ -108,6 +108,30 @@ def _update_issue_description(
         )
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+def _create_issue_with_body(
+    args: list[str],
+    description: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> str:
+    with NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+        handle.write(description)
+        temp_path = Path(handle.name)
+    try:
+        result = run_bd_command(
+            [*args, "--body-file", str(temp_path), "--silent"],
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+    finally:
+        temp_path.unlink(missing_ok=True)
+    issue_id = result.stdout.strip() if result.stdout else ""
+    if not issue_id:
+        die("failed to create bead")
+    return issue_id
 
 
 def find_agent_bead(
@@ -216,4 +240,61 @@ def set_agent_hook(
     )
     _update_issue_description(
         agent_bead_id, updated, beads_root=beads_root, cwd=cwd
+    )
+
+
+def create_message_bead(
+    *,
+    subject: str,
+    body: str,
+    metadata: dict[str, object],
+    assignee: str | None = None,
+    beads_root: Path,
+    cwd: Path,
+) -> dict[str, object]:
+    """Create a message bead and return its data."""
+    description = messages.render_message(metadata, body)
+    args = [
+        "create",
+        "--type",
+        "task",
+        "--label",
+        "at:message",
+        "--label",
+        "at:unread",
+        "--title",
+        subject,
+    ]
+    if assignee:
+        args.extend(["--assignee", assignee])
+    issue_id = _create_issue_with_body(args, description, beads_root=beads_root, cwd=cwd)
+    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+    return issues[0] if issues else {"id": issue_id, "title": subject}
+
+
+def list_inbox_messages(
+    agent_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    unread_only: bool = True,
+) -> list[dict[str, object]]:
+    """List message beads assigned to the agent."""
+    args = ["list", "--label", "at:message", "--assignee", agent_id]
+    if unread_only:
+        args.extend(["--label", "at:unread"])
+    return run_bd_json(args, beads_root=beads_root, cwd=cwd)
+
+
+def mark_message_read(
+    message_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    """Mark a message bead as read."""
+    run_bd_command(
+        ["update", message_id, "--remove-label", "at:unread"],
+        beads_root=beads_root,
+        cwd=cwd,
     )

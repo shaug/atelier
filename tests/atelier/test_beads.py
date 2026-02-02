@@ -79,3 +79,46 @@ def test_set_agent_hook_updates_description() -> None:
 
     assert captured["id"] == "atelier-agent"
     assert "hook_bead: atelier-epic" in captured["description"]
+
+
+def test_create_message_bead_renders_frontmatter() -> None:
+    with (
+        patch("atelier.beads.messages.render_message", return_value="body"),
+        patch("atelier.beads._create_issue_with_body", return_value="atelier-55"),
+        patch(
+            "atelier.beads.run_bd_json",
+            return_value=[{"id": "atelier-55", "title": "Hello"}],
+        ),
+    ):
+        result = beads.create_message_bead(
+            subject="Hello",
+            body="Hi",
+            metadata={"from": "alice"},
+            assignee="bob",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+    assert result["id"] == "atelier-55"
+
+
+def test_list_inbox_messages_filters_unread() -> None:
+    with patch(
+        "atelier.beads.run_bd_json", return_value=[{"id": "atelier-77"}]
+    ) as run_json:
+        result = beads.list_inbox_messages(
+            "alice", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+    assert result
+    called_args = run_json.call_args.args[0]
+    assert "--label" in called_args
+    assert "at:unread" in called_args
+
+
+def test_mark_message_read_updates_labels() -> None:
+    with patch("atelier.beads.run_bd_command") as run_command:
+        beads.mark_message_read(
+            "atelier-88", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+    called_args = run_command.call_args.args[0]
+    assert "update" in called_args
+    assert "--remove-label" in called_args
