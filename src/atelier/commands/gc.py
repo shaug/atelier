@@ -6,8 +6,9 @@ import datetime as dt
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
-from .. import beads, config, worktrees
+from .. import beads, config, messages, worktrees
 from ..io import confirm, say, warn
 from .resolve import resolve_current_project_with_repo_root
 
@@ -256,6 +257,59 @@ def _gc_orphan_worktrees(
     return actions
 
 
+def _gc_message_claims(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    stale_hours: float,
+) -> list[GcAction]:
+    now = dt.datetime.now(tz=dt.timezone.utc)
+    stale_delta = dt.timedelta(hours=stale_hours)
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:message"], beads_root=beads_root, cwd=repo_root
+    )
+    for issue in issues:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id:
+            continue
+        description = issue.get("description")
+        if not isinstance(description, str):
+            continue
+        payload = messages.parse_message(description)
+        queue = payload.metadata.get("queue")
+        claimed_at = payload.metadata.get("claimed_at")
+        if not queue or not isinstance(claimed_at, str):
+            continue
+        claimed_time = _parse_rfc3339(claimed_at)
+        if claimed_time is None or now - claimed_time <= stale_delta:
+            continue
+        description_text = f"Release stale queue claim for message {issue_id}"
+
+        def _apply_release(
+            message_id: str = issue_id,
+            body: str = payload.body,
+            metadata: dict[str, object] = dict(payload.metadata),
+        ) -> None:
+            metadata["claimed_by"] = None
+            metadata["claimed_at"] = None
+            updated = messages.render_message(metadata, body)
+            with NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+                handle.write(updated)
+                temp_path = handle.name
+            try:
+                beads.run_bd_command(
+                    ["update", message_id, "--body-file", temp_path],
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                )
+            finally:
+                Path(temp_path).unlink(missing_ok=True)
+
+        actions.append(GcAction(description=description_text, apply=_apply_release))
+    return actions
+
+
 def gc(args: object) -> None:
     """Garbage collect stale hooks and orphaned worktrees."""
     project_root, project_config, _enlistment, repo_root = (
@@ -292,6 +346,11 @@ def gc(args: object) -> None:
             beads_root=beads_root,
             repo_root=repo_root,
             git_path=config.resolve_git_path(project_config),
+        )
+    )
+    actions.extend(
+        _gc_message_claims(
+            beads_root=beads_root, repo_root=repo_root, stale_hours=stale_hours
         )
     )
 

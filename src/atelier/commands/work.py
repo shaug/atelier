@@ -9,8 +9,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .. import agent_home, agents, beads, codex, config, exec, policy, root_branch
-from .. import workspace, worktrees
+from .. import (
+    agent_home,
+    agents,
+    beads,
+    codex,
+    config,
+    exec,
+    policy,
+    root_branch,
+    workspace,
+    worktrees,
+)
 from ..io import die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
 

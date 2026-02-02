@@ -48,7 +48,12 @@ class TestListWorkspaces:
             with (
                 patch(
                     "atelier.commands.list.resolve_current_project_with_repo_root",
-                    return_value=(project_root, config_payload, str(repo_root), repo_root),
+                    return_value=(
+                        project_root,
+                        config_payload,
+                        str(repo_root),
+                        repo_root,
+                    ),
                 ),
                 patch("atelier.commands.list.beads.run_bd_command"),
                 patch("atelier.commands.list.beads.run_bd_json", return_value=issues),

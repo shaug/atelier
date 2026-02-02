@@ -2,8 +2,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import atelier.commands.work as work_cmd
 import atelier.codex as codex
+import atelier.commands.work as work_cmd
 import atelier.config as config
 import atelier.worktrees as worktrees
 
