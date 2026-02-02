@@ -239,6 +239,13 @@ def _check_inbox_before_claim(
     if inbox:
         say(f"Inbox has {len(inbox)} unread message(s); review before claiming work.")
         return True
+    queued = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root)
+    if queued:
+        say(
+            "Queue has "
+            f"{len(queued)} unclaimed message(s); review before claiming work."
+        )
+        return True
     return False
 
 

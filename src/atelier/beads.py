@@ -866,6 +866,38 @@ def list_inbox_messages(
     return run_bd_json(args, beads_root=beads_root, cwd=cwd)
 
 
+def list_queue_messages(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    queue: str | None = None,
+    unclaimed_only: bool = True,
+) -> list[dict[str, object]]:
+    """List queued message beads, optionally filtered by queue name."""
+    issues = run_bd_json(
+        ["list", "--label", "at:message"], beads_root=beads_root, cwd=cwd
+    )
+    matches: list[dict[str, object]] = []
+    for issue in issues:
+        description = issue.get("description")
+        if not isinstance(description, str):
+            continue
+        payload = messages.parse_message(description)
+        queue_name = payload.metadata.get("queue")
+        if not isinstance(queue_name, str) or not queue_name.strip():
+            continue
+        if queue is not None and queue_name != queue:
+            continue
+        claimed_by = payload.metadata.get("claimed_by")
+        if unclaimed_only and isinstance(claimed_by, str) and claimed_by.strip():
+            continue
+        enriched = dict(issue)
+        enriched["queue"] = queue_name
+        enriched["claimed_by"] = claimed_by
+        matches.append(enriched)
+    return matches
+
+
 def mark_message_read(
     message_id: str,
     *,

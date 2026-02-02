@@ -61,6 +61,7 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.commands.work.beads.run_bd_command"),
         patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
         patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
@@ -165,6 +166,7 @@ def test_work_prompt_allows_resume_epic() -> None:
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.commands.work.beads.run_bd_command"),
         patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
         patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
@@ -247,6 +249,7 @@ def test_work_auto_picks_ready_epic() -> None:
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.commands.work.beads.run_bd_command"),
         patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
         patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
@@ -353,6 +356,7 @@ def test_work_auto_falls_back_to_oldest_unfinished() -> None:
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.commands.work.beads.run_bd_command"),
         patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
         patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
@@ -505,6 +509,7 @@ def test_work_stops_for_unread_inbox() -> None:
             "atelier.commands.work.beads.list_inbox_messages",
             return_value=[{"id": "msg-1"}],
         ),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
         patch(
             "atelier.commands.work.beads.ensure_agent_bead",
             return_value={"id": "atelier-agent"},
@@ -581,6 +586,7 @@ def test_work_resumes_assigned_epic_before_inbox() -> None:
             "atelier.commands.work.beads.list_inbox_messages",
             return_value=[{"id": "msg-1"}],
         ),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
             return_value=("feat/root-atelier-epic-hooked.1", mapping),
