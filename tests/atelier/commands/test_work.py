@@ -51,6 +51,7 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
             return_value=Path("/beads"),
         ),
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.work.beads.run_bd_command"),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
             return_value=("feat/root-atelier-epic.1", mapping),
@@ -79,13 +80,12 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
     assert calls[1][0] == "ready"
 
 
-def test_work_auto_picks_ready_or_in_progress() -> None:
-    ready_epics: list[dict[str, object]] = []
-    in_progress_epics = [
+def test_work_auto_picks_ready_epic() -> None:
+    open_epics = [
         {
             "id": "atelier-epic",
             "title": "Epic",
-            "status": "in_progress",
+            "status": "open",
             "labels": ["at:epic"],
         }
     ]
@@ -94,10 +94,8 @@ def test_work_auto_picks_ready_or_in_progress() -> None:
 
     def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
         calls.append(args)
-        if args[0] == "list" and "--ready" in args:
-            return ready_epics
         if args[0] == "list" and "--status" in args:
-            return in_progress_epics
+            return open_epics
         return changesets
 
     mapping = worktrees.WorktreeMapping(
@@ -122,6 +120,7 @@ def test_work_auto_picks_ready_or_in_progress() -> None:
             return_value=Path("/beads"),
         ),
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.work.beads.run_bd_command"),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
             return_value=("feat/root-atelier-epic.1", mapping),
@@ -146,10 +145,8 @@ def test_work_auto_picks_ready_or_in_progress() -> None:
         work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
 
     assert calls[0][0] == "list"
-    assert "--ready" in calls[0]
-    assert calls[1][0] == "list"
-    assert "--status" in calls[1]
-    assert calls[2][0] == "ready"
+    assert "--status" in calls[0]
+    assert calls[1][0] == "ready"
 
 
 def test_work_uses_explicit_epic_id() -> None:
@@ -182,6 +179,7 @@ def test_work_uses_explicit_epic_id() -> None:
             return_value=Path("/beads"),
         ),
         patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.work.beads.run_bd_command"),
         patch(
             "atelier.commands.work.worktrees.ensure_changeset_branch",
             return_value=("feat/root-atelier-epic.1", mapping),

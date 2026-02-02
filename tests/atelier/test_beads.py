@@ -41,10 +41,13 @@ def test_ensure_agent_bead_creates_when_missing() -> None:
 
 def test_claim_epic_updates_assignee_and_status() -> None:
     issue = {"id": "atelier-9", "labels": [], "assignee": None}
+    updated = {"id": "atelier-9", "labels": ["at:hooked"], "assignee": "agent"}
 
     def fake_json(
         args: list[str], *, beads_root: Path, cwd: Path
     ) -> list[dict[str, object]]:
+        if args and args[0] == "show":
+            return [updated]
         return [issue]
 
     with (
@@ -53,7 +56,7 @@ def test_claim_epic_updates_assignee_and_status() -> None:
     ):
         beads.claim_epic(
             "atelier-9",
-            "atelier/worker/alice",
+            "agent",
             beads_root=Path("/beads"),
             cwd=Path("/repo"),
         )
@@ -62,6 +65,7 @@ def test_claim_epic_updates_assignee_and_status() -> None:
     assert "update" in called_args
     assert "--assignee" in called_args
     assert "--status" in called_args
+    assert "hooked" in called_args
 
 
 def test_set_agent_hook_updates_description() -> None:

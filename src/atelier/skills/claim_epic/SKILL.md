@@ -17,7 +17,8 @@ description: >-
 ## Steps
 
 1. Claim the epic:
-   - `bd update <epic_id> --assignee <agent_id> --status in_progress --add-label at:hooked`
+   - `bd update <epic_id> --assignee <agent_id> --status hooked --add-label at:hooked`
+1. Re-read the epic to verify the assignee is still `<agent_id>`.
 1. Load the agent bead description:
    - `bd show <agent_bead_id>`
 1. Update `hook_bead` in the agent bead description:

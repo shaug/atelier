@@ -193,6 +193,8 @@ def _create_changesets(epic_id: str, *, beads_root: Path, repo_root: Path) -> No
         if not title:
             return
         acceptance = prompt("Changeset acceptance", required=True)
+        ready = confirm("Mark this changeset ready to work?", default=True)
+        status_label = "cs:ready" if ready else "cs:planned"
         beads.run_bd_command(
             [
                 "create",
@@ -202,6 +204,8 @@ def _create_changesets(epic_id: str, *, beads_root: Path, repo_root: Path) -> No
                 "task",
                 "--label",
                 "at:changeset",
+                "--label",
+                status_label,
                 "--title",
                 title,
                 "--acceptance",

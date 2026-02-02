@@ -23,7 +23,8 @@ description: >-
 ## Steps
 
 1. For each changeset, create a bead:
-   - `bd create --parent <epic_id> --type task --label at:changeset --title <title> --acceptance <acceptance>`
+   - `bd create --parent <epic_id> --type task --label at:changeset --label cs:ready --title <title> --acceptance <acceptance>`
+1. If the changeset is not ready, use `cs:planned` instead of `cs:ready`.
 1. Record guardrails in the changeset description or notes.
 1. If a changeset violates guardrails, pause and request explicit approval.
 

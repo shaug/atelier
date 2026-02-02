@@ -410,7 +410,8 @@ def claim_epic(
     labels = issue.get("labels") if isinstance(issue.get("labels"), list) else []
     if "at:draft" in labels:
         die(f"epic {epic_id} is marked as draft")
-    if issue.get("assignee"):
+    existing_assignee = issue.get("assignee")
+    if existing_assignee and existing_assignee != agent_id:
         die(f"epic {epic_id} already has an assignee")
     run_bd_command(
         [
@@ -419,7 +420,7 @@ def claim_epic(
             "--assignee",
             agent_id,
             "--status",
-            "in_progress",
+            "hooked",
             "--add-label",
             "at:hooked",
         ],
@@ -427,7 +428,13 @@ def claim_epic(
         cwd=cwd,
     )
     refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
-    return refreshed[0] if refreshed else issue
+    if refreshed:
+        updated = refreshed[0]
+        assignee = updated.get("assignee")
+        if assignee != agent_id:
+            die(f"epic {epic_id} claim failed; already assigned")
+        return updated
+    return issue
 
 
 def set_agent_hook(

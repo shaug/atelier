@@ -36,10 +36,13 @@ def _filter_epics(issues: list[dict[str, object]]) -> list[dict[str, object]]:
     filtered: list[dict[str, object]] = []
     for issue in issues:
         status = str(issue.get("status") or "")
-        if status not in {"open", "in_progress", "ready"}:
+        if status and status.lower() not in {"open"}:
             continue
         labels = _issue_labels(issue)
         if "at:draft" in labels:
+            continue
+        assignee = issue.get("assignee")
+        if assignee:
             continue
         filtered.append(issue)
     return filtered
@@ -78,7 +81,8 @@ def _select_epic_auto(*, beads_root: Path, repo_root: Path) -> str:
             "list",
             "--label",
             "at:epic",
-            "--ready",
+            "--status",
+            "open",
             "--no-assignee",
             "--limit",
             "1",
@@ -89,22 +93,6 @@ def _select_epic_auto(*, beads_root: Path, repo_root: Path) -> str:
     ready = _filter_epics(ready)
     if ready:
         return str(ready[0].get("id"))
-    in_progress = beads.run_bd_json(
-        [
-            "list",
-            "--label",
-            "at:epic",
-            "--status",
-            "in_progress",
-            "--limit",
-            "1",
-        ],
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
-    in_progress = _filter_epics(in_progress)
-    if in_progress:
-        return str(in_progress[0].get("id"))
     die("no eligible epics found")
 
 
@@ -112,13 +100,38 @@ def _next_changeset(
     *, epic_id: str, beads_root: Path, repo_root: Path
 ) -> dict[str, object]:
     changesets = beads.run_bd_json(
-        ["ready", "--parent", epic_id, "--label", "at:changeset"],
+        [
+            "ready",
+            "--parent",
+            epic_id,
+            "--label",
+            "at:changeset",
+            "--label",
+            "cs:ready",
+        ],
         beads_root=beads_root,
         cwd=repo_root,
     )
     if not changesets:
         die(f"no ready changesets found for epic {epic_id}")
     return changesets[0]
+
+
+def _mark_changeset_in_progress(
+    changeset_id: str, *, beads_root: Path, repo_root: Path
+) -> None:
+    beads.run_bd_command(
+        [
+            "update",
+            changeset_id,
+            "--add-label",
+            "cs:in_progress",
+            "--remove-label",
+            "cs:ready",
+        ],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
 
 
 def start_worker(args: object) -> None:
@@ -178,6 +191,10 @@ def start_worker(args: object) -> None:
     changeset_id = changeset.get("id") or ""
     changeset_title = changeset.get("title") or ""
     say(f"Next changeset: {changeset_id} {changeset_title}")
+    if changeset_id:
+        _mark_changeset_in_progress(
+            changeset_id, beads_root=beads_root, repo_root=repo_root
+        )
     git_path = config.resolve_git_path(project_config)
     worktrees.ensure_git_worktree(
         project_data_dir,
