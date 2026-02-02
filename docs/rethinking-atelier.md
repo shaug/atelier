@@ -461,6 +461,8 @@ Embed these in planning skills:
 - Target ~200 to 400 lines of code per changeset.
 - Split if a changeset exceeds ~800 lines unless purely mechanical.
 - Keep tests with their closest production change.
+- Require explicit approval for >800 LOC changesets and record the approval in
+  notes.
 
 ## Atelier CLI (Overseer Only)
 
