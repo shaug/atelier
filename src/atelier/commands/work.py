@@ -83,20 +83,38 @@ def _parse_issue_time(value: object) -> dt.datetime | None:
     if not value:
         return None
     try:
-        return dt.datetime.fromisoformat(str(value))
+        parsed = dt.datetime.fromisoformat(str(value))
     except (TypeError, ValueError):
         return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed
 
 
 def _sort_by_created_at(
     issues: list[dict[str, object]], *, newest: bool = False
 ) -> list[dict[str, object]]:
-    sentinel = dt.datetime.max
+    sentinel = dt.datetime.max.replace(tzinfo=dt.timezone.utc)
     return sorted(
         issues,
         key=lambda issue: _parse_issue_time(issue.get("created_at")) or sentinel,
         reverse=newest,
     )
+
+
+def _sort_by_recency(issues: list[dict[str, object]]) -> list[dict[str, object]]:
+    sentinel = dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+
+    def key(issue: dict[str, object]) -> dt.datetime:
+        updated = _parse_issue_time(issue.get("updated_at"))
+        if updated:
+            return updated
+        created = _parse_issue_time(issue.get("created_at"))
+        if created:
+            return created
+        return sentinel
+
+    return sorted(issues, key=key, reverse=True)
 
 
 def _list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
@@ -105,12 +123,23 @@ def _list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]
     )
 
 
-def _select_epic_prompt(issues: list[dict[str, object]]) -> str:
-    epics = _filter_epics(issues)
-    if not epics:
+def _select_epic_prompt(issues: list[dict[str, object]], *, agent_id: str) -> str:
+    epics = _filter_epics(issues, require_unassigned=True)
+    resume = _filter_epics(issues, assignee=agent_id)
+    if not epics and not resume:
         die("no eligible epics found")
-    say("Available epics:")
+    if epics:
+        say("Available epics:")
     for issue in epics:
+        issue_id = issue.get("id") or ""
+        status = issue.get("status") or "unknown"
+        title = issue.get("title") or ""
+        root_branch_value = beads.extract_workspace_root_branch(issue) or "unset"
+        say(f"- {issue_id} [{status}] {root_branch_value} {title}")
+    resume = _sort_by_recency(resume)
+    if resume:
+        say("Resume epics:")
+    for issue in resume:
         issue_id = issue.get("id") or ""
         status = issue.get("status") or "unknown"
         title = issue.get("title") or ""
@@ -120,7 +149,7 @@ def _select_epic_prompt(issues: list[dict[str, object]]) -> str:
     selection = selection.strip()
     if not selection:
         die("epic id is required")
-    valid_ids = {str(issue.get("id")) for issue in epics if issue.get("id")}
+    valid_ids = {str(issue.get("id")) for issue in epics + resume if issue.get("id")}
     if selection not in valid_ids:
         die(f"unknown epic id: {selection}")
     return selection
@@ -210,7 +239,7 @@ def start_worker(args: object) -> None:
             )
         else:
             issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
-            selected_epic = _select_epic_prompt(issues)
+            selected_epic = _select_epic_prompt(issues, agent_id=agent.agent_id)
 
         say(f"Selected epic: {selected_epic}")
         epic_issue = beads.claim_epic(
