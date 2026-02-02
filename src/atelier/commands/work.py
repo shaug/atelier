@@ -148,6 +148,7 @@ def start_worker(args: object) -> None:
     os.environ["ATELIER_AGENT_ID"] = agent.agent_id
     os.environ.setdefault("BD_ACTOR", agent.agent_id)
     os.environ.setdefault("BEADS_AGENT_NAME", agent.agent_id)
+    beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
     agent_bead = beads.ensure_agent_bead(
         agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
     )
