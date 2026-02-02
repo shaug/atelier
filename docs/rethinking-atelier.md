@@ -349,6 +349,34 @@ and keep the data model compatible (e.g., attachment fields or molecule IDs).
 Atelier should support explicit PR/MR workflows without requiring a dedicated
 agent role. The workflow can be implemented via skills and/or molecules.
 
+### Changeset Lifecycle (Review Projects)
+
+Changesets move through a deterministic lifecycle in review-based projects.
+Store the lifecycle fields on the changeset bead description (key: value) so
+they remain visible and auditable.
+
+Recommended states (map to `pr_state`):
+
+- **planned**: changeset bead exists but no branch/PR yet.
+- **in_progress**: branch exists and work is underway.
+- **review**: PR opened and awaiting review.
+- **changes_requested**: review feedback requires updates.
+- **approved**: review approved and ready to merge.
+- **merged**: PR merged or integrated.
+
+Suggested fields:
+
+```
+pr_url: <url>
+pr_number: <id>
+pr_state: planned|in_progress|review|changes_requested|approved|merged
+review_owner: <identity>
+```
+
+`publish` should advance `pr_state` from `planned`/`in_progress` to `review`
+once a PR exists. `finalize` (or integration) should advance `pr_state` to
+`merged` when the PR is integrated.
+
 Recommended bead fields for changesets (key: value in description):
 
 - pr_url: <url>
