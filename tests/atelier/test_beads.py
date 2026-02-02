@@ -169,3 +169,81 @@ def test_update_changeset_review_updates_description() -> None:
 
     assert captured["id"] == "atelier-99"
     assert "pr_state: review" in captured["description"]
+
+
+def test_update_worktree_path_writes_description() -> None:
+    issue = {"id": "epic-1", "description": "workspace.root_branch: main\n"}
+    captured: dict[str, str] = {}
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        return [issue]
+
+    def fake_update(
+        issue_id: str, description: str, *, beads_root: Path, cwd: Path
+    ) -> None:
+        captured["id"] = issue_id
+        captured["description"] = description
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+    ):
+        beads.update_worktree_path(
+            "epic-1", "worktrees/epic-1", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+
+    assert captured["id"] == "epic-1"
+    assert "worktree_path: worktrees/epic-1" in captured["description"]
+
+
+def test_parse_external_tickets_reads_json() -> None:
+    description = (
+        'external_tickets: [{"provider":"github","id":"123","url":"u"}]\nscope: demo\n'
+    )
+    tickets = beads.parse_external_tickets(description)
+    assert len(tickets) == 1
+    ticket = tickets[0]
+    assert ticket.provider == "github"
+    assert ticket.ticket_id == "123"
+    assert ticket.url == "u"
+
+
+def test_update_external_tickets_updates_labels() -> None:
+    issue = {"id": "issue-1", "description": "scope: demo\n", "labels": ["ext:github"]}
+    captured: dict[str, object] = {"commands": []}
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        return [issue]
+
+    def fake_command(args: list[str], *, beads_root: Path, cwd: Path) -> None:
+        captured["commands"].append(args)
+
+    def fake_update(
+        issue_id: str, description: str, *, beads_root: Path, cwd: Path
+    ) -> None:
+        captured["description"] = description
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
+        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+    ):
+        beads.update_external_tickets(
+            "issue-1",
+            [beads.ExternalTicketRef(provider="jira", ticket_id="J-1")],
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert "external_tickets:" in str(captured.get("description", ""))
+    update_calls = [cmd for cmd in captured["commands"] if cmd and cmd[0] == "update"]
+    assert update_calls
+    combined = " ".join(update_calls[0])
+    assert "--add-label" in combined
+    assert "ext:jira" in combined
+    assert "--remove-label" in combined
+    assert "ext:github" in combined

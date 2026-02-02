@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -13,6 +14,16 @@ from .io import die
 
 POLICY_LABEL = "at:policy"
 POLICY_SCOPE_LABEL = "scope:project"
+EXTERNAL_TICKETS_KEY = "external_tickets"
+
+
+@dataclass(frozen=True)
+class ExternalTicketRef:
+    provider: str
+    ticket_id: str
+    url: str | None = None
+    state: str | None = None
+    on_close: str | None = None
 
 
 def beads_env(beads_root: Path) -> dict[str, str]:
@@ -100,6 +111,11 @@ def workspace_label(root_branch: str) -> str:
     return f"workspace:{root_branch}"
 
 
+def external_label(provider: str) -> str:
+    """Return the external ticket label for a provider."""
+    return f"ext:{provider}"
+
+
 def policy_role_label(role: str) -> str:
     """Return the policy role label."""
     return f"role:{role}"
@@ -120,6 +136,64 @@ def extract_workspace_root_branch(issue: dict[str, object]) -> str | None:
             if isinstance(label, str) and label.startswith("workspace:"):
                 return label[len("workspace:") :]
     return None
+
+
+def extract_worktree_path(issue: dict[str, object]) -> str | None:
+    """Extract the worktree path from a bead description."""
+    description = issue.get("description")
+    fields = _parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    worktree_path = fields.get("worktree_path")
+    if worktree_path:
+        return worktree_path
+    return None
+
+
+def parse_external_tickets(description: str | None) -> list[ExternalTicketRef]:
+    """Parse external ticket references from a description."""
+    if not description:
+        return []
+    tickets_raw: str | None = None
+    for line in description.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        if key.strip() == EXTERNAL_TICKETS_KEY:
+            tickets_raw = value.strip()
+            break
+    if not tickets_raw or tickets_raw.lower() == "null":
+        return []
+    try:
+        payload = json.loads(tickets_raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+    tickets: list[ExternalTicketRef] = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        provider = entry.get("provider")
+        ticket_id = entry.get("id") or entry.get("ticket_id")
+        if not isinstance(provider, str) or not provider.strip():
+            continue
+        if not isinstance(ticket_id, str) or not ticket_id.strip():
+            continue
+        tickets.append(
+            ExternalTicketRef(
+                provider=provider.strip(),
+                ticket_id=ticket_id.strip(),
+                url=entry.get("url") if isinstance(entry.get("url"), str) else None,
+                state=entry.get("state")
+                if isinstance(entry.get("state"), str)
+                else None,
+                on_close=entry.get("on_close")
+                if isinstance(entry.get("on_close"), str)
+                else None,
+            )
+        )
+    return tickets
 
 
 def list_epics_by_workspace_label(
@@ -192,6 +266,85 @@ def update_workspace_root_branch(
 
     _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
     refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    return refreshed[0] if refreshed else issue
+
+
+def update_worktree_path(
+    epic_id: str,
+    worktree_path: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    allow_override: bool = False,
+) -> dict[str, object]:
+    """Update the worktree_path field for an epic."""
+    issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"epic not found: {epic_id}")
+    issue = issues[0]
+    current = extract_worktree_path(issue)
+    if current and current != worktree_path and not allow_override:
+        die("worktree path already set; override not permitted")
+    description = issue.get("description")
+    updated = _update_description_field(
+        description if isinstance(description, str) else "",
+        key="worktree_path",
+        value=worktree_path,
+    )
+    _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
+    refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    return refreshed[0] if refreshed else issue
+
+
+def update_external_tickets(
+    issue_id: str,
+    tickets: list[ExternalTicketRef],
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> dict[str, object]:
+    """Update external ticket references and labels on a bead."""
+    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"issue not found: {issue_id}")
+    issue = issues[0]
+    payload = [
+        {
+            "provider": ticket.provider,
+            "id": ticket.ticket_id,
+            "url": ticket.url,
+            "state": ticket.state,
+            "on_close": ticket.on_close,
+        }
+        for ticket in tickets
+    ]
+    serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    description = issue.get("description")
+    updated = _update_description_field(
+        description if isinstance(description, str) else "",
+        key=EXTERNAL_TICKETS_KEY,
+        value=serialized,
+    )
+
+    desired_labels = {external_label(ticket.provider) for ticket in tickets}
+    labels = issue.get("labels") if isinstance(issue.get("labels"), list) else []
+    labels = [label for label in labels if isinstance(label, str)]
+    remove_labels = [
+        label
+        for label in labels
+        if label.startswith("ext:") and label not in desired_labels
+    ]
+    add_labels = [label for label in desired_labels if label not in labels]
+    if add_labels or remove_labels:
+        args = ["update", issue_id]
+        for label in add_labels:
+            args.extend(["--add-label", label])
+        for label in remove_labels:
+            args.extend(["--remove-label", label])
+        run_bd_command(args, beads_root=beads_root, cwd=cwd)
+
+    _update_issue_description(issue_id, updated, beads_root=beads_root, cwd=cwd)
+    refreshed = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
     return refreshed[0] if refreshed else issue
 
 

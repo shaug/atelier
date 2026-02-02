@@ -85,6 +85,7 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
                 "description": "workspace.root_branch: feat/root\n",
             },
         ),
+        patch("atelier.commands.work.beads.update_worktree_path"),
         patch("atelier.commands.work.beads.set_agent_hook"),
         patch(
             "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
@@ -170,6 +171,7 @@ def test_work_auto_picks_ready_epic() -> None:
                 "description": "workspace.root_branch: feat/root\n",
             },
         ),
+        patch("atelier.commands.work.beads.update_worktree_path"),
         patch("atelier.commands.work.beads.set_agent_hook"),
         patch(
             "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
@@ -245,6 +247,7 @@ def test_work_uses_explicit_epic_id() -> None:
                 "description": "workspace.root_branch: feat/root\n",
             },
         ),
+        patch("atelier.commands.work.beads.update_worktree_path"),
         patch("atelier.commands.work.beads.set_agent_hook"),
         patch(
             "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent

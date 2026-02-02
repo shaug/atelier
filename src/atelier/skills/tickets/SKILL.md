@@ -1,34 +1,32 @@
 ---
 name: tickets
 description: >-
-  Associate Atelier workspaces with ticket references and route provider-specific
-  ticket operations. Use when a user asks to attach ticket IDs or URLs to a
-  workspace branch, list or edit workspace ticket refs, or coordinate ticket
-  metadata updates via a provider skill (GitHub issues or Linear).
+  Attach or update external ticket references on Beads issues (epics or
+  changesets). Use when a user asks to link external tickets, list existing
+  refs, or update their state.
 ---
 
-# Manage workspace tickets
+# Manage external ticket references
 
 ## Inputs
 
-- workspace_branch: workspace branch name or workspace root path to target.
-- ticket_provider: `none`, `github`, or `linear` (from project config or user).
-- ticket_refs: one or more ticket IDs or URLs to attach.
-- default_project: optional default project (for GitHub, `OWNER/REPO`).
-- default_namespace: optional namespace for providers that need it.
+- issue_id: Bead id to update (epic or changeset).
+- ticket_refs: One or more external ticket IDs or URLs to attach.
+- provider: Optional provider name (github, linear, jira, etc).
+- beads_dir: Optional Beads store path.
 
 ## Steps
 
-1. Confirm the target workspace branch/root and the ticket provider.
-1. Load association rules and config locations from
-   [references/ticket-config.md](references/ticket-config.md).
-1. Attach refs to the workspace config by running:
-   `scripts/attach_ticket_refs.py --workspace <workspace_root> --ref <ticket-ref> [--ref <ticket-ref> ...]`.
-1. Read existing refs from `<workspace_root>/config.user.json` at `tickets.refs`
-   when the user asks to list or verify attachments.
-1. Delegate provider-specific ticket operations:
-   - For `github`, use the `github-issues` skill with `default_project` as the
-     fallback repo.
-   - For `linear`, use the `linear` skill.
-   - For `none`, skip external operations and report that only local refs were
-     updated.
+1. Show the target bead:
+   - `bd show <issue_id>`
+1. Parse existing `external_tickets` from the description (JSON list).
+1. Merge in the new ticket refs, normalizing to:
+   - `provider`, `id`, optional `url`, `state`, `on_close`.
+1. Update the description with the new `external_tickets` JSON payload using
+   `bd update <issue_id> --body-file <path>`.
+1. Add provider labels (e.g., `ext:github`) and remove stale ones.
+
+## Verification
+
+- The bead description includes an `external_tickets` field.
+- Provider labels match the attached ticket refs.

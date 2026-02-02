@@ -37,6 +37,10 @@ branch derived from the root branch:
 <root_branch>-<changeset_id>
 ```
 
+Changesets track lifecycle intent using labels:
+
+- `cs:planned`, `cs:ready`, `cs:in_progress`, `cs:merged`, `cs:abandoned`
+
 ### Worktree
 
 A worktree is a per-epic Git checkout stored under the Atelier data directory.
@@ -88,10 +92,22 @@ Key fields include:
 - `editor.edit`: blocking editor for quick edits
 - `editor.work`: non-blocking editor for worktree opens
 
+Agent sessions inherit identity env vars:
+
+- `ATELIER_AGENT_ID`
+- `BD_ACTOR`
+- `BEADS_AGENT_NAME`
+
 ## 5. Planning Store
 
 Atelier requires `bd` on the PATH for planning storage. Epics and changesets are
 stored as records with metadata, labels, and parent/child relationships.
+
+Epic description fields include:
+
+- `workspace.root_branch` (required)
+- `worktree_path` (set after worktree creation)
+- `external_tickets` (JSON list of linked external tickets, optional)
 
 ## 6. Command Semantics
 

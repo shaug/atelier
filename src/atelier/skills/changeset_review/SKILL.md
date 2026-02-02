@@ -22,6 +22,8 @@ description: >-
    - `bd show <changeset_id>`
 1. Update the description fields (`pr_url`, `pr_number`, `pr_state`,
    `review_owner`).
+1. If `pr_state` is `merged`, add label `cs:merged` and remove `cs:in_progress`.
+1. If the PR was closed without merge, add label `cs:abandoned`.
 1. Write the new description with `bd update <changeset_id> --body-file <path>`.
 
 ## Verification

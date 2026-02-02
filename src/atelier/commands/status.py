@@ -9,7 +9,7 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .. import beads, config, worktrees
+from .. import beads, config, messages, worktrees
 from ..io import die, say
 from .resolve import resolve_current_project_with_repo_root
 
@@ -45,11 +45,15 @@ def status(args: object) -> None:
         beads_root=beads_root,
         repo_root=repo_root,
     )
+    queues = _build_queue_payloads(
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
 
     epics = sorted(epics, key=lambda item: (item.get("root_branch") or "", item["id"]))
     agents = sorted(agents, key=lambda item: item.get("agent_id") or "")
 
-    counts = _status_counts(epics, agents)
+    counts = _status_counts(epics, agents, queues)
     project_info = {
         "project_dir": str(project_root),
         "repo_root": str(repo_root),
@@ -61,13 +65,14 @@ def status(args: object) -> None:
         "counts": counts,
         "epics": epics,
         "agents": agents,
+        "queues": queues,
     }
 
     if format_value == "json":
         say(json.dumps(payload, indent=2, sort_keys=True))
         return
 
-    _render_status(project_info, counts, epics, agents)
+    _render_status(project_info, counts, epics, agents, queues)
 
 
 def _build_agent_payloads(
@@ -126,10 +131,17 @@ def _build_epic_payloads(
         mapping = worktrees.load_mapping(
             worktrees.mapping_path(project_data_dir, epic_id)
         )
-        worktree_relpath = mapping.worktree_path if mapping else None
-        worktree_path = (
-            str(project_data_dir / worktree_relpath) if worktree_relpath else None
-        )
+        worktree_relpath = beads.extract_worktree_path(issue)
+        if not worktree_relpath and mapping:
+            worktree_relpath = mapping.worktree_path
+        worktree_path = None
+        if worktree_relpath:
+            candidate = Path(worktree_relpath)
+            worktree_path = (
+                str(candidate)
+                if candidate.is_absolute()
+                else str(project_data_dir / candidate)
+            )
         changesets = _list_changesets(
             epic_id, beads_root=beads_root, repo_root=repo_root
         )
@@ -229,7 +241,9 @@ def _issue_labels(issue: dict[str, object]) -> list[str]:
 
 
 def _status_counts(
-    epics: list[dict[str, object]], agents: list[dict[str, object]]
+    epics: list[dict[str, object]],
+    agents: list[dict[str, object]],
+    queues: list[dict[str, object]],
 ) -> dict[str, object]:
     status_counts: dict[str, int] = {}
     total_changesets = 0
@@ -241,13 +255,46 @@ def _status_counts(
         if isinstance(changesets, dict):
             total_changesets += int(changesets.get("total", 0))
             ready_changesets += int(changesets.get("ready", 0))
+    queue_total = sum(int(queue.get("total", 0)) for queue in queues)
+    queue_claimed = sum(int(queue.get("claimed", 0)) for queue in queues)
     return {
         "epics": len(epics),
         "agents": len(agents),
         "changesets": total_changesets,
         "changesets_ready": ready_changesets,
+        "queues": len(queues),
+        "queue_messages": queue_total,
+        "queue_claimed": queue_claimed,
         "epic_statuses": status_counts,
     }
+
+
+def _build_queue_payloads(
+    *, beads_root: Path, repo_root: Path
+) -> list[dict[str, object]]:
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:message"], beads_root=beads_root, cwd=repo_root
+    )
+    queues: dict[str, dict[str, int]] = {}
+    for issue in issues:
+        description = issue.get("description")
+        if not isinstance(description, str):
+            continue
+        payload = messages.parse_message(description)
+        queue_name = payload.metadata.get("queue")
+        if not isinstance(queue_name, str) or not queue_name.strip():
+            continue
+        claimed_by = payload.metadata.get("claimed_by")
+        entry = queues.setdefault(
+            queue_name, {"total": 0, "claimed": 0, "unclaimed": 0}
+        )
+        entry["total"] += 1
+        if isinstance(claimed_by, str) and claimed_by.strip():
+            entry["claimed"] += 1
+        else:
+            entry["unclaimed"] += 1
+    payloads = [{"queue": name, **stats} for name, stats in sorted(queues.items())]
+    return payloads
 
 
 def _render_status(
@@ -255,6 +302,7 @@ def _render_status(
     counts: dict[str, object],
     epics: list[dict[str, object]],
     agents: list[dict[str, object]],
+    queues: list[dict[str, object]],
 ) -> None:
     console = Console()
     overview = Table(title="Project Status", box=box.SIMPLE, show_header=False)
@@ -267,6 +315,9 @@ def _render_status(
     overview.add_row("Agents", _display_value(counts.get("agents")))
     overview.add_row("Changesets", _display_value(counts.get("changesets")))
     overview.add_row("Ready changesets", _display_value(counts.get("changesets_ready")))
+    overview.add_row("Queues", _display_value(counts.get("queues")))
+    overview.add_row("Queued messages", _display_value(counts.get("queue_messages")))
+    overview.add_row("Claimed messages", _display_value(counts.get("queue_claimed")))
     console.print(overview)
 
     if epics:
@@ -321,6 +372,21 @@ def _render_status(
         console.print(table)
     else:
         console.print("No agents found.")
+
+    if queues:
+        table = Table(title="Queues", box=box.SIMPLE)
+        table.add_column("Queue", no_wrap=True)
+        table.add_column("Total", justify="right")
+        table.add_column("Claimed", justify="right")
+        table.add_column("Unclaimed", justify="right")
+        for queue in queues:
+            table.add_row(
+                _display_value(queue.get("queue")),
+                _display_value(queue.get("total")),
+                _display_value(queue.get("claimed")),
+                _display_value(queue.get("unclaimed")),
+            )
+        console.print(table)
 
 
 def _display_value(value: object) -> str:

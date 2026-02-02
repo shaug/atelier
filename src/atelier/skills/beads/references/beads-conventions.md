@@ -37,6 +37,7 @@ machine-parsable). Example:
 scope: <short scope>
 changeset_strategy: <rules>
 worktree_path: <path>
+external_tickets: <json list>
 ```
 
 ## Messages
@@ -44,6 +45,13 @@ worktree_path: <path>
 Message beads are first-class. Use YAML frontmatter in the description and
 include `thread: <bead-id>` when the message belongs to a specific epic or
 changeset.
+
+Queue/channel frontmatter fields (optional):
+
+- `queue`: queue name (for work intake)
+- `claimed_by` / `claimed_at`: queue claim metadata
+- `channel`: channel name
+- `retention_days` or `expires_at`: explicit retention policy for channel posts
 
 ## Beads location
 

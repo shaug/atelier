@@ -225,6 +225,12 @@ def start_worker(args: object) -> None:
             changeset_id,
             root_branch=root_branch_value,
         )
+        beads.update_worktree_path(
+            selected_epic,
+            mapping.worktree_path,
+            beads_root=beads_root,
+            cwd=repo_root,
+        )
         worktree_path = project_data_dir / mapping.worktree_path
         worktrees.ensure_changeset_checkout(
             worktree_path,

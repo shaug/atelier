@@ -310,6 +310,71 @@ def _gc_message_claims(
     return actions
 
 
+def _coerce_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+    return None
+
+
+def _gc_message_retention(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    now = dt.datetime.now(tz=dt.timezone.utc)
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:message"], beads_root=beads_root, cwd=repo_root
+    )
+    for issue in issues:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id:
+            continue
+        description = issue.get("description")
+        if not isinstance(description, str):
+            continue
+        payload = messages.parse_message(description)
+        channel = payload.metadata.get("channel")
+        if not isinstance(channel, str) or not channel.strip():
+            continue
+        expires_at = payload.metadata.get("expires_at")
+        retention_days = _coerce_float(payload.metadata.get("retention_days"))
+        expiry_time: dt.datetime | None = None
+        if isinstance(expires_at, str):
+            expiry_time = _parse_rfc3339(expires_at)
+        if expiry_time is None and retention_days is not None:
+            created_at_raw = issue.get("created_at")
+            created_at = _parse_rfc3339(
+                created_at_raw if isinstance(created_at_raw, str) else None
+            )
+            if created_at is not None:
+                expiry_time = created_at + dt.timedelta(days=retention_days)
+        if expiry_time is None or now < expiry_time:
+            continue
+        description_text = f"Close expired channel message {issue_id}"
+
+        def _apply_close(message_id: str = issue_id) -> None:
+            beads.run_bd_command(
+                ["close", message_id],
+                beads_root=beads_root,
+                cwd=repo_root,
+                allow_failure=True,
+            )
+
+        actions.append(GcAction(description=description_text, apply=_apply_close))
+    return actions
+
+
 def gc(args: object) -> None:
     """Garbage collect stale hooks and orphaned worktrees."""
     project_root, project_config, _enlistment, repo_root = (
@@ -353,6 +418,7 @@ def gc(args: object) -> None:
             beads_root=beads_root, repo_root=repo_root, stale_hours=stale_hours
         )
     )
+    actions.extend(_gc_message_retention(beads_root=beads_root, repo_root=repo_root))
 
     if not actions:
         say("No GC actions needed.")

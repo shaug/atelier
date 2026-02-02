@@ -68,6 +68,8 @@ def test_status_json_summary() -> None:
                 return [epic_one, epic_two]
             if args[:3] == ["list", "--label", "at:agent"]:
                 return [agent_one]
+            if args[:3] == ["list", "--label", "at:message"]:
+                return []
             if args and args[0] == "list" and "--parent" in args:
                 epic_id = args[args.index("--parent") + 1]
                 if epic_id == "epic-1":
@@ -115,6 +117,7 @@ def test_status_json_summary() -> None:
         payload = json.loads(buffer.getvalue())
         assert payload["counts"]["epics"] == 2
         assert payload["counts"]["agents"] == 1
+        assert payload["counts"]["queues"] == 0
         epic_payloads = {item["id"]: item for item in payload["epics"]}
         epic = epic_payloads["epic-1"]
         assert epic["root_branch"] == "alpha"

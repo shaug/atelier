@@ -25,6 +25,10 @@ side effects inside the user's repo.
   `workspace:<root_branch>`.
 - **Worktree**: A per-epic git worktree checkout stored under the data
   directory. Worktree mappings live under `worktrees/.meta/`.
+- **Worktree path**: Stored as `worktree_path` in epic metadata once created.
+- **Changeset labels**: Changesets use `cs:planned`, `cs:ready`,
+  `cs:in_progress`, `cs:merged`, and `cs:abandoned` to capture non-derivable
+  lifecycle state.
 
 ## Filesystem layout
 
@@ -119,7 +123,7 @@ epics and changesets, including labels and metadata.
 
 - `atelier status`
 
-  - Shows project status for epics, hooks, and changesets.
+  - Shows project status for epics, hooks, changesets, and queued messages.
 
 - `atelier list`
 
@@ -132,4 +136,5 @@ epics and changesets, including labels and metadata.
 
 - `atelier gc`
 
-  - Cleans up stale hooks, claims, and orphaned worktrees.
+  - Cleans up stale hooks, claims, orphaned worktrees, and stale queue claims.
+  - Closes channel messages when explicit retention metadata is present.

@@ -144,11 +144,11 @@ isolation.
 
 ## Changeset Branch Naming
 
-Default naming should be stable and derived from the changeset bead ID:
+Default naming should be stable and derived from the workspace root branch and
+changeset bead ID:
 
 ```
-<epic-id>-1
-<epic-id>-2
+<root-branch>-<changeset-id>
 ```
 
 Branch names should be treated as immutable once created. If scope changes
@@ -222,6 +222,8 @@ Frontmatter fields (recommended):
 - channel: <name>
 - claimed_by: <identity>
 - claimed_at: <rfc3339>
+- retention_days: <int>
+- expires_at: <rfc3339>
 
 ### Message Bead Shape
 

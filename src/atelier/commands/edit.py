@@ -76,15 +76,26 @@ def _select_epic_by_workspace(
     return issue, root_branch
 
 
-def _resolve_worktree_path(project_dir: Path, epic_id: str, root_branch: str) -> Path:
+def _resolve_worktree_path(
+    project_dir: Path,
+    epic_id: str,
+    root_branch: str,
+    worktree_relpath: str | None,
+) -> Path:
     mapping = worktrees.load_mapping(worktrees.mapping_path(project_dir, epic_id))
     if mapping is None:
-        die("worktree not initialized; run 'atelier work' first")
-    if mapping.root_branch and mapping.root_branch != root_branch:
-        die("workspace root branch does not match worktree mapping")
-    if not mapping.root_branch:
-        die("worktree mapping missing root branch")
-    worktree_path = project_dir / mapping.worktree_path
+        if not worktree_relpath:
+            die("worktree not initialized; run 'atelier work' first")
+        candidate = Path(worktree_relpath)
+        worktree_path = (
+            candidate if candidate.is_absolute() else project_dir / candidate
+        )
+    else:
+        if mapping.root_branch and mapping.root_branch != root_branch:
+            die("workspace root branch does not match worktree mapping")
+        if not mapping.root_branch:
+            die("worktree mapping missing root branch")
+        worktree_path = project_dir / mapping.worktree_path
     if not worktree_path.exists():
         die("worktree missing; run 'atelier work' first")
     if not (worktree_path / ".git").exists():
@@ -115,7 +126,10 @@ def open_workspace_editor(args: object) -> None:
         die("selected epic is missing workspace.root_branch")
 
     worktree_path = _resolve_worktree_path(
-        project_data_dir, str(issue.get("id") or ""), root_branch
+        project_data_dir,
+        str(issue.get("id") or ""),
+        root_branch,
+        beads.extract_worktree_path(issue),
     )
     project_enlistment = project_config.project.enlistment or enlistment_path
     env = workspace.workspace_environment(
