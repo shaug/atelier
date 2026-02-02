@@ -23,20 +23,18 @@ except ImportError:  # pragma: no cover - legacy Click fallback
     from click.parser import split_arg_string
 
 from . import __version__, beads, config, git, paths
-from .commands import clean as clean_cmd
 from .commands import config as config_cmd
 from .commands import edit as edit_cmd
 from .commands import gc as gc_cmd
 from .commands import init as init_cmd
 from .commands import list as list_cmd
 from .commands import new as new_cmd
+from .commands import open as open_cmd
 from .commands import plan as plan_cmd
 from .commands import policy as policy_cmd
-from .commands import shell as shell_cmd
 from .commands import status as status_cmd
 from .commands import work as work_cmd
 from .exec import try_run_command
-from .io import warn
 
 app = typer.Typer(
     add_completion=True,
@@ -150,19 +148,6 @@ def _filter_completion_candidates(values: list[str], incomplete: str) -> list[st
         seen.add(value)
         deduped.append(value)
     return deduped
-
-
-def _workspace_name_shell_complete(
-    _ctx: click.Context, _args: list[str], incomplete: str
-) -> list[str]:
-    resolved = _resolve_completion_project()
-    if not resolved:
-        return []
-    repo_root, project_root, config_payload, _git_path = resolved
-    project_data_dir = config.resolve_project_data_dir(project_root, config_payload)
-    beads_root = config.resolve_beads_root(project_data_dir, repo_root)
-    names = _collect_workspace_root_branches(repo_root, beads_root=beads_root)
-    return _filter_completion_candidates(names, incomplete)
 
 
 def _workspace_only_shell_complete(
@@ -361,37 +346,48 @@ def new_command(
 
 @app.command(
     "open",
-    help="Deprecated: use 'atelier work' instead.",
+    help="Open a shell (or run a command) in a workspace worktree.",
 )
 def open_command(
-    epic_id: Annotated[
+    workspace_name: Annotated[
         str | None,
         typer.Argument(
-            help="epic bead id to work on (optional)",
+            help="workspace branch to open (prompted when omitted)",
+            autocompletion=_workspace_only_shell_complete,
         ),
     ] = None,
-    mode: Annotated[
+    command: Annotated[
+        list[str] | None,
+        typer.Argument(help="command to run in the worktree"),
+    ] = None,
+    raw: Annotated[
+        bool,
+        typer.Option("--raw", help="do not apply the branch prefix"),
+    ] = False,
+    shell: Annotated[
         str | None,
-        typer.Option(
-            "--mode",
-            help="worker selection mode: prompt or auto (defaults to ATELIER_MODE)",
-        ),
+        typer.Option("--shell", help="shell path or name for interactive mode"),
     ] = None,
+    workspace_root: Annotated[
+        bool,
+        typer.Option("--workspace", help="open the worktree root"),
+    ] = False,
+    set_title: Annotated[
+        bool,
+        typer.Option("--set-title", help="emit a terminal title escape"),
+    ] = False,
 ) -> None:
-    """Deprecated alias for ``atelier work``.
-
-    Args:
-        epic_id: Epic bead id to work on (optional).
-        mode: Worker selection mode (prompt or auto).
-
-    Returns:
-        None.
-
-    Example:
-        $ atelier work
-    """
-    warn("`atelier open` is deprecated; use `atelier work` instead.")
-    work_cmd.start_worker(SimpleNamespace(epic_id=epic_id, mode=mode))
+    """Open a shell or run a command in a worktree."""
+    open_cmd.open_worktree(
+        SimpleNamespace(
+            workspace_name=workspace_name,
+            command=command or [],
+            raw=raw,
+            shell=shell,
+            workspace_root=workspace_root,
+            set_title=set_title,
+        )
+    )
 
 
 @app.command("plan", help="Start a planner session for Beads epics.")
@@ -435,89 +431,6 @@ def work_command(
     work_cmd.start_worker(SimpleNamespace(epic_id=epic_id, mode=mode))
 
 
-@app.command(
-    "shell",
-    help="Open a shell in the workspace repo (or root with --workspace).",
-)
-def shell_command(
-    workspace_name: Annotated[
-        str,
-        typer.Argument(
-            help="workspace branch to open",
-            autocompletion=_workspace_only_shell_complete,
-        ),
-    ],
-    shell: Annotated[
-        str | None,
-        typer.Option("--shell", help="shell path or name for interactive mode"),
-    ] = None,
-    command: Annotated[
-        list[str] | None,
-        typer.Argument(
-            help="command to run in the workspace repo (or root with --workspace)"
-        ),
-    ] = None,
-    workspace_root: Annotated[
-        bool,
-        typer.Option("--workspace", help="open the workspace root instead of repo"),
-    ] = False,
-    set_title: Annotated[
-        bool,
-        typer.Option("--set-title", help="emit a terminal title escape"),
-    ] = False,
-) -> None:
-    """Open a shell in the workspace repo or run a command there."""
-    shell_cmd.open_workspace_shell(
-        SimpleNamespace(
-            workspace_name=workspace_name,
-            shell=shell,
-            command=command or [],
-            workspace_root=workspace_root,
-            set_title=set_title,
-        )
-    )
-
-
-@app.command(
-    "exec",
-    help="Run a command in the workspace repo (or root with --workspace).",
-)
-def exec_command(
-    workspace_name: Annotated[
-        str,
-        typer.Argument(
-            help="workspace branch to open",
-            autocompletion=_workspace_only_shell_complete,
-        ),
-    ],
-    command: Annotated[
-        list[str] | None,
-        typer.Argument(
-            help="command to run in the workspace repo (or root with --workspace)"
-        ),
-    ] = None,
-    workspace_root: Annotated[
-        bool,
-        typer.Option("--workspace", help="open the workspace root instead of repo"),
-    ] = False,
-    set_title: Annotated[
-        bool,
-        typer.Option("--set-title", help="emit a terminal title escape"),
-    ] = False,
-) -> None:
-    """Run a command in the workspace repo (alias for shell command mode)."""
-    shell_cmd.open_workspace_shell(
-        SimpleNamespace(
-            workspace_name=workspace_name,
-            shell=None,
-            command=command or [],
-            workspace_root=workspace_root,
-            set_title=set_title,
-        ),
-        require_command=True,
-    )
-
-
 @app.command("list", help="List workspaces for the current project.")
 def list_command() -> None:
     """List workspaces for the current project.
@@ -543,69 +456,6 @@ def status_command(
 ) -> None:
     """Show project status for epics, hooks, and changesets."""
     status_cmd(SimpleNamespace(format=format))
-
-
-@app.command(
-    "clean",
-    help="Delete workspaces safely (finalization tag by default).",
-)
-def clean_command(
-    all_: Annotated[
-        bool,
-        typer.Option("--all", "-A", help="delete all workspaces regardless of state"),
-    ] = False,
-    yes: Annotated[
-        bool,
-        typer.Option("--yes", "-y", help="delete without confirmation"),
-    ] = False,
-    orphans: Annotated[
-        bool,
-        typer.Option(
-            "--orphans",
-            help="delete orphaned workspaces (missing config or repo dir)",
-        ),
-    ] = False,
-    dry_run: Annotated[
-        bool,
-        typer.Option("--dry-run", help="show planned deletions only"),
-    ] = False,
-    no_branch: Annotated[
-        bool,
-        typer.Option("--no-branch", help="do not delete workspace branches"),
-    ] = False,
-    workspace_names: Annotated[
-        list[str] | None,
-        typer.Argument(
-            help="workspace branches to delete",
-            autocompletion=_workspace_only_shell_complete,
-        ),
-    ] = None,
-) -> None:
-    """Delete workspaces safely based on their status or explicit targets.
-
-    Args:
-        all_: Delete all workspaces regardless of state when true.
-        yes: Delete without confirmation prompts when true.
-        no_branch: Skip deleting local/remote workspace branches when true.
-        workspace_names: Workspace branches to delete (optional).
-        orphans: Delete orphaned workspaces when true.
-
-    Returns:
-        None.
-
-    Example:
-        $ atelier clean --all --yes
-    """
-    clean_cmd.clean_workspaces(
-        SimpleNamespace(
-            all=all_,
-            yes=yes,
-            orphans=orphans,
-            dry_run=dry_run,
-            no_branch=no_branch,
-            workspace_names=workspace_names or [],
-        )
-    )
 
 
 @app.command(

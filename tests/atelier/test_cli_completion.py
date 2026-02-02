@@ -45,48 +45,10 @@ def test_completion_env_fallbacks_to_prog(monkeypatch):
     assert os.environ["COMP_CWORD"] == "0"
 
 
-def test_workspace_completion_returns_empty_without_project(monkeypatch):
-    monkeypatch.setattr(cli, "_resolve_completion_project", lambda: None)
-
-    assert cli._workspace_name_shell_complete(None, [], "") == []
-
-
 def test_workspace_only_completion_returns_empty_without_project(monkeypatch):
     monkeypatch.setattr(cli, "_resolve_completion_project", lambda: None)
 
     assert cli._workspace_only_shell_complete(None, [], "") == []
-
-
-def test_workspace_completion_filters_and_dedupes(monkeypatch):
-    config_payload = config.ProjectConfig()
-    monkeypatch.setattr(
-        cli,
-        "_resolve_completion_project",
-        lambda: (Path("/repo"), Path("/project"), config_payload, None),
-    )
-    monkeypatch.setattr(
-        cli,
-        "_collect_workspace_root_branches",
-        lambda *args, **kwargs: ["feat/one", "bug/two", "bug/two"],
-    )
-
-    assert cli._workspace_name_shell_complete(None, [], "b") == ["bug/two"]
-
-
-def test_workspace_completion_excludes_default_branches(monkeypatch):
-    config_payload = config.ProjectConfig()
-    monkeypatch.setattr(
-        cli,
-        "_resolve_completion_project",
-        lambda: (Path("/repo"), Path("/project"), config_payload, None),
-    )
-    monkeypatch.setattr(
-        cli,
-        "_collect_workspace_root_branches",
-        lambda *args, **kwargs: ["main", "master"],
-    )
-
-    assert cli._workspace_name_shell_complete(None, [], "m") == []
 
 
 def test_workspace_only_completion_returns_root_branches(monkeypatch):
@@ -99,7 +61,7 @@ def test_workspace_only_completion_returns_root_branches(monkeypatch):
     monkeypatch.setattr(
         cli,
         "_collect_workspace_root_branches",
-        lambda *args, **kwargs: ["feat/one", "bug/two"],
+        lambda *args, **kwargs: ["feat/one", "bug/two", "bug/two"],
     )
 
     assert cli._workspace_only_shell_complete(None, [], "b") == ["bug/two"]

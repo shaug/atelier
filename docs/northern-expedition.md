@@ -28,7 +28,7 @@ ______________________________________________________________________
 - Work is organized by epics, worktrees, and changeset branches.
 - Intent lives in epic records with `workspace.root_branch` metadata.
 - `atelier work` starts worker sessions.
-- `publish` and finalization tags encode integration state.
+- `publish` coordinates integration state.
 - Changesets are planned, sequenced, and mapped to branches.
 
 ______________________________________________________________________
@@ -53,10 +53,9 @@ ______________________________________________________________________
 ### Atelier as Execution Overlay
 
 - Most state lives in Beads.
-- Atelier stores execution-specific data in workspace config when needed:
+- Atelier stores execution-specific data alongside worktrees when needed:
   - branch mapping for changesets
   - PR metadata and review state
-  - base/head commit SHAs
 - Optional local SQLite locks can be used for claim atomicity.
 
 ______________________________________________________________________
@@ -216,7 +215,7 @@ ______________________________________________________________________
 
 - Encode PR/review state in workspace config.
 - Skills update Beads comments/labels for review state.
-- Re-evaluate finalization tags (optional deprecation).
+- Remove legacy finalization tags from the workflow.
 
 ### Phase 4 — Tightening
 

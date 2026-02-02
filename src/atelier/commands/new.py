@@ -1,7 +1,7 @@
 """Implementation for the ``atelier new`` command.
 
 ``atelier new`` creates a brand-new local git repository, registers it as an
-Atelier project, and opens the first workspace on the mainline branch.
+Atelier project, and drops into planning mode.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from .. import config, exec, paths
 from ..io import die, prompt
 from . import init as init_cmd
-from . import open as open_cmd
+from . import plan as plan_cmd
 
 
 def _dir_is_empty(path: Path) -> bool:
@@ -55,7 +55,7 @@ def _ensure_empty_dir(path: Path) -> None:
 
 
 def new_project(args: object) -> None:
-    """Create a brand-new local project and open its first workspace.
+    """Create a brand-new local project and start planning.
 
     Args:
         args: CLI argument object with optional fields such as ``path``,
@@ -118,14 +118,6 @@ def new_project(args: object) -> None:
             )
             config.write_project_config(config_path, config_payload)
 
-        open_cmd.open_workspace(
-            SimpleNamespace(
-                workspace_name=default_branch,
-                raw=True,
-                branch_pr=None,
-                branch_history=None,
-                yolo=False,
-            )
-        )
+        plan_cmd.run_planner(SimpleNamespace(create_epic=False, epic_id=None))
     finally:
         os.chdir(original_cwd)

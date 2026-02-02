@@ -29,6 +29,8 @@ side effects inside the user's repo.
 - **Changeset labels**: Changesets use `cs:planned`, `cs:ready`,
   `cs:in_progress`, `cs:merged`, and `cs:abandoned` to capture non-derivable
   lifecycle state.
+- **External tickets**: Linked via `external_tickets` in bead descriptions with
+  provider labels like `ext:github`.
 
 ## Filesystem layout
 
@@ -113,7 +115,7 @@ epics and changesets, including labels and metadata.
   - Opens the selected workspace worktree in `editor.work`.
   - Prompts for a workspace when none is provided.
 
-- `atelier shell` / `atelier exec`
+- `atelier open`
 
   - Runs an interactive shell or command in the worktree.
 
@@ -129,12 +131,9 @@ epics and changesets, including labels and metadata.
 
   - Lists available workspaces (root branches) for the current project.
 
-- `atelier clean`
-
-  - Removes worktrees marked finalized (via publish tooling) or when explicitly
-    requested.
-
 - `atelier gc`
 
   - Cleans up stale hooks, claims, orphaned worktrees, and stale queue claims.
   - Closes channel messages when explicit retention metadata is present.
+  - Channel retention metadata can be set via `retention_days` or `expires_at`
+    in message frontmatter.

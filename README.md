@@ -209,10 +209,9 @@ atelier edit <workspace-branch> --workspace
 Open a shell in a workspace worktree (or run a command there):
 
 ```sh
-atelier shell <workspace-branch>
-atelier shell <workspace-branch> -- python -m http.server
-atelier exec <workspace-branch> -- python -m http.server
-atelier shell <workspace-branch> --workspace
+atelier open <workspace-branch>
+atelier open <workspace-branch> -- python -m http.server
+atelier open <workspace-branch> --workspace
 ```
 
 Show project status:
@@ -228,28 +227,10 @@ List workspaces:
 atelier list
 ```
 
-Clean completed workspaces (finalization tag):
+Clean up stale hooks/claims and orphaned worktrees:
 
 ```sh
-atelier clean
-```
-
-Remove orphaned workspaces (missing config or repo):
-
-```sh
-atelier clean --orphans
-```
-
-Delete specific workspaces and keep their branches:
-
-```sh
-atelier clean --no-branch feat/login refactor/api
-```
-
-Delete everything without prompting:
-
-```sh
-atelier clean --all --yes
+atelier gc
 ```
 
 ## Notes
@@ -258,9 +239,8 @@ atelier clean --all --yes
 - `AGENTS.md` is a managed prologue used to configure agents.
 - `atelier policy` edits the project-wide policy shared by planning and work
   agents.
-- The `publish` skill records integration guidance derived from workspace config
-  and the finalization tag (`atelier/<branch-name>/finalized`) used by
-  `atelier clean`.
+- The `publish` skill records integration guidance derived from project config
+  and applies it to changeset branches.
 - Configuration lives in `config.sys.json`/`config.user.json` under the Atelier
   data directory.
 - Worktrees live under the data directory and are keyed by epic id.
@@ -274,8 +254,8 @@ to print the installed version and exit.
 
 ### `atelier new [path]`
 
-Create a new local Git repo, register it as an Atelier project, and open the
-first workspace on the default branch.
+Create a new local Git repo, register it as an Atelier project, and start
+planning.
 
 Usage:
 
@@ -414,28 +394,22 @@ Options:
 - `--create-epic`: Open an interactive form to create a new epic.
 - `--epic-id`: Plan against an existing epic id.
 
-### `atelier shell <workspace-branch> [--] [command ...]`
+### `atelier open [workspace-branch] [--] [command ...]`
 
-Open a shell in a workspace worktree, or run a command there. Use `--shell` to
-override the interactive shell selection. Use `--workspace` to run in the
-worktree root instead of the default repo path.
+Open a shell in a workspace worktree, or run a command there. If
+`<workspace-branch>` is omitted, you will be prompted to choose one. Use
+`--shell` to override the interactive shell selection. Use `--workspace` to run
+in the worktree root instead of the default repo path.
 
 Options:
 
 - `--shell`: Shell path or name for interactive mode.
 - `--workspace`: Run in the worktree root instead of the default repo path.
 - `--set-title`: Emit a terminal title escape.
+- `--raw`: Treat the workspace name as the full branch name (no prefix lookup).
 
-### `atelier exec <workspace-branch> [--] [command ...]`
-
-Run a command in a workspace worktree. This is an alias for `atelier shell` in
-command-execution mode and requires a command. Use `--workspace` to run in the
-worktree root instead of the default repo path.
-
-Options:
-
-- `--workspace`: Run in the worktree root instead of the default repo path.
-- `--set-title`: Emit a terminal title escape.
+`atelier open` runs a command when arguments are provided; otherwise it opens an
+interactive shell.
 
 ### `atelier status`
 
@@ -460,39 +434,6 @@ Usage:
 
 ```sh
 atelier list
-```
-
-### `atelier clean`
-
-Delete workspaces safely. By default, this removes only workspaces that have the
-local finalization tag `atelier/<branch-name>/finalized`. Remote branches are
-deleted only for finalized workspaces; `--all` can target unfinalized ones but
-still asks for explicit confirmation before deleting their remote branches.
-
-Usage:
-
-```sh
-atelier clean
-atelier clean feat/old-branch refactor/api
-```
-
-Options:
-
-- `--dry-run`: Show planned deletions without removing anything.
-- `--all` or `-A`: Delete all workspaces regardless of state (still confirms
-  remote branch deletion for unfinalized workspaces).
-- `--yes` or `-y`: Delete without confirmation prompts (except remote branch
-  deletion for unfinalized workspaces).
-- `--no-branch`: Keep local/remote branches; delete only workspace folders.
-- `--orphans`: Delete orphaned workspaces (missing config or repo directory).
-
-Examples:
-
-```sh
-atelier clean --dry-run
-atelier clean --all --yes
-atelier clean --no-branch feat/old-branch
-atelier clean --orphans
 ```
 
 ### `atelier gc`

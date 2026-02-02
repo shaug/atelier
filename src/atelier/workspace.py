@@ -327,23 +327,6 @@ def normalize_workspace_name(value: str) -> str:
     return normalized
 
 
-def finalization_tag_name(workspace_branch: str) -> str:
-    """Return the local finalization tag name for a workspace branch.
-
-    Args:
-        workspace_branch: Workspace branch name.
-
-    Returns:
-        Finalization tag string (``atelier/<branch>/finalized``).
-
-    Example:
-        >>> finalization_tag_name("feat/demo")
-        'atelier/feat/demo/finalized'
-    """
-    branch = workspace_branch.lstrip("/")
-    return f"atelier/{branch}/finalized"
-
-
 def workspace_branch_for_dir(workspace_dir: Path) -> str:
     """Read the workspace branch name from its config file.
 
@@ -697,7 +680,6 @@ def collect_workspaces(
     workspaces_root = project_root / WORKSPACES_DIRNAME
     if not workspaces_root.exists():
         return []
-    main_repo_dir = enlistment_repo_dir if enlistment_repo_dir else None
     workspace_configs: list[Path] = []
     for workspace_dir in sorted(workspaces_root.iterdir()):
         if not workspace_dir.is_dir():
@@ -730,14 +712,12 @@ def collect_workspaces(
         checked_out: bool | None = None
         clean: bool | None = None
         pushed: bool | None = None
-        finalized: bool | None = None
         mainline_branch: str | None = None
         ahead: int | None = None
         behind: int | None = None
         work_commits: int | None = None
         committed_work: bool | None = None
         if with_status:
-            finalization_tag = finalization_tag_name(branch)
             if repo_dir.exists() and git.git_is_repo(repo_dir, git_path=git_path):
                 repo_available = True
                 current_branch = git.git_current_branch(repo_dir, git_path=git_path)
@@ -750,9 +730,6 @@ def collect_workspaces(
                     pushed = git.git_has_remote_branch(
                         repo_dir, branch, git_path=git_path
                     )
-                finalized = git.git_tag_exists(
-                    repo_dir, finalization_tag, git_path=git_path
-                )
                 mainline_branch = git.git_default_branch(repo_dir, git_path=git_path)
                 if mainline_branch:
                     ahead = git.git_commits_ahead(
@@ -768,11 +745,6 @@ def collect_workspaces(
                     base_sha,
                     git_path=git_path,
                 )
-            if main_repo_dir is not None:
-                if finalized is not True:
-                    finalized = git.git_tag_exists(
-                        main_repo_dir, finalization_tag, git_path=git_path
-                    )
         return {
             "name": workspace_name,
             "path": workspace_dir,
@@ -784,7 +756,6 @@ def collect_workspaces(
             "checked_out": checked_out,
             "clean": clean,
             "pushed": pushed,
-            "finalized": finalized,
             "base": base,
             "work_commits": work_commits,
             "committed_work": committed_work,

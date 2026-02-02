@@ -117,9 +117,8 @@ Epic description fields include:
 - `atelier work`: select/claim an epic, pick the next ready changeset, and
   ensure worktree + branch mappings exist.
 - `atelier edit`: open the selected worktree in `editor.work`.
-- `atelier shell` / `atelier exec`: run a shell or command inside the worktree.
+- `atelier open`: run a shell or command inside the worktree.
 - `atelier config`: view or update project config.
 - `atelier status`: show hooks, claims, and changeset status.
 - `atelier list`: list available workspaces (root branches).
 - `atelier gc`: clean up stale hooks and orphaned worktrees.
-- `atelier clean`: delete finalized worktrees when explicitly requested.

@@ -9,13 +9,13 @@ import atelier.config as config
 import atelier.paths as paths
 
 
-def test_new_creates_project_and_opens_workspace() -> None:
+def test_new_creates_project_and_starts_planning() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         data_dir = root / "data"
         target_dir = root / "greenfield"
         commands: list[tuple[list[str], Path | None]] = []
-        opened: list[object] = []
+        planned: list[object] = []
         responses = iter(["", "", "", "", "", "", "", ""])
 
         def fake_run(
@@ -23,8 +23,8 @@ def test_new_creates_project_and_opens_workspace() -> None:
         ) -> None:
             commands.append((cmd, cwd))
 
-        def fake_open(args: object) -> None:
-            opened.append(args)
+        def fake_plan(args: object) -> None:
+            planned.append(args)
 
         original_cwd = Path.cwd()
         os.chdir(root)
@@ -37,7 +37,7 @@ def test_new_creates_project_and_opens_workspace() -> None:
                 patch("atelier.exec.run_command", fake_run),
                 patch("atelier.git.git_repo_root", return_value=target_dir),
                 patch("atelier.git.git_origin_url", return_value=None),
-                patch("atelier.commands.open.open_workspace", fake_open),
+                patch("atelier.commands.plan.run_planner", fake_plan),
             ):
                 new_cmd.new_project(
                     SimpleNamespace(
@@ -69,7 +69,4 @@ def test_new_creates_project_and_opens_workspace() -> None:
             and "--allow-empty" in cmd
             for cmd, _ in commands
         )
-        assert opened
-        open_args = opened[0]
-        assert getattr(open_args, "workspace_name") == "main"
-        assert getattr(open_args, "raw") is True
+        assert planned

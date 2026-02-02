@@ -1,25 +1,21 @@
 """Command implementations exposed by the Atelier CLI."""
 
-from .clean import clean_workspaces
 from .config import show_config
 from .init import init_project
 from .list import list_workspaces
 from .new import new_project
-from .open import open_workspace
+from .open import open_worktree
 from .plan import run_planner
 from .policy import edit_policy
-from .shell import open_workspace_shell
 from .status import status
 from .work import start_worker
 
 __all__ = [
-    "clean_workspaces",
     "edit_policy",
     "init_project",
     "list_workspaces",
     "new_project",
-    "open_workspace",
-    "open_workspace_shell",
+    "open_worktree",
     "run_planner",
     "show_config",
     "start_worker",

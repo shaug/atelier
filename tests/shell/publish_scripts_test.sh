@@ -57,24 +57,3 @@ test_run_required_checks_executes_commands() {
   assert_equals 0 "$?"
   assert_file_exists "${TMP_REPO}/marker.txt"
 }
-
-test_create_finalization_tag_creates_tag() {
-  TMP_REPO="$(create_temp_repo)"
-  create_commit "$TMP_REPO" "init.txt"
-  "${PUBLISH_SCRIPTS_DIR}/create_finalization_tag.sh" "$TMP_REPO" "feat/demo" \
-    >/dev/null 2>&1
-  assert_equals 0 "$?"
-  git -C "$TMP_REPO" rev-parse -q --verify "refs/tags/atelier/feat/demo/finalized" \
-    >/dev/null 2>&1
-  assert_equals 0 "$?"
-}
-
-test_create_finalization_tag_fails_when_tag_exists() {
-  TMP_REPO="$(create_temp_repo)"
-  create_commit "$TMP_REPO" "init.txt"
-  "${PUBLISH_SCRIPTS_DIR}/create_finalization_tag.sh" "$TMP_REPO" "feat/demo" \
-    >/dev/null 2>&1
-  "${PUBLISH_SCRIPTS_DIR}/create_finalization_tag.sh" "$TMP_REPO" "feat/demo" \
-    >/dev/null 2>&1
-  assert_equals 1 "$?"
-}

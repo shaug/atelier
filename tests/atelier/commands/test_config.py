@@ -102,7 +102,7 @@ class TestConfigCommand:
                 updated = config.load_project_config(config_path)
                 assert updated is not None
                 assert updated.agent.default == "codex"
-                assert call_count["count"] == 6
+                assert call_count["count"] == 5
             finally:
                 os.chdir(original_cwd)
 
@@ -156,7 +156,7 @@ class TestConfigCommand:
                 config_path = paths.project_config_path(project_dir)
                 updated = config.load_project_config(config_path)
                 assert updated is not None
-                assert call_count["count"] == 9
+                assert call_count["count"] == 8
                 assert updated.branch.pr is False
                 assert updated.branch.history == "merge"
             finally:

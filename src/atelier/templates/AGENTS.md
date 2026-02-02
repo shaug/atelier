@@ -39,17 +39,15 @@ development.
 - Do not expand scope beyond what is written there.
 - Prefer small, reviewable changes over large refactors.
 - Avoid unrelated cleanup unless explicitly required.
-- After integration (as guided by the `publish` skill), create the local
-  finalization tag `atelier/<branch-name>/finalized` (do not push);
-  `atelier clean` relies on it.
+- Follow the integration guidance provided by the `publish` skill.
 
 ## Publishing and Finalization Commands
 
-- Before publish/persist/finalize, run the required workspace checks
+- Before publish/persist, run the required workspace checks
   (tests/formatting/linting/etc.) described in the repo's `AGENTS.md`. Do not
   proceed if they fail unless the user explicitly asks to ignore the failures.
-- Use the `publish` skill for publish/persist/finalize semantics derived from
-  the workspace config.
+- Use the `publish` skill for publish/persist semantics derived from the project
+  config.
 
 Ensure the configured agent CLI is installed and authenticated (see
 `agent.default`).
@@ -64,6 +62,6 @@ Ensure the configured agent CLI is installed and authenticated (see
 - Epic bead rules take precedence over `repo/AGENTS.md`.
 - `repo/AGENTS.md` rules take precedence over this file.
 
-Before finalizing work in a workspace, use the `publish` skill.
+Before integrating work in a workspace, use the `publish` skill.
 
 After reading the applicable files, proceed with the work described there.

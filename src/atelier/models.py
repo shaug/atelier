@@ -14,9 +14,6 @@ BranchHistory = Literal["manual", "squash", "merge", "rebase"]
 UPGRADE_POLICY_VALUES = ("always", "ask", "manual")
 UpgradePolicy = Literal["always", "ask", "manual"]
 
-TICKET_PROVIDER_VALUES = ("none", "github", "linear")
-TicketProvider = Literal["none", "github", "linear"]
-
 BEADS_LOCATION_VALUES = ("repo", "project")
 BeadsLocation = Literal["repo", "project"]
 
@@ -266,59 +263,6 @@ class EditorConfig(BaseModel):
         return normalized
 
 
-class TicketProviderConfig(BaseModel):
-    """Ticket provider configuration for the project.
-
-    Attributes:
-        provider: Ticket provider name (none|github|linear).
-        default_project: Optional default project identifier.
-        default_namespace: Optional default namespace (org/team/etc).
-
-    Example:
-        >>> TicketProviderConfig(provider="github", default_project="org/repo")
-        TicketProviderConfig(...)
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    provider: TicketProvider = "none"
-    default_project: str | None = None
-    default_namespace: str | None = None
-
-    @field_validator("provider", mode="before")
-    @classmethod
-    def normalize_provider(cls, value: object) -> object:
-        if value is None:
-            return "none"
-        if isinstance(value, str):
-            return value.strip().lower()
-        return value
-
-    @field_validator("default_project", "default_namespace", mode="before")
-    @classmethod
-    def normalize_optional_text(cls, value: object) -> object:
-        if value is None:
-            return None
-        if isinstance(value, str) and value.strip() == "":
-            return None
-        return value
-
-
-class TicketRefs(BaseModel):
-    """Ticket references stored in workspace config."""
-
-    model_config = ConfigDict(extra="allow")
-
-    refs: list[str] = Field(default_factory=list)
-
-    @field_validator("refs", mode="before")
-    @classmethod
-    def normalize_refs(cls, value: object) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        return [str(item) for item in value if item is not None]
-
-
 class BeadsSection(BaseModel):
     """Beads configuration for a project."""
 
@@ -483,7 +427,6 @@ class ProjectConfig(BaseModel):
     branch: BranchConfig = Field(default_factory=BranchConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
-    tickets: TicketProviderConfig = Field(default_factory=TicketProviderConfig)
     beads: BeadsSection = Field(default_factory=BeadsSection)
     atelier: AtelierSection = Field(default_factory=AtelierSection)
 
@@ -508,7 +451,6 @@ class ProjectUserConfig(BaseModel):
     branch: BranchConfig = Field(default_factory=BranchConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
-    tickets: TicketProviderConfig = Field(default_factory=TicketProviderConfig)
     atelier: AtelierUserSection = Field(default_factory=AtelierUserSection)
 
 
@@ -620,7 +562,6 @@ class WorkspaceConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     workspace: WorkspaceSection
-    tickets: TicketRefs = Field(default_factory=TicketRefs)
     skills: dict[str, SkillMetadata] = Field(default_factory=dict)
     atelier: AtelierSection = Field(default_factory=AtelierSection)
 
@@ -640,5 +581,4 @@ class WorkspaceUserConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    tickets: TicketRefs = Field(default_factory=TicketRefs)
     atelier: AtelierUserSection = Field(default_factory=AtelierUserSection)
