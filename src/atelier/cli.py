@@ -28,6 +28,7 @@ from .commands import describe as describe_cmd
 from .commands import edit as edit_cmd
 from .commands import init as init_cmd
 from .commands import list as list_cmd
+from .commands import mail as mail_cmd
 from .commands import new as new_cmd
 from .commands import open as open_cmd
 from .commands import plan as plan_cmd
@@ -46,6 +47,8 @@ app = typer.Typer(
         "or resume a workspace that owns its own checkout and agent session."
     ),
 )
+mail_app = typer.Typer(help="Mail tools for message beads.")
+app.add_typer(mail_app, name="mail")
 
 _COMPLETE_ENV = "_ATELIER_COMPLETE"
 _DEFAULT_BRANCH_EXCLUDES = {"main", "master"}
@@ -482,6 +485,77 @@ def work_command(
 ) -> None:
     """Start a worker session."""
     work_cmd.start_worker(SimpleNamespace(epic_id=epic_id, mode=mode))
+
+
+@mail_app.command("inbox", help="List message beads assigned to an agent.")
+def mail_inbox_command(
+    agent: Annotated[
+        str | None,
+        typer.Option("--agent", help="agent id to filter inbox (defaults to current)"),
+    ] = None,
+    all_messages: Annotated[
+        bool,
+        typer.Option("--all", help="include read messages"),
+    ] = False,
+) -> None:
+    """List message beads for the agent inbox."""
+    mail_cmd.inbox(SimpleNamespace(agent=agent, all=all_messages))
+
+
+@mail_app.command("send", help="Send a message bead to an agent.")
+def mail_send_command(
+    to: Annotated[
+        str,
+        typer.Option("--to", help="recipient agent id"),
+    ],
+    subject: Annotated[
+        str,
+        typer.Option("--subject", help="message subject line"),
+    ],
+    body: Annotated[
+        str | None,
+        typer.Option("--body", help="message body text"),
+    ] = None,
+    body_file: Annotated[
+        Path | None,
+        typer.Option("--body-file", help="path to a file with message body"),
+    ] = None,
+    sender: Annotated[
+        str | None,
+        typer.Option("--from", help="sender agent id override"),
+    ] = None,
+    thread: Annotated[
+        str | None,
+        typer.Option("--thread", help="thread bead id"),
+    ] = None,
+    reply_to: Annotated[
+        str | None,
+        typer.Option("--reply-to", help="reply-to message id"),
+    ] = None,
+) -> None:
+    """Send a message bead."""
+    mail_cmd.send_mail(
+        SimpleNamespace(
+            to=to,
+            subject=subject,
+            body=body,
+            body_file=body_file,
+            sender=sender,
+            thread=thread,
+            reply_to=reply_to,
+        )
+    )
+
+
+@mail_app.command("mark-read", help="Mark a message bead as read.")
+def mail_mark_read_command(
+    message_id: Annotated[
+        str,
+        typer.Argument(help="message bead id to mark read"),
+    ]
+) -> None:
+    """Mark a message bead as read."""
+    mail_cmd.mark_read(SimpleNamespace(message_id=message_id))
 
 
 @app.command(
