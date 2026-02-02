@@ -16,7 +16,6 @@ import atelier
 import atelier.config as config
 import atelier.git as git
 import atelier.paths as paths
-import atelier.workspace as workspace
 
 RAW_ORIGIN = "git@github.com:org/repo.git"
 NORMALIZED_ORIGIN = git.normalize_origin_url(RAW_ORIGIN)
@@ -24,10 +23,6 @@ NORMALIZED_ORIGIN = git.normalize_origin_url(RAW_ORIGIN)
 
 def enlistment_path_for(path: Path) -> str:
     return str(path.resolve())
-
-
-def workspace_id_for(enlistment_path: str, branch: str) -> str:
-    return workspace.workspace_identifier(enlistment_path, branch)
 
 
 def make_init_args(**overrides: object) -> SimpleNamespace:
@@ -102,33 +97,6 @@ def write_open_config(root: Path, enlistment_path: str, **overrides: object) -> 
     parsed = config.ProjectConfig.model_validate(config_payload)
     config.write_project_config(paths.project_config_path(root), parsed)
     return parsed.model_dump()
-
-
-def write_workspace_config(
-    workspace_dir: Path,
-    branch: str,
-    enlistment_path: str,
-    session: dict | None = None,
-    branch_pr: bool = True,
-    branch_history: str = "manual",
-) -> None:
-    payload = {
-        "workspace": {
-            "branch": branch,
-            "branch_pr": branch_pr,
-            "branch_history": branch_history,
-            "id": workspace_id_for(enlistment_path, branch),
-        },
-        "atelier": {
-            "version": atelier.__version__,
-            "created_at": "2026-01-01T00:00:00Z",
-            "upgrade": "ask",
-        },
-    }
-    if session is not None:
-        payload["workspace"]["session"] = session
-    parsed = config.WorkspaceConfig.model_validate(payload)
-    config.write_workspace_config(paths.workspace_config_path(workspace_dir), parsed)
 
 
 def init_local_repo(root: Path) -> Path:

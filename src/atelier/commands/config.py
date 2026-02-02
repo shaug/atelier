@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .. import config, editor, exec, paths
 from ..io import confirm, die, say
-from .resolve import resolve_current_project, resolve_workspace_target
+from .resolve import resolve_current_project
 
 
 def _emit_json(payload: dict) -> None:
@@ -75,7 +75,6 @@ def _edit_user_config(
 
 def show_config(args: object) -> None:
     """Show or update Atelier configuration for the current project."""
-    workspace_name = getattr(args, "workspace_name", None)
     installed = bool(getattr(args, "installed", False))
     prompt_values = bool(getattr(args, "prompt", False))
     reset_values = bool(getattr(args, "reset", False))
@@ -85,28 +84,6 @@ def show_config(args: object) -> None:
         die("--prompt and --edit cannot be combined")
 
     project_root, project_config, enlistment_path = resolve_current_project()
-
-    if workspace_name:
-        if installed or prompt_values or reset_values or edit_values:
-            die(
-                "workspace config cannot be combined with --installed/--prompt/--reset/--edit"
-            )
-        git_path = config.resolve_git_path(project_config)
-        branch, workspace_dir = resolve_workspace_target(
-            project_root=project_root,
-            project_config=project_config,
-            enlistment_path=enlistment_path,
-            workspace_name=str(workspace_name),
-            raw=False,
-            git_path=git_path,
-        )
-        workspace_config = config.load_workspace_config(
-            paths.workspace_config_path(workspace_dir)
-        )
-        if not workspace_config:
-            die(f"failed to load workspace config for {branch}")
-        _emit_json(workspace_config.model_dump())
-        return
 
     if installed:
         defaults = config.load_installed_defaults()

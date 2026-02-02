@@ -1,4 +1,4 @@
-"""Configuration helpers for Atelier projects and workspaces.
+"""Configuration helpers for Atelier projects.
 
 This module reads and writes ``config.sys.json``/``config.user.json`` files,
 validates them with Pydantic models, and normalizes CLI overrides.
@@ -18,7 +18,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from . import __version__, agents, paths, templates
+from . import __version__, agents, paths
 from . import command as command_util
 from .editor import system_editor_default
 from .io import die, prompt, select
@@ -34,13 +34,7 @@ from .models import (
     ProjectSection,
     ProjectSystemConfig,
     ProjectUserConfig,
-    SkillMetadata,
-    WorkspaceConfig,
-    WorkspaceSession,
-    WorkspaceSystemConfig,
-    WorkspaceUserConfig,
 )
-from .paths import workspace_config_path
 
 
 def utc_now() -> str:
@@ -145,17 +139,6 @@ def _split_project_payload(payload: dict) -> tuple[dict, dict]:
     return system_payload, user_payload
 
 
-def _split_workspace_payload(payload: dict) -> tuple[dict, dict]:
-    atelier_payload = dict(payload.get("atelier", {}) or {})
-    upgrade = atelier_payload.pop("upgrade", None)
-    user_payload: dict = {}
-    if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
-        user_payload["atelier"] = {"upgrade": upgrade}
-    system_payload = dict(payload)
-    system_payload["atelier"] = atelier_payload
-    return system_payload, user_payload
-
-
 def parse_project_system_config(
     payload: dict, source: Path | str | None = None
 ) -> ProjectSystemConfig:
@@ -178,28 +161,6 @@ def parse_project_user_config(
         die(f"invalid project user config{location}:\n{exc}")
 
 
-def parse_workspace_system_config(
-    payload: dict, source: Path | str | None = None
-) -> WorkspaceSystemConfig:
-    """Validate a workspace system config payload."""
-    try:
-        return WorkspaceSystemConfig.model_validate(payload)
-    except ValidationError as exc:
-        location = f" at {source}" if source else ""
-        die(f"invalid workspace system config{location}:\n{exc}")
-
-
-def parse_workspace_user_config(
-    payload: dict, source: Path | str | None = None
-) -> WorkspaceUserConfig:
-    """Validate a workspace user config payload."""
-    try:
-        return WorkspaceUserConfig.model_validate(payload)
-    except ValidationError as exc:
-        location = f" at {source}" if source else ""
-        die(f"invalid workspace user config{location}:\n{exc}")
-
-
 def _migrate_legacy_project_config(project_dir: Path) -> None:
     sys_path = paths.project_config_sys_path(project_dir)
     user_path = paths.project_config_user_path(project_dir)
@@ -212,23 +173,6 @@ def _migrate_legacy_project_config(project_dir: Path) -> None:
     system_payload, user_payload = _split_project_payload(payload)
     system_config = parse_project_system_config(system_payload, legacy_path)
     user_config = parse_project_user_config(user_payload, legacy_path)
-    write_json(sys_path, system_config)
-    write_json(user_path, user_config)
-    _backup_legacy_config(legacy_path)
-
-
-def _migrate_legacy_workspace_config(workspace_dir: Path) -> None:
-    sys_path = paths.workspace_config_sys_path(workspace_dir)
-    user_path = paths.workspace_config_user_path(workspace_dir)
-    if sys_path.exists() or user_path.exists():
-        return
-    legacy_path = paths.workspace_config_legacy_path(workspace_dir)
-    payload = load_json(legacy_path)
-    if not payload:
-        return
-    system_payload, user_payload = _split_workspace_payload(payload)
-    system_config = parse_workspace_system_config(system_payload, legacy_path)
-    user_config = parse_workspace_user_config(user_payload, legacy_path)
     write_json(sys_path, system_config)
     write_json(user_path, user_config)
     _backup_legacy_config(legacy_path)
@@ -268,26 +212,6 @@ def load_project_user_config(path: Path) -> ProjectUserConfig | None:
     return parse_project_user_config(payload, path)
 
 
-def load_workspace_system_config(path: Path) -> WorkspaceSystemConfig | None:
-    """Load and validate a workspace system config from disk."""
-    workspace_dir = path.parent
-    _migrate_legacy_workspace_config(workspace_dir)
-    payload = load_json(path)
-    if not payload:
-        return None
-    return parse_workspace_system_config(payload, path)
-
-
-def load_workspace_user_config(path: Path) -> WorkspaceUserConfig | None:
-    """Load and validate a workspace user config from disk."""
-    workspace_dir = path.parent
-    _migrate_legacy_workspace_config(workspace_dir)
-    payload = load_json(path)
-    if not payload:
-        return None
-    return parse_workspace_user_config(payload, path)
-
-
 def merge_project_configs(
     system_config: ProjectSystemConfig, user_config: ProjectUserConfig | None
 ) -> ProjectConfig:
@@ -322,25 +246,6 @@ def merge_project_configs(
     return parse_project_config(merged)
 
 
-def merge_workspace_configs(
-    system_config: WorkspaceSystemConfig, user_config: WorkspaceUserConfig | None
-) -> WorkspaceConfig:
-    """Merge system and user workspace configs into a full config."""
-    system_payload = system_config.model_dump()
-    user_payload = (user_config or WorkspaceUserConfig()).model_dump()
-    merged = dict(system_payload)
-    system_atelier = system_payload.get("atelier", {}) if system_payload else {}
-    user_atelier = user_payload.get("atelier", {}) if user_payload else {}
-    merged_atelier = dict(system_atelier)
-    if "upgrade" in user_atelier:
-        merged_atelier["upgrade"] = user_atelier.get("upgrade")
-    merged["atelier"] = merged_atelier
-    for key, value in user_payload.items():
-        if key not in merged:
-            merged[key] = value
-    return parse_workspace_config(merged)
-
-
 def split_project_config(
     config_payload: ProjectConfig,
 ) -> tuple[ProjectSystemConfig, ProjectUserConfig]:
@@ -349,17 +254,6 @@ def split_project_config(
     system_payload, user_payload = _split_project_payload(payload)
     system_config = parse_project_system_config(system_payload)
     user_config = parse_project_user_config(user_payload)
-    return system_config, user_config
-
-
-def split_workspace_config(
-    config_payload: WorkspaceConfig,
-) -> tuple[WorkspaceSystemConfig, WorkspaceUserConfig]:
-    """Split a workspace config into system and user configs."""
-    payload = config_payload.model_dump()
-    system_payload, user_payload = _split_workspace_payload(payload)
-    system_config = parse_workspace_system_config(system_payload)
-    user_config = parse_workspace_user_config(user_payload)
     return system_config, user_config
 
 
@@ -373,16 +267,6 @@ def write_project_user_config(path: Path, payload: ProjectUserConfig) -> None:
     write_json(path, payload)
 
 
-def write_workspace_system_config(path: Path, payload: WorkspaceSystemConfig) -> None:
-    """Write a workspace system config to disk."""
-    write_json(path, payload)
-
-
-def write_workspace_user_config(path: Path, payload: WorkspaceUserConfig) -> None:
-    """Write a workspace user config to disk."""
-    write_json(path, payload)
-
-
 def write_project_config(path: Path, payload: ProjectConfig) -> None:
     """Write a merged project config to system/user files."""
     project_dir = path.parent
@@ -391,172 +275,6 @@ def write_project_config(path: Path, payload: ProjectConfig) -> None:
         paths.project_config_sys_path(project_dir), system_config
     )
     write_project_user_config(paths.project_config_user_path(project_dir), user_config)
-
-
-def write_workspace_config(path: Path, payload: WorkspaceConfig) -> None:
-    """Write a merged workspace config to system/user files."""
-    workspace_dir = path.parent
-    system_config, user_config = split_workspace_config(payload)
-    write_workspace_system_config(
-        paths.workspace_config_sys_path(workspace_dir), system_config
-    )
-    write_workspace_user_config(
-        paths.workspace_config_user_path(workspace_dir), user_config
-    )
-
-
-def update_project_managed_files(project_dir: Path, updates: dict[str, str]) -> None:
-    """Update managed file hashes in a project config."""
-    if not updates:
-        return
-    config_path = paths.project_config_sys_path(project_dir)
-    config_payload = load_project_system_config(config_path)
-    if not config_payload:
-        die("no Atelier project config found for managed file updates")
-    atelier_section = config_payload.atelier
-    managed = dict(atelier_section.managed_files)
-    managed.update(updates)
-    atelier_section = atelier_section.model_copy(update={"managed_files": managed})
-    config_payload = config_payload.model_copy(update={"atelier": atelier_section})
-    write_project_system_config(config_path, config_payload)
-
-
-def update_workspace_managed_files(
-    workspace_dir: Path, updates: dict[str, str]
-) -> None:
-    """Update managed file hashes in a workspace config."""
-    if not updates:
-        return
-    config_path = paths.workspace_config_sys_path(workspace_dir)
-    workspace_config = load_workspace_system_config(config_path)
-    if not workspace_config:
-        die("no workspace config found for managed file updates")
-    atelier_section = workspace_config.atelier
-    managed = dict(atelier_section.managed_files)
-    managed.update(updates)
-    atelier_section = atelier_section.model_copy(update={"managed_files": managed})
-    workspace_config = workspace_config.model_copy(update={"atelier": atelier_section})
-    write_workspace_system_config(config_path, workspace_config)
-
-
-def remove_workspace_managed_files(workspace_dir: Path, keys: set[str]) -> None:
-    """Remove managed file hashes from a workspace config."""
-    if not keys:
-        return
-    config_path = paths.workspace_config_sys_path(workspace_dir)
-    workspace_config = load_workspace_system_config(config_path)
-    if not workspace_config:
-        die("no workspace config found for managed file updates")
-    atelier_section = workspace_config.atelier
-    managed = dict(atelier_section.managed_files)
-    updated = False
-    for key in keys:
-        if key in managed:
-            managed.pop(key)
-            updated = True
-    if not updated:
-        return
-    atelier_section = atelier_section.model_copy(update={"managed_files": managed})
-    workspace_config = workspace_config.model_copy(update={"atelier": atelier_section})
-    write_workspace_system_config(config_path, workspace_config)
-
-
-def update_workspace_skills_metadata(
-    workspace_dir: Path, updates: dict[str, dict[str, str] | SkillMetadata]
-) -> None:
-    """Update skill metadata in a workspace config."""
-    if not updates:
-        return
-    normalized: dict[str, SkillMetadata] = {}
-    for name, entry in updates.items():
-        normalized[name] = SkillMetadata.model_validate(entry)
-    config_path = paths.workspace_config_sys_path(workspace_dir)
-    workspace_config = load_workspace_system_config(config_path)
-    if not workspace_config:
-        die("no workspace config found for skill metadata updates")
-    skills = dict(workspace_config.skills)
-    skills.update(normalized)
-    workspace_config = workspace_config.model_copy(update={"skills": skills})
-    write_workspace_system_config(config_path, workspace_config)
-
-
-def replace_workspace_skills_metadata(
-    workspace_dir: Path, skills: dict[str, dict[str, str] | SkillMetadata]
-) -> None:
-    """Replace skill metadata in a workspace config."""
-    normalized: dict[str, SkillMetadata] = {}
-    for name, entry in skills.items():
-        normalized[name] = SkillMetadata.model_validate(entry)
-    config_path = paths.workspace_config_sys_path(workspace_dir)
-    workspace_config = load_workspace_system_config(config_path)
-    if not workspace_config:
-        die("no workspace config found for skill metadata updates")
-    workspace_config = workspace_config.model_copy(update={"skills": normalized})
-    write_workspace_system_config(config_path, workspace_config)
-
-
-def update_workspace_session(
-    workspace_dir: Path,
-    *,
-    agent: str | None = None,
-    session_id: str | None = None,
-    resume_command: str | None = None,
-) -> None:
-    """Update the stored agent session metadata for a workspace."""
-    if agent is None and session_id is None and resume_command is None:
-        return
-    config_path = paths.workspace_config_sys_path(workspace_dir)
-    workspace_config = load_workspace_system_config(config_path)
-    if not workspace_config:
-        return
-    workspace_section = workspace_config.workspace
-    session = workspace_section.session or WorkspaceSession()
-    updates: dict[str, object] = {}
-    if agent is not None:
-        updates["agent"] = agent
-    if session_id is not None:
-        updates["id"] = session_id
-    if resume_command is not None:
-        updates["resume_command"] = resume_command
-    if not updates:
-        return
-    session = session.model_copy(update=updates)
-    workspace_section = workspace_section.model_copy(update={"session": session})
-    workspace_config = workspace_config.model_copy(
-        update={"workspace": workspace_section}
-    )
-    write_workspace_system_config(config_path, workspace_config)
-
-
-def managed_project_agents_updates(project_dir: Path) -> dict[str, str]:
-    """Return managed hashes for project AGENTS templates when canonical."""
-    canonical = templates.agents_template(prefer_installed_if_modified=True)
-    updates: dict[str, str] = {}
-    candidates = [
-        (
-            f"{paths.TEMPLATES_DIRNAME}/AGENTS.md",
-            project_dir / paths.TEMPLATES_DIRNAME / "AGENTS.md",
-        ),
-    ]
-    for rel_path, path in candidates:
-        if not path.exists():
-            continue
-        content = path.read_text(encoding="utf-8")
-        if content == canonical:
-            updates[rel_path] = hash_text(content)
-    return updates
-
-
-def managed_workspace_agents_updates(workspace_dir: Path) -> dict[str, str]:
-    """Return managed hashes for workspace AGENTS files when canonical."""
-    agents_path = workspace_dir / "AGENTS.md"
-    if not agents_path.exists():
-        return {}
-    content = agents_path.read_text(encoding="utf-8")
-    canonical = templates.workspace_agents_template(prefer_installed_if_modified=True)
-    if content != canonical:
-        return {}
-    return {"AGENTS.md": hash_text(content)}
 
 
 def parse_project_config(
@@ -606,53 +324,6 @@ def load_project_config(path: Path) -> ProjectConfig | None:
     merged = merge_project_configs(system_config, user_config)
     ensure_agent_available(merged.agent.default, label="project")
     return merged
-
-
-def parse_workspace_config(
-    payload: dict, source: Path | str | None = None
-) -> WorkspaceConfig:
-    """Validate a workspace config payload.
-
-    Args:
-        payload: Raw config payload.
-        source: Optional path or label for error messages.
-
-    Returns:
-        Parsed ``WorkspaceConfig``.
-
-    Example:
-        >>> parse_workspace_config({"workspace": {"branch": "feat/demo"}})
-        WorkspaceConfig(...)
-    """
-    try:
-        return WorkspaceConfig.model_validate(payload)
-    except ValidationError as exc:
-        location = f" at {source}" if source else ""
-        die(f"invalid workspace config{location}:\n{exc}")
-
-
-def load_workspace_config(path: Path) -> WorkspaceConfig | None:
-    """Load and validate a workspace config from disk.
-
-    Args:
-        path: Path to ``config.sys.json`` in the workspace directory.
-
-    Returns:
-        Parsed ``WorkspaceConfig`` or ``None`` when missing/empty.
-
-    Example:
-        >>> from pathlib import Path
-        >>> load_workspace_config(Path("missing.json")) is None
-        True
-    """
-    workspace_dir = path.parent
-    system_path = paths.workspace_config_sys_path(workspace_dir)
-    user_path = paths.workspace_config_user_path(workspace_dir)
-    system_config = load_workspace_system_config(system_path)
-    if not system_config:
-        return None
-    user_config = load_workspace_user_config(user_path)
-    return merge_workspace_configs(system_config, user_config)
 
 
 def resolve_branch_config(config: ProjectConfig | dict) -> BranchConfig:
@@ -862,32 +533,6 @@ def resolve_branch_overrides(
             branch_history_override, "--branch-history"
         )
     return resolved_pr, resolved_history
-
-
-def read_workspace_branch_settings(
-    workspace_dir: Path,
-) -> tuple[bool | None, str | None]:
-    """Read branch settings from a workspace config.
-
-    Args:
-        workspace_dir: Path to the workspace directory.
-
-    Returns:
-        Tuple of ``(branch_pr, branch_history)`` or ``(None, None)`` when missing.
-
-    Example:
-        >>> from pathlib import Path
-        >>> read_workspace_branch_settings(Path("missing"))
-        (None, None)
-    """
-    config_path = workspace_config_path(workspace_dir)
-    workspace_config = load_workspace_config(config_path)
-    if not workspace_config:
-        return None, None
-    return (
-        workspace_config.workspace.branch_pr,
-        workspace_config.workspace.branch_history,
-    )
 
 
 def read_arg(args: object | None, name: str) -> object | None:

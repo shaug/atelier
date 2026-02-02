@@ -1,10 +1,10 @@
-"""Shared project/workspace resolution helpers for commands."""
+"""Shared project resolution helpers for commands."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from .. import config, git, paths, workspace
+from .. import config, git, paths
 from ..io import die
 
 
@@ -40,31 +40,3 @@ def resolve_current_project_with_repo_root() -> tuple[
         enlistment_path, origin
     )
     return project_root, config_payload, enlistment_path, repo_root
-
-
-def resolve_workspace_target(
-    *,
-    project_root: Path,
-    project_config: config.ProjectConfig,
-    enlistment_path: str,
-    workspace_name: str,
-    raw: bool = False,
-    git_path: str | None = None,
-) -> tuple[str, Path]:
-    """Resolve and validate a workspace target for the current project."""
-    normalized = workspace.normalize_workspace_name(str(workspace_name))
-    if not normalized:
-        die("workspace branch must not be empty")
-    if git_path is None:
-        git_path = config.resolve_git_path(project_config)
-    branch, workspace_dir, exists = workspace.resolve_workspace_target(
-        project_root,
-        project_config.project.enlistment or enlistment_path,
-        normalized,
-        project_config.branch.prefix,
-        raw,
-        git_path,
-    )
-    if not exists:
-        die(f"workspace not found: {normalized}")
-    return branch, workspace_dir

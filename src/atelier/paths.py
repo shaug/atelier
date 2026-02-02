@@ -8,7 +8,6 @@ from platformdirs import user_data_dir
 
 ATELIER_APP_NAME = "atelier"
 PROJECTS_DIRNAME = "projects"
-WORKSPACES_DIRNAME = "workspaces"
 WORKTREES_DIRNAME = "worktrees"
 TEMPLATES_DIRNAME = "templates"
 SKILLS_DIRNAME = "skills"
@@ -17,8 +16,6 @@ BEADS_DIRNAME = ".beads"
 LEGACY_CONFIG_FILENAME = "config.json"
 PROJECT_CONFIG_SYS_FILENAME = "config.sys.json"
 PROJECT_CONFIG_USER_FILENAME = "config.user.json"
-WORKSPACE_CONFIG_SYS_FILENAME = "config.sys.json"
-WORKSPACE_CONFIG_USER_FILENAME = "config.user.json"
 INSTALLED_CONFIG_USER_FILENAME = "config.user.json"
 
 
@@ -119,22 +116,6 @@ def project_key(origin: str) -> str:
     return hashlib.sha256(origin.encode("utf-8")).hexdigest()
 
 
-def workspace_key(branch: str) -> str:
-    """Hash a workspace branch name into a legacy workspace key.
-
-    Args:
-        branch: Workspace branch name.
-
-    Returns:
-        Hex digest workspace key.
-
-    Example:
-        >>> len(workspace_key("feat/demo")) == 64
-        True
-    """
-    return hashlib.sha256(branch.encode("utf-8")).hexdigest()
-
-
 _URL_SAFE_CHARS = set(string.ascii_letters + string.digits + "-._~")
 
 
@@ -188,47 +169,6 @@ def project_dir_name(enlistment_path: str) -> str:
     """
     base = _normalize_filespace(Path(enlistment_path).name, strip_git=False)
     suffix = _short_hash(enlistment_path)
-    if not base:
-        return suffix
-    return f"{base}-{suffix}"
-
-
-def legacy_workspace_dir_name(branch: str) -> str:
-    """Return the normalized legacy workspace directory name for a branch.
-
-    Args:
-        branch: Workspace branch name.
-
-    Returns:
-        Normalized workspace directory name with a short hash suffix.
-
-    Example:
-        >>> legacy_workspace_dir_name("feat/demo").startswith("feat-demo-")
-        True
-    """
-    base = _normalize_filespace(branch, strip_git=False)
-    suffix = _short_hash(branch)
-    if not base:
-        return suffix
-    return f"{base}-{suffix}"
-
-
-def workspace_dir_name(branch: str, workspace_id: str) -> str:
-    """Return the normalized workspace directory name for a workspace ID.
-
-    Args:
-        branch: Workspace branch name.
-        workspace_id: Full workspace identifier string.
-
-    Returns:
-        Normalized workspace directory name with a short hash suffix.
-
-    Example:
-        >>> workspace_dir_name("feat/demo", "atelier:/repo:feat/demo").startswith("feat-demo-")
-        True
-    """
-    base = _normalize_filespace(branch, strip_git=False)
-    suffix = _short_hash(workspace_id)
     if not base:
         return suffix
     return f"{base}-{suffix}"
@@ -306,81 +246,6 @@ def project_config_legacy_path(project_dir: Path) -> Path:
 def project_config_path(project_dir: Path) -> Path:
     """Return the path to a project's system config file."""
     return project_config_sys_path(project_dir)
-
-
-def workspaces_root_for_project(project_dir: Path) -> Path:
-    """Return the workspaces root directory for a project.
-
-    Args:
-        project_dir: Project directory path.
-
-    Returns:
-        Path to the workspaces root.
-
-    Example:
-        >>> workspaces_root_for_project(Path("/tmp/project")).name == WORKSPACES_DIRNAME
-        True
-    """
-    return project_dir / WORKSPACES_DIRNAME
-
-
-def workspace_dir_for_branch(
-    project_dir: Path, branch: str, workspace_id: str | None
-) -> Path:
-    """Return the workspace directory path for a branch.
-
-    Args:
-        project_dir: Project directory path.
-        branch: Workspace branch name.
-
-    Returns:
-        Path to the workspace directory.
-
-    Example:
-        >>> workspace_dir_for_branch(Path("/tmp/project"), "feat/demo", "atelier:/repo:feat/demo").parent.name == WORKSPACES_DIRNAME
-        True
-    """
-    workspaces_root = workspaces_root_for_project(project_dir)
-    legacy_dir = workspaces_root / workspace_key(branch)
-    if legacy_dir.exists():
-        return legacy_dir
-    legacy_short = workspaces_root / legacy_workspace_dir_name(branch)
-    if legacy_short.exists():
-        return legacy_short
-    if not workspace_id:
-        raise ValueError("workspace_id is required for workspace directory naming")
-    return workspaces_root / workspace_dir_name(branch, workspace_id)
-
-
-def workspace_config_sys_path(workspace_dir: Path) -> Path:
-    """Return the path to a workspace system config file.
-
-    Args:
-        workspace_dir: Workspace directory path.
-
-    Returns:
-        Path to ``config.sys.json``.
-
-    Example:
-        >>> workspace_config_sys_path(Path("/tmp/workspace")).name == WORKSPACE_CONFIG_SYS_FILENAME
-        True
-    """
-    return workspace_dir / WORKSPACE_CONFIG_SYS_FILENAME
-
-
-def workspace_config_user_path(workspace_dir: Path) -> Path:
-    """Return the path to a workspace user config file."""
-    return workspace_dir / WORKSPACE_CONFIG_USER_FILENAME
-
-
-def workspace_config_legacy_path(workspace_dir: Path) -> Path:
-    """Return the legacy workspace config path."""
-    return workspace_dir / LEGACY_CONFIG_FILENAME
-
-
-def workspace_config_path(workspace_dir: Path) -> Path:
-    """Return the path to a workspace system config file."""
-    return workspace_config_sys_path(workspace_dir)
 
 
 def ensure_dir(path: Path) -> None:

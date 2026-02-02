@@ -492,13 +492,6 @@ def gc_command(
 
 @app.command("config", help="Inspect or update Atelier configuration.")
 def config_command(
-    workspace_name: Annotated[
-        str | None,
-        typer.Argument(
-            help="workspace branch to show config for (optional)",
-            autocompletion=_workspace_only_shell_complete,
-        ),
-    ] = None,
     installed: Annotated[
         bool,
         typer.Option("--installed", help="operate on installed defaults"),
@@ -519,7 +512,6 @@ def config_command(
     """Show or update Atelier configuration."""
     config_cmd.show_config(
         SimpleNamespace(
-            workspace_name=workspace_name,
             installed=installed,
             prompt=prompt,
             reset=reset,
