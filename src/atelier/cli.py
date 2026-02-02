@@ -462,9 +462,13 @@ def plan_command(
             help="open an interactive bead form to create a new epic",
         ),
     ] = False,
+    epic_id: Annotated[
+        str | None,
+        typer.Option("--epic-id", help="existing epic bead id to plan against"),
+    ] = None,
 ) -> None:
     """Start a planner session."""
-    plan_cmd.run_planner(SimpleNamespace(create_epic=create_epic))
+    plan_cmd.run_planner(SimpleNamespace(create_epic=create_epic, epic_id=epic_id))
 
 
 @app.command("work", help="Start a worker session for the next changeset.")
