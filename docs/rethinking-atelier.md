@@ -427,6 +427,9 @@ should be enforced via:
 - An initial bootstrap message only if the runtime requires it.
 
 AGENTS.md is the primary source of behavior; skills are the execution mechanism.
+Use the `startup_contract` skill to sequence hook checks, inbox handling, and
+claiming new epics. If no eligible epics exist, emit a `NEEDS-DECISION` message
+to the overseer.
 
 ## Claiming Strategy (Atomicity)
 
