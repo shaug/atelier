@@ -433,19 +433,19 @@ sync/approval workflows.
 
 ## Startup Contract (Enforcement)
 
-The startup contract (“check hook → if hooked, run it → if empty, check inbox”)
-should be enforced via:
+The startup contract (“check hook → if hooked, run it → if empty, check
+inbox/queue”) should be enforced via:
 
 - Per-agent `AGENTS.md` in `<atelier-data>/agents/<name>/`.
 - A session-start skill that runs immediately on agent boot.
 - An initial bootstrap message only if the runtime requires it.
 
 AGENTS.md is the primary source of behavior; skills are the execution mechanism.
-Use the `startup_contract` skill to sequence hook checks, inbox handling, and
-claiming new epics. The fallback ordering is: resume hooked epic, then stop if
-there are unread message beads, then choose a new epic (auto = oldest ready,
-else oldest assigned; prompt = user selection). If no eligible epics exist, emit
-a `NEEDS-DECISION` message to the overseer.
+Use the `startup_contract` skill to sequence hook checks, inbox/queue handling,
+and claiming new epics. The fallback ordering is: resume hooked epic, then stop
+if there are unread message beads or unclaimed queue items, then choose a new
+epic (auto = oldest ready, else oldest assigned; prompt = user selection). If no
+eligible epics exist, emit a `NEEDS-DECISION` message to the overseer.
 
 ## Claiming Strategy (Atomicity)
 
