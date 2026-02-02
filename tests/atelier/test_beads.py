@@ -157,6 +157,35 @@ def test_get_agent_hook_falls_back_to_description() -> None:
     assert hook == "epic-2"
 
 
+def test_get_agent_hook_backfills_slot() -> None:
+    issue = {"id": "atelier-agent", "description": "hook_bead: epic-2\n"}
+    calls: list[list[str]] = []
+
+    def fake_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> CompletedProcess[str]:
+        calls.append(args)
+        if args[:2] == ["slot", "show"]:
+            return CompletedProcess(args=args, returncode=0, stdout="{}\n", stderr="")
+        return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        return [issue]
+
+    with (
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+    ):
+        hook = beads.get_agent_hook(
+            "atelier-agent", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+
+    assert hook == "epic-2"
+    assert any(args[:2] == ["slot", "set"] for args in calls)
+
+
 def test_create_message_bead_renders_frontmatter() -> None:
     with (
         patch("atelier.beads.messages.render_message", return_value="body"),

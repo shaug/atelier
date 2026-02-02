@@ -170,6 +170,21 @@ def _slot_show_hook(
     return _extract_hook_from_slot_payload(payload)
 
 
+def _slot_set_hook(
+    agent_bead_id: str,
+    epic_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    run_bd_command(
+        ["slot", "set", agent_bead_id, HOOK_SLOT_NAME, epic_id],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
+
+
 def get_agent_hook(
     agent_bead_id: str,
     *,
@@ -188,7 +203,10 @@ def get_agent_hook(
     fields = _parse_description_fields(
         description if isinstance(description, str) else ""
     )
-    return _normalize_hook_value(fields.get("hook_bead"))
+    hook = _normalize_hook_value(fields.get("hook_bead"))
+    if hook:
+        _slot_set_hook(agent_bead_id, hook, beads_root=beads_root, cwd=cwd)
+    return hook
 
 
 def workspace_label(root_branch: str) -> str:
