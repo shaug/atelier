@@ -9,7 +9,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .. import agent_home, beads, config, policy, root_branch, worktrees
+from .. import agent_home, agents, beads, codex, config, exec, policy, root_branch
+from .. import workspace, worktrees
 from ..io import die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
 
@@ -144,6 +145,9 @@ def start_worker(args: object) -> None:
     agent = agent_home.resolve_agent_home(
         project_data_dir, project_config, role="worker"
     )
+    os.environ["ATELIER_AGENT_ID"] = agent.agent_id
+    os.environ.setdefault("BD_ACTOR", agent.agent_id)
+    os.environ.setdefault("BEADS_AGENT_NAME", agent.agent_id)
     agent_bead = beads.ensure_agent_bead(
         agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
     )
@@ -218,3 +222,32 @@ def start_worker(args: object) -> None:
     )
     say(f"Worktree: {worktree_path}")
     say(f"Changeset branch: {branch}")
+
+    agent_spec = agents.get_agent(project_config.agent.default)
+    if agent_spec is None:
+        die(f"unsupported agent {project_config.agent.default!r}")
+    agent_options = list(project_config.agent.options.get(agent_spec.name, []))
+    project_enlistment = project_config.project.enlistment or _enlistment
+    env = workspace.workspace_environment(
+        project_enlistment,
+        root_branch_value,
+        worktree_path,
+        base_env=agents.agent_environment(agent.agent_id),
+    )
+    opening_prompt = ""
+    if agent_spec.name == "codex":
+        opening_prompt = workspace.workspace_session_identifier(
+            project_enlistment, root_branch_value, changeset_id or None
+        )
+    say(f"Starting {agent_spec.display_name} session")
+    start_cmd, start_cwd = agent_spec.build_start_command(
+        worktree_path, agent_options, opening_prompt
+    )
+    if agent_spec.name == "codex":
+        result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
+        if result is None:
+            die(f"missing required command: {start_cmd[0]}")
+        if result.returncode != 0:
+            die(f"command failed: {' '.join(start_cmd)}")
+    else:
+        exec.run_command(start_cmd, cwd=start_cwd, env=env)

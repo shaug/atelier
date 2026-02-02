@@ -19,6 +19,10 @@ def beads_env(beads_root: Path) -> dict[str, str]:
     """Return an environment mapping with BEADS_DIR set."""
     env = os.environ.copy()
     env["BEADS_DIR"] = str(beads_root)
+    agent_id = env.get("ATELIER_AGENT_ID")
+    if agent_id:
+        env.setdefault("BD_ACTOR", agent_id)
+        env.setdefault("BEADS_AGENT_NAME", agent_id)
     return env
 
 
@@ -369,7 +373,7 @@ def ensure_agent_bead(
         return existing
     description = f"agent_id: {agent_id}\n"
     if role:
-        description += f"role: {role}\n"
+        description += f"role_type: {role}\n"
     result = run_bd_command(
         [
             "create",

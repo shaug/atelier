@@ -84,7 +84,7 @@ def _build_agent_payloads(
         if not isinstance(agent_id, str):
             agent_id = str(agent_id)
         agent_id = agent_id.strip()
-        role = fields.get("role")
+        role = fields.get("role_type") or fields.get("role")
         hook_bead = fields.get("hook_bead")
         heartbeat_at = fields.get("heartbeat_at")
         labels = _issue_labels(issue)

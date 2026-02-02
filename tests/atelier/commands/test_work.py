@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import atelier.commands.work as work_cmd
+import atelier.codex as codex
 import atelier.config as config
 import atelier.worktrees as worktrees
 
@@ -58,6 +59,12 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
         ),
         patch("atelier.commands.work.worktrees.ensure_changeset_checkout"),
         patch("atelier.commands.work.worktrees.ensure_git_worktree"),
+        patch(
+            "atelier.commands.work.codex.run_codex_command",
+            return_value=codex.CodexRunResult(
+                returncode=0, session_id=None, resume_command=None
+            ),
+        ),
         patch(
             "atelier.commands.work.beads.ensure_agent_bead",
             return_value={"id": "atelier-agent"},
@@ -129,6 +136,12 @@ def test_work_auto_picks_ready_epic() -> None:
         patch("atelier.commands.work.worktrees.ensure_changeset_checkout"),
         patch("atelier.commands.work.worktrees.ensure_git_worktree"),
         patch(
+            "atelier.commands.work.codex.run_codex_command",
+            return_value=codex.CodexRunResult(
+                returncode=0, session_id=None, resume_command=None
+            ),
+        ),
+        patch(
             "atelier.commands.work.beads.ensure_agent_bead",
             return_value={"id": "atelier-agent"},
         ),
@@ -188,6 +201,12 @@ def test_work_uses_explicit_epic_id() -> None:
         ),
         patch("atelier.commands.work.worktrees.ensure_changeset_checkout"),
         patch("atelier.commands.work.worktrees.ensure_git_worktree"),
+        patch(
+            "atelier.commands.work.codex.run_codex_command",
+            return_value=codex.CodexRunResult(
+                returncode=0, session_id=None, resume_command=None
+            ),
+        ),
         patch(
             "atelier.commands.work.beads.ensure_agent_bead",
             return_value={"id": "atelier-agent"},

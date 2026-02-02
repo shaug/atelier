@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -21,6 +22,9 @@ def run_planner(args: object) -> None:
     agent = agent_home.resolve_agent_home(
         project_data_dir, project_config, role="planner"
     )
+    os.environ["ATELIER_AGENT_ID"] = agent.agent_id
+    os.environ.setdefault("BD_ACTOR", agent.agent_id)
+    os.environ.setdefault("BEADS_AGENT_NAME", agent.agent_id)
 
     say("Beads planning session")
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
