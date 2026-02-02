@@ -6,6 +6,7 @@ Used by ``atelier work``.
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 from pathlib import Path
 
@@ -43,20 +44,59 @@ def _issue_labels(issue: dict[str, object]) -> set[str]:
     return {str(label) for label in labels if label is not None}
 
 
-def _filter_epics(issues: list[dict[str, object]]) -> list[dict[str, object]]:
+def _is_eligible_status(status: str, *, allow_hooked: bool) -> bool:
+    if not status:
+        return True
+    normalized = status.lower()
+    if normalized in {"open", "ready", "in_progress"}:
+        return True
+    if allow_hooked and normalized == "hooked":
+        return True
+    return False
+
+
+def _filter_epics(
+    issues: list[dict[str, object]],
+    *,
+    assignee: str | None = None,
+    require_unassigned: bool = False,
+) -> list[dict[str, object]]:
     filtered: list[dict[str, object]] = []
     for issue in issues:
         status = str(issue.get("status") or "")
-        if status and status.lower() not in {"open"}:
+        if not _is_eligible_status(status, allow_hooked=assignee is not None):
             continue
         labels = _issue_labels(issue)
         if "at:draft" in labels:
             continue
-        assignee = issue.get("assignee")
-        if assignee:
+        issue_assignee = issue.get("assignee")
+        if assignee is not None:
+            if issue_assignee != assignee:
+                continue
+        elif require_unassigned and issue_assignee:
             continue
         filtered.append(issue)
     return filtered
+
+
+def _parse_issue_time(value: object) -> dt.datetime | None:
+    if not value:
+        return None
+    try:
+        return dt.datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _sort_by_created_at(
+    issues: list[dict[str, object]], *, newest: bool = False
+) -> list[dict[str, object]]:
+    sentinel = dt.datetime.max
+    return sorted(
+        issues,
+        key=lambda issue: _parse_issue_time(issue.get("created_at")) or sentinel,
+        reverse=newest,
+    )
 
 
 def _list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
@@ -86,24 +126,16 @@ def _select_epic_prompt(issues: list[dict[str, object]]) -> str:
     return selection
 
 
-def _select_epic_auto(*, beads_root: Path, repo_root: Path) -> str:
-    ready = beads.run_bd_json(
-        [
-            "list",
-            "--label",
-            "at:epic",
-            "--status",
-            "open",
-            "--no-assignee",
-            "--limit",
-            "1",
-        ],
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
-    ready = _filter_epics(ready)
+def _select_epic_auto(*, beads_root: Path, repo_root: Path, agent_id: str) -> str:
+    issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
+    ready = _filter_epics(issues, require_unassigned=True)
     if ready:
+        ready = _sort_by_created_at(ready)
         return str(ready[0].get("id"))
+    unfinished = _filter_epics(issues, assignee=agent_id)
+    if unfinished:
+        unfinished = _sort_by_created_at(unfinished)
+        return str(unfinished[0].get("id"))
     die("no eligible epics found")
 
 
@@ -174,7 +206,7 @@ def start_worker(args: object) -> None:
                 die("epic id must not be empty")
         elif mode == "auto":
             selected_epic = _select_epic_auto(
-                beads_root=beads_root, repo_root=repo_root
+                beads_root=beads_root, repo_root=repo_root, agent_id=agent.agent_id
             )
         else:
             issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
