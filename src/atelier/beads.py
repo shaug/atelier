@@ -27,6 +27,28 @@ class ExternalTicketRef:
     on_close: str | None = None
 
 
+@dataclass(frozen=True)
+class ChangesetSummary:
+    total: int
+    ready: int
+    merged: int
+    abandoned: int
+    remaining: int
+
+    @property
+    def ready_to_close(self) -> bool:
+        return self.total > 0 and self.remaining == 0
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "total": self.total,
+            "ready": self.ready,
+            "merged": self.merged,
+            "abandoned": self.abandoned,
+            "remaining": self.remaining,
+        }
+
+
 def beads_env(beads_root: Path) -> dict[str, str]:
     """Return an environment mapping with BEADS_DIR set."""
     env = os.environ.copy()
@@ -79,6 +101,39 @@ def run_bd_json(
     if isinstance(payload, dict):
         return [payload]
     return []
+
+
+def _issue_labels(issue: dict[str, object]) -> set[str]:
+    labels = issue.get("labels")
+    if not isinstance(labels, list):
+        return set()
+    return {str(label) for label in labels if label}
+
+
+def summarize_changesets(
+    changesets: list[dict[str, object]],
+    *,
+    ready: list[dict[str, object]] | None = None,
+) -> ChangesetSummary:
+    """Return a summary of changeset lifecycle counts."""
+    ready_count = len(ready) if ready is not None else 0
+    merged = 0
+    abandoned = 0
+    for issue in changesets:
+        labels = _issue_labels(issue)
+        if "cs:merged" in labels:
+            merged += 1
+        if "cs:abandoned" in labels:
+            abandoned += 1
+    total = len(changesets)
+    remaining = max(total - merged - abandoned, 0)
+    return ChangesetSummary(
+        total=total,
+        ready=ready_count,
+        merged=merged,
+        abandoned=abandoned,
+        remaining=remaining,
+    )
 
 
 def _normalize_description(description: str | None) -> str:
@@ -701,6 +756,21 @@ def claim_epic(
             die(f"epic {epic_id} claim failed; already assigned")
         return updated
     return issue
+
+
+def epic_changeset_summary(
+    epic_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> ChangesetSummary:
+    """Summarize changesets under an epic."""
+    changesets = run_bd_json(
+        ["list", "--parent", epic_id, "--label", "at:changeset"],
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+    return summarize_changesets(changesets)
 
 
 def set_agent_hook(

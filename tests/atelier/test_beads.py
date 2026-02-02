@@ -229,6 +229,42 @@ def test_mark_message_read_updates_labels() -> None:
     assert "--remove-label" in called_args
 
 
+def test_summarize_changesets_counts_and_ready() -> None:
+    changesets = [
+        {"labels": ["cs:merged"]},
+        {"labels": ["cs:abandoned"]},
+        {"labels": ["cs:ready"]},
+    ]
+    summary = beads.summarize_changesets(changesets, ready=[changesets[2]])
+    assert summary.total == 3
+    assert summary.ready == 1
+    assert summary.merged == 1
+    assert summary.abandoned == 1
+    assert summary.remaining == 1
+    assert summary.ready_to_close is False
+
+
+def test_epic_changeset_summary_ready_to_close() -> None:
+    changesets = [
+        {"labels": ["cs:merged"]},
+        {"labels": ["cs:abandoned"]},
+    ]
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:2] == ["list", "--parent"]:
+            return changesets
+        return []
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_json):
+        summary = beads.epic_changeset_summary(
+            "epic-1", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+
+    assert summary.ready_to_close is True
+
+
 def test_update_changeset_review_updates_description() -> None:
     issue = {"id": "atelier-99", "description": "scope: demo\n"}
     captured: dict[str, str] = {}

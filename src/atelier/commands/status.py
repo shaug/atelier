@@ -160,7 +160,8 @@ def _build_epic_payloads(
         ready_changesets = _list_ready_changesets(
             epic_id, beads_root=beads_root, repo_root=repo_root
         )
-        changeset_counts = _changeset_counts(changesets, ready_changesets)
+        summary = beads.summarize_changesets(changesets, ready=ready_changesets)
+        changeset_counts = summary.as_dict()
         payloads.append(
             {
                 "id": epic_id,
@@ -177,6 +178,7 @@ def _build_epic_payloads(
                 "hooked_by": hook_map.get(epic_id, []),
                 "hooked": "at:hooked" in labels or epic_id in hook_map,
                 "changesets": changeset_counts,
+                "ready_to_close": summary.ready_to_close,
             }
         )
     return payloads
@@ -208,30 +210,6 @@ def _list_ready_changesets(
         beads_root=beads_root,
         cwd=repo_root,
     )
-
-
-def _changeset_counts(
-    changesets: list[dict[str, object]],
-    ready: list[dict[str, object]],
-) -> dict[str, int]:
-    merged = 0
-    abandoned = 0
-    for issue in changesets:
-        labels = _issue_labels(issue)
-        if "cs:merged" in labels:
-            merged += 1
-        if "cs:abandoned" in labels:
-            abandoned += 1
-    total = len(changesets)
-    ready_count = len(ready)
-    remaining = max(total - merged - abandoned, 0)
-    return {
-        "total": total,
-        "ready": ready_count,
-        "merged": merged,
-        "abandoned": abandoned,
-        "remaining": remaining,
-    }
 
 
 def _normalize_assignee(value: object) -> str | None:
