@@ -174,6 +174,7 @@ class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     default: str = "codex"
+    identity: str | None = None
     options: dict[str, list[str]] = Field(default_factory=dict)
 
     @field_validator("default", mode="before")
@@ -190,6 +191,16 @@ class AgentConfig(BaseModel):
     def validate_default(cls, value: str) -> str:
         if not agents.is_supported_agent(value):
             raise ValueError(f"unsupported agent {value!r}")
+        return value
+
+    @field_validator("identity", mode="before")
+    @classmethod
+    def normalize_identity(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
         return value
 
     @field_validator("options", mode="before")

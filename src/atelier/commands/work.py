@@ -126,7 +126,12 @@ def start_worker(args: object) -> None:
     )
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
-    agent_home.resolve_agent_home(project_data_dir, project_config, role="worker")
+    agent = agent_home.resolve_agent_home(
+        project_data_dir, project_config, role="worker"
+    )
+    beads.ensure_agent_bead(
+        agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
+    )
 
     epic_id = getattr(args, "epic_id", None)
     mode = _normalize_mode(getattr(args, "mode", None))

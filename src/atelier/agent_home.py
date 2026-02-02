@@ -109,10 +109,14 @@ def resolve_agent_home(
 ) -> AgentHome:
     """Resolve the agent identity and ensure the home directory exists."""
     env_agent_id = os.environ.get("ATELIER_AGENT_ID")
+    config_agent_id = project_config.agent.identity
     if env_agent_id:
         agent_id = env_agent_id.strip()
         if not agent_id:
             die("ATELIER_AGENT_ID must not be empty")
+        agent_name = _derive_agent_name(agent_id)
+    elif config_agent_id:
+        agent_id = config_agent_id
         agent_name = _derive_agent_name(agent_id)
     else:
         agent_name = _normalize_agent_name(project_config.agent.default)

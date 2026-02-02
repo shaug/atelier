@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from atelier import agent_home
-from atelier.models import ProjectConfig
+from atelier.models import AgentConfig, ProjectConfig
 
 
 def test_resolve_agent_home_creates_metadata_and_instructions() -> None:
@@ -35,3 +35,17 @@ def test_env_agent_id_overrides_default_name() -> None:
             )
         assert home.name == "alice"
         assert home.agent_id == "atelier/worker/alice"
+
+
+def test_config_agent_identity_is_used_when_env_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        project_dir.mkdir(parents=True)
+        config_payload = ProjectConfig(
+            agent=AgentConfig(identity="atelier/worker/bob")
+        )
+        home = agent_home.resolve_agent_home(
+            project_dir, config_payload, role="worker"
+        )
+    assert home.name == "bob"
+    assert home.agent_id == "atelier/worker/bob"
