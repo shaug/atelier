@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .. import beads, config, worktrees
+from .. import agent_home, beads, config, worktrees
 from ..io import die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
 
@@ -126,6 +126,7 @@ def start_worker(args: object) -> None:
     )
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
+    agent_home.resolve_agent_home(project_data_dir, project_config, role="worker")
 
     epic_id = getattr(args, "epic_id", None)
     mode = _normalize_mode(getattr(args, "mode", None))

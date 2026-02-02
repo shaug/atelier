@@ -7,6 +7,7 @@ from . import paths
 
 TEMPLATE_PARTS: tuple[tuple[str, ...], ...] = (
     ("AGENTS.md",),
+    ("agent", "AGENTS.md"),
     ("project", "PROJECT.md"),
     ("workspace", "SUCCESS.md"),
     ("workspace", "SUCCESS.ticket.md"),
@@ -122,6 +123,20 @@ def agents_template(
         True
     """
     return read_template(
+        "AGENTS.md",
+        prefer_installed=prefer_installed,
+        prefer_installed_if_modified=prefer_installed_if_modified,
+    )
+
+
+def agent_home_template(
+    *,
+    prefer_installed: bool = False,
+    prefer_installed_if_modified: bool = False,
+) -> str:
+    """Return the canonical agent home ``AGENTS.md`` template text."""
+    return read_template(
+        "agent",
         "AGENTS.md",
         prefer_installed=prefer_installed,
         prefer_installed_if_modified=prefer_installed_if_modified,
