@@ -9,7 +9,7 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .. import beads, config, messages, worktrees
+from .. import beads, config, git, messages, prs, worktrees
 from ..io import die, say
 from .resolve import resolve_current_project_with_repo_root
 
@@ -40,12 +40,15 @@ def status(args: object) -> None:
     agents, hook_map = _build_agent_payloads(
         agent_issues, beads_root=beads_root, repo_root=repo_root
     )
+    origin = project_config.project.origin or project_config.project.repo_url
+    repo_slug = prs.github_repo_slug(origin)
     epics = _build_epic_payloads(
         epic_issues,
         hook_map=hook_map,
         project_data_dir=project_data_dir,
         beads_root=beads_root,
         repo_root=repo_root,
+        repo_slug=repo_slug,
     )
     queues = _build_queue_payloads(
         beads_root=beads_root,
@@ -132,6 +135,7 @@ def _build_epic_payloads(
     project_data_dir: Path,
     beads_root: Path,
     repo_root: Path,
+    repo_slug: str | None,
 ) -> list[dict[str, object]]:
     payloads: list[dict[str, object]] = []
     for issue in issues:
@@ -157,6 +161,12 @@ def _build_epic_payloads(
         changesets = _list_changesets(
             epic_id, beads_root=beads_root, repo_root=repo_root
         )
+        changeset_details = _build_changeset_details(
+            changesets,
+            mapping=mapping,
+            repo_root=repo_root,
+            repo_slug=repo_slug,
+        )
         ready_changesets = _list_ready_changesets(
             epic_id, beads_root=beads_root, repo_root=repo_root
         )
@@ -178,10 +188,66 @@ def _build_epic_payloads(
                 "hooked_by": hook_map.get(epic_id, []),
                 "hooked": "at:hooked" in labels or epic_id in hook_map,
                 "changesets": changeset_counts,
+                "changeset_details": changeset_details,
                 "ready_to_close": summary.ready_to_close,
             }
         )
     return payloads
+
+
+def _build_changeset_details(
+    changesets: list[dict[str, object]],
+    *,
+    mapping: worktrees.WorktreeMapping | None,
+    repo_root: Path,
+    repo_slug: str | None,
+) -> list[dict[str, object]]:
+    details: list[dict[str, object]] = []
+    for issue in changesets:
+        changeset_id = issue.get("id")
+        if not isinstance(changeset_id, str) or not changeset_id:
+            continue
+        labels = _issue_labels(issue)
+        branch = None
+        if mapping is not None:
+            branch = mapping.changesets.get(changeset_id)
+        pushed = False
+        if branch:
+            pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{branch}")
+        pr_payload = None
+        if repo_slug and branch:
+            pr_payload = prs.read_github_pr_status(repo_slug, branch)
+        review_requested = prs.has_review_requests(pr_payload)
+        lifecycle = prs.lifecycle_state(
+            pr_payload, pushed=pushed, review_requested=review_requested
+        )
+        details.append(
+            {
+                "id": changeset_id,
+                "title": issue.get("title"),
+                "labels": labels,
+                "branch": branch,
+                "pushed": pushed,
+                "review_requested": review_requested,
+                "lifecycle_state": lifecycle,
+                "pr": _summarize_pr(pr_payload),
+            }
+        )
+    return details
+
+
+def _summarize_pr(payload: dict[str, object] | None) -> dict[str, object] | None:
+    if not payload:
+        return None
+    return {
+        "number": payload.get("number"),
+        "url": payload.get("url"),
+        "state": payload.get("state"),
+        "is_draft": payload.get("isDraft"),
+        "review_decision": payload.get("reviewDecision"),
+        "mergeable": payload.get("mergeable"),
+        "updated_at": payload.get("updatedAt"),
+    }
 
 
 def _list_changesets(
