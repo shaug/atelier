@@ -18,8 +18,10 @@ system.
 - Human-centric automation with optional explicit review/approval checkpoints.
 - Workspace-oriented flow: work is scoped to a purpose via epic-linked worktrees
   and changeset stacks.
-- Workers are started manually in separate terminals.
-- No background agents. All automation happens via skills once a session starts.
+- Workers are orchestrated by `atelier work`; each session targets a single
+  changeset and exits.
+- No background daemons. `atelier work` can loop or watch for new work while it
+  runs, but it exits when no work remains (unless in watch mode).
 - Most state lives in bd; optional local SQLite only for stronger claim
   atomicity.
 - Planner creates epics + tasks + subtasks with changeset guardrails.
@@ -55,6 +57,7 @@ Responsibilities:
 - Claim an available epic.
 - Hook the epic to itself.
 - Work through tasks/subtasks.
+- Execute exactly one changeset per session, then exit.
 - Close completed tasks and the epic.
 - Clear hook on completion.
 
@@ -66,7 +69,7 @@ Epic completion rule:
   output reports `ready_to_close` when no remaining changesets exist; use
   `work_done` to close the epic and clear the hook.
 
-### Worker Modes
+### Worker Selection Modes
 
 Workers can run in one of two modes:
 
@@ -90,12 +93,31 @@ Auto mode flow:
 
 1. Claim the next eligible *ready* epic.
 1. If none are ready, pick up an unfinished epic.
-1. On completion, repeat.
+1. On completion, repeat if the run mode keeps the worker running.
 
 Auto mode default should prefer new ready epics over unfinished work. Users can
 explicitly target unfinished epics via command-line or by reusing an existing
 session. Auto mode selects the oldest ready epic first (by created time), then
 falls back to the oldest unfinished epic already assigned to the agent.
+
+### Worker Run Modes
+
+`atelier work` can orchestrate multiple agent sessions. Each session handles one
+changeset, then exits. The orchestrator decides whether to launch another
+session.
+
+Run modes:
+
+- **once**: run a single worker session, then exit.
+- **default**: keep starting worker sessions while ready work exists; exit when
+  no work is ready.
+- **watch**: keep checking for new ready work and restart sessions when work
+  becomes available.
+
+Configure the run mode via:
+
+- `ATELIER_RUN_MODE=once|default|watch`
+- `ATELIER_WATCH_INTERVAL=<seconds>` (watch only)
 
 ## Atelier Data Directory
 

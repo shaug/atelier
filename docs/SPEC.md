@@ -115,10 +115,17 @@ Epic description fields include:
 - `atelier plan`: create epics and changesets; assign `workspace.root_branch`.
 - `atelier policy`: edit project-wide policy for planners/workers.
 - `atelier work`: select/claim an epic, pick the next ready changeset, and
-  ensure worktree + branch mappings exist.
+  ensure worktree + branch mappings exist. Run mode controls whether it runs
+  once, loops while work is ready, or watches for new work.
 - `atelier edit`: open the selected worktree in `editor.work`.
 - `atelier open`: run a shell or command inside the worktree.
 - `atelier config`: view or update project config.
 - `atelier status`: show hooks, claims, and changeset status.
 - `atelier list`: list available workspaces (root branches).
 - `atelier gc`: clean up stale hooks and orphaned worktrees.
+
+Worker modes:
+
+- `ATELIER_MODE=prompt|auto` controls epic selection.
+- `ATELIER_RUN_MODE=once|default|watch` controls session looping.
+- `ATELIER_WATCH_INTERVAL=<seconds>` controls watch polling cadence.

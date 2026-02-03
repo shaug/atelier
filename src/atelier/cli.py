@@ -433,6 +433,13 @@ def work_command(
             help="worker selection mode: prompt or auto (defaults to ATELIER_MODE)",
         ),
     ] = None,
+    run_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--run-mode",
+            help="worker run mode: once, default, watch (defaults to ATELIER_RUN_MODE)",
+        ),
+    ] = None,
     queue: Annotated[
         bool,
         typer.Option(
@@ -442,7 +449,9 @@ def work_command(
     ] = False,
 ) -> None:
     """Start a worker session."""
-    work_cmd.start_worker(SimpleNamespace(epic_id=epic_id, mode=mode, queue=queue))
+    work_cmd.start_worker(
+        SimpleNamespace(epic_id=epic_id, mode=mode, run_mode=run_mode, queue=queue)
+    )
 
 
 @app.command("list", help="List workspaces for the current project.")

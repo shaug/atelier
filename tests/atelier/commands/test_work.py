@@ -96,7 +96,9 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
         patch("atelier.commands.work.prompt", return_value="atelier-epic"),
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="prompt"))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="prompt", run_mode="once")
+        )
 
     assert calls[0][0] == "list"
     assert calls[1][0] == "ready"
@@ -194,7 +196,9 @@ def test_work_prompt_allows_resume_epic() -> None:
         patch("atelier.commands.work.prompt", return_value="atelier-epic-hooked"),
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="prompt"))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="prompt", run_mode="once")
+        )
 
     assert calls[0][0] == "list"
     assert calls[1][0] == "ready"
@@ -283,7 +287,9 @@ def test_work_auto_picks_ready_epic() -> None:
         ),
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once")
+        )
 
     assert calls[0][0] == "list"
     assert calls[1][0] == "ready"
@@ -383,7 +389,9 @@ def test_work_auto_falls_back_to_oldest_unfinished() -> None:
         ),
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once")
+        )
 
     assert calls[0][0] == "list"
     assert calls[1][0] == "ready"
@@ -473,7 +481,9 @@ def test_work_resumes_hooked_epic() -> None:
         ),
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once")
+        )
 
     assert calls[0][0] == "show"
     assert calls[1][0] == "ready"
@@ -521,7 +531,9 @@ def test_work_stops_for_unread_inbox() -> None:
         ),
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once")
+        )
 
     claim_epic.assert_not_called()
 
@@ -612,7 +624,9 @@ def test_work_resumes_assigned_epic_before_inbox() -> None:
         ),
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once")
+        )
 
     assert claimed == ["atelier-epic-hooked"]
 
@@ -660,7 +674,9 @@ def test_work_prompts_for_queue_before_claiming() -> None:
         patch("atelier.commands.work.prompt", return_value="msg-1"),
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once")
+        )
 
     claim_queue.assert_called_once_with(
         "msg-1",
@@ -706,7 +722,9 @@ def test_work_queue_option_stops_when_empty() -> None:
         ),
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto", queue=True))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", queue=True, run_mode="once")
+        )
 
     claim_epic.assert_not_called()
 
@@ -750,7 +768,9 @@ def test_work_auto_sends_needs_decision_when_idle() -> None:
         ),
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once")
+        )
 
     claim_epic.assert_not_called()
     send_message.assert_called_once()
@@ -796,7 +816,9 @@ def test_work_prompt_sends_needs_decision_when_idle() -> None:
         patch("atelier.commands.work.prompt") as prompt,
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="prompt"))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="prompt", run_mode="once")
+        )
 
     claim_epic.assert_not_called()
     prompt.assert_not_called()
@@ -872,6 +894,8 @@ def test_work_uses_explicit_epic_id() -> None:
         ),
         patch("atelier.commands.work.say"),
     ):
-        work_cmd.start_worker(SimpleNamespace(epic_id="atelier-epic", mode="prompt"))
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id="atelier-epic", mode="prompt", run_mode="once")
+        )
 
     assert calls[0][0] == "ready"

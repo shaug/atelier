@@ -1,13 +1,14 @@
 """Worker session command implementation.
 
-Starts a worker session by selecting an epic and its next ready changeset.
-Used by ``atelier work``.
+Starts worker sessions by selecting an epic and its next ready changeset.
+``atelier work`` can loop or watch based on run mode.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import os
+import time
 from pathlib import Path
 
 from .. import (
@@ -27,6 +28,8 @@ from ..io import die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
 
 _MODE_VALUES = {"prompt", "auto"}
+_RUN_MODE_VALUES = {"once", "default", "watch"}
+_WATCH_INTERVAL_SECONDS = 60
 
 
 def _normalize_mode(value: str | None) -> str:
@@ -36,6 +39,28 @@ def _normalize_mode(value: str | None) -> str:
     if normalized not in _MODE_VALUES:
         die("mode must be one of: prompt, auto")
     return normalized
+
+
+def _normalize_run_mode(value: str | None) -> str:
+    if value is None:
+        value = os.environ.get("ATELIER_RUN_MODE", "default")
+    normalized = value.strip().lower()
+    if normalized not in _RUN_MODE_VALUES:
+        die("run mode must be one of: once, default, watch")
+    return normalized
+
+
+def _watch_interval_seconds() -> int:
+    raw = os.environ.get("ATELIER_WATCH_INTERVAL", "").strip()
+    if not raw:
+        return _WATCH_INTERVAL_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        die("ATELIER_WATCH_INTERVAL must be an integer number of seconds")
+    if value <= 0:
+        die("ATELIER_WATCH_INTERVAL must be a positive number of seconds")
+    return value
 
 
 def _issue_labels(issue: dict[str, object]) -> set[str]:
@@ -319,8 +344,8 @@ def _handle_queue_before_claim(
     return True
 
 
-def start_worker(args: object) -> None:
-    """Start a worker session by selecting an epic and changeset."""
+def _run_worker_once(args: object, *, mode: str) -> bool:
+    """Start a single worker session by selecting an epic and changeset."""
     project_root, project_config, _enlistment, repo_root = (
         resolve_current_project_with_repo_root()
     )
@@ -341,7 +366,6 @@ def start_worker(args: object) -> None:
 
         epic_id = getattr(args, "epic_id", None)
         queue_only = bool(getattr(args, "queue", False))
-        mode = _normalize_mode(getattr(args, "mode", None))
 
         agent_bead_id = agent_bead.get("id")
         if not isinstance(agent_bead_id, str) or not agent_bead_id:
@@ -353,7 +377,7 @@ def start_worker(args: object) -> None:
                 repo_root=repo_root,
                 force_prompt=True,
             ):
-                return
+                return False
         hooked_epic = None
         assigned_epic = None
         issues: list[dict[str, object]] | None = None
@@ -385,11 +409,11 @@ def start_worker(args: object) -> None:
         elif _check_inbox_before_claim(
             agent.agent_id, beads_root=beads_root, repo_root=repo_root
         ):
-            return
+            return False
         elif _handle_queue_before_claim(
             agent.agent_id, beads_root=beads_root, repo_root=repo_root
         ):
-            return
+            return False
         elif mode == "auto":
             if issues is None:
                 issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
@@ -402,7 +426,7 @@ def start_worker(args: object) -> None:
                     beads_root=beads_root,
                     repo_root=repo_root,
                 )
-                return
+                return False
         else:
             if issues is None:
                 issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
@@ -415,7 +439,7 @@ def start_worker(args: object) -> None:
                     beads_root=beads_root,
                     repo_root=repo_root,
                 )
-                return
+                return False
 
         say(f"Selected epic: {selected_epic}")
         epic_issue = beads.claim_epic(
@@ -508,3 +532,26 @@ def start_worker(args: object) -> None:
                 die(f"command failed: {' '.join(start_cmd)}")
         else:
             exec.run_command(start_cmd, cwd=start_cwd, env=env)
+        return True
+
+
+def start_worker(args: object) -> None:
+    """Start worker sessions based on the configured run mode."""
+    mode = _normalize_mode(getattr(args, "mode", None))
+    run_mode = _normalize_run_mode(getattr(args, "run_mode", None))
+    if bool(getattr(args, "queue", False)):
+        _run_worker_once(args, mode=mode)
+        return
+
+    while True:
+        started = _run_worker_once(args, mode=mode)
+        if run_mode == "once":
+            return
+        if started:
+            continue
+        if run_mode == "watch":
+            interval = _watch_interval_seconds()
+            say(f"No ready work; watching for updates (sleeping {interval}s).")
+            time.sleep(interval)
+            continue
+        return

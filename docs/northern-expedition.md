@@ -107,13 +107,19 @@ ______________________________________________________________________
 ### Worker (`atelier work`)
 
 - Claims and hooks an epic.
-- Executes tasks and changesets.
+- Executes tasks and changesets (one changeset per session).
 - Closes work and clears hooks.
 
-### Worker Modes
+### Worker Selection Modes
 
 - **prompt**: list available epics, ask user to choose.
 - **auto**: claim the next eligible ready epic, or resume unfinished work.
+
+### Worker Run Modes
+
+- **once**: run a single worker session, then exit.
+- **default**: keep running sessions while ready work exists.
+- **watch**: poll for new ready work and restart sessions as work appears.
 
 ______________________________________________________________________
 
@@ -131,6 +137,7 @@ ______________________________________________________________________
 - With an explicit epic id: claim and hook that epic.
 - Without args: prompt (or auto mode) to claim the next eligible epic.
 - Starts work on the next ready changeset for the chosen epic.
+- Run mode determines whether it loops or watches for more work.
 - `atelier open` is not part of the primary workflow.
 
 ### `atelier edit`

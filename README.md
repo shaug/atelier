@@ -179,12 +179,14 @@ and does not write files into the repo.
 You can run `atelier init` in multiple repos; each enlistment becomes its own
 project entry.
 
-Start a worker session (select epic + next changeset):
+Start a worker session (one changeset per session):
 
 ```sh
 atelier work
 atelier work at-epic123
 atelier work --mode auto
+atelier work --run-mode once
+atelier work --run-mode watch
 ```
 
 `atelier work` will:
@@ -192,6 +194,7 @@ atelier work --mode auto
 - claim or select the epic to work on
 - pick the next ready changeset
 - ensure the worktree and changeset branch mapping exist
+- repeat or watch depending on `--run-mode` / `ATELIER_RUN_MODE`
 
 Plan epics and changesets:
 
