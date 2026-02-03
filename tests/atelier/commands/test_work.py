@@ -642,6 +642,7 @@ def test_work_prompts_for_queue_before_claiming() -> None:
             "atelier.commands.work.config.resolve_beads_root",
             return_value=Path("/beads"),
         ),
+        patch("atelier.commands.work.beads.run_bd_json", return_value=[]),
         patch("atelier.commands.work.beads.run_bd_command"),
         patch(
             "atelier.commands.work.beads.ensure_agent_bead",
