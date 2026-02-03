@@ -106,8 +106,22 @@ stored as records with metadata, labels, and parent/child relationships.
 Epic description fields include:
 
 - `workspace.root_branch` (required)
-- `worktree_path` (set after worktree creation)
+- `workspace.parent_branch` (integration target, optional)
+- `workspace.primary_head` (last known root SHA, optional)
+- `workspace.worktree_path` (set after worktree creation)
+- `workspace.pr_strategy` (sequential/on-ready/parallel, optional)
 - `external_tickets` (JSON list of linked external tickets, optional)
+
+Changeset description fields include:
+
+- `changeset.root_branch` (epic root branch)
+- `changeset.parent_branch` (branch this changeset was cut from)
+- `changeset.work_branch` (active work branch)
+- `changeset.root_base` (root SHA at claim time, optional)
+- `changeset.parent_base` (parent SHA at claim time, optional)
+- `changeset.integrated_sha` (root SHA after integration, optional)
+- `changeset.pr_number` (PR/MR number, optional)
+- `changeset.pr_state` (draft|open|approved|merged|closed, optional)
 
 ## 6. Command Semantics
 

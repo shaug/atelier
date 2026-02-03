@@ -179,8 +179,9 @@ worktree_path: worktrees/at-abc12
 
 Changesets should always have a corresponding bead that is a child of the epic.
 In PR-based workflows, each changeset bead maps to its own branch and PR.
-Changesets should be branches, not separate worktrees, unless you need stronger
-isolation.
+Changesets are still modeled as branches, but parallel work requires separate
+worktrees per changeset session. The epic worktree remains a convenience view
+for the root branch.
 
 ## Changeset Branch Naming
 
@@ -194,6 +195,33 @@ changeset bead ID:
 Branch names should be treated as immutable once created. If scope changes
 materially, close the old changeset bead and create a new one with a new branch.
 If no PR exists yet, renaming is possible but discouraged for auditability.
+
+## Branch Metadata (Bead Fields)
+
+Record branch lineage in bead descriptions so integration is deterministic.
+
+Epic beads:
+
+```
+workspace.root_branch: <string>    # stable workspace branch name
+workspace.parent_branch: <string>  # integration target (usually main)
+workspace.primary_head: <sha>      # optional CAS checkpoint
+workspace.worktree_path: <string>  # epic worktree (convenience view)
+workspace.pr_strategy: <string>    # sequential | on-ready | parallel (future)
+```
+
+Changeset beads:
+
+```
+changeset.root_branch: <string>    # epic root branch
+changeset.parent_branch: <string>  # branch this changeset was cut from
+changeset.work_branch: <string>    # active work branch
+changeset.root_base: <sha>         # optional root SHA at claim time
+changeset.parent_base: <sha>       # optional parent SHA at claim time
+changeset.integrated_sha: <sha>    # root SHA after integration
+changeset.pr_number: <int>         # PR/MR number (if created)
+changeset.pr_state: <string>       # draft|open|approved|merged|closed
+```
 
 ## Identity (Agent IDs)
 
@@ -396,6 +424,52 @@ and keep the data model compatible (e.g., attachment fields or molecule IDs).
 
 Atelier should support explicit PR/MR workflows without requiring a dedicated
 agent role. The workflow can be implemented via skills and/or molecules.
+
+### Changeset Integration Routine
+
+Each changeset is integrated on completion, not at epic close. Integration
+rebases the changeset onto the root branch and updates the root branch
+atomically, then marks the changeset as merged and retires its worktree.
+
+Non-PR flow:
+
+1. Ensure root branch is current.
+1. Rebase the changeset work branch onto root.
+1. Fast-forward root to the rebased changeset (CAS update).
+1. Record `changeset.integrated_sha` and mark `cs:merged`.
+
+PR flow (sequential by default):
+
+1. Rebase the changeset work branch onto root before creating/updating a PR.
+1. Push the work branch and create/update the PR when the strategy allows.
+1. When the PR merges, update labels to `cs:merged` and record
+   `changeset.integrated_sha`.
+
+Use optimistic locking to avoid parallel integration conflicts: compare the
+stored root SHA (or `git rev-parse <root>`) before moving the root branch; if it
+has moved, rebase onto the new root and retry.
+
+### PR Strategy (Default: Sequential)
+
+PR strategy is a project-level policy on when to push and when to open PRs. The
+default is **sequential**: only one PR open at a time, and PRs are not created
+until the epic is ready for review.
+
+Dimensions to consider:
+
+- **Push timing**:
+  - `on_changeset_complete` (default): push the work branch after integration.
+  - `on_epic_complete`: push only when the epic is fully integrated.
+- **PR open timing** (for non-first changesets):
+  - after parent PR is created
+  - after parent PR is approved
+  - after parent PR is merged (default)
+- **Epic gating**:
+  - open PRs only after the epic is complete (default)
+  - allow PRs as soon as changesets are ready
+
+When a PR is not yet allowed by the strategy, pushing the branch is still
+permitted so work is backed up without creating reviewer noise.
 
 ### Changeset Lifecycle (Review Projects)
 

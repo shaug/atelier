@@ -15,7 +15,10 @@ description: >-
 - operation: `publish` | `persist`.
 - worktree_path: path to the worktree (default: `.`).
 - repo_path: path to the repo (default: `<worktree_path>`).
-- root_branch: workspace root branch (from `ATELIER_WORKSPACE`).
+- root_branch: epic root branch (from bead metadata).
+- parent_branch: parent branch for the changeset (from bead metadata).
+- work_branch: changeset work branch (from bead metadata).
+- pr_strategy: project PR strategy (e.g., sequential).
 - required_checks: explicit commands from `repo/AGENTS.md`.
 - allow_check_failures: only if the user explicitly asks to ignore failures.
 
@@ -26,6 +29,8 @@ description: >-
    semantics, invariants, and recovery rules.
 1. Resolve publish settings from project config:
    - Use `branch.pr`, `branch.history`, and the project default branch.
+1. Resolve changeset metadata (root/parent/work branches and PR strategy) from
+   bead descriptions or environment.
 1. Ensure a clean working tree before changes:
    - Run `scripts/ensure_clean_tree.sh <repo_path>`.
 1. Check changeset size against guardrails:
@@ -36,10 +41,15 @@ description: >-
    - Run `scripts/run_required_checks.sh <repo_path> <command> [<command> ...]`.
 1. Prepare commits with git as needed. Do not mutate state with `atelier`.
 1. Execute the operation per the resolved plan:
-   - If `branch_pr` is true, push the changeset branch and use the `github-prs`
-     skill to create/update PRs for publish/persist.
-   - If `branch_pr` is false, integrate onto `default_branch` per
-     `branch_history` for publish/persist, then push the default branch.
+   - Rebase the work branch onto `root_branch` before any integration or PR.
+   - If `branch_pr` is true:
+     - Push the work branch.
+     - If the PR strategy allows, use the `github-prs` skill to create/update
+       the PR. Otherwise, record that the branch is pushed and exit.
+   - If `branch_pr` is false:
+     - Integrate the rebased work branch onto `root_branch` per `branch_history`
+       (rebase/merge/squash).
+     - Push the updated `root_branch`.
 1. Verify results using read-only commands and git:
    - `atelier status --format=json`
    - `scripts/ensure_clean_tree.sh <repo_path>`
@@ -48,7 +58,7 @@ description: >-
 
 - Required checks succeeded (or explicit user override recorded).
 - Working tree is clean before and after mutations.
-- Branch/PR state matches the project config-derived plan.
+- Branch/PR state matches the project config-derived plan and PR strategy.
 - Repo is clean after publish/persist.
 
 ## Failure paths

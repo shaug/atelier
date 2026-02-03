@@ -10,9 +10,10 @@ Use this reference when executing publish or persist workflows.
 
 ## Operation semantics
 
-Definitions derived from project config:
+Definitions derived from project config and bead metadata:
 
-- **publish**: run required checks, then publish per the config-derived plan.
+- **publish**: run required checks, then publish per the config-derived plan and
+  PR strategy.
 - **persist**: save progress without integrating. When `branch_pr` is false,
   persist is the same as publish.
 
@@ -20,16 +21,17 @@ Branch mode mapping:
 
 - `branch_pr = true`
   - **persist**: commit and push the changeset branch only (no PR).
-  - **publish**: commit, push, and create/update the PR.
+  - **publish**: commit, push, and create/update the PR when allowed by the PR
+    strategy (otherwise push only).
 - `branch_pr = false`
-  - **publish/persist**: commit, integrate onto the default branch per
-    `branch_history`, then push.
+  - **publish/persist**: commit, integrate onto the epic `root_branch` per
+    `branch_history`, then push the root branch.
 
 Publishing is complete only when the branch required by the plan is pushed.
 
-If a push is rejected because the default branch moved, update your local
-default branch and re-apply the workspace changes according to the history
-policy (rebase/merge/squash), then push again.
+If a push is rejected because the root branch moved, update your local root
+branch and re-apply the workspace changes according to the history policy
+(rebase/merge/squash), then push again.
 
 ## Invariants
 
@@ -53,3 +55,7 @@ policy (rebase/merge/squash), then push again.
 
 When `branch_pr` is true, delegate PR creation or updates to the `github-prs`
 skill. Validate results after mutation.
+
+PR strategy default: sequential (one PR at a time, defer PR creation until the
+epic is ready for review). When the strategy blocks PR creation, push the branch
+and exit without opening a PR.
