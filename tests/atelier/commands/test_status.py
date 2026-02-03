@@ -131,3 +131,91 @@ def test_status_json_summary() -> None:
         assert epic["changesets"]["merged"] == 1
         assert epic["changesets"]["abandoned"] == 1
         assert epic["worktree_relpath"] == "worktrees/epic-1"
+
+
+def test_status_includes_changeset_signals() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        config_payload = {
+            "project": {
+                "enlistment": str(repo_root),
+                "origin": "github.com/org/repo",
+            }
+        }
+        project_config = config.ProjectConfig.model_validate(config_payload)
+
+        epic = {
+            "id": "epic-1",
+            "title": "Epic",
+            "status": "open",
+            "labels": ["at:epic"],
+        }
+        changesets = [{"id": "cs-1", "title": "Changeset", "labels": ["at:changeset"]}]
+
+        def fake_run_bd_json(
+            args: list[str], *, beads_root: Path, cwd: Path
+        ) -> list[dict[str, object]]:
+            if args[:3] == ["list", "--label", "at:epic"]:
+                return [epic]
+            if args[:3] == ["list", "--label", "at:agent"]:
+                return []
+            if args[:3] == ["list", "--label", "at:message"]:
+                return []
+            if args and args[0] == "list" and "--parent" in args:
+                return list(changesets)
+            if args and args[0] == "ready" and "--parent" in args:
+                return []
+            return []
+
+        def fake_load_mapping(path: Path) -> WorktreeMapping | None:
+            if path.name == "epic-1.json":
+                return WorktreeMapping(
+                    epic_id="epic-1",
+                    worktree_path="worktrees/epic-1",
+                    root_branch="alpha",
+                    changesets={"cs-1": "alpha-cs-1"},
+                )
+            return None
+
+        pr_payload = {"state": "OPEN", "isDraft": True}
+
+        with (
+            patch(
+                "atelier.commands.status.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, str(repo_root), repo_root),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_command",
+                return_value=DummyResult(),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_json",
+                side_effect=fake_run_bd_json,
+            ),
+            patch(
+                "atelier.commands.status.worktrees.load_mapping",
+                side_effect=fake_load_mapping,
+            ),
+            patch(
+                "atelier.commands.status.git.git_ref_exists",
+                return_value=True,
+            ),
+            patch(
+                "atelier.commands.status.prs.read_github_pr_status",
+                return_value=pr_payload,
+            ),
+        ):
+            buffer = io.StringIO()
+            with patch("sys.stdout", buffer):
+                status_cmd(SimpleNamespace(format="json"))
+
+        payload = json.loads(buffer.getvalue())
+        epic_payload = payload["epics"][0]
+        details = epic_payload["changeset_details"]
+        assert details[0]["branch"] == "alpha-cs-1"
+        assert details[0]["lifecycle_state"] == "draft-pr"
