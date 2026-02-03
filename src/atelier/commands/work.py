@@ -123,11 +123,13 @@ def _list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]
     )
 
 
-def _select_epic_prompt(issues: list[dict[str, object]], *, agent_id: str) -> str:
+def _select_epic_prompt(
+    issues: list[dict[str, object]], *, agent_id: str
+) -> str | None:
     epics = _filter_epics(issues, require_unassigned=True)
     resume = _filter_epics(issues, assignee=agent_id)
     if not epics and not resume:
-        die("no eligible epics found")
+        return None
     if epics:
         say("Available epics:")
     for issue in epics:
@@ -155,7 +157,7 @@ def _select_epic_prompt(issues: list[dict[str, object]], *, agent_id: str) -> st
     return selection
 
 
-def _select_epic_auto(issues: list[dict[str, object]], *, agent_id: str) -> str:
+def _select_epic_auto(issues: list[dict[str, object]], *, agent_id: str) -> str | None:
     ready = _filter_epics(issues, require_unassigned=True)
     if ready:
         ready = _sort_by_created_at(ready)
@@ -164,7 +166,38 @@ def _select_epic_auto(issues: list[dict[str, object]], *, agent_id: str) -> str:
     if unfinished:
         unfinished = _sort_by_created_at(unfinished)
         return str(unfinished[0].get("id"))
-    die("no eligible epics found")
+    return None
+
+
+def _send_needs_decision(
+    *,
+    agent_id: str,
+    mode: str,
+    issues: list[dict[str, object]],
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    ready = _filter_epics(issues, require_unassigned=True)
+    assigned = _filter_epics(issues, assignee=agent_id)
+    subject = "NEEDS-DECISION: No eligible epics"
+    timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+    body = "\n".join(
+        [
+            f"Agent: {agent_id}",
+            f"Mode: {mode}",
+            f"Total epics: {len(issues)}",
+            f"Ready epics: {len(ready)}",
+            f"Assigned epics: {len(assigned)}",
+            f"Timestamp: {timestamp}",
+        ]
+    )
+    beads.create_message_bead(
+        subject=subject,
+        body=body,
+        metadata={"from": agent_id, "queue": "overseer", "msg_type": "notification"},
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
 
 
 def _next_changeset(
@@ -360,10 +393,28 @@ def start_worker(args: object) -> None:
             if issues is None:
                 issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
             selected_epic = _select_epic_auto(issues, agent_id=agent.agent_id)
+            if selected_epic is None:
+                _send_needs_decision(
+                    agent_id=agent.agent_id,
+                    mode=mode,
+                    issues=issues,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                )
+                return
         else:
             if issues is None:
                 issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
             selected_epic = _select_epic_prompt(issues, agent_id=agent.agent_id)
+            if selected_epic is None:
+                _send_needs_decision(
+                    agent_id=agent.agent_id,
+                    mode=mode,
+                    issues=issues,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                )
+                return
 
         say(f"Selected epic: {selected_epic}")
         epic_issue = beads.claim_epic(
