@@ -464,7 +464,9 @@ bd update <epic-id> --assignee=<agent> --status=hooked
 
 Re-read and verify assignee. If mismatched, release and retry.
 
-### Option B: SQLite lock (stronger)
+### Option B: SQLite lock (future exploration)
+
+Not implemented yet. Revisit after more mileage with bd-only claims.
 
 Use a local SQLite table:
 
