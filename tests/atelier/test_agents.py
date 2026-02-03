@@ -118,6 +118,7 @@ class TestAgentSpec:
             "codex",
             "claude",
             "gemini",
+            "opencode",
             "copilot",
             "aider",
         )

@@ -26,6 +26,7 @@ from . import __version__, beads, config, git, paths
 from .commands import config as config_cmd
 from .commands import edit as edit_cmd
 from .commands import gc as gc_cmd
+from .commands import hook as hook_cmd
 from .commands import init as init_cmd
 from .commands import list as list_cmd
 from .commands import new as new_cmd
@@ -399,6 +400,19 @@ def plan_command(
 ) -> None:
     """Start a planner session."""
     plan_cmd.run_planner(SimpleNamespace(epic_id=epic_id))
+
+
+@app.command("hook", help="Run an agent hook event handler.")
+def hook_command(
+    event: Annotated[
+        str | None,
+        typer.Argument(
+            help="hook event name (session-start|pre-compact|stop)",
+        ),
+    ] = None,
+) -> None:
+    """Run a hook command for agent integrations."""
+    hook_cmd.run_hook(SimpleNamespace(event=event))
 
 
 @app.command(

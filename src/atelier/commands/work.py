@@ -17,6 +17,7 @@ from .. import (
     codex,
     config,
     exec,
+    hooks,
     policy,
     root_branch,
     workspace,
@@ -485,11 +486,16 @@ def start_worker(args: object) -> None:
             worktree_path,
             base_env=agents.agent_environment(agent.agent_id),
         )
+        env["ATELIER_EPIC_ID"] = selected_epic
+        if changeset_id:
+            env["ATELIER_CHANGESET_ID"] = str(changeset_id)
         opening_prompt = ""
         if agent_spec.name == "codex":
             opening_prompt = workspace.workspace_session_identifier(
                 project_enlistment, root_branch_value, changeset_id or None
             )
+        hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
+        hooks.ensure_hooks_path(env, hook_path)
         say(f"Starting {agent_spec.display_name} session")
         start_cmd, start_cwd = agent_spec.build_start_command(
             worktree_path, agent_options, opening_prompt

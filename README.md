@@ -89,6 +89,7 @@ Atelier validates that the configured agent is available on your PATH (using
 - [Codex CLI](https://developers.openai.com/codex/cli/)
 - [Claude Code CLI](https://claude.com/product/claude-code)
 - [Gemini CLI](https://geminicli.com)
+- [OpenCode](https://opencode.ai)
 - [GitHub Copilot CLI](https://github.com/features/copilot/cli)
 - [Aider](https://aider.chat/docs/install.html)
 

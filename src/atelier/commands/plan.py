@@ -10,6 +10,7 @@ from .. import (
     config,
     exec,
     git,
+    hooks,
     policy,
     workspace,
     worktrees,
@@ -65,6 +66,8 @@ def run_planner(args: object) -> None:
         if agent_spec is None:
             die(f"unsupported agent {project_config.agent.default!r}")
         agent_options = list(project_config.agent.options.get(agent_spec.name, []))
+        hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
+        hooks.ensure_hooks_path(env, hook_path)
         opening_prompt = ""
         if agent_spec.name == "codex":
             opening_prompt = workspace.workspace_session_identifier(

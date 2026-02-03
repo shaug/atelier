@@ -27,6 +27,7 @@ class AgentSpec:
     resume_requires_session_id: bool = True
     version_args: tuple[str, ...] = ("--version",)
     yolo_flags: tuple[str, ...] = ()
+    supports_hooks: bool = False
 
     def _base_command(
         self, workspace_dir: Path, options: list[str]
@@ -85,6 +86,7 @@ AGENTS: dict[str, AgentSpec] = {
         command=("claude",),
         resume_subcommand=("--continue",),
         resume_requires_session_id=False,
+        supports_hooks=True,
     ),
     "gemini": AgentSpec(
         name="gemini",
@@ -93,6 +95,13 @@ AGENTS: dict[str, AgentSpec] = {
         prompt_flag="--prompt-interactive",
         resume_subcommand=("--resume",),
         resume_requires_session_id=False,
+        supports_hooks=True,
+    ),
+    "opencode": AgentSpec(
+        name="opencode",
+        display_name="OpenCode",
+        command=("opencode",),
+        supports_hooks=True,
     ),
     "copilot": AgentSpec(
         name="copilot",

@@ -204,6 +204,10 @@ Recommended env vars:
 - `BD_ACTOR=atelier/worker/alice` (for bead attribution)
 - `BEADS_AGENT_NAME=atelier/worker/alice` (for bead routing/slots)
 
+Hook-capable runtimes (Claude, Gemini, OpenCode) can load the hook config
+exported by Atelier at `ATELIER_HOOKS_PATH`. For non-hook runtimes, follow the
+startup contract manually.
+
 Agent bead IDs should be derived from the stable identity, e.g.:
 
 - `at-worker-alice`

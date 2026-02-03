@@ -12,6 +12,12 @@ This directory is the persistent home for a single agent identity.
 - Check for an existing hook before starting new work.
 - If no hook is present, check for message beads before claiming work.
 
+## Hooks (If Supported)
+
+- Hook-capable runtimes (Claude, Gemini, OpenCode) can use Atelier hook configs.
+- `ATELIER_HOOKS_PATH` points to the generated hook config in this agent home.
+- If your runtime cannot load hooks, follow the Startup Contract manually.
+
 ## Notes
 
 - Project policy (if configured) is injected below for this agent role.
