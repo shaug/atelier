@@ -47,9 +47,12 @@ def ensure_agent_hooks(agent_home: AgentHome, agent: AgentSpec) -> Path | None:
     if not agent.supports_hooks:
         return None
     path = hooks_path(agent_home)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = render_hook_config(hook_commands())
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = render_hook_config(hook_commands())
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        return None
     return path
 
 
