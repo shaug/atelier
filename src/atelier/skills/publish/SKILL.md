@@ -15,6 +15,7 @@ description: >-
 - operation: `publish` | `persist`.
 - worktree_path: path to the worktree (default: `.`).
 - repo_path: path to the repo (default: `<worktree_path>`).
+- root_branch: workspace root branch (from `ATELIER_WORKSPACE`).
 - required_checks: explicit commands from `repo/AGENTS.md`.
 - allow_check_failures: only if the user explicitly asks to ignore failures.
 
@@ -27,6 +28,10 @@ description: >-
    - Use `branch.pr`, `branch.history`, and the project default branch.
 1. Ensure a clean working tree before changes:
    - Run `scripts/ensure_clean_tree.sh <repo_path>`.
+1. Check changeset size against guardrails:
+   - Run `git -C <repo_path> diff --numstat <root_branch>...HEAD`.
+   - Sum added + deleted lines; if >800 LOC without approval, stop and send a
+     `NEEDS-DECISION:` message to the overseer.
 1. Run required checks unless explicitly told to skip failures:
    - Run `scripts/run_required_checks.sh <repo_path> <command> [<command> ...]`.
 1. Prepare commits with git as needed. Do not mutate state with `atelier`.

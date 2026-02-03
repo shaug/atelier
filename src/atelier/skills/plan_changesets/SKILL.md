@@ -21,6 +21,7 @@ description: >-
 - Keep tests with the nearest production change.
 - Ask for an estimated LOC range per changeset and confirm approval when a
   changeset exceeds ~800 LOC (unless purely mechanical).
+- If a changeset is trending >400 LOC, consider splitting before implementation.
 - Record the LOC estimate and any explicit approval in notes (use `--notes` or
   `--append-notes`, not `--estimate`).
 
