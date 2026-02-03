@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import subprocess
@@ -896,6 +897,39 @@ def list_queue_messages(
         enriched["claimed_by"] = claimed_by
         matches.append(enriched)
     return matches
+
+
+def claim_queue_message(
+    message_id: str,
+    agent_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    queue: str | None = None,
+) -> dict[str, object]:
+    """Claim a queued message bead by setting claimed metadata."""
+    issues = run_bd_json(["show", message_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"message not found: {message_id}")
+    issue = issues[0]
+    description = issue.get("description")
+    payload = messages.parse_message(
+        description if isinstance(description, str) else ""
+    )
+    queue_name = payload.metadata.get("queue")
+    if not isinstance(queue_name, str) or not queue_name.strip():
+        die(f"message {message_id} is not in a queue")
+    if queue is not None and queue_name != queue:
+        die(f"message {message_id} is not in queue {queue!r}")
+    claimed_by = payload.metadata.get("claimed_by")
+    if isinstance(claimed_by, str) and claimed_by.strip():
+        die(f"message {message_id} already claimed by {claimed_by}")
+    payload.metadata["claimed_by"] = agent_id
+    payload.metadata["claimed_at"] = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+    updated = messages.render_message(payload.metadata, payload.body)
+    _update_issue_description(message_id, updated, beads_root=beads_root, cwd=cwd)
+    refreshed = run_bd_json(["show", message_id], beads_root=beads_root, cwd=cwd)
+    return refreshed[0] if refreshed else issue
 
 
 def mark_message_read(

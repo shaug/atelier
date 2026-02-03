@@ -419,9 +419,16 @@ def work_command(
             help="worker selection mode: prompt or auto (defaults to ATELIER_MODE)",
         ),
     ] = None,
+    queue: Annotated[
+        bool,
+        typer.Option(
+            "--queue",
+            help="process queued messages and exit",
+        ),
+    ] = False,
 ) -> None:
     """Start a worker session."""
-    work_cmd.start_worker(SimpleNamespace(epic_id=epic_id, mode=mode))
+    work_cmd.start_worker(SimpleNamespace(epic_id=epic_id, mode=mode, queue=queue))
 
 
 @app.command("list", help="List workspaces for the current project.")

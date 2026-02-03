@@ -617,6 +617,99 @@ def test_work_resumes_assigned_epic_before_inbox() -> None:
     assert claimed == ["atelier-epic-hooked"]
 
 
+def test_work_prompts_for_queue_before_claiming() -> None:
+    queued = [
+        {"id": "msg-1", "title": "Queue item", "queue": "triage"},
+    ]
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/agent",
+        role="worker",
+        path=Path("/project/agents/worker"),
+    )
+
+    with (
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.work.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.work.beads.run_bd_command"),
+        patch(
+            "atelier.commands.work.beads.ensure_agent_bead",
+            return_value={"id": "atelier-agent"},
+        ),
+        patch("atelier.commands.work.policy.sync_agent_home_policy"),
+        patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=queued),
+        patch("atelier.commands.work.beads.claim_queue_message") as claim_queue,
+        patch("atelier.commands.work.beads.claim_epic") as claim_epic,
+        patch(
+            "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
+        ),
+        patch("atelier.commands.work.prompt", return_value="msg-1"),
+        patch("atelier.commands.work.say"),
+    ):
+        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto"))
+
+    claim_queue.assert_called_once_with(
+        "msg-1",
+        "atelier/worker/agent",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    claim_epic.assert_not_called()
+
+
+def test_work_queue_option_stops_when_empty() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/agent",
+        role="worker",
+        path=Path("/project/agents/worker"),
+    )
+
+    with (
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.work.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.work.beads.run_bd_command"),
+        patch(
+            "atelier.commands.work.beads.ensure_agent_bead",
+            return_value={"id": "atelier-agent"},
+        ),
+        patch("atelier.commands.work.policy.sync_agent_home_policy"),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.work.beads.claim_epic") as claim_epic,
+        patch(
+            "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
+        ),
+        patch("atelier.commands.work.say"),
+    ):
+        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode="auto", queue=True))
+
+    claim_epic.assert_not_called()
+
+
 def test_work_uses_explicit_epic_id() -> None:
     changesets = [{"id": "atelier-epic.1", "title": "First changeset"}]
     calls: list[list[str]] = []

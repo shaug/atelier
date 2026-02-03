@@ -206,6 +206,38 @@ def test_create_message_bead_renders_frontmatter() -> None:
     assert result["id"] == "atelier-55"
 
 
+def test_claim_queue_message_sets_claimed_metadata() -> None:
+    description = "---\nqueue: triage\n---\n\nBody\n"
+    issue = {"id": "msg-1", "description": description}
+    captured: dict[str, str] = {}
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        return [issue]
+
+    def fake_update(
+        issue_id: str, description: str, *, beads_root: Path, cwd: Path
+    ) -> None:
+        captured["id"] = issue_id
+        captured["description"] = description
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+    ):
+        beads.claim_queue_message(
+            "msg-1",
+            "atelier/worker/agent",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert captured["id"] == "msg-1"
+    assert "claimed_by: atelier/worker/agent" in captured["description"]
+    assert "claimed_at:" in captured["description"]
+
+
 def test_list_inbox_messages_filters_unread() -> None:
     with patch(
         "atelier.beads.run_bd_json", return_value=[{"id": "atelier-77"}]

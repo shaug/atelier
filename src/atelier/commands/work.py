@@ -239,14 +239,50 @@ def _check_inbox_before_claim(
     if inbox:
         say(f"Inbox has {len(inbox)} unread message(s); review before claiming work.")
         return True
-    queued = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root)
-    if queued:
-        say(
-            "Queue has "
-            f"{len(queued)} unclaimed message(s); review before claiming work."
-        )
-        return True
     return False
+
+
+def _prompt_queue_claim(
+    queued: list[dict[str, object]],
+    *,
+    agent_id: str,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    say("Queued messages:")
+    for issue in queued:
+        issue_id = issue.get("id") or ""
+        queue_name = issue.get("queue") or "queue"
+        title = issue.get("title") or ""
+        say(f"- {issue_id} [{queue_name}] {title}")
+    selection = prompt("Queue message id (blank to skip)")
+    selection = selection.strip()
+    if not selection:
+        return
+    valid_ids = {str(issue.get("id")) for issue in queued if issue.get("id")}
+    if selection not in valid_ids:
+        die(f"unknown queue message id: {selection}")
+    beads.claim_queue_message(selection, agent_id, beads_root=beads_root, cwd=repo_root)
+    say(f"Claimed queue message: {selection}")
+
+
+def _handle_queue_before_claim(
+    agent_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    force_prompt: bool = False,
+) -> bool:
+    queued = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root)
+    if not queued:
+        if force_prompt:
+            say("No queued messages available.")
+            return True
+        return False
+    _prompt_queue_claim(
+        queued, agent_id=agent_id, beads_root=beads_root, repo_root=repo_root
+    )
+    return True
 
 
 def start_worker(args: object) -> None:
@@ -270,11 +306,20 @@ def start_worker(args: object) -> None:
         )
 
         epic_id = getattr(args, "epic_id", None)
+        queue_only = bool(getattr(args, "queue", False))
         mode = _normalize_mode(getattr(args, "mode", None))
 
         agent_bead_id = agent_bead.get("id")
         if not isinstance(agent_bead_id, str) or not agent_bead_id:
             die("failed to resolve agent bead id")
+        if queue_only:
+            if _handle_queue_before_claim(
+                agent.agent_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                force_prompt=True,
+            ):
+                return
         hooked_epic = None
         assigned_epic = None
         issues: list[dict[str, object]] | None = None
@@ -304,6 +349,10 @@ def start_worker(args: object) -> None:
             selected_epic = assigned_epic
             say(f"Resuming assigned epic: {selected_epic}")
         elif _check_inbox_before_claim(
+            agent.agent_id, beads_root=beads_root, repo_root=repo_root
+        ):
+            return
+        elif _handle_queue_before_claim(
             agent.agent_id, beads_root=beads_root, repo_root=repo_root
         ):
             return

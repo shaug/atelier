@@ -443,9 +443,10 @@ inbox/queue”) should be enforced via:
 AGENTS.md is the primary source of behavior; skills are the execution mechanism.
 Use the `startup_contract` skill to sequence hook checks, inbox/queue handling,
 and claiming new epics. The fallback ordering is: resume hooked epic, then stop
-if there are unread message beads or unclaimed queue items, then choose a new
-epic (auto = oldest ready, else oldest assigned; prompt = user selection). If no
-eligible epics exist, emit a `NEEDS-DECISION` message to the overseer.
+if there are unread message beads, then prompt to claim/process any unclaimed
+queue items, then choose a new epic (auto = oldest ready, else oldest assigned;
+prompt = user selection). If no eligible epics exist, emit a `NEEDS-DECISION`
+message to the overseer.
 
 ## Claiming Strategy (Atomicity)
 
