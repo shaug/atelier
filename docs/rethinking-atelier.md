@@ -471,6 +471,12 @@ Dimensions to consider:
 When a PR is not yet allowed by the strategy, pushing the branch is still
 permitted so work is backed up without creating reviewer noise.
 
+### PR Drafting (Agent Assist)
+
+PR creation is mechanical except for the summary text. Use the `pr_draft` skill
+to generate the PR title/body from the changeset bead and diff, then open the PR
+via `github-prs` when the strategy allows it.
+
 ### Changeset Lifecycle (Review Projects)
 
 Changesets move through a deterministic lifecycle, but PR states are computed

@@ -35,7 +35,7 @@ def test_status_json_summary() -> None:
             "status": "open",
             "assignee": "agent-1",
             "labels": ["at:epic", "workspace:alpha", "at:hooked"],
-            "description": "workspace.root_branch: alpha\n",
+            "description": "workspace.root_branch: alpha\nworkspace.pr_strategy: sequential\n",
         }
         epic_two = {
             "id": "epic-2",
@@ -125,6 +125,7 @@ def test_status_json_summary() -> None:
         epic_payloads = {item["id"]: item for item in payload["epics"]}
         epic = epic_payloads["epic-1"]
         assert epic["root_branch"] == "alpha"
+        assert epic["pr_strategy"] == "sequential"
         assert epic["hooked_by"] == ["agent-1"]
         assert epic["changesets"]["total"] == 3
         assert epic["changesets"]["ready"] == 1

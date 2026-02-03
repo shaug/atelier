@@ -142,6 +142,10 @@ def _build_epic_payloads(
         epic_id = issue.get("id")
         if not isinstance(epic_id, str) or not epic_id:
             continue
+        description = issue.get("description")
+        fields = beads.parse_description_fields(
+            description if isinstance(description, str) else ""
+        )
         labels = _issue_labels(issue)
         root_branch = beads.extract_workspace_root_branch(issue) or None
         mapping = worktrees.load_mapping(
@@ -180,6 +184,7 @@ def _build_epic_payloads(
                 "assignee": _normalize_assignee(issue.get("assignee")),
                 "labels": labels,
                 "root_branch": root_branch,
+                "pr_strategy": fields.get("workspace.pr_strategy") or None,
                 "workspace_label": beads.workspace_label(root_branch)
                 if root_branch
                 else None,
@@ -382,6 +387,7 @@ def _render_status(
         table.add_column("Status", no_wrap=True)
         table.add_column("Assignee", no_wrap=True)
         table.add_column("Root", no_wrap=True)
+        table.add_column("PR Strategy", no_wrap=True)
         table.add_column("Hooked by", no_wrap=True)
         table.add_column("Changesets", justify="right")
         table.add_column("Worktree", overflow="fold")
@@ -404,6 +410,7 @@ def _render_status(
                 _display_value(epic.get("status")),
                 _display_value(epic.get("assignee")),
                 _display_value(epic.get("root_branch")),
+                _display_value(epic.get("pr_strategy")),
                 hooked_by_display or "-",
                 ready_display,
                 _display_value(epic.get("worktree_relpath")),
