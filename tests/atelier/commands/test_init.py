@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest.mock import patch
 
 import pytest
@@ -33,6 +34,16 @@ class TestInitProject:
                     patch("builtins.input", lambda _: next(responses)),
                     patch(
                         "atelier.config.shutil.which", return_value="/usr/bin/cursor"
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.run_bd_command",
+                        return_value=CompletedProcess(
+                            args=["bd"], returncode=0, stdout="", stderr=""
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
@@ -76,6 +87,16 @@ class TestInitProject:
                         "atelier.config.shutil.which", return_value="/usr/bin/cursor"
                     ),
                     patch.dict(os.environ, {"EDITOR": "nano -w"}),
+                    patch(
+                        "atelier.commands.init.beads.run_bd_command",
+                        return_value=CompletedProcess(
+                            args=["bd"], returncode=0, stdout="", stderr=""
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
@@ -106,6 +127,16 @@ class TestInitProject:
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
+                    patch(
+                        "atelier.commands.init.beads.run_bd_command",
+                        return_value=CompletedProcess(
+                            args=["bd"], returncode=0, stdout="", stderr=""
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
@@ -138,6 +169,16 @@ class TestInitProject:
                     patch("builtins.input", lambda _: next(responses)),
                     patch("atelier.config.shutil.which", return_value=None),
                     patch.dict(os.environ, {"EDITOR": "nano -w"}),
+                    patch(
+                        "atelier.commands.init.beads.run_bd_command",
+                        return_value=CompletedProcess(
+                            args=["bd"], returncode=0, stdout="", stderr=""
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
@@ -207,6 +248,16 @@ class TestInitProject:
                         side_effect=AssertionError("prompt should not be called"),
                     ),
                     patch("atelier.commands.init.confirm", return_value=False),
+                    patch(
+                        "atelier.commands.init.beads.run_bd_command",
+                        return_value=CompletedProcess(
+                            args=["bd"], returncode=0, stdout="", stderr=""
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
@@ -225,6 +276,76 @@ class TestInitProject:
                 assert config_payload.agent.default == "codex"
                 assert config_payload.editor.edit == ["cursor", "-w"]
                 assert config_payload.editor.work == ["cursor"]
+            finally:
+                os.chdir(original_cwd)
+
+    def test_init_reprompts_with_existing_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                payload = {
+                    "project": {
+                        "enlistment": enlistment_path,
+                        "origin": NORMALIZED_ORIGIN,
+                        "repo_url": RAW_ORIGIN,
+                    },
+                    "branch": {
+                        "prefix": "existing/",
+                        "pr": False,
+                        "history": "merge",
+                    },
+                    "agent": {"default": "codex", "options": {"codex": []}},
+                    "editor": {"edit": ["nano", "-w"], "work": ["nano"]},
+                    "atelier": {
+                        "version": "0.1.0",
+                        "created_at": "2026-01-01T00:00:00Z",
+                    },
+                }
+                with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                    project_dir = paths.project_dir_for_enlistment(
+                        enlistment_path, NORMALIZED_ORIGIN
+                    )
+                project_dir.mkdir(parents=True, exist_ok=True)
+                parsed = config.ProjectConfig.model_validate(payload)
+                config.write_project_config(
+                    paths.project_config_path(project_dir), parsed
+                )
+
+                args = make_init_args()
+                responses = iter(["", "", "", "", "", "", "", ""])
+
+                with (
+                    patch("builtins.input", lambda _: next(responses)),
+                    patch("atelier.commands.init.confirm", return_value=False),
+                    patch(
+                        "atelier.commands.init.beads.run_bd_command",
+                        return_value=CompletedProcess(
+                            args=["bd"], returncode=0, stdout="", stderr=""
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    init_cmd.init_project(args)
+
+                config_path = paths.project_config_path(project_dir)
+                config_payload = config.load_project_config(config_path)
+                assert config_payload is not None
+                assert config_payload.branch.prefix == "existing/"
+                assert config_payload.branch.pr is False
+                assert config_payload.branch.history == "merge"
+                assert config_payload.agent.default == "codex"
+                assert config_payload.editor.edit == ["nano", "-w"]
+                assert config_payload.editor.work == ["nano"]
             finally:
                 os.chdir(original_cwd)
 

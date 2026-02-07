@@ -1,6 +1,7 @@
 import os
 import tempfile
 from pathlib import Path
+from subprocess import CompletedProcess
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -33,6 +34,16 @@ def test_new_creates_project_and_starts_planning() -> None:
                 patch("builtins.input", lambda _: next(responses)),
                 patch("atelier.commands.init.confirm", return_value=False),
                 patch("atelier.config.shutil.which", return_value="/usr/bin/cursor"),
+                patch(
+                    "atelier.commands.init.beads.run_bd_command",
+                    return_value=CompletedProcess(
+                        args=["bd"], returncode=0, stdout="", stderr=""
+                    ),
+                ),
+                patch(
+                    "atelier.commands.init.beads.ensure_atelier_types",
+                    return_value=False,
+                ),
                 patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                 patch("atelier.exec.run_command", fake_run),
                 patch("atelier.git.git_repo_root", return_value=target_dir),

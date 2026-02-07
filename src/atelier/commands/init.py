@@ -31,40 +31,24 @@ def init_project(args: object) -> None:
     config_path = paths.project_config_path(project_dir)
     config_payload = config.load_project_config(config_path)
     user_payload = config.load_json(paths.project_config_user_path(project_dir))
-    missing_fields = config.user_config_missing_fields(user_payload)
-    args_provided = any(
-        getattr(args, name, None) is not None
-        for name in (
-            "branch_prefix",
-            "branch_pr",
-            "branch_history",
-            "agent",
-            "editor_edit",
-            "editor_work",
-            "editor",
-        )
-    )
-    if config_payload and not missing_fields and not args_provided:
-        say("Atelier project already initialized")
-        return
     payload = config.build_project_config(
         config_payload or {},
         enlistment_path,
         origin,
         origin_raw,
         args,
-        prompt_missing_only=True,
+        prompt_missing_only=not bool(config_payload),
         raw_existing=user_payload,
     )
     project.ensure_project_dirs(project_dir)
     config.write_project_config(config_path, payload)
     project.ensure_project_scaffold(project_dir)
 
+    beads_root = config.resolve_beads_root(project_dir, Path(enlistment_path))
+    beads.run_bd_command(["prime"], beads_root=beads_root, cwd=Path(enlistment_path))
+    beads.ensure_atelier_types(beads_root=beads_root, cwd=Path(enlistment_path))
+
     if confirm("Add project-wide policy for agents?", default=False):
-        beads_root = config.resolve_beads_root(project_dir, Path(enlistment_path))
-        beads.run_bd_command(
-            ["prime"], beads_root=beads_root, cwd=Path(enlistment_path)
-        )
         planner_issue = beads.list_policy_beads(
             policy.ROLE_PLANNER, beads_root=beads_root, cwd=Path(enlistment_path)
         )

@@ -29,6 +29,7 @@ def test_ensure_agent_bead_creates_when_missing() -> None:
 
     with (
         patch("atelier.beads.find_agent_bead", return_value=None),
+        patch("atelier.beads._agent_issue_type", return_value="task"),
         patch("atelier.beads.run_bd_command", side_effect=fake_command),
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
     ):

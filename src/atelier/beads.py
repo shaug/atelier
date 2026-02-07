@@ -18,6 +18,10 @@ POLICY_LABEL = "at:policy"
 POLICY_SCOPE_LABEL = "scope:project"
 EXTERNAL_TICKETS_KEY = "external_tickets"
 HOOK_SLOT_NAME = "hook"
+ATELIER_CUSTOM_TYPES = ("agent", "policy")
+_AGENT_ISSUE_TYPE = "agent"
+_FALLBACK_ISSUE_TYPE = "task"
+_ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
 
 
 @dataclass(frozen=True)
@@ -103,6 +107,130 @@ def run_bd_json(
     if isinstance(payload, dict):
         return [payload]
     return []
+
+
+def _parse_types_payload(raw: str) -> dict[str, object] | None:
+    if not raw:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            return json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+
+
+def _extract_issue_types(payload: object) -> set[str]:
+    if not isinstance(payload, dict):
+        return set()
+    types: set[str] = set()
+    for key in ("core_types", "custom_types", "types"):
+        items = payload.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict):
+                name = item.get("name")
+                if isinstance(name, str) and name:
+                    types.add(name)
+            elif isinstance(item, str) and item:
+                types.add(item)
+    return types
+
+
+def _list_issue_types(*, beads_root: Path, cwd: Path) -> set[str]:
+    cached = _ISSUE_TYPE_CACHE.get(beads_root)
+    if cached is not None:
+        return cached
+    result = exec.try_run_command(
+        ["bd", "types", "--json"], cwd=cwd, env=beads_env(beads_root)
+    )
+    if result is None or result.returncode != 0:
+        types = {_FALLBACK_ISSUE_TYPE}
+        _ISSUE_TYPE_CACHE[beads_root] = types
+        return types
+    payload = _parse_types_payload(result.stdout or "")
+    types = _extract_issue_types(payload)
+    if not types:
+        types = {_FALLBACK_ISSUE_TYPE}
+    _ISSUE_TYPE_CACHE[beads_root] = types
+    return types
+
+
+def _agent_issue_type(*, beads_root: Path, cwd: Path) -> str:
+    types = _list_issue_types(beads_root=beads_root, cwd=cwd)
+    if _AGENT_ISSUE_TYPE in types:
+        return _AGENT_ISSUE_TYPE
+    return _FALLBACK_ISSUE_TYPE
+
+
+def _parse_custom_types(value: str | None) -> list[str]:
+    if not value:
+        return []
+    entries = []
+    seen = set()
+    for part in value.split(","):
+        entry = part.strip()
+        if not entry or entry in seen:
+            continue
+        seen.add(entry)
+        entries.append(entry)
+    return entries
+
+
+def ensure_custom_types(
+    required: list[str],
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> bool:
+    """Ensure the Beads config includes required custom issue types."""
+    required_clean = []
+    seen = set()
+    for entry in required:
+        value = entry.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        required_clean.append(value)
+    if not required_clean:
+        return False
+    result = run_bd_command(
+        ["config", "get", "types.custom", "--json"],
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+    payload = _parse_types_payload(result.stdout or "")
+    current_value = ""
+    if isinstance(payload, dict):
+        value = payload.get("value")
+        if isinstance(value, str):
+            current_value = value
+    existing = _parse_custom_types(current_value)
+    missing = [entry for entry in required_clean if entry not in existing]
+    if not missing:
+        return False
+    updated = ",".join([*existing, *missing])
+    run_bd_command(
+        ["config", "set", "types.custom", updated], beads_root=beads_root, cwd=cwd
+    )
+    _ISSUE_TYPE_CACHE.pop(beads_root, None)
+    return True
+
+
+def ensure_atelier_types(*, beads_root: Path, cwd: Path) -> bool:
+    """Ensure Atelier-required custom issue types are configured."""
+    return ensure_custom_types(
+        list(ATELIER_CUSTOM_TYPES), beads_root=beads_root, cwd=cwd
+    )
 
 
 def _issue_labels(issue: dict[str, object]) -> set[str]:
@@ -565,16 +693,13 @@ def create_policy_bead(
         handle.write(body.rstrip("\n") + "\n" if body else "")
         temp_path = Path(handle.name)
     try:
+        labels = ",".join([POLICY_LABEL, POLICY_SCOPE_LABEL, policy_role_label(role)])
         args = [
             "create",
             "--type",
             "policy",
-            "--label",
-            POLICY_LABEL,
-            "--label",
-            POLICY_SCOPE_LABEL,
-            "--label",
-            policy_role_label(role),
+            "--labels",
+            labels,
             "--title",
             title,
             "--body-file",
@@ -693,12 +818,13 @@ def ensure_agent_bead(
     description = f"agent_id: {agent_id}\n"
     if role:
         description += f"role_type: {role}\n"
+    issue_type = _agent_issue_type(beads_root=beads_root, cwd=cwd)
     result = run_bd_command(
         [
             "create",
             "--type",
-            "agent",
-            "--label",
+            issue_type,
+            "--labels",
             "at:agent",
             "--title",
             agent_id,
@@ -837,10 +963,8 @@ def create_message_bead(
         "create",
         "--type",
         "task",
-        "--label",
-        "at:message",
-        "--label",
-        "at:unread",
+        "--labels",
+        "at:message,at:unread",
         "--title",
         subject,
     ]
