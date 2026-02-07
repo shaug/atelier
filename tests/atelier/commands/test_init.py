@@ -45,6 +45,14 @@ class TestInitProject:
                         "atelier.commands.init.beads.ensure_atelier_types",
                         return_value=False,
                     ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_store",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        return_value=False,
+                    ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
@@ -69,6 +77,61 @@ class TestInitProject:
                 assert not (project_dir / "PROJECT.md").exists()
             finally:
                 os.chdir(original_cwd)
+
+    def test_init_uses_project_scoped_beads_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                project_dir = paths.project_dir_for_enlistment(
+                    enlistment_path, NORMALIZED_ORIGIN
+                )
+            captured: dict[str, object] = {}
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                args = make_init_args()
+                responses = iter(["", "", "", "", "", "", "", ""])
+
+                def fake_bd(
+                    _args: list[str], *, beads_root: Path, cwd: Path
+                ) -> CompletedProcess[str]:
+                    captured["beads_root"] = beads_root
+                    captured["cwd"] = cwd
+                    return CompletedProcess(
+                        args=["bd"], returncode=0, stdout="", stderr=""
+                    )
+
+                with (
+                    patch("builtins.input", lambda _: next(responses)),
+                    patch("atelier.commands.init.confirm", return_value=False),
+                    patch(
+                        "atelier.commands.init.beads.run_bd_command",
+                        side_effect=fake_bd,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_store",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        return_value=False,
+                    ),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    init_cmd.init_project(args)
+            finally:
+                os.chdir(original_cwd)
+
+            assert captured["beads_root"] == project_dir / ".beads"
+            assert Path(str(captured["cwd"])).resolve() == root.resolve()
 
     def test_init_prefers_cursor_over_env_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,6 +158,14 @@ class TestInitProject:
                     ),
                     patch(
                         "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_store",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -137,6 +208,14 @@ class TestInitProject:
                         "atelier.commands.init.beads.ensure_atelier_types",
                         return_value=False,
                     ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_store",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        return_value=False,
+                    ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
@@ -177,6 +256,14 @@ class TestInitProject:
                     ),
                     patch(
                         "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_store",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -258,6 +345,14 @@ class TestInitProject:
                         "atelier.commands.init.beads.ensure_atelier_types",
                         return_value=False,
                     ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_store",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        return_value=False,
+                    ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
@@ -329,6 +424,14 @@ class TestInitProject:
                     ),
                     patch(
                         "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_store",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),

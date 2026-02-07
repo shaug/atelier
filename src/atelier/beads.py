@@ -19,6 +19,7 @@ POLICY_SCOPE_LABEL = "scope:project"
 EXTERNAL_TICKETS_KEY = "external_tickets"
 HOOK_SLOT_NAME = "hook"
 ATELIER_CUSTOM_TYPES = ("agent", "policy")
+ATELIER_ISSUE_PREFIX = "at"
 _AGENT_ISSUE_TYPE = "agent"
 _FALLBACK_ISSUE_TYPE = "task"
 _ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
@@ -184,6 +185,58 @@ def _parse_custom_types(value: str | None) -> list[str]:
         seen.add(entry)
         entries.append(entry)
     return entries
+
+
+def ensure_atelier_store(*, beads_root: Path, cwd: Path) -> bool:
+    """Ensure the Atelier Beads store exists with the expected prefix."""
+    if beads_root.exists():
+        return False
+    run_bd_command(
+        ["init", "--prefix", ATELIER_ISSUE_PREFIX, "--quiet"],
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+    return True
+
+
+def _current_issue_prefix(*, beads_root: Path, cwd: Path) -> str:
+    result = run_bd_command(
+        ["config", "get", "issue_prefix", "--json"], beads_root=beads_root, cwd=cwd
+    )
+    payload = _parse_types_payload(result.stdout or "")
+    if isinstance(payload, dict):
+        value = payload.get("value")
+        if isinstance(value, str):
+            return value.strip()
+    return ""
+
+
+def ensure_issue_prefix(
+    prefix: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> bool:
+    """Ensure Beads uses the expected issue prefix."""
+    expected = prefix.strip().lower()
+    if not expected:
+        return False
+    current = _current_issue_prefix(beads_root=beads_root, cwd=cwd)
+    if current == expected:
+        return False
+    run_bd_command(
+        ["config", "set", "issue_prefix", expected], beads_root=beads_root, cwd=cwd
+    )
+    # Keep existing issue ids aligned with configured prefix.
+    run_bd_command(
+        ["rename-prefix", f"{expected}-", "--repair"], beads_root=beads_root, cwd=cwd
+    )
+    return True
+
+
+def ensure_atelier_issue_prefix(*, beads_root: Path, cwd: Path) -> bool:
+    """Ensure Atelier uses the canonical issue prefix."""
+    return ensure_issue_prefix(ATELIER_ISSUE_PREFIX, beads_root=beads_root, cwd=cwd)
 
 
 def ensure_custom_types(

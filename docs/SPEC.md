@@ -103,6 +103,11 @@ Agent sessions inherit identity env vars:
 Atelier requires `bd` on the PATH for planning storage. Epics and changesets are
 stored as records with metadata, labels, and parent/child relationships.
 
+Atelier planning state is always stored in the project-scoped Beads directory
+(`<atelier-project-dir>/.beads`). Repository-local Beads stores are treated as
+external systems, not as the source of Atelier planning state. The issue prefix
+for this store is `at`.
+
 Epic description fields include:
 
 - `workspace.root_branch` (required)

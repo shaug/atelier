@@ -44,6 +44,14 @@ def test_new_creates_project_and_starts_planning() -> None:
                     "atelier.commands.init.beads.ensure_atelier_types",
                     return_value=False,
                 ),
+                patch(
+                    "atelier.commands.init.beads.ensure_atelier_store",
+                    return_value=False,
+                ),
+                patch(
+                    "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                    return_value=False,
+                ),
                 patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                 patch("atelier.exec.run_command", fake_run),
                 patch("atelier.git.git_repo_root", return_value=target_dir),

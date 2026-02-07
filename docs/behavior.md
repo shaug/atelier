@@ -87,6 +87,15 @@ Branch prefix:
 Atelier requires `bd` on the PATH. It is used as the local planning store for
 epics and changesets, including labels and metadata.
 
+Atelier planning always uses a project-scoped Beads store at:
+
+`<atelier-project-dir>/.beads`
+
+Atelier also enforces the Beads issue prefix `at` for this store.
+
+Repository-local Beads stores (for example `<repo>/.beads`) are not used for
+Atelier planning state. They are treated as external ticket sources.
+
 ## Command behavior (high level)
 
 - `atelier init`

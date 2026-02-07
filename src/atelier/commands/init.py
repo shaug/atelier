@@ -45,6 +45,8 @@ def init_project(args: object) -> None:
     project.ensure_project_scaffold(project_dir)
 
     beads_root = config.resolve_beads_root(project_dir, Path(enlistment_path))
+    beads.ensure_atelier_store(beads_root=beads_root, cwd=Path(enlistment_path))
+    beads.ensure_atelier_issue_prefix(beads_root=beads_root, cwd=Path(enlistment_path))
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=Path(enlistment_path))
     beads.ensure_atelier_types(beads_root=beads_root, cwd=Path(enlistment_path))
 

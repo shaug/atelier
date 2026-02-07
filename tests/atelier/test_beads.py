@@ -1,5 +1,6 @@
 from pathlib import Path
 from subprocess import CompletedProcess
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import atelier.beads as beads
@@ -38,6 +39,66 @@ def test_ensure_agent_bead_creates_when_missing() -> None:
         )
 
     assert result["id"] == "atelier-2"
+
+
+def test_ensure_atelier_store_initializes_missing_root() -> None:
+    with TemporaryDirectory() as tmp:
+        beads_root = Path(tmp) / ".beads"
+        with patch("atelier.beads.run_bd_command") as run_command:
+            changed = beads.ensure_atelier_store(
+                beads_root=beads_root, cwd=Path("/repo")
+            )
+
+    assert changed is True
+    assert run_command.call_args.args[0] == ["init", "--prefix", "at", "--quiet"]
+
+
+def test_ensure_atelier_store_skips_existing_root() -> None:
+    with TemporaryDirectory() as tmp:
+        beads_root = Path(tmp) / ".beads"
+        beads_root.mkdir(parents=True)
+        with patch("atelier.beads.run_bd_command") as run_command:
+            changed = beads.ensure_atelier_store(
+                beads_root=beads_root, cwd=Path("/repo")
+            )
+
+    assert changed is False
+    run_command.assert_not_called()
+
+
+def test_ensure_issue_prefix_noop_when_already_expected() -> None:
+    with (
+        patch("atelier.beads._current_issue_prefix", return_value="at"),
+        patch("atelier.beads.run_bd_command") as run_command,
+    ):
+        changed = beads.ensure_issue_prefix(
+            "at", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+
+    assert changed is False
+    run_command.assert_not_called()
+
+
+def test_ensure_issue_prefix_updates_when_mismatched() -> None:
+    calls: list[list[str]] = []
+
+    def fake_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> CompletedProcess[str]:
+        calls.append(args)
+        return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.beads._current_issue_prefix", return_value="atelier"),
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
+    ):
+        changed = beads.ensure_issue_prefix(
+            "at", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+
+    assert changed is True
+    assert calls[0] == ["config", "set", "issue_prefix", "at"]
+    assert calls[1] == ["rename-prefix", "at-", "--repair"]
 
 
 def test_claim_epic_updates_assignee_and_status() -> None:

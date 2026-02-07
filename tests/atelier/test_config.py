@@ -43,3 +43,36 @@ def test_resolve_project_data_dir_prefers_config() -> None:
     assert config.resolve_project_data_dir(Path("/project"), config_payload) == Path(
         "/custom"
     )
+
+
+def test_resolve_beads_root_is_project_scoped() -> None:
+    project_dir = Path("/project/.atelier")
+    repo_root = Path("/project/repo")
+    assert config.resolve_beads_root(project_dir, repo_root) == project_dir / ".beads"
+
+
+def test_build_project_config_forces_project_beads_location() -> None:
+    args = SimpleNamespace(
+        branch_prefix="",
+        branch_pr="true",
+        branch_history="merge",
+        agent="codex",
+        editor_edit="cat",
+        editor_work="cat",
+    )
+    existing = {
+        "beads": {"location": "repo"},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = Path(tmp) / "data"
+        with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+            with patch("atelier.agents.available_agent_names", return_value=("codex",)):
+                payload = config.build_project_config(
+                    existing,
+                    "/repo",
+                    "github.com/org/repo",
+                    "https://github.com/org/repo",
+                    args,
+                    allow_editor_empty=True,
+                )
+    assert payload.beads.location == "project"

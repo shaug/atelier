@@ -516,6 +516,11 @@ In PR-based workflows, each changeset bead maps to:
 
 ## External Ticket Integration (Future)
 
+Atelier planning state should never be shared with the source repository's own
+Beads database. Each Atelier project keeps its own Beads store under the Atelier
+data directory. If the source repository has a Beads installation, it is treated
+as an external ticket provider, similar to GitHub/Linear/Jira.
+
 Atelier should support linking beads to external tickets without importing the
 entire external system into beads. Use explicit fields and labels to preserve
 traceability and define close/sync behavior. A bead may be associated with
@@ -532,10 +537,14 @@ Recommended epic/task fields (YAML frontmatter, nested schema):
 Recommended labels:
 
 - ext:github / ext:linear / ext:jira
+- ext:beads (for source-repo Beads issues)
 
 Integration should be handled by skills (e.g., `external_import`,
 `external_sync`, `external_close`), with optional molecules for multi-step
 sync/approval workflows.
+
+Out-of-the-box provider support should include GitHub Issues. Additional
+providers can be implemented in core CLI code or through installable skills.
 
 ## Startup Contract (Enforcement)
 

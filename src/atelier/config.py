@@ -430,21 +430,18 @@ def resolve_project_data_dir(project_root: Path, project_config: ProjectConfig) 
 
 
 def detect_beads_location(repo_root: Path) -> str:
-    """Detect the Beads location for a repo.
+    """Return the Atelier Beads location.
 
-    Prefers the repo's Beads store when present, otherwise falls back to the
-    project-level store.
+    Atelier planning always uses the project-scoped Beads store. Repository
+    Beads stores are treated as external sources.
     """
-    if (repo_root / paths.BEADS_DIRNAME).exists():
-        return "repo"
+    _ = repo_root
     return "project"
 
 
 def resolve_beads_root(project_dir: Path, repo_root: Path) -> Path:
-    """Resolve the Beads root directory based on discovery rules."""
-    location = detect_beads_location(repo_root)
-    if location == "repo":
-        return repo_root / paths.BEADS_DIRNAME
+    """Resolve the Beads root directory for Atelier planning."""
+    _ = repo_root
     return paths.project_beads_dir(project_dir)
 
 
@@ -988,9 +985,7 @@ def build_project_config(
     project_provider_url = existing_config.project.provider_url
     project_owner = existing_config.project.owner
 
-    beads_location = existing_config.beads.location
-    if not beads_location:
-        beads_location = detect_beads_location(Path(enlistment_path))
+    beads_location = "project"
     beads_section = existing_config.beads.model_copy(
         update={"location": beads_location}
     )
