@@ -142,6 +142,56 @@ Optional behaviors:
   a push-back option to update the external ticket body or notes.
 - External state sync is never required for readiness; it is strictly optional.
 
+## Examples
+
+Example `external_tickets` entry for a primary GitHub issue:
+
+```json
+[
+  {
+    "provider": "github",
+    "id": "1234",
+    "url": "https://github.com/org/repo/issues/1234",
+    "relation": "primary",
+    "direction": "imported",
+    "sync_mode": "import",
+    "state": "open",
+    "on_close": "comment"
+  }
+]
+```
+
+Example with a context-only ticket and a derived child ticket:
+
+```json
+[
+  {
+    "provider": "linear",
+    "id": "ENG-101",
+    "relation": "context",
+    "direction": "imported",
+    "sync_mode": "manual",
+    "state": "in_progress"
+  },
+  {
+    "provider": "github",
+    "id": "5678",
+    "relation": "derived",
+    "direction": "exported",
+    "sync_mode": "export",
+    "parent_id": "1234",
+    "state": "open"
+  }
+]
+```
+
+Example planner interaction summary:
+
+- Import: select `github`, query `label:planning`, create new epics with
+  `relation=primary`.
+- Export: select `github`, export chosen epics, attach `direction=exported` and
+  add `ext:github` labels.
+
 ## Provider integration architecture
 
 Integration should be skill-first, with a stable core contract.
