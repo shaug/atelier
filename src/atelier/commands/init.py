@@ -15,8 +15,8 @@ def init_project(args: object) -> None:
 
     Args:
         args: CLI argument object with optional fields such as ``branch_prefix``,
-            ``branch_pr``, ``branch_history``, ``agent``, ``editor_edit``, and
-            ``editor_work``.
+            ``branch_pr``, ``branch_history``, ``branch_pr_strategy``, ``agent``,
+            ``editor_edit``, and ``editor_work``.
 
     Returns:
         None.

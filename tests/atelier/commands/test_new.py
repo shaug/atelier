@@ -17,7 +17,7 @@ def test_new_creates_project_and_starts_planning() -> None:
         target_dir = root / "greenfield"
         commands: list[tuple[list[str], Path | None]] = []
         planned: list[object] = []
-        responses = iter(["", "", "", "", "", "", "", ""])
+        responses = iter(["", "", "", "", "", "", "", "", ""])
 
         def fake_run(
             cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None
@@ -64,6 +64,7 @@ def test_new_creates_project_and_starts_planning() -> None:
                         branch_prefix=None,
                         branch_pr=None,
                         branch_history=None,
+                        branch_pr_strategy=None,
                         agent=None,
                         editor_edit=None,
                         editor_work=None,

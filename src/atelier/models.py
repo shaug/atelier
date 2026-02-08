@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import agents
+from .pr_strategy import PR_STRATEGY_DEFAULT, PR_STRATEGY_VALUES, PrStrategy
 
 BRANCH_HISTORY_VALUES = ("manual", "squash", "merge", "rebase")
 BranchHistory = Literal["manual", "squash", "merge", "rebase"]
@@ -25,6 +26,7 @@ class BranchConfig(BaseModel):
         prefix: Prefix applied to workspace branches.
         pr: Whether pull requests are expected.
         history: History policy (manual|squash|merge|rebase).
+        pr_strategy: PR creation strategy (sequential|on-ready|parallel).
 
     Example:
         >>> BranchConfig(prefix="scott/", pr=False, history="rebase")
@@ -36,6 +38,7 @@ class BranchConfig(BaseModel):
     prefix: str = ""
     pr: bool = True
     history: BranchHistory = "manual"
+    pr_strategy: PrStrategy = PR_STRATEGY_DEFAULT
 
     @field_validator("prefix", mode="before")
     @classmethod
@@ -50,6 +53,19 @@ class BranchConfig(BaseModel):
         if isinstance(value, str):
             return value.strip()
         return value
+
+    @field_validator("pr_strategy", mode="before")
+    @classmethod
+    def normalize_pr_strategy(cls, value: object) -> object:
+        if value is None:
+            return PR_STRATEGY_DEFAULT
+        if isinstance(value, str):
+            normalized = value.strip().lower().replace("_", "-")
+            if not normalized:
+                return PR_STRATEGY_DEFAULT
+            if normalized in PR_STRATEGY_VALUES:
+                return normalized
+        raise ValueError("pr_strategy must be one of: " + ", ".join(PR_STRATEGY_VALUES))
 
 
 class GitSection(BaseModel):

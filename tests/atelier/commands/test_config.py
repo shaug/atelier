@@ -32,7 +32,7 @@ class TestConfigCommand:
             os.chdir(root)
             try:
                 responses = iter(
-                    ["team/", "false", "rebase", "codex", "vim -w", "vim", ""]
+                    ["team/", "false", "rebase", "", "codex", "vim -w", "vim", ""]
                 )
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -73,7 +73,7 @@ class TestConfigCommand:
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(["team/", "false", "rebase", "vim -w", "vim", ""])
+                responses = iter(["team/", "false", "rebase", "", "vim -w", "vim", ""])
                 call_count = {"count": 0}
 
                 def fake_input(_: str) -> str:
@@ -102,7 +102,7 @@ class TestConfigCommand:
                 updated = config.load_project_config(config_path)
                 assert updated is not None
                 assert updated.agent.default == "codex"
-                assert call_count["count"] == 5
+                assert call_count["count"] == 6
             finally:
                 os.chdir(original_cwd)
 
@@ -127,6 +127,7 @@ class TestConfigCommand:
                         "false",
                         "sideways",
                         "merge",
+                        "",
                         "codex",
                         "vim -w",
                         "vim",
@@ -156,7 +157,7 @@ class TestConfigCommand:
                 config_path = paths.project_config_path(project_dir)
                 updated = config.load_project_config(config_path)
                 assert updated is not None
-                assert call_count["count"] == 8
+                assert call_count["count"] == 9
                 assert updated.branch.pr is False
                 assert updated.branch.history == "merge"
             finally:
@@ -225,7 +226,7 @@ class TestConfigCommand:
             os.chdir(root)
             try:
                 responses = iter(
-                    ["prefs/", "true", "merge", "codex", "code -w", "code", ""]
+                    ["prefs/", "true", "merge", "", "codex", "code -w", "code", ""]
                 )
                 with (
                     patch("builtins.input", lambda _: next(responses)),
