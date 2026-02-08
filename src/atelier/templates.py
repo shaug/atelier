@@ -8,6 +8,7 @@ from . import paths
 TEMPLATE_PARTS: tuple[tuple[str, ...], ...] = (
     ("agent", "AGENTS.md"),
     ("AGENTS.planner.md.tmpl",),
+    ("AGENTS.worker.md.tmpl",),
 )
 
 
@@ -127,6 +128,19 @@ def planner_template(
     """Return the planner AGENTS template text."""
     return read_template(
         "AGENTS.planner.md.tmpl",
+        prefer_installed=prefer_installed,
+        prefer_installed_if_modified=prefer_installed_if_modified,
+    )
+
+
+def worker_template(
+    *,
+    prefer_installed: bool = False,
+    prefer_installed_if_modified: bool = False,
+) -> str:
+    """Return the worker AGENTS template text."""
+    return read_template(
+        "AGENTS.worker.md.tmpl",
         prefer_installed=prefer_installed,
         prefer_installed_if_modified=prefer_installed_if_modified,
     )

@@ -19,8 +19,11 @@ from .. import (
     config,
     exec,
     hooks,
+    paths,
     policy,
+    prompting,
     root_branch,
+    templates,
     workspace,
     worktrees,
 )
@@ -504,6 +507,23 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
             die(f"unsupported agent {project_config.agent.default!r}")
         agent_options = list(project_config.agent.options.get(agent_spec.name, []))
         project_enlistment = project_config.project.enlistment or _enlistment
+        worker_agents_path = worktree_path / "AGENTS.md"
+        paths.ensure_dir(worker_agents_path.parent)
+        worker_template = templates.worker_template(prefer_installed_if_modified=True)
+        worker_agents_path.write_text(
+            prompting.render_template(
+                worker_template,
+                {
+                    "agent_id": agent.agent_id,
+                    "project_root": str(project_enlistment),
+                    "project_data_dir": str(project_data_dir),
+                    "beads_dir": str(beads_root),
+                    "beads_prefix": "at",
+                    "worker_worktree": str(worktree_path),
+                },
+            ),
+            encoding="utf-8",
+        )
         env = workspace.workspace_environment(
             project_enlistment,
             root_branch_value,
