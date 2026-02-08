@@ -122,6 +122,14 @@ Planner is the orchestrator for external ticket synchronization.
 - On-demand sync: planner exposes explicit actions to refresh cached state or
   push local updates when a provider declares capability support.
 
+### Planner environment
+
+Planner sessions expose provider context to the agent via environment variables.
+These are optional hints and should not be treated as authoritative.
+
+- `ATELIER_EXTERNAL_PROVIDERS`: comma-separated provider slugs.
+- `ATELIER_GITHUB_REPO`: GitHub repo slug (`owner/name`) when available.
+
 ## Readiness and completeness
 
 Beads linked to external tickets are only worker-ready when local content is

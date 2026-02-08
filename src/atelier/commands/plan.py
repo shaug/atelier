@@ -9,6 +9,7 @@ from .. import (
     codex,
     config,
     exec,
+    external_registry,
     git,
     hooks,
     policy,
@@ -57,6 +58,9 @@ def run_planner(args: object) -> None:
             default_branch,
             worktree_path,
             base_env=agents.agent_environment(agent.agent_id),
+        )
+        env.update(
+            external_registry.planner_provider_environment(project_config, repo_root)
         )
         epic_id = getattr(args, "epic_id", None)
         if epic_id:
