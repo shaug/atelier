@@ -18,7 +18,7 @@ jobs:
 
       - name: Install
         run: |
-          uv venv
+          uv venv --clear
           uv pip install -e .[dev]
 
       - name: Lint
