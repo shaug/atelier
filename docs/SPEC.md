@@ -108,6 +108,10 @@ Atelier planning state is always stored in the project-scoped Beads directory
 external systems, not as the source of Atelier planning state. The issue prefix
 for this store is `at`.
 
+External ticket linkage and sync semantics are defined in:
+
+- `/Users/scott/code/atelier/docs/SPEC-external-ticket-integration.md`
+
 Epic description fields include:
 
 - `workspace.root_branch` (required)
