@@ -9,7 +9,7 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .. import beads, config, git, messages, prs, worktrees
+from .. import beads, config, git, messages, pr_strategy, prs, worktrees
 from ..io import die, say
 from .resolve import resolve_current_project_with_repo_root
 
@@ -170,6 +170,7 @@ def _build_epic_payloads(
             mapping=mapping,
             repo_root=repo_root,
             repo_slug=repo_slug,
+            pr_strategy_value=fields.get("workspace.pr_strategy"),
         )
         ready_changesets = _list_ready_changesets(
             epic_id, beads_root=beads_root, repo_root=repo_root
@@ -206,13 +207,20 @@ def _build_changeset_details(
     mapping: worktrees.WorktreeMapping | None,
     repo_root: Path,
     repo_slug: str | None,
+    pr_strategy_value: object,
 ) -> list[dict[str, object]]:
     details: list[dict[str, object]] = []
+    branch_states: dict[str, str | None] = {}
     for issue in changesets:
         changeset_id = issue.get("id")
         if not isinstance(changeset_id, str) or not changeset_id:
             continue
         labels = _issue_labels(issue)
+        description = issue.get("description")
+        fields = beads.parse_description_fields(
+            description if isinstance(description, str) else ""
+        )
+        parent_branch = fields.get("changeset.parent_branch")
         branch = None
         if mapping is not None:
             branch = mapping.changesets.get(changeset_id)
@@ -226,6 +234,8 @@ def _build_changeset_details(
         lifecycle = prs.lifecycle_state(
             pr_payload, pushed=pushed, review_requested=review_requested
         )
+        if branch:
+            branch_states[branch] = lifecycle
         details.append(
             {
                 "id": changeset_id,
@@ -236,8 +246,19 @@ def _build_changeset_details(
                 "review_requested": review_requested,
                 "lifecycle_state": lifecycle,
                 "pr": _summarize_pr(pr_payload),
+                "parent_branch": parent_branch,
             }
         )
+    for detail in details:
+        parent_branch = detail.pop("parent_branch", None)
+        parent_state = None
+        if isinstance(parent_branch, str):
+            parent_state = branch_states.get(parent_branch)
+        decision = pr_strategy.pr_strategy_decision(
+            pr_strategy_value, parent_state=parent_state
+        )
+        detail["pr_allowed"] = decision.allow_pr
+        detail["pr_gate_reason"] = decision.reason
     return details
 
 
