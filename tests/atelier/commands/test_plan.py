@@ -174,6 +174,5 @@ def test_plan_promotes_draft_epic_with_approval(tmp_path: Path) -> None:
         plan_cmd.run_planner(SimpleNamespace(epic_id=None))
 
     assert any(
-        call[:2] == ["update", "atelier-draft"] and "at:draft" in call
-        for call in calls
+        call[:2] == ["update", "atelier-draft"] and "at:draft" in call for call in calls
     )

@@ -57,9 +57,7 @@ def _list_queue_messages(*, beads_root: Path, repo_root: Path) -> None:
     say("No queued messages.")
 
 
-def _list_draft_epics(
-    *, beads_root: Path, repo_root: Path
-) -> list[dict[str, object]]:
+def _list_draft_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
     issues = beads.run_bd_json(
         ["list", "--label", "at:epic", "--label", "at:draft"],
         beads_root=beads_root,
@@ -124,9 +122,7 @@ def run_planner(args: object) -> None:
         beads.ensure_agent_bead(
             agent.agent_id, beads_root=beads_root, cwd=repo_root, role="planner"
         )
-        _list_inbox_messages(
-            agent.agent_id, beads_root=beads_root, repo_root=repo_root
-        )
+        _list_inbox_messages(agent.agent_id, beads_root=beads_root, repo_root=repo_root)
         _list_queue_messages(beads_root=beads_root, repo_root=repo_root)
         draft_epics = _list_draft_epics(beads_root=beads_root, repo_root=repo_root)
         _maybe_promote_draft_epic(
