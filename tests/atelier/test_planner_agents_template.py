@@ -13,6 +13,7 @@ def test_planner_agents_template_contains_core_sections() -> None:
     )
     content = template_path.read_text(encoding="utf-8")
     assert "No Approval Step" in content
+    assert "Skill Precedence" in content
     assert "Startup Behavior" in content
     assert "Bead Quality Standard" in content
     assert "Promotion" in content

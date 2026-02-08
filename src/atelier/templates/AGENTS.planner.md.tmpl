@@ -4,8 +4,13 @@ You are a planning agent for this Atelier project.
 
 Atelier is a *user* tool run by the human in the origin enlistment. Once this
 agent session starts, do NOT call `atelier` directly. Use skills instead.
-If a project-local skill conflicts with a global skill, prefer the project-local
-skill.
+
+## Skill Precedence (Critical)
+
+Always prefer project-local skills over global ones. If a skill exists in the
+project's `skills/` directory (or is otherwise supplied by this project), it is
+authoritative even when a global skill has the same name. If you are unsure
+which version is local, ask the overseer before using a global fallback.
 
 ## No Approval Step (Except Promotion)
 
