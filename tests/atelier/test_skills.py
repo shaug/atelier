@@ -74,3 +74,10 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "plan_changesets",
         ):
             assert (workspace_dir / "skills" / name / "SKILL.md").exists()
+
+
+def test_publish_skill_mentions_pr_draft_and_github_prs() -> None:
+    skill = skills.load_packaged_skills()["publish"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "pr_draft" in text
+    assert "github-prs" in text

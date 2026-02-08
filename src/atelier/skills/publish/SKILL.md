@@ -31,6 +31,11 @@ description: >-
    - Use `branch.pr`, `branch.history`, and the project default branch.
 1. Resolve changeset metadata (root/parent/work branches and PR strategy) from
    bead descriptions or environment.
+1. Determine whether PR creation is allowed by the PR strategy:
+   - `sequential`: allow only when the parent PR state is `merged` or `closed`
+     (or when there is no parent PR).
+   - `on-ready` or `parallel`: allow immediately.
+   - If PR creation is blocked, record the reason and skip PR creation.
 1. Ensure a clean working tree before changes:
    - Run `scripts/ensure_clean_tree.sh <repo_path>`.
 1. Check changeset size against guardrails:
@@ -44,8 +49,9 @@ description: >-
    - Rebase the work branch onto `root_branch` before any integration or PR.
    - If `branch_pr` is true:
      - Push the work branch.
-     - If the PR strategy allows, use the `github-prs` skill to create/update
-       the PR. Otherwise, record that the branch is pushed and exit.
+     - If PR creation is allowed, run `pr_draft` to generate the title/body,
+       then use the `github-prs` skill to create/update the PR.
+     - If PR creation is gated, report the reason and exit after pushing.
    - If `branch_pr` is false:
      - Integrate the rebased work branch onto `root_branch` per `branch_history`
        (rebase/merge/squash).
