@@ -19,6 +19,7 @@ from .. import (
     config,
     exec,
     hooks,
+    messages,
     paths,
     policy,
     prompting,
@@ -286,10 +287,115 @@ def _mark_changeset_in_progress(
             "cs:in_progress",
             "--remove-label",
             "cs:ready",
+            "--status",
+            "in_progress",
         ],
         beads_root=beads_root,
         cwd=repo_root,
     )
+
+
+def _mark_changeset_closed(
+    changeset_id: str, *, beads_root: Path, repo_root: Path
+) -> None:
+    beads.run_bd_command(
+        [
+            "update",
+            changeset_id,
+            "--status",
+            "closed",
+            "--remove-label",
+            "cs:ready",
+            "--remove-label",
+            "cs:planned",
+            "--remove-label",
+            "cs:in_progress",
+        ],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+
+
+def _mark_changeset_blocked(
+    changeset_id: str, *, beads_root: Path, repo_root: Path, reason: str
+) -> None:
+    timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+    note = f"blocked_at: {timestamp} reason: {reason}"
+    beads.run_bd_command(
+        [
+            "update",
+            changeset_id,
+            "--remove-label",
+            "cs:in_progress",
+            "--status",
+            "open",
+            "--append-notes",
+            note,
+        ],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+
+
+def _has_blocking_messages(
+    *,
+    thread_ids: set[str],
+    started_at: dt.datetime,
+    beads_root: Path,
+    repo_root: Path,
+) -> bool:
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:message"], beads_root=beads_root, cwd=repo_root
+    )
+    for issue in issues:
+        created_at = _parse_issue_time(issue.get("created_at"))
+        if created_at is not None and created_at < started_at:
+            continue
+        description = issue.get("description")
+        payload = messages.parse_message(
+            description if isinstance(description, str) else ""
+        )
+        thread = payload.metadata.get("thread")
+        if isinstance(thread, str) and thread in thread_ids:
+            return True
+    return False
+
+
+def _finalize_changeset(
+    *,
+    changeset_id: str,
+    epic_id: str,
+    agent_bead_id: str,
+    started_at: dt.datetime,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    if not changeset_id:
+        return
+    issues = beads.run_bd_json(
+        ["show", changeset_id], beads_root=beads_root, cwd=repo_root
+    )
+    if not issues:
+        return
+    labels = _issue_labels(issues[0])
+    if "cs:merged" in labels or "cs:abandoned" in labels:
+        _mark_changeset_closed(changeset_id, beads_root=beads_root, repo_root=repo_root)
+        beads.close_epic_if_complete(
+            epic_id, agent_bead_id, beads_root=beads_root, cwd=repo_root
+        )
+        return
+    if _has_blocking_messages(
+        thread_ids={changeset_id, epic_id},
+        started_at=started_at,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    ):
+        _mark_changeset_blocked(
+            changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            reason="message requires planner decision",
+        )
 
 
 def _check_inbox_before_claim(
@@ -544,14 +650,51 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
         start_cmd, start_cwd = agent_spec.build_start_command(
             worktree_path, agent_options, opening_prompt
         )
+        started_at = dt.datetime.now(tz=dt.timezone.utc)
         if agent_spec.name == "codex":
             result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
             if result is None:
+                _mark_changeset_blocked(
+                    changeset_id,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    reason=f"missing required command: {start_cmd[0]}",
+                )
                 die(f"missing required command: {start_cmd[0]}")
             if result.returncode != 0:
+                _mark_changeset_blocked(
+                    changeset_id,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    reason=f"command failed: {' '.join(start_cmd)}",
+                )
                 die(f"command failed: {' '.join(start_cmd)}")
         else:
-            exec.run_command(start_cmd, cwd=start_cwd, env=env)
+            result = exec.run_command_status(start_cmd, cwd=start_cwd, env=env)
+            if result is None:
+                _mark_changeset_blocked(
+                    changeset_id,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    reason=f"missing required command: {start_cmd[0]}",
+                )
+                die(f"missing required command: {start_cmd[0]}")
+            if result.returncode != 0:
+                _mark_changeset_blocked(
+                    changeset_id,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    reason=f"command failed: {' '.join(start_cmd)}",
+                )
+                die(f"command failed: {' '.join(start_cmd)}")
+        _finalize_changeset(
+            changeset_id=changeset_id,
+            epic_id=selected_epic,
+            agent_bead_id=agent_bead_id,
+            started_at=started_at,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
         return True
 
 
