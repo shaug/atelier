@@ -12,8 +12,8 @@ def test_worker_agents_template_contains_core_sections() -> None:
         / "AGENTS.worker.md.tmpl"
     )
     content = template_path.read_text(encoding="utf-8")
-    assert "Worker Context" in content
-    assert "Startup Behavior" in content
+    assert "Single-Bead Contract" in content
     assert "Execution Workflow" in content
-    assert "Guardrails" in content
+    assert "Messaging Rules" in content
     assert "Finish" in content
+    assert "Do not look for more" in content
