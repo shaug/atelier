@@ -1183,6 +1183,41 @@ def mark_message_read(
     )
 
 
+def update_changeset_integrated_sha(
+    changeset_id: str,
+    integrated_sha: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    allow_override: bool = False,
+) -> dict[str, object]:
+    """Update the integrated SHA field for a changeset bead."""
+    if not integrated_sha:
+        die("integrated sha must not be empty")
+    issues = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"changeset not found: {changeset_id}")
+    issue = issues[0]
+    description = issue.get("description")
+    fields = _parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    current = fields.get("changeset.integrated_sha")
+    if current and current.lower() != "null" and current != integrated_sha:
+        if not allow_override:
+            die("changeset integrated sha already set; override not permitted")
+    if current == integrated_sha:
+        return issue
+    updated = _update_description_field(
+        description if isinstance(description, str) else "",
+        key="changeset.integrated_sha",
+        value=integrated_sha,
+    )
+    _update_issue_description(changeset_id, updated, beads_root=beads_root, cwd=cwd)
+    refreshed = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+    return refreshed[0] if refreshed else issue
+
+
 def update_changeset_review(
     changeset_id: str,
     metadata: changesets.ReviewMetadata,
