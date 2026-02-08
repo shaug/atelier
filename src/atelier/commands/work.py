@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from .. import (
@@ -34,6 +35,12 @@ from .resolve import resolve_current_project_with_repo_root
 _MODE_VALUES = {"prompt", "auto"}
 _RUN_MODE_VALUES = {"once", "default", "watch"}
 _WATCH_INTERVAL_SECONDS = 60
+
+
+@dataclass(frozen=True)
+class StartupContractResult:
+    epic_id: str | None
+    should_exit: bool
 
 
 def _normalize_mode(value: str | None) -> str:
@@ -453,6 +460,72 @@ def _handle_queue_before_claim(
     return True
 
 
+def _run_startup_contract(
+    *,
+    agent_id: str,
+    agent_bead_id: str,
+    beads_root: Path,
+    repo_root: Path,
+    mode: str,
+    explicit_epic_id: str | None,
+    queue_only: bool,
+) -> StartupContractResult:
+    """Apply startup_contract skill ordering to select the next epic."""
+    if explicit_epic_id is not None:
+        selected_epic = str(explicit_epic_id).strip()
+        if not selected_epic:
+            die("epic id must not be empty")
+        return StartupContractResult(epic_id=selected_epic, should_exit=False)
+
+    if queue_only:
+        _handle_queue_before_claim(
+            agent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            force_prompt=True,
+        )
+        return StartupContractResult(epic_id=None, should_exit=True)
+
+    hooked_epic = _resolve_hooked_epic(
+        agent_bead_id, agent_id, beads_root=beads_root, repo_root=repo_root
+    )
+    if hooked_epic:
+        say(f"Resuming hooked epic: {hooked_epic}")
+        return StartupContractResult(epic_id=hooked_epic, should_exit=False)
+
+    issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
+    assigned = _filter_epics(issues, assignee=agent_id)
+    assigned = _sort_by_created_at(assigned)
+    if assigned:
+        candidate = assigned[0].get("id")
+        if candidate:
+            selected_epic = str(candidate)
+            say(f"Resuming assigned epic: {selected_epic}")
+            return StartupContractResult(epic_id=selected_epic, should_exit=False)
+
+    if _check_inbox_before_claim(agent_id, beads_root=beads_root, repo_root=repo_root):
+        return StartupContractResult(epic_id=None, should_exit=True)
+    if _handle_queue_before_claim(agent_id, beads_root=beads_root, repo_root=repo_root):
+        return StartupContractResult(epic_id=None, should_exit=True)
+
+    if mode == "auto":
+        selected_epic = _select_epic_auto(issues, agent_id=agent_id)
+    else:
+        selected_epic = _select_epic_prompt(issues, agent_id=agent_id)
+
+    if selected_epic is None:
+        _send_needs_decision(
+            agent_id=agent_id,
+            mode=mode,
+            issues=issues,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        return StartupContractResult(epic_id=None, should_exit=True)
+
+    return StartupContractResult(epic_id=selected_epic, should_exit=False)
+
+
 def _run_worker_once(args: object, *, mode: str) -> bool:
     """Start a single worker session by selecting an epic and changeset."""
     project_root, project_config, _enlistment, repo_root = (
@@ -479,76 +552,21 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
         agent_bead_id = agent_bead.get("id")
         if not isinstance(agent_bead_id, str) or not agent_bead_id:
             die("failed to resolve agent bead id")
-        if queue_only:
-            if _handle_queue_before_claim(
-                agent.agent_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                force_prompt=True,
-            ):
-                return False
-        hooked_epic = None
-        assigned_epic = None
-        issues: list[dict[str, object]] | None = None
-        if not epic_id:
-            hooked_epic = _resolve_hooked_epic(
-                agent_bead_id,
-                agent.agent_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
-            )
-        if not epic_id and not hooked_epic:
-            issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
-            assigned = _filter_epics(issues, assignee=agent.agent_id)
-            assigned = _sort_by_created_at(assigned)
-            if assigned:
-                candidate = assigned[0].get("id")
-                if candidate:
-                    assigned_epic = str(candidate)
-        if epic_id:
-            selected_epic = str(epic_id).strip()
-            if not selected_epic:
-                die("epic id must not be empty")
-        elif hooked_epic:
-            selected_epic = hooked_epic
-            say(f"Resuming hooked epic: {selected_epic}")
-        elif assigned_epic:
-            selected_epic = assigned_epic
-            say(f"Resuming assigned epic: {selected_epic}")
-        elif _check_inbox_before_claim(
-            agent.agent_id, beads_root=beads_root, repo_root=repo_root
-        ):
+
+        startup_result = _run_startup_contract(
+            agent_id=agent.agent_id,
+            agent_bead_id=agent_bead_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            mode=mode,
+            explicit_epic_id=epic_id,
+            queue_only=queue_only,
+        )
+        if startup_result.should_exit:
             return False
-        elif _handle_queue_before_claim(
-            agent.agent_id, beads_root=beads_root, repo_root=repo_root
-        ):
-            return False
-        elif mode == "auto":
-            if issues is None:
-                issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
-            selected_epic = _select_epic_auto(issues, agent_id=agent.agent_id)
-            if selected_epic is None:
-                _send_needs_decision(
-                    agent_id=agent.agent_id,
-                    mode=mode,
-                    issues=issues,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                )
-                return False
-        else:
-            if issues is None:
-                issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
-            selected_epic = _select_epic_prompt(issues, agent_id=agent.agent_id)
-            if selected_epic is None:
-                _send_needs_decision(
-                    agent_id=agent.agent_id,
-                    mode=mode,
-                    issues=issues,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                )
-                return False
+        if not startup_result.epic_id:
+            die("startup contract did not select an epic")
+        selected_epic = startup_result.epic_id
 
         say(f"Selected epic: {selected_epic}")
         epic_issue = beads.claim_epic(

@@ -771,6 +771,52 @@ def test_work_queue_option_stops_when_empty() -> None:
     claim_epic.assert_not_called()
 
 
+def test_work_invokes_startup_contract() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/agent",
+        role="worker",
+        path=Path("/project/agents/worker"),
+    )
+
+    with (
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.work.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.work.beads.run_bd_command"),
+        patch(
+            "atelier.commands.work.beads.ensure_agent_bead",
+            return_value={"id": "atelier-agent"},
+        ),
+        patch("atelier.commands.work.policy.sync_agent_home_policy"),
+        patch(
+            "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
+        ),
+        patch(
+            "atelier.commands.work._run_startup_contract",
+            return_value=work_cmd.StartupContractResult(epic_id=None, should_exit=True),
+        ) as startup_contract,
+        patch("atelier.commands.work.say"),
+    ):
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once")
+        )
+
+    startup_contract.assert_called_once()
+    assert startup_contract.call_args.kwargs["agent_id"] == "atelier/worker/agent"
+    assert startup_contract.call_args.kwargs["explicit_epic_id"] is None
+
+
 def test_work_auto_sends_needs_decision_when_idle() -> None:
     agent = AgentHome(
         name="worker",
