@@ -2,6 +2,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 import atelier.codex as codex
 import atelier.commands.work as work_cmd
 import atelier.config as config
@@ -11,6 +13,15 @@ from atelier.agent_home import AgentHome
 
 def _fake_project_payload() -> config.ProjectConfig:
     return config.ProjectConfig()
+
+
+@pytest.fixture(autouse=True)
+def _project_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(
+        "atelier.commands.work.config.resolve_project_data_dir",
+        lambda *_args, **_kwargs: tmp_path,
+    )
+    return tmp_path
 
 
 def test_work_prompt_selects_epic_and_changeset() -> None:
