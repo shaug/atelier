@@ -12,7 +12,8 @@ def _fake_project_payload() -> ProjectConfig:
     return ProjectConfig()
 
 
-def test_plan_starts_agent_session() -> None:
+def test_plan_starts_agent_session(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "worktrees" / "planner"
     agent = AgentHome(
         name="planner",
         agent_id="atelier/planner/planner",
@@ -50,7 +51,7 @@ def test_plan_starts_agent_session() -> None:
         ),
         patch(
             "atelier.commands.plan.config.resolve_project_data_dir",
-            return_value=Path("/project"),
+            return_value=tmp_path,
         ),
         patch(
             "atelier.commands.plan.config.resolve_beads_root",
@@ -69,7 +70,7 @@ def test_plan_starts_agent_session() -> None:
         patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
         patch(
             "atelier.commands.plan.worktrees.ensure_git_worktree",
-            return_value=Path("/project/worktrees/planner"),
+            return_value=worktree_path,
         ),
         patch(
             "atelier.commands.plan.codex.run_codex_command",
