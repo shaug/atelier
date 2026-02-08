@@ -4,6 +4,8 @@ This document captures the current behavior of the Atelier CLI. It is a compact
 overview; command-specific details live in module docstrings under
 `src/atelier/commands`.
 
+See `docs/dogfood.md` for the end-to-end dogfood golden path.
+
 ## Purpose
 
 Atelier is a local CLI for workspace-based development inside a single Git repo
