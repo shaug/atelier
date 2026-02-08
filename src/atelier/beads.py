@@ -12,6 +12,11 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from . import changesets, exec, messages
+from .external_tickets import (
+    ExternalTicketRef,
+    external_ticket_payload,
+    normalize_external_ticket_entry,
+)
 from .io import die
 
 POLICY_LABEL = "at:policy"
@@ -23,15 +28,6 @@ ATELIER_ISSUE_PREFIX = "at"
 _AGENT_ISSUE_TYPE = "agent"
 _FALLBACK_ISSUE_TYPE = "task"
 _ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
-
-
-@dataclass(frozen=True)
-class ExternalTicketRef:
-    provider: str
-    ticket_id: str
-    url: str | None = None
-    state: str | None = None
-    on_close: str | None = None
 
 
 @dataclass(frozen=True)
@@ -495,14 +491,8 @@ def parse_external_tickets(description: str | None) -> list[ExternalTicketRef]:
     """Parse external ticket references from a description."""
     if not description:
         return []
-    tickets_raw: str | None = None
-    for line in description.splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        if key.strip() == EXTERNAL_TICKETS_KEY:
-            tickets_raw = value.strip()
-            break
+    fields = _parse_description_fields(description)
+    tickets_raw = fields.get(EXTERNAL_TICKETS_KEY)
     if not tickets_raw or tickets_raw.lower() == "null":
         return []
     try:
@@ -515,25 +505,10 @@ def parse_external_tickets(description: str | None) -> list[ExternalTicketRef]:
     for entry in payload:
         if not isinstance(entry, dict):
             continue
-        provider = entry.get("provider")
-        ticket_id = entry.get("id") or entry.get("ticket_id")
-        if not isinstance(provider, str) or not provider.strip():
+        normalized = normalize_external_ticket_entry(entry)
+        if normalized is None:
             continue
-        if not isinstance(ticket_id, str) or not ticket_id.strip():
-            continue
-        tickets.append(
-            ExternalTicketRef(
-                provider=provider.strip(),
-                ticket_id=ticket_id.strip(),
-                url=entry.get("url") if isinstance(entry.get("url"), str) else None,
-                state=entry.get("state")
-                if isinstance(entry.get("state"), str)
-                else None,
-                on_close=entry.get("on_close")
-                if isinstance(entry.get("on_close"), str)
-                else None,
-            )
-        )
+        tickets.append(normalized)
     return tickets
 
 
@@ -649,16 +624,7 @@ def update_external_tickets(
     if not issues:
         die(f"issue not found: {issue_id}")
     issue = issues[0]
-    payload = [
-        {
-            "provider": ticket.provider,
-            "id": ticket.ticket_id,
-            "url": ticket.url,
-            "state": ticket.state,
-            "on_close": ticket.on_close,
-        }
-        for ticket in tickets
-    ]
+    payload = [external_ticket_payload(ticket) for ticket in tickets]
     serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True)
     description = issue.get("description")
     updated = _update_description_field(

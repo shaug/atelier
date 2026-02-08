@@ -474,15 +474,22 @@ def test_update_worktree_path_writes_description() -> None:
 
 
 def test_parse_external_tickets_reads_json() -> None:
-    description = (
-        'external_tickets: [{"provider":"github","id":"123","url":"u"}]\nscope: demo\n'
-    )
+    description = 'external_tickets: [{"provider":"GitHub","id":"123","url":"u","relation":"Primary","direction":"import","sync_mode":"pull","state":"In-Progress","raw_state":"In Progress","state_updated_at":"2026-02-08T10:00:00Z","parent_id":"P-1","on_close":"Close","last_synced_at":"2026-02-08T11:00:00Z"}]\nscope: demo\n'
     tickets = beads.parse_external_tickets(description)
     assert len(tickets) == 1
     ticket = tickets[0]
     assert ticket.provider == "github"
     assert ticket.ticket_id == "123"
     assert ticket.url == "u"
+    assert ticket.relation == "primary"
+    assert ticket.direction == "imported"
+    assert ticket.sync_mode == "import"
+    assert ticket.state == "in_progress"
+    assert ticket.raw_state == "In Progress"
+    assert ticket.state_updated_at == "2026-02-08T10:00:00Z"
+    assert ticket.parent_id == "P-1"
+    assert ticket.on_close == "close"
+    assert ticket.last_synced_at == "2026-02-08T11:00:00Z"
 
 
 def test_update_external_tickets_updates_labels() -> None:
