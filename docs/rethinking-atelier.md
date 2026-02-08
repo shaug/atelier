@@ -622,7 +622,9 @@ Agents should not call `atelier` directly. Agents use skills only.
 
 ## Agent Skills (Agent-Only API)
 
-Skills live in `skills/` and wrap all interactions with bd.
+Skills live in `skills/` and wrap all interactions with bd. If a project-local
+skill conflicts with a global skill, the project-local version is
+authoritative. Ask the overseer before falling back to a global skill.
 
 Core skills:
 
