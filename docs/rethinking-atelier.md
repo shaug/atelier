@@ -46,6 +46,7 @@ Planner worktree:
 
 - Planner sessions run in a dedicated worktree per planner identity.
 - Treat the worktree as read-only for code changes (no commits beyond beads).
+- Planner worktrees install a commit-blocking hook and warn when dirty.
 - Use it as a reference canvas for planning and decomposition only.
 
 ### Worker (Atelier Work)

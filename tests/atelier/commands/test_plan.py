@@ -176,3 +176,26 @@ def test_plan_promotes_draft_epic_with_approval(tmp_path: Path) -> None:
     assert any(
         call[:2] == ["update", "atelier-draft"] and "at:draft" in call for call in calls
     )
+
+
+def test_planner_guardrails_install_commit_blocker(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "planner"
+    worktree_path.mkdir(parents=True)
+    (worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+
+    with (
+        patch("atelier.commands.plan.exec.run_command") as run_command,
+        patch(
+            "atelier.commands.plan.git.git_status_porcelain",
+            return_value=[" M example.txt"],
+        ),
+        patch("atelier.commands.plan.say") as say,
+    ):
+        plan_cmd._ensure_planner_read_only_guardrails(worktree_path, git_path="git")
+
+    hooks_dir = plan_cmd._planner_hooks_dir(worktree_path)
+    hook_path = hooks_dir / "pre-commit"
+    assert hook_path.exists()
+    run_command.assert_called_once()
+    assert "core.hooksPath" in run_command.call_args.args[0]
+    assert say.call_args_list

@@ -110,6 +110,8 @@ Atelier planning state. They are treated as external ticket sources.
 
   - Creates epics, tasks, and changesets in the planning store.
   - Suggests and validates a `workspace.root_branch` value.
+  - Installs a read-only guardrail hook for planner worktrees and warns on dirty
+    working trees.
 
 - `atelier policy`
 

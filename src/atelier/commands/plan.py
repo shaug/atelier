@@ -75,6 +75,51 @@ def _list_draft_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, ob
     return issues
 
 
+_PLANNER_HOOKS_DIR = ".atelier/hooks"
+_PLANNER_PRECOMMIT = """#!/bin/sh
+echo "Planner worktree is read-only. Do not commit from this workspace." >&2
+exit 1
+"""
+
+
+def _planner_hooks_dir(worktree_path: Path) -> Path:
+    return worktree_path / _PLANNER_HOOKS_DIR
+
+
+def _install_planner_commit_blocker(
+    worktree_path: Path, *, git_path: str | None
+) -> None:
+    hooks_dir = _planner_hooks_dir(worktree_path)
+    paths.ensure_dir(hooks_dir)
+    hook_path = hooks_dir / "pre-commit"
+    hook_path.write_text(_PLANNER_PRECOMMIT, encoding="utf-8")
+    hook_path.chmod(0o755)
+    exec.run_command(
+        git.git_command(
+            ["-C", str(worktree_path), "config", "core.hooksPath", str(hooks_dir)],
+            git_path=git_path,
+        )
+    )
+
+
+def _warn_planner_dirty(worktree_path: Path, *, git_path: str | None) -> None:
+    status = git.git_status_porcelain(worktree_path, git_path=git_path)
+    if not status:
+        return
+    say("Planner worktree has uncommitted changes. Keep this workspace read-only.")
+    for line in status[:5]:
+        say(f"- {line}")
+
+
+def _ensure_planner_read_only_guardrails(
+    worktree_path: Path, *, git_path: str | None
+) -> None:
+    if not (worktree_path / ".git").exists():
+        return
+    _install_planner_commit_blocker(worktree_path, git_path=git_path)
+    _warn_planner_dirty(worktree_path, git_path=git_path)
+
+
 def _maybe_promote_draft_epic(
     issues: list[dict[str, object]],
     *,
@@ -143,6 +188,7 @@ def run_planner(args: object) -> None:
             root_branch=default_branch,
             git_path=git_path,
         )
+        _ensure_planner_read_only_guardrails(worktree_path, git_path=git_path)
         planner_agents_path = worktree_path / "AGENTS.md"
         paths.ensure_dir(planner_agents_path.parent)
         planner_template = templates.planner_template(prefer_installed_if_modified=True)
