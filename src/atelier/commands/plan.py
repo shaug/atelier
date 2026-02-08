@@ -12,7 +12,10 @@ from .. import (
     external_registry,
     git,
     hooks,
+    paths,
     policy,
+    prompting,
+    templates,
     workspace,
     worktrees,
 )
@@ -27,6 +30,7 @@ def run_planner(args: object) -> None:
     )
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
+    project_enlistment = project_config.project.enlistment or _enlistment
     agent = agent_home.resolve_agent_home(
         project_data_dir, project_config, role="planner"
     )
@@ -52,7 +56,23 @@ def run_planner(args: object) -> None:
             root_branch=default_branch,
             git_path=git_path,
         )
-        project_enlistment = project_config.project.enlistment or _enlistment
+        planner_agents_path = worktree_path / "AGENTS.md"
+        paths.ensure_dir(planner_agents_path.parent)
+        planner_template = templates.planner_template(prefer_installed_if_modified=True)
+        planner_agents_path.write_text(
+            prompting.render_template(
+                planner_template,
+                {
+                    "agent_id": agent.agent_id,
+                    "project_root": str(project_enlistment),
+                    "project_data_dir": str(project_data_dir),
+                    "beads_dir": str(beads_root),
+                    "beads_prefix": "at",
+                    "planner_worktree": str(worktree_path),
+                },
+            ),
+            encoding="utf-8",
+        )
         env = workspace.workspace_environment(
             project_enlistment,
             default_branch,
