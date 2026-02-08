@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from .. import (
     agent_home,
     agents,
@@ -19,8 +21,89 @@ from .. import (
     workspace,
     worktrees,
 )
-from ..io import die, say
+from ..io import die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
+
+
+def _list_inbox_messages(
+    agent_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    inbox = beads.list_inbox_messages(
+        agent_id, beads_root=beads_root, cwd=repo_root, unread_only=True
+    )
+    if inbox:
+        say("Unread messages:")
+        for issue in inbox:
+            issue_id = issue.get("id") or ""
+            title = issue.get("title") or ""
+            say(f"- {issue_id} {title}")
+        return
+    say("No unread messages.")
+
+
+def _list_queue_messages(*, beads_root: Path, repo_root: Path) -> None:
+    queued = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root)
+    if queued:
+        say("Queued messages:")
+        for issue in queued:
+            issue_id = issue.get("id") or ""
+            queue_name = issue.get("queue") or "queue"
+            title = issue.get("title") or ""
+            say(f"- {issue_id} [{queue_name}] {title}")
+        return
+    say("No queued messages.")
+
+
+def _list_draft_epics(
+    *, beads_root: Path, repo_root: Path
+) -> list[dict[str, object]]:
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:epic", "--label", "at:draft"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    if not issues:
+        say("No draft epics.")
+        return []
+    say("Draft epics:")
+    for issue in issues:
+        issue_id = issue.get("id") or ""
+        status = issue.get("status") or "unknown"
+        title = issue.get("title") or ""
+        say(f"- {issue_id} [{status}] {title}")
+    return issues
+
+
+def _maybe_promote_draft_epic(
+    issues: list[dict[str, object]],
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    if not issues:
+        return
+    choice = prompt("Promote a draft epic to ready? (y/N)").strip().lower()
+    if choice not in {"y", "yes"}:
+        return
+    epic_id = prompt("Draft epic id").strip()
+    if not epic_id:
+        die("draft epic id is required")
+    valid_ids = {str(issue.get("id")) for issue in issues if issue.get("id")}
+    if epic_id not in valid_ids:
+        die(f"unknown draft epic id: {epic_id}")
+    confirm = prompt(f"Promote {epic_id} to ready? (y/N)").strip().lower()
+    if confirm not in {"y", "yes"}:
+        say("Draft epic promotion cancelled.")
+        return
+    beads.run_bd_command(
+        ["update", epic_id, "--remove-label", "at:draft", "--add-label", "at:ready"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    say(f"Promoted draft epic: {epic_id}")
 
 
 def run_planner(args: object) -> None:
@@ -40,6 +123,14 @@ def run_planner(args: object) -> None:
         beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
         beads.ensure_agent_bead(
             agent.agent_id, beads_root=beads_root, cwd=repo_root, role="planner"
+        )
+        _list_inbox_messages(
+            agent.agent_id, beads_root=beads_root, repo_root=repo_root
+        )
+        _list_queue_messages(beads_root=beads_root, repo_root=repo_root)
+        draft_epics = _list_draft_epics(beads_root=beads_root, repo_root=repo_root)
+        _maybe_promote_draft_epic(
+            draft_epics, beads_root=beads_root, repo_root=repo_root
         )
         policy.sync_agent_home_policy(
             agent, role=policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
