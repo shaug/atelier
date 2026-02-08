@@ -452,6 +452,9 @@ has moved, rebase onto the new root and retry.
 
 ### PR Strategy (Default: Sequential)
 
+Status: PR strategy configuration and gating are not implemented yet. The
+behavior below is the target once PR strategy wiring lands.
+
 PR strategy is a project-level policy on when to push and when to open PRs. The
 default is **sequential**: only one PR open at a time, and PRs are not created
 until the epic is ready for review.
@@ -548,6 +551,9 @@ Out-of-the-box provider support should include GitHub Issues. Additional
 providers can be implemented in core CLI code or through installable skills.
 
 ## Startup Contract (Enforcement)
+
+Status: currently enforced in `atelier work` before launching worker sessions.
+Session-start skill and hook-based enforcement are planned.
 
 The startup contract (“check hook → if hooked, run it → if empty, check
 inbox/queue”) should be enforced via:
