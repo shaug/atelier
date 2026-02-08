@@ -213,6 +213,76 @@ Default provider:
 - GitHub Issues support should be available out of the box, but implemented via
   the same contract used by other providers where possible.
 
+## Skill integration contract
+
+Skills act as provider adapters when a first-party integration is not bundled in
+Atelier. Planner calls skills with explicit payloads and expects normalized
+ticket records in return.
+
+Required skill inputs:
+
+- `provider`: provider slug (`github`, `linear`, `jira`, `beads`, `custom`).
+- `operation`: one of `import`, `export`, `link`, `sync_state`.
+- `bead_ids`: list of bead ids affected by the operation.
+
+Optional skill inputs:
+
+- `query`: provider-specific query string for imports.
+- `relation`: default relation to apply for imported or exported tickets.
+- `sync_mode`: desired sync mode for new links.
+- `filters`: provider-specific filters expressed as a JSON object.
+- `provider_config`: provider-specific auth/config data (opaque to core).
+
+Required skill outputs:
+
+- `tickets`: list of normalized external ticket entries with `provider` and `id`
+  set. Other canonical fields are optional but should be supplied when available
+  (`url`, `relation`, `direction`, `sync_mode`, `state`, `raw_state`,
+  `state_updated_at`, `parent_id`, `on_close`, `last_synced_at`).
+
+Optional skill outputs:
+
+- `errors`: list of per-ticket error messages for partial failures.
+- `metadata`: provider-specific response metadata for audit.
+
+Mapping rules:
+
+- Planner validates each ticket entry using the canonical schema and merges them
+  into `external_tickets`.
+- Invalid entries are skipped with a visible warning; valid entries are merged
+  by `(provider, id)` to avoid duplicates.
+
+Example skill input:
+
+```json
+{
+  "provider": "linear",
+  "operation": "import",
+  "bead_ids": ["atelier-123"],
+  "query": "label:planning",
+  "relation": "primary",
+  "sync_mode": "import"
+}
+```
+
+Example skill output:
+
+```json
+{
+  "tickets": [
+    {
+      "provider": "linear",
+      "id": "ENG-101",
+      "url": "https://linear.app/org/issue/ENG-101",
+      "relation": "primary",
+      "direction": "imported",
+      "sync_mode": "import",
+      "state": "open"
+    }
+  ]
+}
+```
+
 ## Minimal provider contract
 
 Required operations:

@@ -18,7 +18,8 @@ description: >-
 1. Show the bead and parse `external_tickets` entries.
 1. For each entry, optionally call provider-specific tooling (e.g., GitHub or
    Linear skills) to fetch current state if the user asks for it.
-1. Update the `state` value in `external_tickets` based on fetched data.
+1. Update the `state` and `state_updated_at` values in `external_tickets` based
+   on fetched data.
 1. Write the updated description with `bd update <issue_id> --body-file <path>`.
 
 ## Verification

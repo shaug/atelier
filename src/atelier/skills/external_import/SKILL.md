@@ -13,13 +13,16 @@ description: >-
 - provider: External provider name.
 - ticket_id: External ticket identifier.
 - ticket_url: Optional URL.
+- relation: Optional relation (primary/secondary/context/derived).
+- sync_mode: Optional sync mode (manual/import/export/sync).
 - beads_dir: Optional Beads store path.
 
 ## Steps
 
 1. Show the bead:
    - `bd show <issue_id>`
-1. Add/merge the ticket ref into `external_tickets` in the description.
+1. Add/merge the ticket ref into `external_tickets` in the description, with
+   `direction=imported` by default.
 1. Add the `ext:<provider>` label to the bead.
 1. Do not fetch remote metadata unless the user explicitly requests it.
 

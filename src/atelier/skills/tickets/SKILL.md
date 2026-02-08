@@ -21,7 +21,8 @@ description: >-
    - `bd show <issue_id>`
 1. Parse existing `external_tickets` from the description (JSON list).
 1. Merge in the new ticket refs, normalizing to:
-   - `provider`, `id`, optional `url`, `state`, `on_close`.
+   - `provider`, `id`, optional `url`, `relation`, `direction`, `sync_mode`,
+     `state`, `on_close`.
 1. Update the description with the new `external_tickets` JSON payload using
    `bd update <issue_id> --body-file <path>`.
 1. Add provider labels (e.g., `ext:github`) and remove stale ones.
