@@ -122,6 +122,26 @@ Planner is the orchestrator for external ticket synchronization.
 - On-demand sync: planner exposes explicit actions to refresh cached state or
   push local updates when a provider declares capability support.
 
+## Readiness and completeness
+
+Beads linked to external tickets are only worker-ready when local content is
+complete and self-contained.
+
+Required for worker readiness:
+
+- Title and description capture the full intent, constraints, and acceptance
+  criteria needed to execute without external lookups.
+- `external_tickets` entries include `relation` and `direction` when known, so
+  planner can distinguish actionable work from context references.
+- Any required context from external systems is copied into the bead body or
+  linked local notes before the bead is marked ready.
+
+Optional behaviors:
+
+- When local content meaningfully exceeds the external ticket, planner may offer
+  a push-back option to update the external ticket body or notes.
+- External state sync is never required for readiness; it is strictly optional.
+
 ## Provider integration architecture
 
 Integration should be skill-first, with a stable core contract.
