@@ -180,6 +180,13 @@ def run_planner(args: object) -> None:
         default_branch = git.git_default_branch(repo_root, git_path=git_path)
         if not default_branch:
             die("failed to determine default branch for planner worktree")
+        provider_contexts = external_registry.resolve_external_providers(
+            project_config, repo_root
+        )
+        provider_slugs = sorted(
+            {context.provider.slug for context in provider_contexts if context.provider}
+        )
+        external_providers = ", ".join(provider_slugs) if provider_slugs else "none"
         planner_key = f"planner-{agent.name}"
         worktree_path = worktrees.ensure_git_worktree(
             project_data_dir,
@@ -198,10 +205,13 @@ def run_planner(args: object) -> None:
                 {
                     "agent_id": agent.agent_id,
                     "project_root": str(project_enlistment),
+                    "repo_root": str(repo_root),
                     "project_data_dir": str(project_data_dir),
                     "beads_dir": str(beads_root),
                     "beads_prefix": "at",
                     "planner_worktree": str(worktree_path),
+                    "default_branch": default_branch,
+                    "external_providers": external_providers,
                 },
             ),
             encoding="utf-8",
