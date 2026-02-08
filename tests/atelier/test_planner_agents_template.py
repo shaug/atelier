@@ -17,3 +17,4 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "Startup Behavior" in content
     assert "Bead Quality Standard" in content
     assert "Promotion" in content
+    assert "External providers" in content

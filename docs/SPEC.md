@@ -98,6 +98,18 @@ Agent sessions inherit identity env vars:
 - `BD_ACTOR`
 - `BEADS_AGENT_NAME`
 
+Planner template variables:
+
+- `agent_id`
+- `project_root`
+- `repo_root`
+- `project_data_dir`
+- `beads_dir`
+- `beads_prefix`
+- `planner_worktree`
+- `default_branch`
+- `external_providers` (comma-separated slugs, or `none`)
+
 ## 5. Planning Store
 
 Atelier requires `bd` on the PATH for planning storage. Epics and changesets are
