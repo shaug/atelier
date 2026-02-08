@@ -19,6 +19,7 @@ from .. import (
     codex,
     config,
     exec,
+    git,
     hooks,
     messages,
     paths,
@@ -583,6 +584,10 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
             beads.update_workspace_root_branch(
                 selected_epic, root_branch_value, beads_root=beads_root, cwd=repo_root
             )
+        parent_branch_value = root_branch_value
+        beads.update_workspace_parent_branch(
+            selected_epic, parent_branch_value, beads_root=beads_root, cwd=repo_root
+        )
         beads.set_agent_hook(
             agent_bead_id, selected_epic, beads_root=beads_root, cwd=repo_root
         )
@@ -623,6 +628,23 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
             root_branch=root_branch_value,
             git_path=git_path,
         )
+        if changeset_id:
+            root_base = git.git_rev_parse(
+                worktree_path, root_branch_value, git_path=git_path
+            )
+            parent_base = git.git_rev_parse(
+                worktree_path, parent_branch_value, git_path=git_path
+            )
+            beads.update_changeset_branch_metadata(
+                changeset_id,
+                root_branch=root_branch_value,
+                parent_branch=parent_branch_value,
+                work_branch=branch,
+                root_base=root_base,
+                parent_base=parent_base,
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
         say(f"Worktree: {worktree_path}")
         say(f"Changeset branch: {branch}")
 

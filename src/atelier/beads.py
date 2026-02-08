@@ -585,6 +585,41 @@ def update_workspace_root_branch(
     return refreshed[0] if refreshed else issue
 
 
+def update_workspace_parent_branch(
+    epic_id: str,
+    parent_branch: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    allow_override: bool = False,
+) -> dict[str, object]:
+    """Update the workspace parent branch field for an epic."""
+    if not parent_branch:
+        die("parent branch must not be empty")
+    issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"epic not found: {epic_id}")
+    issue = issues[0]
+    description = issue.get("description")
+    fields = _parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    current = fields.get("workspace.parent_branch")
+    if current and current.lower() != "null" and current != parent_branch:
+        if not allow_override:
+            die("workspace parent branch already set; override not permitted")
+    if current == parent_branch:
+        return issue
+    updated = _update_description_field(
+        description if isinstance(description, str) else "",
+        key="workspace.parent_branch",
+        value=parent_branch,
+    )
+    _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
+    refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    return refreshed[0] if refreshed else issue
+
+
 def update_worktree_path(
     epic_id: str,
     worktree_path: str,
@@ -610,6 +645,65 @@ def update_worktree_path(
     _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
     refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
     return refreshed[0] if refreshed else issue
+
+
+def update_changeset_branch_metadata(
+    changeset_id: str,
+    *,
+    root_branch: str | None,
+    parent_branch: str | None,
+    work_branch: str | None,
+    root_base: str | None = None,
+    parent_base: str | None = None,
+    beads_root: Path,
+    cwd: Path,
+    allow_override: bool = False,
+) -> dict[str, object]:
+    """Update branch lineage metadata fields for a changeset."""
+    issues = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"changeset not found: {changeset_id}")
+    issue = issues[0]
+    description = issue.get("description")
+    fields = _parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+
+    def normalize(value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned or cleaned.lower() == "null":
+            return None
+        return cleaned
+
+    updated = description if isinstance(description, str) else ""
+    changed = False
+
+    def apply(key: str, value: str | None) -> None:
+        nonlocal updated, changed
+        normalized = normalize(value)
+        if normalized is None:
+            return
+        current = normalize(fields.get(key))
+        if current and current != normalized and not allow_override:
+            die(f"{key} already set; override not permitted")
+        if current == normalized:
+            return
+        updated = _update_description_field(updated, key=key, value=normalized)
+        changed = True
+
+    apply("changeset.root_branch", root_branch)
+    apply("changeset.parent_branch", parent_branch)
+    apply("changeset.work_branch", work_branch)
+    apply("changeset.root_base", root_base)
+    apply("changeset.parent_base", parent_base)
+
+    if changed:
+        _update_issue_description(changeset_id, updated, beads_root=beads_root, cwd=cwd)
+        refreshed = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+        return refreshed[0] if refreshed else issue
+    return issue
 
 
 def update_external_tickets(
