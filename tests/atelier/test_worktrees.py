@@ -25,7 +25,40 @@ def test_ensure_changeset_branch_writes_mapping() -> None:
         assert payload["epic_id"] == "epic"
         assert payload["root_branch"] == "feat/root"
         assert payload["changesets"]["epic.1"] == "feat/root-epic.1"
+        assert payload["changeset_worktrees"] == {}
         assert mapping.worktree_path == "worktrees/epic"
+
+
+def test_ensure_changeset_worktree_writes_mapping() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        repo_root = Path(tmp) / "repo"
+        project_dir.mkdir(parents=True)
+        repo_root.mkdir(parents=True)
+
+        def fake_ref_exists(
+            _repo: Path, ref: str, *, git_path: str | None = None
+        ) -> bool:
+            return ref == "refs/heads/feat/root"
+
+        with (
+            patch("atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists),
+            patch("atelier.worktrees.exec_util.run_command") as run_command,
+        ):
+            worktree_path = worktrees.ensure_changeset_worktree(
+                project_dir,
+                repo_root,
+                "epic",
+                "epic.1",
+                branch="feat/root-epic.1",
+                root_branch="feat/root",
+            )
+
+        mapping_file = worktrees.mapping_path(project_dir, "epic")
+        payload = json.loads(mapping_file.read_text(encoding="utf-8"))
+        assert payload["changeset_worktrees"]["epic.1"] == "worktrees/epic.1"
+        assert worktree_path == project_dir / "worktrees" / "epic.1"
+        assert run_command.called
 
 
 def test_ensure_git_worktree_creates_when_missing() -> None:

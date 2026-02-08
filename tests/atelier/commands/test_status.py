@@ -89,6 +89,7 @@ def test_status_json_summary() -> None:
                     worktree_path="worktrees/epic-1",
                     root_branch="alpha",
                     changesets={},
+                    changeset_worktrees={},
                 )
             return None
 
@@ -180,6 +181,7 @@ def test_status_includes_changeset_signals() -> None:
                     worktree_path="worktrees/epic-1",
                     root_branch="alpha",
                     changesets={"cs-1": "alpha-cs-1"},
+                    changeset_worktrees={},
                 )
             return None
 

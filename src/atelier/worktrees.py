@@ -19,6 +19,7 @@ class WorktreeMapping:
     worktree_path: str
     root_branch: str
     changesets: dict[str, str]
+    changeset_worktrees: dict[str, str]
 
 
 def worktrees_root(project_dir: Path) -> Path:
@@ -47,6 +48,7 @@ def load_mapping(path: Path) -> WorktreeMapping | None:
     worktree_path = payload.get("worktree_path")
     root_branch = payload.get("root_branch")
     changesets = payload.get("changesets")
+    changeset_worktrees = payload.get("changeset_worktrees")
     if not isinstance(epic_id, str) or not epic_id:
         return None
     if not isinstance(worktree_path, str) or not worktree_path:
@@ -55,9 +57,16 @@ def load_mapping(path: Path) -> WorktreeMapping | None:
         root_branch = ""
     if not isinstance(changesets, dict):
         changesets = {}
+    if not isinstance(changeset_worktrees, dict):
+        changeset_worktrees = {}
     normalized = {
         str(key): str(value)
         for key, value in changesets.items()
+        if key is not None and value is not None
+    }
+    normalized_worktrees = {
+        str(key): str(value)
+        for key, value in changeset_worktrees.items()
         if key is not None and value is not None
     }
     return WorktreeMapping(
@@ -65,6 +74,7 @@ def load_mapping(path: Path) -> WorktreeMapping | None:
         worktree_path=worktree_path,
         root_branch=root_branch,
         changesets=normalized,
+        changeset_worktrees=normalized_worktrees,
     )
 
 
@@ -75,6 +85,7 @@ def write_mapping(path: Path, mapping: WorktreeMapping) -> None:
         "worktree_path": mapping.worktree_path,
         "root_branch": mapping.root_branch,
         "changesets": mapping.changesets,
+        "changeset_worktrees": mapping.changeset_worktrees,
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
@@ -101,6 +112,7 @@ def ensure_worktree_mapping(
                 worktree_path=mapping.worktree_path,
                 root_branch=root_branch,
                 changesets=mapping.changesets,
+                changeset_worktrees=mapping.changeset_worktrees,
             )
             write_mapping(path, updated)
             return updated
@@ -111,6 +123,7 @@ def ensure_worktree_mapping(
         worktree_path=relative_path,
         root_branch=root_branch,
         changesets={},
+        changeset_worktrees={},
     )
     write_mapping(path, mapping)
     return mapping
@@ -137,9 +150,97 @@ def ensure_changeset_branch(
         worktree_path=mapping.worktree_path,
         root_branch=mapping.root_branch,
         changesets={**mapping.changesets, changeset_id: branch},
+        changeset_worktrees=mapping.changeset_worktrees,
     )
     write_mapping(mapping_path(project_dir, epic_id), updated)
     return branch, updated
+
+
+def changeset_worktree_relpath(changeset_id: str) -> str:
+    """Return the default worktree path for a changeset."""
+    if not changeset_id:
+        die("changeset id must not be empty")
+    return f"{paths.WORKTREES_DIRNAME}/{changeset_id}"
+
+
+def ensure_changeset_worktree(
+    project_dir: Path,
+    repo_root: Path,
+    epic_id: str,
+    changeset_id: str,
+    *,
+    branch: str,
+    root_branch: str,
+    git_path: str | None = None,
+) -> Path:
+    """Ensure a git worktree exists for a changeset and return its path."""
+    if not branch or not root_branch:
+        die("changeset branch and root branch must not be empty")
+    mapping = ensure_worktree_mapping(project_dir, epic_id, root_branch)
+    relpath = mapping.changeset_worktrees.get(changeset_id)
+    if not relpath:
+        relpath = changeset_worktree_relpath(changeset_id)
+        updated = WorktreeMapping(
+            epic_id=mapping.epic_id,
+            worktree_path=mapping.worktree_path,
+            root_branch=mapping.root_branch,
+            changesets=mapping.changesets,
+            changeset_worktrees={**mapping.changeset_worktrees, changeset_id: relpath},
+        )
+        write_mapping(mapping_path(project_dir, epic_id), updated)
+        mapping = updated
+
+    worktree_path = project_dir / relpath
+    if worktree_path.exists():
+        if (worktree_path / ".git").exists():
+            return worktree_path
+        die(f"worktree path exists but is not a git worktree: {worktree_path}")
+
+    branch_ref = f"refs/heads/{branch}"
+    remote_branch = f"refs/remotes/origin/{branch}"
+    root_ref = f"refs/heads/{root_branch}"
+    remote_root = f"refs/remotes/origin/{root_branch}"
+
+    if git.git_ref_exists(repo_root, branch_ref, git_path=git_path):
+        args = ["-C", str(repo_root), "worktree", "add", str(worktree_path), branch]
+    elif git.git_ref_exists(repo_root, remote_branch, git_path=git_path):
+        args = [
+            "-C",
+            str(repo_root),
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            str(worktree_path),
+            f"origin/{branch}",
+        ]
+    elif git.git_ref_exists(repo_root, root_ref, git_path=git_path):
+        args = [
+            "-C",
+            str(repo_root),
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            str(worktree_path),
+            root_branch,
+        ]
+    elif git.git_ref_exists(repo_root, remote_root, git_path=git_path):
+        args = [
+            "-C",
+            str(repo_root),
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            str(worktree_path),
+            f"origin/{root_branch}",
+        ]
+    else:
+        die(f"root branch {root_branch!r} not found for changeset worktree")
+
+    exec_util.run_command(git.git_command(args, git_path=git_path))
+    return worktree_path
 
 
 def ensure_changeset_checkout(

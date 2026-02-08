@@ -32,6 +32,7 @@ def test_edit_opens_workspace_repo_in_editor(tmp_path: Path) -> None:
         worktree_path="worktrees/at-epic",
         root_branch="feat/root",
         changesets={},
+        changeset_worktrees={},
     )
 
     with (

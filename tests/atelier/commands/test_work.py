@@ -51,6 +51,16 @@ def _branch_metadata_updates() -> object:
         yield update_epic, update_changeset
 
 
+@pytest.fixture(autouse=True)
+def _changeset_worktree(tmp_path: Path) -> object:
+    worktree_path = tmp_path / "worktrees" / "changeset"
+    with patch(
+        "atelier.commands.work.worktrees.ensure_changeset_worktree",
+        return_value=worktree_path,
+    ):
+        yield
+
+
 def test_work_prompt_selects_epic_and_changeset() -> None:
     epics = [
         {
@@ -77,6 +87,7 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
         worktree_path="worktrees/atelier-epic",
         root_branch="feat/root",
         changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
+        changeset_worktrees={},
     )
     agent = AgentHome(
         name="worker",
@@ -187,6 +198,7 @@ def test_work_prompt_allows_resume_epic() -> None:
         worktree_path="worktrees/atelier-epic-hooked",
         root_branch="feat/root",
         changesets={"atelier-epic-hooked.1": "feat/root-atelier-epic-hooked.1"},
+        changeset_worktrees={},
     )
     agent = AgentHome(
         name="worker",
@@ -275,6 +287,7 @@ def test_work_auto_picks_ready_epic() -> None:
         worktree_path="worktrees/atelier-epic",
         root_branch="feat/root",
         changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
+        changeset_worktrees={},
     )
     agent = AgentHome(
         name="worker",
@@ -387,6 +400,7 @@ def test_work_auto_falls_back_to_oldest_unfinished() -> None:
         worktree_path="worktrees/atelier-epic-old",
         root_branch="feat/root",
         changesets={"atelier-epic-old.1": "feat/root-atelier-epic-old.1"},
+        changeset_worktrees={},
     )
     agent = AgentHome(
         name="worker",
@@ -482,6 +496,7 @@ def test_work_resumes_hooked_epic() -> None:
         worktree_path="worktrees/atelier-epic",
         root_branch="feat/root",
         changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
+        changeset_worktrees={},
     )
     agent = AgentHome(
         name="worker",
@@ -625,6 +640,7 @@ def test_work_resumes_assigned_epic_before_inbox() -> None:
         worktree_path="worktrees/atelier-epic-hooked",
         root_branch="feat/root",
         changesets={"atelier-epic-hooked.1": "feat/root-atelier-epic-hooked.1"},
+        changeset_worktrees={},
     )
     agent = AgentHome(
         name="worker",
@@ -943,6 +959,7 @@ def test_work_uses_explicit_epic_id() -> None:
         worktree_path="worktrees/atelier-epic",
         root_branch="feat/root",
         changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
+        changeset_worktrees={},
     )
     agent = AgentHome(
         name="worker",
@@ -1031,6 +1048,7 @@ def test_work_records_branch_metadata(_branch_metadata_updates: object) -> None:
         worktree_path="worktrees/atelier-epic",
         root_branch="feat/root",
         changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
+        changeset_worktrees={},
     )
     agent = AgentHome(
         name="worker",
@@ -1146,6 +1164,7 @@ def test_work_marks_changeset_blocked_on_thread_message() -> None:
         worktree_path="worktrees/atelier-epic",
         root_branch="feat/root",
         changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
+        changeset_worktrees={},
     )
     agent = AgentHome(
         name="worker",
@@ -1239,6 +1258,7 @@ def test_work_closes_epic_when_changeset_complete() -> None:
         worktree_path="worktrees/atelier-epic",
         root_branch="feat/root",
         changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
+        changeset_worktrees={},
     )
     agent = AgentHome(
         name="worker",

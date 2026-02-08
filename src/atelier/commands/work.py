@@ -602,7 +602,7 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
                 changeset_id, beads_root=beads_root, repo_root=repo_root
             )
         git_path = config.resolve_git_path(project_config)
-        worktrees.ensure_git_worktree(
+        epic_worktree_path = worktrees.ensure_git_worktree(
             project_data_dir,
             repo_root,
             selected_epic,
@@ -621,19 +621,27 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
             beads_root=beads_root,
             cwd=repo_root,
         )
-        worktree_path = project_data_dir / mapping.worktree_path
+        changeset_worktree_path = worktrees.ensure_changeset_worktree(
+            project_data_dir,
+            repo_root,
+            selected_epic,
+            changeset_id,
+            branch=branch,
+            root_branch=root_branch_value,
+            git_path=git_path,
+        )
         worktrees.ensure_changeset_checkout(
-            worktree_path,
+            changeset_worktree_path,
             branch,
             root_branch=root_branch_value,
             git_path=git_path,
         )
         if changeset_id:
             root_base = git.git_rev_parse(
-                worktree_path, root_branch_value, git_path=git_path
+                changeset_worktree_path, root_branch_value, git_path=git_path
             )
             parent_base = git.git_rev_parse(
-                worktree_path, parent_branch_value, git_path=git_path
+                changeset_worktree_path, parent_branch_value, git_path=git_path
             )
             beads.update_changeset_branch_metadata(
                 changeset_id,
@@ -645,7 +653,8 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
                 beads_root=beads_root,
                 cwd=repo_root,
             )
-        say(f"Worktree: {worktree_path}")
+        say(f"Epic worktree: {epic_worktree_path}")
+        say(f"Changeset worktree: {changeset_worktree_path}")
         say(f"Changeset branch: {branch}")
 
         agent_spec = agents.get_agent(project_config.agent.default)
@@ -653,7 +662,7 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
             die(f"unsupported agent {project_config.agent.default!r}")
         agent_options = list(project_config.agent.options.get(agent_spec.name, []))
         project_enlistment = project_config.project.enlistment or _enlistment
-        worker_agents_path = worktree_path / "AGENTS.md"
+        worker_agents_path = changeset_worktree_path / "AGENTS.md"
         paths.ensure_dir(worker_agents_path.parent)
         worker_template = templates.worker_template(prefer_installed_if_modified=True)
         worker_agents_path.write_text(
@@ -665,7 +674,7 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
                     "project_data_dir": str(project_data_dir),
                     "beads_dir": str(beads_root),
                     "beads_prefix": "at",
-                    "worker_worktree": str(worktree_path),
+                    "worker_worktree": str(changeset_worktree_path),
                 },
             ),
             encoding="utf-8",
@@ -673,7 +682,7 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
         env = workspace.workspace_environment(
             project_enlistment,
             root_branch_value,
-            worktree_path,
+            changeset_worktree_path,
             base_env=agents.agent_environment(agent.agent_id),
         )
         env["ATELIER_EPIC_ID"] = selected_epic
@@ -688,7 +697,7 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
         hooks.ensure_hooks_path(env, hook_path)
         say(f"Starting {agent_spec.display_name} session")
         start_cmd, start_cwd = agent_spec.build_start_command(
-            worktree_path, agent_options, opening_prompt
+            changeset_worktree_path, agent_options, opening_prompt
         )
         started_at = dt.datetime.now(tz=dt.timezone.utc)
         if agent_spec.name == "codex":
