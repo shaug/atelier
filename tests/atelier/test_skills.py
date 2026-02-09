@@ -35,6 +35,7 @@ def test_packaged_skills_include_core_set() -> None:
         "plan_create_epic",
         "plan_split_tasks",
         "plan_changesets",
+        "plan_changeset_guardrails",
     }.issubset(names)
 
 
@@ -72,6 +73,7 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "plan_create_epic",
             "plan_split_tasks",
             "plan_changesets",
+            "plan_changeset_guardrails",
         ):
             assert (workspace_dir / "skills" / name / "SKILL.md").exists()
 

@@ -648,6 +648,7 @@ Planner skills:
 - `plan_create_epic`
 - `plan_split_tasks`
 - `plan_changesets` (enforce guardrails)
+- `plan_changeset_guardrails` (validate guardrails)
 
 Ticket skills:
 
