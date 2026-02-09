@@ -16,6 +16,7 @@ from .. import (
     agent_home,
     agents,
     beads,
+    branching,
     codex,
     config,
     exec,
@@ -43,6 +44,10 @@ _WATCH_INTERVAL_SECONDS = 60
 class StartupContractResult:
     epic_id: str | None
     should_exit: bool
+
+
+def _dry_run_log(message: str) -> None:
+    say(f"DRY-RUN: {message}")
 
 
 def _normalize_mode(value: str | None) -> str:
@@ -215,6 +220,7 @@ def _send_needs_decision(
     issues: list[dict[str, object]],
     beads_root: Path,
     repo_root: Path,
+    dry_run: bool,
 ) -> None:
     ready = _filter_epics(issues, require_unassigned=True)
     assigned = _filter_epics(issues, assignee=agent_id)
@@ -230,6 +236,10 @@ def _send_needs_decision(
             f"Timestamp: {timestamp}",
         ]
     )
+    if dry_run:
+        _dry_run_log(f"Would send message: {subject}")
+        _dry_run_log(body)
+        return
     beads.create_message_bead(
         subject=subject,
         body=body,
@@ -247,7 +257,12 @@ def _send_planner_notification(
     thread_id: str | None,
     beads_root: Path,
     repo_root: Path,
+    dry_run: bool,
 ) -> None:
+    if dry_run:
+        _dry_run_log(f"Would send message: {subject}")
+        _dry_run_log(body)
+        return
     metadata: dict[str, object] = {
         "from": agent_id,
         "queue": "planner",
@@ -270,6 +285,7 @@ def _send_no_ready_changesets(
     agent_id: str,
     beads_root: Path,
     repo_root: Path,
+    dry_run: bool,
 ) -> None:
     summary = beads.epic_changeset_summary(
         epic_id, beads_root=beads_root, cwd=repo_root
@@ -293,6 +309,7 @@ def _send_no_ready_changesets(
         thread_id=epic_id,
         beads_root=beads_root,
         repo_root=repo_root,
+        dry_run=dry_run,
     )
 
 
@@ -498,6 +515,7 @@ def _finalize_changeset(
             thread_id=changeset_id,
             beads_root=beads_root,
             repo_root=repo_root,
+            dry_run=False,
         )
         return
     description = issue.get("description")
@@ -519,6 +537,7 @@ def _finalize_changeset(
             thread_id=changeset_id,
             beads_root=beads_root,
             repo_root=repo_root,
+            dry_run=False,
         )
         return
     work_branch = work_branch.strip()
@@ -541,6 +560,7 @@ def _finalize_changeset(
             thread_id=changeset_id,
             beads_root=beads_root,
             repo_root=repo_root,
+            dry_run=False,
         )
 
 
@@ -586,13 +606,26 @@ def _handle_queue_before_claim(
     beads_root: Path,
     repo_root: Path,
     force_prompt: bool = False,
+    dry_run: bool = False,
 ) -> bool:
     queued = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root)
     if not queued:
         if force_prompt:
-            say("No queued messages available.")
+            if dry_run:
+                _dry_run_log("No queued messages available.")
+            else:
+                say("No queued messages available.")
             return True
         return False
+    if dry_run:
+        say("Queued messages:")
+        for issue in queued:
+            issue_id = issue.get("id") or ""
+            queue_name = issue.get("queue") or "queue"
+            title = issue.get("title") or ""
+            say(f"- {issue_id} [{queue_name}] {title}")
+        _dry_run_log("Would prompt to claim a queue message.")
+        return True
     _prompt_queue_claim(
         queued, agent_id=agent_id, beads_root=beads_root, repo_root=repo_root
     )
@@ -602,12 +635,13 @@ def _handle_queue_before_claim(
 def _run_startup_contract(
     *,
     agent_id: str,
-    agent_bead_id: str,
+    agent_bead_id: str | None,
     beads_root: Path,
     repo_root: Path,
     mode: str,
     explicit_epic_id: str | None,
     queue_only: bool,
+    dry_run: bool,
 ) -> StartupContractResult:
     """Apply startup_contract skill ordering to select the next epic."""
     if explicit_epic_id is not None:
@@ -622,12 +656,19 @@ def _run_startup_contract(
             beads_root=beads_root,
             repo_root=repo_root,
             force_prompt=True,
+            dry_run=dry_run,
         )
+        if dry_run:
+            _dry_run_log("Queue-only run would exit after handling queue.")
         return StartupContractResult(epic_id=None, should_exit=True)
 
-    hooked_epic = _resolve_hooked_epic(
-        agent_bead_id, agent_id, beads_root=beads_root, repo_root=repo_root
-    )
+    hooked_epic = None
+    if agent_bead_id:
+        hooked_epic = _resolve_hooked_epic(
+            agent_bead_id, agent_id, beads_root=beads_root, repo_root=repo_root
+        )
+    elif dry_run:
+        _dry_run_log("Would create agent bead before checking for hooks.")
     if hooked_epic:
         say(f"Resuming hooked epic: {hooked_epic}")
         return StartupContractResult(epic_id=hooked_epic, should_exit=False)
@@ -643,8 +684,14 @@ def _run_startup_contract(
             return StartupContractResult(epic_id=selected_epic, should_exit=False)
 
     if _check_inbox_before_claim(agent_id, beads_root=beads_root, repo_root=repo_root):
+        if dry_run:
+            _dry_run_log("Inbox has unread messages; would exit before claiming work.")
         return StartupContractResult(epic_id=None, should_exit=True)
-    if _handle_queue_before_claim(agent_id, beads_root=beads_root, repo_root=repo_root):
+    if _handle_queue_before_claim(
+        agent_id, beads_root=beads_root, repo_root=repo_root, dry_run=dry_run
+    ):
+        if dry_run:
+            _dry_run_log("Queue messages available; would exit before claiming work.")
         return StartupContractResult(epic_id=None, should_exit=True)
 
     if mode == "auto":
@@ -659,38 +706,61 @@ def _run_startup_contract(
             issues=issues,
             beads_root=beads_root,
             repo_root=repo_root,
+            dry_run=dry_run,
         )
         return StartupContractResult(epic_id=None, should_exit=True)
 
     return StartupContractResult(epic_id=selected_epic, should_exit=False)
 
 
-def _run_worker_once(args: object, *, mode: str) -> bool:
+def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
     """Start a single worker session by selecting an epic and changeset."""
     project_root, project_config, _enlistment, repo_root = (
         resolve_current_project_with_repo_root()
     )
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
-    agent = agent_home.resolve_agent_home(
-        project_data_dir, project_config, role="worker"
-    )
+    if dry_run:
+        agent = agent_home.preview_agent_home(
+            project_data_dir, project_config, role="worker"
+        )
+    else:
+        agent = agent_home.resolve_agent_home(
+            project_data_dir, project_config, role="worker"
+        )
 
     with agents.scoped_agent_env(agent.agent_id):
-        beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
-        agent_bead = beads.ensure_agent_bead(
-            agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
-        )
-        policy.sync_agent_home_policy(
-            agent, role=policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root
-        )
+        agent_bead_id: str | None = None
+        if dry_run:
+            _dry_run_log("Would run: bd prime")
+            agent_bead = beads.find_agent_bead(
+                agent.agent_id, beads_root=beads_root, cwd=repo_root
+            )
+            if agent_bead:
+                agent_bead_id = (
+                    str(agent_bead.get("id")) if agent_bead.get("id") else None
+                )
+            if not agent_bead_id:
+                _dry_run_log(
+                    f"Would create agent bead for {agent.agent_id!r} (worker)."
+                )
+            _dry_run_log("Would sync agent home policy.")
+        else:
+            beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
+            agent_bead = beads.ensure_agent_bead(
+                agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
+            )
+            policy.sync_agent_home_policy(
+                agent, role=policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root
+            )
+            agent_bead_id = agent_bead.get("id")
 
         epic_id = getattr(args, "epic_id", None)
         queue_only = bool(getattr(args, "queue", False))
 
-        agent_bead_id = agent_bead.get("id")
-        if not isinstance(agent_bead_id, str) or not agent_bead_id:
-            die("failed to resolve agent bead id")
+        if not dry_run:
+            if not isinstance(agent_bead_id, str) or not agent_bead_id:
+                die("failed to resolve agent bead id")
 
         startup_result = _run_startup_contract(
             agent_id=agent.agent_id,
@@ -700,35 +770,76 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
             mode=mode,
             explicit_epic_id=epic_id,
             queue_only=queue_only,
+            dry_run=dry_run,
         )
         if startup_result.should_exit:
+            if dry_run:
+                _dry_run_log("Startup contract would exit without starting a worker.")
             return False
         if not startup_result.epic_id:
+            if dry_run:
+                _dry_run_log("Startup contract did not select an epic.")
+                return False
             die("startup contract did not select an epic")
         selected_epic = startup_result.epic_id
 
-        say(f"Selected epic: {selected_epic}")
-        epic_issue = beads.claim_epic(
-            selected_epic, agent.agent_id, beads_root=beads_root, cwd=repo_root
-        )
+        if dry_run:
+            _dry_run_log(f"Selected epic: {selected_epic}")
+            issues = beads.run_bd_json(
+                ["show", selected_epic], beads_root=beads_root, cwd=repo_root
+            )
+            if not issues:
+                _dry_run_log(f"Epic {selected_epic!r} not found.")
+                return False
+            epic_issue = issues[0]
+            _dry_run_log(
+                f"Would claim epic {selected_epic!r} for agent {agent.agent_id!r}."
+            )
+        else:
+            say(f"Selected epic: {selected_epic}")
+            epic_issue = beads.claim_epic(
+                selected_epic, agent.agent_id, beads_root=beads_root, cwd=repo_root
+            )
         root_branch_value = beads.extract_workspace_root_branch(epic_issue)
+        suggested_root_branch = None
         if not root_branch_value:
-            root_branch_value = root_branch.prompt_root_branch(
-                title=str(epic_issue.get("title") or selected_epic),
-                branch_prefix=project_config.branch.prefix,
-                beads_root=beads_root,
-                repo_root=repo_root,
+            suggested_root_branch = branching.suggest_root_branch(
+                str(epic_issue.get("title") or selected_epic),
+                project_config.branch.prefix,
             )
-            beads.update_workspace_root_branch(
-                selected_epic, root_branch_value, beads_root=beads_root, cwd=repo_root
-            )
+            if dry_run:
+                _dry_run_log(
+                    "Root branch missing; would prompt for root branch selection."
+                )
+                if suggested_root_branch:
+                    _dry_run_log(f"Suggested root branch: {suggested_root_branch!r}.")
+                root_branch_value = suggested_root_branch
+            else:
+                root_branch_value = root_branch.prompt_root_branch(
+                    title=str(epic_issue.get("title") or selected_epic),
+                    branch_prefix=project_config.branch.prefix,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                )
+                beads.update_workspace_root_branch(
+                    selected_epic,
+                    root_branch_value,
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                )
         parent_branch_value = root_branch_value
-        beads.update_workspace_parent_branch(
-            selected_epic, parent_branch_value, beads_root=beads_root, cwd=repo_root
-        )
-        beads.set_agent_hook(
-            agent_bead_id, selected_epic, beads_root=beads_root, cwd=repo_root
-        )
+        if dry_run:
+            _dry_run_log(
+                f"Would set workspace parent branch to {parent_branch_value!r}."
+            )
+            _dry_run_log("Would set agent hook to selected epic.")
+        else:
+            beads.update_workspace_parent_branch(
+                selected_epic, parent_branch_value, beads_root=beads_root, cwd=repo_root
+            )
+            beads.set_agent_hook(
+                agent_bead_id, selected_epic, beads_root=beads_root, cwd=repo_root
+            )
         changeset = _next_changeset(
             epic_id=selected_epic, beads_root=beads_root, repo_root=repo_root
         )
@@ -738,7 +849,11 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
                 agent_id=agent.agent_id,
                 beads_root=beads_root,
                 repo_root=repo_root,
+                dry_run=dry_run,
             )
+            if dry_run:
+                _dry_run_log("Would release epic assignment and clear agent hook.")
+                return False
             _release_epic_assignment(
                 selected_epic, beads_root=beads_root, repo_root=repo_root
             )
@@ -746,109 +861,183 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
             return False
         changeset_id = changeset.get("id") or ""
         changeset_title = changeset.get("title") or ""
-        say(f"Next changeset: {changeset_id} {changeset_title}")
+        if dry_run:
+            _dry_run_log(f"Next changeset: {changeset_id} {changeset_title}")
+        else:
+            say(f"Next changeset: {changeset_id} {changeset_title}")
         if changeset_id:
-            _mark_changeset_in_progress(
-                changeset_id, beads_root=beads_root, repo_root=repo_root
-            )
+            if dry_run:
+                _dry_run_log(f"Would mark changeset {changeset_id} in progress.")
+            else:
+                _mark_changeset_in_progress(
+                    changeset_id, beads_root=beads_root, repo_root=repo_root
+                )
         git_path = config.resolve_git_path(project_config)
-        epic_worktree_path = worktrees.ensure_git_worktree(
-            project_data_dir,
-            repo_root,
-            selected_epic,
-            root_branch=root_branch_value,
-            git_path=git_path,
-        )
-        branch, mapping = worktrees.ensure_changeset_branch(
-            project_data_dir,
-            selected_epic,
-            changeset_id,
-            root_branch=root_branch_value,
-        )
-        beads.update_worktree_path(
-            selected_epic,
-            mapping.worktree_path,
-            beads_root=beads_root,
-            cwd=repo_root,
-        )
-        changeset_worktree_path = worktrees.ensure_changeset_worktree(
-            project_data_dir,
-            repo_root,
-            selected_epic,
-            changeset_id,
-            branch=branch,
-            root_branch=root_branch_value,
-            git_path=git_path,
-        )
-        worktrees.ensure_changeset_checkout(
-            changeset_worktree_path,
-            branch,
-            root_branch=root_branch_value,
-            git_path=git_path,
-        )
-        if changeset_id:
-            root_base = git.git_rev_parse(
-                changeset_worktree_path, root_branch_value, git_path=git_path
+        epic_worktree_path: Path | None = None
+        changeset_worktree_path: Path | None = None
+        branch: str | None = None
+        if dry_run:
+            mapping = None
+            mapping_path = worktrees.mapping_path(project_data_dir, selected_epic)
+            if mapping_path.exists():
+                mapping = worktrees.load_mapping(mapping_path)
+            epic_worktree_path = (
+                project_data_dir / mapping.worktree_path
+                if mapping and mapping.worktree_path
+                else worktrees.worktree_dir(project_data_dir, selected_epic)
             )
-            parent_base = git.git_rev_parse(
-                changeset_worktree_path, parent_branch_value, git_path=git_path
+            if mapping and changeset_id in mapping.changesets:
+                branch = mapping.changesets[changeset_id]
+            elif root_branch_value:
+                branch = worktrees.derive_changeset_branch(
+                    root_branch_value, changeset_id
+                )
+            changeset_relpath = None
+            if mapping and changeset_id in mapping.changeset_worktrees:
+                changeset_relpath = mapping.changeset_worktrees[changeset_id]
+            elif changeset_id:
+                changeset_relpath = worktrees.changeset_worktree_relpath(changeset_id)
+            if changeset_relpath:
+                changeset_worktree_path = project_data_dir / changeset_relpath
+            _dry_run_log(f"Epic worktree: {epic_worktree_path}")
+            if changeset_worktree_path is not None:
+                _dry_run_log(f"Changeset worktree: {changeset_worktree_path}")
+            else:
+                _dry_run_log("Changeset worktree: <unknown>")
+            _dry_run_log(f"Changeset branch: {branch or '<unknown>'}")
+            if changeset_id:
+                _dry_run_log(
+                    "Would update changeset branch metadata "
+                    f"(root={root_branch_value!r}, parent={parent_branch_value!r}, "
+                    f"work={branch!r})."
+                )
+            _dry_run_log("Would ensure git worktrees and checkout.")
+        else:
+            epic_worktree_path = worktrees.ensure_git_worktree(
+                project_data_dir,
+                repo_root,
+                selected_epic,
+                root_branch=root_branch_value,
+                git_path=git_path,
             )
-            beads.update_changeset_branch_metadata(
+            branch, mapping = worktrees.ensure_changeset_branch(
+                project_data_dir,
+                selected_epic,
                 changeset_id,
                 root_branch=root_branch_value,
-                parent_branch=parent_branch_value,
-                work_branch=branch,
-                root_base=root_base,
-                parent_base=parent_base,
+            )
+            beads.update_worktree_path(
+                selected_epic,
+                mapping.worktree_path,
                 beads_root=beads_root,
                 cwd=repo_root,
             )
-        say(f"Epic worktree: {epic_worktree_path}")
-        say(f"Changeset worktree: {changeset_worktree_path}")
-        say(f"Changeset branch: {branch}")
+            changeset_worktree_path = worktrees.ensure_changeset_worktree(
+                project_data_dir,
+                repo_root,
+                selected_epic,
+                changeset_id,
+                branch=branch,
+                root_branch=root_branch_value,
+                git_path=git_path,
+            )
+            worktrees.ensure_changeset_checkout(
+                changeset_worktree_path,
+                branch,
+                root_branch=root_branch_value,
+                git_path=git_path,
+            )
+            if changeset_id:
+                root_base = git.git_rev_parse(
+                    changeset_worktree_path, root_branch_value, git_path=git_path
+                )
+                parent_base = git.git_rev_parse(
+                    changeset_worktree_path, parent_branch_value, git_path=git_path
+                )
+                beads.update_changeset_branch_metadata(
+                    changeset_id,
+                    root_branch=root_branch_value,
+                    parent_branch=parent_branch_value,
+                    work_branch=branch,
+                    root_base=root_base,
+                    parent_base=parent_base,
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                )
+            say(f"Epic worktree: {epic_worktree_path}")
+            say(f"Changeset worktree: {changeset_worktree_path}")
+            say(f"Changeset branch: {branch}")
 
         agent_spec = agents.get_agent(project_config.agent.default)
         if agent_spec is None:
             die(f"unsupported agent {project_config.agent.default!r}")
         agent_options = list(project_config.agent.options.get(agent_spec.name, []))
         project_enlistment = project_config.project.enlistment or _enlistment
-        worker_agents_path = changeset_worktree_path / "AGENTS.md"
-        paths.ensure_dir(worker_agents_path.parent)
-        worker_template = templates.worker_template(prefer_installed_if_modified=True)
-        worker_agents_path.write_text(
-            prompting.render_template(
-                worker_template,
-                {
-                    "agent_id": agent.agent_id,
-                    "project_root": str(project_enlistment),
-                    "project_data_dir": str(project_data_dir),
-                    "beads_dir": str(beads_root),
-                    "beads_prefix": "at",
-                    "worker_worktree": str(changeset_worktree_path),
-                },
-            ),
-            encoding="utf-8",
-        )
-        env = workspace.workspace_environment(
-            project_enlistment,
-            root_branch_value,
-            changeset_worktree_path,
-            base_env=agents.agent_environment(agent.agent_id),
-        )
-        env["ATELIER_EPIC_ID"] = selected_epic
-        if changeset_id:
-            env["ATELIER_CHANGESET_ID"] = str(changeset_id)
+        workspace_branch = root_branch_value or ""
+        if dry_run:
+            worker_agents_path = (
+                changeset_worktree_path / "AGENTS.md"
+                if changeset_worktree_path is not None
+                else None
+            )
+            if worker_agents_path is not None:
+                _dry_run_log(f"Would write worker AGENTS.md to {worker_agents_path}")
+            _dry_run_log("Would prepare workspace environment variables.")
+        else:
+            worker_agents_path = changeset_worktree_path / "AGENTS.md"
+            paths.ensure_dir(worker_agents_path.parent)
+            worker_template = templates.worker_template(
+                prefer_installed_if_modified=True
+            )
+            worker_agents_path.write_text(
+                prompting.render_template(
+                    worker_template,
+                    {
+                        "agent_id": agent.agent_id,
+                        "project_root": str(project_enlistment),
+                        "project_data_dir": str(project_data_dir),
+                        "beads_dir": str(beads_root),
+                        "beads_prefix": "at",
+                        "worker_worktree": str(changeset_worktree_path),
+                    },
+                ),
+                encoding="utf-8",
+            )
+            env = workspace.workspace_environment(
+                project_enlistment,
+                workspace_branch,
+                changeset_worktree_path,
+                base_env=agents.agent_environment(agent.agent_id),
+            )
+            env["ATELIER_EPIC_ID"] = selected_epic
+            if changeset_id:
+                env["ATELIER_CHANGESET_ID"] = str(changeset_id)
         opening_prompt = ""
         if agent_spec.name == "codex":
             opening_prompt = workspace.workspace_session_identifier(
-                project_enlistment, root_branch_value, changeset_id or None
+                project_enlistment, workspace_branch, changeset_id or None
             )
-        hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
-        hooks.ensure_hooks_path(env, hook_path)
-        say(f"Starting {agent_spec.display_name} session")
+        if dry_run:
+            _dry_run_log("Would ensure agent hooks are installed.")
+        else:
+            hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
+            hooks.ensure_hooks_path(env, hook_path)
+        if dry_run:
+            _dry_run_log(f"Would start {agent_spec.display_name} session.")
+        else:
+            say(f"Starting {agent_spec.display_name} session")
+        command_worktree = changeset_worktree_path or Path(".")
+        if dry_run and changeset_worktree_path is None:
+            _dry_run_log("Changeset worktree unknown; using '.' for command preview.")
         start_cmd, start_cwd = agent_spec.build_start_command(
-            changeset_worktree_path, agent_options, opening_prompt
+            command_worktree,
+            agent_options,
+            opening_prompt,
         )
+        if dry_run:
+            _dry_run_log(f"Agent command: {' '.join(start_cmd)}")
+            _dry_run_log(f"Agent cwd: {start_cwd}")
+            return False
         started_at = dt.datetime.now(tz=dt.timezone.utc)
         if agent_spec.name == "codex":
             result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
@@ -905,12 +1094,23 @@ def start_worker(args: object) -> None:
     """Start worker sessions based on the configured run mode."""
     mode = _normalize_mode(getattr(args, "mode", None))
     run_mode = _normalize_run_mode(getattr(args, "run_mode", None))
+    dry_run = bool(getattr(args, "dry_run", False))
     if bool(getattr(args, "queue", False)):
-        _run_worker_once(args, mode=mode)
+        _run_worker_once(args, mode=mode, dry_run=dry_run)
         return
+    if dry_run:
+        while True:
+            _run_worker_once(args, mode=mode, dry_run=True)
+            if run_mode != "watch":
+                return
+            interval = _watch_interval_seconds()
+            _dry_run_log(
+                f"Watching for updates (sleeping {interval}s before next check)."
+            )
+            time.sleep(interval)
 
     while True:
-        started = _run_worker_once(args, mode=mode)
+        started = _run_worker_once(args, mode=mode, dry_run=False)
         if run_mode == "once":
             return
         if started:

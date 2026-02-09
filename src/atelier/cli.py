@@ -465,10 +465,23 @@ def work_command(
             help="process queued messages and exit",
         ),
     ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="log what would happen without mutating state or starting the agent",
+        ),
+    ] = False,
 ) -> None:
     """Start a worker session."""
     work_cmd.start_worker(
-        SimpleNamespace(epic_id=epic_id, mode=mode, run_mode=run_mode, queue=queue)
+        SimpleNamespace(
+            epic_id=epic_id,
+            mode=mode,
+            run_mode=run_mode,
+            queue=queue,
+            dry_run=dry_run,
+        )
     )
 
 

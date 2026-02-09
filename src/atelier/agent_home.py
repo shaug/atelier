@@ -122,3 +122,24 @@ def resolve_agent_home(
     return ensure_agent_home(
         project_dir, role=role, agent_name=agent_name, agent_id=agent_id
     )
+
+
+def preview_agent_home(
+    project_dir: Path, project_config: ProjectConfig, *, role: str
+) -> AgentHome:
+    """Return agent identity and path without creating files."""
+    env_agent_id = os.environ.get("ATELIER_AGENT_ID")
+    config_agent_id = project_config.agent.identity
+    if env_agent_id:
+        agent_id = env_agent_id.strip()
+        if not agent_id:
+            die("ATELIER_AGENT_ID must not be empty")
+        agent_name = _derive_agent_name(agent_id)
+    elif config_agent_id:
+        agent_id = config_agent_id
+        agent_name = _derive_agent_name(agent_id)
+    else:
+        agent_name = _normalize_agent_name(project_config.agent.default)
+        agent_id = _derive_agent_id(role, agent_name)
+    home_dir = paths.project_agents_dir(project_dir) / agent_name
+    return AgentHome(name=agent_name, agent_id=agent_id, role=role, path=home_dir)

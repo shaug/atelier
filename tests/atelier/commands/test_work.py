@@ -1037,6 +1037,129 @@ def test_work_prompt_sends_needs_decision_when_idle() -> None:
     send_message.assert_called_once()
 
 
+def test_work_dry_run_logs_and_skips_mutations() -> None:
+    epics = [
+        {
+            "id": "atelier-epic",
+            "title": "Epic",
+            "status": "open",
+            "labels": ["at:epic"],
+        }
+    ]
+    changesets = [{"id": "atelier-epic.1", "title": "First changeset"}]
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[0] == "list":
+            return epics
+        if args[0] == "ready":
+            return changesets
+        if args[0] == "show":
+            return [
+                {
+                    "id": "atelier-epic",
+                    "title": "Epic",
+                    "description": "workspace.root_branch: feat/root\n",
+                }
+            ]
+        return []
+
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/agent",
+        role="worker",
+        path=Path("/project/agents/worker"),
+    )
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.resolve_current_project_with_repo_root",
+                return_value=(
+                    Path("/project"),
+                    _fake_project_payload(),
+                    "/repo",
+                    Path("/repo"),
+                ),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.config.resolve_beads_root",
+                return_value=Path("/beads"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.beads.run_bd_json",
+                side_effect=fake_run_bd_json,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.beads.find_agent_bead",
+                return_value={"id": "atelier-agent"},
+            )
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.beads.get_agent_hook", return_value=None)
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.beads.list_inbox_messages", return_value=[])
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.beads.list_queue_messages", return_value=[])
+        )
+        claim_epic = stack.enter_context(
+            patch("atelier.commands.work.beads.claim_epic")
+        )
+        set_hook = stack.enter_context(
+            patch("atelier.commands.work.beads.set_agent_hook")
+        )
+        update_parent = stack.enter_context(
+            patch("atelier.commands.work.beads.update_workspace_parent_branch")
+        )
+        ensure_git_worktree = stack.enter_context(
+            patch("atelier.commands.work.worktrees.ensure_git_worktree")
+        )
+        run_codex = stack.enter_context(
+            patch("atelier.commands.work.codex.run_codex_command")
+        )
+        say = stack.enter_context(patch("atelier.commands.work.say"))
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.agent_home.preview_agent_home",
+                return_value=agent,
+            )
+        )
+
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once", dry_run=True)
+        )
+
+    claim_epic.assert_not_called()
+    set_hook.assert_not_called()
+    update_parent.assert_not_called()
+    ensure_git_worktree.assert_not_called()
+    run_codex.assert_not_called()
+    assert any("DRY-RUN: Agent command:" in call.args[0] for call in say.call_args_list)
+
+
+def test_work_dry_run_watch_sleeps() -> None:
+    with (
+        patch("atelier.commands.work._run_worker_once", return_value=False) as run_once,
+        patch("atelier.commands.work.time.sleep", side_effect=RuntimeError) as sleep,
+    ):
+        with pytest.raises(RuntimeError):
+            work_cmd.start_worker(
+                SimpleNamespace(
+                    epic_id=None, mode="auto", run_mode="watch", dry_run=True
+                )
+            )
+
+    assert run_once.call_args.kwargs["dry_run"] is True
+    sleep.assert_called_once()
+
+
 def test_work_uses_explicit_epic_id() -> None:
     changesets = [{"id": "atelier-epic.1", "title": "First changeset"}]
     calls: list[list[str]] = []
