@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
@@ -160,7 +161,7 @@ class RepoBeadsProvider:
             raise RuntimeError(f"missing Beads store at {beads_root}")
         return run_bd_json(args, beads_root=beads_root, cwd=self.repo_root)
 
-    def _run_bd_command(self, args: list[str]) -> "subprocess.CompletedProcess[str]":
+    def _run_bd_command(self, args: list[str]) -> subprocess.CompletedProcess[str]:
         from .beads import run_bd_command
 
         beads_root = self.beads_root or (self.repo_root / paths.BEADS_DIRNAME)

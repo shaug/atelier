@@ -134,19 +134,25 @@ def test_repo_beads_provider_create_ticket_when_allowed(
     ]
     created: dict[str, object] = {}
 
-    def fake_run_bd_command(args: list[str]) -> object:
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
         created["args"] = args
+        created["beads_root"] = beads_root
+        created["cwd"] = cwd
 
         class Result:
             stdout = "bd-9\n"
 
         return Result()
 
-    def fake_run_bd(args: list[str]) -> list[dict[str, object]]:
+    def fake_run_bd(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
         return payload
 
-    monkeypatch.setattr(provider, "_run_bd_command", fake_run_bd_command)
-    monkeypatch.setattr(provider, "_run_bd", fake_run_bd)
+    monkeypatch.setattr("atelier.beads.run_bd_command", fake_run_bd_command)
+    monkeypatch.setattr("atelier.repo_beads_provider.run_bd_json", fake_run_bd)
 
     record = provider.create_ticket(
         ExternalTicketCreateRequest(
