@@ -25,6 +25,7 @@ from .. import (
     paths,
     policy,
     prompting,
+    prs,
     root_branch,
     templates,
     workspace,
@@ -238,9 +239,83 @@ def _send_needs_decision(
     )
 
 
+def _send_planner_notification(
+    *,
+    subject: str,
+    body: str,
+    agent_id: str,
+    thread_id: str | None,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    metadata: dict[str, object] = {
+        "from": agent_id,
+        "queue": "planner",
+        "msg_type": "notification",
+    }
+    if thread_id:
+        metadata["thread"] = thread_id
+    beads.create_message_bead(
+        subject=subject,
+        body=body,
+        metadata=metadata,
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+
+
+def _send_no_ready_changesets(
+    *,
+    epic_id: str,
+    agent_id: str,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    summary = beads.epic_changeset_summary(
+        epic_id, beads_root=beads_root, cwd=repo_root
+    )
+    timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+    subject = f"NEEDS-DECISION: No ready changesets for {epic_id}"
+    body = "\n".join(
+        [
+            f"Epic: {epic_id}",
+            f"Agent: {agent_id}",
+            f"Total changesets: {summary.total}",
+            f"Ready changesets: {summary.ready}",
+            f"Remaining changesets: {summary.remaining}",
+            f"Timestamp: {timestamp}",
+        ]
+    )
+    _send_planner_notification(
+        subject=subject,
+        body=body,
+        agent_id=agent_id,
+        thread_id=epic_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+
+
+def _release_epic_assignment(
+    epic_id: str, *, beads_root: Path, repo_root: Path
+) -> None:
+    issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
+    if not issues:
+        return
+    issue = issues[0]
+    labels = _issue_labels(issue)
+    status = str(issue.get("status") or "")
+    args = ["update", epic_id, "--assignee", ""]
+    if "at:hooked" in labels:
+        args.extend(["--remove-label", "at:hooked"])
+    if status and status not in {"closed", "done"}:
+        args.extend(["--status", "open"])
+    beads.run_bd_command(args, beads_root=beads_root, cwd=repo_root, allow_failure=True)
+
+
 def _next_changeset(
     *, epic_id: str, beads_root: Path, repo_root: Path
-) -> dict[str, object]:
+) -> dict[str, object] | None:
     changesets = beads.run_bd_json(
         [
             "ready",
@@ -255,7 +330,7 @@ def _next_changeset(
         cwd=repo_root,
     )
     if not changesets:
-        die(f"no ready changesets found for epic {epic_id}")
+        return None
     return changesets[0]
 
 
@@ -373,8 +448,10 @@ def _finalize_changeset(
     *,
     changeset_id: str,
     epic_id: str,
+    agent_id: str,
     agent_bead_id: str,
     started_at: dt.datetime,
+    repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
 ) -> None:
@@ -385,7 +462,8 @@ def _finalize_changeset(
     )
     if not issues:
         return
-    labels = _issue_labels(issues[0])
+    issue = issues[0]
+    labels = _issue_labels(issue)
     if "cs:merged" in labels or "cs:abandoned" in labels:
         _mark_changeset_closed(changeset_id, beads_root=beads_root, repo_root=repo_root)
         beads.close_epic_if_complete(
@@ -403,6 +481,66 @@ def _finalize_changeset(
             beads_root=beads_root,
             repo_root=repo_root,
             reason="message requires planner decision",
+        )
+        return
+    if "cs:in_progress" in labels:
+        _mark_changeset_blocked(
+            changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            reason="changeset state not updated after worker session",
+        )
+        _send_planner_notification(
+            subject=f"NEEDS-DECISION: Changeset not updated ({changeset_id})",
+            body="Changeset still marked cs:in_progress after worker completion. "
+            "Confirm desired next state or update the bead.",
+            agent_id=agent_id,
+            thread_id=changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        return
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    work_branch = fields.get("changeset.work_branch")
+    if not work_branch or work_branch.strip().lower() == "null":
+        _mark_changeset_blocked(
+            changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            reason="missing changeset.work_branch metadata",
+        )
+        _send_planner_notification(
+            subject=f"NEEDS-DECISION: Missing changeset metadata ({changeset_id})",
+            body="Missing changeset.work_branch metadata needed to validate publish.",
+            agent_id=agent_id,
+            thread_id=changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        return
+    work_branch = work_branch.strip()
+    pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}")
+    pr_payload = None
+    if repo_slug:
+        pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+    if not pushed and not pr_payload:
+        _mark_changeset_blocked(
+            changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            reason="publish/checks signals missing",
+        )
+        _send_planner_notification(
+            subject=f"NEEDS-DECISION: Publish/checks missing ({changeset_id})",
+            body="No push or PR detected after worker completion. "
+            "Publish/persist may not have run.",
+            agent_id=agent_id,
+            thread_id=changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
         )
 
 
@@ -594,6 +732,18 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
         changeset = _next_changeset(
             epic_id=selected_epic, beads_root=beads_root, repo_root=repo_root
         )
+        if changeset is None:
+            _send_no_ready_changesets(
+                epic_id=selected_epic,
+                agent_id=agent.agent_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            _release_epic_assignment(
+                selected_epic, beads_root=beads_root, repo_root=repo_root
+            )
+            beads.clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
+            return False
         changeset_id = changeset.get("id") or ""
         changeset_title = changeset.get("title") or ""
         say(f"Next changeset: {changeset_id} {changeset_title}")
@@ -739,8 +889,12 @@ def _run_worker_once(args: object, *, mode: str) -> bool:
         _finalize_changeset(
             changeset_id=changeset_id,
             epic_id=selected_epic,
+            agent_id=agent.agent_id,
             agent_bead_id=agent_bead_id,
             started_at=started_at,
+            repo_slug=prs.github_repo_slug(
+                project_config.project.origin or project_config.project.repo_url
+            ),
             beads_root=beads_root,
             repo_root=repo_root,
         )
