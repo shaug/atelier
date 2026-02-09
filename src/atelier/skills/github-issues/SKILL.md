@@ -18,6 +18,9 @@ description: >-
 - labels: comma-separated label list; empty string clears labels.
 - comment: optional closing comment when closing.
 - reason: optional close reason (`completed` or `not planned`).
+- state: optional list state (`open`, `closed`, `all`) for listing.
+- search: optional search query for listing.
+- limit: optional max results for listing.
 
 ## Steps
 
@@ -27,6 +30,9 @@ description: >-
      `scripts/create_issue.py --repo <repo> --title <title> --body <body> [--labels <labels>]`.
 1. For read:
    - Run `scripts/read_issue.py --repo <repo> --issue <issue>`.
+1. For list:
+   - Run
+     `scripts/list_issues.py --repo <repo> [--state <state>] [--search <search>] [--limit <limit>]`.
 1. For update:
    - Run
      `scripts/update_issue.py --repo <repo> --issue <issue> [--title <title>] [--body <body>] [--labels <labels>]`.

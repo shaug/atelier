@@ -91,3 +91,9 @@ def test_tickets_skill_mentions_import_export_and_sync() -> None:
     assert "sync_state" in text
     assert "external_import" in text
     assert "external_sync" in text
+
+
+def test_github_issues_skill_mentions_list_script() -> None:
+    skill = skills.load_packaged_skills()["github-issues"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "list_issues.py" in text
