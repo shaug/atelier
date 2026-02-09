@@ -250,6 +250,25 @@ Default provider:
 - GitHub Issues support should be available out of the box, but implemented via
   the same contract used by other providers where possible.
 
+### Repo Beads provider
+
+The `beads` provider treats a repository-local `.beads` store as an external
+ticket source. It is read-only by default.
+
+Behavior:
+
+- Import/link operations read from the repo `.beads` store using read-only
+  access.
+- Export operations are blocked unless an explicit `allow_write` toggle is
+  enabled by the caller.
+- When export is enabled, new Beads issues are created with a conservative
+  default type (`task`) unless labels map to another type.
+
+Configuration:
+
+- `beads_root`: path to the repo-local `.beads` directory.
+- `allow_write`: boolean gate that must be explicitly enabled for export.
+
 ## Skill integration contract
 
 Skills act as provider adapters when a first-party integration is not bundled in
