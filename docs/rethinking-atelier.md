@@ -623,8 +623,8 @@ Agents should not call `atelier` directly. Agents use skills only.
 ## Agent Skills (Agent-Only API)
 
 Skills live in `skills/` and wrap all interactions with bd. If a project-local
-skill conflicts with a global skill, the project-local version is
-authoritative. Ask the overseer before falling back to a global skill.
+skill conflicts with a global skill, the project-local version is authoritative.
+Ask the overseer before falling back to a global skill.
 
 Core skills:
 
@@ -648,6 +648,13 @@ Planner skills:
 - `plan_create_epic`
 - `plan_split_tasks`
 - `plan_changesets` (enforce guardrails)
+
+Ticket skills:
+
+- `tickets` (orchestrate import/export/link/sync)
+- `external_import` (attach external_tickets metadata)
+- `external_sync` (refresh cached state)
+- `github-issues` (provider API calls)
 
 Messaging skills:
 
