@@ -18,6 +18,9 @@ description: >-
 - relation: Optional relation (primary/secondary/context/derived).
 - direction: Optional direction (imported/exported/linked).
 - sync_mode: Optional sync mode (manual/import/export/sync).
+- include_state: Optional boolean for state sync (`sync_state` op).
+- include_body: Optional boolean for body/content sync (`sync_state` op).
+- include_notes: Optional boolean for notes/summary sync (`sync_state` op).
 - beads_dir: Optional Beads store path.
 
 ## Steps
@@ -35,7 +38,8 @@ description: >-
      Attach refs via `external_import` with `direction=exported`.
    - `link`: attach existing tickets via `external_import` with
      `direction=linked` (and optional `relation`/`sync_mode`).
-   - `sync_state`: refresh cached state via `external_sync`.
+   - `sync_state`: refresh cached state via `external_sync` (pass optional
+     include_state/include_body/include_notes toggles).
 1. When provider operations are required:
    - GitHub Issues: use `github` → `github-issues` for create/read/update.
    - Other systems: use their provider skill (linear/jira/etc).
