@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Sequence
 
 from .external_providers import (
@@ -14,6 +14,7 @@ from .external_providers import (
     ExternalTicketImportRequest,
     ExternalTicketLinkRequest,
     ExternalTicketRecord,
+    ExternalTicketSyncOptions,
 )
 from .external_tickets import ExternalTicketRef, normalize_state
 
@@ -28,6 +29,9 @@ class GithubIssuesProvider:
 
     slug: str = "github"
     display_name: str = "GitHub Issues"
+    sync_options: ExternalTicketSyncOptions = field(
+        default_factory=ExternalTicketSyncOptions
+    )
     capabilities: ExternalProviderCapabilities = ExternalProviderCapabilities(
         supports_import=True,
         supports_create=True,
@@ -60,11 +64,12 @@ class GithubIssuesProvider:
         payload = _run_json(cmd)
         if not isinstance(payload, list):
             raise RuntimeError("Unexpected gh issue list output")
+        sync_options = request.sync_options or self.sync_options
         records: list[ExternalTicketRecord] = []
         for entry in payload:
             if not isinstance(entry, dict):
                 continue
-            record = issue_payload_to_record(entry)
+            record = issue_payload_to_record(entry, sync_options=sync_options)
             if record:
                 records.append(record)
         return records
@@ -101,7 +106,8 @@ class GithubIssuesProvider:
         )
         if not isinstance(payload, dict):
             raise RuntimeError("Unexpected gh issue view output")
-        record = issue_payload_to_record(payload)
+        sync_options = request.sync_options or self.sync_options
+        record = issue_payload_to_record(payload, sync_options=sync_options)
         if not record:
             raise RuntimeError("Failed to parse linked issue")
         return record
@@ -146,25 +152,34 @@ class GithubIssuesProvider:
         raise NotImplementedError("GitHub Issues does not support child tickets")
 
     def sync_state(self, ref: ExternalTicketRef) -> ExternalTicketRef:
+        if not self.sync_options.include_state:
+            return ref
         _require_gh()
         payload = _run_json(["gh", "api", f"repos/{self.repo}/issues/{ref.ticket_id}"])
         if not isinstance(payload, dict):
             raise RuntimeError("Unexpected gh issue view output")
-        ticket_ref = issue_payload_to_ref(payload)
+        ticket_ref = issue_payload_to_ref(payload, sync_options=self.sync_options)
         if not ticket_ref:
             raise RuntimeError("Failed to parse issue state")
         return ticket_ref
 
 
-def issue_payload_to_record(payload: dict[str, object]) -> ExternalTicketRecord | None:
-    ref = issue_payload_to_ref(payload)
+def issue_payload_to_record(
+    payload: dict[str, object],
+    *,
+    sync_options: ExternalTicketSyncOptions | None = None,
+) -> ExternalTicketRecord | None:
+    options = sync_options or ExternalTicketSyncOptions()
+    ref = issue_payload_to_ref(payload, sync_options=options)
     if not ref:
         return None
     title = payload.get("title") if isinstance(payload.get("title"), str) else None
-    body = payload.get("body") if isinstance(payload.get("body"), str) else None
+    body = None
+    if options.include_body:
+        body = payload.get("body") if isinstance(payload.get("body"), str) else None
     labels = tuple(_label_names(payload.get("labels")))
     summary = payload.get("stateReason")
-    if not isinstance(summary, str):
+    if not options.include_notes or not isinstance(summary, str):
         summary = None
     return ExternalTicketRecord(
         ref=ref,
@@ -176,18 +191,31 @@ def issue_payload_to_record(payload: dict[str, object]) -> ExternalTicketRecord 
     )
 
 
-def issue_payload_to_ref(payload: dict[str, object]) -> ExternalTicketRef | None:
+def issue_payload_to_ref(
+    payload: dict[str, object],
+    *,
+    sync_options: ExternalTicketSyncOptions | None = None,
+) -> ExternalTicketRef | None:
+    options = sync_options or ExternalTicketSyncOptions()
     number = payload.get("number") or payload.get("id")
     if not isinstance(number, int | str):
         return None
     ticket_id = str(number)
     url = payload.get("url") or payload.get("html_url")
     url_value = url if isinstance(url, str) else None
-    raw_state = payload.get("stateReason") or payload.get("state")
-    raw_state_value = raw_state if isinstance(raw_state, str) else None
-    state = normalize_state(payload.get("state")) or "unknown"
+    raw_state_value = None
+    state = None
+    state_updated_at = None
+    content_updated_at = None
     updated_at = payload.get("updatedAt") or payload.get("updated_at")
-    state_updated_at = updated_at if isinstance(updated_at, str) else None
+    updated_at_value = updated_at if isinstance(updated_at, str) else None
+    if options.include_state:
+        raw_state = payload.get("stateReason") or payload.get("state")
+        raw_state_value = raw_state if isinstance(raw_state, str) else None
+        state = normalize_state(payload.get("state")) or "unknown"
+        state_updated_at = updated_at_value
+    if options.include_body or options.include_notes:
+        content_updated_at = updated_at_value
     return ExternalTicketRef(
         provider="github",
         ticket_id=ticket_id,
@@ -195,6 +223,7 @@ def issue_payload_to_ref(payload: dict[str, object]) -> ExternalTicketRef | None
         state=state,
         raw_state=raw_state_value,
         state_updated_at=state_updated_at,
+        content_updated_at=content_updated_at,
     )
 
 
