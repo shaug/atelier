@@ -253,14 +253,12 @@ Default provider:
 ### Repo Beads provider
 
 The `beads` provider treats a repository-local `.beads` store as an external
-ticket source. It is read-only by default.
+ticket source. It is auto-discovered when the repo has a `.beads` directory.
 
 Behavior:
 
-- Import/link operations read from the repo `.beads` store using read-only
-  access.
-- Export operations are blocked unless an explicit `allow_write` toggle is
-  enabled by the caller.
+- Import/link operations read from the repo `.beads` store.
+- Export operations are allowed when `allow_write` is explicitly enabled.
 - When export is enabled, new Beads issues are created with a conservative
   default type (`task`) unless labels map to another type.
 

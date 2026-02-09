@@ -10,6 +10,7 @@ from . import config, git, prs
 from .external_providers import ExternalProvider
 from .github_issues_provider import GithubIssuesProvider
 from .models import ProjectConfig
+from .repo_beads_provider import RepoBeadsProvider
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,14 @@ def resolve_external_providers(
 ) -> Sequence[ExternalProviderContext]:
     """Return provider contexts for the current project."""
     provider_contexts: list[ExternalProviderContext] = []
+
+    beads_dir = repo_root / ".beads"
+    if beads_dir.exists():
+        provider_contexts.append(
+            ExternalProviderContext(
+                provider=RepoBeadsProvider(repo_root=repo_root, allow_write=True)
+            )
+        )
 
     repo_slug = _github_repo_from_config(project_config)
     if repo_slug is None:

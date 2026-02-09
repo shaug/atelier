@@ -13,3 +13,15 @@ def test_planner_provider_environment_includes_github_repo() -> None:
     env = planner_provider_environment(config_payload, Path("/repo"))
     assert env["ATELIER_EXTERNAL_PROVIDERS"] == "github"
     assert env["ATELIER_GITHUB_REPO"] == "acme/widgets"
+
+
+def test_planner_provider_environment_includes_repo_beads(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".beads").mkdir()
+    config_payload = ProjectConfig(
+        project=ProjectSection(origin="github.com/acme/widgets")
+    )
+    env = planner_provider_environment(config_payload, tmp_path)
+    assert env["ATELIER_EXTERNAL_PROVIDERS"] == "beads,github"
+    assert env["ATELIER_GITHUB_REPO"] == "acme/widgets"
