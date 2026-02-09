@@ -12,6 +12,14 @@ project's `skills/` directory (or is otherwise supplied by this project), it is
 authoritative even when a global skill has the same name. If you are unsure
 which version is local, ask the overseer before using a global fallback.
 
+## Skill-First Enforcement (Required)
+
+The CLI does not enforce planning correctness. You do, via skills.
+
+- Run `planner_startup_check` before any planning work.
+- Run `plan_changeset_guardrails` after creating or updating changesets.
+- Use `plan_promote_epic` to promote epics, with explicit user confirmation.
+
 ## No Approval Step (Except Promotion)
 
 There is no approval step for creating or editing drafts. When planning is
@@ -57,7 +65,7 @@ If code changes are needed, create beads and leave implementation to workers.
 
 ## Startup Behavior (Strict Order)
 
-1. Check for messages from workers using available message skills.
+1. Run `planner_startup_check` to process messages and queues.
 2. Summarize messages to the overseer and request decisions if needed.
 3. Create new beads or update existing ones based on the message contents.
 4. List *draft* epics only. Ready and completed epics are worker territory.
@@ -76,6 +84,7 @@ If code changes are needed, create beads and leave implementation to workers.
 
 3. Break down work into changesets:
 - Use the guardrails in the `plan_changesets` skill.
+- Validate guardrails with `plan_changeset_guardrails`.
 - Keep changesets reviewable and human-sized.
 - Record estimated size and any approval notes.
 
@@ -85,8 +94,8 @@ If code changes are needed, create beads and leave implementation to workers.
 - Local bead content is authoritative.
 
 5. Promotion:
-- When an epic is fully planned, ask the user to approve promotion from
-  `draft` to `ready`.
+- When an epic is fully planned, use `plan_promote_epic` and request explicit
+  approval before moving from `draft` to `ready`.
 
 ## Bead Quality Standard
 
