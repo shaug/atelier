@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from atelier.external_providers import (
+    ExternalTicketCreateRequest,
     ExternalTicketImportRequest,
     ExternalTicketLinkRequest,
     ExternalTicketSyncOptions,
@@ -104,3 +105,61 @@ def test_repo_beads_provider_link_reads_issue(
     assert isinstance(args, list)
     assert "--readonly" in args
     assert "show" in args
+
+
+def test_repo_beads_provider_create_requires_allow_write(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".beads").mkdir()
+    provider = RepoBeadsProvider(repo_root=tmp_path)
+    request = ExternalTicketCreateRequest(bead_id="at-1", title="Export", body="Body")
+    with pytest.raises(RuntimeError, match="allow_write"):
+        provider.create_ticket(request)
+
+
+def test_repo_beads_provider_create_ticket_when_allowed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".beads").mkdir()
+    provider = RepoBeadsProvider(repo_root=tmp_path, allow_write=True)
+    payload = [
+        {
+            "id": "bd-9",
+            "title": "Exported",
+            "description": "Body",
+            "status": "open",
+            "updated_at": "2026-02-08T12:00:00Z",
+            "labels": ["epic"],
+        }
+    ]
+    created: dict[str, object] = {}
+
+    def fake_run_bd_command(args: list[str]) -> object:
+        created["args"] = args
+
+        class Result:
+            stdout = "bd-9\n"
+
+        return Result()
+
+    def fake_run_bd(args: list[str]) -> list[dict[str, object]]:
+        return payload
+
+    monkeypatch.setattr(provider, "_run_bd_command", fake_run_bd_command)
+    monkeypatch.setattr(provider, "_run_bd", fake_run_bd)
+
+    record = provider.create_ticket(
+        ExternalTicketCreateRequest(
+            bead_id="at-1",
+            title="Exported",
+            body="Body",
+            labels=("epic",),
+        )
+    )
+    assert record.ref.ticket_id == "bd-9"
+    assert record.title == "Exported"
+
+    args = created["args"]
+    assert isinstance(args, list)
+    assert "create" in args
+    assert "--silent" in args

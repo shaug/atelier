@@ -25,21 +25,25 @@ class RepoBeadsProvider:
 
     repo_root: Path
     beads_root: Path | None = None
+    allow_write: bool = False
 
     slug: str = "beads"
     display_name: str = "Repo Beads"
     sync_options: ExternalTicketSyncOptions = field(
         default_factory=ExternalTicketSyncOptions
     )
-    capabilities: ExternalProviderCapabilities = ExternalProviderCapabilities(
-        supports_import=True,
-        supports_create=False,
-        supports_link=True,
-        supports_set_in_progress=False,
-        supports_update=False,
-        supports_children=False,
-        supports_state_sync=True,
-    )
+
+    @property
+    def capabilities(self) -> ExternalProviderCapabilities:
+        return ExternalProviderCapabilities(
+            supports_import=True,
+            supports_create=self.allow_write,
+            supports_link=True,
+            supports_set_in_progress=self.allow_write,
+            supports_update=self.allow_write,
+            supports_children=False,
+            supports_state_sync=True,
+        )
 
     def import_tickets(
         self, request: ExternalTicketImportRequest
@@ -75,10 +79,38 @@ class RepoBeadsProvider:
     def create_ticket(
         self, request: ExternalTicketCreateRequest
     ) -> ExternalTicketRecord:
-        raise NotImplementedError("Repo Beads provider is read-only")
+        if not self.allow_write:
+            raise RuntimeError("Repo Beads export disabled (allow_write=false)")
+        issue_type = _resolve_issue_type(request.labels)
+        args = [
+            "create",
+            "--title",
+            request.title,
+            "--type",
+            issue_type,
+            "--silent",
+        ]
+        if request.body:
+            args.extend(["--description", request.body])
+        if request.labels:
+            args.extend(["--labels", ",".join(request.labels)])
+        result = self._run_bd_command(args)
+        issue_id = result.stdout.strip()
+        if not issue_id:
+            raise RuntimeError("Failed to create Beads issue")
+        payload = self._run_bd(["--readonly", "show", issue_id])
+        if not payload:
+            raise RuntimeError("Failed to read created Beads issue")
+        record = _issue_payload_to_record(payload[0], sync_options=self.sync_options)
+        if not record:
+            raise RuntimeError("Failed to parse created Beads issue")
+        return record
 
     def set_in_progress(self, ref: ExternalTicketRef) -> ExternalTicketRef:
-        raise NotImplementedError("Repo Beads provider is read-only")
+        if not self.allow_write:
+            raise RuntimeError("Repo Beads export disabled (allow_write=false)")
+        self._run_bd_command(["update", ref.ticket_id, "--status", "in_progress"])
+        return self.sync_state(ref)
 
     def update_ticket(
         self,
@@ -87,12 +119,31 @@ class RepoBeadsProvider:
         title: str | None = None,
         body: str | None = None,
     ) -> ExternalTicketRef:
-        raise NotImplementedError("Repo Beads provider is read-only")
+        if not self.allow_write:
+            raise RuntimeError("Repo Beads export disabled (allow_write=false)")
+        if not title and body is None:
+            return ref
+        args = ["update", ref.ticket_id]
+        if title:
+            args.extend(["--title", title])
+        if body is not None:
+            args.extend(["--description", body])
+        self._run_bd_command(args)
+        return self.sync_state(ref)
 
     def create_child_ticket(
         self, ref: ExternalTicketRef, *, title: str, body: str | None = None
     ) -> ExternalTicketRef:
-        raise NotImplementedError("Repo Beads provider is read-only")
+        if not self.allow_write:
+            raise RuntimeError("Repo Beads export disabled (allow_write=false)")
+        args = ["create", "--title", title, "--type", "task", "--silent"]
+        if body:
+            args.extend(["--description", body])
+        result = self._run_bd_command(args)
+        issue_id = result.stdout.strip()
+        if not issue_id:
+            raise RuntimeError("Failed to create child Beads issue")
+        return ExternalTicketRef(provider="beads", ticket_id=issue_id)
 
     def sync_state(self, ref: ExternalTicketRef) -> ExternalTicketRef:
         if not self.sync_options.include_state:
@@ -108,6 +159,14 @@ class RepoBeadsProvider:
         if not beads_root.exists():
             raise RuntimeError(f"missing Beads store at {beads_root}")
         return run_bd_json(args, beads_root=beads_root, cwd=self.repo_root)
+
+    def _run_bd_command(self, args: list[str]) -> "subprocess.CompletedProcess[str]":
+        from .beads import run_bd_command
+
+        beads_root = self.beads_root or (self.repo_root / paths.BEADS_DIRNAME)
+        if not beads_root.exists():
+            raise RuntimeError(f"missing Beads store at {beads_root}")
+        return run_bd_command(args, beads_root=beads_root, cwd=self.repo_root)
 
 
 def _issue_payload_to_record(
@@ -187,3 +246,19 @@ def _format_body(description: str | None, acceptance: str | None) -> str | None:
     if not parts:
         return None
     return "\n\n".join(parts)
+
+
+def _resolve_issue_type(labels: Sequence[str]) -> str:
+    for label in labels:
+        normalized = label.strip().lower()
+        if normalized.endswith(":epic") or normalized == "epic":
+            return "epic"
+        if normalized.endswith(":task") or normalized == "task":
+            return "task"
+        if normalized.endswith(":bug") or normalized == "bug":
+            return "bug"
+        if normalized.endswith(":feature") or normalized == "feature":
+            return "feature"
+        if normalized.endswith(":chore") or normalized == "chore":
+            return "chore"
+    return "task"
