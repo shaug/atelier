@@ -81,3 +81,13 @@ def test_publish_skill_mentions_pr_draft_and_github_prs() -> None:
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "pr_draft" in text
     assert "github-prs" in text
+
+
+def test_tickets_skill_mentions_import_export_and_sync() -> None:
+    skill = skills.load_packaged_skills()["tickets"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "import" in text
+    assert "export" in text
+    assert "sync_state" in text
+    assert "external_import" in text
+    assert "external_sync" in text

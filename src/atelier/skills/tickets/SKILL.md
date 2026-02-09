@@ -1,33 +1,51 @@
 ---
 name: tickets
 description: >-
-  Attach or update external ticket references on Beads issues (epics or
-  changesets). Use when a user asks to link external tickets, list existing
-  refs, or update their state.
+  Orchestrate external ticket import, export, link, and sync operations using
+  provider skills plus Beads updates. Use when a user asks to import tickets
+  into planning, export beads to a provider, link existing tickets, or refresh
+  ticket state.
 ---
 
 # Manage external ticket references
 
 ## Inputs
 
+- operation: `import` | `export` | `link` | `sync_state`.
 - issue_id: Bead id to update (epic or changeset).
-- ticket_refs: One or more external ticket IDs or URLs to attach.
-- provider: Optional provider name (github, linear, jira, etc).
+- ticket_refs: One or more external ticket IDs or URLs to attach (for link).
+- provider: Provider name (`github`, `linear`, `jira`, `beads`, etc).
+- relation: Optional relation (primary/secondary/context/derived).
+- direction: Optional direction (imported/exported/linked).
+- sync_mode: Optional sync mode (manual/import/export/sync).
 - beads_dir: Optional Beads store path.
 
 ## Steps
 
+1. Determine provider context:
+   - Use `ATELIER_EXTERNAL_PROVIDERS` and `ATELIER_GITHUB_REPO` when present.
+   - If the provider is not configured, ask the overseer before proceeding.
 1. Show the target bead:
    - `bd show <issue_id>`
-1. Parse existing `external_tickets` from the description (JSON list).
-1. Merge in the new ticket refs, normalizing to:
-   - `provider`, `id`, optional `url`, `relation`, `direction`, `sync_mode`,
-     `state`, `on_close`.
-1. Update the description with the new `external_tickets` JSON payload using
-   `bd update <issue_id> --body-file <path>`.
-1. Add provider labels (e.g., `ext:github`) and remove stale ones.
+1. Route based on `operation`:
+   - `import`: use the provider skill to list or read candidate tickets. Create
+     local beads as needed (epics or context) and attach refs via
+     `external_import` with `direction=imported`.
+   - `export`: use the provider skill to create tickets from the bead content.
+     Attach refs via `external_import` with `direction=exported`.
+   - `link`: attach existing tickets via `external_import` with
+     `direction=linked` (and optional `relation`/`sync_mode`).
+   - `sync_state`: refresh cached state via `external_sync`.
+1. When provider operations are required:
+   - GitHub Issues: use `github` → `github-issues` for create/read/update.
+   - Other systems: use their provider skill (linear/jira/etc).
+1. Verify Beads metadata:
+   - `external_tickets` includes provider/id/url plus
+     relation/direction/sync_mode.
+   - Provider labels (e.g., `ext:github`) match attached refs.
 
 ## Verification
 
 - The bead description includes an `external_tickets` field.
 - Provider labels match the attached ticket refs.
+- Direction/relation/sync_mode are set for any new associations.
