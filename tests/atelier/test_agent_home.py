@@ -82,3 +82,30 @@ def test_ensure_agent_links_creates_symlinks_or_markers() -> None:
         _assert_link_or_marker(home.path, "worktree", worktree)
         _assert_link_or_marker(home.path, "beads", beads)
         _assert_link_or_marker(home.path, "skills", skills)
+
+
+def test_ensure_claude_compat_writes_files() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        agent_path = root / "agent"
+        agent_path.mkdir(parents=True)
+        content = "# Agent Instructions\nRule: test\n"
+
+        agent_home.ensure_claude_compat(agent_path, content)
+
+        claude_md = agent_path / agent_home.CLAUDE_INSTRUCTIONS_FILENAME
+        assert claude_md.exists()
+        assert "AGENTS.md" in claude_md.read_text(encoding="utf-8")
+
+        hook_path = (
+            agent_path
+            / agent_home.CLAUDE_DIRNAME
+            / agent_home.CLAUDE_HOOKS_DIRNAME
+            / agent_home.CLAUDE_HOOK_SCRIPT
+        )
+        assert hook_path.exists()
+
+        settings_path = (
+            agent_path / agent_home.CLAUDE_DIRNAME / agent_home.CLAUDE_SETTINGS_FILENAME
+        )
+        assert settings_path.exists()

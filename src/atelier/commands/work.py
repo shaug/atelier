@@ -1019,6 +1019,8 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
                     beads_root=beads_root,
                     cwd=repo_root,
                 )
+                updated_content = worker_agents_path.read_text(encoding="utf-8")
+                agent_home.ensure_claude_compat(agent.path, updated_content)
             env = workspace.workspace_environment(
                 project_enlistment,
                 workspace_branch,

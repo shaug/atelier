@@ -13,6 +13,11 @@ from .models import ProjectConfig
 
 AGENT_METADATA_FILENAME = "agent.json"
 AGENT_INSTRUCTIONS_FILENAME = "AGENTS.md"
+CLAUDE_INSTRUCTIONS_FILENAME = "CLAUDE.md"
+CLAUDE_DIRNAME = ".claude"
+CLAUDE_SETTINGS_FILENAME = "settings.json"
+CLAUDE_HOOKS_DIRNAME = "hooks"
+CLAUDE_HOOK_SCRIPT = "append_agentsmd_context.sh"
 
 
 @dataclass(frozen=True)
@@ -159,6 +164,68 @@ def ensure_agent_links(
     _ensure_dir_link(root / "worktree", worktree_path)
     _ensure_dir_link(root / "skills", skills_dir)
     _ensure_dir_link(root / "beads", beads_root)
+
+
+def ensure_claude_compat(agent_path: Path, agents_content: str) -> None:
+    """Ensure CLAUDE.md and hooks exist for Claude Code compatibility."""
+    if not agent_path.exists():
+        return
+    preface = (
+        "This project uses AGENTS.md as the authoritative behavioral contract.\n"
+        "Claude must follow the rules below.\n"
+    )
+    content = preface.rstrip("\n") + "\n\n---\n\n" + agents_content.rstrip("\n") + "\n"
+    claude_path = agent_path / CLAUDE_INSTRUCTIONS_FILENAME
+    if not claude_path.exists() or claude_path.read_text(encoding="utf-8") != content:
+        claude_path.write_text(content, encoding="utf-8")
+
+    claude_dir = agent_path / CLAUDE_DIRNAME
+    hooks_dir = claude_dir / CLAUDE_HOOKS_DIRNAME
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_path = hooks_dir / CLAUDE_HOOK_SCRIPT
+    hook_body = """#!/bin/bash
+set -euo pipefail
+
+project_dir="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+
+echo "=== AGENTS.md Files Found ==="
+find "$project_dir" -maxdepth 5 -name "AGENTS.md" -type f | while read -r file; do
+  echo "--- File: $file ---"
+  cat "$file"
+  echo ""
+done
+"""
+    if not hook_path.exists() or hook_path.read_text(encoding="utf-8") != hook_body:
+        hook_path.write_text(hook_body, encoding="utf-8")
+        hook_path.chmod(0o755)
+
+    settings_path = claude_dir / CLAUDE_SETTINGS_FILENAME
+    settings_payload = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "startup",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/"
+                            "append_agentsmd_context.sh",
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    current = None
+    if settings_path.exists():
+        try:
+            current = json.loads(settings_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            current = None
+    if current != settings_payload:
+        settings_path.write_text(
+            json.dumps(settings_payload, indent=2) + "\n", encoding="utf-8"
+        )
 
 
 def preview_agent_home(

@@ -231,6 +231,8 @@ def run_planner(args: object) -> None:
             policy.sync_agent_home_policy(
                 agent, role=policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
             )
+            updated_content = planner_agents_path.read_text(encoding="utf-8")
+            agent_home.ensure_claude_compat(agent.path, updated_content)
         env = workspace.workspace_environment(
             project_enlistment,
             default_branch,
