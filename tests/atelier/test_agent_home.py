@@ -8,6 +8,16 @@ from atelier import agent_home
 from atelier.models import AgentConfig, ProjectConfig
 
 
+def _assert_link_or_marker(base: Path, name: str, target: Path) -> None:
+    link = base / name
+    if link.is_symlink():
+        assert link.resolve() == target.resolve()
+        return
+    marker = base / f"{name}.path"
+    assert marker.exists()
+    assert marker.read_text(encoding="utf-8").strip() == str(target)
+
+
 def test_resolve_agent_home_creates_metadata_and_instructions() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"
@@ -45,3 +55,30 @@ def test_config_agent_identity_is_used_when_env_missing() -> None:
         home = agent_home.resolve_agent_home(project_dir, config_payload, role="worker")
     assert home.name == "bob"
     assert home.agent_id == "atelier/worker/bob"
+
+
+def test_ensure_agent_links_creates_symlinks_or_markers() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "project"
+        project_dir.mkdir(parents=True)
+        home = agent_home.resolve_agent_home(
+            project_dir, ProjectConfig(), role="worker"
+        )
+        worktree = root / "worktree"
+        beads = root / "beads"
+        skills = root / "skills"
+        worktree.mkdir()
+        beads.mkdir()
+        skills.mkdir()
+
+        agent_home.ensure_agent_links(
+            home,
+            worktree_path=worktree,
+            beads_root=beads,
+            skills_dir=skills,
+        )
+
+        _assert_link_or_marker(home.path, "worktree", worktree)
+        _assert_link_or_marker(home.path, "beads", beads)
+        _assert_link_or_marker(home.path, "skills", skills)

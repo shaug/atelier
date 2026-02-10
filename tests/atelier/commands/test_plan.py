@@ -283,9 +283,11 @@ def test_planner_guardrails_install_commit_blocker(tmp_path: Path) -> None:
         ),
         patch("atelier.commands.plan.say") as say,
     ):
-        plan_cmd._ensure_planner_read_only_guardrails(worktree_path, git_path="git")
+        plan_cmd._ensure_planner_read_only_guardrails(
+            worktree_path, tmp_path / "hooks", git_path="git"
+        )
 
-    hooks_dir = plan_cmd._planner_hooks_dir(worktree_path)
+    hooks_dir = tmp_path / "hooks"
     hook_path = hooks_dir / "pre-commit"
     assert hook_path.exists()
     run_command.assert_called_once()

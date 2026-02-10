@@ -28,6 +28,7 @@ from .. import (
     prompting,
     prs,
     root_branch,
+    skills,
     templates,
     workspace,
     worktrees,
@@ -750,9 +751,6 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
             agent_bead = beads.ensure_agent_bead(
                 agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
             )
-            policy.sync_agent_home_policy(
-                agent, role=policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root
-            )
             agent_bead_id = agent_bead.get("id")
 
         epic_id = getattr(args, "epic_id", None)
@@ -976,7 +974,7 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
         workspace_branch = root_branch_value or ""
         if dry_run:
             worker_agents_path = (
-                changeset_worktree_path / "AGENTS.md"
+                agent.path / "AGENTS.md"
                 if changeset_worktree_path is not None
                 else None
             )
@@ -984,25 +982,43 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
                 _dry_run_log(f"Would write worker AGENTS.md to {worker_agents_path}")
             _dry_run_log("Would prepare workspace environment variables.")
         else:
-            worker_agents_path = changeset_worktree_path / "AGENTS.md"
-            paths.ensure_dir(worker_agents_path.parent)
+            skills_dir: Path | None = None
+            if project_data_dir.exists():
+                try:
+                    skills_dir = skills.ensure_project_skills(project_data_dir)
+                except OSError:
+                    skills_dir = None
+            if skills_dir is not None:
+                agent_home.ensure_agent_links(
+                    agent,
+                    worktree_path=changeset_worktree_path,
+                    beads_root=beads_root,
+                    skills_dir=skills_dir,
+                )
+            worker_agents_path = agent.path / "AGENTS.md"
             worker_template = templates.worker_template(
                 prefer_installed_if_modified=True
             )
-            worker_agents_path.write_text(
-                prompting.render_template(
-                    worker_template,
-                    {
-                        "agent_id": agent.agent_id,
-                        "project_root": str(project_enlistment),
-                        "project_data_dir": str(project_data_dir),
-                        "beads_dir": str(beads_root),
-                        "beads_prefix": "at",
-                        "worker_worktree": str(changeset_worktree_path),
-                    },
-                ),
-                encoding="utf-8",
+            worker_content = prompting.render_template(
+                worker_template,
+                {
+                    "agent_id": agent.agent_id,
+                    "project_root": str(project_enlistment),
+                    "project_data_dir": str(project_data_dir),
+                    "beads_dir": str(beads_root),
+                    "beads_prefix": "at",
+                    "worker_worktree": str(changeset_worktree_path),
+                },
             )
+            if agent.path.exists():
+                paths.ensure_dir(worker_agents_path.parent)
+                worker_agents_path.write_text(worker_content, encoding="utf-8")
+                policy.sync_agent_home_policy(
+                    agent,
+                    role=policy.ROLE_WORKER,
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                )
             env = workspace.workspace_environment(
                 project_enlistment,
                 workspace_branch,
@@ -1026,11 +1042,8 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
             _dry_run_log(f"Would start {agent_spec.display_name} session.")
         else:
             say(f"Starting {agent_spec.display_name} session")
-        command_worktree = changeset_worktree_path or Path(".")
-        if dry_run and changeset_worktree_path is None:
-            _dry_run_log("Changeset worktree unknown; using '.' for command preview.")
         start_cmd, start_cwd = agent_spec.build_start_command(
-            command_worktree,
+            agent.path,
             agent_options,
             opening_prompt,
         )

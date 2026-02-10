@@ -90,6 +90,26 @@ def write_mapping(path: Path, mapping: WorktreeMapping) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def _worktree_branch_in_use(
+    repo_root: Path, branch_ref: str, *, git_path: str | None = None
+) -> bool:
+    cmd = git.git_command(
+        ["-C", str(repo_root), "worktree", "list", "--porcelain"],
+        git_path=git_path,
+    )
+    result = exec_util.try_run_command(cmd)
+    if result is None or result.returncode != 0:
+        return False
+    raw = result.stdout or ""
+    for line in raw.splitlines():
+        if not line.startswith("branch "):
+            continue
+        ref = line.split(" ", 1)[1].strip()
+        if ref == branch_ref:
+            return True
+    return False
+
+
 def ensure_worktree_mapping(
     project_dir: Path, epic_id: str, root_branch: str
 ) -> WorktreeMapping:
@@ -357,14 +377,26 @@ def ensure_git_worktree(
     has_remote = git.git_ref_exists(repo_root, remote_ref, git_path=git_path)
 
     if has_local:
-        args = [
-            "-C",
-            str(repo_root),
-            "worktree",
-            "add",
-            str(worktree_path),
-            default_branch,
-        ]
+        in_use = _worktree_branch_in_use(repo_root, local_ref, git_path=git_path)
+        if in_use:
+            args = [
+                "-C",
+                str(repo_root),
+                "worktree",
+                "add",
+                "--detach",
+                str(worktree_path),
+                default_branch,
+            ]
+        else:
+            args = [
+                "-C",
+                str(repo_root),
+                "worktree",
+                "add",
+                str(worktree_path),
+                default_branch,
+            ]
     elif has_remote:
         args = [
             "-C",

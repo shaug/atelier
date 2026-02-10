@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import paths, templates
-from .io import die
+from .io import die, warn
 from .models import ProjectConfig
 
 AGENT_METADATA_FILENAME = "agent.json"
@@ -122,6 +122,43 @@ def resolve_agent_home(
     return ensure_agent_home(
         project_dir, role=role, agent_name=agent_name, agent_id=agent_id
     )
+
+
+def _ensure_dir_link(dest: Path, target: Path) -> None:
+    if dest.is_symlink():
+        try:
+            if dest.resolve() == target.resolve():
+                return
+        except OSError:
+            pass
+        dest.unlink()
+    elif dest.exists():
+        return
+    try:
+        dest.symlink_to(target, target_is_directory=True)
+    except OSError:
+        warn(f"failed to link {dest} -> {target}")
+        path_marker = dest.with_suffix(".path")
+        try:
+            path_marker.write_text(str(target), encoding="utf-8")
+        except OSError:
+            return
+
+
+def ensure_agent_links(
+    agent: AgentHome,
+    *,
+    worktree_path: Path,
+    beads_root: Path,
+    skills_dir: Path,
+) -> None:
+    """Ensure the agent home exposes links to worktree, skills, and beads."""
+    root = agent.path
+    if not root.exists():
+        return
+    _ensure_dir_link(root / "worktree", worktree_path)
+    _ensure_dir_link(root / "skills", skills_dir)
+    _ensure_dir_link(root / "beads", beads_root)
 
 
 def preview_agent_home(

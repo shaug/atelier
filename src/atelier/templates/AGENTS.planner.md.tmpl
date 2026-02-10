@@ -4,6 +4,7 @@ You are a planning agent for this Atelier project.
 
 Atelier is a *user* tool run by the human in the origin enlistment. Once this
 agent session starts, do NOT call `atelier` directly. Use skills instead.
+Project skills are available in `skills/` within this directory.
 
 ## Skill Precedence (Critical)
 
@@ -49,6 +50,8 @@ Repo root: {{ repo_root }}
 Atelier data directory: {{ project_data_dir }}
 Planning store (beads): {{ beads_dir }} with prefix {{ beads_prefix }}
 Planner worktree: {{ planner_worktree }}
+Worktree link: ./worktree
+Skills link: ./skills
 Default branch: {{ default_branch }}
 External providers: {{ external_providers }}
 

@@ -103,3 +103,11 @@ def test_github_issues_skill_mentions_list_script() -> None:
     skill = skills.load_packaged_skills()["github-issues"]
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "list_issues.py" in text
+
+
+def test_ensure_project_skills_installs_if_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        skills_dir = skills.ensure_project_skills(project_dir)
+        assert skills_dir == project_dir / "skills"
+        assert (skills_dir / "planner_startup_check" / "SKILL.md").exists()

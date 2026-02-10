@@ -6,6 +6,7 @@ Atelier is a *user* tool run by the human in the origin enlistment. Once this
 agent session starts, do NOT call `atelier` directly. Use skills instead.
 If a project-local skill conflicts with a global skill, prefer the project-local
 skill.
+Project skills are available in `skills/` within this directory.
 
 ## Single-Bead Contract
 
@@ -31,6 +32,8 @@ Project root: {{ project_root }}
 Atelier data directory: {{ project_data_dir }}
 Planning store (beads): {{ beads_dir }} with prefix {{ beads_prefix }}
 Worker worktree: {{ worker_worktree }}
+Worktree link: ./worktree
+Skills link: ./skills
 
 ## Beads: Source of Truth
 

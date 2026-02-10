@@ -17,6 +17,7 @@ from .. import (
     paths,
     policy,
     prompting,
+    skills,
     templates,
     workspace,
     worktrees,
@@ -75,21 +76,20 @@ def _list_draft_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, ob
     return issues
 
 
-_PLANNER_HOOKS_DIR = ".atelier/hooks"
+_PLANNER_HOOKS_DIR = "planner-git-hooks"
 _PLANNER_PRECOMMIT = """#!/bin/sh
 echo "Planner worktree is read-only. Do not commit from this workspace." >&2
 exit 1
 """
 
 
-def _planner_hooks_dir(worktree_path: Path) -> Path:
-    return worktree_path / _PLANNER_HOOKS_DIR
+def _planner_hooks_dir(agent_home_path: Path) -> Path:
+    return agent_home_path / _PLANNER_HOOKS_DIR
 
 
 def _install_planner_commit_blocker(
-    worktree_path: Path, *, git_path: str | None
+    worktree_path: Path, hooks_dir: Path, *, git_path: str | None
 ) -> None:
-    hooks_dir = _planner_hooks_dir(worktree_path)
     paths.ensure_dir(hooks_dir)
     hook_path = hooks_dir / "pre-commit"
     hook_path.write_text(_PLANNER_PRECOMMIT, encoding="utf-8")
@@ -112,11 +112,11 @@ def _warn_planner_dirty(worktree_path: Path, *, git_path: str | None) -> None:
 
 
 def _ensure_planner_read_only_guardrails(
-    worktree_path: Path, *, git_path: str | None
+    worktree_path: Path, hooks_dir: Path, *, git_path: str | None
 ) -> None:
     if not (worktree_path / ".git").exists():
         return
-    _install_planner_commit_blocker(worktree_path, git_path=git_path)
+    _install_planner_commit_blocker(worktree_path, hooks_dir, git_path=git_path)
     _warn_planner_dirty(worktree_path, git_path=git_path)
 
 
@@ -173,9 +173,6 @@ def run_planner(args: object) -> None:
         _maybe_promote_draft_epic(
             draft_epics, beads_root=beads_root, repo_root=repo_root
         )
-        policy.sync_agent_home_policy(
-            agent, role=policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
-        )
         git_path = config.resolve_git_path(project_config)
         default_branch = git.git_default_branch(repo_root, git_path=git_path)
         if not default_branch:
@@ -195,27 +192,45 @@ def run_planner(args: object) -> None:
             root_branch=default_branch,
             git_path=git_path,
         )
-        _ensure_planner_read_only_guardrails(worktree_path, git_path=git_path)
-        planner_agents_path = worktree_path / "AGENTS.md"
-        paths.ensure_dir(planner_agents_path.parent)
-        planner_template = templates.planner_template(prefer_installed_if_modified=True)
-        planner_agents_path.write_text(
-            prompting.render_template(
-                planner_template,
-                {
-                    "agent_id": agent.agent_id,
-                    "project_root": str(project_enlistment),
-                    "repo_root": str(repo_root),
-                    "project_data_dir": str(project_data_dir),
-                    "beads_dir": str(beads_root),
-                    "beads_prefix": "at",
-                    "planner_worktree": str(worktree_path),
-                    "default_branch": default_branch,
-                    "external_providers": external_providers,
-                },
-            ),
-            encoding="utf-8",
+        skills_dir: Path | None = None
+        if project_data_dir.exists():
+            try:
+                skills_dir = skills.ensure_project_skills(project_data_dir)
+            except OSError:
+                skills_dir = None
+        if skills_dir is not None:
+            agent_home.ensure_agent_links(
+                agent,
+                worktree_path=worktree_path,
+                beads_root=beads_root,
+                skills_dir=skills_dir,
+            )
+        hooks_dir = _planner_hooks_dir(agent.path)
+        _ensure_planner_read_only_guardrails(
+            worktree_path, hooks_dir, git_path=git_path
         )
+        planner_agents_path = agent.path / "AGENTS.md"
+        planner_template = templates.planner_template(prefer_installed_if_modified=True)
+        planner_content = prompting.render_template(
+            planner_template,
+            {
+                "agent_id": agent.agent_id,
+                "project_root": str(project_enlistment),
+                "repo_root": str(repo_root),
+                "project_data_dir": str(project_data_dir),
+                "beads_dir": str(beads_root),
+                "beads_prefix": "at",
+                "planner_worktree": str(worktree_path),
+                "default_branch": default_branch,
+                "external_providers": external_providers,
+            },
+        )
+        if agent.path.exists():
+            paths.ensure_dir(planner_agents_path.parent)
+            planner_agents_path.write_text(planner_content, encoding="utf-8")
+            policy.sync_agent_home_policy(
+                agent, role=policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
+            )
         env = workspace.workspace_environment(
             project_enlistment,
             default_branch,
@@ -244,7 +259,7 @@ def run_planner(args: object) -> None:
             )
         say(f"Starting {agent_spec.display_name} session")
         start_cmd, start_cwd = agent_spec.build_start_command(
-            worktree_path, agent_options, opening_prompt
+            agent.path, agent_options, opening_prompt
         )
         if agent_spec.name == "codex":
             result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)

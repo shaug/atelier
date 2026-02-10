@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from . import changesets, exec, messages
+from . import changesets, messages
 from .external_tickets import (
     ExternalTicketRef,
     external_ticket_payload,
@@ -76,11 +76,24 @@ def run_bd_command(
     unless allow_failure is True.
     """
     cmd = ["bd", *args]
-    result = exec.try_run_command(cmd, cwd=cwd, env=beads_env(beads_root))
-    if result is None:
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            env=beads_env(beads_root),
+            capture_output=True,
+            text=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
         die("missing required command: bd")
     if result.returncode != 0 and not allow_failure:
-        die(f"command failed: {' '.join(cmd)}")
+        detail = (result.stderr or result.stdout or "").strip()
+        message = f"command failed: {' '.join(cmd)}"
+        if detail:
+            message = f"{message}\n{detail}"
+        die(message)
     return result
 
 
@@ -147,10 +160,21 @@ def _list_issue_types(*, beads_root: Path, cwd: Path) -> set[str]:
     cached = _ISSUE_TYPE_CACHE.get(beads_root)
     if cached is not None:
         return cached
-    result = exec.try_run_command(
-        ["bd", "types", "--json"], cwd=cwd, env=beads_env(beads_root)
-    )
-    if result is None or result.returncode != 0:
+    try:
+        result = subprocess.run(
+            ["bd", "types", "--json"],
+            cwd=cwd,
+            env=beads_env(beads_root),
+            capture_output=True,
+            text=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        types = {_FALLBACK_ISSUE_TYPE}
+        _ISSUE_TYPE_CACHE[beads_root] = types
+        return types
+    if result.returncode != 0:
         types = {_FALLBACK_ISSUE_TYPE}
         _ISSUE_TYPE_CACHE[beads_root] = types
         return types

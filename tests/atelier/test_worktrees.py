@@ -1,6 +1,7 @@
 import json
 import tempfile
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest.mock import patch
 
 import atelier.worktrees as worktrees
@@ -84,6 +85,43 @@ def test_ensure_git_worktree_creates_when_missing() -> None:
 
         assert worktree_path == project_dir / "worktrees" / "epic"
         assert run_command.called
+
+
+def test_ensure_git_worktree_detaches_when_branch_in_use() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        repo_root = Path(tmp) / "repo"
+        project_dir.mkdir(parents=True)
+        repo_root.mkdir(parents=True)
+
+        def fake_ref_exists(
+            _repo: Path, ref: str, *, git_path: str | None = None
+        ) -> bool:
+            return ref == "refs/heads/main"
+
+        def fake_try_run(
+            cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None
+        ) -> CompletedProcess[str]:
+            return CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="worktree /repo\nbranch refs/heads/main\n",
+                stderr="",
+            )
+
+        with (
+            patch("atelier.worktrees.git.git_default_branch", return_value="main"),
+            patch("atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists),
+            patch(
+                "atelier.worktrees.exec_util.try_run_command", side_effect=fake_try_run
+            ),
+            patch("atelier.worktrees.exec_util.run_command") as run_command,
+        ):
+            worktrees.ensure_git_worktree(
+                project_dir, repo_root, "epic", root_branch="feat/root"
+            )
+
+        assert "--detach" in run_command.call_args.args[0]
 
 
 def test_remove_git_worktree_noop_when_missing() -> None:
