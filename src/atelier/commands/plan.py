@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 
 from .. import (
@@ -149,8 +151,48 @@ def _maybe_promote_draft_epic(
     say(f"Promoted draft epic: {epic_id}")
 
 
+def _trace_enabled() -> bool:
+    return os.environ.get("ATELIER_PLAN_TRACE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _step(label: str, *, timings: list[tuple[str, float]], trace: bool) -> callable:
+    say(f"-> {label}")
+    start = time.perf_counter()
+
+    def finish(extra: str | None = None) -> None:
+        elapsed = time.perf_counter() - start
+        timings.append((label, elapsed))
+        suffix = f" ({elapsed:.2f}s)" if trace or elapsed >= 0.5 else ""
+        if extra:
+            say(f"ok {label}{suffix}: {extra}")
+        else:
+            say(f"ok {label}{suffix}")
+
+    return finish
+
+
+def _report_timings(timings: list[tuple[str, float]], *, trace: bool) -> None:
+    if not timings:
+        return
+    slow = [(label, elapsed) for label, elapsed in timings if elapsed >= 0.5]
+    if not trace and not slow:
+        return
+    say("Timing summary:")
+    for label, elapsed in sorted(timings, key=lambda item: item[1], reverse=True):
+        if not trace and elapsed < 0.5:
+            continue
+        say(f"- {label}: {elapsed:.2f}s")
+
+
 def run_planner(args: object) -> None:
     """Start a planning session for Beads epics and changesets."""
+    timings: list[tuple[str, float]] = []
+    trace = _trace_enabled()
     project_root, project_config, _enlistment, repo_root = (
         resolve_current_project_with_repo_root()
     )
@@ -163,20 +205,34 @@ def run_planner(args: object) -> None:
 
     with agents.scoped_agent_env(agent.agent_id):
         say("Planner session")
+        finish = _step("Prime beads", timings=timings, trace=trace)
         beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
+        finish()
+        finish = _step("Ensure planner agent bead", timings=timings, trace=trace)
         beads.ensure_agent_bead(
             agent.agent_id, beads_root=beads_root, cwd=repo_root, role="planner"
         )
+        finish()
+        finish = _step("Check inbox", timings=timings, trace=trace)
         _list_inbox_messages(agent.agent_id, beads_root=beads_root, repo_root=repo_root)
+        finish()
+        finish = _step("Check queue", timings=timings, trace=trace)
         _list_queue_messages(beads_root=beads_root, repo_root=repo_root)
+        finish()
+        finish = _step("List draft epics", timings=timings, trace=trace)
         draft_epics = _list_draft_epics(beads_root=beads_root, repo_root=repo_root)
+        finish()
+        finish = _step("Promote draft epic (optional)", timings=timings, trace=trace)
         _maybe_promote_draft_epic(
             draft_epics, beads_root=beads_root, repo_root=repo_root
         )
+        finish()
         git_path = config.resolve_git_path(project_config)
+        finish = _step("Resolve default branch", timings=timings, trace=trace)
         default_branch = git.git_default_branch(repo_root, git_path=git_path)
         if not default_branch:
             die("failed to determine default branch for planner worktree")
+        finish(f"default branch {default_branch}")
         provider_contexts = external_registry.resolve_external_providers(
             project_config, repo_root
         )
@@ -185,6 +241,7 @@ def run_planner(args: object) -> None:
         )
         external_providers = ", ".join(provider_slugs) if provider_slugs else "none"
         planner_key = f"planner-{agent.name}"
+        finish = _step("Ensure planner worktree", timings=timings, trace=trace)
         worktree_path = worktrees.ensure_git_worktree(
             project_data_dir,
             repo_root,
@@ -192,25 +249,33 @@ def run_planner(args: object) -> None:
             root_branch=default_branch,
             git_path=git_path,
         )
+        finish(str(worktree_path))
         skills_dir: Path | None = None
         if project_data_dir.exists():
             try:
+                finish = _step("Ensure skills", timings=timings, trace=trace)
                 skills_dir = skills.ensure_project_skills(project_data_dir)
+                finish(str(skills_dir))
             except OSError:
                 skills_dir = None
         if skills_dir is not None:
+            finish = _step("Link agent home", timings=timings, trace=trace)
             agent_home.ensure_agent_links(
                 agent,
                 worktree_path=worktree_path,
                 beads_root=beads_root,
                 skills_dir=skills_dir,
             )
+            finish()
         hooks_dir = _planner_hooks_dir(agent.path)
+        finish = _step("Install read-only guardrails", timings=timings, trace=trace)
         _ensure_planner_read_only_guardrails(
             worktree_path, hooks_dir, git_path=git_path
         )
+        finish()
         planner_agents_path = agent.path / "AGENTS.md"
         planner_template = templates.planner_template(prefer_installed_if_modified=True)
+        finish = _step("Render planner AGENTS.md", timings=timings, trace=trace)
         planner_content = prompting.render_template(
             planner_template,
             {
@@ -225,12 +290,17 @@ def run_planner(args: object) -> None:
                 "external_providers": external_providers,
             },
         )
+        finish()
         if agent.path.exists():
             paths.ensure_dir(planner_agents_path.parent)
+            finish = _step("Write planner AGENTS.md", timings=timings, trace=trace)
             planner_agents_path.write_text(planner_content, encoding="utf-8")
+            finish(str(planner_agents_path))
+            finish = _step("Sync policy", timings=timings, trace=trace)
             policy.sync_agent_home_policy(
                 agent, role=policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
             )
+            finish()
             updated_content = planner_agents_path.read_text(encoding="utf-8")
             agent_home.ensure_claude_compat(agent.path, updated_content)
         env = workspace.workspace_environment(
@@ -252,6 +322,7 @@ def run_planner(args: object) -> None:
         agent_options = list(project_config.agent.options.get(agent_spec.name, []))
         hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
         hooks.ensure_hooks_path(env, hook_path)
+        _report_timings(timings, trace=trace)
         opening_prompt = ""
         if agent_spec.name == "codex":
             opening_prompt = workspace.workspace_session_identifier(

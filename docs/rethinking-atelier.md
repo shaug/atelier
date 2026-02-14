@@ -41,6 +41,7 @@ Responsibilities:
 - Create task + subtask beads under epics.
 - Create required changeset beads (PR-sized units).
 - Encode changeset guardrails in bead descriptions.
+- Use `ATELIER_PLAN_TRACE=1` to show detailed timing output during startup.
 
 Planner worktree:
 
