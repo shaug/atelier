@@ -228,7 +228,7 @@ def _list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]
 
 
 def _select_epic_prompt(
-    issues: list[dict[str, object]], *, agent_id: str
+    issues: list[dict[str, object]], *, agent_id: str, assume_yes: bool = False
 ) -> str | None:
     epics = _filter_epics(issues, require_unassigned=True)
     resume = _filter_epics(issues, assignee=agent_id)
@@ -256,7 +256,10 @@ def _select_epic_prompt(
         choices[label] = str(issue_id)
     if not choices:
         return None
-    selected = select("Epic to work on", list(choices.keys()))
+    labels = list(choices.keys())
+    if assume_yes:
+        return choices[labels[0]]
+    selected = select("Epic to work on", labels)
     return choices[selected]
 
 
@@ -641,6 +644,7 @@ def _prompt_queue_claim(
     agent_id: str,
     beads_root: Path,
     repo_root: Path,
+    assume_yes: bool = False,
 ) -> None:
     say("Queued messages:")
     for issue in queued:
@@ -648,8 +652,12 @@ def _prompt_queue_claim(
         queue_name = issue.get("queue") or "queue"
         title = issue.get("title") or ""
         say(f"- {issue_id} [{queue_name}] {title}")
-    selection = prompt("Queue message id (blank to skip)")
-    selection = selection.strip()
+    selection = ""
+    if assume_yes:
+        first = queued[0].get("id")
+        selection = str(first).strip() if first is not None else ""
+    else:
+        selection = prompt("Queue message id (blank to skip)").strip()
     if not selection:
         return
     valid_ids = {str(issue.get("id")) for issue in queued if issue.get("id")}
@@ -666,6 +674,7 @@ def _handle_queue_before_claim(
     repo_root: Path,
     force_prompt: bool = False,
     dry_run: bool = False,
+    assume_yes: bool = False,
 ) -> bool:
     queued = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root)
     if not queued:
@@ -686,7 +695,11 @@ def _handle_queue_before_claim(
         _dry_run_log("Would prompt to claim a queue message.")
         return True
     _prompt_queue_claim(
-        queued, agent_id=agent_id, beads_root=beads_root, repo_root=repo_root
+        queued,
+        agent_id=agent_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        assume_yes=assume_yes,
     )
     return True
 
@@ -701,6 +714,7 @@ def _run_startup_contract(
     explicit_epic_id: str | None,
     queue_only: bool,
     dry_run: bool,
+    assume_yes: bool,
 ) -> StartupContractResult:
     """Apply startup_contract skill ordering to select the next epic."""
     if explicit_epic_id is not None:
@@ -718,6 +732,7 @@ def _run_startup_contract(
             repo_root=repo_root,
             force_prompt=True,
             dry_run=dry_run,
+            assume_yes=assume_yes,
         )
         if dry_run:
             _dry_run_log("Queue-only run would exit after handling queue.")
@@ -757,7 +772,11 @@ def _run_startup_contract(
             epic_id=None, should_exit=True, reason="inbox_blocked"
         )
     if _handle_queue_before_claim(
-        agent_id, beads_root=beads_root, repo_root=repo_root, dry_run=dry_run
+        agent_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        dry_run=dry_run,
+        assume_yes=assume_yes,
     ):
         if dry_run:
             _dry_run_log("Queue messages available; would exit before claiming work.")
@@ -768,7 +787,9 @@ def _run_startup_contract(
     if mode == "auto":
         selected_epic = _select_epic_auto(issues, agent_id=agent_id)
     else:
-        selected_epic = _select_epic_prompt(issues, agent_id=agent_id)
+        selected_epic = _select_epic_prompt(
+            issues, agent_id=agent_id, assume_yes=assume_yes
+        )
 
     if selected_epic is None:
         _send_needs_decision(
@@ -845,6 +866,7 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
 
         epic_id = getattr(args, "epic_id", None)
         queue_only = bool(getattr(args, "queue", False))
+        assume_yes = bool(getattr(args, "yes", False))
 
         if not dry_run:
             if not isinstance(agent_bead_id, str) or not agent_bead_id:
@@ -860,6 +882,7 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
             explicit_epic_id=epic_id,
             queue_only=queue_only,
             dry_run=dry_run,
+            assume_yes=assume_yes,
         )
         summary_note = startup_result.reason
         if startup_result.epic_id:
@@ -931,6 +954,7 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
                     branch_prefix=project_config.branch.prefix,
                     beads_root=beads_root,
                     repo_root=repo_root,
+                    assume_yes=assume_yes,
                 )
                 beads.update_workspace_root_branch(
                     selected_epic,

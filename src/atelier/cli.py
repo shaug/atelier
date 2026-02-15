@@ -494,6 +494,14 @@ def work_command(
             help="log what would happen without mutating state or starting the agent",
         ),
     ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="accept defaults for interactive choices",
+        ),
+    ] = False,
 ) -> None:
     """Start a worker session."""
     work_cmd.start_worker(
@@ -503,6 +511,7 @@ def work_command(
             run_mode=run_mode,
             queue=queue,
             dry_run=dry_run,
+            yes=yes,
         )
     )
 
