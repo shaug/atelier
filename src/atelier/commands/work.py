@@ -110,6 +110,19 @@ def _report_worker_summary(summary: WorkerRunSummary, *, dry_run: bool) -> None:
         say(f"- Changeset: {summary.changeset_id}")
 
 
+def _with_codex_exec(cmd: list[str], opening_prompt: str) -> list[str]:
+    """Return a codex command rewritten to run non-interactively via `exec`."""
+    if not cmd:
+        return cmd
+    rewritten = list(cmd)
+    if opening_prompt and rewritten[-1] == opening_prompt:
+        return [*rewritten[:-1], "exec", opening_prompt]
+    rewritten.append("exec")
+    if opening_prompt:
+        rewritten.append(opening_prompt)
+    return rewritten
+
+
 def _normalize_mode(value: str | None) -> str:
     if value is None:
         value = os.environ.get("ATELIER_MODE", "prompt")
@@ -1215,6 +1228,8 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
             agent_options,
             opening_prompt,
         )
+        if agent_spec.name == "codex":
+            start_cmd = _with_codex_exec(start_cmd, opening_prompt)
         if dry_run:
             _dry_run_log(f"Agent command: {' '.join(start_cmd)}")
             _dry_run_log(f"Agent cwd: {start_cwd}")

@@ -172,6 +172,102 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
     assert select_epic.called
 
 
+def test_work_starts_codex_in_exec_mode() -> None:
+    epics = [
+        {
+            "id": "atelier-epic",
+            "title": "Epic",
+            "status": "open",
+            "labels": ["at:epic"],
+        }
+    ]
+    changesets = [{"id": "atelier-epic.1", "title": "First changeset"}]
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        post_session = _post_session_payload(args, changeset_id="atelier-epic.1")
+        if post_session is not None:
+            return post_session
+        if args[0] == "list":
+            return epics
+        return changesets
+
+    mapping = worktrees.WorktreeMapping(
+        epic_id="atelier-epic",
+        worktree_path="worktrees/atelier-epic",
+        root_branch="feat/root",
+        changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
+        changeset_worktrees={},
+    )
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/agent",
+        role="worker",
+        path=Path("/project/agents/worker"),
+    )
+
+    with (
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.work.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.work.beads.run_bd_command"),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
+        patch(
+            "atelier.commands.work.worktrees.ensure_changeset_branch",
+            return_value=("feat/root-atelier-epic.1", mapping),
+        ),
+        patch("atelier.commands.work.worktrees.ensure_changeset_checkout"),
+        patch("atelier.commands.work.worktrees.ensure_git_worktree"),
+        patch(
+            "atelier.commands.work.beads.ensure_agent_bead",
+            return_value={"id": "atelier-agent"},
+        ),
+        patch("atelier.commands.work.policy.sync_agent_home_policy"),
+        patch(
+            "atelier.commands.work.beads.claim_epic",
+            return_value={
+                "id": "atelier-epic",
+                "title": "Epic",
+                "description": "workspace.root_branch: feat/root\n",
+            },
+        ),
+        patch("atelier.commands.work.beads.update_worktree_path"),
+        patch("atelier.commands.work.beads.set_agent_hook"),
+        patch(
+            "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
+        ),
+        patch(
+            "atelier.commands.work.select",
+            return_value="available | atelier-epic [open] unset Epic",
+        ),
+        patch(
+            "atelier.commands.work.codex.run_codex_command",
+            return_value=codex.CodexRunResult(
+                returncode=0, session_id=None, resume_command=None
+            ),
+        ) as run_codex,
+        patch("atelier.commands.work.say"),
+    ):
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="prompt", run_mode="once")
+        )
+
+    started_cmd = run_codex.call_args.args[0]
+    assert "exec" in started_cmd
+
+
 def test_next_changeset_prefers_in_progress() -> None:
     changesets = [
         {"id": "atelier-epic.1", "labels": ["at:changeset", "cs:ready"]},
