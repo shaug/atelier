@@ -153,6 +153,8 @@ Changeset description fields include:
 - `atelier work`: select/claim an epic, pick the next ready changeset, and
   ensure worktree + branch mappings exist. Run mode controls whether it runs
   once, loops while work is ready, or watches for new work.
+- `atelier daemon`: start/stop/status a long-lived worker loop and the bd daemon
+  for full-stack mode.
 - `atelier edit`: open the selected worktree in `editor.work`.
 - `atelier open`: run a shell or command inside the worktree.
 - `atelier config`: view or update project config.

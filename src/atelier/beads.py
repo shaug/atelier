@@ -69,6 +69,7 @@ def run_bd_command(
     beads_root: Path,
     cwd: Path,
     allow_failure: bool = False,
+    daemon: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run a bd command and return the CompletedProcess.
 
@@ -76,6 +77,8 @@ def run_bd_command(
     unless allow_failure is True.
     """
     cmd = ["bd", *args]
+    if not daemon and "--no-daemon" not in cmd:
+        cmd.append("--no-daemon")
     try:
         result = subprocess.run(
             cmd,
@@ -162,7 +165,7 @@ def _list_issue_types(*, beads_root: Path, cwd: Path) -> set[str]:
         return cached
     try:
         result = subprocess.run(
-            ["bd", "types", "--json"],
+            ["bd", "types", "--json", "--no-daemon"],
             cwd=cwd,
             env=beads_env(beads_root),
             capture_output=True,

@@ -196,6 +196,14 @@ atelier work --run-mode watch
 - ensure the worktree and changeset branch mapping exist
 - repeat or watch depending on `--run-mode` / `ATELIER_RUN_MODE`
 
+Run the optional daemon (full-stack mode):
+
+```sh
+atelier daemon start
+atelier daemon status
+atelier daemon stop
+```
+
 Plan epics and changesets:
 
 ```sh

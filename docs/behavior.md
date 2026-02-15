@@ -125,6 +125,11 @@ Atelier planning state. They are treated as external ticket sources.
   - Uses run mode (`ATELIER_RUN_MODE`) to decide whether to run once, loop while
     work is ready, or watch for new work.
 
+- `atelier daemon`
+
+  - Starts/stops a long-lived worker loop.
+  - Starts/stops the bd daemon when full-stack mode is requested.
+
 - `atelier edit`
 
   - Opens the selected workspace worktree in `editor.work`.
