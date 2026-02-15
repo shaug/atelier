@@ -157,7 +157,10 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
         patch(
             "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
         ),
-        patch("atelier.commands.work.prompt", return_value="atelier-epic"),
+        patch(
+            "atelier.commands.work.select",
+            return_value="available | atelier-epic [open] unset Epic",
+        ) as select_epic,
         patch("atelier.commands.work.say"),
     ):
         work_cmd.start_worker(
@@ -166,6 +169,7 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
 
     assert calls[0][0] == "list"
     assert calls[1][0] == "ready"
+    assert select_epic.called
 
 
 def test_work_prompt_allows_resume_epic() -> None:
@@ -261,7 +265,10 @@ def test_work_prompt_allows_resume_epic() -> None:
         patch(
             "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
         ),
-        patch("atelier.commands.work.prompt", return_value="atelier-epic-hooked"),
+        patch(
+            "atelier.commands.work.select",
+            return_value="resume | atelier-epic-hooked [hooked] unset Epic hooked",
+        ),
         patch("atelier.commands.work.say"),
     ):
         work_cmd.start_worker(

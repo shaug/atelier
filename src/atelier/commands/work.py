@@ -33,7 +33,7 @@ from .. import (
     workspace,
     worktrees,
 )
-from ..io import die, prompt, say
+from ..io import die, prompt, say, select
 from .resolve import resolve_current_project_with_repo_root
 
 _MODE_VALUES = {"prompt", "auto"}
@@ -234,31 +234,30 @@ def _select_epic_prompt(
     resume = _filter_epics(issues, assignee=agent_id)
     if not epics and not resume:
         return None
-    if epics:
-        say("Available epics:")
+    choices: dict[str, str] = {}
     for issue in epics:
         issue_id = issue.get("id") or ""
+        if not issue_id:
+            continue
         status = issue.get("status") or "unknown"
         title = issue.get("title") or ""
         root_branch_value = beads.extract_workspace_root_branch(issue) or "unset"
-        say(f"- {issue_id} [{status}] {root_branch_value} {title}")
+        label = f"available | {issue_id} [{status}] {root_branch_value} {title}"
+        choices[label] = str(issue_id)
     resume = _sort_by_recency(resume)
-    if resume:
-        say("Resume epics:")
     for issue in resume:
         issue_id = issue.get("id") or ""
+        if not issue_id:
+            continue
         status = issue.get("status") or "unknown"
         title = issue.get("title") or ""
         root_branch_value = beads.extract_workspace_root_branch(issue) or "unset"
-        say(f"- {issue_id} [{status}] {root_branch_value} {title}")
-    selection = prompt("Epic id")
-    selection = selection.strip()
-    if not selection:
-        die("epic id is required")
-    valid_ids = {str(issue.get("id")) for issue in epics + resume if issue.get("id")}
-    if selection not in valid_ids:
-        die(f"unknown epic id: {selection}")
-    return selection
+        label = f"resume | {issue_id} [{status}] {root_branch_value} {title}"
+        choices[label] = str(issue_id)
+    if not choices:
+        return None
+    selected = select("Epic to work on", list(choices.keys()))
+    return choices[selected]
 
 
 def _select_epic_auto(issues: list[dict[str, object]], *, agent_id: str) -> str | None:
