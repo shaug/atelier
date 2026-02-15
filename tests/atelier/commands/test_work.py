@@ -172,6 +172,24 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
     assert select_epic.called
 
 
+def test_next_changeset_prefers_in_progress() -> None:
+    changesets = [
+        {"id": "atelier-epic.1", "labels": ["at:changeset", "cs:ready"]},
+        {"id": "atelier-epic.3", "labels": ["at:changeset", "cs:in_progress"]},
+    ]
+
+    with patch(
+        "atelier.commands.work.beads.run_bd_json",
+        return_value=changesets,
+    ):
+        selected = work_cmd._next_changeset(
+            epic_id="atelier-epic", beads_root=Path("/beads"), repo_root=Path("/repo")
+        )
+
+    assert selected is not None
+    assert selected["id"] == "atelier-epic.3"
+
+
 def test_work_prompt_yes_uses_first_epic_without_select() -> None:
     epics = [
         {

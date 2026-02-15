@@ -402,14 +402,20 @@ def _next_changeset(
             epic_id,
             "--label",
             "at:changeset",
-            "--label",
-            "cs:ready",
         ],
         beads_root=beads_root,
         cwd=repo_root,
     )
     if not changesets:
         return None
+    in_progress = [
+        issue for issue in changesets if "cs:in_progress" in _issue_labels(issue)
+    ]
+    if in_progress:
+        return in_progress[0]
+    ready = [issue for issue in changesets if "cs:ready" in _issue_labels(issue)]
+    if ready:
+        return ready[0]
     return changesets[0]
 
 
