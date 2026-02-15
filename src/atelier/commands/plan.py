@@ -96,9 +96,58 @@ def _install_planner_commit_blocker(
     hook_path = hooks_dir / "pre-commit"
     hook_path.write_text(_PLANNER_PRECOMMIT, encoding="utf-8")
     hook_path.chmod(0o755)
+    # Enable per-worktree config so hooksPath can be scoped to this worktree only.
     exec.run_command(
         git.git_command(
-            ["-C", str(worktree_path), "config", "core.hooksPath", str(hooks_dir)],
+            [
+                "-C",
+                str(worktree_path),
+                "config",
+                "extensions.worktreeConfig",
+                "true",
+            ],
+            git_path=git_path,
+        )
+    )
+    legacy_hooks = exec.try_run_command(
+        git.git_command(
+            [
+                "-C",
+                str(worktree_path),
+                "config",
+                "--local",
+                "--get",
+                "core.hooksPath",
+            ],
+            git_path=git_path,
+        )
+    )
+    if legacy_hooks is None:
+        die("missing required command: git")
+    if legacy_hooks.returncode == 0 and legacy_hooks.stdout.strip() == str(hooks_dir):
+        exec.run_command(
+            git.git_command(
+                [
+                    "-C",
+                    str(worktree_path),
+                    "config",
+                    "--local",
+                    "--unset",
+                    "core.hooksPath",
+                ],
+                git_path=git_path,
+            )
+        )
+    exec.run_command(
+        git.git_command(
+            [
+                "-C",
+                str(worktree_path),
+                "config",
+                "--worktree",
+                "core.hooksPath",
+                str(hooks_dir),
+            ],
             git_path=git_path,
         )
     )

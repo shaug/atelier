@@ -290,6 +290,10 @@ def test_planner_guardrails_install_commit_blocker(tmp_path: Path) -> None:
     with (
         patch("atelier.commands.plan.exec.run_command") as run_command,
         patch(
+            "atelier.commands.plan.exec.try_run_command",
+            return_value=SimpleNamespace(returncode=1, stdout=""),
+        ),
+        patch(
             "atelier.commands.plan.git.git_status_porcelain",
             return_value=[" M example.txt"],
         ),
@@ -302,6 +306,9 @@ def test_planner_guardrails_install_commit_blocker(tmp_path: Path) -> None:
     hooks_dir = tmp_path / "hooks"
     hook_path = hooks_dir / "pre-commit"
     assert hook_path.exists()
-    run_command.assert_called_once()
-    assert "core.hooksPath" in run_command.call_args.args[0]
+    assert run_command.call_count == 2
+    assert any(
+        call.args and "--worktree" in call.args[0] and "core.hooksPath" in call.args[0]
+        for call in run_command.call_args_list
+    )
     assert say.call_args_list
