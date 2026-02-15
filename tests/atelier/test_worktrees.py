@@ -85,6 +85,10 @@ def test_ensure_git_worktree_creates_when_missing() -> None:
 
         assert worktree_path == project_dir / "worktrees" / "epic"
         assert run_command.called
+        command = run_command.call_args.args[0]
+        assert "-b" in command
+        assert "feat/root" in command
+        assert "origin/main" in command
 
 
 def test_ensure_git_worktree_detaches_when_branch_in_use() -> None:
@@ -97,7 +101,7 @@ def test_ensure_git_worktree_detaches_when_branch_in_use() -> None:
         def fake_ref_exists(
             _repo: Path, ref: str, *, git_path: str | None = None
         ) -> bool:
-            return ref == "refs/heads/main"
+            return ref == "refs/heads/feat/root"
 
         def fake_try_run(
             cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None
@@ -105,7 +109,7 @@ def test_ensure_git_worktree_detaches_when_branch_in_use() -> None:
             return CompletedProcess(
                 args=cmd,
                 returncode=0,
-                stdout="worktree /repo\nbranch refs/heads/main\n",
+                stdout="worktree /repo\nbranch refs/heads/feat/root\n",
                 stderr="",
             )
 

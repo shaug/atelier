@@ -367,17 +367,13 @@ def ensure_git_worktree(
             return worktree_path
         die(f"worktree path exists but is not a git worktree: {worktree_path}")
 
-    default_branch = git.git_default_branch(repo_root, git_path=git_path)
-    if not default_branch:
-        die("failed to determine default branch for worktree")
+    root_ref = f"refs/heads/{root_branch}"
+    remote_root_ref = f"refs/remotes/origin/{root_branch}"
+    has_root_local = git.git_ref_exists(repo_root, root_ref, git_path=git_path)
+    has_root_remote = git.git_ref_exists(repo_root, remote_root_ref, git_path=git_path)
 
-    local_ref = f"refs/heads/{default_branch}"
-    remote_ref = f"refs/remotes/origin/{default_branch}"
-    has_local = git.git_ref_exists(repo_root, local_ref, git_path=git_path)
-    has_remote = git.git_ref_exists(repo_root, remote_ref, git_path=git_path)
-
-    if has_local:
-        in_use = _worktree_branch_in_use(repo_root, local_ref, git_path=git_path)
+    if has_root_local:
+        in_use = _worktree_branch_in_use(repo_root, root_ref, git_path=git_path)
         if in_use:
             args = [
                 "-C",
@@ -386,7 +382,7 @@ def ensure_git_worktree(
                 "add",
                 "--detach",
                 str(worktree_path),
-                default_branch,
+                root_branch,
             ]
         else:
             args = [
@@ -395,21 +391,49 @@ def ensure_git_worktree(
                 "worktree",
                 "add",
                 str(worktree_path),
-                default_branch,
+                root_branch,
             ]
-    elif has_remote:
+    elif has_root_remote:
         args = [
             "-C",
             str(repo_root),
             "worktree",
             "add",
             "-b",
-            default_branch,
+            root_branch,
             str(worktree_path),
-            f"origin/{default_branch}",
+            f"origin/{root_branch}",
         ]
     else:
-        die(f"default branch {default_branch!r} not found for worktree")
+        default_branch = git.git_default_branch(repo_root, git_path=git_path)
+        if not default_branch:
+            die("failed to determine default branch for worktree")
+        local_default_ref = f"refs/heads/{default_branch}"
+        remote_default_ref = f"refs/remotes/origin/{default_branch}"
+        if git.git_ref_exists(repo_root, local_default_ref, git_path=git_path):
+            args = [
+                "-C",
+                str(repo_root),
+                "worktree",
+                "add",
+                "-b",
+                root_branch,
+                str(worktree_path),
+                default_branch,
+            ]
+        elif git.git_ref_exists(repo_root, remote_default_ref, git_path=git_path):
+            args = [
+                "-C",
+                str(repo_root),
+                "worktree",
+                "add",
+                "-b",
+                root_branch,
+                str(worktree_path),
+                f"origin/{default_branch}",
+            ]
+        else:
+            die(f"default branch {default_branch!r} not found for worktree")
 
     exec_util.run_command(git.git_command(args, git_path=git_path))
     return worktree_path
