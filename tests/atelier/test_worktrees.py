@@ -85,10 +85,15 @@ def test_ensure_git_worktree_creates_when_missing() -> None:
 
         assert worktree_path == project_dir / "worktrees" / "epic"
         assert run_command.called
-        command = run_command.call_args.args[0]
-        assert "-b" in command
-        assert "feat/root" in command
-        assert "origin/main" in command
+        assert run_command.call_count == 2
+        assert any(
+            "branch" in call.args[0] and "feat/root" in call.args[0]
+            for call in run_command.call_args_list
+        )
+        assert any(
+            "worktree" in call.args[0] and "feat/root" in call.args[0]
+            for call in run_command.call_args_list
+        )
 
 
 def test_ensure_git_worktree_detaches_when_branch_in_use() -> None:
@@ -126,6 +131,39 @@ def test_ensure_git_worktree_detaches_when_branch_in_use() -> None:
             )
 
         assert "--detach" in run_command.call_args.args[0]
+
+
+def test_ensure_git_worktree_existing_path_still_materializes_root_branch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        repo_root = Path(tmp) / "repo"
+        project_dir.mkdir(parents=True)
+        repo_root.mkdir(parents=True)
+
+        mapping = worktrees.ensure_worktree_mapping(project_dir, "epic", "feat/root")
+        worktree_path = project_dir / mapping.worktree_path
+        worktree_path.mkdir(parents=True)
+        (worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+
+        def fake_ref_exists(
+            _repo: Path, ref: str, *, git_path: str | None = None
+        ) -> bool:
+            return ref == "refs/heads/main"
+
+        with (
+            patch("atelier.worktrees.git.git_default_branch", return_value="main"),
+            patch("atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists),
+            patch("atelier.worktrees.exec_util.run_command") as run_command,
+        ):
+            resolved = worktrees.ensure_git_worktree(
+                project_dir, repo_root, "epic", root_branch="feat/root"
+            )
+
+        assert resolved == worktree_path
+        run_command.assert_called_once()
+        command = run_command.call_args.args[0]
+        assert "branch" in command
+        assert "feat/root" in command
 
 
 def test_remove_git_worktree_noop_when_missing() -> None:
