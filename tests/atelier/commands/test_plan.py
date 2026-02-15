@@ -126,6 +126,14 @@ def test_plan_promotes_draft_epic_with_approval(tmp_path: Path) -> None:
                     "labels": ["at:epic", "at:draft"],
                 }
             ]
+        if args and args[0] == "ready":
+            return [
+                {
+                    "id": "atelier-draft.1",
+                    "title": "Planned changeset",
+                    "labels": ["at:changeset", "cs:planned"],
+                }
+            ]
         return []
 
     def fake_prompt(_: str) -> str:
@@ -180,6 +188,10 @@ def test_plan_promotes_draft_epic_with_approval(tmp_path: Path) -> None:
 
     assert any(
         call[:2] == ["update", "atelier-draft"] and "at:draft" in call for call in calls
+    )
+    assert any(
+        call[:2] == ["update", "atelier-draft.1"] and "cs:ready" in call
+        for call in calls
     )
 
 

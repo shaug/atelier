@@ -846,7 +846,9 @@ def test_work_invokes_startup_contract() -> None:
         ),
         patch(
             "atelier.commands.work._run_startup_contract",
-            return_value=work_cmd.StartupContractResult(epic_id=None, should_exit=True),
+            return_value=work_cmd.StartupContractResult(
+                epic_id=None, should_exit=True, reason="no_eligible_epics"
+            ),
         ) as startup_contract,
         patch("atelier.commands.work.say"),
     ):
@@ -1146,7 +1148,10 @@ def test_work_dry_run_logs_and_skips_mutations() -> None:
 
 def test_work_dry_run_watch_sleeps() -> None:
     with (
-        patch("atelier.commands.work._run_worker_once", return_value=False) as run_once,
+        patch(
+            "atelier.commands.work._run_worker_once",
+            return_value=work_cmd.WorkerRunSummary(started=False, reason="no_work"),
+        ) as run_once,
         patch("atelier.commands.work.time.sleep", side_effect=RuntimeError) as sleep,
     ):
         with pytest.raises(RuntimeError):

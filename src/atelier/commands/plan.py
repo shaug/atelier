@@ -148,7 +148,46 @@ def _maybe_promote_draft_epic(
         beads_root=beads_root,
         cwd=repo_root,
     )
+    _promote_ready_changesets(epic_id, beads_root=beads_root, repo_root=repo_root)
     say(f"Promoted draft epic: {epic_id}")
+
+
+def _promote_ready_changesets(
+    epic_id: str, *, beads_root: Path, repo_root: Path
+) -> None:
+    ready_changesets = beads.run_bd_json(
+        ["ready", "--parent", epic_id, "--label", "at:changeset"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    if not ready_changesets:
+        say(f"No runnable changesets available for {epic_id}.")
+        return
+    promoted: list[str] = []
+    for issue in ready_changesets:
+        labels = issue.get("labels") or []
+        if "cs:planned" not in labels:
+            continue
+        issue_id = issue.get("id")
+        if not issue_id:
+            continue
+        beads.run_bd_command(
+            [
+                "update",
+                str(issue_id),
+                "--add-label",
+                "cs:ready",
+                "--remove-label",
+                "cs:planned",
+            ],
+            beads_root=beads_root,
+            cwd=repo_root,
+        )
+        promoted.append(str(issue_id))
+    if not promoted:
+        say(f"No planned changesets to promote for {epic_id}.")
+        return
+    say(f"Promoted changesets to ready: {', '.join(promoted)}")
 
 
 def _trace_enabled() -> bool:

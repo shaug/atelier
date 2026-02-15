@@ -45,10 +45,69 @@ _WATCH_INTERVAL_SECONDS = 60
 class StartupContractResult:
     epic_id: str | None
     should_exit: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class WorkerRunSummary:
+    started: bool
+    reason: str
+    epic_id: str | None = None
+    changeset_id: str | None = None
 
 
 def _dry_run_log(message: str) -> None:
     say(f"DRY-RUN: {message}")
+
+
+def _trace_enabled() -> bool:
+    return os.environ.get("ATELIER_WORK_TRACE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _step(label: str, *, timings: list[tuple[str, float]], trace: bool) -> callable:
+    say(f"-> {label}")
+    start = time.perf_counter()
+
+    def finish(extra: str | None = None) -> None:
+        elapsed = time.perf_counter() - start
+        timings.append((label, elapsed))
+        suffix = f" ({elapsed:.2f}s)" if trace or elapsed >= 0.5 else ""
+        if extra:
+            say(f"ok {label}{suffix}: {extra}")
+        else:
+            say(f"ok {label}{suffix}")
+
+    return finish
+
+
+def _report_timings(timings: list[tuple[str, float]], *, trace: bool) -> None:
+    if not timings:
+        return
+    slow = [(label, elapsed) for label, elapsed in timings if elapsed >= 0.5]
+    if not trace and not slow:
+        return
+    say("Timing summary:")
+    for label, elapsed in sorted(timings, key=lambda item: item[1], reverse=True):
+        if not trace and elapsed < 0.5:
+            continue
+        say(f"- {label}: {elapsed:.2f}s")
+
+
+def _report_worker_summary(summary: WorkerRunSummary, *, dry_run: bool) -> None:
+    prefix = "DRY-RUN " if dry_run else ""
+    status = "started worker session" if summary.started else "no worker started"
+    say(f"{prefix}Summary: {status}")
+    if summary.reason:
+        say(f"- Reason: {summary.reason}")
+    if summary.epic_id:
+        say(f"- Epic: {summary.epic_id}")
+    if summary.changeset_id:
+        say(f"- Changeset: {summary.changeset_id}")
 
 
 def _normalize_mode(value: str | None) -> str:
@@ -649,7 +708,9 @@ def _run_startup_contract(
         selected_epic = str(explicit_epic_id).strip()
         if not selected_epic:
             die("epic id must not be empty")
-        return StartupContractResult(epic_id=selected_epic, should_exit=False)
+        return StartupContractResult(
+            epic_id=selected_epic, should_exit=False, reason="explicit_epic"
+        )
 
     if queue_only:
         _handle_queue_before_claim(
@@ -661,7 +722,9 @@ def _run_startup_contract(
         )
         if dry_run:
             _dry_run_log("Queue-only run would exit after handling queue.")
-        return StartupContractResult(epic_id=None, should_exit=True)
+        return StartupContractResult(
+            epic_id=None, should_exit=True, reason="queue_only"
+        )
 
     hooked_epic = None
     if agent_bead_id:
@@ -672,7 +735,9 @@ def _run_startup_contract(
         _dry_run_log("Would create agent bead before checking for hooks.")
     if hooked_epic:
         say(f"Resuming hooked epic: {hooked_epic}")
-        return StartupContractResult(epic_id=hooked_epic, should_exit=False)
+        return StartupContractResult(
+            epic_id=hooked_epic, should_exit=False, reason="hooked_epic"
+        )
 
     issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
     assigned = _filter_epics(issues, assignee=agent_id)
@@ -682,18 +747,24 @@ def _run_startup_contract(
         if candidate:
             selected_epic = str(candidate)
             say(f"Resuming assigned epic: {selected_epic}")
-            return StartupContractResult(epic_id=selected_epic, should_exit=False)
+            return StartupContractResult(
+                epic_id=selected_epic, should_exit=False, reason="assigned_epic"
+            )
 
     if _check_inbox_before_claim(agent_id, beads_root=beads_root, repo_root=repo_root):
         if dry_run:
             _dry_run_log("Inbox has unread messages; would exit before claiming work.")
-        return StartupContractResult(epic_id=None, should_exit=True)
+        return StartupContractResult(
+            epic_id=None, should_exit=True, reason="inbox_blocked"
+        )
     if _handle_queue_before_claim(
         agent_id, beads_root=beads_root, repo_root=repo_root, dry_run=dry_run
     ):
         if dry_run:
             _dry_run_log("Queue messages available; would exit before claiming work.")
-        return StartupContractResult(epic_id=None, should_exit=True)
+        return StartupContractResult(
+            epic_id=None, should_exit=True, reason="queue_blocked"
+        )
 
     if mode == "auto":
         selected_epic = _select_epic_auto(issues, agent_id=agent_id)
@@ -709,13 +780,26 @@ def _run_startup_contract(
             repo_root=repo_root,
             dry_run=dry_run,
         )
-        return StartupContractResult(epic_id=None, should_exit=True)
+        return StartupContractResult(
+            epic_id=None, should_exit=True, reason="no_eligible_epics"
+        )
 
-    return StartupContractResult(epic_id=selected_epic, should_exit=False)
+    return StartupContractResult(
+        epic_id=selected_epic,
+        should_exit=False,
+        reason="selected_auto" if mode == "auto" else "selected_prompt",
+    )
 
 
-def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
+def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSummary:
     """Start a single worker session by selecting an epic and changeset."""
+    timings: list[tuple[str, float]] = []
+    trace = _trace_enabled()
+
+    def finish(summary: WorkerRunSummary) -> WorkerRunSummary:
+        _report_timings(timings, trace=trace)
+        return summary
+
     project_root, project_config, _enlistment, repo_root = (
         resolve_current_project_with_repo_root()
     )
@@ -731,9 +815,16 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
         )
 
     with agents.scoped_agent_env(agent.agent_id):
+        say("Worker session")
         agent_bead_id: str | None = None
+        finish_step = _step("Prime beads", timings=timings, trace=trace)
         if dry_run:
             _dry_run_log("Would run: bd prime")
+        else:
+            beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
+        finish_step()
+        finish_step = _step("Ensure worker agent bead", timings=timings, trace=trace)
+        if dry_run:
             agent_bead = beads.find_agent_bead(
                 agent.agent_id, beads_root=beads_root, cwd=repo_root
             )
@@ -747,11 +838,11 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
                 )
             _dry_run_log("Would sync agent home policy.")
         else:
-            beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
             agent_bead = beads.ensure_agent_bead(
                 agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
             )
             agent_bead_id = agent_bead.get("id")
+        finish_step()
 
         epic_id = getattr(args, "epic_id", None)
         queue_only = bool(getattr(args, "queue", False))
@@ -760,6 +851,7 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
             if not isinstance(agent_bead_id, str) or not agent_bead_id:
                 die("failed to resolve agent bead id")
 
+        finish_step = _step("Select epic", timings=timings, trace=trace)
         startup_result = _run_startup_contract(
             agent_id=agent.agent_id,
             agent_bead_id=agent_bead_id,
@@ -770,17 +862,32 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
             queue_only=queue_only,
             dry_run=dry_run,
         )
+        summary_note = startup_result.reason
+        if startup_result.epic_id:
+            summary_note = f"{summary_note} ({startup_result.epic_id})"
+        finish_step(extra=summary_note)
         if startup_result.should_exit:
             if dry_run:
                 _dry_run_log("Startup contract would exit without starting a worker.")
-            return False
+            return finish(
+                WorkerRunSummary(
+                    started=False,
+                    reason=startup_result.reason,
+                    epic_id=startup_result.epic_id,
+                )
+            )
         if not startup_result.epic_id:
             if dry_run:
                 _dry_run_log("Startup contract did not select an epic.")
-                return False
+                return finish(
+                    WorkerRunSummary(
+                        started=False, reason="no_epic_selected", epic_id=None
+                    )
+                )
             die("startup contract did not select an epic")
         selected_epic = startup_result.epic_id
 
+        finish_step = _step("Claim epic", timings=timings, trace=trace)
         if dry_run:
             _dry_run_log(f"Selected epic: {selected_epic}")
             issues = beads.run_bd_json(
@@ -788,7 +895,12 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
             )
             if not issues:
                 _dry_run_log(f"Epic {selected_epic!r} not found.")
-                return False
+                finish_step(extra="epic not found")
+                return finish(
+                    WorkerRunSummary(
+                        started=False, reason="epic_not_found", epic_id=selected_epic
+                    )
+                )
             epic_issue = issues[0]
             _dry_run_log(
                 f"Would claim epic {selected_epic!r} for agent {agent.agent_id!r}."
@@ -798,6 +910,8 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
             epic_issue = beads.claim_epic(
                 selected_epic, agent.agent_id, beads_root=beads_root, cwd=repo_root
             )
+        finish_step()
+        finish_step = _step("Resolve root branch", timings=timings, trace=trace)
         root_branch_value = beads.extract_workspace_root_branch(epic_issue)
         suggested_root_branch = None
         if not root_branch_value:
@@ -825,6 +939,8 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
                     beads_root=beads_root,
                     cwd=repo_root,
                 )
+        finish_step(extra=root_branch_value or "unset")
+        finish_step = _step("Set parent branch + hook", timings=timings, trace=trace)
         parent_branch_value = root_branch_value
         if dry_run:
             _dry_run_log(
@@ -838,6 +954,8 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
             beads.set_agent_hook(
                 agent_bead_id, selected_epic, beads_root=beads_root, cwd=repo_root
             )
+        finish_step()
+        finish_step = _step("Select changeset", timings=timings, trace=trace)
         changeset = _next_changeset(
             epic_id=selected_epic, beads_root=beads_root, repo_root=repo_root
         )
@@ -849,14 +967,26 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
                 repo_root=repo_root,
                 dry_run=dry_run,
             )
+            finish_step(extra="no ready changesets")
             if dry_run:
                 _dry_run_log("Would release epic assignment and clear agent hook.")
-                return False
+                return finish(
+                    WorkerRunSummary(
+                        started=False,
+                        reason="no_ready_changesets",
+                        epic_id=selected_epic,
+                    )
+                )
             _release_epic_assignment(
                 selected_epic, beads_root=beads_root, repo_root=repo_root
             )
             beads.clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
-            return False
+            return finish(
+                WorkerRunSummary(
+                    started=False, reason="no_ready_changesets", epic_id=selected_epic
+                )
+            )
+        finish_step(extra=str(changeset.get("id") or "unknown"))
         changeset_id = changeset.get("id") or ""
         changeset_title = changeset.get("title") or ""
         if dry_run:
@@ -870,6 +1000,7 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
                 _mark_changeset_in_progress(
                     changeset_id, beads_root=beads_root, repo_root=repo_root
                 )
+        finish_step = _step("Prepare worktrees", timings=timings, trace=trace)
         git_path = config.resolve_git_path(project_config)
         epic_worktree_path: Path | None = None
         changeset_worktree_path: Path | None = None
@@ -965,7 +1096,9 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
             say(f"Epic worktree: {epic_worktree_path}")
             say(f"Changeset worktree: {changeset_worktree_path}")
             say(f"Changeset branch: {branch}")
+        finish_step()
 
+        finish_step = _step("Prepare agent session", timings=timings, trace=trace)
         agent_spec = agents.get_agent(project_config.agent.default)
         if agent_spec is None:
             die(f"unsupported agent {project_config.agent.default!r}")
@@ -1030,16 +1163,20 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
             env["ATELIER_EPIC_ID"] = selected_epic
             if changeset_id:
                 env["ATELIER_CHANGESET_ID"] = str(changeset_id)
+        finish_step()
         opening_prompt = ""
         if agent_spec.name == "codex":
             opening_prompt = workspace.workspace_session_identifier(
                 project_enlistment, workspace_branch, changeset_id or None
             )
+        finish_step = _step("Install agent hooks", timings=timings, trace=trace)
         if dry_run:
             _dry_run_log("Would ensure agent hooks are installed.")
         else:
             hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
             hooks.ensure_hooks_path(env, hook_path)
+        finish_step()
+        finish_step = _step("Start agent session", timings=timings, trace=trace)
         if dry_run:
             _dry_run_log(f"Would start {agent_spec.display_name} session.")
         else:
@@ -1052,8 +1189,17 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
         if dry_run:
             _dry_run_log(f"Agent command: {' '.join(start_cmd)}")
             _dry_run_log(f"Agent cwd: {start_cwd}")
-            return False
+            finish_step(extra="dry run")
+            return finish(
+                WorkerRunSummary(
+                    started=False,
+                    reason="dry_run",
+                    epic_id=selected_epic,
+                    changeset_id=str(changeset_id) if changeset_id else None,
+                )
+            )
         started_at = dt.datetime.now(tz=dt.timezone.utc)
+        returncode = 0
         if agent_spec.name == "codex":
             result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
             if result is None:
@@ -1065,6 +1211,7 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
                 )
                 die(f"missing required command: {start_cmd[0]}")
             if result.returncode != 0:
+                returncode = result.returncode
                 _mark_changeset_blocked(
                     changeset_id,
                     beads_root=beads_root,
@@ -1083,6 +1230,7 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
                 )
                 die(f"missing required command: {start_cmd[0]}")
             if result.returncode != 0:
+                returncode = result.returncode
                 _mark_changeset_blocked(
                     changeset_id,
                     beads_root=beads_root,
@@ -1090,6 +1238,8 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
                     reason=f"command failed: {' '.join(start_cmd)}",
                 )
                 die(f"command failed: {' '.join(start_cmd)}")
+        finish_step(extra=f"exit={returncode}")
+        finish_step = _step("Finalize changeset", timings=timings, trace=trace)
         _finalize_changeset(
             changeset_id=changeset_id,
             epic_id=selected_epic,
@@ -1102,7 +1252,15 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> bool:
             beads_root=beads_root,
             repo_root=repo_root,
         )
-        return True
+        finish_step()
+        return finish(
+            WorkerRunSummary(
+                started=True,
+                reason="agent_session_complete",
+                epic_id=selected_epic,
+                changeset_id=str(changeset_id) if changeset_id else None,
+            )
+        )
 
 
 def start_worker(args: object) -> None:
@@ -1111,11 +1269,13 @@ def start_worker(args: object) -> None:
     run_mode = _normalize_run_mode(getattr(args, "run_mode", None))
     dry_run = bool(getattr(args, "dry_run", False))
     if bool(getattr(args, "queue", False)):
-        _run_worker_once(args, mode=mode, dry_run=dry_run)
+        summary = _run_worker_once(args, mode=mode, dry_run=dry_run)
+        _report_worker_summary(summary, dry_run=dry_run)
         return
     if dry_run:
         while True:
-            _run_worker_once(args, mode=mode, dry_run=True)
+            summary = _run_worker_once(args, mode=mode, dry_run=True)
+            _report_worker_summary(summary, dry_run=True)
             if run_mode != "watch":
                 return
             interval = _watch_interval_seconds()
@@ -1125,10 +1285,11 @@ def start_worker(args: object) -> None:
             time.sleep(interval)
 
     while True:
-        started = _run_worker_once(args, mode=mode, dry_run=False)
+        summary = _run_worker_once(args, mode=mode, dry_run=False)
+        _report_worker_summary(summary, dry_run=False)
         if run_mode == "once":
             return
-        if started:
+        if summary.started:
             continue
         if run_mode == "watch":
             interval = _watch_interval_seconds()
