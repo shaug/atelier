@@ -401,6 +401,35 @@ def _send_planner_notification(
     )
 
 
+def _send_invalid_changeset_labels_notification(
+    *,
+    epic_id: str,
+    invalid_changesets: list[str],
+    agent_id: str,
+    beads_root: Path,
+    repo_root: Path,
+    dry_run: bool,
+) -> str:
+    detail = ", ".join(invalid_changesets[:5])
+    if len(invalid_changesets) > 5:
+        detail = f"{detail}, ..."
+    _send_planner_notification(
+        subject=f"NEEDS-DECISION: Invalid changeset labels ({epic_id})",
+        body=(
+            "Found child work items with invalid labels: "
+            f"{', '.join(invalid_changesets)}.\n"
+            "All executable work items must be labeled at:changeset; "
+            "do not use at:subtask."
+        ),
+        agent_id=agent_id,
+        thread_id=epic_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        dry_run=dry_run,
+    )
+    return detail
+
+
 def _send_no_ready_changesets(
     *,
     epic_id: str,
@@ -471,7 +500,7 @@ def _next_changeset(
     in_progress = [
         issue
         for issue in changesets
-        if "cs:in_progress" in _issue_labels(issue)
+        if _is_changeset_in_progress(issue)
         and "cs:merged" not in _issue_labels(issue)
         and "cs:abandoned" not in _issue_labels(issue)
     ]
@@ -483,7 +512,7 @@ def _next_changeset(
                     issue_id, beads_root=beads_root, repo_root=repo_root
                 ):
                     return issue
-    ready = [issue for issue in changesets if "cs:ready" in _issue_labels(issue)]
+    ready = [issue for issue in changesets if _is_changeset_ready(issue)]
     if ready:
         for issue in ready:
             issue_id = issue.get("id")
@@ -505,6 +534,68 @@ def _has_open_descendant_changesets(
         include_closed=False,
     )
     return bool(descendants)
+
+
+def _is_changeset_in_progress(issue: dict[str, object]) -> bool:
+    labels = _issue_labels(issue)
+    if "cs:in_progress" in labels:
+        return True
+    status = str(issue.get("status") or "").lower()
+    return status == "in_progress"
+
+
+def _is_changeset_ready(issue: dict[str, object]) -> bool:
+    labels = _issue_labels(issue)
+    return "cs:ready" in labels
+
+
+def _list_child_issues(
+    parent_id: str, *, beads_root: Path, repo_root: Path, include_closed: bool = False
+) -> list[dict[str, object]]:
+    args = ["list", "--parent", parent_id]
+    if include_closed:
+        args.append("--all")
+    return beads.run_bd_json(args, beads_root=beads_root, cwd=repo_root)
+
+
+def _find_invalid_changeset_labels(
+    root_id: str, *, beads_root: Path, repo_root: Path
+) -> list[str]:
+    invalid: list[str] = []
+    seen: set[str] = set()
+    queue = [root_id]
+    while queue:
+        current = queue.pop(0)
+        children = _list_child_issues(
+            current, beads_root=beads_root, repo_root=repo_root, include_closed=True
+        )
+        for issue in children:
+            issue_id = issue.get("id")
+            if not isinstance(issue_id, str) or not issue_id or issue_id in seen:
+                continue
+            seen.add(issue_id)
+            queue.append(issue_id)
+            labels = _issue_labels(issue)
+            has_cs_label = any(label.startswith("cs:") for label in labels)
+            if "at:subtask" in labels or (
+                has_cs_label and "at:changeset" not in labels
+            ):
+                invalid.append(issue_id)
+    return invalid
+
+
+def _changeset_parent_branch(issue: dict[str, object], *, root_branch: str) -> str:
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    parent_branch = fields.get("changeset.parent_branch")
+    if not parent_branch:
+        return root_branch
+    normalized = parent_branch.strip()
+    if not normalized or normalized.lower() == "null":
+        return root_branch
+    return normalized
 
 
 def _resolve_hooked_epic(
@@ -686,7 +777,9 @@ def _has_blocking_messages(
     repo_root: Path,
 ) -> bool:
     issues = beads.run_bd_json(
-        ["list", "--label", "at:message"], beads_root=beads_root, cwd=repo_root
+        ["list", "--label", "at:message", "--label", "at:unread"],
+        beads_root=beads_root,
+        cwd=repo_root,
     )
     for issue in issues:
         created_at = _parse_issue_time(issue.get("created_at"))
@@ -698,6 +791,30 @@ def _has_blocking_messages(
         )
         thread = payload.metadata.get("thread")
         if isinstance(thread, str) and thread in thread_ids:
+            return True
+    return False
+
+
+def _changeset_integration_proven(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+) -> bool:
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    integrated_sha = fields.get("changeset.integrated_sha")
+    if integrated_sha and integrated_sha.strip().lower() != "null":
+        return True
+    work_branch = fields.get("changeset.work_branch")
+    if not repo_slug or not work_branch or work_branch.strip().lower() == "null":
+        return False
+    branch = work_branch.strip()
+    if git.git_ref_exists(repo_root, f"refs/remotes/origin/{branch}"):
+        pr_payload = prs.read_github_pr_status(repo_slug, branch)
+        if pr_payload and pr_payload.get("mergedAt"):
             return True
     return False
 
@@ -722,6 +839,21 @@ def _finalize_changeset(
         return FinalizeResult(continue_running=False, reason="changeset_not_found")
     issue = issues[0]
     labels = _issue_labels(issue)
+    invalid_changesets = _find_invalid_changeset_labels(
+        epic_id, beads_root=beads_root, repo_root=repo_root
+    )
+    if invalid_changesets:
+        _send_invalid_changeset_labels_notification(
+            epic_id=epic_id,
+            invalid_changesets=invalid_changesets,
+            agent_id=agent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            dry_run=False,
+        )
+        return FinalizeResult(
+            continue_running=False, reason="changeset_label_violation"
+        )
     if "cs:merged" in labels or "cs:abandoned" in labels:
         if _has_open_descendant_changesets(
             changeset_id, beads_root=beads_root, repo_root=repo_root
@@ -765,6 +897,28 @@ def _finalize_changeset(
             )
             return FinalizeResult(
                 continue_running=True, reason="changeset_children_pending"
+            )
+        if "cs:merged" in labels and not _changeset_integration_proven(
+            issue, repo_slug=repo_slug, repo_root=repo_root
+        ):
+            _mark_changeset_blocked(
+                changeset_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                reason="missing integration signal for cs:merged",
+            )
+            _send_planner_notification(
+                subject=f"NEEDS-DECISION: Missing integration signal ({changeset_id})",
+                body="Changeset is labeled cs:merged but no integration signal "
+                "(changeset.integrated_sha or merged PR) was found.",
+                agent_id=agent_id,
+                thread_id=changeset_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                dry_run=False,
+            )
+            return FinalizeResult(
+                continue_running=False, reason="changeset_blocked_missing_integration"
             )
         _mark_changeset_closed(changeset_id, beads_root=beads_root, repo_root=repo_root)
         _close_completed_container_changesets(
@@ -906,7 +1060,7 @@ def _prompt_queue_claim(
     beads_root: Path,
     repo_root: Path,
     assume_yes: bool = False,
-) -> None:
+) -> bool:
     say("Queued messages:")
     for issue in queued:
         issue_id = issue.get("id") or ""
@@ -920,12 +1074,13 @@ def _prompt_queue_claim(
     else:
         selection = prompt("Queue message id (blank to skip)").strip()
     if not selection:
-        return
+        return False
     valid_ids = {str(issue.get("id")) for issue in queued if issue.get("id")}
     if selection not in valid_ids:
         die(f"unknown queue message id: {selection}")
     beads.claim_queue_message(selection, agent_id, beads_root=beads_root, cwd=repo_root)
     say(f"Claimed queue message: {selection}")
+    return True
 
 
 def _handle_queue_before_claim(
@@ -961,13 +1116,16 @@ def _handle_queue_before_claim(
             say(f"- {issue_id} [{queue_name}] {title}")
         _dry_run_log("Would prompt to claim a queue message.")
         return True
-    _prompt_queue_claim(
+    claimed = _prompt_queue_claim(
         queued,
         agent_id=agent_id,
         beads_root=beads_root,
         repo_root=repo_root,
         assume_yes=assume_yes,
     )
+    if not claimed:
+        say("Skipped queue; continuing to epic selection.")
+        return False
     return True
 
 
@@ -1247,6 +1405,37 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
                 agent_bead_id, selected_epic, beads_root=beads_root, cwd=repo_root
             )
         finish_step()
+        finish_step = _step("Validate changeset labels", timings=timings, trace=trace)
+        invalid_changesets = _find_invalid_changeset_labels(
+            selected_epic, beads_root=beads_root, repo_root=repo_root
+        )
+        if invalid_changesets:
+            detail = _send_invalid_changeset_labels_notification(
+                epic_id=selected_epic,
+                invalid_changesets=invalid_changesets,
+                agent_id=agent.agent_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                dry_run=dry_run,
+            )
+            finish_step(extra=f"invalid labels: {detail}")
+            if dry_run:
+                _dry_run_log("Would release epic assignment and clear agent hook.")
+            else:
+                _release_epic_assignment(
+                    selected_epic, beads_root=beads_root, repo_root=repo_root
+                )
+                beads.clear_agent_hook(
+                    agent_bead_id, beads_root=beads_root, cwd=repo_root
+                )
+            return finish(
+                WorkerRunSummary(
+                    started=False,
+                    reason="changeset_label_violation",
+                    epic_id=selected_epic,
+                )
+            )
+        finish_step()
         finish_step = _step("Select changeset", timings=timings, trace=trace)
         changeset = _next_changeset(
             epic_id=selected_epic, beads_root=beads_root, repo_root=repo_root
@@ -1281,17 +1470,24 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
         finish_step(extra=str(changeset.get("id") or "unknown"))
         changeset_id = changeset.get("id") or ""
         changeset_title = changeset.get("title") or ""
+        changeset_parent_branch = root_branch_value
+        if changeset_parent_branch and changeset_id:
+            if dry_run:
+                changeset_parent_branch = _changeset_parent_branch(
+                    changeset, root_branch=changeset_parent_branch
+                )
+            else:
+                selected_changeset = beads.run_bd_json(
+                    ["show", str(changeset_id)], beads_root=beads_root, cwd=repo_root
+                )
+                if selected_changeset:
+                    changeset_parent_branch = _changeset_parent_branch(
+                        selected_changeset[0], root_branch=changeset_parent_branch
+                    )
         if dry_run:
             _dry_run_log(f"Next changeset: {changeset_id} {changeset_title}")
         else:
             say(f"Next changeset: {changeset_id} {changeset_title}")
-        if changeset_id:
-            if dry_run:
-                _dry_run_log(f"Would mark changeset {changeset_id} in progress.")
-            else:
-                _mark_changeset_in_progress(
-                    changeset_id, beads_root=beads_root, repo_root=repo_root
-                )
         finish_step = _step("Prepare worktrees", timings=timings, trace=trace)
         git_path = config.resolve_git_path(project_config)
         epic_worktree_path: Path | None = None
@@ -1329,7 +1525,8 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
             if changeset_id:
                 _dry_run_log(
                     "Would update changeset branch metadata "
-                    f"(root={root_branch_value!r}, parent={parent_branch_value!r}, "
+                    f"(root={root_branch_value!r}, "
+                    f"parent={changeset_parent_branch!r}, "
                     f"work={branch!r})."
                 )
             _dry_run_log("Would ensure git worktrees and checkout.")
@@ -1360,12 +1557,14 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
                 changeset_id,
                 branch=branch,
                 root_branch=root_branch_value,
+                parent_branch=changeset_parent_branch,
                 git_path=git_path,
             )
             worktrees.ensure_changeset_checkout(
                 changeset_worktree_path,
                 branch,
                 root_branch=root_branch_value,
+                parent_branch=changeset_parent_branch,
                 git_path=git_path,
             )
             if changeset_id:
@@ -1373,12 +1572,14 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
                     changeset_worktree_path, root_branch_value, git_path=git_path
                 )
                 parent_base = git.git_rev_parse(
-                    changeset_worktree_path, parent_branch_value, git_path=git_path
+                    changeset_worktree_path,
+                    changeset_parent_branch,
+                    git_path=git_path,
                 )
                 beads.update_changeset_branch_metadata(
                     changeset_id,
                     root_branch=root_branch_value,
-                    parent_branch=parent_branch_value,
+                    parent_branch=changeset_parent_branch,
                     work_branch=branch,
                     root_base=root_base,
                     parent_base=parent_base,
@@ -1388,6 +1589,15 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
             say(f"Epic worktree: {epic_worktree_path}")
             say(f"Changeset worktree: {changeset_worktree_path}")
             say(f"Changeset branch: {branch}")
+        finish_step()
+        finish_step = _step("Mark changeset in progress", timings=timings, trace=trace)
+        if changeset_id:
+            if dry_run:
+                _dry_run_log(f"Would mark changeset {changeset_id} in progress.")
+            else:
+                _mark_changeset_in_progress(
+                    changeset_id, beads_root=beads_root, repo_root=repo_root
+                )
         finish_step()
 
         finish_step = _step("Prepare agent session", timings=timings, trace=trace)

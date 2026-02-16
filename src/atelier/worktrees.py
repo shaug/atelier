@@ -251,6 +251,7 @@ def ensure_changeset_worktree(
     *,
     branch: str,
     root_branch: str,
+    parent_branch: str | None = None,
     git_path: str | None = None,
 ) -> Path:
     """Ensure a git worktree exists for a changeset and return its path."""
@@ -281,6 +282,10 @@ def ensure_changeset_worktree(
     root_ref = f"refs/heads/{root_branch}"
     remote_root = f"refs/remotes/origin/{root_branch}"
 
+    parent = (parent_branch or "").strip() or root_branch
+    parent_ref = f"refs/heads/{parent}"
+    remote_parent = f"refs/remotes/origin/{parent}"
+
     if git.git_ref_exists(repo_root, branch_ref, git_path=git_path):
         args = ["-C", str(repo_root), "worktree", "add", str(worktree_path), branch]
     elif git.git_ref_exists(repo_root, remote_branch, git_path=git_path):
@@ -293,6 +298,28 @@ def ensure_changeset_worktree(
             branch,
             str(worktree_path),
             f"origin/{branch}",
+        ]
+    elif git.git_ref_exists(repo_root, parent_ref, git_path=git_path):
+        args = [
+            "-C",
+            str(repo_root),
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            str(worktree_path),
+            parent,
+        ]
+    elif git.git_ref_exists(repo_root, remote_parent, git_path=git_path):
+        args = [
+            "-C",
+            str(repo_root),
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            str(worktree_path),
+            f"origin/{parent}",
         ]
     elif git.git_ref_exists(repo_root, root_ref, git_path=git_path):
         args = [
@@ -328,6 +355,7 @@ def ensure_changeset_checkout(
     branch: str,
     *,
     root_branch: str,
+    parent_branch: str | None = None,
     git_path: str | None = None,
 ) -> None:
     """Ensure the changeset branch exists and is checked out in the worktree."""
@@ -403,9 +431,28 @@ def ensure_changeset_checkout(
         )
         return
 
+    parent = (parent_branch or "").strip() or root_branch
+    parent_ref = f"refs/heads/{parent}"
+    remote_parent = f"refs/remotes/origin/{parent}"
+
     exec_util.run_command(
         git.git_command(
-            ["-C", str(worktree_path), "checkout", "-b", branch, root_branch],
+            [
+                "-C",
+                str(worktree_path),
+                "checkout",
+                "-b",
+                branch,
+                parent
+                if git.git_ref_exists(worktree_path, parent_ref, git_path=git_path)
+                else (
+                    f"origin/{parent}"
+                    if git.git_ref_exists(
+                        worktree_path, remote_parent, git_path=git_path
+                    )
+                    else root_branch
+                ),
+            ],
             git_path=git_path,
         )
     )

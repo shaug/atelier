@@ -362,6 +362,15 @@ def test_list_descendant_changesets_walks_tree() -> None:
     assert calls == ["epic-1", "epic-1.1", "epic-1.2", "epic-1.1.1"]
 
 
+def test_list_child_changesets_uses_changeset_label() -> None:
+    with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
+        beads.list_child_changesets(
+            "epic-1", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+    called_args = run_json.call_args.args[0]
+    assert called_args == ["list", "--parent", "epic-1", "--label", "at:changeset"]
+
+
 def test_summarize_changesets_counts_and_ready() -> None:
     changesets = [
         {"labels": ["cs:merged"]},

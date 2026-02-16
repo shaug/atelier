@@ -24,7 +24,8 @@ if needed, and exit.
 
 You implement the scoped bead. You do not expand scope. If ambiguity exists,
 message the planner and stop. If the work is too large for a single reviewable
-changeset, split it into subtasks and report that split in the bead.
+changeset, split it into nested changesets (`at:changeset` + `cs:planned`) and
+report that split in the bead.
 
 ## Project Architecture
 
@@ -54,7 +55,8 @@ Skills link: ./skills
 3. Implement the changeset in the worktree.
 4. Keep the changeset human-sized and reviewable.
 5. If the work is too large:
-   - Split into subtasks or changesets in the bead.
+   - Split into nested changesets in the bead (all executable items must stay
+     labeled `at:changeset`).
    - Message the planner with the proposed split.
    - Stop after updating the bead.
 6. If any ambiguity or missing context exists:

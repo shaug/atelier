@@ -1,7 +1,7 @@
 ---
 name: plan_split_tasks
 description: >-
-  Split an epic into task and subtask beads with appropriate labels.
+  Split an epic into changeset beads with dependency-safe labeling.
 ---
 
 # Plan split tasks
@@ -9,18 +9,18 @@ description: >-
 ## Inputs
 
 - epic_id: Parent epic bead id.
-- tasks: List of task titles and acceptance criteria.
-- subtasks: Optional subtasks mapped to a task.
+- tasks: List of changeset titles and acceptance criteria.
+- subtasks: Optional nested changesets mapped to a parent changeset.
 - beads_dir: Optional Beads store path.
 
 ## Steps
 
-1. Create task beads under the epic:
-   - `bd create --parent <epic_id> --type task --label at:task --title <title> --acceptance <acceptance>`
-1. Create subtasks under the task when needed:
-   - `bd create --parent <task_id> --type task --label at:subtask --title <title> --acceptance <acceptance>`
+1. Create changeset beads under the epic:
+   - `bd create --parent <epic_id> --type task --label at:changeset --label cs:planned --title <title> --acceptance <acceptance>`
+1. Create nested changesets under a parent changeset when needed:
+   - `bd create --parent <changeset_id> --type task --label at:changeset --label cs:planned --title <title> --acceptance <acceptance>`
 1. Use `--notes` for follow-up details instead of editing descriptions.
 
 ## Verification
 
-- Tasks and subtasks appear under the epic with correct labels.
+- All executable work items are labeled `at:changeset` (never `at:subtask`).
