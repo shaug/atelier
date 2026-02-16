@@ -11,6 +11,8 @@ from .pr_strategy import PR_STRATEGY_DEFAULT, PR_STRATEGY_VALUES, PrStrategy
 
 BRANCH_HISTORY_VALUES = ("manual", "squash", "merge", "rebase")
 BranchHistory = Literal["manual", "squash", "merge", "rebase"]
+BRANCH_SQUASH_MESSAGE_VALUES = ("deterministic", "agent")
+BranchSquashMessage = Literal["deterministic", "agent"]
 
 UPGRADE_POLICY_VALUES = ("always", "ask", "manual")
 UpgradePolicy = Literal["always", "ask", "manual"]
@@ -26,6 +28,7 @@ class BranchConfig(BaseModel):
         prefix: Prefix applied to workspace branches.
         pr: Whether pull requests are expected.
         history: History policy (manual|squash|merge|rebase).
+        squash_message: Squash commit message policy (deterministic|agent).
         pr_strategy: PR creation strategy (sequential|on-ready|parallel).
 
     Example:
@@ -38,6 +41,7 @@ class BranchConfig(BaseModel):
     prefix: str = ""
     pr: bool = True
     history: BranchHistory = "manual"
+    squash_message: BranchSquashMessage = "deterministic"
     pr_strategy: PrStrategy = PR_STRATEGY_DEFAULT
 
     @field_validator("prefix", mode="before")
@@ -66,6 +70,21 @@ class BranchConfig(BaseModel):
             if normalized in PR_STRATEGY_VALUES:
                 return normalized
         raise ValueError("pr_strategy must be one of: " + ", ".join(PR_STRATEGY_VALUES))
+
+    @field_validator("squash_message", mode="before")
+    @classmethod
+    def normalize_squash_message(cls, value: object) -> object:
+        if value is None:
+            return "deterministic"
+        if isinstance(value, str):
+            normalized = value.strip().lower().replace("_", "-")
+            if not normalized:
+                return "deterministic"
+            if normalized in BRANCH_SQUASH_MESSAGE_VALUES:
+                return normalized
+        raise ValueError(
+            "squash_message must be one of: " + ", ".join(BRANCH_SQUASH_MESSAGE_VALUES)
+        )
 
 
 class GitSection(BaseModel):

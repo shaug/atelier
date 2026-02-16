@@ -2834,6 +2834,11 @@ def test_finalize_epic_if_complete_integrates_non_pr() -> None:
         root_branch="feat/root",
         parent_branch="main",
         history="rebase",
+        squash_message_mode="deterministic",
+        squash_message_agent_spec=None,
+        squash_message_agent_options=None,
+        squash_message_agent_home=None,
+        squash_message_agent_env=None,
         repo_root=Path("/repo"),
         git_path="git",
     )
@@ -2852,6 +2857,21 @@ def test_squash_subject_prefers_external_ticket_id() -> None:
     subject = work_cmd._squash_subject(issue, epic_id="at-epic")
 
     assert subject == "GH-194: Fix widget pipeline"
+
+
+def test_parse_squash_subject_output_ignores_preamble_lines() -> None:
+    output = "\n".join(
+        [
+            "OpenAI Codex v0.101.0",
+            "thinking",
+            "tokens used",
+            "GH-194: tighten stuck-run ownership checks",
+        ]
+    )
+
+    parsed = work_cmd._parse_squash_subject_output(output)
+
+    assert parsed == "GH-194: tighten stuck-run ownership checks"
 
 
 def test_integrate_epic_root_to_parent_merge_prefers_ff() -> None:
@@ -2963,6 +2983,66 @@ def test_integrate_epic_root_to_parent_squash_uses_ticket_subject() -> None:
     assert ok is True
     assert error is None
     assert ["commit", "-m", "GH-194: Fix widget pipeline"] in run_calls
+
+
+def test_integrate_epic_root_to_parent_squash_uses_agent_subject_when_enabled() -> None:
+    run_calls: list[list[str]] = []
+
+    def fake_is_ancestor(
+        repo_root: Path, ancestor: str, descendant: str, *, git_path: str | None = None
+    ) -> bool | None:
+        return False
+
+    def fake_rev_parse(
+        repo_root: Path, ref: str, *, git_path: str | None = None
+    ) -> str | None:
+        if ref == "main":
+            return "aaa111"
+        if ref == "feat/root":
+            return "bbb222"
+        return "ccc333"
+
+    def fake_run_git_status(
+        args: list[str], *, repo_root: Path, git_path: str | None = None
+    ) -> tuple[bool, str]:
+        run_calls.append(args)
+        return True, ""
+
+    issue = {
+        "id": "at-epic",
+        "title": "Fix widget pipeline",
+    }
+
+    with (
+        patch("atelier.commands.work._ensure_local_branch", return_value=True),
+        patch("atelier.commands.work.git.git_is_clean", return_value=True),
+        patch(
+            "atelier.commands.work.git.git_is_ancestor", side_effect=fake_is_ancestor
+        ),
+        patch("atelier.commands.work.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.commands.work.git.git_current_branch", return_value="feat/root"),
+        patch("atelier.commands.work.git.git_rev_parse", side_effect=fake_rev_parse),
+        patch("atelier.commands.work._run_git_status", side_effect=fake_run_git_status),
+        patch(
+            "atelier.commands.work._agent_generated_squash_subject",
+            return_value="Agent drafted squash subject",
+        ) as draft_subject,
+    ):
+        ok, _sha, error = work_cmd._integrate_epic_root_to_parent(
+            epic_issue=issue,
+            epic_id="at-epic",
+            root_branch="feat/root",
+            parent_branch="main",
+            history="squash",
+            squash_message_mode="agent",
+            repo_root=Path("/repo"),
+            git_path="git",
+        )
+
+    assert ok is True
+    assert error is None
+    draft_subject.assert_called_once()
+    assert ["commit", "-m", "Agent drafted squash subject"] in run_calls
 
 
 def test_work_does_not_mark_in_progress_before_worktree_prepared() -> None:

@@ -42,6 +42,7 @@ _MODE_VALUES = {"prompt", "auto"}
 _RUN_MODE_VALUES = {"once", "default", "watch"}
 _WATCH_INTERVAL_SECONDS = 60
 _WORKER_QUEUE_NAME = "worker"
+_SQUASH_MESSAGE_MODES = {"deterministic", "agent"}
 _INTEGRATED_SHA_NOTE_PATTERN = re.compile(
     r"(?:^|\n)\s*(?:[-*]\s+)?`?changeset\.integrated_sha`?\s*[:=]\s*([0-9a-fA-F]{7,40})\b",
     re.MULTILINE,
@@ -1116,6 +1117,126 @@ def _squash_subject(issue: dict[str, object], *, epic_id: str) -> str:
     return epic_id
 
 
+def _normalize_squash_message_mode(value: object) -> str:
+    if not isinstance(value, str):
+        return "deterministic"
+    normalized = value.strip().lower()
+    if normalized in _SQUASH_MESSAGE_MODES:
+        return normalized
+    return "deterministic"
+
+
+def _parse_squash_subject_output(output: str) -> str | None:
+    cleaned = codex.strip_ansi(output).replace("\r", "\n")
+    for raw_line in cleaned.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lowered = line.lower()
+        if lowered in {"thinking", "user", "assistant", "codex", "--------"}:
+            continue
+        if lowered.startswith(
+            (
+                "warning:",
+                "deprecated:",
+                "mcp:",
+                "tokens used",
+                "openai codex",
+                "session id:",
+            )
+        ):
+            continue
+        line = line.strip("`\"'").strip()
+        if line.startswith(("-", "*")):
+            line = line[1:].strip()
+        line = " ".join(line.split())
+        if line:
+            return line[:120]
+    return None
+
+
+def _agent_generated_squash_subject(
+    *,
+    epic_issue: dict[str, object],
+    epic_id: str,
+    root_branch: str,
+    parent_branch: str,
+    repo_root: Path,
+    git_path: str | None,
+    agent_spec: agents.AgentSpec | None,
+    agent_options: list[str] | None,
+    agent_home: Path | None,
+    agent_env: dict[str, str] | None,
+) -> str | None:
+    if agent_spec is None or agent_home is None:
+        return None
+    if agent_spec.name != "codex":
+        return None
+
+    commit_messages = git.git_commit_messages(
+        repo_root,
+        parent_branch,
+        root_branch,
+        git_path=git_path,
+    )
+    files_changed = git.git_diff_name_status(
+        repo_root,
+        parent_branch,
+        root_branch,
+        git_path=git_path,
+    )
+    ticket_id = _first_external_ticket_id(epic_issue) or "none"
+    title = str(epic_issue.get("title") or epic_id).strip() or epic_id
+    commits_preview = (
+        "\n".join(f"- {message}" for message in commit_messages[:12] if message)
+        or "- (none)"
+    )
+    files_preview = "\n".join(
+        f"- {entry}" for entry in files_changed[:30] if entry
+    ) or ("- (none)")
+    prompt_text = "\n".join(
+        [
+            "Draft a single git squash commit subject for integrating an epic branch.",
+            "",
+            "Constraints:",
+            "- Output exactly one line (no markdown, no bullets, no quotes).",
+            "- Imperative mood, no trailing period.",
+            "- Maximum 72 characters.",
+            "",
+            f"Epic id: {epic_id}",
+            f"Primary ticket: {ticket_id}",
+            f"Epic title: {title}",
+            f"Parent branch: {parent_branch}",
+            f"Root branch: {root_branch}",
+            "",
+            "Commit messages being squashed:",
+            commits_preview,
+            "",
+            "Changed files:",
+            files_preview,
+            "",
+            "Return only the commit subject.",
+        ]
+    )
+
+    start_cmd, start_cwd = agent_spec.build_start_command(
+        agent_home,
+        list(agent_options or []),
+        prompt_text,
+    )
+    start_cmd = _with_codex_exec(start_cmd, prompt_text)
+    start_cmd = _strip_flag_with_value(start_cmd, "--cd")
+    start_cmd = _ensure_exec_subcommand_flag(start_cmd, "--skip-git-repo-check")
+    start_cwd = agent_home
+    result = exec.try_run_command(start_cmd, cwd=start_cwd, env=agent_env)
+    if result is None or result.returncode != 0:
+        return None
+    parsed = _parse_squash_subject_output(result.stdout or "")
+    if parsed:
+        return parsed
+    return _parse_squash_subject_output(result.stderr or "")
+
+
 def _cleanup_epic_branches_and_worktrees(
     *,
     project_data_dir: Path | None,
@@ -1168,6 +1289,11 @@ def _integrate_epic_root_to_parent(
     root_branch: str,
     parent_branch: str,
     history: str,
+    squash_message_mode: str = "deterministic",
+    squash_message_agent_spec: agents.AgentSpec | None = None,
+    squash_message_agent_options: list[str] | None = None,
+    squash_message_agent_home: Path | None = None,
+    squash_message_agent_env: dict[str, str] | None = None,
     repo_root: Path,
     git_path: str | None = None,
 ) -> tuple[bool, str | None, str | None]:
@@ -1318,6 +1444,21 @@ def _integrate_epic_root_to_parent(
                     detail or f"failed to squash-merge {root} into {parent}",
                 )
             message = _squash_subject(epic_issue, epic_id=epic_id)
+            if _normalize_squash_message_mode(squash_message_mode) == "agent":
+                drafted = _agent_generated_squash_subject(
+                    epic_issue=epic_issue,
+                    epic_id=epic_id,
+                    root_branch=root,
+                    parent_branch=parent,
+                    repo_root=repo_root,
+                    git_path=git_path,
+                    agent_spec=squash_message_agent_spec,
+                    agent_options=squash_message_agent_options,
+                    agent_home=squash_message_agent_home,
+                    agent_env=squash_message_agent_env,
+                )
+                if drafted:
+                    message = drafted
             ok, detail = _run_git_status(
                 ["commit", "-m", message], repo_root=repo_root, git_path=git_path
             )
@@ -1361,9 +1502,14 @@ def _finalize_epic_if_complete(
     agent_bead_id: str,
     branch_pr: bool,
     branch_history: str,
+    branch_squash_message: str = "deterministic",
     beads_root: Path,
     repo_root: Path,
     project_data_dir: Path | None = None,
+    squash_message_agent_spec: agents.AgentSpec | None = None,
+    squash_message_agent_options: list[str] | None = None,
+    squash_message_agent_home: Path | None = None,
+    squash_message_agent_env: dict[str, str] | None = None,
     git_path: str | None = None,
 ) -> FinalizeResult:
     if not _epic_ready_to_finalize(epic_id, beads_root=beads_root, repo_root=repo_root):
@@ -1420,6 +1566,11 @@ def _finalize_epic_if_complete(
             root_branch=root_branch,
             parent_branch=parent_branch,
             history=branch_history,
+            squash_message_mode=branch_squash_message,
+            squash_message_agent_spec=squash_message_agent_spec,
+            squash_message_agent_options=squash_message_agent_options,
+            squash_message_agent_home=squash_message_agent_home,
+            squash_message_agent_env=squash_message_agent_env,
             repo_root=repo_root,
             git_path=git_path,
         )
@@ -1467,7 +1618,12 @@ def _finalize_changeset(
     repo_root: Path,
     branch_pr: bool = True,
     branch_history: str = "manual",
+    branch_squash_message: str = "deterministic",
     project_data_dir: Path | None = None,
+    squash_message_agent_spec: agents.AgentSpec | None = None,
+    squash_message_agent_options: list[str] | None = None,
+    squash_message_agent_home: Path | None = None,
+    squash_message_agent_env: dict[str, str] | None = None,
     git_path: str | None = None,
 ) -> FinalizeResult:
     if not changeset_id:
@@ -1580,9 +1736,14 @@ def _finalize_changeset(
             agent_bead_id=agent_bead_id,
             branch_pr=branch_pr,
             branch_history=branch_history,
+            branch_squash_message=branch_squash_message,
             beads_root=beads_root,
             repo_root=repo_root,
             project_data_dir=project_data_dir,
+            squash_message_agent_spec=squash_message_agent_spec,
+            squash_message_agent_options=squash_message_agent_options,
+            squash_message_agent_home=squash_message_agent_home,
+            squash_message_agent_env=squash_message_agent_env,
             git_path=git_path,
         )
     if _has_blocking_messages(
@@ -2526,7 +2687,12 @@ def _run_worker_once(
             repo_root=repo_root,
             branch_pr=project_config.branch.pr,
             branch_history=project_config.branch.history,
+            branch_squash_message=project_config.branch.squash_message,
             project_data_dir=project_data_dir,
+            squash_message_agent_spec=agent_spec,
+            squash_message_agent_options=agent_options,
+            squash_message_agent_home=agent.path,
+            squash_message_agent_env=env,
             git_path=git_path,
         )
         finish_step(extra=finalize_result.reason)

@@ -233,6 +233,13 @@ def init_command(
             help="branch history policy (manual|squash|merge|rebase)",
         ),
     ] = None,
+    branch_squash_message: Annotated[
+        str | None,
+        typer.Option(
+            "--branch-squash-message",
+            help="squash commit message policy (deterministic|agent)",
+        ),
+    ] = None,
     branch_pr_strategy: Annotated[
         str | None,
         typer.Option(
@@ -262,6 +269,7 @@ def init_command(
         branch_prefix: Prefix for new workspace branches (optional).
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
+        branch_squash_message: Squash commit subject policy (deterministic|agent).
         branch_pr_strategy: PR strategy (sequential|on-ready|parallel).
         agent: Agent name.
         editor_edit: Editor command used for blocking edits (policy docs).
@@ -277,6 +285,7 @@ def init_command(
             branch_prefix=branch_prefix,
             branch_pr=branch_pr,
             branch_history=branch_history,
+            branch_squash_message=branch_squash_message,
             branch_pr_strategy=branch_pr_strategy,
             agent=agent,
             editor_edit=editor_edit,
@@ -312,6 +321,13 @@ def new_command(
             help="branch history policy (manual|squash|merge|rebase)",
         ),
     ] = None,
+    branch_squash_message: Annotated[
+        str | None,
+        typer.Option(
+            "--branch-squash-message",
+            help="squash commit message policy (deterministic|agent)",
+        ),
+    ] = None,
     branch_pr_strategy: Annotated[
         str | None,
         typer.Option(
@@ -342,6 +358,7 @@ def new_command(
         branch_prefix: Prefix for new workspace branches (optional).
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
+        branch_squash_message: Squash commit subject policy (deterministic|agent).
         branch_pr_strategy: PR strategy (sequential|on-ready|parallel).
         agent: Agent name.
         editor_edit: Editor command used for blocking edits (policy docs).
@@ -359,6 +376,7 @@ def new_command(
             branch_prefix=branch_prefix,
             branch_pr=branch_pr,
             branch_history=branch_history,
+            branch_squash_message=branch_squash_message,
             branch_pr_strategy=branch_pr_strategy,
             agent=agent,
             editor_edit=editor_edit,

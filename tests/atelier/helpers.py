@@ -30,6 +30,7 @@ def make_init_args(**overrides: object) -> SimpleNamespace:
         "branch_prefix": None,
         "branch_pr": None,
         "branch_history": None,
+        "branch_squash_message": None,
         "branch_pr_strategy": None,
         "agent": None,
         "editor_edit": None,

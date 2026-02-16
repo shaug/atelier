@@ -24,6 +24,7 @@ from .editor import system_editor_default
 from .io import die, prompt, select
 from .models import (
     BRANCH_HISTORY_VALUES,
+    BRANCH_SQUASH_MESSAGE_VALUES,
     UPGRADE_POLICY_VALUES,
     AgentConfig,
     AtelierSection,
@@ -577,6 +578,7 @@ def user_config_missing_fields(payload: dict | None) -> list[str]:
         ("branch", "prefix"),
         ("branch", "pr"),
         ("branch", "history"),
+        ("branch", "squash_message"),
         ("branch", "pr_strategy"),
         ("agent", "default"),
         ("editor", "edit"),
@@ -760,6 +762,10 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
         branch = branch.model_copy(update={"pr": default_config.branch.pr})
     if not _path_has_value(payload, "branch", "history"):
         branch = branch.model_copy(update={"history": default_config.branch.history})
+    if not _path_has_value(payload, "branch", "squash_message"):
+        branch = branch.model_copy(
+            update={"squash_message": default_config.branch.squash_message}
+        )
     if not _path_has_value(payload, "branch", "pr_strategy"):
         branch = branch.model_copy(
             update={"pr_strategy": default_config.branch.pr_strategy}
@@ -871,6 +877,7 @@ def build_project_config(
 
     branch_pr_default = branch_config.pr
     branch_history_default = branch_config.history
+    branch_squash_message_default = branch_config.squash_message
 
     branch_pr_arg = read_arg(args, "branch_pr")
     if branch_pr_arg is not None:
@@ -902,6 +909,20 @@ def build_project_config(
         )
     else:
         branch_history = branch_history_default
+
+    branch_squash_message_arg = read_arg(args, "branch_squash_message")
+    if branch_squash_message_arg is not None:
+        try:
+            branch_squash_message = BranchConfig.model_validate(
+                {"squash_message": branch_squash_message_arg}
+            ).squash_message
+        except ValidationError:
+            die(
+                "branch.squash_message must be one of: "
+                + ", ".join(BRANCH_SQUASH_MESSAGE_VALUES)
+            )
+    else:
+        branch_squash_message = branch_squash_message_default
 
     branch_pr_strategy_default = branch_config.pr_strategy
     branch_pr_strategy_arg = read_arg(args, "branch_pr_strategy")
@@ -1036,6 +1057,7 @@ def build_project_config(
             prefix=branch_prefix,
             pr=branch_pr,
             history=branch_history,
+            squash_message=branch_squash_message,
             pr_strategy=branch_pr_strategy,
         ),
         agent=AgentConfig(default=agent_default, options=agent_options),
