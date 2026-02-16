@@ -33,6 +33,10 @@ Recommended per-entry fields:
 - `provider`: provider slug (`github`, `linear`, `jira`, `beads`, `custom`).
 - `id`: provider ticket id/key.
 - `url`: canonical remote URL when available.
+- `title`: optional cached remote title.
+- `summary`: optional short summary snippet.
+- `body`: optional cached remote body.
+- `notes`: optional cached remote notes.
 - `relation`: role of this ticket relative to the bead.
 - `direction`: provenance of association.
 - `sync_mode`: sync policy for this link.
@@ -41,6 +45,8 @@ Recommended per-entry fields:
 - `state_updated_at`: optional timestamp for cached state.
 - `parent_id`: optional provider parent ticket id (for hierarchical systems).
 - `on_close`: optional close behavior (`none`, `comment`, `close`, `sync`).
+- `content_updated_at`: optional timestamp for cached content.
+- `notes_updated_at`: optional timestamp for cached notes.
 - `last_synced_at`: optional last successful sync timestamp.
 
 ### `relation`
@@ -91,6 +97,17 @@ Usage:
 - Optional sync/reporting.
 - Never required for worker readiness.
 
+### Optional enrichment fields
+
+Remote ticket content can be cached for convenience, but remains optional and
+non-authoritative.
+
+- `title`, `summary`, `body`, `notes` are only populated when explicitly
+  requested or when provider sync toggles permit it.
+- `content_updated_at` and `notes_updated_at` track when cached content/notes
+  were last refreshed.
+- Local bead content is always authoritative even when enrichment data exists.
+
 ## Planner contract (`atelier plan`)
 
 Planner is the orchestrator for external ticket synchronization.
@@ -121,6 +138,18 @@ Planner is the orchestrator for external ticket synchronization.
     provider.
 - On-demand sync: planner exposes explicit actions to refresh cached state or
   push local updates when a provider declares capability support.
+
+### Optional sync toggles
+
+Provider integrations can honor per-provider sync toggles to control which
+remote fields are synchronized. These toggles are intended to preserve local
+ownership and reduce unnecessary data pulls.
+
+Recommended toggles:
+
+- `include_state`: include cached state and timestamps.
+- `include_body`: include remote body/content fields.
+- `include_notes`: include remote notes/summary fields.
 
 ### Planner environment
 
@@ -221,11 +250,32 @@ Default provider:
 - GitHub Issues support should be available out of the box, but implemented via
   the same contract used by other providers where possible.
 
+### Repo Beads provider
+
+The `beads` provider treats a repository-local `.beads` store as an external
+ticket source. It is auto-discovered when the repo has a `.beads` directory.
+
+Behavior:
+
+- Import/link operations read from the repo `.beads` store.
+- Export operations are allowed when `allow_write` is explicitly enabled.
+- When export is enabled, new Beads issues are created with a conservative
+  default type (`task`) unless labels map to another type.
+
+Configuration:
+
+- `beads_root`: path to the repo-local `.beads` directory.
+- `allow_write`: boolean gate that must be explicitly enabled for export.
+
 ## Skill integration contract
 
 Skills act as provider adapters when a first-party integration is not bundled in
 Atelier. Planner calls skills with explicit payloads and expects normalized
 ticket records in return.
+
+Planner should use the `tickets` skill as the orchestration layer. It delegates
+provider-specific API calls to provider skills (for example `github-issues`) and
+uses `external_import`/`external_sync` to update Beads metadata.
 
 Required skill inputs:
 

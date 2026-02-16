@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from . import changesets, exec, messages
+from . import changesets, messages
 from .external_tickets import (
     ExternalTicketRef,
     external_ticket_payload,
@@ -69,6 +69,7 @@ def run_bd_command(
     beads_root: Path,
     cwd: Path,
     allow_failure: bool = False,
+    daemon: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run a bd command and return the CompletedProcess.
 
@@ -76,11 +77,26 @@ def run_bd_command(
     unless allow_failure is True.
     """
     cmd = ["bd", *args]
-    result = exec.try_run_command(cmd, cwd=cwd, env=beads_env(beads_root))
-    if result is None:
+    if not daemon and "--no-daemon" not in cmd:
+        cmd.append("--no-daemon")
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            env=beads_env(beads_root),
+            capture_output=True,
+            text=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
         die("missing required command: bd")
     if result.returncode != 0 and not allow_failure:
-        die(f"command failed: {' '.join(cmd)}")
+        detail = (result.stderr or result.stdout or "").strip()
+        message = f"command failed: {' '.join(cmd)}"
+        if detail:
+            message = f"{message}\n{detail}"
+        die(message)
     return result
 
 
@@ -147,10 +163,21 @@ def _list_issue_types(*, beads_root: Path, cwd: Path) -> set[str]:
     cached = _ISSUE_TYPE_CACHE.get(beads_root)
     if cached is not None:
         return cached
-    result = exec.try_run_command(
-        ["bd", "types", "--json"], cwd=cwd, env=beads_env(beads_root)
-    )
-    if result is None or result.returncode != 0:
+    try:
+        result = subprocess.run(
+            ["bd", "types", "--json", "--no-daemon"],
+            cwd=cwd,
+            env=beads_env(beads_root),
+            capture_output=True,
+            text=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        types = {_FALLBACK_ISSUE_TYPE}
+        _ISSUE_TYPE_CACHE[beads_root] = types
+        return types
+    if result.returncode != 0:
         types = {_FALLBACK_ISSUE_TYPE}
         _ISSUE_TYPE_CACHE[beads_root] = types
         return types
@@ -313,6 +340,51 @@ def summarize_changesets(
         abandoned=abandoned,
         remaining=remaining,
     )
+
+
+def list_child_changesets(
+    parent_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    include_closed: bool = False,
+) -> list[dict[str, object]]:
+    """List direct child changesets for a parent issue."""
+    args = ["list", "--parent", parent_id, "--label", "at:changeset"]
+    if include_closed:
+        args.append("--all")
+    return run_bd_json(args, beads_root=beads_root, cwd=cwd)
+
+
+def list_descendant_changesets(
+    parent_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    include_closed: bool = False,
+) -> list[dict[str, object]]:
+    """List descendant changesets (children + deeper descendants)."""
+    descendants: list[dict[str, object]] = []
+    seen: set[str] = set()
+    queue = [parent_id]
+    while queue:
+        current = queue.pop(0)
+        children = list_child_changesets(
+            current,
+            beads_root=beads_root,
+            cwd=cwd,
+            include_closed=include_closed,
+        )
+        for issue in children:
+            issue_id = issue.get("id")
+            if not isinstance(issue_id, str) or not issue_id:
+                continue
+            if issue_id in seen:
+                continue
+            seen.add(issue_id)
+            descendants.append(issue)
+            queue.append(issue_id)
+    return descendants
 
 
 def _normalize_description(description: str | None) -> str:
@@ -585,6 +657,41 @@ def update_workspace_root_branch(
     return refreshed[0] if refreshed else issue
 
 
+def update_workspace_parent_branch(
+    epic_id: str,
+    parent_branch: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    allow_override: bool = False,
+) -> dict[str, object]:
+    """Update the workspace parent branch field for an epic."""
+    if not parent_branch:
+        die("parent branch must not be empty")
+    issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"epic not found: {epic_id}")
+    issue = issues[0]
+    description = issue.get("description")
+    fields = _parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    current = fields.get("workspace.parent_branch")
+    if current and current.lower() != "null" and current != parent_branch:
+        if not allow_override:
+            die("workspace parent branch already set; override not permitted")
+    if current == parent_branch:
+        return issue
+    updated = _update_description_field(
+        description if isinstance(description, str) else "",
+        key="workspace.parent_branch",
+        value=parent_branch,
+    )
+    _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
+    refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    return refreshed[0] if refreshed else issue
+
+
 def update_worktree_path(
     epic_id: str,
     worktree_path: str,
@@ -610,6 +717,65 @@ def update_worktree_path(
     _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
     refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
     return refreshed[0] if refreshed else issue
+
+
+def update_changeset_branch_metadata(
+    changeset_id: str,
+    *,
+    root_branch: str | None,
+    parent_branch: str | None,
+    work_branch: str | None,
+    root_base: str | None = None,
+    parent_base: str | None = None,
+    beads_root: Path,
+    cwd: Path,
+    allow_override: bool = False,
+) -> dict[str, object]:
+    """Update branch lineage metadata fields for a changeset."""
+    issues = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"changeset not found: {changeset_id}")
+    issue = issues[0]
+    description = issue.get("description")
+    fields = _parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+
+    def normalize(value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned or cleaned.lower() == "null":
+            return None
+        return cleaned
+
+    updated = description if isinstance(description, str) else ""
+    changed = False
+
+    def apply(key: str, value: str | None) -> None:
+        nonlocal updated, changed
+        normalized = normalize(value)
+        if normalized is None:
+            return
+        current = normalize(fields.get(key))
+        if current and current != normalized and not allow_override:
+            die(f"{key} already set; override not permitted")
+        if current == normalized:
+            return
+        updated = _update_description_field(updated, key=key, value=normalized)
+        changed = True
+
+    apply("changeset.root_branch", root_branch)
+    apply("changeset.parent_branch", parent_branch)
+    apply("changeset.work_branch", work_branch)
+    apply("changeset.root_base", root_base)
+    apply("changeset.parent_base", parent_base)
+
+    if changed:
+        _update_issue_description(changeset_id, updated, beads_root=beads_root, cwd=cwd)
+        refreshed = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+        return refreshed[0] if refreshed else issue
+    return issue
 
 
 def update_external_tickets(
@@ -912,10 +1078,11 @@ def epic_changeset_summary(
     cwd: Path,
 ) -> ChangesetSummary:
     """Summarize changesets under an epic."""
-    changesets = run_bd_json(
-        ["list", "--parent", epic_id, "--label", "at:changeset"],
+    changesets = list_descendant_changesets(
+        epic_id,
         beads_root=beads_root,
         cwd=cwd,
+        include_closed=True,
     )
     return summarize_changesets(changesets)
 
@@ -1016,11 +1183,13 @@ def list_queue_messages(
     cwd: Path,
     queue: str | None = None,
     unclaimed_only: bool = True,
+    unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List queued message beads, optionally filtered by queue name."""
-    issues = run_bd_json(
-        ["list", "--label", "at:message"], beads_root=beads_root, cwd=cwd
-    )
+    args = ["list", "--label", "at:message"]
+    if unread_only:
+        args.extend(["--label", "at:unread"])
+    issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
     matches: list[dict[str, object]] = []
     for issue in issues:
         description = issue.get("description")
@@ -1087,6 +1256,41 @@ def mark_message_read(
         beads_root=beads_root,
         cwd=cwd,
     )
+
+
+def update_changeset_integrated_sha(
+    changeset_id: str,
+    integrated_sha: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    allow_override: bool = False,
+) -> dict[str, object]:
+    """Update the integrated SHA field for a changeset bead."""
+    if not integrated_sha:
+        die("integrated sha must not be empty")
+    issues = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"changeset not found: {changeset_id}")
+    issue = issues[0]
+    description = issue.get("description")
+    fields = _parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    current = fields.get("changeset.integrated_sha")
+    if current and current.lower() != "null" and current != integrated_sha:
+        if not allow_override:
+            die("changeset integrated sha already set; override not permitted")
+    if current == integrated_sha:
+        return issue
+    updated = _update_description_field(
+        description if isinstance(description, str) else "",
+        key="changeset.integrated_sha",
+        value=integrated_sha,
+    )
+    _update_issue_description(changeset_id, updated, beads_root=beads_root, cwd=cwd)
+    refreshed = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+    return refreshed[0] if refreshed else issue
 
 
 def update_changeset_review(

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import pytest
 
+from atelier.external_providers import (
+    ExternalTicketImportRequest,
+    ExternalTicketSyncOptions,
+)
 from atelier.github_issues_provider import (
     GithubIssuesProvider,
     issue_payload_to_record,
@@ -27,6 +31,23 @@ def test_issue_payload_to_ref_handles_basic_fields() -> None:
     assert ref.state_updated_at == "2026-02-08T10:00:00Z"
 
 
+def test_issue_payload_to_ref_respects_state_toggle() -> None:
+    payload = {
+        "number": 101,
+        "url": "https://github.com/org/repo/issues/101",
+        "state": "OPEN",
+        "stateReason": "planned",
+        "updatedAt": "2026-02-08T10:00:00Z",
+    }
+    ref = issue_payload_to_ref(
+        payload, sync_options=ExternalTicketSyncOptions(include_state=False)
+    )
+    assert ref is not None
+    assert ref.state is None
+    assert ref.raw_state is None
+    assert ref.state_updated_at is None
+
+
 def test_issue_payload_to_record_includes_labels() -> None:
     payload = {
         "number": 7,
@@ -44,6 +65,24 @@ def test_issue_payload_to_record_includes_labels() -> None:
     assert record.ref.state == "closed"
 
 
+def test_issue_payload_to_record_respects_body_toggle() -> None:
+    payload = {
+        "number": 8,
+        "title": "Missing docs",
+        "body": "Extra details",
+        "stateReason": "not planned",
+        "labels": [],
+        "state": "OPEN",
+    }
+    record = issue_payload_to_record(
+        payload,
+        sync_options=ExternalTicketSyncOptions(include_body=False, include_notes=False),
+    )
+    assert record is not None
+    assert record.body is None
+    assert record.summary is None
+
+
 def test_import_tickets_parses_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = GithubIssuesProvider(repo="org/repo")
     payload = [
@@ -58,9 +97,7 @@ def test_import_tickets_parses_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("atelier.github_issues_provider._require_gh", lambda: None)
 
     records = provider.import_tickets(
-        request=type(
-            "Req", (), {"include_closed": True, "limit": None, "query": None}
-        )()
+        request=ExternalTicketImportRequest(include_closed=True)
     )
     assert len(records) == 2
     assert records[0].ref.ticket_id == "1"

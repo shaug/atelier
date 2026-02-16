@@ -750,6 +750,65 @@ def git_merge_base(
     return result.stdout.strip() or None
 
 
+def git_is_ancestor(
+    repo_dir: Path,
+    ancestor: str,
+    descendant: str,
+    *,
+    git_path: str | None = None,
+) -> bool | None:
+    """Return whether ``ancestor`` is an ancestor of ``descendant``.
+
+    Returns ``True``/``False`` for git's explicit status codes, or ``None`` when
+    git fails for another reason (missing ref, invalid repo, etc.).
+    """
+    result = run_git_command(
+        git_command(
+            [
+                "-C",
+                str(repo_dir),
+                "merge-base",
+                "--is-ancestor",
+                ancestor,
+                descendant,
+            ],
+            git_path=git_path,
+        )
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    return None
+
+
+def git_branch_fully_applied(
+    repo_dir: Path,
+    upstream: str,
+    head: str,
+    *,
+    git_path: str | None = None,
+) -> bool | None:
+    """Return whether ``head`` changes are fully represented in ``upstream``.
+
+    Uses `git cherry upstream head`: any `+` line means a commit from ``head`` is
+    not yet applied to ``upstream``; `-` lines are equivalent/applied commits.
+    """
+    result = run_git_command(
+        git_command(
+            ["-C", str(repo_dir), "cherry", upstream, head],
+            git_path=git_path,
+        )
+    )
+    if result.returncode != 0:
+        return None
+    for line in (result.stdout or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("+"):
+            return False
+    return True
+
+
 def git_commit_subjects_since_merge_base(
     repo_dir: Path,
     base: str,

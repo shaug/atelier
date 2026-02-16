@@ -31,6 +31,10 @@ side effects inside the user's repo.
 - **Changeset labels**: Changesets use `cs:planned`, `cs:ready`,
   `cs:in_progress`, `cs:merged`, and `cs:abandoned` to capture non-derivable
   lifecycle state.
+  - `cs:ready` means the changeset definition is complete and worker-executable
+    when dependencies are satisfied.
+  - Dependency/unblock readiness is determined by `bd ready`, not by
+    transitioning labels at dependency completion time.
 - **External tickets**: Linked via `external_tickets` in bead descriptions with
   provider labels like `ext:github`.
 
@@ -110,6 +114,8 @@ Atelier planning state. They are treated as external ticket sources.
 
   - Creates epics, tasks, and changesets in the planning store.
   - Suggests and validates a `workspace.root_branch` value.
+  - Installs a read-only guardrail hook for planner worktrees and warns on dirty
+    working trees.
 
 - `atelier policy`
 
@@ -122,6 +128,11 @@ Atelier planning state. They are treated as external ticket sources.
   - Creates/records the changeset branch mapping.
   - Uses run mode (`ATELIER_RUN_MODE`) to decide whether to run once, loop while
     work is ready, or watch for new work.
+
+- `atelier daemon`
+
+  - Starts/stops a long-lived worker loop.
+  - Starts/stops the bd daemon when full-stack mode is requested.
 
 - `atelier edit`
 

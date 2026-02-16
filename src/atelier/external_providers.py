@@ -52,6 +52,15 @@ class ExternalProviderCapabilities:
 
 
 @dataclass(frozen=True)
+class ExternalTicketSyncOptions:
+    """Optional sync toggles for external ticket data."""
+
+    include_state: bool = True
+    include_body: bool = True
+    include_notes: bool = True
+
+
+@dataclass(frozen=True)
 class ExternalTicketRecord:
     """Normalized external ticket data returned by a provider."""
 
@@ -70,6 +79,7 @@ class ExternalTicketImportRequest:
     query: str | None = None
     limit: int | None = None
     include_closed: bool = False
+    sync_options: ExternalTicketSyncOptions | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +98,7 @@ class ExternalTicketLinkRequest:
 
     bead_id: str
     ticket: ExternalTicketRef
+    sync_options: ExternalTicketSyncOptions | None = None
 
 
 class ExternalProvider(Protocol):

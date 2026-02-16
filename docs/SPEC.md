@@ -41,6 +41,13 @@ Changesets track lifecycle intent using labels:
 
 - `cs:planned`, `cs:ready`, `cs:in_progress`, `cs:merged`, `cs:abandoned`
 
+Label semantics:
+
+- `cs:ready` indicates the changeset is fully defined and may be claimed when
+  unblocked.
+- Dependency-based runnability is derived from `bd ready` (graph state), not
+  from relabeling when blockers clear.
+
 ### Worktree
 
 A worktree is a per-epic Git checkout stored under the Atelier data directory.
@@ -98,6 +105,18 @@ Agent sessions inherit identity env vars:
 - `BD_ACTOR`
 - `BEADS_AGENT_NAME`
 
+Planner template variables:
+
+- `agent_id`
+- `project_root`
+- `repo_root`
+- `project_data_dir`
+- `beads_dir`
+- `beads_prefix`
+- `planner_worktree`
+- `default_branch`
+- `external_providers` (comma-separated slugs, or `none`)
+
 ## 5. Planning Store
 
 Atelier requires `bd` on the PATH for planning storage. Epics and changesets are
@@ -118,7 +137,8 @@ Epic description fields include:
 - `workspace.parent_branch` (integration target, optional)
 - `workspace.primary_head` (last known root SHA, optional)
 - `workspace.worktree_path` (set after worktree creation)
-- `workspace.pr_strategy` (sequential/on-ready/parallel, optional)
+- `workspace.pr_strategy` (sequential/on-ready/parallel, optional; planned, not
+  yet enforced)
 - `external_tickets` (JSON list of linked external tickets, optional)
 
 Changeset description fields include:
@@ -140,6 +160,8 @@ Changeset description fields include:
 - `atelier work`: select/claim an epic, pick the next ready changeset, and
   ensure worktree + branch mappings exist. Run mode controls whether it runs
   once, loops while work is ready, or watches for new work.
+- `atelier daemon`: start/stop/status a long-lived worker loop and the bd daemon
+  for full-stack mode.
 - `atelier edit`: open the selected worktree in `editor.work`.
 - `atelier open`: run a shell or command inside the worktree.
 - `atelier config`: view or update project config.

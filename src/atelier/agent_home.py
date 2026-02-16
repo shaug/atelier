@@ -8,11 +8,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import paths, templates
-from .io import die
+from .io import die, warn
 from .models import ProjectConfig
 
 AGENT_METADATA_FILENAME = "agent.json"
 AGENT_INSTRUCTIONS_FILENAME = "AGENTS.md"
+CLAUDE_INSTRUCTIONS_FILENAME = "CLAUDE.md"
+CLAUDE_DIRNAME = ".claude"
+CLAUDE_SETTINGS_FILENAME = "settings.json"
+CLAUDE_HOOKS_DIRNAME = "hooks"
+CLAUDE_HOOK_SCRIPT = "append_agentsmd_context.sh"
 
 
 @dataclass(frozen=True)
@@ -122,3 +127,123 @@ def resolve_agent_home(
     return ensure_agent_home(
         project_dir, role=role, agent_name=agent_name, agent_id=agent_id
     )
+
+
+def _ensure_dir_link(dest: Path, target: Path) -> None:
+    if dest.is_symlink():
+        try:
+            if dest.resolve() == target.resolve():
+                return
+        except OSError:
+            pass
+        dest.unlink()
+    elif dest.exists():
+        return
+    try:
+        dest.symlink_to(target, target_is_directory=True)
+    except OSError:
+        warn(f"failed to link {dest} -> {target}")
+        path_marker = dest.with_suffix(".path")
+        try:
+            path_marker.write_text(str(target), encoding="utf-8")
+        except OSError:
+            return
+
+
+def ensure_agent_links(
+    agent: AgentHome,
+    *,
+    worktree_path: Path,
+    beads_root: Path,
+    skills_dir: Path,
+) -> None:
+    """Ensure the agent home exposes links to worktree, skills, and beads."""
+    root = agent.path
+    if not root.exists():
+        return
+    _ensure_dir_link(root / "worktree", worktree_path)
+    _ensure_dir_link(root / "skills", skills_dir)
+    _ensure_dir_link(root / "beads", beads_root)
+
+
+def ensure_claude_compat(agent_path: Path, agents_content: str) -> None:
+    """Ensure CLAUDE.md and hooks exist for Claude Code compatibility."""
+    if not agent_path.exists():
+        return
+    preface = (
+        "This project uses AGENTS.md as the authoritative behavioral contract.\n"
+        "Claude must follow the rules below.\n"
+    )
+    content = preface.rstrip("\n") + "\n\n---\n\n" + agents_content.rstrip("\n") + "\n"
+    claude_path = agent_path / CLAUDE_INSTRUCTIONS_FILENAME
+    if not claude_path.exists() or claude_path.read_text(encoding="utf-8") != content:
+        claude_path.write_text(content, encoding="utf-8")
+
+    claude_dir = agent_path / CLAUDE_DIRNAME
+    hooks_dir = claude_dir / CLAUDE_HOOKS_DIRNAME
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_path = hooks_dir / CLAUDE_HOOK_SCRIPT
+    hook_body = """#!/bin/bash
+set -euo pipefail
+
+project_dir="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+
+echo "=== AGENTS.md Files Found ==="
+find "$project_dir" -maxdepth 5 -name "AGENTS.md" -type f | while read -r file; do
+  echo "--- File: $file ---"
+  cat "$file"
+  echo ""
+done
+"""
+    if not hook_path.exists() or hook_path.read_text(encoding="utf-8") != hook_body:
+        hook_path.write_text(hook_body, encoding="utf-8")
+        hook_path.chmod(0o755)
+
+    settings_path = claude_dir / CLAUDE_SETTINGS_FILENAME
+    settings_payload = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "startup",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/"
+                            "append_agentsmd_context.sh",
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    current = None
+    if settings_path.exists():
+        try:
+            current = json.loads(settings_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            current = None
+    if current != settings_payload:
+        settings_path.write_text(
+            json.dumps(settings_payload, indent=2) + "\n", encoding="utf-8"
+        )
+
+
+def preview_agent_home(
+    project_dir: Path, project_config: ProjectConfig, *, role: str
+) -> AgentHome:
+    """Return agent identity and path without creating files."""
+    env_agent_id = os.environ.get("ATELIER_AGENT_ID")
+    config_agent_id = project_config.agent.identity
+    if env_agent_id:
+        agent_id = env_agent_id.strip()
+        if not agent_id:
+            die("ATELIER_AGENT_ID must not be empty")
+        agent_name = _derive_agent_name(agent_id)
+    elif config_agent_id:
+        agent_id = config_agent_id
+        agent_name = _derive_agent_name(agent_id)
+    else:
+        agent_name = _normalize_agent_name(project_config.agent.default)
+        agent_id = _derive_agent_id(role, agent_name)
+    home_dir = paths.project_agents_dir(project_dir) / agent_name
+    return AgentHome(name=agent_name, agent_id=agent_id, role=role, path=home_dir)

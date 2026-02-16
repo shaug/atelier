@@ -313,6 +313,22 @@ def test_list_inbox_messages_filters_unread() -> None:
     assert "at:unread" in called_args
 
 
+def test_list_queue_messages_filters_unread_by_default() -> None:
+    with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
+        beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
+    called_args = run_json.call_args.args[0]
+    assert called_args == ["list", "--label", "at:message", "--label", "at:unread"]
+
+
+def test_list_queue_messages_can_include_read_messages() -> None:
+    with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
+        beads.list_queue_messages(
+            beads_root=Path("/beads"), cwd=Path("/repo"), unread_only=False
+        )
+    called_args = run_json.call_args.args[0]
+    assert called_args == ["list", "--label", "at:message"]
+
+
 def test_mark_message_read_updates_labels() -> None:
     with patch("atelier.beads.run_bd_command") as run_command:
         beads.mark_message_read(
@@ -321,6 +337,38 @@ def test_mark_message_read_updates_labels() -> None:
     called_args = run_command.call_args.args[0]
     assert "update" in called_args
     assert "--remove-label" in called_args
+
+
+def test_list_descendant_changesets_walks_tree() -> None:
+    calls: list[str] = []
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        parent = args[2]
+        calls.append(parent)
+        if parent == "epic-1":
+            return [{"id": "epic-1.1"}, {"id": "epic-1.2"}]
+        if parent == "epic-1.1":
+            return [{"id": "epic-1.1.1"}]
+        return []
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_json):
+        issues = beads.list_descendant_changesets(
+            "epic-1", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+
+    assert [issue["id"] for issue in issues] == ["epic-1.1", "epic-1.2", "epic-1.1.1"]
+    assert calls == ["epic-1", "epic-1.1", "epic-1.2", "epic-1.1.1"]
+
+
+def test_list_child_changesets_uses_changeset_label() -> None:
+    with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
+        beads.list_child_changesets(
+            "epic-1", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+    called_args = run_json.call_args.args[0]
+    assert called_args == ["list", "--parent", "epic-1", "--label", "at:changeset"]
 
 
 def test_summarize_changesets_counts_and_ready() -> None:
@@ -339,16 +387,17 @@ def test_summarize_changesets_counts_and_ready() -> None:
 
 
 def test_epic_changeset_summary_ready_to_close() -> None:
-    changesets = [
-        {"labels": ["cs:merged"]},
-        {"labels": ["cs:abandoned"]},
-    ]
+    changesets = {
+        "epic-1": [{"id": "epic-1.1", "labels": ["cs:merged"]}],
+        "epic-1.1": [{"id": "epic-1.1.1", "labels": ["cs:abandoned"]}],
+        "epic-1.1.1": [],
+    }
 
     def fake_json(
         args: list[str], *, beads_root: Path, cwd: Path
     ) -> list[dict[str, object]]:
         if args[:2] == ["list", "--parent"]:
-            return changesets
+            return changesets.get(args[2], [])
         return []
 
     with patch("atelier.beads.run_bd_json", side_effect=fake_json):
@@ -360,13 +409,16 @@ def test_epic_changeset_summary_ready_to_close() -> None:
 
 
 def test_close_epic_if_complete_closes_and_clears_hook() -> None:
-    changesets = [{"labels": ["cs:merged"]}]
+    changesets = {
+        "epic-1": [{"id": "epic-1.1", "labels": ["cs:merged"]}],
+        "epic-1.1": [],
+    }
 
     def fake_json(
         args: list[str], *, beads_root: Path, cwd: Path
     ) -> list[dict[str, object]]:
         if args[:2] == ["list", "--parent"]:
-            return changesets
+            return changesets.get(args[2], [])
         return []
 
     with (
@@ -390,13 +442,16 @@ def test_close_epic_if_complete_closes_and_clears_hook() -> None:
 
 
 def test_close_epic_if_complete_respects_confirm() -> None:
-    changesets = [{"labels": ["cs:merged"]}]
+    changesets = {
+        "epic-1": [{"id": "epic-1.1", "labels": ["cs:merged"]}],
+        "epic-1.1": [],
+    }
 
     def fake_json(
         args: list[str], *, beads_root: Path, cwd: Path
     ) -> list[dict[str, object]]:
         if args[:2] == ["list", "--parent"]:
-            return changesets
+            return changesets.get(args[2], [])
         return []
 
     with (

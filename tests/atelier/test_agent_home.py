@@ -8,6 +8,16 @@ from atelier import agent_home
 from atelier.models import AgentConfig, ProjectConfig
 
 
+def _assert_link_or_marker(base: Path, name: str, target: Path) -> None:
+    link = base / name
+    if link.is_symlink():
+        assert link.resolve() == target.resolve()
+        return
+    marker = base / f"{name}.path"
+    assert marker.exists()
+    assert marker.read_text(encoding="utf-8").strip() == str(target)
+
+
 def test_resolve_agent_home_creates_metadata_and_instructions() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"
@@ -45,3 +55,57 @@ def test_config_agent_identity_is_used_when_env_missing() -> None:
         home = agent_home.resolve_agent_home(project_dir, config_payload, role="worker")
     assert home.name == "bob"
     assert home.agent_id == "atelier/worker/bob"
+
+
+def test_ensure_agent_links_creates_symlinks_or_markers() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "project"
+        project_dir.mkdir(parents=True)
+        home = agent_home.resolve_agent_home(
+            project_dir, ProjectConfig(), role="worker"
+        )
+        worktree = root / "worktree"
+        beads = root / "beads"
+        skills = root / "skills"
+        worktree.mkdir()
+        beads.mkdir()
+        skills.mkdir()
+
+        agent_home.ensure_agent_links(
+            home,
+            worktree_path=worktree,
+            beads_root=beads,
+            skills_dir=skills,
+        )
+
+        _assert_link_or_marker(home.path, "worktree", worktree)
+        _assert_link_or_marker(home.path, "beads", beads)
+        _assert_link_or_marker(home.path, "skills", skills)
+
+
+def test_ensure_claude_compat_writes_files() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        agent_path = root / "agent"
+        agent_path.mkdir(parents=True)
+        content = "# Agent Instructions\nRule: test\n"
+
+        agent_home.ensure_claude_compat(agent_path, content)
+
+        claude_md = agent_path / agent_home.CLAUDE_INSTRUCTIONS_FILENAME
+        assert claude_md.exists()
+        assert "AGENTS.md" in claude_md.read_text(encoding="utf-8")
+
+        hook_path = (
+            agent_path
+            / agent_home.CLAUDE_DIRNAME
+            / agent_home.CLAUDE_HOOKS_DIRNAME
+            / agent_home.CLAUDE_HOOK_SCRIPT
+        )
+        assert hook_path.exists()
+
+        settings_path = (
+            agent_path / agent_home.CLAUDE_DIRNAME / agent_home.CLAUDE_SETTINGS_FILENAME
+        )
+        assert settings_path.exists()

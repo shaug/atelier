@@ -15,8 +15,8 @@ def init_project(args: object) -> None:
 
     Args:
         args: CLI argument object with optional fields such as ``branch_prefix``,
-            ``branch_pr``, ``branch_history``, ``agent``, ``editor_edit``, and
-            ``editor_work``.
+            ``branch_pr``, ``branch_history``, ``branch_pr_strategy``, ``agent``,
+            ``editor_edit``, and ``editor_work``.
 
     Returns:
         None.
@@ -40,14 +40,18 @@ def init_project(args: object) -> None:
         prompt_missing_only=not bool(config_payload),
         raw_existing=user_payload,
     )
+    say("Writing project configuration...")
     project.ensure_project_dirs(project_dir)
     config.write_project_config(config_path, payload)
     project.ensure_project_scaffold(project_dir)
 
     beads_root = config.resolve_beads_root(project_dir, Path(enlistment_path))
+    say("Preparing Beads store...")
     beads.ensure_atelier_store(beads_root=beads_root, cwd=Path(enlistment_path))
     beads.ensure_atelier_issue_prefix(beads_root=beads_root, cwd=Path(enlistment_path))
+    say("Priming Beads store...")
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=Path(enlistment_path))
+    say("Ensuring Beads issue types...")
     beads.ensure_atelier_types(beads_root=beads_root, cwd=Path(enlistment_path))
 
     if confirm("Add project-wide policy for agents?", default=False):

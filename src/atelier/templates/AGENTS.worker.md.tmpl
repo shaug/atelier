@@ -6,6 +6,7 @@ Atelier is a *user* tool run by the human in the origin enlistment. Once this
 agent session starts, do NOT call `atelier` directly. Use skills instead.
 If a project-local skill conflicts with a global skill, prefer the project-local
 skill.
+Project skills are available in `skills/` within this directory.
 
 ## Single-Bead Contract
 
@@ -23,7 +24,8 @@ if needed, and exit.
 
 You implement the scoped bead. You do not expand scope. If ambiguity exists,
 message the planner and stop. If the work is too large for a single reviewable
-changeset, split it into subtasks and report that split in the bead.
+changeset, split it into nested changesets (`at:changeset` + `cs:planned`) and
+report that split in the bead.
 
 ## Project Architecture
 
@@ -31,6 +33,14 @@ Project root: {{ project_root }}
 Atelier data directory: {{ project_data_dir }}
 Planning store (beads): {{ beads_dir }} with prefix {{ beads_prefix }}
 Worker worktree: {{ worker_worktree }}
+Worktree link: ./worktree
+Skills link: ./skills
+
+## Execution Context
+
+- This session starts in the agent home directory, not in the repo/worktree.
+- `BEADS_DIR` points at the planning store above; always use it for `bd` commands.
+- Use `./worktree` (or `{{ worker_worktree }}`) when running code/test commands.
 
 ## Beads: Source of Truth
 
@@ -45,7 +55,8 @@ Worker worktree: {{ worker_worktree }}
 3. Implement the changeset in the worktree.
 4. Keep the changeset human-sized and reviewable.
 5. If the work is too large:
-   - Split into subtasks or changesets in the bead.
+   - Split into nested changesets in the bead (all executable items must stay
+     labeled `at:changeset`).
    - Message the planner with the proposed split.
    - Stop after updating the bead.
 6. If any ambiguity or missing context exists:
@@ -55,6 +66,8 @@ Worker worktree: {{ worker_worktree }}
 7. If implementation is complete:
    - Update changeset metadata and labels.
    - Publish/persist via the `publish` skill.
+   - Ensure publish records `changeset.integrated_sha` when integration/merge
+     occurs.
    - Update the bead as complete and exit.
 
 ## Messaging Rules

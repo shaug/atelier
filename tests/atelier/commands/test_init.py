@@ -28,7 +28,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -92,7 +92,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", "", ""])
 
                 def fake_bd(
                     _args: list[str], *, beads_root: Path, cwd: Path
@@ -142,7 +142,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -194,7 +194,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "cursor -w", "cursor", "", ""])
+                responses = iter(["", "", "", "", "", "cursor -w", "cursor", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -242,7 +242,7 @@ class TestInitProject:
             os.chdir(root)
             try:
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -324,6 +324,7 @@ class TestInitProject:
                     branch_prefix="feat/",
                     branch_pr="false",
                     branch_history="merge",
+                    branch_pr_strategy="sequential",
                     agent="codex",
                     editor_edit="cursor -w",
                     editor_work="cursor",
@@ -411,7 +412,7 @@ class TestInitProject:
                 )
 
                 args = make_init_args()
-                responses = iter(["", "", "", "", "", "", "", ""])
+                responses = iter(["", "", "", "", "", "", "", "", ""])
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),

@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover - legacy Click fallback
 
 from . import __version__, beads, config, git, paths
 from .commands import config as config_cmd
+from .commands import daemon as daemon_cmd
 from .commands import edit as edit_cmd
 from .commands import gc as gc_cmd
 from .commands import hook as hook_cmd
@@ -45,6 +46,9 @@ app = typer.Typer(
         "a worker session against the next ready changeset."
     ),
 )
+
+daemon_app = typer.Typer(help="Manage the Atelier daemon.")
+app.add_typer(daemon_app, name="daemon")
 _COMPLETE_ENV = "_ATELIER_COMPLETE"
 _DEFAULT_BRANCH_EXCLUDES = {"main", "master"}
 
@@ -103,7 +107,7 @@ def _resolve_completion_project(
 
 
 def _collect_workspace_root_branches(repo_root: Path, *, beads_root: Path) -> list[str]:
-    cmd = ["bd", "list", "--label", "at:epic", "--json"]
+    cmd = ["bd", "list", "--label", "at:epic", "--json", "--no-daemon"]
     result = try_run_command(cmd, cwd=repo_root, env=beads.beads_env(beads_root))
     if not result or result.returncode != 0:
         return []
@@ -229,6 +233,13 @@ def init_command(
             help="branch history policy (manual|squash|merge|rebase)",
         ),
     ] = None,
+    branch_pr_strategy: Annotated[
+        str | None,
+        typer.Option(
+            "--branch-pr-strategy",
+            help="PR strategy (sequential|on-ready|parallel)",
+        ),
+    ] = None,
     agent: Annotated[
         str | None,
         typer.Option(
@@ -251,6 +262,7 @@ def init_command(
         branch_prefix: Prefix for new workspace branches (optional).
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
+        branch_pr_strategy: PR strategy (sequential|on-ready|parallel).
         agent: Agent name.
         editor_edit: Editor command used for blocking edits (policy docs).
         editor_work: Editor command used for opening the workspace repo.
@@ -265,6 +277,7 @@ def init_command(
             branch_prefix=branch_prefix,
             branch_pr=branch_pr,
             branch_history=branch_history,
+            branch_pr_strategy=branch_pr_strategy,
             agent=agent,
             editor_edit=editor_edit,
             editor_work=editor_work,
@@ -299,6 +312,13 @@ def new_command(
             help="branch history policy (manual|squash|merge|rebase)",
         ),
     ] = None,
+    branch_pr_strategy: Annotated[
+        str | None,
+        typer.Option(
+            "--branch-pr-strategy",
+            help="PR strategy (sequential|on-ready|parallel)",
+        ),
+    ] = None,
     agent: Annotated[
         str | None,
         typer.Option(
@@ -322,6 +342,7 @@ def new_command(
         branch_prefix: Prefix for new workspace branches (optional).
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
+        branch_pr_strategy: PR strategy (sequential|on-ready|parallel).
         agent: Agent name.
         editor_edit: Editor command used for blocking edits (policy docs).
         editor_work: Editor command used for opening the workspace repo.
@@ -338,6 +359,7 @@ def new_command(
             branch_prefix=branch_prefix,
             branch_pr=branch_pr,
             branch_history=branch_history,
+            branch_pr_strategy=branch_pr_strategy,
             agent=agent,
             editor_edit=editor_edit,
             editor_work=editor_work,
@@ -415,6 +437,24 @@ def hook_command(
     hook_cmd.run_hook(SimpleNamespace(event=event))
 
 
+@daemon_app.command("start", help="Start the Atelier daemon.")
+def daemon_start() -> None:
+    """Start the worker + bd daemon."""
+    daemon_cmd.start_daemon(SimpleNamespace())
+
+
+@daemon_app.command("stop", help="Stop the Atelier daemon.")
+def daemon_stop() -> None:
+    """Stop the worker + bd daemon."""
+    daemon_cmd.stop_daemon(SimpleNamespace())
+
+
+@daemon_app.command("status", help="Show daemon status.")
+def daemon_status() -> None:
+    """Show worker + bd daemon status."""
+    daemon_cmd.status_daemon(SimpleNamespace())
+
+
 @app.command(
     "work",
     help="Start a worker session for the next ready changeset.",
@@ -447,10 +487,32 @@ def work_command(
             help="process queued messages and exit",
         ),
     ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="log what would happen without mutating state or starting the agent",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="accept defaults for interactive choices",
+        ),
+    ] = False,
 ) -> None:
     """Start a worker session."""
     work_cmd.start_worker(
-        SimpleNamespace(epic_id=epic_id, mode=mode, run_mode=run_mode, queue=queue)
+        SimpleNamespace(
+            epic_id=epic_id,
+            mode=mode,
+            run_mode=run_mode,
+            queue=queue,
+            dry_run=dry_run,
+            yes=yes,
+        )
     )
 
 

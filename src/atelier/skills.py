@@ -194,3 +194,12 @@ def install_workspace_skills(workspace_dir: Path) -> dict[str, dict[str, str]]:
         name: {"version": __version__, "hash": definition.digest}
         for name, definition in definitions.items()
     }
+
+
+def ensure_project_skills(project_dir: Path) -> Path:
+    """Ensure packaged skills are installed in the project data directory."""
+    skills_dir = paths.project_skills_dir(project_dir)
+    if skills_dir.exists():
+        return skills_dir
+    install_workspace_skills(project_dir)
+    return skills_dir

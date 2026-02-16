@@ -27,6 +27,14 @@ Branch mode mapping:
   - **publish/persist**: commit, integrate onto the epic `root_branch` per
     `branch_history`, then push the root branch.
 
+Changeset metadata:
+
+- After a successful integration or merged PR, update the changeset bead field
+  `changeset.integrated_sha` to the integrated commit SHA.
+- For non-integrating persist runs, do not set `changeset.integrated_sha`.
+- If you cannot determine the integrated SHA deterministically, send
+  `NEEDS-DECISION` and stop.
+
 Publishing is complete only when the branch required by the plan is pushed.
 
 If a push is rejected because the root branch moved, update your local root
@@ -59,3 +67,7 @@ skill. Validate results after mutation.
 PR strategy default: sequential (one PR at a time, defer PR creation until the
 epic is ready for review). When the strategy blocks PR creation, push the branch
 and exit without opening a PR.
+
+When PR creation is allowed, draft the PR title/body with the `pr_draft` skill
+and hand the result to `github-prs`. When PR creation is gated, report the
+reason and skip PR creation after pushing the branch.

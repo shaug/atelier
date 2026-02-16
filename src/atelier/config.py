@@ -18,7 +18,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
-from . import __version__, agents, paths
+from . import __version__, agents, paths, pr_strategy
 from . import command as command_util
 from .editor import system_editor_default
 from .io import die, prompt, select
@@ -386,6 +386,14 @@ def normalize_branch_history(value: object, source: str) -> str:
     return normalized
 
 
+def normalize_pr_strategy(value: object, source: str) -> str:
+    """Normalize a PR strategy string or fail with a helpful error."""
+    try:
+        return pr_strategy.normalize_pr_strategy(value)
+    except ValueError:
+        die(f"{source} must be one of: " + ", ".join(pr_strategy.PR_STRATEGY_VALUES))
+
+
 def resolve_branch_history(branch_config: BranchConfig) -> str:
     """Return the branch history policy string.
 
@@ -569,6 +577,7 @@ def user_config_missing_fields(payload: dict | None) -> list[str]:
         ("branch", "prefix"),
         ("branch", "pr"),
         ("branch", "history"),
+        ("branch", "pr_strategy"),
         ("agent", "default"),
         ("editor", "edit"),
         ("editor", "work"),
@@ -751,6 +760,10 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
         branch = branch.model_copy(update={"pr": default_config.branch.pr})
     if not _path_has_value(payload, "branch", "history"):
         branch = branch.model_copy(update={"history": default_config.branch.history})
+    if not _path_has_value(payload, "branch", "pr_strategy"):
+        branch = branch.model_copy(
+            update={"pr_strategy": default_config.branch.pr_strategy}
+        )
 
     agent = parsed.agent
     if not _path_has_value(payload, "agent", "default"):
@@ -890,6 +903,24 @@ def build_project_config(
     else:
         branch_history = branch_history_default
 
+    branch_pr_strategy_default = branch_config.pr_strategy
+    branch_pr_strategy_arg = read_arg(args, "branch_pr_strategy")
+    if branch_pr_strategy_arg is not None:
+        branch_pr_strategy = normalize_pr_strategy(
+            branch_pr_strategy_arg, "--branch-pr-strategy"
+        )
+    elif should_prompt("branch", "pr_strategy"):
+        branch_pr_strategy_input = select(
+            "PR strategy",
+            pr_strategy.PR_STRATEGY_VALUES,
+            branch_pr_strategy_default,
+        )
+        branch_pr_strategy = normalize_pr_strategy(
+            branch_pr_strategy_input, "branch.pr_strategy"
+        )
+    else:
+        branch_pr_strategy = branch_pr_strategy_default
+
     available_agents = agents.available_agent_names()
     if not available_agents:
         die(
@@ -1001,7 +1032,12 @@ def build_project_config(
             owner=project_owner,
         ),
         git=existing_config.git,
-        branch=BranchConfig(prefix=branch_prefix, pr=branch_pr, history=branch_history),
+        branch=BranchConfig(
+            prefix=branch_prefix,
+            pr=branch_pr,
+            history=branch_history,
+            pr_strategy=branch_pr_strategy,
+        ),
         agent=AgentConfig(default=agent_default, options=agent_options),
         editor=EditorConfig(edit=editor_edit, work=editor_work),
         beads=beads_section,

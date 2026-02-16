@@ -89,6 +89,7 @@ def test_status_json_summary() -> None:
                     worktree_path="worktrees/epic-1",
                     root_branch="alpha",
                     changesets={},
+                    changeset_worktrees={},
                 )
             return None
 
@@ -180,6 +181,7 @@ def test_status_includes_changeset_signals() -> None:
                     worktree_path="worktrees/epic-1",
                     root_branch="alpha",
                     changesets={"cs-1": "alpha-cs-1"},
+                    changeset_worktrees={},
                 )
             return None
 
@@ -220,3 +222,5 @@ def test_status_includes_changeset_signals() -> None:
         details = epic_payload["changeset_details"]
         assert details[0]["branch"] == "alpha-cs-1"
         assert details[0]["lifecycle_state"] == "draft-pr"
+        assert details[0]["pr_allowed"] is True
+        assert details[0]["pr_gate_reason"] == "no-parent"

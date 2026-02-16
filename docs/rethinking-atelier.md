@@ -20,8 +20,10 @@ system.
   and changeset stacks.
 - Workers are orchestrated by `atelier work`; each session targets a single
   changeset and exits.
-- No background daemons. `atelier work` can loop or watch for new work while it
-  runs, but it exits when no work remains (unless in watch mode).
+- No background daemons by default. `atelier work` can loop or watch for new
+  work while it runs, and `atelier daemon` can run a long-lived worker loop when
+  full-stack mode is desired.
+- In minimal mode, bd runs in direct mode (no daemon) to avoid startup delays.
 - Most state lives in bd; optional local SQLite only for stronger claim
   atomicity.
 - Planner creates epics + tasks + subtasks with changeset guardrails.
@@ -41,11 +43,13 @@ Responsibilities:
 - Create task + subtask beads under epics.
 - Create required changeset beads (PR-sized units).
 - Encode changeset guardrails in bead descriptions.
+- Use `ATELIER_PLAN_TRACE=1` to show detailed timing output during startup.
 
 Planner worktree:
 
 - Planner sessions run in a dedicated worktree per planner identity.
 - Treat the worktree as read-only for code changes (no commits beyond beads).
+- Planner worktrees install a commit-blocking hook and warn when dirty.
 - Use it as a reference canvas for planning and decomposition only.
 
 ### Worker (Atelier Work)
@@ -451,6 +455,9 @@ has moved, rebase onto the new root and retry.
 
 ### PR Strategy (Default: Sequential)
 
+Status: PR strategy configuration and gating are not implemented yet. The
+behavior below is the target once PR strategy wiring lands.
+
 PR strategy is a project-level policy on when to push and when to open PRs. The
 default is **sequential**: only one PR open at a time, and PRs are not created
 until the epic is ready for review.
@@ -548,6 +555,9 @@ providers can be implemented in core CLI code or through installable skills.
 
 ## Startup Contract (Enforcement)
 
+Status: currently enforced in `atelier work` before launching worker sessions.
+Session-start skill and hook-based enforcement are planned.
+
 The startup contract (“check hook → if hooked, run it → if empty, check
 inbox/queue”) should be enforced via:
 
@@ -607,6 +617,7 @@ User-facing commands should be minimal:
 
 - `atelier plan` -> start planner session
 - `atelier work` -> start worker session
+- `atelier daemon` -> start/stop/status full-stack worker loop
 - `atelier edit` -> open a workspace repo in the work editor
 - `atelier status` -> show hooks, claims, queue state
 - `atelier gc` -> cleanup stale hooks, claims, channels, queues
@@ -615,7 +626,9 @@ Agents should not call `atelier` directly. Agents use skills only.
 
 ## Agent Skills (Agent-Only API)
 
-Skills live in `skills/` and wrap all interactions with bd.
+Skills live in `skills/` and wrap all interactions with bd. If a project-local
+skill conflicts with a global skill, the project-local version is authoritative.
+Ask the overseer before falling back to a global skill.
 
 Core skills:
 
@@ -639,6 +652,16 @@ Planner skills:
 - `plan_create_epic`
 - `plan_split_tasks`
 - `plan_changesets` (enforce guardrails)
+- `plan_changeset_guardrails` (validate guardrails)
+- `plan_promote_epic` (explicit promotion)
+- `planner_startup_check` (message loop)
+
+Ticket skills:
+
+- `tickets` (orchestrate import/export/link/sync)
+- `external_import` (attach external_tickets metadata)
+- `external_sync` (refresh cached state)
+- `github-issues` (provider API calls)
 
 Messaging skills:
 

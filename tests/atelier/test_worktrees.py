@@ -1,6 +1,7 @@
 import json
 import tempfile
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest.mock import patch
 
 import atelier.worktrees as worktrees
@@ -25,7 +26,40 @@ def test_ensure_changeset_branch_writes_mapping() -> None:
         assert payload["epic_id"] == "epic"
         assert payload["root_branch"] == "feat/root"
         assert payload["changesets"]["epic.1"] == "feat/root-epic.1"
+        assert payload["changeset_worktrees"] == {}
         assert mapping.worktree_path == "worktrees/epic"
+
+
+def test_ensure_changeset_worktree_writes_mapping() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        repo_root = Path(tmp) / "repo"
+        project_dir.mkdir(parents=True)
+        repo_root.mkdir(parents=True)
+
+        def fake_ref_exists(
+            _repo: Path, ref: str, *, git_path: str | None = None
+        ) -> bool:
+            return ref == "refs/heads/feat/root"
+
+        with (
+            patch("atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists),
+            patch("atelier.worktrees.exec_util.run_command") as run_command,
+        ):
+            worktree_path = worktrees.ensure_changeset_worktree(
+                project_dir,
+                repo_root,
+                "epic",
+                "epic.1",
+                branch="feat/root-epic.1",
+                root_branch="feat/root",
+            )
+
+        mapping_file = worktrees.mapping_path(project_dir, "epic")
+        payload = json.loads(mapping_file.read_text(encoding="utf-8"))
+        assert payload["changeset_worktrees"]["epic.1"] == "worktrees/epic.1"
+        assert worktree_path == project_dir / "worktrees" / "epic.1"
+        assert run_command.called
 
 
 def test_ensure_git_worktree_creates_when_missing() -> None:
@@ -51,6 +85,85 @@ def test_ensure_git_worktree_creates_when_missing() -> None:
 
         assert worktree_path == project_dir / "worktrees" / "epic"
         assert run_command.called
+        assert run_command.call_count == 2
+        assert any(
+            "branch" in call.args[0] and "feat/root" in call.args[0]
+            for call in run_command.call_args_list
+        )
+        assert any(
+            "worktree" in call.args[0] and "feat/root" in call.args[0]
+            for call in run_command.call_args_list
+        )
+
+
+def test_ensure_git_worktree_detaches_when_branch_in_use() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        repo_root = Path(tmp) / "repo"
+        project_dir.mkdir(parents=True)
+        repo_root.mkdir(parents=True)
+
+        def fake_ref_exists(
+            _repo: Path, ref: str, *, git_path: str | None = None
+        ) -> bool:
+            return ref == "refs/heads/feat/root"
+
+        def fake_try_run(
+            cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None
+        ) -> CompletedProcess[str]:
+            return CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="worktree /repo\nbranch refs/heads/feat/root\n",
+                stderr="",
+            )
+
+        with (
+            patch("atelier.worktrees.git.git_default_branch", return_value="main"),
+            patch("atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists),
+            patch(
+                "atelier.worktrees.exec_util.try_run_command", side_effect=fake_try_run
+            ),
+            patch("atelier.worktrees.exec_util.run_command") as run_command,
+        ):
+            worktrees.ensure_git_worktree(
+                project_dir, repo_root, "epic", root_branch="feat/root"
+            )
+
+        assert "--detach" in run_command.call_args.args[0]
+
+
+def test_ensure_git_worktree_existing_path_still_materializes_root_branch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        repo_root = Path(tmp) / "repo"
+        project_dir.mkdir(parents=True)
+        repo_root.mkdir(parents=True)
+
+        mapping = worktrees.ensure_worktree_mapping(project_dir, "epic", "feat/root")
+        worktree_path = project_dir / mapping.worktree_path
+        worktree_path.mkdir(parents=True)
+        (worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+
+        def fake_ref_exists(
+            _repo: Path, ref: str, *, git_path: str | None = None
+        ) -> bool:
+            return ref == "refs/heads/main"
+
+        with (
+            patch("atelier.worktrees.git.git_default_branch", return_value="main"),
+            patch("atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists),
+            patch("atelier.worktrees.exec_util.run_command") as run_command,
+        ):
+            resolved = worktrees.ensure_git_worktree(
+                project_dir, repo_root, "epic", root_branch="feat/root"
+            )
+
+        assert resolved == worktree_path
+        run_command.assert_called_once()
+        command = run_command.call_args.args[0]
+        assert "branch" in command
+        assert "feat/root" in command
 
 
 def test_remove_git_worktree_noop_when_missing() -> None:
