@@ -2380,11 +2380,13 @@ def test_finalize_accepts_merged_with_graph_integration_signal() -> None:
         patch("atelier.commands.work.beads.close_epic_if_complete") as close_epic,
         patch(
             "atelier.commands.work.git.git_ref_exists",
-            side_effect=lambda repo, ref: ref
-            in {
-                "refs/heads/feat/root",
-                "refs/heads/feat/root-atelier-epic.1",
-            },
+            side_effect=lambda repo, ref: (
+                ref
+                in {
+                    "refs/heads/feat/root",
+                    "refs/heads/feat/root-atelier-epic.1",
+                }
+            ),
         ),
         patch("atelier.commands.work.git.git_is_ancestor", return_value=True),
         patch("atelier.commands.work.git.git_rev_parse", return_value="abc123"),
