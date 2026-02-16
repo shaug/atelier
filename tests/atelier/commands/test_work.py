@@ -2671,6 +2671,86 @@ def test_finalize_accepts_merged_with_graph_integration_signal() -> None:
     close_epic.assert_called_once()
 
 
+def test_finalize_accepts_merged_with_integrated_sha_in_notes() -> None:
+    run_commands: list[list[str]] = []
+
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset", "cs:merged"],
+                    "description": (
+                        "notes:\n"
+                        "- `changeset.integrated_sha`: "
+                        "67c7ca10898839106bbb9377e0ed0709fc7c0fbf\n"
+                    ),
+                }
+            ],
+        ),
+        patch(
+            "atelier.commands.work.beads.list_descendant_changesets", return_value=[]
+        ),
+        patch(
+            "atelier.commands.work.beads.run_bd_command",
+            side_effect=lambda args, **kwargs: run_commands.append(list(args)),
+        ),
+        patch("atelier.commands.work.beads.close_epic_if_complete") as close_epic,
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_complete"
+    assert any(
+        args[:2] == ["update", "atelier-epic.1"] and "--body-file" in args
+        for args in run_commands
+    )
+    close_epic.assert_called_once()
+
+
+def test_integration_signal_reads_sha_from_realistic_notes_payload() -> None:
+    issue = {
+        "id": "at-wjj.4.2",
+        "labels": ["at:changeset", "cs:blocked", "cs:merged"],
+        "description": (
+            "scope: For each detected stuck item, assign disposition.\n"
+            "changeset.root_branch: gh-194-data-taking-a-long-time\n"
+            "changeset.parent_branch: gh-194-data-taking-a-long-time\n"
+            "changeset.work_branch: gh-194-data-taking-a-long-time-at-wjj.4.2\n"
+            "changeset.root_base: b5763f124f206c413b89a333dc02bf656b95481a\n"
+            "changeset.parent_base: b5763f124f206c413b89a333dc02bf656b95481a\n"
+            "notes:\n"
+            "planner_relabel_2026-02-16: corrected child classification.\n"
+            "implementation_2026-02-16:\n"
+            "- publish/integration: pushed work branch + root branch to origin at "
+            "67c7ca10898839106bbb9377e0ed0709fc7c0fbf.\n"
+            "changeset.integrated_sha: "
+            "67c7ca10898839106bbb9377e0ed0709fc7c0fbf\n"
+            "blocked_at: 2026-02-16T20:51:57.364115+00:00 reason: missing integration signal "
+            "for cs:merged\n"
+        ),
+    }
+
+    with patch("atelier.commands.work.prs.read_github_pr_status", return_value=None):
+        proven, sha = work_cmd._changeset_integration_signal(
+            issue, repo_slug=None, repo_root=Path("/repo")
+        )
+
+    assert proven is True
+    assert sha == "67c7ca10898839106bbb9377e0ed0709fc7c0fbf"
+
+
 def test_work_does_not_mark_in_progress_before_worktree_prepared() -> None:
     epics = [
         {

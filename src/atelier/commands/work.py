@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -41,6 +42,10 @@ _MODE_VALUES = {"prompt", "auto"}
 _RUN_MODE_VALUES = {"once", "default", "watch"}
 _WATCH_INTERVAL_SECONDS = 60
 _WORKER_QUEUE_NAME = "worker"
+_INTEGRATED_SHA_NOTE_PATTERN = re.compile(
+    r"(?:^|\n)\s*(?:[-*]\s+)?`?changeset\.integrated_sha`?\s*[:=]\s*([0-9a-fA-F]{7,40})\b",
+    re.MULTILINE,
+)
 
 
 @dataclass(frozen=True)
@@ -936,12 +941,14 @@ def _changeset_integration_signal(
     repo_root: Path,
 ) -> tuple[bool, str | None]:
     description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    description_text = description if isinstance(description, str) else ""
+    fields = beads.parse_description_fields(description_text)
     integrated_sha = fields.get("changeset.integrated_sha")
     if integrated_sha and integrated_sha.strip().lower() != "null":
         return True, integrated_sha.strip()
+    integrated_sha_match = _INTEGRATED_SHA_NOTE_PATTERN.search(description_text)
+    if integrated_sha_match:
+        return True, integrated_sha_match.group(1)
 
     root_branch = fields.get("changeset.root_branch")
     work_branch = fields.get("changeset.work_branch")
