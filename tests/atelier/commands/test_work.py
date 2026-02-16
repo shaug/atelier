@@ -2752,6 +2752,57 @@ def test_integration_signal_reads_sha_from_realistic_notes_payload() -> None:
     assert sha == "67c7ca10898839106bbb9377e0ed0709fc7c0fbf"
 
 
+def test_integration_signal_reads_sha_from_issue_notes_field() -> None:
+    issue = {
+        "id": "at-wjj.4.3",
+        "labels": ["at:changeset", "cs:merged"],
+        "description": (
+            "scope: Verify resolved items reached valid next-step states.\n"
+            "changeset.root_branch: gh-194-data-taking-a-long-time\n"
+            "changeset.parent_branch: gh-194-data-taking-a-long-time\n"
+            "changeset.work_branch: gh-194-data-taking-a-long-time-at-wjj.4.3\n"
+        ),
+        "notes": (
+            "implementation_2026-02-16:\n"
+            "- publish/integration: pushed commit dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a.\n"
+            "changeset.integrated_sha: dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a\n"
+        ),
+    }
+
+    with patch("atelier.commands.work.prs.read_github_pr_status", return_value=None):
+        proven, sha = work_cmd._changeset_integration_signal(
+            issue, repo_slug=None, repo_root=Path("/repo")
+        )
+
+    assert proven is True
+    assert sha == "dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a"
+
+
+def test_integration_signal_prefers_last_integrated_sha_entry() -> None:
+    issue = {
+        "id": "at-wjj.4.3",
+        "labels": ["at:changeset", "cs:merged"],
+        "description": (
+            "changeset.root_branch: gh-194-data-taking-a-long-time\n"
+            "changeset.parent_branch: gh-194-data-taking-a-long-time\n"
+            "changeset.work_branch: gh-194-data-taking-a-long-time-at-wjj.4.3\n"
+        ),
+        "notes": (
+            "changeset.integrated_sha: dd9fe6ec497565dbf2d4d6a8df8d76af7cb6f8d7\n"
+            "correction_2026-02-16: canonical changeset.integrated_sha: "
+            "dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a\n"
+        ),
+    }
+
+    with patch("atelier.commands.work.prs.read_github_pr_status", return_value=None):
+        proven, sha = work_cmd._changeset_integration_signal(
+            issue, repo_slug=None, repo_root=Path("/repo")
+        )
+
+    assert proven is True
+    assert sha == "dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a"
+
+
 def test_finalize_epic_if_complete_closes_in_pr_mode() -> None:
     with (
         patch("atelier.commands.work._epic_ready_to_finalize", return_value=True),
