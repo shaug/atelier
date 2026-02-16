@@ -79,7 +79,7 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         patch(
             "atelier.commands.plan.worktrees.ensure_git_worktree",
             return_value=worktree_path,
-        ),
+        ) as ensure_git_worktree,
         patch(
             "atelier.commands.plan.codex.run_codex_command",
             side_effect=fake_run_codex_command,
@@ -92,6 +92,14 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
     assert calls
     assert calls[0][0] == "prime"
     assert captured_env.get("ATELIER_PLAN_EPIC") == "atelier-epic"
+    assert captured_env.get("ATELIER_WORKSPACE") == "main-planner-planner"
+    ensure_git_worktree.assert_called_once_with(
+        tmp_path,
+        Path("/repo"),
+        "planner-planner",
+        root_branch="main-planner-planner",
+        git_path="git",
+    )
 
 
 def test_plan_promotes_draft_epic_with_approval(tmp_path: Path) -> None:
@@ -279,6 +287,7 @@ def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
 
     assert captured["repo_root"] == "/repo"
     assert captured["default_branch"] == "main"
+    assert captured["planner_branch"] == "main-planner-planner"
     assert captured["external_providers"] == "github"
 
 

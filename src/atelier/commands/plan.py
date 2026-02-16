@@ -250,6 +250,146 @@ def _trace_enabled() -> bool:
     }
 
 
+def _planner_branch_name(*, default_branch: str, agent_name: str) -> str:
+    token = "".join(
+        ch.lower() if ch.isalnum() else "-" for ch in agent_name.strip() or "planner"
+    )
+    token = "-".join(part for part in token.split("-") if part)
+    if not token:
+        token = "planner"
+    return f"{default_branch}-planner-{token}"
+
+
+def _planner_worktree_path(
+    project_data_dir: Path, planner_key: str
+) -> tuple[worktrees.WorktreeMapping | None, Path]:
+    mapping = worktrees.load_mapping(
+        worktrees.mapping_path(project_data_dir, planner_key)
+    )
+    if mapping is None:
+        return None, worktrees.worktree_dir(project_data_dir, planner_key)
+    mapped = Path(mapping.worktree_path)
+    if not mapped.is_absolute():
+        mapped = project_data_dir / mapped
+    return mapping, mapped
+
+
+def _is_worktree_clean(path: Path, *, git_path: str | None) -> bool:
+    return not git.git_status_porcelain(path, git_path=git_path)
+
+
+def _resolve_default_sync_ref(
+    path: Path, default_branch: str, *, git_path: str | None
+) -> str | None:
+    remote_ref = f"refs/remotes/origin/{default_branch}"
+    if git.git_ref_exists(path, remote_ref, git_path=git_path):
+        return f"origin/{default_branch}"
+    local_ref = f"refs/heads/{default_branch}"
+    if git.git_ref_exists(path, local_ref, git_path=git_path):
+        return default_branch
+    return None
+
+
+def _maybe_migrate_planner_mapping(
+    *,
+    project_data_dir: Path,
+    planner_key: str,
+    planner_branch: str,
+    default_branch: str,
+    git_path: str | None,
+) -> None:
+    mapping, mapped_path = _planner_worktree_path(project_data_dir, planner_key)
+    if mapping is None or mapping.root_branch == planner_branch:
+        return
+    if mapped_path.exists() and (mapped_path / ".git").exists():
+        if not _is_worktree_clean(mapped_path, git_path=git_path):
+            die(
+                f"planner worktree has local changes: {mapped_path}; "
+                "clean it before migrating planner branch"
+            )
+        fetch_result = exec.try_run_command(
+            git.git_command(
+                ["-C", str(mapped_path), "fetch", "origin", default_branch],
+                git_path=git_path,
+            )
+        )
+        if fetch_result is None:
+            die("missing required command: git")
+        sync_ref = _resolve_default_sync_ref(
+            mapped_path, default_branch, git_path=git_path
+        )
+        if sync_ref is None:
+            die(f"default branch {default_branch!r} not found for planner migration")
+        exec.run_command(
+            git.git_command(
+                [
+                    "-C",
+                    str(mapped_path),
+                    "checkout",
+                    "-B",
+                    planner_branch,
+                    sync_ref,
+                ],
+                git_path=git_path,
+            )
+        )
+    updated = worktrees.WorktreeMapping(
+        epic_id=mapping.epic_id,
+        worktree_path=mapping.worktree_path,
+        root_branch=planner_branch,
+        changesets=mapping.changesets,
+        changeset_worktrees=mapping.changeset_worktrees,
+    )
+    worktrees.write_mapping(
+        worktrees.mapping_path(project_data_dir, planner_key), updated
+    )
+
+
+def _sync_planner_branch(
+    *,
+    worktree_path: Path,
+    planner_branch: str,
+    default_branch: str,
+    git_path: str | None,
+) -> None:
+    if not (worktree_path / ".git").exists():
+        return
+    if not _is_worktree_clean(worktree_path, git_path=git_path):
+        say("Planner worktree has local changes; skipping planner branch sync.")
+        return
+    fetch_result = exec.try_run_command(
+        git.git_command(
+            ["-C", str(worktree_path), "fetch", "origin", default_branch],
+            git_path=git_path,
+        )
+    )
+    if fetch_result is None:
+        die("missing required command: git")
+    if fetch_result.returncode != 0:
+        say(f"Warning: failed to fetch origin/{default_branch}; skipping planner sync.")
+        return
+    sync_ref = _resolve_default_sync_ref(
+        worktree_path, default_branch, git_path=git_path
+    )
+    if sync_ref is None:
+        say(
+            f"Warning: default branch {default_branch!r} not found; skipping planner sync."
+        )
+        return
+    exec.run_command(
+        git.git_command(
+            ["-C", str(worktree_path), "checkout", planner_branch],
+            git_path=git_path,
+        )
+    )
+    exec.run_command(
+        git.git_command(
+            ["-C", str(worktree_path), "reset", "--hard", sync_ref],
+            git_path=git_path,
+        )
+    )
+
+
 def _step(label: str, *, timings: list[tuple[str, float]], trace: bool) -> callable:
     say(f"-> {label}")
     start = time.perf_counter()
@@ -331,15 +471,35 @@ def run_planner(args: object) -> None:
         )
         external_providers = ", ".join(provider_slugs) if provider_slugs else "none"
         planner_key = f"planner-{agent.name}"
+        planner_branch = _planner_branch_name(
+            default_branch=default_branch, agent_name=agent.name
+        )
+        finish = _step("Prepare planner branch", timings=timings, trace=trace)
+        _maybe_migrate_planner_mapping(
+            project_data_dir=project_data_dir,
+            planner_key=planner_key,
+            planner_branch=planner_branch,
+            default_branch=default_branch,
+            git_path=git_path,
+        )
+        finish(planner_branch)
         finish = _step("Ensure planner worktree", timings=timings, trace=trace)
         worktree_path = worktrees.ensure_git_worktree(
             project_data_dir,
             repo_root,
             planner_key,
-            root_branch=default_branch,
+            root_branch=planner_branch,
             git_path=git_path,
         )
         finish(str(worktree_path))
+        finish = _step("Sync planner worktree", timings=timings, trace=trace)
+        _sync_planner_branch(
+            worktree_path=worktree_path,
+            planner_branch=planner_branch,
+            default_branch=default_branch,
+            git_path=git_path,
+        )
+        finish()
         skills_dir: Path | None = None
         if project_data_dir.exists():
             try:
@@ -376,6 +536,7 @@ def run_planner(args: object) -> None:
                 "beads_dir": str(beads_root),
                 "beads_prefix": "at",
                 "planner_worktree": str(worktree_path),
+                "planner_branch": planner_branch,
                 "default_branch": default_branch,
                 "external_providers": external_providers,
             },
@@ -395,7 +556,7 @@ def run_planner(args: object) -> None:
             agent_home.ensure_claude_compat(agent.path, updated_content)
         env = workspace.workspace_environment(
             project_enlistment,
-            default_branch,
+            planner_branch,
             worktree_path,
             base_env=agents.agent_environment(agent.agent_id),
         )
@@ -417,7 +578,7 @@ def run_planner(args: object) -> None:
         if agent_spec.name == "codex":
             opening_prompt = workspace.workspace_session_identifier(
                 project_enlistment,
-                default_branch,
+                planner_branch,
                 f"planner-{agent.name}",
             )
         say(f"Starting {agent_spec.display_name} session")
