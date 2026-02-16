@@ -24,7 +24,7 @@ from .. import (
     workspace,
     worktrees,
 )
-from ..io import die, prompt, say
+from ..io import confirm, die, prompt, say
 from .resolve import resolve_current_project_with_repo_root
 
 
@@ -303,10 +303,21 @@ def _maybe_migrate_planner_mapping(
         return
     if mapped_path.exists() and (mapped_path / ".git").exists():
         if not _is_worktree_clean(mapped_path, git_path=git_path):
-            die(
-                f"planner worktree has local changes: {mapped_path}; "
-                "clean it before migrating planner branch"
+            say(f"Planner worktree has local changes: {mapped_path}")
+            status = git.git_status_porcelain(mapped_path, git_path=git_path)
+            if status:
+                say("Local changes:")
+                for line in status[:20]:
+                    say(f"- {line}")
+                if len(status) > 20:
+                    say(f"- ... ({len(status) - 20} more)")
+            proceed = confirm(
+                f"Discard local planner worktree changes and migrate to "
+                f"{planner_branch!r}?",
+                default=False,
             )
+            if not proceed:
+                die("planner branch migration cancelled by user")
         fetch_result = exec.try_run_command(
             git.git_command(
                 ["-C", str(mapped_path), "fetch", "origin", default_branch],

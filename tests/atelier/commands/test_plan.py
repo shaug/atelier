@@ -2,9 +2,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 import atelier.codex as codex
 import atelier.commands.plan as plan_cmd
 import atelier.external_registry as external_registry
+import atelier.worktrees as worktrees
 from atelier.agent_home import AgentHome
 from atelier.config import ProjectConfig
 
@@ -321,3 +324,46 @@ def test_planner_guardrails_install_commit_blocker(tmp_path: Path) -> None:
         for call in run_command.call_args_list
     )
     assert say.call_args_list
+
+
+def test_planner_migration_prompts_when_worktree_dirty(tmp_path: Path) -> None:
+    planner_key = "planner-codex"
+    mapping_path = worktrees.mapping_path(tmp_path, planner_key)
+    mapping_path.parent.mkdir(parents=True, exist_ok=True)
+    worktrees.write_mapping(
+        mapping_path,
+        worktrees.WorktreeMapping(
+            epic_id=planner_key,
+            worktree_path="worktrees/planner-codex",
+            root_branch="main",
+            changesets={},
+            changeset_worktrees={},
+        ),
+    )
+    planner_worktree = tmp_path / "worktrees" / "planner-codex"
+    planner_worktree.mkdir(parents=True)
+    (planner_worktree / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+
+    with (
+        patch(
+            "atelier.commands.plan.git.git_status_porcelain",
+            return_value=[" M src/example.py", "?? notes.txt"],
+        ),
+        patch("atelier.commands.plan.confirm", return_value=False) as confirm,
+        patch("atelier.commands.plan.say") as say,
+    ):
+        with pytest.raises(SystemExit):
+            plan_cmd._maybe_migrate_planner_mapping(
+                project_data_dir=tmp_path,
+                planner_key=planner_key,
+                planner_branch="main-planner-codex",
+                default_branch="main",
+                git_path="git",
+            )
+
+    confirm.assert_called_once()
+    assert any(
+        "Planner worktree has local changes" in str(call.args[0])
+        for call in say.call_args_list
+    )
+    assert any("Local changes:" in str(call.args[0]) for call in say.call_args_list)
