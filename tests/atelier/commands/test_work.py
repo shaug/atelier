@@ -73,6 +73,14 @@ def _publish_signals() -> object:
         yield
 
 
+@pytest.fixture(autouse=True)
+def _changeset_descendants() -> object:
+    with patch(
+        "atelier.commands.work.beads.list_descendant_changesets", return_value=[]
+    ):
+        yield
+
+
 def test_work_prompt_selects_epic_and_changeset() -> None:
     epics = [
         {
@@ -400,6 +408,37 @@ def test_next_changeset_prefers_in_progress() -> None:
 
     assert selected is not None
     assert selected["id"] == "atelier-epic.3"
+
+
+def test_next_changeset_skips_non_leaf_parent() -> None:
+    changesets = [
+        {"id": "atelier-epic.1", "labels": ["at:changeset", "cs:in_progress"]},
+        {"id": "atelier-epic.1.1", "labels": ["at:changeset", "cs:ready"]},
+    ]
+
+    def fake_descendants(
+        issue_id: str, *, beads_root: Path, cwd: Path, include_closed: bool = False
+    ) -> list[dict[str, object]]:
+        if issue_id == "atelier-epic.1":
+            return [{"id": "atelier-epic.1.1"}]
+        return []
+
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=changesets,
+        ),
+        patch(
+            "atelier.commands.work.beads.list_descendant_changesets",
+            side_effect=fake_descendants,
+        ),
+    ):
+        selected = work_cmd._next_changeset(
+            epic_id="atelier-epic", beads_root=Path("/beads"), repo_root=Path("/repo")
+        )
+
+    assert selected is not None
+    assert selected["id"] == "atelier-epic.1.1"
 
 
 def test_next_changeset_requires_ready_or_in_progress_label() -> None:
@@ -2192,6 +2231,52 @@ def test_run_worker_once_stops_when_changeset_not_updated() -> None:
 
     assert summary.started is False
     assert summary.reason == "changeset_blocked_not_updated"
+
+
+def test_finalize_keeps_parent_open_when_children_pending() -> None:
+    run_commands: list[list[str]] = []
+
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.4",
+                    "labels": ["at:changeset", "cs:merged"],
+                    "status": "closed",
+                }
+            ],
+        ),
+        patch(
+            "atelier.commands.work.beads.list_descendant_changesets",
+            side_effect=lambda issue_id, **kwargs: (
+                [{"id": "atelier-epic.4.1"}] if issue_id == "atelier-epic.4" else []
+            ),
+        ),
+        patch(
+            "atelier.commands.work.beads.run_bd_command",
+            side_effect=lambda args, **kwargs: run_commands.append(list(args)),
+        ),
+        patch("atelier.commands.work.beads.close_epic_if_complete") as close_epic,
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.4",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_children_pending"
+    assert any(
+        args[:2] == ["update", "atelier-epic.4"] and "--status" in args
+        for args in run_commands
+    )
+    close_epic.assert_not_called()
 
 
 def test_work_closes_epic_when_changeset_complete() -> None:

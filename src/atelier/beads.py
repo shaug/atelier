@@ -342,6 +342,51 @@ def summarize_changesets(
     )
 
 
+def list_child_changesets(
+    parent_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    include_closed: bool = False,
+) -> list[dict[str, object]]:
+    """List direct child changesets for a parent issue."""
+    args = ["list", "--parent", parent_id, "--label", "at:changeset"]
+    if include_closed:
+        args.append("--all")
+    return run_bd_json(args, beads_root=beads_root, cwd=cwd)
+
+
+def list_descendant_changesets(
+    parent_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    include_closed: bool = False,
+) -> list[dict[str, object]]:
+    """List descendant changesets (children + deeper descendants)."""
+    descendants: list[dict[str, object]] = []
+    seen: set[str] = set()
+    queue = [parent_id]
+    while queue:
+        current = queue.pop(0)
+        children = list_child_changesets(
+            current,
+            beads_root=beads_root,
+            cwd=cwd,
+            include_closed=include_closed,
+        )
+        for issue in children:
+            issue_id = issue.get("id")
+            if not isinstance(issue_id, str) or not issue_id:
+                continue
+            if issue_id in seen:
+                continue
+            seen.add(issue_id)
+            descendants.append(issue)
+            queue.append(issue_id)
+    return descendants
+
+
 def _normalize_description(description: str | None) -> str:
     if not description:
         return ""
@@ -1033,10 +1078,11 @@ def epic_changeset_summary(
     cwd: Path,
 ) -> ChangesetSummary:
     """Summarize changesets under an epic."""
-    changesets = run_bd_json(
-        ["list", "--parent", epic_id, "--label", "at:changeset"],
+    changesets = list_descendant_changesets(
+        epic_id,
         beads_root=beads_root,
         cwd=cwd,
+        include_closed=True,
     )
     return summarize_changesets(changesets)
 

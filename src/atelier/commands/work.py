@@ -469,14 +469,42 @@ def _next_changeset(
     if not changesets:
         return None
     in_progress = [
-        issue for issue in changesets if "cs:in_progress" in _issue_labels(issue)
+        issue
+        for issue in changesets
+        if "cs:in_progress" in _issue_labels(issue)
+        and "cs:merged" not in _issue_labels(issue)
+        and "cs:abandoned" not in _issue_labels(issue)
     ]
     if in_progress:
-        return in_progress[0]
+        for issue in in_progress:
+            issue_id = issue.get("id")
+            if isinstance(issue_id, str) and issue_id:
+                if not _has_open_descendant_changesets(
+                    issue_id, beads_root=beads_root, repo_root=repo_root
+                ):
+                    return issue
     ready = [issue for issue in changesets if "cs:ready" in _issue_labels(issue)]
     if ready:
-        return ready[0]
+        for issue in ready:
+            issue_id = issue.get("id")
+            if isinstance(issue_id, str) and issue_id:
+                if not _has_open_descendant_changesets(
+                    issue_id, beads_root=beads_root, repo_root=repo_root
+                ):
+                    return issue
     return None
+
+
+def _has_open_descendant_changesets(
+    changeset_id: str, *, beads_root: Path, repo_root: Path
+) -> bool:
+    descendants = beads.list_descendant_changesets(
+        changeset_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+        include_closed=False,
+    )
+    return bool(descendants)
 
 
 def _resolve_hooked_epic(
@@ -569,6 +597,54 @@ def _mark_changeset_blocked(
     )
 
 
+def _mark_changeset_children_in_progress(
+    changeset_id: str, *, beads_root: Path, repo_root: Path
+) -> None:
+    beads.run_bd_command(
+        [
+            "update",
+            changeset_id,
+            "--status",
+            "in_progress",
+            "--add-label",
+            "cs:in_progress",
+            "--remove-label",
+            "cs:ready",
+        ],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+
+
+def _close_completed_container_changesets(
+    epic_id: str, *, beads_root: Path, repo_root: Path
+) -> list[str]:
+    closed: list[str] = []
+    descendants = beads.list_descendant_changesets(
+        epic_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+        include_closed=True,
+    )
+    for issue in descendants:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id:
+            continue
+        status = str(issue.get("status") or "").lower()
+        if status in {"closed", "done"}:
+            continue
+        labels = _issue_labels(issue)
+        if "cs:merged" not in labels and "cs:abandoned" not in labels:
+            continue
+        if _has_open_descendant_changesets(
+            issue_id, beads_root=beads_root, repo_root=repo_root
+        ):
+            continue
+        _mark_changeset_closed(issue_id, beads_root=beads_root, repo_root=repo_root)
+        closed.append(issue_id)
+    return closed
+
+
 def _has_blocking_messages(
     *,
     thread_ids: set[str],
@@ -614,7 +690,22 @@ def _finalize_changeset(
     issue = issues[0]
     labels = _issue_labels(issue)
     if "cs:merged" in labels or "cs:abandoned" in labels:
+        if _has_open_descendant_changesets(
+            changeset_id, beads_root=beads_root, repo_root=repo_root
+        ):
+            _mark_changeset_children_in_progress(
+                changeset_id, beads_root=beads_root, repo_root=repo_root
+            )
+            _close_completed_container_changesets(
+                epic_id, beads_root=beads_root, repo_root=repo_root
+            )
+            return FinalizeResult(
+                continue_running=True, reason="changeset_children_pending"
+            )
         _mark_changeset_closed(changeset_id, beads_root=beads_root, repo_root=repo_root)
+        _close_completed_container_changesets(
+            epic_id, beads_root=beads_root, repo_root=repo_root
+        )
         beads.close_epic_if_complete(
             epic_id, agent_bead_id, beads_root=beads_root, cwd=repo_root
         )
