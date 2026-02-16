@@ -2279,6 +2279,143 @@ def test_finalize_keeps_parent_open_when_children_pending() -> None:
     close_epic.assert_not_called()
 
 
+def test_finalize_promotes_planned_descendants_when_unblocked() -> None:
+    run_commands: list[list[str]] = []
+
+    def fake_descendants(
+        issue_id: str, *, beads_root: Path, cwd: Path, include_closed: bool = False
+    ) -> list[dict[str, object]]:
+        if issue_id == "atelier-epic.4":
+            return [
+                {
+                    "id": "atelier-epic.4.1",
+                    "labels": ["at:changeset", "cs:planned"],
+                    "status": "open",
+                }
+            ]
+        if issue_id == "atelier-epic":
+            return [
+                {
+                    "id": "atelier-epic.4",
+                    "labels": ["at:changeset", "cs:merged"],
+                    "status": "open",
+                },
+                {
+                    "id": "atelier-epic.4.1",
+                    "labels": ["at:changeset", "cs:planned"],
+                    "status": "open",
+                },
+            ]
+        return []
+
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            side_effect=lambda args, **kwargs: (
+                [{"id": "atelier-epic.4", "labels": ["at:changeset", "cs:merged"]}]
+                if args[:2] == ["show", "atelier-epic.4"]
+                else []
+            ),
+        ),
+        patch(
+            "atelier.commands.work.beads.list_descendant_changesets",
+            side_effect=fake_descendants,
+        ),
+        patch(
+            "atelier.commands.work.beads.run_bd_command",
+            side_effect=lambda args, **kwargs: run_commands.append(list(args)),
+        ),
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.4",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_children_pending"
+    assert any(
+        args[:2] == ["update", "atelier-epic.4.1"] and "cs:ready" in args
+        for args in run_commands
+    )
+    assert any(
+        args[:2] == ["update", "atelier-epic.4"] and "--status" in args
+        for args in run_commands
+    )
+
+
+def test_finalize_blocks_when_planned_descendants_need_planning() -> None:
+    run_commands: list[list[str]] = []
+    message_description = messages.render_message(
+        {"thread": "atelier-epic.4.1"}, "Need planning details for subtask."
+    )
+
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            side_effect=lambda args, **kwargs: (
+                [{"id": "atelier-epic.4", "labels": ["at:changeset", "cs:merged"]}]
+                if args[:2] == ["show", "atelier-epic.4"]
+                else (
+                    [
+                        {
+                            "id": "msg-1",
+                            "description": message_description,
+                            "created_at": "2999-01-01T00:00:00+00:00",
+                        }
+                    ]
+                    if args[:2] == ["list", "--label"] and "at:message" in args
+                    else []
+                )
+            ),
+        ),
+        patch(
+            "atelier.commands.work.beads.list_descendant_changesets",
+            side_effect=lambda issue_id, **kwargs: (
+                [
+                    {
+                        "id": "atelier-epic.4.1",
+                        "labels": ["at:changeset", "cs:planned"],
+                        "status": "open",
+                    }
+                ]
+                if issue_id == "atelier-epic.4"
+                else []
+            ),
+        ),
+        patch(
+            "atelier.commands.work.beads.run_bd_command",
+            side_effect=lambda args, **kwargs: run_commands.append(list(args)),
+        ),
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.4",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert result.continue_running is False
+    assert result.reason == "changeset_children_planning_blocked"
+    assert any(
+        args[:2] == ["update", "atelier-epic.4"] and "--status" in args
+        for args in run_commands
+    )
+    assert not any(
+        args[:2] == ["update", "atelier-epic.4.1"] and "cs:ready" in args
+        for args in run_commands
+    )
+
+
 def test_work_closes_epic_when_changeset_complete() -> None:
     epics = [
         {

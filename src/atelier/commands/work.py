@@ -645,6 +645,39 @@ def _close_completed_container_changesets(
     return closed
 
 
+def _promote_planned_descendant_changesets(
+    changeset_id: str, *, beads_root: Path, repo_root: Path
+) -> list[str]:
+    promoted: list[str] = []
+    descendants = beads.list_descendant_changesets(
+        changeset_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+        include_closed=False,
+    )
+    for issue in descendants:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id:
+            continue
+        labels = _issue_labels(issue)
+        if "cs:planned" not in labels:
+            continue
+        beads.run_bd_command(
+            [
+                "update",
+                issue_id,
+                "--add-label",
+                "cs:ready",
+                "--remove-label",
+                "cs:planned",
+            ],
+            beads_root=beads_root,
+            cwd=repo_root,
+        )
+        promoted.append(issue_id)
+    return promoted
+
+
 def _has_blocking_messages(
     *,
     thread_ids: set[str],
@@ -693,6 +726,37 @@ def _finalize_changeset(
         if _has_open_descendant_changesets(
             changeset_id, beads_root=beads_root, repo_root=repo_root
         ):
+            descendants = beads.list_descendant_changesets(
+                changeset_id,
+                beads_root=beads_root,
+                cwd=repo_root,
+                include_closed=False,
+            )
+            planned_ids = {
+                issue_id
+                for issue in descendants
+                if isinstance((issue_id := issue.get("id")), str)
+                and issue_id
+                and "cs:planned" in _issue_labels(issue)
+            }
+            if planned_ids and _has_blocking_messages(
+                thread_ids={changeset_id, epic_id, *planned_ids},
+                started_at=started_at,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            ):
+                _mark_changeset_children_in_progress(
+                    changeset_id, beads_root=beads_root, repo_root=repo_root
+                )
+                _close_completed_container_changesets(
+                    epic_id, beads_root=beads_root, repo_root=repo_root
+                )
+                return FinalizeResult(
+                    continue_running=False, reason="changeset_children_planning_blocked"
+                )
+            _promote_planned_descendant_changesets(
+                changeset_id, beads_root=beads_root, repo_root=repo_root
+            )
             _mark_changeset_children_in_progress(
                 changeset_id, beads_root=beads_root, repo_root=repo_root
             )
