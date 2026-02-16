@@ -410,6 +410,36 @@ def _select_epic_auto(
     return None
 
 
+def _select_epic_from_ready_changesets(
+    *,
+    issues: list[dict[str, object]],
+    is_actionable: Callable[[str], bool],
+    beads_root: Path,
+    repo_root: Path,
+) -> str | None:
+    """Pick an actionable epic (or standalone changeset) from global ready work."""
+    ready_changesets = beads.run_bd_json(
+        ["ready", "--label", "at:changeset"], beads_root=beads_root, cwd=repo_root
+    )
+    if not ready_changesets:
+        return None
+    known_epics = {
+        str(issue_id) for issue in issues if (issue_id := issue.get("id")) is not None
+    }
+    for changeset in _sort_by_created_at(ready_changesets):
+        issue_id = changeset.get("id")
+        if not isinstance(issue_id, str) or not issue_id:
+            continue
+        candidate = issue_id
+        if "." in issue_id:
+            maybe_epic = issue_id.split(".", 1)[0]
+            if maybe_epic in known_epics:
+                candidate = maybe_epic
+        if is_actionable(candidate):
+            return candidate
+    return None
+
+
 def _send_needs_decision(
     *,
     agent_id: str,
@@ -559,6 +589,24 @@ def _release_epic_assignment(
 def _next_changeset(
     *, epic_id: str, beads_root: Path, repo_root: Path
 ) -> dict[str, object] | None:
+    target = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
+    if target:
+        issue = target[0]
+        issue_id = issue.get("id")
+        labels = _issue_labels(issue)
+        if (
+            isinstance(issue_id, str)
+            and issue_id == epic_id
+            and "at:changeset" in labels
+            and "cs:merged" not in labels
+            and "cs:abandoned" not in labels
+            and (_is_changeset_in_progress(issue) or _is_changeset_ready(issue))
+        ):
+            if not _has_open_descendant_changesets(
+                epic_id, beads_root=beads_root, repo_root=repo_root
+            ):
+                return issue
+
     changesets = beads.run_bd_json(
         [
             "ready",
@@ -1375,6 +1423,19 @@ def _run_startup_contract(
             is_actionable=epic_has_actionable_changeset,
             assume_yes=assume_yes,
         )
+    if selected_epic is None:
+        selected_epic = _select_epic_from_ready_changesets(
+            issues=issues,
+            is_actionable=epic_has_actionable_changeset,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        if selected_epic:
+            return StartupContractResult(
+                epic_id=selected_epic,
+                should_exit=False,
+                reason="selected_ready_changeset",
+            )
 
     if selected_epic is None:
         _send_needs_decision(

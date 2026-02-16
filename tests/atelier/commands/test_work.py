@@ -410,9 +410,14 @@ def test_next_changeset_prefers_in_progress() -> None:
         {"id": "atelier-epic.3", "labels": ["at:changeset", "cs:in_progress"]},
     ]
 
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "atelier-epic"]:
+            return [{"id": "atelier-epic", "labels": ["at:epic"]}]
+        return changesets
+
     with patch(
         "atelier.commands.work.beads.run_bd_json",
-        return_value=changesets,
+        side_effect=fake_run_bd_json,
     ):
         selected = work_cmd._next_changeset(
             epic_id="atelier-epic", beads_root=Path("/beads"), repo_root=Path("/repo")
@@ -435,10 +440,15 @@ def test_next_changeset_skips_non_leaf_parent() -> None:
             return [{"id": "atelier-epic.1.1"}]
         return []
 
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "atelier-epic"]:
+            return [{"id": "atelier-epic", "labels": ["at:epic"]}]
+        return changesets
+
     with (
         patch(
             "atelier.commands.work.beads.run_bd_json",
-            return_value=changesets,
+            side_effect=fake_run_bd_json,
         ),
         patch(
             "atelier.commands.work.beads.list_descendant_changesets",
@@ -456,9 +466,14 @@ def test_next_changeset_skips_non_leaf_parent() -> None:
 def test_next_changeset_requires_ready_or_in_progress_label() -> None:
     changesets = [{"id": "atelier-epic.1", "labels": ["at:changeset"]}]
 
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "atelier-epic"]:
+            return [{"id": "atelier-epic", "labels": ["at:epic"]}]
+        return changesets
+
     with patch(
         "atelier.commands.work.beads.run_bd_json",
-        return_value=changesets,
+        side_effect=fake_run_bd_json,
     ):
         selected = work_cmd._next_changeset(
             epic_id="atelier-epic", beads_root=Path("/beads"), repo_root=Path("/repo")
@@ -472,8 +487,13 @@ def test_next_changeset_treats_status_in_progress_as_active() -> None:
         {"id": "atelier-epic.1", "labels": ["at:changeset"], "status": "in_progress"}
     ]
 
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "atelier-epic"]:
+            return [{"id": "atelier-epic", "labels": ["at:epic"]}]
+        return changesets
+
     with (
-        patch("atelier.commands.work.beads.run_bd_json", return_value=changesets),
+        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch(
             "atelier.commands.work.beads.list_descendant_changesets", return_value=[]
         ),
@@ -484,6 +504,28 @@ def test_next_changeset_treats_status_in_progress_as_active() -> None:
 
     assert selected is not None
     assert selected["id"] == "atelier-epic.1"
+
+
+def test_next_changeset_allows_standalone_changeset() -> None:
+    standalone = {
+        "id": "at-irs",
+        "labels": ["at:changeset", "cs:ready"],
+    }
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "at-irs"]:
+            return [standalone]
+        if args[0] == "ready":
+            return []
+        return []
+
+    with patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json):
+        selected = work_cmd._next_changeset(
+            epic_id="at-irs", beads_root=Path("/beads"), repo_root=Path("/repo")
+        )
+
+    assert selected is not None
+    assert selected["id"] == "at-irs"
 
 
 def test_find_invalid_changeset_labels_flags_subtasks() -> None:
@@ -1385,6 +1427,61 @@ def test_startup_contract_skips_hooked_epic_without_ready_changesets() -> None:
     assert result.should_exit is False
     assert result.reason == "selected_auto"
     assert result.epic_id == "atelier-epic-ready"
+
+
+def test_startup_contract_falls_back_to_global_ready_changeset() -> None:
+    epics = [
+        {
+            "id": "atelier-epic-stalled",
+            "title": "Stalled epic",
+            "status": "open",
+            "labels": ["at:epic"],
+        }
+    ]
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["list", "--label"]:
+            return epics
+        if args[:2] == ["ready", "--label"]:
+            return [
+                {
+                    "id": "at-irs",
+                    "title": "Guardrail changeset",
+                    "labels": ["at:changeset", "cs:ready"],
+                    "created_at": "2026-02-01T00:00:00+00:00",
+                }
+            ]
+        return []
+
+    def fake_next_changeset(
+        *, epic_id: str, beads_root: Path, repo_root: Path
+    ) -> dict[str, object] | None:
+        if epic_id == "at-irs":
+            return {"id": "at-irs"}
+        return None
+
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.work._next_changeset", side_effect=fake_next_changeset),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.work.say"),
+    ):
+        result = work_cmd._run_startup_contract(
+            agent_id="atelier/worker/agent/p123-t2",
+            agent_bead_id=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            mode="auto",
+            explicit_epic_id=None,
+            queue_only=False,
+            dry_run=False,
+            assume_yes=True,
+        )
+
+    assert result.should_exit is False
+    assert result.reason == "selected_ready_changeset"
+    assert result.epic_id == "at-irs"
 
 
 def test_work_prompts_for_queue_before_claiming() -> None:
