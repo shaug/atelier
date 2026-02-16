@@ -1311,6 +1311,10 @@ def test_startup_contract_reclaims_stale_same_family_epic() -> None:
 
     with (
         patch("atelier.commands.work.beads.run_bd_json", return_value=epics),
+        patch(
+            "atelier.commands.work._next_changeset",
+            return_value={"id": "atelier-epic-stale.1"},
+        ),
         patch("atelier.commands.work.os.kill", side_effect=ProcessLookupError),
         patch("atelier.commands.work.say"),
     ):
@@ -1330,6 +1334,57 @@ def test_startup_contract_reclaims_stale_same_family_epic() -> None:
     assert result.reason == "stale_assignee_epic"
     assert result.epic_id == "atelier-epic-stale"
     assert result.reassign_from == "atelier/worker/agent/p999999-t1"
+
+
+def test_startup_contract_skips_hooked_epic_without_ready_changesets() -> None:
+    epics = [
+        {
+            "id": "atelier-epic-stalled",
+            "title": "Stalled epic",
+            "status": "open",
+            "labels": ["at:epic"],
+        },
+        {
+            "id": "atelier-epic-ready",
+            "title": "Ready epic",
+            "status": "open",
+            "labels": ["at:epic"],
+        },
+    ]
+
+    def fake_next_changeset(
+        *, epic_id: str, beads_root: Path, repo_root: Path
+    ) -> dict[str, object] | None:
+        if epic_id == "atelier-epic-ready":
+            return {"id": "atelier-epic-ready.1"}
+        return None
+
+    with (
+        patch(
+            "atelier.commands.work._resolve_hooked_epic",
+            return_value="atelier-epic-stalled",
+        ),
+        patch("atelier.commands.work.beads.run_bd_json", return_value=epics),
+        patch("atelier.commands.work._next_changeset", side_effect=fake_next_changeset),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.work.say"),
+    ):
+        result = work_cmd._run_startup_contract(
+            agent_id="atelier/worker/agent/p123-t2",
+            agent_bead_id="atelier-agent",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            mode="auto",
+            explicit_epic_id=None,
+            queue_only=False,
+            dry_run=False,
+            assume_yes=True,
+        )
+
+    assert result.should_exit is False
+    assert result.reason == "selected_auto"
+    assert result.epic_id == "atelier-epic-ready"
 
 
 def test_work_prompts_for_queue_before_claiming() -> None:
@@ -1631,6 +1686,33 @@ def test_work_cleans_up_session_agent_home_on_exit(tmp_path: Path) -> None:
     cleanup_home.assert_called_once_with(agent, project_dir=tmp_path)
 
 
+def test_work_once_retries_after_no_ready_changesets() -> None:
+    with (
+        patch(
+            "atelier.commands.work._run_worker_once",
+            side_effect=[
+                work_cmd.WorkerRunSummary(
+                    started=False,
+                    reason="no_ready_changesets",
+                    epic_id="atelier-epic",
+                ),
+                work_cmd.WorkerRunSummary(
+                    started=False,
+                    reason="no_eligible_epics",
+                ),
+            ],
+        ) as run_once,
+        patch("atelier.commands.work._report_worker_summary"),
+    ):
+        work_cmd.start_worker(
+            SimpleNamespace(
+                epic_id=None, mode="auto", run_mode="once", dry_run=True, queue=False
+            )
+        )
+
+    assert run_once.call_count == 2
+
+
 def test_work_auto_sends_needs_decision_when_idle() -> None:
     agent = AgentHome(
         name="worker",
@@ -1753,8 +1835,8 @@ def test_work_messages_planner_when_no_ready_changesets() -> None:
     assert calls[0][0] == "list"
     assert any(call and call[0] == "ready" for call in calls)
     send_message.assert_called_once()
-    clear_hook.assert_called_once()
-    assert any(
+    clear_hook.assert_not_called()
+    assert not any(
         call.args[0][0] == "update" and "--assignee" in call.args[0]
         for call in run_bd_command.call_args_list
     )

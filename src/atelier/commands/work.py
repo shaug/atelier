@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -347,7 +348,11 @@ def _list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]
 
 
 def _select_epic_prompt(
-    issues: list[dict[str, object]], *, agent_id: str, assume_yes: bool = False
+    issues: list[dict[str, object]],
+    *,
+    agent_id: str,
+    is_actionable: Callable[[str], bool],
+    assume_yes: bool = False,
 ) -> str | None:
     epics = _filter_epics(issues, require_unassigned=True)
     resume = _filter_epics(issues, assignee=agent_id)
@@ -356,7 +361,7 @@ def _select_epic_prompt(
     choices: dict[str, str] = {}
     for issue in epics:
         issue_id = issue.get("id") or ""
-        if not issue_id:
+        if not issue_id or not is_actionable(str(issue_id)):
             continue
         status = issue.get("status") or "unknown"
         title = issue.get("title") or ""
@@ -366,7 +371,7 @@ def _select_epic_prompt(
     resume = _sort_by_recency(resume)
     for issue in resume:
         issue_id = issue.get("id") or ""
-        if not issue_id:
+        if not issue_id or not is_actionable(str(issue_id)):
             continue
         status = issue.get("status") or "unknown"
         title = issue.get("title") or ""
@@ -382,15 +387,26 @@ def _select_epic_prompt(
     return choices[selected]
 
 
-def _select_epic_auto(issues: list[dict[str, object]], *, agent_id: str) -> str | None:
+def _select_epic_auto(
+    issues: list[dict[str, object]],
+    *,
+    agent_id: str,
+    is_actionable: Callable[[str], bool],
+) -> str | None:
     ready = _filter_epics(issues, require_unassigned=True)
     if ready:
         ready = _sort_by_created_at(ready)
-        return str(ready[0].get("id"))
+        for issue in ready:
+            issue_id = issue.get("id") or ""
+            if issue_id and is_actionable(str(issue_id)):
+                return str(issue_id)
     unfinished = _filter_epics(issues, assignee=agent_id)
     if unfinished:
         unfinished = _sort_by_created_at(unfinished)
-        return str(unfinished[0].get("id"))
+        for issue in unfinished:
+            issue_id = issue.get("id") or ""
+            if issue_id and is_actionable(str(issue_id)):
+                return str(issue_id)
     return None
 
 
@@ -1266,6 +1282,19 @@ def _run_startup_contract(
             epic_id=None, should_exit=True, reason="queue_only"
         )
 
+    actionable_cache: dict[str, bool] = {}
+
+    def epic_has_actionable_changeset(epic_id: str) -> bool:
+        cached = actionable_cache.get(epic_id)
+        if cached is not None:
+            return cached
+        actionable = (
+            _next_changeset(epic_id=epic_id, beads_root=beads_root, repo_root=repo_root)
+            is not None
+        )
+        actionable_cache[epic_id] = actionable
+        return actionable
+
     hooked_epic = None
     if agent_bead_id:
         hooked_epic = _resolve_hooked_epic(
@@ -1273,18 +1302,20 @@ def _run_startup_contract(
         )
     elif dry_run:
         _dry_run_log("Would create agent bead before checking for hooks.")
-    if hooked_epic:
+    if hooked_epic and epic_has_actionable_changeset(hooked_epic):
         say(f"Resuming hooked epic: {hooked_epic}")
         return StartupContractResult(
             epic_id=hooked_epic, should_exit=False, reason="hooked_epic"
         )
+    if hooked_epic:
+        say(f"Hooked epic has no ready changesets: {hooked_epic}")
 
     issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
     assigned = _filter_epics(issues, assignee=agent_id)
     assigned = _sort_by_created_at(assigned)
-    if assigned:
-        candidate = assigned[0].get("id")
-        if candidate:
+    for issue in assigned:
+        candidate = issue.get("id")
+        if candidate and epic_has_actionable_changeset(str(candidate)):
             selected_epic = str(candidate)
             say(f"Resuming assigned epic: {selected_epic}")
             return StartupContractResult(
@@ -1292,11 +1323,15 @@ def _run_startup_contract(
             )
 
     stale_assigned = _stale_family_assigned_epics(issues, agent_id=agent_id)
-    if stale_assigned:
-        issue = stale_assigned[0]
+    for issue in stale_assigned:
         candidate = issue.get("id")
         previous_assignee = issue.get("assignee")
-        if candidate and isinstance(previous_assignee, str) and previous_assignee:
+        if (
+            candidate
+            and isinstance(previous_assignee, str)
+            and previous_assignee
+            and epic_has_actionable_changeset(str(candidate))
+        ):
             selected_epic = str(candidate)
             say(
                 "Reclaiming stale epic assignment: "
@@ -1330,10 +1365,15 @@ def _run_startup_contract(
         )
 
     if mode == "auto":
-        selected_epic = _select_epic_auto(issues, agent_id=agent_id)
+        selected_epic = _select_epic_auto(
+            issues, agent_id=agent_id, is_actionable=epic_has_actionable_changeset
+        )
     else:
         selected_epic = _select_epic_prompt(
-            issues, agent_id=agent_id, assume_yes=assume_yes
+            issues,
+            agent_id=agent_id,
+            is_actionable=epic_has_actionable_changeset,
+            assume_yes=assume_yes,
         )
 
     if selected_epic is None:
@@ -1968,6 +2008,19 @@ def start_worker(args: object) -> None:
                     args, mode=mode, dry_run=True, session_key=session_key
                 )
                 _report_worker_summary(summary, dry_run=True)
+                if summary.started:
+                    if run_mode == "once":
+                        return
+                    continue
+                if summary.reason == "no_ready_changesets":
+                    if run_mode == "watch":
+                        interval = _watch_interval_seconds()
+                        _dry_run_log(
+                            "Watching for updates "
+                            f"(sleeping {interval}s before next check)."
+                        )
+                        time.sleep(interval)
+                    continue
                 if run_mode != "watch":
                     return
                 interval = _watch_interval_seconds()
@@ -1981,9 +2034,15 @@ def start_worker(args: object) -> None:
                 args, mode=mode, dry_run=False, session_key=session_key
             )
             _report_worker_summary(summary, dry_run=False)
-            if run_mode == "once":
-                return
             if summary.started:
+                if run_mode == "once":
+                    return
+                continue
+            if summary.reason == "no_ready_changesets":
+                if run_mode == "watch":
+                    interval = _watch_interval_seconds()
+                    say(f"No ready work; watching for updates (sleeping {interval}s).")
+                    time.sleep(interval)
                 continue
             if run_mode == "watch":
                 interval = _watch_interval_seconds()
