@@ -1,3 +1,4 @@
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -58,3 +59,62 @@ def test_gc_closes_expired_channel_messages() -> None:
         gc_cmd.gc(SimpleNamespace(stale_hours=24.0, dry_run=False, yes=True))
 
     assert any(cmd[:2] == ["close", "msg-1"] for cmd in calls)
+
+
+def test_gc_removes_stale_session_agent_home() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        data_dir = root / "data"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        stale_home = data_dir / "agents" / "worker" / "codex" / "p4242-t1"
+        stale_home.mkdir(parents=True, exist_ok=True)
+        (stale_home / "AGENTS.md").write_text("x", encoding="utf-8")
+        project_config = config.ProjectConfig()
+        agent_issue = {
+            "id": "agent-1",
+            "title": "atelier/worker/codex/p4242-t1",
+            "labels": ["at:agent"],
+            "description": "agent_id: atelier/worker/codex/p4242-t1\nrole_type: worker\n",
+        }
+
+        def fake_run_bd_json(
+            args: list[str], *, beads_root: Path, cwd: Path
+        ) -> list[dict[str, object]]:
+            if args[:3] == ["list", "--label", "at:agent"]:
+                return [agent_issue]
+            if args[:3] == ["list", "--label", "at:epic"]:
+                return []
+            if args[:3] == ["list", "--label", "at:message"]:
+                return []
+            return []
+
+        with (
+            patch(
+                "atelier.commands.gc.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, "/repo", repo_root),
+            ),
+            patch(
+                "atelier.commands.gc.config.resolve_project_data_dir",
+                return_value=data_dir,
+            ),
+            patch(
+                "atelier.commands.gc.config.resolve_beads_root",
+                return_value=Path("/beads"),
+            ),
+            patch(
+                "atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json
+            ),
+            patch("atelier.commands.gc.beads.run_bd_command"),
+            patch("atelier.commands.gc.beads.get_agent_hook", return_value=None),
+            patch(
+                "atelier.commands.gc.agent_home.is_session_agent_active",
+                return_value=False,
+            ),
+            patch("atelier.commands.gc.say"),
+        ):
+            gc_cmd.gc(SimpleNamespace(stale_hours=24.0, dry_run=False, yes=True))
+
+        assert not stale_home.exists()

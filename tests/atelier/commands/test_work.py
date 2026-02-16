@@ -1586,6 +1586,51 @@ def test_work_invokes_startup_contract() -> None:
     assert startup_contract.call_args.kwargs["explicit_epic_id"] is None
 
 
+def test_work_cleans_up_session_agent_home_on_exit(tmp_path: Path) -> None:
+    project_root = Path("/project")
+    repo_root = Path("/repo")
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/agent/p100-t200",
+        role="worker",
+        path=tmp_path / "agents" / "worker" / "agent" / "p100-t200",
+        session_key="p100-t200",
+    )
+
+    with (
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(
+                project_root,
+                _fake_project_payload(),
+                "/repo",
+                repo_root,
+            ),
+        ),
+        patch(
+            "atelier.commands.work.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.work.agent_home.preview_agent_home",
+            return_value=agent,
+        ),
+        patch(
+            "atelier.commands.work._run_worker_once",
+            return_value=work_cmd.WorkerRunSummary(
+                started=False, reason="no_eligible_epics"
+            ),
+        ),
+        patch("atelier.commands.work._report_worker_summary"),
+        patch("atelier.commands.work.agent_home.cleanup_agent_home") as cleanup_home,
+    ):
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once", dry_run=False)
+        )
+
+    cleanup_home.assert_called_once_with(agent, project_dir=tmp_path)
+
+
 def test_work_auto_sends_needs_decision_when_idle() -> None:
     agent = AgentHome(
         name="worker",

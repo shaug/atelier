@@ -448,163 +448,181 @@ def run_planner(args: object) -> None:
         session_key=session_key,
     )
 
-    with agents.scoped_agent_env(agent.agent_id):
-        say("Planner session")
-        finish = _step("Prime beads", timings=timings, trace=trace)
-        beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
-        finish()
-        finish = _step("Ensure planner agent bead", timings=timings, trace=trace)
-        beads.ensure_agent_bead(
-            agent.agent_id, beads_root=beads_root, cwd=repo_root, role="planner"
-        )
-        finish()
-        finish = _step("Check inbox", timings=timings, trace=trace)
-        _list_inbox_messages(agent.agent_id, beads_root=beads_root, repo_root=repo_root)
-        finish()
-        finish = _step("Check queue", timings=timings, trace=trace)
-        _list_queue_messages(beads_root=beads_root, repo_root=repo_root)
-        finish()
-        finish = _step("List draft epics", timings=timings, trace=trace)
-        draft_epics = _list_draft_epics(beads_root=beads_root, repo_root=repo_root)
-        finish()
-        finish = _step("Promote draft epic (optional)", timings=timings, trace=trace)
-        _maybe_promote_draft_epic(
-            draft_epics, beads_root=beads_root, repo_root=repo_root
-        )
-        finish()
-        git_path = config.resolve_git_path(project_config)
-        finish = _step("Resolve default branch", timings=timings, trace=trace)
-        default_branch = git.git_default_branch(repo_root, git_path=git_path)
-        if not default_branch:
-            die("failed to determine default branch for planner worktree")
-        finish(f"default branch {default_branch}")
-        provider_contexts = external_registry.resolve_external_providers(
-            project_config, repo_root
-        )
-        provider_slugs = sorted(
-            {context.provider.slug for context in provider_contexts if context.provider}
-        )
-        external_providers = ", ".join(provider_slugs) if provider_slugs else "none"
-        planner_key = f"planner-{agent.name}"
-        planner_branch = _planner_branch_name(
-            default_branch=default_branch, agent_name=agent.name
-        )
-        finish = _step("Prepare planner branch", timings=timings, trace=trace)
-        _maybe_migrate_planner_mapping(
-            project_data_dir=project_data_dir,
-            planner_key=planner_key,
-            planner_branch=planner_branch,
-            default_branch=default_branch,
-            git_path=git_path,
-        )
-        finish(planner_branch)
-        finish = _step("Ensure planner worktree", timings=timings, trace=trace)
-        worktree_path = worktrees.ensure_git_worktree(
-            project_data_dir,
-            repo_root,
-            planner_key,
-            root_branch=planner_branch,
-            git_path=git_path,
-        )
-        finish(str(worktree_path))
-        finish = _step("Sync planner worktree", timings=timings, trace=trace)
-        _sync_planner_branch(
-            worktree_path=worktree_path,
-            planner_branch=planner_branch,
-            default_branch=default_branch,
-            git_path=git_path,
-        )
-        finish()
-        skills_dir: Path | None = None
-        if project_data_dir.exists():
-            try:
-                finish = _step("Ensure skills", timings=timings, trace=trace)
-                skills_dir = skills.ensure_project_skills(project_data_dir)
-                finish(str(skills_dir))
-            except OSError:
-                skills_dir = None
-        if skills_dir is not None:
-            finish = _step("Link agent home", timings=timings, trace=trace)
-            agent_home.ensure_agent_links(
-                agent,
+    try:
+        with agents.scoped_agent_env(agent.agent_id):
+            say("Planner session")
+            finish = _step("Prime beads", timings=timings, trace=trace)
+            beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
+            finish()
+            finish = _step("Ensure planner agent bead", timings=timings, trace=trace)
+            beads.ensure_agent_bead(
+                agent.agent_id, beads_root=beads_root, cwd=repo_root, role="planner"
+            )
+            finish()
+            finish = _step("Check inbox", timings=timings, trace=trace)
+            _list_inbox_messages(
+                agent.agent_id, beads_root=beads_root, repo_root=repo_root
+            )
+            finish()
+            finish = _step("Check queue", timings=timings, trace=trace)
+            _list_queue_messages(beads_root=beads_root, repo_root=repo_root)
+            finish()
+            finish = _step("List draft epics", timings=timings, trace=trace)
+            draft_epics = _list_draft_epics(beads_root=beads_root, repo_root=repo_root)
+            finish()
+            finish = _step(
+                "Promote draft epic (optional)", timings=timings, trace=trace
+            )
+            _maybe_promote_draft_epic(
+                draft_epics, beads_root=beads_root, repo_root=repo_root
+            )
+            finish()
+            git_path = config.resolve_git_path(project_config)
+            finish = _step("Resolve default branch", timings=timings, trace=trace)
+            default_branch = git.git_default_branch(repo_root, git_path=git_path)
+            if not default_branch:
+                die("failed to determine default branch for planner worktree")
+            finish(f"default branch {default_branch}")
+            provider_contexts = external_registry.resolve_external_providers(
+                project_config, repo_root
+            )
+            provider_slugs = sorted(
+                {
+                    context.provider.slug
+                    for context in provider_contexts
+                    if context.provider
+                }
+            )
+            external_providers = ", ".join(provider_slugs) if provider_slugs else "none"
+            planner_key = f"planner-{agent.name}"
+            planner_branch = _planner_branch_name(
+                default_branch=default_branch, agent_name=agent.name
+            )
+            finish = _step("Prepare planner branch", timings=timings, trace=trace)
+            _maybe_migrate_planner_mapping(
+                project_data_dir=project_data_dir,
+                planner_key=planner_key,
+                planner_branch=planner_branch,
+                default_branch=default_branch,
+                git_path=git_path,
+            )
+            finish(planner_branch)
+            finish = _step("Ensure planner worktree", timings=timings, trace=trace)
+            worktree_path = worktrees.ensure_git_worktree(
+                project_data_dir,
+                repo_root,
+                planner_key,
+                root_branch=planner_branch,
+                git_path=git_path,
+            )
+            finish(str(worktree_path))
+            finish = _step("Sync planner worktree", timings=timings, trace=trace)
+            _sync_planner_branch(
                 worktree_path=worktree_path,
-                beads_root=beads_root,
-                skills_dir=skills_dir,
+                planner_branch=planner_branch,
+                default_branch=default_branch,
+                git_path=git_path,
             )
             finish()
-        hooks_dir = _planner_hooks_dir(agent.path)
-        finish = _step("Install read-only guardrails", timings=timings, trace=trace)
-        _ensure_planner_read_only_guardrails(
-            worktree_path, hooks_dir, git_path=git_path
-        )
-        finish()
-        planner_agents_path = agent.path / "AGENTS.md"
-        planner_template = templates.planner_template(prefer_installed_if_modified=True)
-        finish = _step("Render planner AGENTS.md", timings=timings, trace=trace)
-        planner_content = prompting.render_template(
-            planner_template,
-            {
-                "agent_id": agent.agent_id,
-                "project_root": str(project_enlistment),
-                "repo_root": str(repo_root),
-                "project_data_dir": str(project_data_dir),
-                "beads_dir": str(beads_root),
-                "beads_prefix": "at",
-                "planner_worktree": str(worktree_path),
-                "planner_branch": planner_branch,
-                "default_branch": default_branch,
-                "external_providers": external_providers,
-            },
-        )
-        finish()
-        if agent.path.exists():
-            paths.ensure_dir(planner_agents_path.parent)
-            finish = _step("Write planner AGENTS.md", timings=timings, trace=trace)
-            planner_agents_path.write_text(planner_content, encoding="utf-8")
-            finish(str(planner_agents_path))
-            finish = _step("Sync policy", timings=timings, trace=trace)
-            policy.sync_agent_home_policy(
-                agent, role=policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
+            skills_dir: Path | None = None
+            if project_data_dir.exists():
+                try:
+                    finish = _step("Ensure skills", timings=timings, trace=trace)
+                    skills_dir = skills.ensure_project_skills(project_data_dir)
+                    finish(str(skills_dir))
+                except OSError:
+                    skills_dir = None
+            if skills_dir is not None:
+                finish = _step("Link agent home", timings=timings, trace=trace)
+                agent_home.ensure_agent_links(
+                    agent,
+                    worktree_path=worktree_path,
+                    beads_root=beads_root,
+                    skills_dir=skills_dir,
+                )
+                finish()
+            hooks_dir = _planner_hooks_dir(agent.path)
+            finish = _step("Install read-only guardrails", timings=timings, trace=trace)
+            _ensure_planner_read_only_guardrails(
+                worktree_path, hooks_dir, git_path=git_path
             )
             finish()
-            updated_content = planner_agents_path.read_text(encoding="utf-8")
-            agent_home.ensure_claude_compat(agent.path, updated_content)
-        env = workspace.workspace_environment(
-            project_enlistment,
-            planner_branch,
-            worktree_path,
-            base_env=agents.agent_environment(agent.agent_id),
-        )
-        env.update(
-            external_registry.planner_provider_environment(project_config, repo_root)
-        )
-        epic_id = getattr(args, "epic_id", None)
-        if epic_id:
-            env["ATELIER_PLAN_EPIC"] = str(epic_id)
-
-        agent_spec = agents.get_agent(project_config.agent.default)
-        if agent_spec is None:
-            die(f"unsupported agent {project_config.agent.default!r}")
-        agent_options = list(project_config.agent.options.get(agent_spec.name, []))
-        hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
-        hooks.ensure_hooks_path(env, hook_path)
-        _report_timings(timings, trace=trace)
-        opening_prompt = ""
-        if agent_spec.name == "codex":
-            opening_prompt = workspace.workspace_session_identifier(
+            planner_agents_path = agent.path / "AGENTS.md"
+            planner_template = templates.planner_template(
+                prefer_installed_if_modified=True
+            )
+            finish = _step("Render planner AGENTS.md", timings=timings, trace=trace)
+            planner_content = prompting.render_template(
+                planner_template,
+                {
+                    "agent_id": agent.agent_id,
+                    "project_root": str(project_enlistment),
+                    "repo_root": str(repo_root),
+                    "project_data_dir": str(project_data_dir),
+                    "beads_dir": str(beads_root),
+                    "beads_prefix": "at",
+                    "planner_worktree": str(worktree_path),
+                    "planner_branch": planner_branch,
+                    "default_branch": default_branch,
+                    "external_providers": external_providers,
+                },
+            )
+            finish()
+            if agent.path.exists():
+                paths.ensure_dir(planner_agents_path.parent)
+                finish = _step("Write planner AGENTS.md", timings=timings, trace=trace)
+                planner_agents_path.write_text(planner_content, encoding="utf-8")
+                finish(str(planner_agents_path))
+                finish = _step("Sync policy", timings=timings, trace=trace)
+                policy.sync_agent_home_policy(
+                    agent,
+                    role=policy.ROLE_PLANNER,
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                )
+                finish()
+                updated_content = planner_agents_path.read_text(encoding="utf-8")
+                agent_home.ensure_claude_compat(agent.path, updated_content)
+            env = workspace.workspace_environment(
                 project_enlistment,
                 planner_branch,
-                f"planner-{agent.name}",
+                worktree_path,
+                base_env=agents.agent_environment(agent.agent_id),
             )
-        say(f"Starting {agent_spec.display_name} session")
-        start_cmd, start_cwd = agent_spec.build_start_command(
-            agent.path, agent_options, opening_prompt
-        )
-        if agent_spec.name == "codex":
-            result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
-            if result is None:
-                die(f"missing required command: {start_cmd[0]}")
-            if result.returncode != 0:
-                die(f"command failed: {' '.join(start_cmd)}")
-        else:
-            exec.run_command(start_cmd, cwd=start_cwd, env=env)
+            env.update(
+                external_registry.planner_provider_environment(
+                    project_config, repo_root
+                )
+            )
+            epic_id = getattr(args, "epic_id", None)
+            if epic_id:
+                env["ATELIER_PLAN_EPIC"] = str(epic_id)
+
+            agent_spec = agents.get_agent(project_config.agent.default)
+            if agent_spec is None:
+                die(f"unsupported agent {project_config.agent.default!r}")
+            agent_options = list(project_config.agent.options.get(agent_spec.name, []))
+            hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
+            hooks.ensure_hooks_path(env, hook_path)
+            _report_timings(timings, trace=trace)
+            opening_prompt = ""
+            if agent_spec.name == "codex":
+                opening_prompt = workspace.workspace_session_identifier(
+                    project_enlistment,
+                    planner_branch,
+                    f"planner-{agent.name}",
+                )
+            say(f"Starting {agent_spec.display_name} session")
+            start_cmd, start_cwd = agent_spec.build_start_command(
+                agent.path, agent_options, opening_prompt
+            )
+            if agent_spec.name == "codex":
+                result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
+                if result is None:
+                    die(f"missing required command: {start_cmd[0]}")
+                if result.returncode != 0:
+                    die(f"command failed: {' '.join(start_cmd)}")
+            else:
+                exec.run_command(start_cmd, cwd=start_cwd, env=env)
+    finally:
+        agent_home.cleanup_agent_home(agent, project_dir=project_data_dir)

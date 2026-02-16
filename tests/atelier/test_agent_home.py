@@ -118,6 +118,37 @@ def test_ensure_agent_links_creates_symlinks_or_markers() -> None:
         _assert_link_or_marker(home.path, "skills", skills)
 
 
+def test_cleanup_agent_home_removes_session_dir_and_prunes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        project_dir.mkdir(parents=True)
+        home = agent_home.resolve_agent_home(
+            project_dir,
+            ProjectConfig(),
+            role="worker",
+            session_key="p1-t2",
+        )
+        marker = home.path / "marker.txt"
+        marker.write_text("x", encoding="utf-8")
+        assert home.path.exists()
+
+        removed = agent_home.cleanup_agent_home(home, project_dir=project_dir)
+
+        assert removed is True
+        assert not home.path.exists()
+        assert not (project_dir / "agents" / "worker" / "codex").exists()
+
+
+def test_cleanup_agent_home_by_id_ignores_non_session_identity() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        project_dir.mkdir(parents=True)
+        removed = agent_home.cleanup_agent_home_by_id(
+            project_dir, "atelier/worker/codex"
+        )
+        assert removed is False
+
+
 def test_ensure_claude_compat_writes_files() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

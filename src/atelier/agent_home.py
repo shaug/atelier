@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,6 +81,44 @@ def generate_session_key() -> str:
     return f"p{os.getpid()}-t{time.time_ns()}"
 
 
+def parse_agent_identity(agent_id: str) -> tuple[str | None, str | None, str | None]:
+    """Parse atelier agent identity into role/name/session components."""
+    parts = [part for part in str(agent_id).split("/") if part]
+    if len(parts) < 3 or parts[0] != "atelier":
+        return None, None, None
+    role = parts[1]
+    name = parts[2]
+    session_key = parts[3] if len(parts) >= 4 else None
+    return role, name, session_key
+
+
+def session_pid_from_agent_id(agent_id: str) -> int | None:
+    """Extract the session PID from an agent id when present."""
+    _role, _name, session_key = parse_agent_identity(agent_id)
+    if not session_key or not session_key.startswith("p"):
+        return None
+    pid_part = session_key[1:].split("-", 1)[0]
+    if not pid_part.isdigit():
+        return None
+    return int(pid_part)
+
+
+def is_session_agent_active(agent_id: str) -> bool:
+    """Return whether a session-scoped agent appears alive."""
+    pid = session_pid_from_agent_id(agent_id)
+    if pid is None:
+        return False
+    if pid == os.getpid():
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def _agent_home_path(
     project_dir: Path, *, role: str, agent_name: str, session_key: str | None = None
 ) -> Path:
@@ -91,6 +130,85 @@ def _agent_home_path(
     if not session_key:
         return base
     return base / session_key
+
+
+def _prune_empty_agent_parents(path: Path, *, stop: Path) -> None:
+    current = path
+    while True:
+        if current == stop:
+            break
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+
+def cleanup_agent_home(agent: AgentHome, *, project_dir: Path) -> bool:
+    """Remove a session-scoped agent home and prune empty parent directories."""
+    if not agent.session_key:
+        return False
+    target = agent.path
+    if not target.exists():
+        return False
+    expected = _agent_home_path(
+        project_dir,
+        role=agent.role,
+        agent_name=agent.name,
+        session_key=agent.session_key,
+    )
+    if target != expected:
+        warn(f"refusing to remove unexpected agent path: {target}")
+        return False
+    try:
+        shutil.rmtree(target, ignore_errors=False)
+    except OSError:
+        warn(f"failed to remove agent home: {target}")
+        return False
+    _prune_empty_agent_parents(
+        target.parent, stop=paths.project_agents_dir(project_dir)
+    )
+    return True
+
+
+def cleanup_agent_home_by_id(project_dir: Path, agent_id: str) -> bool:
+    """Remove session-scoped agent home for an agent identity."""
+    home_path = session_home_path_for_agent_id(project_dir, agent_id)
+    if home_path is None:
+        return False
+    role, name, session_key = parse_agent_identity(agent_id)
+    if not role or not name or not session_key:
+        return False
+    normalized = _normalize_session_key(session_key)
+    if not normalized:
+        return False
+    agent = AgentHome(
+        name=_normalize_agent_name(name),
+        agent_id=agent_id,
+        role=_normalize_agent_name(role),
+        path=home_path,
+        session_key=normalized,
+    )
+    return cleanup_agent_home(agent, project_dir=project_dir)
+
+
+def session_home_path_for_agent_id(project_dir: Path, agent_id: str) -> Path | None:
+    """Return the session home path for a session-scoped agent id."""
+    role, name, session_key = parse_agent_identity(agent_id)
+    if not role or not name or not session_key:
+        return None
+    normalized = _normalize_session_key(session_key)
+    if not normalized:
+        return None
+    return _agent_home_path(
+        project_dir,
+        role=role,
+        agent_name=name,
+        session_key=normalized,
+    )
 
 
 def _metadata_path(home_dir: Path) -> Path:

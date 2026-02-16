@@ -1937,38 +1937,62 @@ def start_worker(args: object) -> None:
     run_mode = _normalize_run_mode(getattr(args, "run_mode", None))
     dry_run = bool(getattr(args, "dry_run", False))
     session_key = agent_home.generate_session_key()
-    if bool(getattr(args, "queue", False)):
-        summary = _run_worker_once(
-            args, mode=mode, dry_run=dry_run, session_key=session_key
+    cleanup_agent: agent_home.AgentHome | None = None
+    cleanup_project_dir: Path | None = None
+    if not dry_run:
+        (
+            cleanup_project_root,
+            cleanup_project_config,
+            _cleanup_enlistment,
+            _cleanup_repo_root,
+        ) = resolve_current_project_with_repo_root()
+        cleanup_project_dir = config.resolve_project_data_dir(
+            cleanup_project_root, cleanup_project_config
         )
-        _report_worker_summary(summary, dry_run=dry_run)
-        return
-    if dry_run:
+        cleanup_agent = agent_home.preview_agent_home(
+            cleanup_project_dir,
+            cleanup_project_config,
+            role="worker",
+            session_key=session_key,
+        )
+    try:
+        if bool(getattr(args, "queue", False)):
+            summary = _run_worker_once(
+                args, mode=mode, dry_run=dry_run, session_key=session_key
+            )
+            _report_worker_summary(summary, dry_run=dry_run)
+            return
+        if dry_run:
+            while True:
+                summary = _run_worker_once(
+                    args, mode=mode, dry_run=True, session_key=session_key
+                )
+                _report_worker_summary(summary, dry_run=True)
+                if run_mode != "watch":
+                    return
+                interval = _watch_interval_seconds()
+                _dry_run_log(
+                    f"Watching for updates (sleeping {interval}s before next check)."
+                )
+                time.sleep(interval)
+
         while True:
             summary = _run_worker_once(
-                args, mode=mode, dry_run=True, session_key=session_key
+                args, mode=mode, dry_run=False, session_key=session_key
             )
-            _report_worker_summary(summary, dry_run=True)
-            if run_mode != "watch":
+            _report_worker_summary(summary, dry_run=False)
+            if run_mode == "once":
                 return
-            interval = _watch_interval_seconds()
-            _dry_run_log(
-                f"Watching for updates (sleeping {interval}s before next check)."
-            )
-            time.sleep(interval)
-
-    while True:
-        summary = _run_worker_once(
-            args, mode=mode, dry_run=False, session_key=session_key
-        )
-        _report_worker_summary(summary, dry_run=False)
-        if run_mode == "once":
+            if summary.started:
+                continue
+            if run_mode == "watch":
+                interval = _watch_interval_seconds()
+                say(f"No ready work; watching for updates (sleeping {interval}s).")
+                time.sleep(interval)
+                continue
             return
-        if summary.started:
-            continue
-        if run_mode == "watch":
-            interval = _watch_interval_seconds()
-            say(f"No ready work; watching for updates (sleeping {interval}s).")
-            time.sleep(interval)
-            continue
-        return
+    finally:
+        if cleanup_agent is not None and cleanup_project_dir is not None:
+            agent_home.cleanup_agent_home(
+                cleanup_agent, project_dir=cleanup_project_dir
+            )

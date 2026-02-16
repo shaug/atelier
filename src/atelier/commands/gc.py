@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from .. import beads, config, messages, worktrees
+from .. import agent_home, beads, config, messages, worktrees
 from ..io import confirm, say, warn
 from .resolve import resolve_current_project_with_repo_root
 
@@ -382,6 +382,61 @@ def _gc_message_retention(
     return actions
 
 
+def _gc_agent_homes(
+    *,
+    project_dir: Path,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    actions: list[GcAction] = []
+    agent_issues = beads.run_bd_json(
+        ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
+    )
+    epics = beads.run_bd_json(
+        ["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root
+    )
+    active_assignees = {
+        str(epic.get("assignee"))
+        for epic in epics
+        if isinstance(epic.get("assignee"), str) and str(epic.get("assignee")).strip()
+    }
+    for issue in agent_issues:
+        description = issue.get("description")
+        fields = beads.parse_description_fields(
+            description if isinstance(description, str) else ""
+        )
+        agent_id = fields.get("agent_id") or issue.get("title") or ""
+        if not isinstance(agent_id, str) or not agent_id.strip():
+            continue
+        agent_id = agent_id.strip()
+        if agent_home.session_pid_from_agent_id(agent_id) is None:
+            continue
+        if agent_home.is_session_agent_active(agent_id):
+            continue
+        issue_id = issue.get("id")
+        hook_bead = None
+        if isinstance(issue_id, str) and issue_id:
+            hook_bead = beads.get_agent_hook(
+                issue_id, beads_root=beads_root, cwd=repo_root
+            )
+        if not hook_bead:
+            hook_bead = fields.get("hook_bead")
+        if hook_bead:
+            continue
+        if agent_id in active_assignees:
+            continue
+        home_path = agent_home.session_home_path_for_agent_id(project_dir, agent_id)
+        if home_path is None or not home_path.exists():
+            continue
+        description_text = f"Remove stale agent home for {agent_id}"
+
+        def _apply_remove(agent: str = agent_id) -> None:
+            agent_home.cleanup_agent_home_by_id(project_dir, agent)
+
+        actions.append(GcAction(description=description_text, apply=_apply_remove))
+    return actions
+
+
 def gc(args: object) -> None:
     """Garbage collect stale hooks and orphaned worktrees."""
     project_root, project_config, _enlistment, repo_root = (
@@ -426,6 +481,13 @@ def gc(args: object) -> None:
         )
     )
     actions.extend(_gc_message_retention(beads_root=beads_root, repo_root=repo_root))
+    actions.extend(
+        _gc_agent_homes(
+            project_dir=project_data_dir,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
 
     if not actions:
         say("No GC actions needed.")
