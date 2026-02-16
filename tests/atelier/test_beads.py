@@ -130,6 +130,34 @@ def test_claim_epic_updates_assignee_and_status() -> None:
     assert "hooked" in called_args
 
 
+def test_claim_epic_allows_expected_takeover() -> None:
+    issue = {"id": "atelier-9", "labels": [], "assignee": "agent-old"}
+    updated = {"id": "atelier-9", "labels": ["at:hooked"], "assignee": "agent-new"}
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args and args[0] == "show":
+            return [updated]
+        return [issue]
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command") as run_command,
+    ):
+        beads.claim_epic(
+            "atelier-9",
+            "agent-new",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            allow_takeover_from="agent-old",
+        )
+
+    called_args = run_command.call_args.args[0]
+    assert "--assignee" in called_args
+    assert "agent-new" in called_args
+
+
 def test_set_agent_hook_updates_description() -> None:
     issue = {"id": "atelier-agent", "description": "role: worker\n"}
     captured: dict[str, str] = {}

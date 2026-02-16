@@ -47,6 +47,7 @@ class StartupContractResult:
     epic_id: str | None
     should_exit: bool
     reason: str
+    reassign_from: str | None = None
 
 
 @dataclass(frozen=True)
@@ -279,6 +280,64 @@ def _sort_by_recency(issues: list[dict[str, object]]) -> list[dict[str, object]]
         return sentinel
 
     return sorted(issues, key=key, reverse=True)
+
+
+def _agent_family_id(agent_id: str) -> str:
+    parts = [part for part in str(agent_id).split("/") if part]
+    if len(parts) >= 3 and parts[0] == "atelier":
+        return "/".join(parts[:3])
+    return str(agent_id)
+
+
+def _agent_session_pid(agent_id: str) -> int | None:
+    parts = [part for part in str(agent_id).split("/") if part]
+    if len(parts) < 4:
+        return None
+    token = parts[3]
+    if not token.startswith("p"):
+        return None
+    pid_part = token[1:].split("-", 1)[0]
+    if not pid_part.isdigit():
+        return None
+    return int(pid_part)
+
+
+def _is_agent_session_active(agent_id: str) -> bool:
+    pid = _agent_session_pid(agent_id)
+    if pid is None:
+        return False
+    if pid == os.getpid():
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _stale_family_assigned_epics(
+    issues: list[dict[str, object]], *, agent_id: str
+) -> list[dict[str, object]]:
+    family = _agent_family_id(agent_id)
+    candidates: list[dict[str, object]] = []
+    for issue in issues:
+        status = str(issue.get("status") or "")
+        if not _is_eligible_status(status, allow_hooked=True):
+            continue
+        labels = _issue_labels(issue)
+        if "at:draft" in labels:
+            continue
+        assignee = issue.get("assignee")
+        if not isinstance(assignee, str) or not assignee or assignee == agent_id:
+            continue
+        if _agent_family_id(assignee) != family:
+            continue
+        if _is_agent_session_active(assignee):
+            continue
+        candidates.append(issue)
+    return _sort_by_created_at(candidates)
 
 
 def _list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
@@ -1232,6 +1291,24 @@ def _run_startup_contract(
                 epic_id=selected_epic, should_exit=False, reason="assigned_epic"
             )
 
+    stale_assigned = _stale_family_assigned_epics(issues, agent_id=agent_id)
+    if stale_assigned:
+        issue = stale_assigned[0]
+        candidate = issue.get("id")
+        previous_assignee = issue.get("assignee")
+        if candidate and isinstance(previous_assignee, str) and previous_assignee:
+            selected_epic = str(candidate)
+            say(
+                "Reclaiming stale epic assignment: "
+                f"{selected_epic} (from {previous_assignee})"
+            )
+            return StartupContractResult(
+                epic_id=selected_epic,
+                should_exit=False,
+                reason="stale_assignee_epic",
+                reassign_from=previous_assignee,
+            )
+
     if _check_inbox_before_claim(agent_id, beads_root=beads_root, repo_root=repo_root):
         if dry_run:
             _dry_run_log("Inbox has unread messages; would exit before claiming work.")
@@ -1397,11 +1474,35 @@ def _run_worker_once(
             _dry_run_log(
                 f"Would claim epic {selected_epic!r} for agent {agent.agent_id!r}."
             )
+            if startup_result.reassign_from:
+                _dry_run_log(
+                    "Would reclaim stale epic assignment from "
+                    f"{startup_result.reassign_from!r}."
+                )
         else:
             say(f"Selected epic: {selected_epic}")
             epic_issue = beads.claim_epic(
-                selected_epic, agent.agent_id, beads_root=beads_root, cwd=repo_root
+                selected_epic,
+                agent.agent_id,
+                beads_root=beads_root,
+                cwd=repo_root,
+                allow_takeover_from=startup_result.reassign_from,
             )
+            if startup_result.reassign_from:
+                previous_agent = beads.find_agent_bead(
+                    startup_result.reassign_from,
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                )
+                previous_agent_id = (
+                    str(previous_agent.get("id"))
+                    if previous_agent and previous_agent.get("id")
+                    else ""
+                )
+                if previous_agent_id:
+                    beads.clear_agent_hook(
+                        previous_agent_id, beads_root=beads_root, cwd=repo_root
+                    )
         finish_step()
         finish_step = _step("Resolve root branch", timings=timings, trace=trace)
         root_branch_value = beads.extract_workspace_root_branch(epic_issue)

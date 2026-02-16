@@ -1035,6 +1035,7 @@ def claim_epic(
     *,
     beads_root: Path,
     cwd: Path,
+    allow_takeover_from: str | None = None,
 ) -> dict[str, object]:
     """Claim an epic by assigning it to the agent."""
     issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
@@ -1045,7 +1046,11 @@ def claim_epic(
     if "at:draft" in labels:
         die(f"epic {epic_id} is marked as draft")
     existing_assignee = issue.get("assignee")
-    if existing_assignee and existing_assignee != agent_id:
+    if (
+        existing_assignee
+        and existing_assignee != agent_id
+        and existing_assignee != allow_takeover_from
+    ):
         die(f"epic {epic_id} already has an assignee")
     run_bd_command(
         [

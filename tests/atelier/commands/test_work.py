@@ -1297,6 +1297,41 @@ def test_work_resumes_assigned_epic_before_inbox() -> None:
     assert claimed == ["atelier-epic-hooked"]
 
 
+def test_startup_contract_reclaims_stale_same_family_epic() -> None:
+    epics = [
+        {
+            "id": "atelier-epic-stale",
+            "title": "Stale Epic",
+            "status": "hooked",
+            "labels": ["at:epic", "at:hooked"],
+            "assignee": "atelier/worker/agent/p999999-t1",
+            "created_at": "2026-02-01T00:00:00+00:00",
+        }
+    ]
+
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", return_value=epics),
+        patch("atelier.commands.work.os.kill", side_effect=ProcessLookupError),
+        patch("atelier.commands.work.say"),
+    ):
+        result = work_cmd._run_startup_contract(
+            agent_id="atelier/worker/agent/p123-t2",
+            agent_bead_id=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            mode="auto",
+            explicit_epic_id=None,
+            queue_only=False,
+            dry_run=False,
+            assume_yes=True,
+        )
+
+    assert result.should_exit is False
+    assert result.reason == "stale_assignee_epic"
+    assert result.epic_id == "atelier-epic-stale"
+    assert result.reassign_from == "atelier/worker/agent/p999999-t1"
+
+
 def test_work_prompts_for_queue_before_claiming() -> None:
     queued = [
         {"id": "msg-1", "title": "Queue item", "queue": "triage"},
