@@ -13,6 +13,7 @@ description: >-
 ## Inputs
 
 - operation: `publish` | `persist`.
+- changeset_id: changeset bead id for metadata updates.
 - worktree_path: path to the worktree (default: `.`).
 - repo_path: path to the repo (default: `<worktree_path>`).
 - root_branch: epic root branch (from bead metadata).
@@ -56,6 +57,13 @@ description: >-
      - Integrate the rebased work branch onto `root_branch` per `branch_history`
        (rebase/merge/squash).
      - Push the updated `root_branch`.
+1. Persist integration metadata on the changeset bead:
+   - If integration occurred (non-PR flow) or a PR merged (PR flow), set
+     `changeset.integrated_sha` to the integrated commit SHA in the bead
+     description using `bd update --body-file ...`.
+   - Do not set `changeset.integrated_sha` for `persist` runs that did not
+     integrate or merge.
+   - If the integrated SHA cannot be determined, send `NEEDS-DECISION` and stop.
 1. Verify results using read-only commands and git:
    - `atelier status --format=json`
    - `scripts/ensure_clean_tree.sh <repo_path>`
@@ -65,6 +73,7 @@ description: >-
 - Required checks succeeded (or explicit user override recorded).
 - Working tree is clean before and after mutations.
 - Branch/PR state matches the project config-derived plan and PR strategy.
+- `changeset.integrated_sha` is present when integration/merge occurred.
 - Repo is clean after publish/persist.
 
 ## Failure paths

@@ -27,6 +27,14 @@ Branch mode mapping:
   - **publish/persist**: commit, integrate onto the epic `root_branch` per
     `branch_history`, then push the root branch.
 
+Changeset metadata:
+
+- After a successful integration or merged PR, update the changeset bead field
+  `changeset.integrated_sha` to the integrated commit SHA.
+- For non-integrating persist runs, do not set `changeset.integrated_sha`.
+- If you cannot determine the integrated SHA deterministically, send
+  `NEEDS-DECISION` and stop.
+
 Publishing is complete only when the branch required by the plan is pushed.
 
 If a push is rejected because the root branch moved, update your local root

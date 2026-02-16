@@ -2353,6 +2353,63 @@ def test_finalize_blocks_merged_without_integration_signal() -> None:
     assert len(sent_messages) == 1
 
 
+def test_finalize_accepts_merged_with_graph_integration_signal() -> None:
+    run_commands: list[list[str]] = []
+
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset", "cs:merged"],
+                    "description": (
+                        "changeset.root_branch: feat/root\n"
+                        "changeset.work_branch: feat/root-atelier-epic.1\n"
+                    ),
+                }
+            ],
+        ),
+        patch(
+            "atelier.commands.work.beads.list_descendant_changesets", return_value=[]
+        ),
+        patch(
+            "atelier.commands.work.beads.run_bd_command",
+            side_effect=lambda args, **kwargs: run_commands.append(list(args)),
+        ),
+        patch("atelier.commands.work.beads.close_epic_if_complete") as close_epic,
+        patch(
+            "atelier.commands.work.git.git_ref_exists",
+            side_effect=lambda repo, ref: ref
+            in {
+                "refs/heads/feat/root",
+                "refs/heads/feat/root-atelier-epic.1",
+            },
+        ),
+        patch("atelier.commands.work.git.git_is_ancestor", return_value=True),
+        patch("atelier.commands.work.git.git_rev_parse", return_value="abc123"),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_complete"
+    assert any(
+        args[:2] == ["update", "atelier-epic.1"] and "--body-file" in args
+        for args in run_commands
+    )
+    close_epic.assert_called_once()
+
+
 def test_work_does_not_mark_in_progress_before_worktree_prepared() -> None:
     epics = [
         {

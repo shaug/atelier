@@ -795,28 +795,59 @@ def _has_blocking_messages(
     return False
 
 
-def _changeset_integration_proven(
+def _branch_ref_for_lookup(repo_root: Path, branch: str) -> str | None:
+    normalized = branch.strip()
+    if not normalized:
+        return None
+    if git.git_ref_exists(repo_root, f"refs/heads/{normalized}"):
+        return normalized
+    if git.git_ref_exists(repo_root, f"refs/remotes/origin/{normalized}"):
+        return f"origin/{normalized}"
+    return None
+
+
+def _changeset_integration_signal(
     issue: dict[str, object],
     *,
     repo_slug: str | None,
     repo_root: Path,
-) -> bool:
+) -> tuple[bool, str | None]:
     description = issue.get("description")
     fields = beads.parse_description_fields(
         description if isinstance(description, str) else ""
     )
     integrated_sha = fields.get("changeset.integrated_sha")
     if integrated_sha and integrated_sha.strip().lower() != "null":
-        return True
+        return True, integrated_sha.strip()
+
+    root_branch = fields.get("changeset.root_branch")
     work_branch = fields.get("changeset.work_branch")
-    if not repo_slug or not work_branch or work_branch.strip().lower() == "null":
-        return False
-    branch = work_branch.strip()
-    if git.git_ref_exists(repo_root, f"refs/remotes/origin/{branch}"):
-        pr_payload = prs.read_github_pr_status(repo_slug, branch)
+
+    # PR merge signal (review flows).
+    if repo_slug and work_branch and work_branch.strip().lower() != "null":
+        pr_payload = prs.read_github_pr_status(repo_slug, work_branch.strip())
         if pr_payload and pr_payload.get("mergedAt"):
-            return True
-    return False
+            return True, None
+
+    # Local git graph signal (non-review fallback).
+    if not root_branch or not work_branch:
+        return False, None
+    if root_branch.strip().lower() == "null" or work_branch.strip().lower() == "null":
+        return False, None
+    root_ref = _branch_ref_for_lookup(repo_root, root_branch)
+    work_ref = _branch_ref_for_lookup(repo_root, work_branch)
+    if not root_ref or not work_ref:
+        return False, None
+
+    is_ancestor = git.git_is_ancestor(repo_root, work_ref, root_ref)
+    if is_ancestor is True:
+        return True, git.git_rev_parse(repo_root, root_ref)
+
+    fully_applied = git.git_branch_fully_applied(repo_root, root_ref, work_ref)
+    if fully_applied is True:
+        return True, git.git_rev_parse(repo_root, root_ref)
+
+    return False, None
 
 
 def _finalize_changeset(
@@ -898,28 +929,38 @@ def _finalize_changeset(
             return FinalizeResult(
                 continue_running=True, reason="changeset_children_pending"
             )
-        if "cs:merged" in labels and not _changeset_integration_proven(
-            issue, repo_slug=repo_slug, repo_root=repo_root
-        ):
-            _mark_changeset_blocked(
-                changeset_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                reason="missing integration signal for cs:merged",
+        if "cs:merged" in labels:
+            integration_proven, integrated_sha = _changeset_integration_signal(
+                issue, repo_slug=repo_slug, repo_root=repo_root
             )
-            _send_planner_notification(
-                subject=f"NEEDS-DECISION: Missing integration signal ({changeset_id})",
-                body="Changeset is labeled cs:merged but no integration signal "
-                "(changeset.integrated_sha or merged PR) was found.",
-                agent_id=agent_id,
-                thread_id=changeset_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                dry_run=False,
-            )
-            return FinalizeResult(
-                continue_running=False, reason="changeset_blocked_missing_integration"
-            )
+            if not integration_proven:
+                _mark_changeset_blocked(
+                    changeset_id,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    reason="missing integration signal for cs:merged",
+                )
+                _send_planner_notification(
+                    subject=f"NEEDS-DECISION: Missing integration signal ({changeset_id})",
+                    body="Changeset is labeled cs:merged but no integration signal "
+                    "(changeset.integrated_sha or merged PR) was found.",
+                    agent_id=agent_id,
+                    thread_id=changeset_id,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    dry_run=False,
+                )
+                return FinalizeResult(
+                    continue_running=False,
+                    reason="changeset_blocked_missing_integration",
+                )
+            if integrated_sha and integrated_sha.strip():
+                beads.update_changeset_integrated_sha(
+                    changeset_id,
+                    integrated_sha.strip(),
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                )
         _mark_changeset_closed(changeset_id, beads_root=beads_root, repo_root=repo_root)
         _close_completed_container_changesets(
             epic_id, beads_root=beads_root, repo_root=repo_root
