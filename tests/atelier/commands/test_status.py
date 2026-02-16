@@ -224,3 +224,88 @@ def test_status_includes_changeset_signals() -> None:
         assert details[0]["lifecycle_state"] == "draft-pr"
         assert details[0]["pr_allowed"] is True
         assert details[0]["pr_gate_reason"] == "no-parent"
+
+
+def test_status_marks_stale_sessions_and_reclaimable_epics() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        project_config = config.ProjectConfig.model_validate(
+            {
+                "project": {
+                    "enlistment": str(repo_root),
+                    "origin": NORMALIZED_ORIGIN,
+                    "repo_url": RAW_ORIGIN,
+                }
+            }
+        )
+        epic = {
+            "id": "epic-stale",
+            "title": "Stale epic",
+            "status": "hooked",
+            "assignee": "atelier/worker/codex/p424242-t1",
+            "labels": ["at:epic", "at:hooked"],
+        }
+        agent = {
+            "id": "agent-stale",
+            "title": "atelier/worker/codex/p424242-t1",
+            "labels": ["at:agent"],
+            "description": (
+                "agent_id: atelier/worker/codex/p424242-t1\n"
+                "hook_bead: epic-stale\n"
+                "role: worker\n"
+            ),
+        }
+
+        def fake_run_bd_json(
+            args: list[str], *, beads_root: Path, cwd: Path
+        ) -> list[dict[str, object]]:
+            if args[:3] == ["list", "--label", "at:epic"]:
+                return [epic]
+            if args[:3] == ["list", "--label", "at:agent"]:
+                return [agent]
+            if args[:3] == ["list", "--label", "at:message"]:
+                return []
+            if args and args[0] == "list" and "--parent" in args:
+                return []
+            if args and args[0] == "ready" and "--parent" in args:
+                return []
+            return []
+
+        with (
+            patch(
+                "atelier.commands.status.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, str(repo_root), repo_root),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_command",
+                return_value=DummyResult(),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_json",
+                side_effect=fake_run_bd_json,
+            ),
+            patch(
+                "atelier.commands.status.beads.get_agent_hook",
+                return_value="epic-stale",
+            ),
+            patch("atelier.commands.status.os.kill", side_effect=ProcessLookupError),
+        ):
+            buffer = io.StringIO()
+            with patch("sys.stdout", buffer):
+                status_cmd(SimpleNamespace(format="json"))
+
+        payload = json.loads(buffer.getvalue())
+        assert payload["counts"]["agents_stale"] == 1
+        assert payload["counts"]["epics_reclaimable"] == 1
+        agent_payload = payload["agents"][0]
+        assert agent_payload["session_pid"] == 424242
+        assert agent_payload["session_state"] == "stale"
+        assert agent_payload["reclaimable"] is True
+        epic_payload = payload["epics"][0]
+        assert epic_payload["assignee_session_state"] == "stale"
+        assert epic_payload["reclaimable"] is True

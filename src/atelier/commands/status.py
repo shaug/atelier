@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from rich import box
@@ -37,7 +38,7 @@ def status(args: object) -> None:
         ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
     )
 
-    agents, hook_map = _build_agent_payloads(
+    agents, hook_map, agent_index = _build_agent_payloads(
         agent_issues, beads_root=beads_root, repo_root=repo_root
     )
     origin = project_config.project.origin or project_config.project.repo_url
@@ -49,6 +50,7 @@ def status(args: object) -> None:
         beads_root=beads_root,
         repo_root=repo_root,
         repo_slug=repo_slug,
+        agent_index=agent_index,
     )
     queues = _build_queue_payloads(
         beads_root=beads_root,
@@ -85,9 +87,14 @@ def _build_agent_payloads(
     *,
     beads_root: Path,
     repo_root: Path,
-) -> tuple[list[dict[str, object]], dict[str, list[str]]]:
+) -> tuple[
+    list[dict[str, object]],
+    dict[str, list[str]],
+    dict[str, dict[str, object]],
+]:
     payloads: list[dict[str, object]] = []
     hook_map: dict[str, list[str]] = {}
+    agent_index: dict[str, dict[str, object]] = {}
     for issue in issues:
         description = issue.get("description")
         fields = beads.parse_description_fields(
@@ -108,16 +115,28 @@ def _build_agent_payloads(
             hook_bead = fields.get("hook_bead")
         heartbeat_at = fields.get("heartbeat_at")
         labels = _issue_labels(issue)
+        family_id = _agent_family_id(agent_id)
+        session_key = _agent_session_key(agent_id)
+        session_pid = _agent_session_pid(agent_id)
+        session_state = _agent_session_state(agent_id)
+        reclaimable = session_state == "stale"
         payload = {
             "id": issue.get("id"),
             "title": issue.get("title"),
             "agent_id": agent_id,
+            "family_id": family_id,
             "role": role,
             "hook_bead": hook_bead,
             "heartbeat_at": heartbeat_at,
+            "session_key": session_key,
+            "session_pid": session_pid,
+            "session_state": session_state,
+            "reclaimable": reclaimable,
             "labels": labels,
         }
         payloads.append(payload)
+        if isinstance(agent_id, str) and agent_id:
+            agent_index[agent_id] = payload
         if (
             isinstance(hook_bead, str)
             and hook_bead
@@ -125,7 +144,7 @@ def _build_agent_payloads(
             and agent_id
         ):
             hook_map.setdefault(hook_bead, []).append(agent_id)
-    return payloads, hook_map
+    return payloads, hook_map, agent_index
 
 
 def _build_epic_payloads(
@@ -136,6 +155,7 @@ def _build_epic_payloads(
     beads_root: Path,
     repo_root: Path,
     repo_slug: str | None,
+    agent_index: dict[str, dict[str, object]],
 ) -> list[dict[str, object]]:
     payloads: list[dict[str, object]] = []
     for issue in issues:
@@ -177,12 +197,20 @@ def _build_epic_payloads(
         )
         summary = beads.summarize_changesets(changesets, ready=ready_changesets)
         changeset_counts = summary.as_dict()
+        assignee = _normalize_assignee(issue.get("assignee"))
+        assignee_session_state, assignee_session_pid = _assignee_session_status(
+            assignee, agent_index=agent_index
+        )
+        reclaimable = assignee_session_state == "stale"
         payloads.append(
             {
                 "id": epic_id,
                 "title": issue.get("title"),
                 "status": issue.get("status"),
-                "assignee": _normalize_assignee(issue.get("assignee")),
+                "assignee": assignee,
+                "assignee_session_state": assignee_session_state,
+                "assignee_session_pid": assignee_session_pid,
+                "reclaimable": reclaimable,
                 "labels": labels,
                 "root_branch": root_branch,
                 "pr_strategy": fields.get("workspace.pr_strategy") or None,
@@ -315,6 +343,67 @@ def _normalize_assignee(value: object) -> str | None:
     return None
 
 
+def _agent_family_id(agent_id: str) -> str:
+    parts = [part for part in str(agent_id).split("/") if part]
+    if len(parts) >= 3 and parts[0] == "atelier":
+        return "/".join(parts[:3])
+    return str(agent_id)
+
+
+def _agent_session_key(agent_id: str) -> str | None:
+    parts = [part for part in str(agent_id).split("/") if part]
+    if len(parts) < 4 or parts[0] != "atelier":
+        return None
+    return parts[3]
+
+
+def _agent_session_pid(agent_id: str) -> int | None:
+    session_key = _agent_session_key(agent_id)
+    if not session_key or not session_key.startswith("p"):
+        return None
+    pid_part = session_key[1:].split("-", 1)[0]
+    if not pid_part.isdigit():
+        return None
+    return int(pid_part)
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid == os.getpid():
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _agent_session_state(agent_id: str) -> str:
+    session_key = _agent_session_key(agent_id)
+    if not session_key:
+        return "legacy"
+    pid = _agent_session_pid(agent_id)
+    if pid is None:
+        return "unknown"
+    return "live" if _pid_is_alive(pid) else "stale"
+
+
+def _assignee_session_status(
+    assignee: str | None,
+    *,
+    agent_index: dict[str, dict[str, object]],
+) -> tuple[str | None, int | None]:
+    if not assignee:
+        return None, None
+    known = agent_index.get(assignee)
+    if known is not None:
+        state = known.get("session_state")
+        pid = known.get("session_pid")
+        return str(state) if state else None, int(pid) if isinstance(pid, int) else None
+    return _agent_session_state(assignee), _agent_session_pid(assignee)
+
+
 def _issue_labels(issue: dict[str, object]) -> list[str]:
     labels = issue.get("labels")
     if not isinstance(labels, list):
@@ -339,11 +428,17 @@ def _status_counts(
             ready_changesets += int(changesets.get("ready", 0))
     queue_total = sum(int(queue.get("total", 0)) for queue in queues)
     queue_claimed = sum(int(queue.get("claimed", 0)) for queue in queues)
+    stale_agents = sum(
+        1 for agent in agents if str(agent.get("session_state") or "") == "stale"
+    )
+    reclaimable_epics = sum(1 for epic in epics if bool(epic.get("reclaimable")))
     return {
         "epics": len(epics),
         "agents": len(agents),
+        "agents_stale": stale_agents,
         "changesets": total_changesets,
         "changesets_ready": ready_changesets,
+        "epics_reclaimable": reclaimable_epics,
         "queues": len(queues),
         "queue_messages": queue_total,
         "queue_claimed": queue_claimed,
@@ -395,8 +490,12 @@ def _render_status(
     overview.add_row("Beads root", _display_value(project_info.get("beads_root")))
     overview.add_row("Epics", _display_value(counts.get("epics")))
     overview.add_row("Agents", _display_value(counts.get("agents")))
+    overview.add_row("Stale agents", _display_value(counts.get("agents_stale")))
     overview.add_row("Changesets", _display_value(counts.get("changesets")))
     overview.add_row("Ready changesets", _display_value(counts.get("changesets_ready")))
+    overview.add_row(
+        "Reclaimable epics", _display_value(counts.get("epics_reclaimable"))
+    )
     overview.add_row("Queues", _display_value(counts.get("queues")))
     overview.add_row("Queued messages", _display_value(counts.get("queue_messages")))
     overview.add_row("Claimed messages", _display_value(counts.get("queue_claimed")))
@@ -407,6 +506,8 @@ def _render_status(
         table.add_column("Epic", no_wrap=True)
         table.add_column("Status", no_wrap=True)
         table.add_column("Assignee", no_wrap=True)
+        table.add_column("Session", no_wrap=True)
+        table.add_column("Reclaim", no_wrap=True)
         table.add_column("Root", no_wrap=True)
         table.add_column("PR Strategy", no_wrap=True)
         table.add_column("Hooked by", no_wrap=True)
@@ -430,6 +531,8 @@ def _render_status(
                 str(epic.get("id") or ""),
                 _display_value(epic.get("status")),
                 _display_value(epic.get("assignee")),
+                _display_value(epic.get("assignee_session_state")),
+                _display_value(epic.get("reclaimable")),
                 _display_value(epic.get("root_branch")),
                 _display_value(epic.get("pr_strategy")),
                 hooked_by_display or "-",
@@ -444,12 +547,20 @@ def _render_status(
         table = Table(title="Agents", box=box.SIMPLE)
         table.add_column("Agent", no_wrap=True)
         table.add_column("Role", no_wrap=True)
+        table.add_column("Session", no_wrap=True)
+        table.add_column("PID", no_wrap=True)
+        table.add_column("State", no_wrap=True)
+        table.add_column("Reclaim", no_wrap=True)
         table.add_column("Hook", no_wrap=True)
         table.add_column("Heartbeat", no_wrap=True)
         for agent in agents:
             table.add_row(
                 _display_value(agent.get("agent_id")),
                 _display_value(agent.get("role")),
+                _display_value(agent.get("session_key")),
+                _display_value(agent.get("session_pid")),
+                _display_value(agent.get("session_state")),
+                _display_value(agent.get("reclaimable")),
                 _display_value(agent.get("hook_bead")),
                 _display_value(agent.get("heartbeat_at")),
             )
