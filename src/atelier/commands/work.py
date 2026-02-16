@@ -70,6 +70,31 @@ class FinalizeResult:
     reason: str
 
 
+def _normalize_branch_value(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or cleaned.lower() == "null":
+        return None
+    return cleaned
+
+
+def _extract_changeset_root_branch(issue: dict[str, object]) -> str | None:
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    return _normalize_branch_value(fields.get("changeset.root_branch"))
+
+
+def _extract_workspace_parent_branch(issue: dict[str, object]) -> str | None:
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    return _normalize_branch_value(fields.get("workspace.parent_branch"))
+
+
 def _dry_run_log(message: str) -> None:
     say(f"DRY-RUN: {message}")
 
@@ -980,6 +1005,226 @@ def _changeset_integration_signal(
     return False, None
 
 
+def _epic_ready_to_finalize(epic_id: str, *, beads_root: Path, repo_root: Path) -> bool:
+    issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
+    if not issues:
+        return False
+    issue = issues[0]
+    labels = _issue_labels(issue)
+    if "at:changeset" in labels and ("cs:merged" in labels or "cs:abandoned" in labels):
+        return True
+    summary = beads.epic_changeset_summary(
+        epic_id, beads_root=beads_root, cwd=repo_root
+    )
+    return summary.ready_to_close
+
+
+def _ensure_local_branch(
+    branch: str, *, repo_root: Path, git_path: str | None = None
+) -> bool:
+    branch_name = branch.strip()
+    if not branch_name:
+        return False
+    if git.git_ref_exists(repo_root, f"refs/heads/{branch_name}", git_path=git_path):
+        return True
+    if not git.git_ref_exists(
+        repo_root, f"refs/remotes/origin/{branch_name}", git_path=git_path
+    ):
+        return False
+    result = exec.try_run_command(
+        git.git_command(
+            [
+                "-C",
+                str(repo_root),
+                "branch",
+                branch_name,
+                f"origin/{branch_name}",
+            ],
+            git_path=git_path,
+        )
+    )
+    return bool(result and result.returncode == 0)
+
+
+def _integrate_epic_root_to_parent(
+    *,
+    root_branch: str,
+    parent_branch: str,
+    history: str,
+    repo_root: Path,
+    git_path: str | None = None,
+) -> tuple[bool, str | None, str | None]:
+    root = root_branch.strip()
+    parent = parent_branch.strip()
+    if not root or not parent:
+        return False, None, "missing root/parent branch metadata"
+    if parent == root:
+        return True, git.git_rev_parse(repo_root, root, git_path=git_path), None
+    if history != "rebase":
+        return (
+            False,
+            None,
+            "epic finalization only supports branch.history=rebase for now",
+        )
+    if not _ensure_local_branch(root, repo_root=repo_root, git_path=git_path):
+        return False, None, f"root branch {root!r} not found"
+    if not _ensure_local_branch(parent, repo_root=repo_root, git_path=git_path):
+        return False, None, f"parent branch {parent!r} not found"
+
+    parent_head = git.git_rev_parse(repo_root, parent, git_path=git_path)
+    if not parent_head:
+        return False, None, f"failed to resolve parent branch head for {parent!r}"
+
+    is_ancestor = git.git_is_ancestor(repo_root, root, parent, git_path=git_path)
+    if is_ancestor is True:
+        return True, parent_head, None
+    fully_applied = git.git_branch_fully_applied(
+        repo_root, parent, root, git_path=git_path
+    )
+    if fully_applied is True:
+        return True, parent_head, None
+
+    rebase_result = exec.try_run_command(
+        git.git_command(
+            ["-C", str(repo_root), "rebase", parent, root], git_path=git_path
+        )
+    )
+    if rebase_result is None:
+        return False, None, "missing required command: git"
+    if rebase_result.returncode != 0:
+        detail = (rebase_result.stderr or rebase_result.stdout or "").strip()
+        return False, None, detail or f"failed to rebase {root} onto {parent}"
+
+    new_root_head = git.git_rev_parse(repo_root, root, git_path=git_path)
+    if not new_root_head:
+        return False, None, f"failed to resolve rebased head for {root!r}"
+
+    update_result = exec.try_run_command(
+        git.git_command(
+            [
+                "-C",
+                str(repo_root),
+                "update-ref",
+                f"refs/heads/{parent}",
+                new_root_head,
+                parent_head,
+            ],
+            git_path=git_path,
+        )
+    )
+    if update_result is None:
+        return False, None, "missing required command: git"
+    if update_result.returncode != 0:
+        detail = (update_result.stderr or update_result.stdout or "").strip()
+        return (
+            False,
+            None,
+            detail or f"failed to move {parent} to integrated head {new_root_head}",
+        )
+
+    push_result = exec.try_run_command(
+        git.git_command(
+            ["-C", str(repo_root), "push", "origin", parent], git_path=git_path
+        )
+    )
+    if push_result is None:
+        return False, None, "missing required command: git"
+    if push_result.returncode != 0:
+        detail = (push_result.stderr or push_result.stdout or "").strip()
+        return False, None, detail or f"failed to push {parent} to origin"
+    return True, new_root_head, None
+
+
+def _finalize_epic_if_complete(
+    *,
+    epic_id: str,
+    agent_id: str,
+    agent_bead_id: str,
+    branch_pr: bool,
+    branch_history: str,
+    beads_root: Path,
+    repo_root: Path,
+    git_path: str | None = None,
+) -> FinalizeResult:
+    if not _epic_ready_to_finalize(epic_id, beads_root=beads_root, repo_root=repo_root):
+        return FinalizeResult(continue_running=True, reason="changeset_complete")
+
+    if not branch_pr:
+        issues = beads.run_bd_json(
+            ["show", epic_id], beads_root=beads_root, cwd=repo_root
+        )
+        if not issues:
+            return FinalizeResult(
+                continue_running=False, reason="epic_blocked_missing_metadata"
+            )
+        issue = issues[0]
+        fields = beads.parse_description_fields(
+            issue.get("description")
+            if isinstance(issue.get("description"), str)
+            else ""
+        )
+        root_branch = _normalize_branch_value(fields.get("workspace.root_branch"))
+        if not root_branch:
+            root_branch = _normalize_branch_value(fields.get("changeset.root_branch"))
+        parent_branch = _normalize_branch_value(fields.get("workspace.parent_branch"))
+        default_branch = git.git_default_branch(repo_root, git_path=git_path)
+        if not parent_branch or (root_branch and parent_branch == root_branch):
+            parent_branch = default_branch or parent_branch or root_branch
+
+        if not root_branch or not parent_branch:
+            _send_planner_notification(
+                subject=f"NEEDS-DECISION: Missing epic branch metadata ({epic_id})",
+                body="Epic is complete but root/parent branch metadata is missing.",
+                agent_id=agent_id,
+                thread_id=epic_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                dry_run=False,
+            )
+            return FinalizeResult(
+                continue_running=False, reason="epic_blocked_missing_metadata"
+            )
+
+        # Keep workspace.parent_branch aligned with final integration target.
+        beads.update_workspace_parent_branch(
+            epic_id,
+            parent_branch,
+            beads_root=beads_root,
+            cwd=repo_root,
+            allow_override=True,
+        )
+
+        integrated_ok, _integrated_sha, error = _integrate_epic_root_to_parent(
+            root_branch=root_branch,
+            parent_branch=parent_branch,
+            history=branch_history,
+            repo_root=repo_root,
+            git_path=git_path,
+        )
+        if not integrated_ok:
+            _send_planner_notification(
+                subject=f"NEEDS-DECISION: Epic finalization failed ({epic_id})",
+                body=(
+                    "Epic changesets are complete, but final integration of "
+                    f"{root_branch} -> {parent_branch} failed.\n"
+                    f"Reason: {error or 'unknown error'}"
+                ),
+                agent_id=agent_id,
+                thread_id=epic_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                dry_run=False,
+            )
+            return FinalizeResult(
+                continue_running=False, reason="epic_blocked_finalization"
+            )
+
+    beads.close_epic_if_complete(
+        epic_id, agent_bead_id, beads_root=beads_root, cwd=repo_root
+    )
+    return FinalizeResult(continue_running=True, reason="changeset_complete")
+
+
 def _finalize_changeset(
     *,
     changeset_id: str,
@@ -990,6 +1235,9 @@ def _finalize_changeset(
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
+    branch_pr: bool = True,
+    branch_history: str = "manual",
+    git_path: str | None = None,
 ) -> FinalizeResult:
     if not changeset_id:
         return FinalizeResult(continue_running=False, reason="changeset_missing")
@@ -1095,10 +1343,16 @@ def _finalize_changeset(
         _close_completed_container_changesets(
             epic_id, beads_root=beads_root, repo_root=repo_root
         )
-        beads.close_epic_if_complete(
-            epic_id, agent_bead_id, beads_root=beads_root, cwd=repo_root
+        return _finalize_epic_if_complete(
+            epic_id=epic_id,
+            agent_id=agent_id,
+            agent_bead_id=agent_bead_id,
+            branch_pr=branch_pr,
+            branch_history=branch_history,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            git_path=git_path,
         )
-        return FinalizeResult(continue_running=True, reason="changeset_complete")
     if _has_blocking_messages(
         thread_ids={changeset_id, epic_id},
         started_at=started_at,
@@ -1480,6 +1734,7 @@ def _run_worker_once(
     )
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
+    git_path = config.resolve_git_path(project_config)
     if dry_run:
         agent = agent_home.preview_agent_home(
             project_data_dir, project_config, role="worker", session_key=session_key
@@ -1614,6 +1869,8 @@ def _run_worker_once(
         finish_step()
         finish_step = _step("Resolve root branch", timings=timings, trace=trace)
         root_branch_value = beads.extract_workspace_root_branch(epic_issue)
+        if not root_branch_value:
+            root_branch_value = _extract_changeset_root_branch(epic_issue)
         suggested_root_branch = None
         if not root_branch_value:
             suggested_root_branch = branching.suggest_root_branch(
@@ -1643,7 +1900,21 @@ def _run_worker_once(
                 )
         finish_step(extra=root_branch_value or "unset")
         finish_step = _step("Set parent branch + hook", timings=timings, trace=trace)
-        parent_branch_value = root_branch_value
+        parent_branch_value = _extract_workspace_parent_branch(epic_issue)
+        default_branch = git.git_default_branch(repo_root, git_path=git_path)
+        if not parent_branch_value:
+            parent_branch_value = default_branch or root_branch_value
+        allow_parent_override = False
+        if (
+            parent_branch_value
+            and root_branch_value
+            and parent_branch_value == root_branch_value
+            and not project_config.branch.pr
+            and default_branch
+            and default_branch != root_branch_value
+        ):
+            parent_branch_value = default_branch
+            allow_parent_override = True
         if dry_run:
             _dry_run_log(
                 f"Would set workspace parent branch to {parent_branch_value!r}."
@@ -1651,7 +1922,11 @@ def _run_worker_once(
             _dry_run_log("Would set agent hook to selected epic.")
         else:
             beads.update_workspace_parent_branch(
-                selected_epic, parent_branch_value, beads_root=beads_root, cwd=repo_root
+                selected_epic,
+                parent_branch_value,
+                beads_root=beads_root,
+                cwd=repo_root,
+                allow_override=allow_parent_override,
             )
             beads.set_agent_hook(
                 agent_bead_id, selected_epic, beads_root=beads_root, cwd=repo_root
@@ -1741,7 +2016,6 @@ def _run_worker_once(
         else:
             say(f"Next changeset: {changeset_id} {changeset_title}")
         finish_step = _step("Prepare worktrees", timings=timings, trace=trace)
-        git_path = config.resolve_git_path(project_config)
         epic_worktree_path: Path | None = None
         changeset_worktree_path: Path | None = None
         branch: str | None = None
@@ -2018,6 +2292,9 @@ def _run_worker_once(
             ),
             beads_root=beads_root,
             repo_root=repo_root,
+            branch_pr=project_config.branch.pr,
+            branch_history=project_config.branch.history,
+            git_path=git_path,
         )
         finish_step(extra=finalize_result.reason)
         if not finalize_result.continue_running:

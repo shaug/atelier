@@ -1101,8 +1101,16 @@ def close_epic_if_complete(
     confirm: Callable[[ChangesetSummary], bool] | None = None,
 ) -> bool:
     """Close an epic and clear hook if all changesets are complete."""
+    issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        return False
+    issue = issues[0]
+    labels = _issue_labels(issue)
+    is_standalone_changeset = "at:changeset" in labels and (
+        "cs:merged" in labels or "cs:abandoned" in labels
+    )
     summary = epic_changeset_summary(epic_id, beads_root=beads_root, cwd=cwd)
-    if not summary.ready_to_close:
+    if not is_standalone_changeset and not summary.ready_to_close:
         return False
     if confirm is not None and not confirm(summary):
         return False

@@ -424,6 +424,8 @@ def test_epic_changeset_summary_ready_to_close() -> None:
     def fake_json(
         args: list[str], *, beads_root: Path, cwd: Path
     ) -> list[dict[str, object]]:
+        if args[:2] == ["show", "epic-1"]:
+            return [{"id": "epic-1", "labels": ["at:epic"]}]
         if args[:2] == ["list", "--parent"]:
             return changesets.get(args[2], [])
         return []
@@ -445,6 +447,8 @@ def test_close_epic_if_complete_closes_and_clears_hook() -> None:
     def fake_json(
         args: list[str], *, beads_root: Path, cwd: Path
     ) -> list[dict[str, object]]:
+        if args[:2] == ["show", "epic-1"]:
+            return [{"id": "epic-1", "labels": ["at:epic"]}]
         if args[:2] == ["list", "--parent"]:
             return changesets.get(args[2], [])
         return []
@@ -497,6 +501,40 @@ def test_close_epic_if_complete_respects_confirm() -> None:
 
     assert result is False
     run_command.assert_not_called()
+
+
+def test_close_epic_if_complete_closes_standalone_changeset() -> None:
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:2] == ["show", "at-irs"]:
+            return [
+                {
+                    "id": "at-irs",
+                    "labels": ["at:changeset", "cs:merged"],
+                }
+            ]
+        if args[:2] == ["list", "--parent"]:
+            return []
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command") as run_command,
+        patch("atelier.beads.clear_agent_hook") as clear_hook,
+    ):
+        result = beads.close_epic_if_complete(
+            "at-irs",
+            "agent-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result is True
+    run_command.assert_called_with(
+        ["close", "at-irs"], beads_root=Path("/beads"), cwd=Path("/repo")
+    )
+    clear_hook.assert_called_once()
 
 
 def test_update_changeset_review_updates_description() -> None:

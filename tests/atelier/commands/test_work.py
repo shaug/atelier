@@ -2296,9 +2296,10 @@ def test_work_records_branch_metadata(_branch_metadata_updates: object) -> None:
 
     update_epic.assert_called_once_with(
         "atelier-epic",
-        "feat/root",
+        "main",
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
+        allow_override=False,
     )
     update_changeset.assert_called_once()
     kwargs = update_changeset.call_args.kwargs
@@ -2751,6 +2752,86 @@ def test_integration_signal_reads_sha_from_realistic_notes_payload() -> None:
     assert sha == "67c7ca10898839106bbb9377e0ed0709fc7c0fbf"
 
 
+def test_finalize_epic_if_complete_closes_in_pr_mode() -> None:
+    with (
+        patch("atelier.commands.work._epic_ready_to_finalize", return_value=True),
+        patch("atelier.commands.work.beads.close_epic_if_complete") as close_epic,
+    ):
+        result = work_cmd._finalize_epic_if_complete(
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            branch_pr=True,
+            branch_history="manual",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_complete"
+    close_epic.assert_called_once_with(
+        "atelier-epic",
+        "atelier-agent",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
+def test_finalize_epic_if_complete_integrates_non_pr() -> None:
+    with (
+        patch("atelier.commands.work._epic_ready_to_finalize", return_value=True),
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic",
+                    "labels": ["at:epic"],
+                    "description": (
+                        "workspace.root_branch: feat/root\n"
+                        "workspace.parent_branch: main\n"
+                    ),
+                }
+            ],
+        ),
+        patch(
+            "atelier.commands.work.beads.update_workspace_parent_branch"
+        ) as update_parent,
+        patch(
+            "atelier.commands.work._integrate_epic_root_to_parent",
+            return_value=(True, "deadbeef", None),
+        ) as integrate,
+        patch("atelier.commands.work.beads.close_epic_if_complete") as close_epic,
+    ):
+        result = work_cmd._finalize_epic_if_complete(
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            branch_pr=False,
+            branch_history="rebase",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            git_path="git",
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_complete"
+    update_parent.assert_called_once_with(
+        "atelier-epic",
+        "main",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_override=True,
+    )
+    integrate.assert_called_once_with(
+        root_branch="feat/root",
+        parent_branch="main",
+        history="rebase",
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+    close_epic.assert_called_once()
+
+
 def test_work_does_not_mark_in_progress_before_worktree_prepared() -> None:
     epics = [
         {
@@ -3187,6 +3268,17 @@ def test_work_closes_epic_when_changeset_complete() -> None:
     def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
         if args[:3] == ["list", "--label", "at:message"]:
             return []
+        if args[:2] == ["show", "atelier-epic"]:
+            return [
+                {
+                    "id": "atelier-epic",
+                    "labels": ["at:epic"],
+                    "description": (
+                        "workspace.root_branch: feat/root\n"
+                        "workspace.parent_branch: main\n"
+                    ),
+                }
+            ]
         if args[:2] == ["show", "atelier-epic.1"]:
             return [
                 {
@@ -3195,6 +3287,18 @@ def test_work_closes_epic_when_changeset_complete() -> None:
                     "description": "changeset.integrated_sha: abc123\n",
                 }
             ]
+        if args[:3] == ["list", "--parent", "atelier-epic"]:
+            return [{"id": "atelier-epic.1", "labels": ["at:changeset", "cs:merged"]}]
+        if args[:3] == ["list", "--parent", "atelier-epic.1"]:
+            return []
+        if args[0] == "list" and "--parent" in args:
+            parent_id = args[args.index("--parent") + 1]
+            if parent_id == "atelier-epic":
+                return [
+                    {"id": "atelier-epic.1", "labels": ["at:changeset", "cs:merged"]}
+                ]
+            if parent_id == "atelier-epic.1":
+                return []
         if args[0] == "list":
             return epics
         return changesets
@@ -3259,7 +3363,12 @@ def test_work_closes_epic_when_changeset_complete() -> None:
         ),
         patch("atelier.commands.work.beads.update_worktree_path"),
         patch("atelier.commands.work.beads.set_agent_hook"),
-        patch("atelier.commands.work.beads.close_epic_if_complete") as close_epic,
+        patch(
+            "atelier.commands.work._finalize_epic_if_complete",
+            return_value=work_cmd.FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        ) as finalize_epic,
         patch(
             "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
         ),
@@ -3269,4 +3378,4 @@ def test_work_closes_epic_when_changeset_complete() -> None:
             SimpleNamespace(epic_id=None, mode="auto", run_mode="once")
         )
 
-    close_epic.assert_called_once()
+    finalize_epic.assert_called_once()
