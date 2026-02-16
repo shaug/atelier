@@ -1046,8 +1046,125 @@ def _ensure_local_branch(
     return bool(result and result.returncode == 0)
 
 
+def _run_git_status(
+    args: list[str], *, repo_root: Path, git_path: str | None = None
+) -> tuple[bool, str]:
+    result = exec.try_run_command(
+        git.git_command(["-C", str(repo_root), *args], git_path=git_path)
+    )
+    if result is None:
+        return False, "missing required command: git"
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        return False, detail or f"command failed: git {' '.join(args)}"
+    return True, (result.stdout or "").strip()
+
+
+def _ensure_branch_not_checked_out(
+    branch: str, *, repo_root: Path, git_path: str | None = None
+) -> None:
+    current = git.git_current_branch(repo_root, git_path=git_path)
+    if current != branch:
+        return
+    _run_git_status(["checkout", "--detach"], repo_root=repo_root, git_path=git_path)
+
+
+def _sync_local_branch_from_remote(
+    branch: str, *, repo_root: Path, git_path: str | None = None
+) -> bool:
+    branch_name = branch.strip()
+    if not branch_name:
+        return False
+    if not git.git_ref_exists(
+        repo_root, f"refs/remotes/origin/{branch_name}", git_path=git_path
+    ):
+        return False
+    _ensure_branch_not_checked_out(branch_name, repo_root=repo_root, git_path=git_path)
+    ok, _ = _run_git_status(
+        ["branch", "-f", branch_name, f"origin/{branch_name}"],
+        repo_root=repo_root,
+        git_path=git_path,
+    )
+    return ok
+
+
+def _first_external_ticket_id(issue: dict[str, object]) -> str | None:
+    description = issue.get("description")
+    tickets = beads.parse_external_tickets(
+        description if isinstance(description, str) else None
+    )
+    if not tickets:
+        return None
+    primary = [ticket for ticket in tickets if ticket.relation == "primary"]
+    source = primary or tickets
+    for ticket in source:
+        ticket_id = (ticket.ticket_id or "").strip()
+        if ticket_id:
+            return ticket_id
+    return None
+
+
+def _squash_subject(issue: dict[str, object], *, epic_id: str) -> str:
+    ticket_id = _first_external_ticket_id(issue)
+    title = str(issue.get("title") or "").strip()
+    if ticket_id and title:
+        return f"{ticket_id}: {title}"
+    if ticket_id:
+        return ticket_id
+    if title:
+        return title
+    return epic_id
+
+
+def _cleanup_epic_branches_and_worktrees(
+    *,
+    project_data_dir: Path | None,
+    repo_root: Path,
+    epic_id: str,
+    keep_branches: set[str] | None = None,
+    git_path: str | None = None,
+) -> None:
+    keep = {branch for branch in (keep_branches or set()) if branch}
+    if project_data_dir is None:
+        return
+    mapping_path = worktrees.mapping_path(project_data_dir, epic_id)
+    mapping = worktrees.load_mapping(mapping_path)
+    if mapping is None:
+        return
+
+    relpaths: list[str] = [mapping.worktree_path, *mapping.changeset_worktrees.values()]
+    for relpath in relpaths:
+        worktree_path = project_data_dir / relpath
+        if not worktree_path.exists():
+            continue
+        if not (worktree_path / ".git").exists():
+            continue
+        _run_git_status(
+            ["worktree", "remove", "--force", str(worktree_path)],
+            repo_root=repo_root,
+            git_path=git_path,
+        )
+
+    branches = {mapping.root_branch, *mapping.changesets.values()}
+    for branch in branches:
+        if not branch or branch in keep:
+            continue
+        _run_git_status(
+            ["push", "origin", "--delete", branch],
+            repo_root=repo_root,
+            git_path=git_path,
+        )
+        _run_git_status(
+            ["branch", "-D", branch], repo_root=repo_root, git_path=git_path
+        )
+
+    mapping_path.unlink(missing_ok=True)
+
+
 def _integrate_epic_root_to_parent(
     *,
+    epic_issue: dict[str, object],
+    epic_id: str,
     root_branch: str,
     parent_branch: str,
     history: str,
@@ -1060,79 +1177,181 @@ def _integrate_epic_root_to_parent(
         return False, None, "missing root/parent branch metadata"
     if parent == root:
         return True, git.git_rev_parse(repo_root, root, git_path=git_path), None
-    if history != "rebase":
-        return (
-            False,
-            None,
-            "epic finalization only supports branch.history=rebase for now",
-        )
     if not _ensure_local_branch(root, repo_root=repo_root, git_path=git_path):
         return False, None, f"root branch {root!r} not found"
     if not _ensure_local_branch(parent, repo_root=repo_root, git_path=git_path):
         return False, None, f"parent branch {parent!r} not found"
 
-    parent_head = git.git_rev_parse(repo_root, parent, git_path=git_path)
-    if not parent_head:
-        return False, None, f"failed to resolve parent branch head for {parent!r}"
+    clean = git.git_is_clean(repo_root, git_path=git_path)
+    if clean is False:
+        return False, None, "repository must be clean before epic finalization"
 
-    is_ancestor = git.git_is_ancestor(repo_root, root, parent, git_path=git_path)
-    if is_ancestor is True:
-        return True, parent_head, None
-    fully_applied = git.git_branch_fully_applied(
-        repo_root, parent, root, git_path=git_path
-    )
-    if fully_applied is True:
-        return True, parent_head, None
+    for attempt in range(2):
+        parent_head = git.git_rev_parse(repo_root, parent, git_path=git_path)
+        if not parent_head:
+            return False, None, f"failed to resolve parent branch head for {parent!r}"
 
-    rebase_result = exec.try_run_command(
-        git.git_command(
-            ["-C", str(repo_root), "rebase", parent, root], git_path=git_path
+        is_ancestor = git.git_is_ancestor(repo_root, root, parent, git_path=git_path)
+        if is_ancestor is True:
+            return True, parent_head, None
+        fully_applied = git.git_branch_fully_applied(
+            repo_root, parent, root, git_path=git_path
         )
-    )
-    if rebase_result is None:
-        return False, None, "missing required command: git"
-    if rebase_result.returncode != 0:
-        detail = (rebase_result.stderr or rebase_result.stdout or "").strip()
-        return False, None, detail or f"failed to rebase {root} onto {parent}"
+        if fully_applied is True:
+            return True, parent_head, None
 
-    new_root_head = git.git_rev_parse(repo_root, root, git_path=git_path)
-    if not new_root_head:
-        return False, None, f"failed to resolve rebased head for {root!r}"
+        can_ff = git.git_is_ancestor(repo_root, parent, root, git_path=git_path) is True
 
-    update_result = exec.try_run_command(
-        git.git_command(
-            [
-                "-C",
-                str(repo_root),
-                "update-ref",
-                f"refs/heads/{parent}",
-                new_root_head,
-                parent_head,
-            ],
-            git_path=git_path,
-        )
-    )
-    if update_result is None:
-        return False, None, "missing required command: git"
-    if update_result.returncode != 0:
-        detail = (update_result.stderr or update_result.stdout or "").strip()
-        return (
-            False,
-            None,
-            detail or f"failed to move {parent} to integrated head {new_root_head}",
-        )
+        if history == "rebase":
+            ok, detail = _run_git_status(
+                ["rebase", parent, root], repo_root=repo_root, git_path=git_path
+            )
+            if not ok:
+                _run_git_status(
+                    ["rebase", "--abort"], repo_root=repo_root, git_path=git_path
+                )
+                return False, None, detail or f"failed to rebase {root} onto {parent}"
+            new_head = git.git_rev_parse(repo_root, root, git_path=git_path)
+            if not new_head:
+                return False, None, f"failed to resolve rebased head for {root!r}"
+            ok, detail = _run_git_status(
+                ["update-ref", f"refs/heads/{parent}", new_head, parent_head],
+                repo_root=repo_root,
+                git_path=git_path,
+            )
+            if not ok:
+                if attempt == 0 and _sync_local_branch_from_remote(
+                    parent, repo_root=repo_root, git_path=git_path
+                ):
+                    continue
+                return False, None, detail or "parent branch moved during finalization"
+            ok, detail = _run_git_status(
+                ["push", "origin", parent], repo_root=repo_root, git_path=git_path
+            )
+            if ok:
+                return True, new_head, None
+            if attempt == 0 and _sync_local_branch_from_remote(
+                parent, repo_root=repo_root, git_path=git_path
+            ):
+                continue
+            return False, None, detail or f"failed to push {parent} to origin"
 
-    push_result = exec.try_run_command(
-        git.git_command(
-            ["-C", str(repo_root), "push", "origin", parent], git_path=git_path
-        )
-    )
-    if push_result is None:
-        return False, None, "missing required command: git"
-    if push_result.returncode != 0:
-        detail = (push_result.stderr or push_result.stdout or "").strip()
-        return False, None, detail or f"failed to push {parent} to origin"
-    return True, new_root_head, None
+        if history == "merge":
+            if can_ff:
+                new_head = git.git_rev_parse(repo_root, root, git_path=git_path)
+                if not new_head:
+                    return False, None, f"failed to resolve head for {root!r}"
+                ok, detail = _run_git_status(
+                    ["update-ref", f"refs/heads/{parent}", new_head, parent_head],
+                    repo_root=repo_root,
+                    git_path=git_path,
+                )
+                if not ok:
+                    if attempt == 0 and _sync_local_branch_from_remote(
+                        parent, repo_root=repo_root, git_path=git_path
+                    ):
+                        continue
+                    return (
+                        False,
+                        None,
+                        detail or "parent branch moved during finalization",
+                    )
+            else:
+                current = git.git_current_branch(repo_root, git_path=git_path)
+                ok, detail = _run_git_status(
+                    ["checkout", parent], repo_root=repo_root, git_path=git_path
+                )
+                if not ok:
+                    return False, None, detail
+                ok, detail = _run_git_status(
+                    ["merge", "--no-edit", root], repo_root=repo_root, git_path=git_path
+                )
+                if current and current != parent:
+                    _run_git_status(
+                        ["checkout", current], repo_root=repo_root, git_path=git_path
+                    )
+                if not ok:
+                    _run_git_status(
+                        ["merge", "--abort"], repo_root=repo_root, git_path=git_path
+                    )
+                    return (
+                        False,
+                        None,
+                        detail or f"failed to merge {root} into {parent}",
+                    )
+            ok, detail = _run_git_status(
+                ["push", "origin", parent], repo_root=repo_root, git_path=git_path
+            )
+            if ok:
+                return (
+                    True,
+                    git.git_rev_parse(repo_root, parent, git_path=git_path),
+                    None,
+                )
+            if attempt == 0 and _sync_local_branch_from_remote(
+                parent, repo_root=repo_root, git_path=git_path
+            ):
+                continue
+            return False, None, detail or f"failed to push {parent} to origin"
+
+        if history == "squash":
+            current = git.git_current_branch(repo_root, git_path=git_path)
+            ok, detail = _run_git_status(
+                ["checkout", parent], repo_root=repo_root, git_path=git_path
+            )
+            if not ok:
+                return False, None, detail
+            ok, detail = _run_git_status(
+                ["merge", "--squash", root], repo_root=repo_root, git_path=git_path
+            )
+            if not ok:
+                _run_git_status(
+                    ["merge", "--abort"], repo_root=repo_root, git_path=git_path
+                )
+                if current and current != parent:
+                    _run_git_status(
+                        ["checkout", current], repo_root=repo_root, git_path=git_path
+                    )
+                return (
+                    False,
+                    None,
+                    detail or f"failed to squash-merge {root} into {parent}",
+                )
+            message = _squash_subject(epic_issue, epic_id=epic_id)
+            ok, detail = _run_git_status(
+                ["commit", "-m", message], repo_root=repo_root, git_path=git_path
+            )
+            if current and current != parent:
+                _run_git_status(
+                    ["checkout", current], repo_root=repo_root, git_path=git_path
+                )
+            if not ok:
+                _run_git_status(
+                    ["merge", "--abort"], repo_root=repo_root, git_path=git_path
+                )
+                return (
+                    False,
+                    None,
+                    detail or f"failed to create squash commit on {parent}",
+                )
+            ok, detail = _run_git_status(
+                ["push", "origin", parent], repo_root=repo_root, git_path=git_path
+            )
+            if ok:
+                return (
+                    True,
+                    git.git_rev_parse(repo_root, parent, git_path=git_path),
+                    None,
+                )
+            if attempt == 0 and _sync_local_branch_from_remote(
+                parent, repo_root=repo_root, git_path=git_path
+            ):
+                continue
+            return False, None, detail or f"failed to push {parent} to origin"
+
+        return False, None, f"unsupported branch.history value: {history!r}"
+
+    return False, None, "epic finalization failed after retry"
 
 
 def _finalize_epic_if_complete(
@@ -1144,6 +1363,7 @@ def _finalize_epic_if_complete(
     branch_history: str,
     beads_root: Path,
     repo_root: Path,
+    project_data_dir: Path | None = None,
     git_path: str | None = None,
 ) -> FinalizeResult:
     if not _epic_ready_to_finalize(epic_id, beads_root=beads_root, repo_root=repo_root):
@@ -1195,6 +1415,8 @@ def _finalize_epic_if_complete(
         )
 
         integrated_ok, _integrated_sha, error = _integrate_epic_root_to_parent(
+            epic_issue=issue,
+            epic_id=epic_id,
             root_branch=root_branch,
             parent_branch=parent_branch,
             history=branch_history,
@@ -1219,9 +1441,17 @@ def _finalize_epic_if_complete(
                 continue_running=False, reason="epic_blocked_finalization"
             )
 
-    beads.close_epic_if_complete(
+    closed = beads.close_epic_if_complete(
         epic_id, agent_bead_id, beads_root=beads_root, cwd=repo_root
     )
+    if closed:
+        _cleanup_epic_branches_and_worktrees(
+            project_data_dir=project_data_dir,
+            repo_root=repo_root,
+            epic_id=epic_id,
+            keep_branches={parent_branch} if "parent_branch" in locals() else set(),
+            git_path=git_path,
+        )
     return FinalizeResult(continue_running=True, reason="changeset_complete")
 
 
@@ -1237,6 +1467,7 @@ def _finalize_changeset(
     repo_root: Path,
     branch_pr: bool = True,
     branch_history: str = "manual",
+    project_data_dir: Path | None = None,
     git_path: str | None = None,
 ) -> FinalizeResult:
     if not changeset_id:
@@ -1351,6 +1582,7 @@ def _finalize_changeset(
             branch_history=branch_history,
             beads_root=beads_root,
             repo_root=repo_root,
+            project_data_dir=project_data_dir,
             git_path=git_path,
         )
     if _has_blocking_messages(
@@ -2294,6 +2526,7 @@ def _run_worker_once(
             repo_root=repo_root,
             branch_pr=project_config.branch.pr,
             branch_history=project_config.branch.history,
+            project_data_dir=project_data_dir,
             git_path=git_path,
         )
         finish_step(extra=finalize_result.reason)

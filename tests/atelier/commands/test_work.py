@@ -2823,6 +2823,14 @@ def test_finalize_epic_if_complete_integrates_non_pr() -> None:
         allow_override=True,
     )
     integrate.assert_called_once_with(
+        epic_issue={
+            "id": "atelier-epic",
+            "labels": ["at:epic"],
+            "description": (
+                "workspace.root_branch: feat/root\nworkspace.parent_branch: main\n"
+            ),
+        },
+        epic_id="atelier-epic",
         root_branch="feat/root",
         parent_branch="main",
         history="rebase",
@@ -2830,6 +2838,131 @@ def test_finalize_epic_if_complete_integrates_non_pr() -> None:
         git_path="git",
     )
     close_epic.assert_called_once()
+
+
+def test_squash_subject_prefers_external_ticket_id() -> None:
+    issue = {
+        "id": "at-epic",
+        "title": "Fix widget pipeline",
+        "description": (
+            'external_tickets: [{"provider":"github","ticket_id":"GH-194","relation":"primary"}]\n'
+        ),
+    }
+
+    subject = work_cmd._squash_subject(issue, epic_id="at-epic")
+
+    assert subject == "GH-194: Fix widget pipeline"
+
+
+def test_integrate_epic_root_to_parent_merge_prefers_ff() -> None:
+    run_calls: list[list[str]] = []
+
+    def fake_is_ancestor(
+        repo_root: Path, ancestor: str, descendant: str, *, git_path: str | None = None
+    ) -> bool | None:
+        if ancestor == "feat/root" and descendant == "main":
+            return False
+        if ancestor == "main" and descendant == "feat/root":
+            return True
+        return None
+
+    def fake_rev_parse(
+        repo_root: Path, ref: str, *, git_path: str | None = None
+    ) -> str | None:
+        if ref == "main":
+            return "aaa111"
+        if ref == "feat/root":
+            return "bbb222"
+        return None
+
+    def fake_run_git_status(
+        args: list[str], *, repo_root: Path, git_path: str | None = None
+    ) -> tuple[bool, str]:
+        run_calls.append(args)
+        return True, ""
+
+    with (
+        patch("atelier.commands.work._ensure_local_branch", return_value=True),
+        patch("atelier.commands.work.git.git_is_clean", return_value=True),
+        patch(
+            "atelier.commands.work.git.git_is_ancestor", side_effect=fake_is_ancestor
+        ),
+        patch("atelier.commands.work.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.commands.work.git.git_rev_parse", side_effect=fake_rev_parse),
+        patch("atelier.commands.work._run_git_status", side_effect=fake_run_git_status),
+    ):
+        ok, sha, error = work_cmd._integrate_epic_root_to_parent(
+            epic_issue={"id": "at-epic", "title": "Epic"},
+            epic_id="at-epic",
+            root_branch="feat/root",
+            parent_branch="main",
+            history="merge",
+            repo_root=Path("/repo"),
+            git_path="git",
+        )
+
+    assert ok is True
+    assert sha == "aaa111"
+    assert error is None
+    assert ["update-ref", "refs/heads/main", "bbb222", "aaa111"] in run_calls
+    assert ["push", "origin", "main"] in run_calls
+
+
+def test_integrate_epic_root_to_parent_squash_uses_ticket_subject() -> None:
+    run_calls: list[list[str]] = []
+
+    def fake_is_ancestor(
+        repo_root: Path, ancestor: str, descendant: str, *, git_path: str | None = None
+    ) -> bool | None:
+        return False
+
+    def fake_rev_parse(
+        repo_root: Path, ref: str, *, git_path: str | None = None
+    ) -> str | None:
+        if ref == "main":
+            return "aaa111"
+        if ref == "feat/root":
+            return "bbb222"
+        return "ccc333"
+
+    def fake_run_git_status(
+        args: list[str], *, repo_root: Path, git_path: str | None = None
+    ) -> tuple[bool, str]:
+        run_calls.append(args)
+        return True, ""
+
+    issue = {
+        "id": "at-epic",
+        "title": "Fix widget pipeline",
+        "description": (
+            'external_tickets: [{"provider":"github","ticket_id":"GH-194","relation":"primary"}]\n'
+        ),
+    }
+
+    with (
+        patch("atelier.commands.work._ensure_local_branch", return_value=True),
+        patch("atelier.commands.work.git.git_is_clean", return_value=True),
+        patch(
+            "atelier.commands.work.git.git_is_ancestor", side_effect=fake_is_ancestor
+        ),
+        patch("atelier.commands.work.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.commands.work.git.git_current_branch", return_value="feat/root"),
+        patch("atelier.commands.work.git.git_rev_parse", side_effect=fake_rev_parse),
+        patch("atelier.commands.work._run_git_status", side_effect=fake_run_git_status),
+    ):
+        ok, _sha, error = work_cmd._integrate_epic_root_to_parent(
+            epic_issue=issue,
+            epic_id="at-epic",
+            root_branch="feat/root",
+            parent_branch="main",
+            history="squash",
+            repo_root=Path("/repo"),
+            git_path="git",
+        )
+
+    assert ok is True
+    assert error is None
+    assert ["commit", "-m", "GH-194: Fix widget pipeline"] in run_calls
 
 
 def test_work_does_not_mark_in_progress_before_worktree_prepared() -> None:
