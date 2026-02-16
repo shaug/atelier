@@ -41,6 +41,13 @@ Changesets track lifecycle intent using labels:
 
 - `cs:planned`, `cs:ready`, `cs:in_progress`, `cs:merged`, `cs:abandoned`
 
+Label semantics:
+
+- `cs:ready` indicates the changeset is fully defined and may be claimed when
+  unblocked.
+- Dependency-based runnability is derived from `bd ready` (graph state), not
+  from relabeling when blockers clear.
+
 ### Worktree
 
 A worktree is a per-epic Git checkout stored under the Atelier data directory.

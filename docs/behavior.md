@@ -31,6 +31,10 @@ side effects inside the user's repo.
 - **Changeset labels**: Changesets use `cs:planned`, `cs:ready`,
   `cs:in_progress`, `cs:merged`, and `cs:abandoned` to capture non-derivable
   lifecycle state.
+  - `cs:ready` means the changeset definition is complete and worker-executable
+    when dependencies are satisfied.
+  - Dependency/unblock readiness is determined by `bd ready`, not by
+    transitioning labels at dependency completion time.
 - **External tickets**: Linked via `external_tickets` in bead descriptions with
   provider labels like `ext:github`.
 

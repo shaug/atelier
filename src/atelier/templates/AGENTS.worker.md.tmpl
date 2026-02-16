@@ -35,6 +35,12 @@ Worker worktree: {{ worker_worktree }}
 Worktree link: ./worktree
 Skills link: ./skills
 
+## Execution Context
+
+- This session starts in the agent home directory, not in the repo/worktree.
+- `BEADS_DIR` points at the planning store above; always use it for `bd` commands.
+- Use `./worktree` (or `{{ worker_worktree }}`) when running code/test commands.
+
 ## Beads: Source of Truth
 
 - Planning data lives in the project-scoped beads store.

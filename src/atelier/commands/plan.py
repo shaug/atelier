@@ -48,7 +48,9 @@ def _list_inbox_messages(
 
 
 def _list_queue_messages(*, beads_root: Path, repo_root: Path) -> None:
-    queued = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root)
+    queued = beads.list_queue_messages(
+        beads_root=beads_root, cwd=repo_root, unread_only=True
+    )
     if queued:
         say("Queued messages:")
         for issue in queued:
@@ -197,23 +199,23 @@ def _maybe_promote_draft_epic(
         beads_root=beads_root,
         cwd=repo_root,
     )
-    _promote_ready_changesets(epic_id, beads_root=beads_root, repo_root=repo_root)
+    _promote_defined_changesets(epic_id, beads_root=beads_root, repo_root=repo_root)
     say(f"Promoted draft epic: {epic_id}")
 
 
-def _promote_ready_changesets(
+def _promote_defined_changesets(
     epic_id: str, *, beads_root: Path, repo_root: Path
 ) -> None:
-    ready_changesets = beads.run_bd_json(
-        ["ready", "--parent", epic_id, "--label", "at:changeset"],
+    all_changesets = beads.run_bd_json(
+        ["list", "--parent", epic_id, "--label", "at:changeset"],
         beads_root=beads_root,
         cwd=repo_root,
     )
-    if not ready_changesets:
-        say(f"No runnable changesets available for {epic_id}.")
+    if not all_changesets:
+        say(f"No changesets found for {epic_id}.")
         return
     promoted: list[str] = []
-    for issue in ready_changesets:
+    for issue in all_changesets:
         labels = issue.get("labels") or []
         if "cs:planned" not in labels:
             continue

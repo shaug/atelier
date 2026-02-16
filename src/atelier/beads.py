@@ -1137,11 +1137,13 @@ def list_queue_messages(
     cwd: Path,
     queue: str | None = None,
     unclaimed_only: bool = True,
+    unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List queued message beads, optionally filtered by queue name."""
-    issues = run_bd_json(
-        ["list", "--label", "at:message"], beads_root=beads_root, cwd=cwd
-    )
+    args = ["list", "--label", "at:message"]
+    if unread_only:
+        args.extend(["--label", "at:unread"])
+    issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
     matches: list[dict[str, object]] = []
     for issue in issues:
         description = issue.get("description")

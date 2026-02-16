@@ -126,7 +126,7 @@ def test_plan_promotes_draft_epic_with_approval(tmp_path: Path) -> None:
                     "labels": ["at:epic", "at:draft"],
                 }
             ]
-        if args and args[0] == "ready":
+        if args[:2] == ["list", "--parent"] and "at:changeset" in args:
             return [
                 {
                     "id": "atelier-draft.1",

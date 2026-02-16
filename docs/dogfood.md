@@ -26,7 +26,8 @@ source of truth and that changesets remain reviewable.
 1. Worker publishes/persists the changeset and updates bead metadata.
 1. Worker exits after updating bead status.
 1. Planner sees updated status and either:
-   - promotes the next changeset, or
+   - resolves blockers/questions and lets dependency-unblocked ready changesets
+     flow to workers, or
    - closes the epic when all changesets are complete.
 
 ## Expected Outcomes

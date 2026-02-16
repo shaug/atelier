@@ -22,15 +22,16 @@ description: >-
 ## Steps
 
 1. Show the epic and verify it is labeled `at:draft`.
-1. List child changesets and confirm which are runnable (no blockers).
+1. List child changesets and confirm which are fully defined.
 1. Summarize the epic and changesets for the user.
 1. Ask for explicit confirmation to promote.
 1. On approval, remove `at:draft` and add `at:ready`.
-1. If runnable child changesets are labeled `cs:planned`, promote each runnable
-   `cs:planned` changeset to `cs:ready`.
+1. Promote each fully-defined `cs:planned` child changeset to `cs:ready`
+   regardless of current dependency blockers.
+1. Let dependency resolution determine runnability (`bd ready`) at worker time.
 
 ## Verification
 
 - Epic no longer has `at:draft`.
 - Epic includes `at:ready`.
-- All runnable child changesets are labeled `cs:ready`.
+- All fully-defined child changesets are labeled `cs:ready`.

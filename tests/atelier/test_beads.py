@@ -313,6 +313,22 @@ def test_list_inbox_messages_filters_unread() -> None:
     assert "at:unread" in called_args
 
 
+def test_list_queue_messages_filters_unread_by_default() -> None:
+    with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
+        beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
+    called_args = run_json.call_args.args[0]
+    assert called_args == ["list", "--label", "at:message", "--label", "at:unread"]
+
+
+def test_list_queue_messages_can_include_read_messages() -> None:
+    with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
+        beads.list_queue_messages(
+            beads_root=Path("/beads"), cwd=Path("/repo"), unread_only=False
+        )
+    called_args = run_json.call_args.args[0]
+    assert called_args == ["list", "--label", "at:message"]
+
+
 def test_mark_message_read_updates_labels() -> None:
     with patch("atelier.beads.run_bd_command") as run_command:
         beads.mark_message_read(

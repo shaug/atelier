@@ -39,6 +39,7 @@ from .resolve import resolve_current_project_with_repo_root
 _MODE_VALUES = {"prompt", "auto"}
 _RUN_MODE_VALUES = {"once", "default", "watch"}
 _WATCH_INTERVAL_SECONDS = 60
+_WORKER_QUEUE_NAME = "worker"
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,12 @@ class WorkerRunSummary:
     reason: str
     epic_id: str | None = None
     changeset_id: str | None = None
+
+
+@dataclass(frozen=True)
+class FinalizeResult:
+    continue_running: bool
+    reason: str
 
 
 def _dry_run_log(message: str) -> None:
@@ -120,6 +127,46 @@ def _with_codex_exec(cmd: list[str], opening_prompt: str) -> list[str]:
     rewritten.append("exec")
     if opening_prompt:
         rewritten.append(opening_prompt)
+    return rewritten
+
+
+def _strip_flag_with_value(args: list[str], flag: str) -> list[str]:
+    """Return args without instances of `flag` and its value."""
+    cleaned: list[str] = []
+    skip_next = False
+    for token in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if token == flag:
+            skip_next = True
+            continue
+        if token.startswith(f"{flag}="):
+            continue
+        cleaned.append(token)
+    return cleaned
+
+
+def _ensure_exec_subcommand_flag(args: list[str], flag: str) -> list[str]:
+    """Ensure a flag is present on the codex `exec` subcommand."""
+    rewritten = list(args)
+    try:
+        exec_index = rewritten.index("exec")
+    except ValueError:
+        return rewritten
+    prompt_start = len(rewritten)
+    if exec_index + 1 < len(rewritten):
+        prompt_start = exec_index + 1
+        for index in range(exec_index + 1, len(rewritten)):
+            token = rewritten[index]
+            if token.startswith("-"):
+                continue
+            prompt_start = index
+            break
+    existing = rewritten[exec_index + 1 : prompt_start]
+    if flag in existing:
+        return rewritten
+    rewritten.insert(exec_index + 1, flag)
     return rewritten
 
 
@@ -429,7 +476,7 @@ def _next_changeset(
     ready = [issue for issue in changesets if "cs:ready" in _issue_labels(issue)]
     if ready:
         return ready[0]
-    return changesets[0]
+    return None
 
 
 def _resolve_hooked_epic(
@@ -508,8 +555,12 @@ def _mark_changeset_blocked(
             changeset_id,
             "--remove-label",
             "cs:in_progress",
+            "--remove-label",
+            "cs:ready",
+            "--add-label",
+            "cs:blocked",
             "--status",
-            "open",
+            "blocked",
             "--append-notes",
             note,
         ],
@@ -552,14 +603,14 @@ def _finalize_changeset(
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
-) -> None:
+) -> FinalizeResult:
     if not changeset_id:
-        return
+        return FinalizeResult(continue_running=False, reason="changeset_missing")
     issues = beads.run_bd_json(
         ["show", changeset_id], beads_root=beads_root, cwd=repo_root
     )
     if not issues:
-        return
+        return FinalizeResult(continue_running=False, reason="changeset_not_found")
     issue = issues[0]
     labels = _issue_labels(issue)
     if "cs:merged" in labels or "cs:abandoned" in labels:
@@ -567,7 +618,7 @@ def _finalize_changeset(
         beads.close_epic_if_complete(
             epic_id, agent_bead_id, beads_root=beads_root, cwd=repo_root
         )
-        return
+        return FinalizeResult(continue_running=True, reason="changeset_complete")
     if _has_blocking_messages(
         thread_ids={changeset_id, epic_id},
         started_at=started_at,
@@ -580,7 +631,9 @@ def _finalize_changeset(
             repo_root=repo_root,
             reason="message requires planner decision",
         )
-        return
+        return FinalizeResult(
+            continue_running=False, reason="changeset_blocked_message"
+        )
     if "cs:in_progress" in labels:
         _mark_changeset_blocked(
             changeset_id,
@@ -598,7 +651,9 @@ def _finalize_changeset(
             repo_root=repo_root,
             dry_run=False,
         )
-        return
+        return FinalizeResult(
+            continue_running=False, reason="changeset_blocked_not_updated"
+        )
     description = issue.get("description")
     fields = beads.parse_description_fields(
         description if isinstance(description, str) else ""
@@ -620,7 +675,9 @@ def _finalize_changeset(
             repo_root=repo_root,
             dry_run=False,
         )
-        return
+        return FinalizeResult(
+            continue_running=False, reason="changeset_blocked_missing_metadata"
+        )
     work_branch = work_branch.strip()
     pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}")
     pr_payload = None
@@ -643,6 +700,36 @@ def _finalize_changeset(
             repo_root=repo_root,
             dry_run=False,
         )
+        return FinalizeResult(
+            continue_running=False, reason="changeset_blocked_publish_missing"
+        )
+    return FinalizeResult(continue_running=True, reason="changeset_published")
+
+
+def _worker_opening_prompt(
+    *,
+    project_enlistment: str,
+    workspace_branch: str,
+    epic_id: str,
+    changeset_id: str,
+    changeset_title: str,
+) -> str:
+    session = workspace.workspace_session_identifier(
+        project_enlistment, workspace_branch, changeset_id or None
+    )
+    title = changeset_title.strip() if changeset_title else ""
+    summary = f"{changeset_id}: {title}" if title else changeset_id
+    lines = [
+        session,
+        ("Execute only this assigned changeset and do not ask for task clarification."),
+        f"Epic: {epic_id}",
+        f"Changeset: {summary}",
+        (
+            "When done, update beads state/labels for this changeset. If blocked,"
+            " send NEEDS-DECISION with details and exit."
+        ),
+    ]
+    return "\n".join(lines)
 
 
 def _check_inbox_before_claim(
@@ -691,11 +778,17 @@ def _handle_queue_before_claim(
     *,
     beads_root: Path,
     repo_root: Path,
+    queue_name: str | None = _WORKER_QUEUE_NAME,
     force_prompt: bool = False,
     dry_run: bool = False,
     assume_yes: bool = False,
 ) -> bool:
-    queued = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root)
+    queued = beads.list_queue_messages(
+        beads_root=beads_root,
+        cwd=repo_root,
+        queue=queue_name,
+        unread_only=True,
+    )
     if not queued:
         if force_prompt:
             if dry_run:
@@ -749,6 +842,7 @@ def _run_startup_contract(
             agent_id,
             beads_root=beads_root,
             repo_root=repo_root,
+            queue_name=_WORKER_QUEUE_NAME,
             force_prompt=True,
             dry_run=dry_run,
             assume_yes=assume_yes,
@@ -794,6 +888,7 @@ def _run_startup_contract(
         agent_id,
         beads_root=beads_root,
         repo_root=repo_root,
+        queue_name=_WORKER_QUEUE_NAME,
         dry_run=dry_run,
         assume_yes=assume_yes,
     ):
@@ -1145,6 +1240,9 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
         if agent_spec is None:
             die(f"unsupported agent {project_config.agent.default!r}")
         agent_options = list(project_config.agent.options.get(agent_spec.name, []))
+        if agent_spec.name == "codex":
+            # Worker sessions are anchored in agent home; ignore user --cd overrides.
+            agent_options = _strip_flag_with_value(agent_options, "--cd")
         project_enlistment = project_config.project.enlistment or _enlistment
         workspace_branch = root_branch_value or ""
         if dry_run:
@@ -1205,11 +1303,16 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
             env["ATELIER_EPIC_ID"] = selected_epic
             if changeset_id:
                 env["ATELIER_CHANGESET_ID"] = str(changeset_id)
+            env["BEADS_DIR"] = str(beads_root)
         finish_step()
         opening_prompt = ""
         if agent_spec.name == "codex":
-            opening_prompt = workspace.workspace_session_identifier(
-                project_enlistment, workspace_branch, changeset_id or None
+            opening_prompt = _worker_opening_prompt(
+                project_enlistment=project_enlistment,
+                workspace_branch=workspace_branch,
+                epic_id=selected_epic,
+                changeset_id=str(changeset_id),
+                changeset_title=str(changeset_title),
             )
         finish_step = _step("Install agent hooks", timings=timings, trace=trace)
         if dry_run:
@@ -1230,6 +1333,9 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
         )
         if agent_spec.name == "codex":
             start_cmd = _with_codex_exec(start_cmd, opening_prompt)
+            start_cmd = _strip_flag_with_value(start_cmd, "--cd")
+            start_cmd = _ensure_exec_subcommand_flag(start_cmd, "--skip-git-repo-check")
+            start_cwd = agent.path
         if dry_run:
             _dry_run_log(f"Agent command: {' '.join(start_cmd)}")
             _dry_run_log(f"Agent cwd: {start_cwd}")
@@ -1284,7 +1390,7 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
                 die(f"command failed: {' '.join(start_cmd)}")
         finish_step(extra=f"exit={returncode}")
         finish_step = _step("Finalize changeset", timings=timings, trace=trace)
-        _finalize_changeset(
+        finalize_result = _finalize_changeset(
             changeset_id=changeset_id,
             epic_id=selected_epic,
             agent_id=agent.agent_id,
@@ -1296,7 +1402,16 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
             beads_root=beads_root,
             repo_root=repo_root,
         )
-        finish_step()
+        finish_step(extra=finalize_result.reason)
+        if not finalize_result.continue_running:
+            return finish(
+                WorkerRunSummary(
+                    started=False,
+                    reason=finalize_result.reason,
+                    epic_id=selected_epic,
+                    changeset_id=str(changeset_id) if changeset_id else None,
+                )
+            )
         return finish(
             WorkerRunSummary(
                 started=True,
