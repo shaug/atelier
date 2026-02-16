@@ -1279,7 +1279,9 @@ def _run_startup_contract(
     )
 
 
-def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSummary:
+def _run_worker_once(
+    args: object, *, mode: str, dry_run: bool, session_key: str
+) -> WorkerRunSummary:
     """Start a single worker session by selecting an epic and changeset."""
     timings: list[tuple[str, float]] = []
     trace = _trace_enabled()
@@ -1295,11 +1297,11 @@ def _run_worker_once(args: object, *, mode: str, dry_run: bool) -> WorkerRunSumm
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
     if dry_run:
         agent = agent_home.preview_agent_home(
-            project_data_dir, project_config, role="worker"
+            project_data_dir, project_config, role="worker", session_key=session_key
         )
     else:
         agent = agent_home.resolve_agent_home(
-            project_data_dir, project_config, role="worker"
+            project_data_dir, project_config, role="worker", session_key=session_key
         )
 
     with agents.scoped_agent_env(agent.agent_id):
@@ -1833,13 +1835,18 @@ def start_worker(args: object) -> None:
     mode = _normalize_mode(getattr(args, "mode", None))
     run_mode = _normalize_run_mode(getattr(args, "run_mode", None))
     dry_run = bool(getattr(args, "dry_run", False))
+    session_key = agent_home.generate_session_key()
     if bool(getattr(args, "queue", False)):
-        summary = _run_worker_once(args, mode=mode, dry_run=dry_run)
+        summary = _run_worker_once(
+            args, mode=mode, dry_run=dry_run, session_key=session_key
+        )
         _report_worker_summary(summary, dry_run=dry_run)
         return
     if dry_run:
         while True:
-            summary = _run_worker_once(args, mode=mode, dry_run=True)
+            summary = _run_worker_once(
+                args, mode=mode, dry_run=True, session_key=session_key
+            )
             _report_worker_summary(summary, dry_run=True)
             if run_mode != "watch":
                 return
@@ -1850,7 +1857,9 @@ def start_worker(args: object) -> None:
             time.sleep(interval)
 
     while True:
-        summary = _run_worker_once(args, mode=mode, dry_run=False)
+        summary = _run_worker_once(
+            args, mode=mode, dry_run=False, session_key=session_key
+        )
         _report_worker_summary(summary, dry_run=False)
         if run_mode == "once":
             return

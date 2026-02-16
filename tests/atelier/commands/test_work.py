@@ -2638,6 +2638,7 @@ def test_run_worker_once_stops_when_changeset_not_updated() -> None:
             SimpleNamespace(epic_id=None, mode="auto", run_mode="default"),
             mode="auto",
             dry_run=False,
+            session_key="p1-t1",
         )
 
     assert summary.started is False

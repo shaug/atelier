@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,10 @@ class AgentHome:
     agent_id: str
     role: str
     path: Path
+    session_key: str | None = None
+
+
+SESSION_ENV_VAR = "ATELIER_AGENT_SESSION"
 
 
 def _normalize_agent_name(value: str) -> str:
@@ -40,14 +45,52 @@ def _derive_agent_name(agent_id: str) -> str:
     parts = [part for part in agent_id.split("/") if part]
     if not parts:
         return _normalize_agent_name(agent_id)
+    if len(parts) >= 4 and parts[0] == "atelier":
+        return _normalize_agent_name(parts[2])
     return _normalize_agent_name(parts[-1])
 
 
-def _derive_agent_id(role: str, agent_name: str) -> str:
+def _derive_agent_id(
+    role: str, agent_name: str, *, session_key: str | None = None
+) -> str:
     normalized_role = role.strip().lower()
     if not normalized_role:
         die("agent role must not be empty")
-    return f"atelier/{normalized_role}/{agent_name}"
+    base = f"atelier/{normalized_role}/{agent_name}"
+    if not session_key:
+        return base
+    return f"{base}/{session_key}"
+
+
+def _normalize_session_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    normalized = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in raw)
+    normalized = normalized.strip("-_")
+    if not normalized:
+        die("agent session key must include alphanumeric characters")
+    return normalized
+
+
+def generate_session_key() -> str:
+    """Generate a process-scoped session key for agent-home isolation."""
+    return f"p{os.getpid()}-t{time.time_ns()}"
+
+
+def _agent_home_path(
+    project_dir: Path, *, role: str, agent_name: str, session_key: str | None = None
+) -> Path:
+    base = (
+        paths.project_agents_dir(project_dir)
+        / _normalize_agent_name(role)
+        / _normalize_agent_name(agent_name)
+    )
+    if not session_key:
+        return base
+    return base / session_key
 
 
 def _metadata_path(home_dir: Path) -> Path:
@@ -64,13 +107,22 @@ def _load_metadata(home_dir: Path) -> AgentHome | None:
     agent_id = payload.get("id")
     name = payload.get("name")
     role = payload.get("role")
+    session_key = payload.get("session_key")
     if not isinstance(agent_id, str) or not agent_id:
         return None
     if not isinstance(name, str) or not name:
         return None
     if not isinstance(role, str) or not role:
         return None
-    return AgentHome(name=name, agent_id=agent_id, role=role, path=home_dir)
+    if session_key is not None and not isinstance(session_key, str):
+        return None
+    return AgentHome(
+        name=name,
+        agent_id=agent_id,
+        role=role,
+        path=home_dir,
+        session_key=_normalize_session_key(session_key),
+    )
 
 
 def _write_metadata(home_dir: Path, agent: AgentHome) -> None:
@@ -78,6 +130,7 @@ def _write_metadata(home_dir: Path, agent: AgentHome) -> None:
         "id": agent.agent_id,
         "name": agent.name,
         "role": agent.role,
+        "session_key": agent.session_key,
     }
     _metadata_path(home_dir).write_text(
         json.dumps(payload, indent=2) + "\n", encoding="utf-8"
@@ -85,12 +138,21 @@ def _write_metadata(home_dir: Path, agent: AgentHome) -> None:
 
 
 def ensure_agent_home(
-    project_dir: Path, *, role: str, agent_name: str, agent_id: str
+    project_dir: Path,
+    *,
+    role: str,
+    agent_name: str,
+    agent_id: str,
+    session_key: str | None = None,
 ) -> AgentHome:
     """Ensure the agent home directory exists and return its metadata."""
-    root = paths.project_agents_dir(project_dir)
-    paths.ensure_dir(root)
-    home_dir = root / agent_name
+    normalized_session = _normalize_session_key(session_key)
+    home_dir = _agent_home_path(
+        project_dir,
+        role=role,
+        agent_name=agent_name,
+        session_key=normalized_session,
+    )
     paths.ensure_dir(home_dir)
 
     agents_path = home_dir / AGENT_INSTRUCTIONS_FILENAME
@@ -101,18 +163,36 @@ def ensure_agent_home(
         )
 
     stored = _load_metadata(home_dir)
-    if stored is None or stored.agent_id != agent_id or stored.role != role:
-        stored = AgentHome(name=agent_name, agent_id=agent_id, role=role, path=home_dir)
+    if (
+        stored is None
+        or stored.agent_id != agent_id
+        or stored.role != role
+        or stored.session_key != normalized_session
+    ):
+        stored = AgentHome(
+            name=agent_name,
+            agent_id=agent_id,
+            role=role,
+            path=home_dir,
+            session_key=normalized_session,
+        )
         _write_metadata(home_dir, stored)
     return stored
 
 
 def resolve_agent_home(
-    project_dir: Path, project_config: ProjectConfig, *, role: str
+    project_dir: Path,
+    project_config: ProjectConfig,
+    *,
+    role: str,
+    session_key: str | None = None,
 ) -> AgentHome:
     """Resolve the agent identity and ensure the home directory exists."""
     env_agent_id = os.environ.get("ATELIER_AGENT_ID")
     config_agent_id = project_config.agent.identity
+    resolved_session = _normalize_session_key(
+        session_key or os.environ.get(SESSION_ENV_VAR)
+    )
     if env_agent_id:
         agent_id = env_agent_id.strip()
         if not agent_id:
@@ -123,9 +203,13 @@ def resolve_agent_home(
         agent_name = _derive_agent_name(agent_id)
     else:
         agent_name = _normalize_agent_name(project_config.agent.default)
-        agent_id = _derive_agent_id(role, agent_name)
+        agent_id = _derive_agent_id(role, agent_name, session_key=resolved_session)
     return ensure_agent_home(
-        project_dir, role=role, agent_name=agent_name, agent_id=agent_id
+        project_dir,
+        role=role,
+        agent_name=agent_name,
+        agent_id=agent_id,
+        session_key=resolved_session,
     )
 
 
@@ -229,11 +313,18 @@ done
 
 
 def preview_agent_home(
-    project_dir: Path, project_config: ProjectConfig, *, role: str
+    project_dir: Path,
+    project_config: ProjectConfig,
+    *,
+    role: str,
+    session_key: str | None = None,
 ) -> AgentHome:
     """Return agent identity and path without creating files."""
     env_agent_id = os.environ.get("ATELIER_AGENT_ID")
     config_agent_id = project_config.agent.identity
+    resolved_session = _normalize_session_key(
+        session_key or os.environ.get(SESSION_ENV_VAR)
+    )
     if env_agent_id:
         agent_id = env_agent_id.strip()
         if not agent_id:
@@ -244,6 +335,17 @@ def preview_agent_home(
         agent_name = _derive_agent_name(agent_id)
     else:
         agent_name = _normalize_agent_name(project_config.agent.default)
-        agent_id = _derive_agent_id(role, agent_name)
-    home_dir = paths.project_agents_dir(project_dir) / agent_name
-    return AgentHome(name=agent_name, agent_id=agent_id, role=role, path=home_dir)
+        agent_id = _derive_agent_id(role, agent_name, session_key=resolved_session)
+    home_dir = _agent_home_path(
+        project_dir,
+        role=role,
+        agent_name=agent_name,
+        session_key=resolved_session,
+    )
+    return AgentHome(
+        name=agent_name,
+        agent_id=agent_id,
+        role=role,
+        path=home_dir,
+        session_key=resolved_session,
+    )
