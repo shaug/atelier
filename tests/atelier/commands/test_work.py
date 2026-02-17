@@ -2830,7 +2830,7 @@ def test_reconcile_blocked_merged_changesets_finalizes_actionable_issue() -> Non
     }
 
     def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
-        if args[:4] == ["list", "--label", "at:changeset", "--label"]:
+        if args and args[0] == "list":
             return [changeset]
         if args[:2] == ["show", "at-wjj"]:
             return [epic]
@@ -2891,7 +2891,7 @@ def test_reconcile_blocked_merged_changesets_dry_run_skips_finalize() -> None:
     }
 
     def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
-        if args[:4] == ["list", "--label", "at:changeset", "--label"]:
+        if args and args[0] == "list":
             return [changeset]
         if args[:2] == ["show", "at-wjj"]:
             return [{"id": "at-wjj", "labels": ["at:epic"], "assignee": None}]
@@ -2938,7 +2938,7 @@ def test_reconcile_blocked_merged_changesets_logs_scan_and_result() -> None:
     logs: list[str] = []
 
     def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
-        if args[:4] == ["list", "--label", "at:changeset", "--label"]:
+        if args and args[0] == "list":
             return [changeset]
         if args[:2] == ["show", "at-wjj"]:
             return [epic]
@@ -2972,6 +2972,116 @@ def test_reconcile_blocked_merged_changesets_logs_scan_and_result() -> None:
 
     assert any("reconcile scan: at-wjj.4.3" in line for line in logs)
     assert any("reconcile ok: at-wjj.4.3" in line for line in logs)
+
+
+def test_reconcile_blocked_merged_changesets_honors_dependency_order() -> None:
+    first = {
+        "id": "at-a.1",
+        "status": "closed",
+        "labels": ["at:changeset", "cs:merged"],
+        "parent": "at-epic",
+        "dependencies": [],
+    }
+    second = {
+        "id": "at-a.2",
+        "status": "blocked",
+        "labels": ["at:changeset", "cs:blocked", "cs:merged"],
+        "parent": "at-epic",
+        "dependencies": ["at-a.1 (closed, cs:merged)"],
+    }
+    epic = {"id": "at-epic", "labels": ["at:epic"], "assignee": None}
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args and args[0] == "list":
+            return [second, first]
+        if args[:2] == ["show", "at-epic"]:
+            return [epic]
+        return []
+
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.commands.work._changeset_integration_signal",
+            return_value=(True, "dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a"),
+        ),
+        patch(
+            "atelier.commands.work._finalize_changeset",
+            return_value=work_cmd.FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        ) as finalize,
+        patch("atelier.commands.work.beads.update_changeset_integrated_sha"),
+    ):
+        result = work_cmd.reconcile_blocked_merged_changesets(
+            agent_id="atelier/worker/codex/p999-t111",
+            agent_bead_id="agent-fallback",
+            project_config=_fake_project_payload(),
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            git_path="git",
+            dry_run=False,
+        )
+
+    assert result.actionable == 2
+    assert result.reconciled == 2
+    assert result.failed == 0
+    assert [call.kwargs["changeset_id"] for call in finalize.call_args_list] == [
+        "at-a.1",
+        "at-a.2",
+    ]
+
+
+def test_reconcile_blocked_merged_changesets_blocks_on_unfinalized_dependency() -> None:
+    candidate = {
+        "id": "at-a.2",
+        "status": "closed",
+        "labels": ["at:changeset", "cs:merged"],
+        "parent": "at-epic",
+        "dependencies": ["at-z.1 (open, cs:in_progress)"],
+    }
+    epic = {"id": "at-epic", "labels": ["at:epic"], "assignee": None}
+    dependency = {
+        "id": "at-z.1",
+        "status": "open",
+        "labels": ["at:changeset", "cs:in_progress"],
+    }
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args and args[0] == "list":
+            return [candidate]
+        if args[:2] == ["show", "at-epic"]:
+            return [epic]
+        if args[:2] == ["show", "at-z.1"]:
+            return [dependency]
+        return []
+
+    logs: list[str] = []
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.commands.work._changeset_integration_signal",
+            return_value=(True, "dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a"),
+        ),
+        patch("atelier.commands.work._finalize_changeset") as finalize,
+    ):
+        result = work_cmd.reconcile_blocked_merged_changesets(
+            agent_id="atelier/worker/codex/p999-t111",
+            agent_bead_id="agent-fallback",
+            project_config=_fake_project_payload(),
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            git_path="git",
+            dry_run=False,
+            log=logs.append,
+        )
+
+    assert result.actionable == 1
+    assert result.reconciled == 0
+    assert result.failed == 1
+    finalize.assert_not_called()
+    assert any("blocked by dependencies: at-z.1" in line for line in logs)
 
 
 def test_finalize_epic_if_complete_closes_in_pr_mode() -> None:

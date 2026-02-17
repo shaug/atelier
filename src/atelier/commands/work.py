@@ -47,6 +47,7 @@ _INTEGRATED_SHA_NOTE_PATTERN = re.compile(
     r"`?changeset\.integrated_sha`?\s*[:=]\s*([0-9a-fA-F]{7,40})\b",
     re.MULTILINE,
 )
+_DEPENDENCY_ID_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\b")
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,15 @@ class ReconcileResult:
     actionable: int
     reconciled: int
     failed: int
+
+
+@dataclass(frozen=True)
+class _ReconcileCandidate:
+    issue_id: str
+    issue: dict[str, object]
+    epic_id: str
+    integrated_sha: str | None
+    dependency_ids: tuple[str, ...]
 
 
 def _normalize_branch_value(value: object) -> str | None:
@@ -115,6 +125,51 @@ def _issue_parent_id(issue: dict[str, object]) -> str | None:
             cleaned = parent_id.strip()
             return cleaned or None
     return None
+
+
+def _parse_dependency_issue_id(value: object) -> str | None:
+    if isinstance(value, dict):
+        relation = value.get("relation")
+        if isinstance(relation, str) and relation.strip().lower() == "parent-child":
+            return None
+        issue_id = value.get("id")
+        if isinstance(issue_id, str):
+            cleaned = issue_id.strip()
+            return cleaned or None
+        nested_issue = value.get("issue")
+        if isinstance(nested_issue, dict):
+            nested_id = nested_issue.get("id")
+            if isinstance(nested_id, str):
+                cleaned = nested_id.strip()
+                return cleaned or None
+        return None
+
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if "parent-child" in text.lower():
+        return None
+    match = _DEPENDENCY_ID_PATTERN.match(text)
+    if not match:
+        return None
+    return match.group(1).strip() or None
+
+
+def _issue_dependency_ids(issue: dict[str, object]) -> tuple[str, ...]:
+    dependencies = issue.get("dependencies")
+    if not isinstance(dependencies, list):
+        return ()
+    ids: list[str] = []
+    seen: set[str] = set()
+    for dependency in dependencies:
+        dependency_id = _parse_dependency_issue_id(dependency)
+        if not dependency_id or dependency_id in seen:
+            continue
+        seen.add(dependency_id)
+        ids.append(dependency_id)
+    return tuple(ids)
 
 
 def _dry_run_log(message: str) -> None:
@@ -1098,16 +1153,15 @@ def reconcile_blocked_merged_changesets(
     dry_run: bool = False,
     log: Callable[[str], None] | None = None,
 ) -> ReconcileResult:
-    """Reconcile blocked/merged changesets that now have deterministic integration."""
+    """Reconcile merged changesets, honoring dependency order."""
     issues = beads.run_bd_json(
         [
             "list",
             "--label",
             "at:changeset",
             "--label",
-            "cs:blocked",
-            "--label",
             "cs:merged",
+            "--all",
         ],
         beads_root=beads_root,
         cwd=repo_root,
@@ -1120,6 +1174,7 @@ def reconcile_blocked_merged_changesets(
     repo_slug = prs.github_repo_slug(
         project_config.project.origin or project_config.project.repo_url
     )
+    candidates: dict[str, _ReconcileCandidate] = {}
     for issue in issues:
         changeset_id = issue.get("id")
         if not isinstance(changeset_id, str) or not changeset_id.strip():
@@ -1128,7 +1183,7 @@ def reconcile_blocked_merged_changesets(
         status = str(issue.get("status") or "").strip().lower()
         if log:
             log(f"reconcile scan: {changeset_id} status={status or 'unknown'}")
-        if status not in {"", "blocked"}:
+        if status not in {"", "blocked", "closed"}:
             if log:
                 log(f"reconcile skip: {changeset_id} (status={status})")
             continue
@@ -1147,61 +1202,182 @@ def reconcile_blocked_merged_changesets(
             if log:
                 log(f"reconcile error: {changeset_id} (unable to resolve epic)")
             continue
-        actionable += 1
-        if dry_run:
-            reconciled += 1
-            if log:
-                log(
-                    f"reconcile dry-run: {changeset_id} -> epic={epic_id}"
-                    + (
-                        f" integrated_sha={integrated_sha.strip()}"
-                        if integrated_sha and integrated_sha.strip()
-                        else ""
-                    )
-                )
-            continue
-        hook_agent_bead_id = _resolve_hook_agent_bead_for_epic(
-            epic_id,
-            fallback_agent_bead_id=agent_bead_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
-        finalize_result = _finalize_changeset(
-            changeset_id=changeset_id.strip(),
+        candidates[changeset_id] = _ReconcileCandidate(
+            issue_id=changeset_id,
+            issue=issue,
             epic_id=epic_id,
-            agent_id=agent_id,
-            agent_bead_id=hook_agent_bead_id or "",
-            started_at=started_at,
-            repo_slug=repo_slug,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            branch_pr=project_config.branch.pr,
-            branch_history=project_config.branch.history,
-            branch_squash_message=project_config.branch.squash_message,
-            project_data_dir=project_data_dir,
-            git_path=git_path,
+            integrated_sha=integrated_sha.strip() if integrated_sha else None,
+            dependency_ids=_issue_dependency_ids(issue),
         )
-        if finalize_result.reason.startswith("changeset_blocked_"):
-            failed += 1
+    actionable = len(candidates)
+    if not candidates:
+        return ReconcileResult(
+            scanned=scanned,
+            actionable=actionable,
+            reconciled=reconciled,
+            failed=failed,
+        )
+
+    issue_cache: dict[str, dict[str, object] | None] = {
+        candidate.issue_id: candidate.issue for candidate in candidates.values()
+    }
+
+    def load_issue(issue_id: str) -> dict[str, object] | None:
+        if issue_id in issue_cache:
+            return issue_cache[issue_id]
+        loaded = beads.run_bd_json(
+            ["show", issue_id], beads_root=beads_root, cwd=repo_root
+        )
+        issue_cache[issue_id] = loaded[0] if loaded else None
+        return issue_cache[issue_id]
+
+    dependency_finalized_cache: dict[str, bool] = {}
+
+    def dependency_finalized(issue_id: str) -> bool:
+        if issue_id in dependency_finalized_cache:
+            return dependency_finalized_cache[issue_id]
+        issue = load_issue(issue_id)
+        if not issue:
+            dependency_finalized_cache[issue_id] = False
+            return False
+        labels = _issue_labels(issue)
+        if "at:changeset" not in labels:
+            dependency_finalized_cache[issue_id] = True
+            return True
+        if "cs:abandoned" in labels:
+            status = str(issue.get("status") or "").strip().lower()
+            finalized = status in {"", "closed", "done"}
+            dependency_finalized_cache[issue_id] = finalized
+            return finalized
+        if "cs:merged" not in labels:
+            dependency_finalized_cache[issue_id] = False
+            return False
+        integrated, _ = _changeset_integration_signal(
+            issue, repo_slug=repo_slug, repo_root=repo_root
+        )
+        dependency_finalized_cache[issue_id] = integrated
+        return integrated
+
+    remaining = set(candidates)
+    reconciled_ids: set[str] = set()
+    failed_ids: set[str] = set()
+
+    while remaining:
+        progressed = False
+        for changeset_id in sorted(remaining):
+            candidate = candidates[changeset_id]
+            dependency_waiting = False
+            dependency_errors: list[str] = []
+            for dependency_id in candidate.dependency_ids:
+                if dependency_id in reconciled_ids:
+                    continue
+                if dependency_id in failed_ids:
+                    dependency_waiting = True
+                    dependency_errors.append(f"{dependency_id}(failed)")
+                    continue
+                if dependency_id in candidates:
+                    dependency_waiting = True
+                    dependency_errors.append(dependency_id)
+                    continue
+                if not dependency_finalized(dependency_id):
+                    dependency_waiting = True
+                    dependency_errors.append(dependency_id)
+            if dependency_waiting:
+                if log:
+                    log(
+                        "reconcile defer: "
+                        f"{changeset_id} (waiting on dependencies: "
+                        f"{', '.join(dependency_errors)})"
+                    )
+                continue
+            remaining.remove(changeset_id)
+            progressed = True
+            if dry_run:
+                reconciled += 1
+                reconciled_ids.add(changeset_id)
+                if log:
+                    log(
+                        f"reconcile dry-run: {changeset_id} -> epic={candidate.epic_id}"
+                        + (
+                            f" integrated_sha={candidate.integrated_sha}"
+                            if candidate.integrated_sha
+                            else ""
+                        )
+                    )
+                continue
+
+            hook_agent_bead_id = _resolve_hook_agent_bead_for_epic(
+                candidate.epic_id,
+                fallback_agent_bead_id=agent_bead_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            finalize_result = _finalize_changeset(
+                changeset_id=candidate.issue_id,
+                epic_id=candidate.epic_id,
+                agent_id=agent_id,
+                agent_bead_id=hook_agent_bead_id or "",
+                started_at=started_at,
+                repo_slug=repo_slug,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                branch_pr=project_config.branch.pr,
+                branch_history=project_config.branch.history,
+                branch_squash_message=project_config.branch.squash_message,
+                project_data_dir=project_data_dir,
+                git_path=git_path,
+            )
+            if finalize_result.reason.startswith("changeset_blocked_"):
+                failed += 1
+                failed_ids.add(changeset_id)
+                if log:
+                    log(
+                        f"reconcile error: {changeset_id} "
+                        f"(finalize reason={finalize_result.reason})"
+                    )
+                continue
+            if candidate.integrated_sha:
+                beads.update_changeset_integrated_sha(
+                    changeset_id,
+                    candidate.integrated_sha,
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                )
             if log:
                 log(
-                    f"reconcile error: {changeset_id} "
+                    f"reconcile ok: {changeset_id} -> epic={candidate.epic_id} "
                     f"(finalize reason={finalize_result.reason})"
                 )
-            continue
-        if integrated_sha and integrated_sha.strip():
-            beads.update_changeset_integrated_sha(
-                changeset_id,
-                integrated_sha.strip(),
-                beads_root=beads_root,
-                cwd=repo_root,
-            )
+            reconciled += 1
+            reconciled_ids.add(changeset_id)
+        if not progressed:
+            break
+
+    for changeset_id in sorted(remaining):
+        candidate = candidates[changeset_id]
+        blockers: list[str] = []
+        for dependency_id in candidate.dependency_ids:
+            if dependency_id in reconciled_ids:
+                continue
+            if dependency_id in failed_ids:
+                blockers.append(f"{dependency_id}(failed)")
+                continue
+            if dependency_id in candidates:
+                blockers.append(dependency_id)
+                continue
+            if not dependency_finalized(dependency_id):
+                blockers.append(dependency_id)
+        failed += 1
+        failed_ids.add(changeset_id)
         if log:
-            log(
-                f"reconcile ok: {changeset_id} -> epic={epic_id} "
-                f"(finalize reason={finalize_result.reason})"
-            )
-        reconciled += 1
+            if blockers:
+                log(
+                    f"reconcile error: {changeset_id} "
+                    f"(blocked by dependencies: {', '.join(blockers)})"
+                )
+            else:
+                log(f"reconcile error: {changeset_id} (dependency order unresolved)")
+
     return ReconcileResult(
         scanned=scanned,
         actionable=actionable,
