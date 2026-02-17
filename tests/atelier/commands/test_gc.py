@@ -148,6 +148,7 @@ def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
                 scanned=2, actionable=1, reconciled=1, failed=0
             ),
         ) as reconcile,
+        patch("atelier.commands.gc.confirm") as confirm,
         patch("atelier.commands.gc.say") as say,
     ):
         gc_cmd.gc(
@@ -161,8 +162,100 @@ def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
         )
 
     reconcile.assert_called_once()
+    confirm.assert_not_called()
     assert any(
         "Reconcile blocked changesets: scanned=2, actionable=1, reconciled=1, failed=0"
+        in str(call.args[0])
+        for call in say.call_args_list
+    )
+
+
+def test_gc_reconcile_flag_prompts_and_skips_without_confirmation() -> None:
+    project_root = Path("/project")
+    repo_root = Path("/repo")
+    project_config = config.ProjectConfig()
+
+    with (
+        patch(
+            "atelier.commands.gc.resolve_current_project_with_repo_root",
+            return_value=(project_root, project_config, "/repo", repo_root),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_project_data_dir",
+            return_value=Path("/data"),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
+        patch(
+            "atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets"
+        ) as reconcile,
+        patch("atelier.commands.gc.confirm", return_value=False) as confirm,
+        patch("atelier.commands.gc.say") as say,
+    ):
+        gc_cmd.gc(
+            SimpleNamespace(
+                stale_hours=24.0,
+                stale_if_missing_heartbeat=False,
+                dry_run=False,
+                reconcile=True,
+                yes=False,
+            )
+        )
+
+    confirm.assert_called_once_with(
+        "Run reconcile for merged changesets now?", default=False
+    )
+    reconcile.assert_not_called()
+    assert any("Skipped reconcile." in str(call.args[0]) for call in say.call_args_list)
+
+
+def test_gc_reconcile_flag_prompts_and_runs_with_confirmation() -> None:
+    project_root = Path("/project")
+    repo_root = Path("/repo")
+    project_config = config.ProjectConfig()
+
+    with (
+        patch(
+            "atelier.commands.gc.resolve_current_project_with_repo_root",
+            return_value=(project_root, project_config, "/repo", repo_root),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_project_data_dir",
+            return_value=Path("/data"),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
+        patch(
+            "atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets",
+            return_value=gc_cmd.work_cmd.ReconcileResult(
+                scanned=1, actionable=1, reconciled=1, failed=0
+            ),
+        ) as reconcile,
+        patch("atelier.commands.gc.confirm", return_value=True) as confirm,
+        patch("atelier.commands.gc.say") as say,
+    ):
+        gc_cmd.gc(
+            SimpleNamespace(
+                stale_hours=24.0,
+                stale_if_missing_heartbeat=False,
+                dry_run=False,
+                reconcile=True,
+                yes=False,
+            )
+        )
+
+    confirm.assert_called_once_with(
+        "Run reconcile for merged changesets now?", default=False
+    )
+    reconcile.assert_called_once()
+    assert any(
+        "Reconcile blocked changesets: scanned=1, actionable=1, reconciled=1, failed=0"
         in str(call.args[0])
         for call in say.call_args_list
     )

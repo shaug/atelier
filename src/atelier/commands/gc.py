@@ -489,24 +489,32 @@ def gc(args: object) -> None:
     include_missing_heartbeat = bool(getattr(args, "stale_if_missing_heartbeat", False))
 
     if reconcile:
-        reconcile_result = work_cmd.reconcile_blocked_merged_changesets(
-            agent_id="atelier/system/gc",
-            agent_bead_id="",
-            project_config=project_config,
-            project_data_dir=project_data_dir,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            git_path=config.resolve_git_path(project_config),
-            dry_run=dry_run,
-            log=say,
-        )
-        say(
-            "Reconcile blocked changesets: "
-            f"scanned={reconcile_result.scanned}, "
-            f"actionable={reconcile_result.actionable}, "
-            f"reconciled={reconcile_result.reconciled}, "
-            f"failed={reconcile_result.failed}"
-        )
+        run_reconcile = True
+        if not dry_run and not yes:
+            run_reconcile = confirm(
+                "Run reconcile for merged changesets now?", default=False
+            )
+        if run_reconcile:
+            reconcile_result = work_cmd.reconcile_blocked_merged_changesets(
+                agent_id="atelier/system/gc",
+                agent_bead_id="",
+                project_config=project_config,
+                project_data_dir=project_data_dir,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                git_path=config.resolve_git_path(project_config),
+                dry_run=dry_run,
+                log=say,
+            )
+            say(
+                "Reconcile blocked changesets: "
+                f"scanned={reconcile_result.scanned}, "
+                f"actionable={reconcile_result.actionable}, "
+                f"reconciled={reconcile_result.reconciled}, "
+                f"failed={reconcile_result.failed}"
+            )
+        else:
+            say("Skipped reconcile.")
 
     actions: list[GcAction] = []
     actions.extend(
