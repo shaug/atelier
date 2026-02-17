@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+import atelier.beads as beads
 import atelier.commands.gc as gc_cmd
 import atelier.config as config
 import atelier.worktrees as worktrees
@@ -460,3 +461,156 @@ def test_gc_orphan_worktree_dirty_force_remove_calls_force() -> None:
             git_path="git",
             force=True,
         )
+
+
+def test_gc_resolved_epic_artifacts_prunes_worktrees_and_branches() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        epic_id = "at-epic"
+        mapping_path = worktrees.mapping_path(project_dir, epic_id)
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_path,
+            worktrees.WorktreeMapping(
+                epic_id=epic_id,
+                worktree_path=f"worktrees/{epic_id}",
+                root_branch="feat/root",
+                changesets={"at-epic.1": "feat/root-at-epic.1"},
+                changeset_worktrees={"at-epic.1": "worktrees/at-epic.1"},
+            ),
+        )
+        epic_worktree = project_dir / "worktrees" / epic_id
+        changeset_worktree = project_dir / "worktrees" / "at-epic.1"
+        epic_worktree.mkdir(parents=True, exist_ok=True)
+        changeset_worktree.mkdir(parents=True, exist_ok=True)
+        (epic_worktree / ".git").write_text("gitdir: /tmp/a", encoding="utf-8")
+        (changeset_worktree / ".git").write_text("gitdir: /tmp/b", encoding="utf-8")
+        epic_issue = {
+            "id": epic_id,
+            "status": "closed",
+            "labels": ["at:epic"],
+            "description": "workspace.parent_branch: main\n",
+        }
+        refs = {
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+            "refs/heads/feat/root",
+            "refs/remotes/origin/feat/root",
+            "refs/heads/feat/root-at-epic.1",
+            "refs/remotes/origin/feat/root-at-epic.1",
+        }
+        commands: list[list[str]] = []
+
+        with (
+            patch("atelier.commands.gc._try_show_issue", return_value=epic_issue),
+            patch(
+                "atelier.commands.gc.beads.epic_changeset_summary",
+                return_value=beads.ChangesetSummary(
+                    total=1, ready=0, merged=1, abandoned=0, remaining=0
+                ),
+            ),
+            patch("atelier.commands.gc.git.git_default_branch", return_value="main"),
+            patch(
+                "atelier.commands.gc.git.git_ref_exists",
+                side_effect=lambda repo, ref, git_path=None: ref in refs,
+            ),
+            patch("atelier.commands.gc.git.git_is_ancestor", return_value=True),
+            patch(
+                "atelier.commands.gc.git.git_branch_fully_applied", return_value=False
+            ),
+            patch("atelier.commands.gc.git.git_status_porcelain", return_value=[]),
+            patch("atelier.commands.gc.git.git_current_branch", return_value="main"),
+            patch(
+                "atelier.commands.gc._run_git_gc_command",
+                side_effect=lambda args, repo_root, git_path: (
+                    commands.append(args),
+                    (True, ""),
+                )[1],
+            ),
+        ):
+            actions = gc_cmd._gc_resolved_epic_artifacts(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+                assume_yes=False,
+            )
+            assert len(actions) == 1
+            actions[0].apply()
+
+        assert ["worktree", "remove", str(epic_worktree)] in commands
+        assert ["worktree", "remove", str(changeset_worktree)] in commands
+        assert ["push", "origin", "--delete", "feat/root"] in commands
+        assert ["push", "origin", "--delete", "feat/root-at-epic.1"] in commands
+        assert ["branch", "-D", "feat/root"] in commands
+        assert ["branch", "-D", "feat/root-at-epic.1"] in commands
+        assert not mapping_path.exists()
+
+
+def test_gc_resolved_epic_artifacts_skips_when_not_integrated() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        epic_id = "at-epic"
+        mapping_path = worktrees.mapping_path(project_dir, epic_id)
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_path,
+            worktrees.WorktreeMapping(
+                epic_id=epic_id,
+                worktree_path=f"worktrees/{epic_id}",
+                root_branch="feat/root",
+                changesets={},
+                changeset_worktrees={},
+            ),
+        )
+        epic_worktree = project_dir / "worktrees" / epic_id
+        epic_worktree.mkdir(parents=True, exist_ok=True)
+        (epic_worktree / ".git").write_text("gitdir: /tmp/a", encoding="utf-8")
+        epic_issue = {
+            "id": epic_id,
+            "status": "closed",
+            "labels": ["at:epic"],
+            "description": "workspace.parent_branch: main\n",
+        }
+        refs = {
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+            "refs/heads/feat/root",
+            "refs/remotes/origin/feat/root",
+        }
+
+        with (
+            patch("atelier.commands.gc._try_show_issue", return_value=epic_issue),
+            patch(
+                "atelier.commands.gc.beads.epic_changeset_summary",
+                return_value=beads.ChangesetSummary(
+                    total=1, ready=0, merged=1, abandoned=0, remaining=0
+                ),
+            ),
+            patch("atelier.commands.gc.git.git_default_branch", return_value="main"),
+            patch(
+                "atelier.commands.gc.git.git_ref_exists",
+                side_effect=lambda repo, ref, git_path=None: ref in refs,
+            ),
+            patch("atelier.commands.gc.git.git_is_ancestor", return_value=False),
+            patch(
+                "atelier.commands.gc.git.git_branch_fully_applied", return_value=False
+            ),
+        ):
+            actions = gc_cmd._gc_resolved_epic_artifacts(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+                assume_yes=False,
+            )
+
+        assert actions == []

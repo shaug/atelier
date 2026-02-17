@@ -9,6 +9,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from .. import agent_home, beads, config, git, messages, worktrees
+from .. import exec as exec_util
 from ..io import confirm, die, say, select, warn
 from . import work as work_cmd
 from .resolve import resolve_current_project_with_repo_root
@@ -18,6 +19,20 @@ from .resolve import resolve_current_project_with_repo_root
 class GcAction:
     description: str
     apply: callable
+
+
+def _run_git_gc_command(
+    args: list[str], *, repo_root: Path, git_path: str
+) -> tuple[bool, str]:
+    result = exec_util.try_run_command(
+        git.git_command(["-C", str(repo_root), *args], git_path=git_path)
+    )
+    if result is None:
+        return False, "missing required command: git"
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        return False, detail or f"command failed: git {' '.join(args)}"
+    return True, (result.stdout or "").strip()
 
 
 def _parse_rfc3339(value: str | None) -> dt.datetime | None:
@@ -226,6 +241,216 @@ def _gc_hooks(
                 _release_epic(epic_issue, beads_root=beads_root, cwd=repo_root)
 
             actions.append(GcAction(description=description, apply=_apply_unhook))
+    return actions
+
+
+def _normalize_branch(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or cleaned.lower() == "null":
+        return None
+    return cleaned
+
+
+def _branch_lookup_ref(
+    repo_root: Path, branch: str, *, git_path: str
+) -> tuple[str | None, str | None]:
+    local_ref = f"refs/heads/{branch}"
+    remote_ref = f"refs/remotes/origin/{branch}"
+    local = (
+        branch if git.git_ref_exists(repo_root, local_ref, git_path=git_path) else None
+    )
+    remote = (
+        f"origin/{branch}"
+        if git.git_ref_exists(repo_root, remote_ref, git_path=git_path)
+        else None
+    )
+    return local, remote
+
+
+def _branch_integrated_into_target(
+    repo_root: Path,
+    *,
+    branch: str,
+    target_ref: str,
+    git_path: str,
+) -> bool:
+    local_ref, remote_ref = _branch_lookup_ref(repo_root, branch, git_path=git_path)
+    branch_refs = [ref for ref in (local_ref, remote_ref) if ref]
+    if not branch_refs:
+        return True
+    for branch_ref in branch_refs:
+        is_ancestor = git.git_is_ancestor(
+            repo_root, branch_ref, target_ref, git_path=git_path
+        )
+        if is_ancestor is True:
+            return True
+        fully_applied = git.git_branch_fully_applied(
+            repo_root, target_ref, branch_ref, git_path=git_path
+        )
+        if fully_applied is True:
+            return True
+    return False
+
+
+def _gc_resolved_epic_artifacts(
+    *,
+    project_dir: Path,
+    beads_root: Path,
+    repo_root: Path,
+    git_path: str,
+    assume_yes: bool = False,
+) -> list[GcAction]:
+    actions: list[GcAction] = []
+    meta_dir = worktrees.worktrees_root(project_dir) / worktrees.METADATA_DIRNAME
+    if not meta_dir.exists():
+        return actions
+    default_branch = git.git_default_branch(repo_root, git_path=git_path) or ""
+    for path in meta_dir.glob("*.json"):
+        mapping = worktrees.load_mapping(path)
+        if not mapping:
+            continue
+        epic_id = mapping.epic_id
+        if not epic_id:
+            continue
+        epic = _try_show_issue(epic_id, beads_root=beads_root, cwd=repo_root)
+        if not epic:
+            continue
+        status = str(epic.get("status") or "").strip().lower()
+        if status not in {"closed", "done"}:
+            continue
+        labels = _issue_labels(epic)
+        if "at:epic" in labels:
+            summary = beads.epic_changeset_summary(
+                epic_id, beads_root=beads_root, cwd=repo_root
+            )
+            if not summary.ready_to_close:
+                continue
+        elif "at:changeset" in labels and not (
+            "cs:merged" in labels or "cs:abandoned" in labels
+        ):
+            continue
+
+        description = epic.get("description")
+        fields = beads.parse_description_fields(
+            description if isinstance(description, str) else ""
+        )
+        parent_branch = _normalize_branch(fields.get("workspace.parent_branch"))
+        if not parent_branch:
+            parent_branch = _normalize_branch(fields.get("changeset.parent_branch"))
+        if not parent_branch:
+            parent_branch = _normalize_branch(default_branch)
+        if not parent_branch:
+            continue
+
+        target_local, target_remote = _branch_lookup_ref(
+            repo_root, parent_branch, git_path=git_path
+        )
+        target_ref = target_local or target_remote
+        if not target_ref:
+            continue
+
+        branches = {mapping.root_branch, *mapping.changesets.values()}
+        prunable_branches = {
+            branch
+            for branch in branches
+            if branch and branch != parent_branch and branch != default_branch
+        }
+        if any(
+            not _branch_integrated_into_target(
+                repo_root, branch=branch, target_ref=target_ref, git_path=git_path
+            )
+            for branch in prunable_branches
+        ):
+            continue
+
+        relpaths = {
+            relpath
+            for relpath in [
+                mapping.worktree_path,
+                *mapping.changeset_worktrees.values(),
+            ]
+            if relpath
+        }
+        existing_worktrees = []
+        for relpath in relpaths:
+            worktree_path = Path(relpath)
+            if not worktree_path.is_absolute():
+                worktree_path = project_dir / worktree_path
+            if worktree_path.exists() and (worktree_path / ".git").exists():
+                existing_worktrees.append(worktree_path)
+
+        has_prunable_branch_ref = False
+        for branch in prunable_branches:
+            local_ref, remote_ref = _branch_lookup_ref(
+                repo_root, branch, git_path=git_path
+            )
+            if local_ref or remote_ref:
+                has_prunable_branch_ref = True
+                break
+        if not existing_worktrees and not has_prunable_branch_ref:
+            continue
+
+        description_text = f"Prune resolved epic artifacts for {epic_id}"
+
+        def _apply_cleanup(
+            epic_value: str = epic_id,
+            mapping_path: Path = path,
+            worktree_paths: list[Path] = list(existing_worktrees),
+            branches_to_prune: list[str] = sorted(prunable_branches),
+        ) -> None:
+            for worktree_path in worktree_paths:
+                status_lines = git.git_status_porcelain(
+                    worktree_path, git_path=git_path
+                )
+                force_remove = False
+                if status_lines:
+                    say(f"Resolved worktree has local changes: {worktree_path}")
+                    for line in status_lines[:20]:
+                        say(f"- {line}")
+                    if len(status_lines) > 20:
+                        say(f"- ... ({len(status_lines) - 20} more)")
+                    if assume_yes:
+                        force_remove = True
+                    else:
+                        choice = select(
+                            "Resolved worktree cleanup action",
+                            ("force-remove", "exit"),
+                            "exit",
+                        )
+                        if choice != "force-remove":
+                            die("gc aborted by user")
+                        force_remove = True
+                args = ["worktree", "remove"]
+                if force_remove:
+                    args.append("--force")
+                args.append(str(worktree_path))
+                ok, detail = _run_git_gc_command(
+                    args, repo_root=repo_root, git_path=git_path
+                )
+                if not ok:
+                    die(detail)
+
+            current_branch = git.git_current_branch(repo_root, git_path=git_path)
+            for branch in branches_to_prune:
+                local_ref, remote_ref = _branch_lookup_ref(
+                    repo_root, branch, git_path=git_path
+                )
+                if remote_ref:
+                    _run_git_gc_command(
+                        ["push", "origin", "--delete", branch],
+                        repo_root=repo_root,
+                        git_path=git_path,
+                    )
+                if local_ref and current_branch != branch:
+                    _run_git_gc_command(
+                        ["branch", "-D", branch], repo_root=repo_root, git_path=git_path
+                    )
+            # Remove stale mapping once worktrees/branches are pruned.
+            mapping_path.unlink(missing_ok=True)
+
+        actions.append(GcAction(description=description_text, apply=_apply_cleanup))
     return actions
 
 
@@ -575,6 +800,15 @@ def gc(args: object) -> None:
     )
     actions.extend(
         _gc_orphan_worktrees(
+            project_dir=project_data_dir,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            git_path=config.resolve_git_path(project_config),
+            assume_yes=yes,
+        )
+    )
+    actions.extend(
+        _gc_resolved_epic_artifacts(
             project_dir=project_data_dir,
             beads_root=beads_root,
             repo_root=repo_root,
