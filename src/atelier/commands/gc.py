@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from .. import agent_home, beads, config, messages, worktrees
-from ..io import confirm, say, warn
+from .. import agent_home, beads, config, git, messages, worktrees
+from ..io import confirm, die, say, select, warn
 from . import work as work_cmd
 from .resolve import resolve_current_project_with_repo_root
 
@@ -235,6 +235,7 @@ def _gc_orphan_worktrees(
     beads_root: Path,
     repo_root: Path,
     git_path: str,
+    assume_yes: bool = False,
 ) -> list[GcAction]:
     actions: list[GcAction] = []
     meta_dir = worktrees.worktrees_root(project_dir) / worktrees.METADATA_DIRNAME
@@ -255,9 +256,36 @@ def _gc_orphan_worktrees(
         def _apply_remove(
             epic: str = epic_id,
             mapping_path: Path = path,
+            mapping_worktree_path: str = mapping.worktree_path,
         ) -> None:
+            worktree_path = Path(mapping_worktree_path)
+            if not worktree_path.is_absolute():
+                worktree_path = project_dir / worktree_path
+            status_lines = git.git_status_porcelain(worktree_path, git_path=git_path)
+            force_remove = False
+            if status_lines:
+                say(f"Orphaned worktree has local changes: {worktree_path}")
+                for line in status_lines[:20]:
+                    say(f"- {line}")
+                if len(status_lines) > 20:
+                    say(f"- ... ({len(status_lines) - 20} more)")
+                if assume_yes:
+                    force_remove = True
+                else:
+                    choice = select(
+                        "Orphaned worktree cleanup action",
+                        ("force-remove", "exit"),
+                        "exit",
+                    )
+                    if choice != "force-remove":
+                        die("gc aborted by user")
+                    force_remove = True
             worktrees.remove_git_worktree(
-                project_dir, repo_root, epic, git_path=git_path
+                project_dir,
+                repo_root,
+                epic,
+                git_path=git_path,
+                force=force_remove,
             )
             mapping_path.unlink(missing_ok=True)
 
@@ -494,6 +522,7 @@ def gc(args: object) -> None:
             beads_root=beads_root,
             repo_root=repo_root,
             git_path=config.resolve_git_path(project_config),
+            assume_yes=yes,
         )
     )
     actions.extend(

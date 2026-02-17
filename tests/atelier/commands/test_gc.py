@@ -3,8 +3,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 import atelier.commands.gc as gc_cmd
 import atelier.config as config
+import atelier.worktrees as worktrees
 from atelier.messages import render_message
 
 
@@ -163,3 +166,138 @@ def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
         in str(call.args[0])
         for call in say.call_args_list
     )
+
+
+def test_gc_orphan_worktree_dirty_prompts_force_or_exit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        data_dir = root / "data"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        mapping_path = worktrees.mapping_path(data_dir, "orphan-epic")
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_path,
+            worktrees.WorktreeMapping(
+                epic_id="orphan-epic",
+                worktree_path="worktrees/orphan-epic",
+                root_branch="feat/orphan",
+                changesets={},
+                changeset_worktrees={},
+            ),
+        )
+        orphan_path = data_dir / "worktrees" / "orphan-epic"
+        orphan_path.mkdir(parents=True, exist_ok=True)
+        (orphan_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+        project_config = config.ProjectConfig()
+
+        with (
+            patch(
+                "atelier.commands.gc.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, "/repo", repo_root),
+            ),
+            patch(
+                "atelier.commands.gc.config.resolve_project_data_dir",
+                return_value=data_dir,
+            ),
+            patch(
+                "atelier.commands.gc.config.resolve_beads_root",
+                return_value=Path("/beads"),
+            ),
+            patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
+            patch("atelier.commands.gc._try_show_issue", return_value=None),
+            patch(
+                "atelier.commands.gc.git.git_status_porcelain",
+                return_value=[" M foo.py", "?? bar.txt"],
+            ),
+            patch(
+                "atelier.commands.gc.worktrees.remove_git_worktree"
+            ) as remove_worktree,
+            patch("atelier.commands.gc.confirm", return_value=True),
+            patch("atelier.commands.gc.select", return_value="exit"),
+            patch("atelier.commands.gc.say"),
+        ):
+            with pytest.raises(SystemExit):
+                gc_cmd.gc(
+                    SimpleNamespace(
+                        stale_hours=24.0,
+                        stale_if_missing_heartbeat=False,
+                        dry_run=False,
+                        reconcile=False,
+                        yes=False,
+                    )
+                )
+
+        remove_worktree.assert_not_called()
+
+
+def test_gc_orphan_worktree_dirty_force_remove_calls_force() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        data_dir = root / "data"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        mapping_path = worktrees.mapping_path(data_dir, "orphan-epic")
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_path,
+            worktrees.WorktreeMapping(
+                epic_id="orphan-epic",
+                worktree_path="worktrees/orphan-epic",
+                root_branch="feat/orphan",
+                changesets={},
+                changeset_worktrees={},
+            ),
+        )
+        orphan_path = data_dir / "worktrees" / "orphan-epic"
+        orphan_path.mkdir(parents=True, exist_ok=True)
+        (orphan_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+        project_config = config.ProjectConfig()
+
+        with (
+            patch(
+                "atelier.commands.gc.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, "/repo", repo_root),
+            ),
+            patch(
+                "atelier.commands.gc.config.resolve_project_data_dir",
+                return_value=data_dir,
+            ),
+            patch(
+                "atelier.commands.gc.config.resolve_beads_root",
+                return_value=Path("/beads"),
+            ),
+            patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
+            patch("atelier.commands.gc._try_show_issue", return_value=None),
+            patch(
+                "atelier.commands.gc.git.git_status_porcelain",
+                return_value=[" M foo.py"],
+            ),
+            patch(
+                "atelier.commands.gc.worktrees.remove_git_worktree"
+            ) as remove_worktree,
+            patch("atelier.commands.gc.confirm", return_value=True),
+            patch("atelier.commands.gc.select", return_value="force-remove"),
+            patch("atelier.commands.gc.say"),
+        ):
+            gc_cmd.gc(
+                SimpleNamespace(
+                    stale_hours=24.0,
+                    stale_if_missing_heartbeat=False,
+                    dry_run=False,
+                    reconcile=False,
+                    yes=False,
+                )
+            )
+
+        remove_worktree.assert_called_once_with(
+            data_dir,
+            repo_root,
+            "orphan-epic",
+            git_path="git",
+            force=True,
+        )
