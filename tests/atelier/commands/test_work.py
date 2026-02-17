@@ -528,6 +528,66 @@ def test_next_changeset_allows_standalone_changeset() -> None:
     assert selected["id"] == "at-irs"
 
 
+def test_next_changeset_allows_ready_epic_without_child_changesets() -> None:
+    epic = {"id": "at-ati", "labels": ["at:epic", "at:ready"], "status": "open"}
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "at-ati"]:
+            return [epic]
+        if args[0] == "ready":
+            return []
+        return []
+
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.commands.work.beads.list_descendant_changesets", return_value=[]
+        ),
+    ):
+        selected = work_cmd._next_changeset(
+            epic_id="at-ati", beads_root=Path("/beads"), repo_root=Path("/repo")
+        )
+
+    assert selected is not None
+    assert selected["id"] == "at-ati"
+
+
+def test_next_changeset_skips_ready_epic_when_child_changesets_exist() -> None:
+    epic = {"id": "at-ati", "labels": ["at:epic", "at:ready"], "status": "open"}
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "at-ati"]:
+            return [epic]
+        if args[0] == "ready":
+            return []
+        return []
+
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.commands.work.beads.list_descendant_changesets",
+            return_value=[{"id": "at-ati.1"}],
+        ),
+    ):
+        selected = work_cmd._next_changeset(
+            epic_id="at-ati", beads_root=Path("/beads"), repo_root=Path("/repo")
+        )
+
+    assert selected is None
+
+
+def test_mark_changeset_in_progress_adds_changeset_label() -> None:
+    with patch("atelier.commands.work.beads.run_bd_command") as run_bd_command:
+        work_cmd._mark_changeset_in_progress(
+            "at-ati", beads_root=Path("/beads"), repo_root=Path("/repo")
+        )
+
+    args = run_bd_command.call_args.args[0]
+    assert args[:2] == ["update", "at-ati"]
+    assert "at:changeset" in args
+    assert "cs:in_progress" in args
+
+
 def test_find_invalid_changeset_labels_flags_subtasks() -> None:
     def fake_run_bd_json(
         args: list[str], *, beads_root: Path, cwd: Path

@@ -15,7 +15,10 @@ description: >-
 ## Readiness checks
 
 - Epic has acceptance criteria and clear scope.
-- Epic contains at least one changeset bead.
+- Epic is executable in one of two ways:
+  - has one or more child changeset beads, or
+  - is itself the single executable changeset (sufficiently scoped, no child
+    changesets).
 - Changeset guardrails have been validated (run `plan_changeset_guardrails`
   first).
 
@@ -23,7 +26,11 @@ description: >-
 
 1. Show the epic and verify it is labeled `at:draft`.
 1. List child changesets and confirm which are fully defined.
-1. Summarize the epic and changesets for the user.
+1. If there are no child changesets and the epic is single-changeset sized:
+   - Add `at:changeset` to the epic.
+   - Add `cs:ready` to the epic.
+1. Summarize the executable unit(s) for the user (child changesets or the epic
+   itself).
 1. Ask for explicit confirmation to promote.
 1. On approval, remove `at:draft` and add `at:ready`.
 1. Promote each fully-defined `cs:planned` child changeset to `cs:ready`
@@ -34,4 +41,7 @@ description: >-
 
 - Epic no longer has `at:draft`.
 - Epic includes `at:ready`.
-- All fully-defined child changesets are labeled `cs:ready`.
+- If the epic has child changesets, all fully-defined children are labeled
+  `cs:ready`.
+- If the epic has no child changesets, the epic itself is labeled `at:changeset`
+  \+ `cs:ready`.

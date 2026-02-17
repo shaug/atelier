@@ -719,6 +719,23 @@ def _next_changeset(
                 epic_id, beads_root=beads_root, repo_root=repo_root
             ):
                 return issue
+        status = str(issue.get("status") or "").strip().lower()
+        if (
+            isinstance(issue_id, str)
+            and issue_id == epic_id
+            and "at:epic" in labels
+            and "at:ready" in labels
+            and status not in {"closed", "done"}
+        ):
+            descendants = beads.list_descendant_changesets(
+                epic_id,
+                beads_root=beads_root,
+                cwd=repo_root,
+                include_closed=True,
+            )
+            if not descendants:
+                # Epics with no child changesets execute directly as a single changeset.
+                return issue
 
     changesets = beads.run_bd_json(
         [
@@ -866,6 +883,8 @@ def _mark_changeset_in_progress(
         [
             "update",
             changeset_id,
+            "--add-label",
+            "at:changeset",
             "--add-label",
             "cs:in_progress",
             "--remove-label",
