@@ -584,6 +584,13 @@ def gc_command(
         bool,
         typer.Option("--dry-run", help="show planned actions only"),
     ] = False,
+    reconcile: Annotated[
+        bool,
+        typer.Option(
+            "--reconcile",
+            help="reconcile blocked merged changesets before GC actions",
+        ),
+    ] = False,
     yes: Annotated[
         bool,
         typer.Option("--yes", help="apply without confirmation"),
@@ -595,6 +602,7 @@ def gc_command(
             stale_hours=stale_hours,
             stale_if_missing_heartbeat=stale_if_missing_heartbeat,
             dry_run=dry_run,
+            reconcile=reconcile,
             yes=yes,
         )
     )

@@ -10,6 +10,7 @@ from tempfile import NamedTemporaryFile
 
 from .. import agent_home, beads, config, messages, worktrees
 from ..io import confirm, say, warn
+from . import work as work_cmd
 from .resolve import resolve_current_project_with_repo_root
 
 
@@ -456,7 +457,27 @@ def gc(args: object) -> None:
 
     dry_run = bool(getattr(args, "dry_run", False))
     yes = bool(getattr(args, "yes", False))
+    reconcile = bool(getattr(args, "reconcile", False))
     include_missing_heartbeat = bool(getattr(args, "stale_if_missing_heartbeat", False))
+
+    if reconcile:
+        reconcile_result = work_cmd.reconcile_blocked_merged_changesets(
+            agent_id="atelier/system/gc",
+            agent_bead_id="",
+            project_config=project_config,
+            project_data_dir=project_data_dir,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            git_path=config.resolve_git_path(project_config),
+            dry_run=dry_run,
+        )
+        say(
+            "Reconcile blocked changesets: "
+            f"scanned={reconcile_result.scanned}, "
+            f"actionable={reconcile_result.actionable}, "
+            f"reconciled={reconcile_result.reconciled}, "
+            f"failed={reconcile_result.failed}"
+        )
 
     actions: list[GcAction] = []
     actions.extend(

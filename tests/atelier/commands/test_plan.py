@@ -72,6 +72,12 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         patch("atelier.commands.plan.agent_home.cleanup_agent_home") as cleanup_home,
         patch("atelier.commands.plan.beads.ensure_agent_bead"),
         patch(
+            "atelier.commands.plan.work_cmd.reconcile_blocked_merged_changesets",
+            return_value=SimpleNamespace(
+                scanned=0, actionable=0, reconciled=0, failed=0
+            ),
+        ) as reconcile,
+        patch(
             "atelier.commands.plan.beads.run_bd_command",
             side_effect=fake_run_bd_command,
         ),
@@ -97,6 +103,7 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
     assert calls[0][0] == "prime"
     assert captured_env.get("ATELIER_PLAN_EPIC") == "atelier-epic"
     assert captured_env.get("ATELIER_WORKSPACE") == "main-planner-planner"
+    reconcile.assert_called_once()
     cleanup_home.assert_called_once_with(agent, project_dir=tmp_path)
     ensure_git_worktree.assert_called_once_with(
         tmp_path,

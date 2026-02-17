@@ -25,6 +25,7 @@ from .. import (
     worktrees,
 )
 from ..io import confirm, die, prompt, say
+from . import work as work_cmd
 from .resolve import resolve_current_project_with_repo_root
 
 
@@ -455,10 +456,28 @@ def run_planner(args: object) -> None:
             beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
             finish()
             finish = _step("Ensure planner agent bead", timings=timings, trace=trace)
-            beads.ensure_agent_bead(
+            agent_bead = beads.ensure_agent_bead(
                 agent.agent_id, beads_root=beads_root, cwd=repo_root, role="planner"
             )
             finish()
+            finish = _step("Reconcile blocked changesets", timings=timings, trace=trace)
+            reconcile_result = work_cmd.reconcile_blocked_merged_changesets(
+                agent_id=agent.agent_id,
+                agent_bead_id=str(agent_bead.get("id") or ""),
+                project_config=project_config,
+                project_data_dir=project_data_dir,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                git_path=config.resolve_git_path(project_config),
+            )
+            finish(
+                extra=(
+                    f"scanned={reconcile_result.scanned}, "
+                    f"actionable={reconcile_result.actionable}, "
+                    f"reconciled={reconcile_result.reconciled}, "
+                    f"failed={reconcile_result.failed}"
+                )
+            )
             finish = _step("Check inbox", timings=timings, trace=trace)
             _list_inbox_messages(
                 agent.agent_id, beads_root=beads_root, repo_root=repo_root

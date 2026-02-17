@@ -71,6 +71,14 @@ class FinalizeResult:
     reason: str
 
 
+@dataclass(frozen=True)
+class ReconcileResult:
+    scanned: int
+    actionable: int
+    reconciled: int
+    failed: int
+
+
 def _normalize_branch_value(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -94,6 +102,19 @@ def _extract_workspace_parent_branch(issue: dict[str, object]) -> str | None:
         description if isinstance(description, str) else ""
     )
     return _normalize_branch_value(fields.get("workspace.parent_branch"))
+
+
+def _issue_parent_id(issue: dict[str, object]) -> str | None:
+    parent = issue.get("parent")
+    if isinstance(parent, str):
+        cleaned = parent.strip()
+        return cleaned or None
+    if isinstance(parent, dict):
+        parent_id = parent.get("id")
+        if isinstance(parent_id, str):
+            cleaned = parent_id.strip()
+            return cleaned or None
+    return None
 
 
 def _dry_run_log(message: str) -> None:
@@ -1012,6 +1033,152 @@ def _changeset_integration_signal(
         return True, git.git_rev_parse(repo_root, root_ref)
 
     return False, None
+
+
+def _resolve_epic_id_for_changeset(
+    issue: dict[str, object], *, beads_root: Path, repo_root: Path
+) -> str | None:
+    current = issue
+    current_id = issue.get("id")
+    if not isinstance(current_id, str) or not current_id.strip():
+        return None
+    visited: set[str] = set()
+    while True:
+        issue_id = current_id.strip()
+        if not issue_id or issue_id in visited:
+            return None
+        visited.add(issue_id)
+        labels = _issue_labels(current)
+        if "at:epic" in labels:
+            return issue_id
+        parent_id = _issue_parent_id(current)
+        if not parent_id:
+            # Standalone top-level changeset can act as its own epic root.
+            return issue_id
+        parent_issues = beads.run_bd_json(
+            ["show", parent_id], beads_root=beads_root, cwd=repo_root
+        )
+        if not parent_issues:
+            return parent_id
+        current = parent_issues[0]
+        current_id = parent_id
+
+
+def _resolve_hook_agent_bead_for_epic(
+    epic_id: str,
+    *,
+    fallback_agent_bead_id: str | None,
+    beads_root: Path,
+    repo_root: Path,
+) -> str | None:
+    issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
+    if not issues:
+        return fallback_agent_bead_id
+    assignee = issues[0].get("assignee")
+    if isinstance(assignee, str) and assignee.strip():
+        assignee_bead = beads.find_agent_bead(
+            assignee.strip(), beads_root=beads_root, cwd=repo_root
+        )
+        if assignee_bead:
+            issue_id = assignee_bead.get("id")
+            if isinstance(issue_id, str) and issue_id.strip():
+                return issue_id.strip()
+    return fallback_agent_bead_id
+
+
+def reconcile_blocked_merged_changesets(
+    *,
+    agent_id: str,
+    agent_bead_id: str | None,
+    project_config: config.ProjectConfig,
+    project_data_dir: Path | None,
+    beads_root: Path,
+    repo_root: Path,
+    git_path: str | None = None,
+    dry_run: bool = False,
+) -> ReconcileResult:
+    """Reconcile blocked/merged changesets that now have deterministic integration."""
+    issues = beads.run_bd_json(
+        [
+            "list",
+            "--label",
+            "at:changeset",
+            "--label",
+            "cs:blocked",
+            "--label",
+            "cs:merged",
+        ],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    scanned = len(issues)
+    actionable = 0
+    reconciled = 0
+    failed = 0
+    started_at = dt.datetime.now(tz=dt.timezone.utc)
+    repo_slug = prs.github_repo_slug(
+        project_config.project.origin or project_config.project.repo_url
+    )
+    for issue in issues:
+        changeset_id = issue.get("id")
+        if not isinstance(changeset_id, str) or not changeset_id.strip():
+            continue
+        status = str(issue.get("status") or "").strip().lower()
+        if status not in {"", "blocked"}:
+            continue
+        integration_proven, integrated_sha = _changeset_integration_signal(
+            issue, repo_slug=repo_slug, repo_root=repo_root
+        )
+        if not integration_proven:
+            continue
+        epic_id = _resolve_epic_id_for_changeset(
+            issue, beads_root=beads_root, repo_root=repo_root
+        )
+        if not epic_id:
+            failed += 1
+            continue
+        actionable += 1
+        if dry_run:
+            reconciled += 1
+            continue
+        hook_agent_bead_id = _resolve_hook_agent_bead_for_epic(
+            epic_id,
+            fallback_agent_bead_id=agent_bead_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        finalize_result = _finalize_changeset(
+            changeset_id=changeset_id.strip(),
+            epic_id=epic_id,
+            agent_id=agent_id,
+            agent_bead_id=hook_agent_bead_id or "",
+            started_at=started_at,
+            repo_slug=repo_slug,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            branch_pr=project_config.branch.pr,
+            branch_history=project_config.branch.history,
+            branch_squash_message=project_config.branch.squash_message,
+            project_data_dir=project_data_dir,
+            git_path=git_path,
+        )
+        if finalize_result.reason.startswith("changeset_blocked_"):
+            failed += 1
+            continue
+        if integrated_sha and integrated_sha.strip():
+            beads.update_changeset_integrated_sha(
+                changeset_id.strip(),
+                integrated_sha.strip(),
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+        reconciled += 1
+    return ReconcileResult(
+        scanned=scanned,
+        actionable=actionable,
+        reconciled=reconciled,
+        failed=failed,
+    )
 
 
 def _epic_ready_to_finalize(epic_id: str, *, beads_root: Path, repo_root: Path) -> bool:
@@ -2182,6 +2349,28 @@ def _run_worker_once(
         if not dry_run:
             if not isinstance(agent_bead_id, str) or not agent_bead_id:
                 die("failed to resolve agent bead id")
+
+        finish_step = _step(
+            "Reconcile blocked changesets", timings=timings, trace=trace
+        )
+        reconcile_result = reconcile_blocked_merged_changesets(
+            agent_id=agent.agent_id,
+            agent_bead_id=agent_bead_id,
+            project_config=project_config,
+            project_data_dir=project_data_dir,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            git_path=git_path,
+            dry_run=dry_run,
+        )
+        finish_step(
+            extra=(
+                f"scanned={reconcile_result.scanned}, "
+                f"actionable={reconcile_result.actionable}, "
+                f"reconciled={reconcile_result.reconciled}, "
+                f"failed={reconcile_result.failed}"
+            )
+        )
 
         finish_step = _step("Select epic", timings=timings, trace=trace)
         startup_result = _run_startup_contract(

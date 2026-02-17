@@ -118,3 +118,48 @@ def test_gc_removes_stale_session_agent_home() -> None:
             gc_cmd.gc(SimpleNamespace(stale_hours=24.0, dry_run=False, yes=True))
 
         assert not stale_home.exists()
+
+
+def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
+    project_root = Path("/project")
+    repo_root = Path("/repo")
+    project_config = config.ProjectConfig()
+
+    with (
+        patch(
+            "atelier.commands.gc.resolve_current_project_with_repo_root",
+            return_value=(project_root, project_config, "/repo", repo_root),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_project_data_dir",
+            return_value=Path("/data"),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
+        patch(
+            "atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets",
+            return_value=gc_cmd.work_cmd.ReconcileResult(
+                scanned=2, actionable=1, reconciled=1, failed=0
+            ),
+        ) as reconcile,
+        patch("atelier.commands.gc.say") as say,
+    ):
+        gc_cmd.gc(
+            SimpleNamespace(
+                stale_hours=24.0,
+                stale_if_missing_heartbeat=False,
+                dry_run=False,
+                reconcile=True,
+                yes=True,
+            )
+        )
+
+    reconcile.assert_called_once()
+    assert any(
+        "Reconcile blocked changesets: scanned=2, actionable=1, reconciled=1, failed=0"
+        in str(call.args[0])
+        for call in say.call_args_list
+    )
