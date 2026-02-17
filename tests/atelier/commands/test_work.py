@@ -3489,10 +3489,108 @@ def test_finalize_epic_if_complete_integrates_non_pr() -> None:
         squash_message_agent_options=None,
         squash_message_agent_home=None,
         squash_message_agent_env=None,
+        integration_cwd=Path("/repo"),
         repo_root=Path("/repo"),
         git_path="git",
     )
     close_epic.assert_called_once()
+
+
+def test_resolve_epic_integration_cwd_prefers_epic_worktree_for_root_branch(
+    tmp_path: Path,
+) -> None:
+    project_data_dir = tmp_path / "data"
+    project_data_dir.mkdir(parents=True, exist_ok=True)
+    epic_id = "atelier-epic"
+    mapping_path = worktrees.mapping_path(project_data_dir, epic_id)
+    mapping_path.parent.mkdir(parents=True, exist_ok=True)
+    worktrees.write_mapping(
+        mapping_path,
+        worktrees.WorktreeMapping(
+            epic_id=epic_id,
+            worktree_path=f"worktrees/{epic_id}",
+            root_branch="feat/root",
+            changesets={},
+            changeset_worktrees={},
+        ),
+    )
+    epic_worktree = project_data_dir / "worktrees" / epic_id
+    epic_worktree.mkdir(parents=True, exist_ok=True)
+    (epic_worktree / ".git").write_text("gitdir: /tmp/epic", encoding="utf-8")
+
+    with patch(
+        "atelier.commands.work.git.git_current_branch", return_value="feat/root"
+    ):
+        selected = work_cmd._resolve_epic_integration_cwd(
+            project_data_dir=project_data_dir,
+            repo_root=Path("/repo"),
+            epic_id=epic_id,
+            root_branch="feat/root",
+            git_path="git",
+        )
+
+    assert selected == epic_worktree
+
+
+def test_integrate_epic_root_to_parent_rebase_uses_integration_worktree_branch() -> (
+    None
+):
+    run_calls: list[tuple[list[str], Path]] = []
+
+    def fake_is_ancestor(
+        repo_root: Path, ancestor: str, descendant: str, *, git_path: str | None = None
+    ) -> bool | None:
+        if ancestor == "feat/root" and descendant == "main":
+            return False
+        if ancestor == "main" and descendant == "feat/root":
+            return False
+        return None
+
+    def fake_rev_parse(
+        repo_root: Path, ref: str, *, git_path: str | None = None
+    ) -> str | None:
+        if ref == "main":
+            return "aaa111"
+        if ref == "feat/root":
+            return "bbb222"
+        return None
+
+    def fake_run_git_status(
+        args: list[str],
+        *,
+        repo_root: Path,
+        git_path: str | None = None,
+        cwd: Path | None = None,
+    ) -> tuple[bool, str]:
+        run_calls.append((list(args), cwd or repo_root))
+        return True, ""
+
+    with (
+        patch("atelier.commands.work._ensure_local_branch", return_value=True),
+        patch("atelier.commands.work.git.git_is_clean", return_value=True),
+        patch(
+            "atelier.commands.work.git.git_is_ancestor", side_effect=fake_is_ancestor
+        ),
+        patch("atelier.commands.work.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.commands.work.git.git_rev_parse", side_effect=fake_rev_parse),
+        patch("atelier.commands.work.git.git_current_branch", return_value="feat/root"),
+        patch("atelier.commands.work._run_git_status", side_effect=fake_run_git_status),
+    ):
+        ok, sha, error = work_cmd._integrate_epic_root_to_parent(
+            epic_issue={"id": "at-epic", "title": "Epic"},
+            epic_id="at-epic",
+            root_branch="feat/root",
+            parent_branch="main",
+            history="rebase",
+            integration_cwd=Path("/worktrees/at-epic"),
+            repo_root=Path("/repo"),
+            git_path="git",
+        )
+
+    assert ok is True
+    assert sha == "bbb222"
+    assert error is None
+    assert (["rebase", "main"], Path("/worktrees/at-epic")) in run_calls
 
 
 def test_squash_subject_prefers_external_ticket_id() -> None:
@@ -3546,7 +3644,11 @@ def test_integrate_epic_root_to_parent_merge_prefers_ff() -> None:
         return None
 
     def fake_run_git_status(
-        args: list[str], *, repo_root: Path, git_path: str | None = None
+        args: list[str],
+        *,
+        repo_root: Path,
+        git_path: str | None = None,
+        cwd: Path | None = None,
     ) -> tuple[bool, str]:
         run_calls.append(args)
         return True, ""
@@ -3596,7 +3698,11 @@ def test_integrate_epic_root_to_parent_squash_uses_ticket_subject() -> None:
         return "ccc333"
 
     def fake_run_git_status(
-        args: list[str], *, repo_root: Path, git_path: str | None = None
+        args: list[str],
+        *,
+        repo_root: Path,
+        git_path: str | None = None,
+        cwd: Path | None = None,
     ) -> tuple[bool, str]:
         run_calls.append(args)
         return True, ""
@@ -3653,7 +3759,11 @@ def test_integrate_epic_root_to_parent_squash_uses_agent_subject_when_enabled() 
         return "ccc333"
 
     def fake_run_git_status(
-        args: list[str], *, repo_root: Path, git_path: str | None = None
+        args: list[str],
+        *,
+        repo_root: Path,
+        git_path: str | None = None,
+        cwd: Path | None = None,
     ) -> tuple[bool, str]:
         run_calls.append(args)
         return True, ""

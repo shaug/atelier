@@ -1583,10 +1583,15 @@ def _ensure_local_branch(
 
 
 def _run_git_status(
-    args: list[str], *, repo_root: Path, git_path: str | None = None
+    args: list[str],
+    *,
+    repo_root: Path,
+    git_path: str | None = None,
+    cwd: Path | None = None,
 ) -> tuple[bool, str]:
+    target_cwd = cwd or repo_root
     result = exec.try_run_command(
-        git.git_command(["-C", str(repo_root), *args], git_path=git_path)
+        git.git_command(["-C", str(target_cwd), *args], git_path=git_path)
     )
     if result is None:
         return False, "missing required command: git"
@@ -1594,6 +1599,31 @@ def _run_git_status(
         detail = (result.stderr or result.stdout or "").strip()
         return False, detail or f"command failed: git {' '.join(args)}"
     return True, (result.stdout or "").strip()
+
+
+def _resolve_epic_integration_cwd(
+    *,
+    project_data_dir: Path | None,
+    repo_root: Path,
+    epic_id: str,
+    root_branch: str,
+    git_path: str | None = None,
+) -> Path:
+    """Prefer the epic worktree when it has the root branch checked out."""
+    if project_data_dir is None or not epic_id:
+        return repo_root
+    mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, epic_id))
+    if mapping is None or not mapping.worktree_path:
+        return repo_root
+    worktree_path = Path(mapping.worktree_path)
+    if not worktree_path.is_absolute():
+        worktree_path = project_data_dir / worktree_path
+    if not worktree_path.exists() or not (worktree_path / ".git").exists():
+        return repo_root
+    current_branch = git.git_current_branch(worktree_path, git_path=git_path)
+    if current_branch == root_branch:
+        return worktree_path
+    return repo_root
 
 
 def _ensure_branch_not_checked_out(
@@ -1829,6 +1859,7 @@ def _integrate_epic_root_to_parent(
     squash_message_agent_options: list[str] | None = None,
     squash_message_agent_home: Path | None = None,
     squash_message_agent_env: dict[str, str] | None = None,
+    integration_cwd: Path | None = None,
     repo_root: Path,
     git_path: str | None = None,
 ) -> tuple[bool, str | None, str | None]:
@@ -1843,7 +1874,8 @@ def _integrate_epic_root_to_parent(
     if not _ensure_local_branch(parent, repo_root=repo_root, git_path=git_path):
         return False, None, f"parent branch {parent!r} not found"
 
-    clean = git.git_is_clean(repo_root, git_path=git_path)
+    operation_cwd = integration_cwd or repo_root
+    clean = git.git_is_clean(operation_cwd, git_path=git_path)
     if clean is False:
         return False, None, "repository must be clean before epic finalization"
 
@@ -1864,12 +1896,25 @@ def _integrate_epic_root_to_parent(
         can_ff = git.git_is_ancestor(repo_root, parent, root, git_path=git_path) is True
 
         if history == "rebase":
+            rebase_args = ["rebase", parent, root]
+            if operation_cwd != repo_root:
+                current_branch = git.git_current_branch(
+                    operation_cwd, git_path=git_path
+                )
+                if current_branch == root:
+                    rebase_args = ["rebase", parent]
             ok, detail = _run_git_status(
-                ["rebase", parent, root], repo_root=repo_root, git_path=git_path
+                rebase_args,
+                repo_root=repo_root,
+                git_path=git_path,
+                cwd=operation_cwd,
             )
             if not ok:
                 _run_git_status(
-                    ["rebase", "--abort"], repo_root=repo_root, git_path=git_path
+                    ["rebase", "--abort"],
+                    repo_root=repo_root,
+                    git_path=git_path,
+                    cwd=operation_cwd,
                 )
                 return False, None, detail or f"failed to rebase {root} onto {parent}"
             new_head = git.git_rev_parse(repo_root, root, git_path=git_path)
@@ -2094,6 +2139,13 @@ def _finalize_epic_if_complete(
             cwd=repo_root,
             allow_override=True,
         )
+        integration_cwd = _resolve_epic_integration_cwd(
+            project_data_dir=project_data_dir,
+            repo_root=repo_root,
+            epic_id=epic_id,
+            root_branch=root_branch,
+            git_path=git_path,
+        )
 
         integrated_ok, _integrated_sha, error = _integrate_epic_root_to_parent(
             epic_issue=issue,
@@ -2106,6 +2158,7 @@ def _finalize_epic_if_complete(
             squash_message_agent_options=squash_message_agent_options,
             squash_message_agent_home=squash_message_agent_home,
             squash_message_agent_env=squash_message_agent_env,
+            integration_cwd=integration_cwd,
             repo_root=repo_root,
             git_path=git_path,
         )
