@@ -21,3 +21,4 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "plan_changeset_guardrails" in content
     assert "plan_promote_epic" in content
     assert "planner_startup_check" in content
+    assert "epic_list" in content

@@ -20,8 +20,13 @@ description: >-
 1. Summarize each message and capture required decisions from the overseer.
 1. Create or update beads based on message content.
 1. Mark messages as read when addressed.
+1. Run `epic_list` with drafts enabled and include its output verbatim in the
+   startup response:
+   - `python3 skills/epic_list/scripts/list_epics.py --show-drafts`
+   - Do not reformat, summarize, or compress the list.
 
 ## Verification
 
 - Inbox and queue are processed before planning work starts.
 - Messages are summarized with explicit decisions or follow-up beads.
+- Draft epic listing is included in stable `epic_list` format.
