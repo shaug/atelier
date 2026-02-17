@@ -190,6 +190,10 @@ def test_gc_reconcile_flag_prompts_and_skips_without_confirmation() -> None:
         ),
         patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
         patch(
+            "atelier.commands.gc.work_cmd.list_reconcile_epic_candidates",
+            return_value={"at-wjj": ["at-wjj.1", "at-wjj.2"]},
+        ),
+        patch(
             "atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets"
         ) as reconcile,
         patch("atelier.commands.gc.confirm", return_value=False) as confirm,
@@ -206,10 +210,14 @@ def test_gc_reconcile_flag_prompts_and_skips_without_confirmation() -> None:
         )
 
     confirm.assert_called_once_with(
-        "Run reconcile for merged changesets now?", default=False
+        "Reconcile epic at-wjj (2 merged changesets: at-wjj.1, at-wjj.2)?",
+        default=False,
     )
     reconcile.assert_not_called()
-    assert any("Skipped reconcile." in str(call.args[0]) for call in say.call_args_list)
+    assert any(
+        "Skipped reconcile: epic at-wjj" in str(call.args[0])
+        for call in say.call_args_list
+    )
 
 
 def test_gc_reconcile_flag_prompts_and_runs_with_confirmation() -> None:
@@ -232,6 +240,10 @@ def test_gc_reconcile_flag_prompts_and_runs_with_confirmation() -> None:
         ),
         patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
         patch(
+            "atelier.commands.gc.work_cmd.list_reconcile_epic_candidates",
+            return_value={"at-wjj": ["at-wjj.1", "at-wjj.2", "at-wjj.3", "at-wjj.4"]},
+        ),
+        patch(
             "atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets",
             return_value=gc_cmd.work_cmd.ReconcileResult(
                 scanned=1, actionable=1, reconciled=1, failed=0
@@ -251,13 +263,67 @@ def test_gc_reconcile_flag_prompts_and_runs_with_confirmation() -> None:
         )
 
     confirm.assert_called_once_with(
-        "Run reconcile for merged changesets now?", default=False
+        "Reconcile epic at-wjj (4 merged changesets: at-wjj.1, at-wjj.2, at-wjj.3, +1 more)?",
+        default=False,
     )
     reconcile.assert_called_once()
+    assert reconcile.call_args.kwargs["epic_filter"] == "at-wjj"
+    assert reconcile.call_args.kwargs["changeset_filter"] == {
+        "at-wjj.1",
+        "at-wjj.2",
+        "at-wjj.3",
+        "at-wjj.4",
+    }
     assert any(
         "Reconcile blocked changesets: scanned=1, actionable=1, reconciled=1, failed=0"
         in str(call.args[0])
         for call in say.call_args_list
+    )
+
+
+def test_gc_reconcile_flag_no_candidates_skips_prompts() -> None:
+    project_root = Path("/project")
+    repo_root = Path("/repo")
+    project_config = config.ProjectConfig()
+
+    with (
+        patch(
+            "atelier.commands.gc.resolve_current_project_with_repo_root",
+            return_value=(project_root, project_config, "/repo", repo_root),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_project_data_dir",
+            return_value=Path("/data"),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
+        patch(
+            "atelier.commands.gc.work_cmd.list_reconcile_epic_candidates",
+            return_value={},
+        ),
+        patch(
+            "atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets"
+        ) as reconcile,
+        patch("atelier.commands.gc.confirm") as confirm,
+        patch("atelier.commands.gc.say") as say,
+    ):
+        gc_cmd.gc(
+            SimpleNamespace(
+                stale_hours=24.0,
+                stale_if_missing_heartbeat=False,
+                dry_run=False,
+                reconcile=True,
+                yes=False,
+            )
+        )
+
+    reconcile.assert_not_called()
+    confirm.assert_not_called()
+    assert any(
+        "No reconcile candidates." in str(call.args[0]) for call in say.call_args_list
     )
 
 

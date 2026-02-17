@@ -489,12 +489,8 @@ def gc(args: object) -> None:
     include_missing_heartbeat = bool(getattr(args, "stale_if_missing_heartbeat", False))
 
     if reconcile:
-        run_reconcile = True
-        if not dry_run and not yes:
-            run_reconcile = confirm(
-                "Run reconcile for merged changesets now?", default=False
-            )
-        if run_reconcile:
+        git_path = config.resolve_git_path(project_config)
+        if dry_run or yes:
             reconcile_result = work_cmd.reconcile_blocked_merged_changesets(
                 agent_id="atelier/system/gc",
                 agent_bead_id="",
@@ -502,7 +498,7 @@ def gc(args: object) -> None:
                 project_data_dir=project_data_dir,
                 beads_root=beads_root,
                 repo_root=repo_root,
-                git_path=config.resolve_git_path(project_config),
+                git_path=git_path,
                 dry_run=dry_run,
                 log=say,
             )
@@ -514,7 +510,59 @@ def gc(args: object) -> None:
                 f"failed={reconcile_result.failed}"
             )
         else:
-            say("Skipped reconcile.")
+            candidates = work_cmd.list_reconcile_epic_candidates(
+                project_config=project_config,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            if not candidates:
+                say("No reconcile candidates.")
+            total_scanned = 0
+            total_actionable = 0
+            total_reconciled = 0
+            total_failed = 0
+            for epic_id, changesets in candidates.items():
+                preview = ", ".join(changesets[:3])
+                if len(changesets) > 3:
+                    preview = f"{preview}, +{len(changesets) - 3} more"
+                prompt_text = (
+                    f"Reconcile epic {epic_id} "
+                    f"({len(changesets)} merged changesets: {preview})?"
+                )
+                if not confirm(prompt_text, default=False):
+                    say(f"Skipped reconcile: epic {epic_id}")
+                    continue
+                reconcile_result = work_cmd.reconcile_blocked_merged_changesets(
+                    agent_id="atelier/system/gc",
+                    agent_bead_id="",
+                    project_config=project_config,
+                    project_data_dir=project_data_dir,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    git_path=git_path,
+                    epic_filter=epic_id,
+                    changeset_filter=set(changesets),
+                    dry_run=False,
+                    log=say,
+                )
+                total_scanned += reconcile_result.scanned
+                total_actionable += reconcile_result.actionable
+                total_reconciled += reconcile_result.reconciled
+                total_failed += reconcile_result.failed
+                say(
+                    f"Reconcile epic {epic_id}: "
+                    f"scanned={reconcile_result.scanned}, "
+                    f"actionable={reconcile_result.actionable}, "
+                    f"reconciled={reconcile_result.reconciled}, "
+                    f"failed={reconcile_result.failed}"
+                )
+            say(
+                "Reconcile blocked changesets: "
+                f"scanned={total_scanned}, "
+                f"actionable={total_actionable}, "
+                f"reconciled={total_reconciled}, "
+                f"failed={total_failed}"
+            )
 
     actions: list[GcAction] = []
     actions.extend(

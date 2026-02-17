@@ -96,7 +96,7 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         ),
         patch("atelier.commands.plan.say"),
     ):
-        plan_cmd.run_planner(SimpleNamespace(epic_id="atelier-epic"))
+        plan_cmd.run_planner(SimpleNamespace(epic_id="atelier-epic", reconcile=True))
 
     assert calls
     assert calls[0][0] == "prime"
@@ -164,7 +164,7 @@ def test_plan_does_not_query_or_prompt_draft_epics_on_startup(tmp_path: Path) ->
             return_value=SimpleNamespace(
                 scanned=0, actionable=0, reconciled=0, failed=0
             ),
-        ),
+        ) as reconcile,
         patch(
             "atelier.commands.plan.beads.run_bd_command",
             side_effect=fake_run_bd_command,
@@ -189,6 +189,7 @@ def test_plan_does_not_query_or_prompt_draft_epics_on_startup(tmp_path: Path) ->
         plan_cmd.run_planner(SimpleNamespace(epic_id=None))
 
     assert not any("at:draft" in call for call in json_calls)
+    reconcile.assert_not_called()
 
 
 def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:

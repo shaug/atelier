@@ -437,9 +437,16 @@ def plan_command(
         str | None,
         typer.Option("--epic-id", help="existing epic bead id to plan against"),
     ] = None,
+    reconcile: Annotated[
+        bool,
+        typer.Option(
+            "--reconcile",
+            help="reconcile merged changesets before starting planner session",
+        ),
+    ] = False,
 ) -> None:
     """Start a planner session."""
-    plan_cmd.run_planner(SimpleNamespace(epic_id=epic_id))
+    plan_cmd.run_planner(SimpleNamespace(epic_id=epic_id, reconcile=reconcile))
 
 
 @app.command("hook", help="Run an agent hook event handler.")
@@ -520,6 +527,13 @@ def work_command(
             help="accept defaults for interactive choices",
         ),
     ] = False,
+    reconcile: Annotated[
+        bool,
+        typer.Option(
+            "--reconcile",
+            help="reconcile merged changesets before startup contract",
+        ),
+    ] = False,
 ) -> None:
     """Start a worker session."""
     work_cmd.start_worker(
@@ -530,6 +544,7 @@ def work_command(
             queue=queue,
             dry_run=dry_run,
             yes=yes,
+            reconcile=reconcile,
         )
     )
 
