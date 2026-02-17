@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import pytest
 
-import atelier.beads as beads
 import atelier.commands.gc as gc_cmd
 import atelier.config as config
 import atelier.worktrees as worktrees
@@ -509,8 +508,8 @@ def test_gc_resolved_epic_artifacts_prunes_worktrees_and_branches() -> None:
             patch("atelier.commands.gc._try_show_issue", return_value=epic_issue),
             patch(
                 "atelier.commands.gc.beads.epic_changeset_summary",
-                return_value=beads.ChangesetSummary(
-                    total=1, ready=0, merged=1, abandoned=0, remaining=0
+                side_effect=AssertionError(
+                    "summary should not gate closed epic cleanup"
                 ),
             ),
             patch("atelier.commands.gc.git.git_default_branch", return_value="main"),
@@ -591,8 +590,8 @@ def test_gc_resolved_epic_artifacts_skips_when_not_integrated() -> None:
             patch("atelier.commands.gc._try_show_issue", return_value=epic_issue),
             patch(
                 "atelier.commands.gc.beads.epic_changeset_summary",
-                return_value=beads.ChangesetSummary(
-                    total=1, ready=0, merged=1, abandoned=0, remaining=0
+                side_effect=AssertionError(
+                    "summary should not gate closed epic cleanup"
                 ),
             ),
             patch("atelier.commands.gc.git.git_default_branch", return_value="main"),

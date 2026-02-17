@@ -321,13 +321,7 @@ def _gc_resolved_epic_artifacts(
         if status not in {"closed", "done"}:
             continue
         labels = _issue_labels(epic)
-        if "at:epic" in labels:
-            summary = beads.epic_changeset_summary(
-                epic_id, beads_root=beads_root, cwd=repo_root
-            )
-            if not summary.ready_to_close:
-                continue
-        elif "at:changeset" in labels and not (
+        if "at:changeset" in labels and not (
             "cs:merged" in labels or "cs:abandoned" in labels
         ):
             continue
