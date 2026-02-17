@@ -1096,6 +1096,7 @@ def reconcile_blocked_merged_changesets(
     repo_root: Path,
     git_path: str | None = None,
     dry_run: bool = False,
+    log: Callable[[str], None] | None = None,
 ) -> ReconcileResult:
     """Reconcile blocked/merged changesets that now have deterministic integration."""
     issues = beads.run_bd_json(
@@ -1123,23 +1124,41 @@ def reconcile_blocked_merged_changesets(
         changeset_id = issue.get("id")
         if not isinstance(changeset_id, str) or not changeset_id.strip():
             continue
+        changeset_id = changeset_id.strip()
         status = str(issue.get("status") or "").strip().lower()
+        if log:
+            log(f"reconcile scan: {changeset_id} status={status or 'unknown'}")
         if status not in {"", "blocked"}:
+            if log:
+                log(f"reconcile skip: {changeset_id} (status={status})")
             continue
         integration_proven, integrated_sha = _changeset_integration_signal(
             issue, repo_slug=repo_slug, repo_root=repo_root
         )
         if not integration_proven:
+            if log:
+                log(f"reconcile skip: {changeset_id} (no integration signal)")
             continue
         epic_id = _resolve_epic_id_for_changeset(
             issue, beads_root=beads_root, repo_root=repo_root
         )
         if not epic_id:
             failed += 1
+            if log:
+                log(f"reconcile error: {changeset_id} (unable to resolve epic)")
             continue
         actionable += 1
         if dry_run:
             reconciled += 1
+            if log:
+                log(
+                    f"reconcile dry-run: {changeset_id} -> epic={epic_id}"
+                    + (
+                        f" integrated_sha={integrated_sha.strip()}"
+                        if integrated_sha and integrated_sha.strip()
+                        else ""
+                    )
+                )
             continue
         hook_agent_bead_id = _resolve_hook_agent_bead_for_epic(
             epic_id,
@@ -1164,13 +1183,23 @@ def reconcile_blocked_merged_changesets(
         )
         if finalize_result.reason.startswith("changeset_blocked_"):
             failed += 1
+            if log:
+                log(
+                    f"reconcile error: {changeset_id} "
+                    f"(finalize reason={finalize_result.reason})"
+                )
             continue
         if integrated_sha and integrated_sha.strip():
             beads.update_changeset_integrated_sha(
-                changeset_id.strip(),
+                changeset_id,
                 integrated_sha.strip(),
                 beads_root=beads_root,
                 cwd=repo_root,
+            )
+        if log:
+            log(
+                f"reconcile ok: {changeset_id} -> epic={epic_id} "
+                f"(finalize reason={finalize_result.reason})"
             )
         reconciled += 1
     return ReconcileResult(
@@ -2362,6 +2391,7 @@ def _run_worker_once(
             repo_root=repo_root,
             git_path=git_path,
             dry_run=dry_run,
+            log=say,
         )
         finish_step(
             extra=(

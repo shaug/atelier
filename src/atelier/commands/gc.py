@@ -498,6 +498,7 @@ def gc(args: object) -> None:
             repo_root=repo_root,
             git_path=config.resolve_git_path(project_config),
             dry_run=dry_run,
+            log=say,
         )
         say(
             "Reconcile blocked changesets: "

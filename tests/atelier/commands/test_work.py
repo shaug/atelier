@@ -2923,6 +2923,57 @@ def test_reconcile_blocked_merged_changesets_dry_run_skips_finalize() -> None:
     finalize.assert_not_called()
 
 
+def test_reconcile_blocked_merged_changesets_logs_scan_and_result() -> None:
+    changeset = {
+        "id": "at-wjj.4.3",
+        "status": "blocked",
+        "labels": ["at:changeset", "cs:blocked", "cs:merged"],
+        "parent": "at-wjj",
+    }
+    epic = {
+        "id": "at-wjj",
+        "labels": ["at:epic"],
+        "assignee": None,
+    }
+    logs: list[str] = []
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:4] == ["list", "--label", "at:changeset", "--label"]:
+            return [changeset]
+        if args[:2] == ["show", "at-wjj"]:
+            return [epic]
+        return [changeset]
+
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.commands.work._changeset_integration_signal",
+            return_value=(True, "dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a"),
+        ),
+        patch(
+            "atelier.commands.work._finalize_changeset",
+            return_value=work_cmd.FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        ),
+        patch("atelier.commands.work.beads.update_changeset_integrated_sha"),
+    ):
+        work_cmd.reconcile_blocked_merged_changesets(
+            agent_id="atelier/worker/codex/p999-t111",
+            agent_bead_id="agent-fallback",
+            project_config=_fake_project_payload(),
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            git_path="git",
+            dry_run=False,
+            log=logs.append,
+        )
+
+    assert any("reconcile scan: at-wjj.4.3" in line for line in logs)
+    assert any("reconcile ok: at-wjj.4.3" in line for line in logs)
+
+
 def test_finalize_epic_if_complete_closes_in_pr_mode() -> None:
     with (
         patch("atelier.commands.work._epic_ready_to_finalize", return_value=True),
