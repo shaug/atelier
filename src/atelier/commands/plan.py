@@ -24,7 +24,7 @@ from .. import (
     workspace,
     worktrees,
 )
-from ..io import confirm, die, prompt, say
+from ..io import confirm, die, say
 from . import work as work_cmd
 from .resolve import resolve_current_project_with_repo_root
 
@@ -61,24 +61,6 @@ def _list_queue_messages(*, beads_root: Path, repo_root: Path) -> None:
             say(f"- {issue_id} [{queue_name}] {title}")
         return
     say("No queued messages.")
-
-
-def _list_draft_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:epic", "--label", "at:draft"],
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
-    if not issues:
-        say("No draft epics.")
-        return []
-    say("Draft epics:")
-    for issue in issues:
-        issue_id = issue.get("id") or ""
-        status = issue.get("status") or "unknown"
-        title = issue.get("title") or ""
-        say(f"- {issue_id} [{status}] {title}")
-    return issues
 
 
 _PLANNER_HOOKS_DIR = "planner-git-hooks"
@@ -172,74 +154,6 @@ def _ensure_planner_read_only_guardrails(
         return
     _install_planner_commit_blocker(worktree_path, hooks_dir, git_path=git_path)
     _warn_planner_dirty(worktree_path, git_path=git_path)
-
-
-def _maybe_promote_draft_epic(
-    issues: list[dict[str, object]],
-    *,
-    beads_root: Path,
-    repo_root: Path,
-) -> None:
-    if not issues:
-        return
-    choice = prompt("Promote a draft epic to ready? (y/N)").strip().lower()
-    if choice not in {"y", "yes"}:
-        return
-    epic_id = prompt("Draft epic id").strip()
-    if not epic_id:
-        die("draft epic id is required")
-    valid_ids = {str(issue.get("id")) for issue in issues if issue.get("id")}
-    if epic_id not in valid_ids:
-        die(f"unknown draft epic id: {epic_id}")
-    confirm = prompt(f"Promote {epic_id} to ready? (y/N)").strip().lower()
-    if confirm not in {"y", "yes"}:
-        say("Draft epic promotion cancelled.")
-        return
-    beads.run_bd_command(
-        ["update", epic_id, "--remove-label", "at:draft", "--add-label", "at:ready"],
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
-    _promote_defined_changesets(epic_id, beads_root=beads_root, repo_root=repo_root)
-    say(f"Promoted draft epic: {epic_id}")
-
-
-def _promote_defined_changesets(
-    epic_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
-    all_changesets = beads.run_bd_json(
-        ["list", "--parent", epic_id, "--label", "at:changeset"],
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
-    if not all_changesets:
-        say(f"No changesets found for {epic_id}.")
-        return
-    promoted: list[str] = []
-    for issue in all_changesets:
-        labels = issue.get("labels") or []
-        if "cs:planned" not in labels:
-            continue
-        issue_id = issue.get("id")
-        if not issue_id:
-            continue
-        beads.run_bd_command(
-            [
-                "update",
-                str(issue_id),
-                "--add-label",
-                "cs:ready",
-                "--remove-label",
-                "cs:planned",
-            ],
-            beads_root=beads_root,
-            cwd=repo_root,
-        )
-        promoted.append(str(issue_id))
-    if not promoted:
-        say(f"No planned changesets to promote for {epic_id}.")
-        return
-    say(f"Promoted changesets to ready: {', '.join(promoted)}")
 
 
 def _trace_enabled() -> bool:
@@ -486,16 +400,6 @@ def run_planner(args: object) -> None:
             finish()
             finish = _step("Check queue", timings=timings, trace=trace)
             _list_queue_messages(beads_root=beads_root, repo_root=repo_root)
-            finish()
-            finish = _step("List draft epics", timings=timings, trace=trace)
-            draft_epics = _list_draft_epics(beads_root=beads_root, repo_root=repo_root)
-            finish()
-            finish = _step(
-                "Promote draft epic (optional)", timings=timings, trace=trace
-            )
-            _maybe_promote_draft_epic(
-                draft_epics, beads_root=beads_root, repo_root=repo_root
-            )
             finish()
             git_path = config.resolve_git_path(project_config)
             finish = _step("Resolve default branch", timings=timings, trace=trace)

@@ -94,7 +94,6 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
             "atelier.commands.plan.codex.run_codex_command",
             side_effect=fake_run_codex_command,
         ),
-        patch("atelier.commands.plan.prompt", return_value=""),
         patch("atelier.commands.plan.say"),
     ):
         plan_cmd.run_planner(SimpleNamespace(epic_id="atelier-epic"))
@@ -114,7 +113,7 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
     )
 
 
-def test_plan_promotes_draft_epic_with_approval(tmp_path: Path) -> None:
+def test_plan_does_not_query_or_prompt_draft_epics_on_startup(tmp_path: Path) -> None:
     worktree_path = tmp_path / "worktrees" / "planner"
     agent = AgentHome(
         name="planner",
@@ -122,14 +121,11 @@ def test_plan_promotes_draft_epic_with_approval(tmp_path: Path) -> None:
         role="planner",
         path=Path("/project/agents/planner"),
     )
-    calls: list[list[str]] = []
-    prompt_answers = iter(["y", "atelier-draft", "y"])
+    json_calls: list[list[str]] = []
 
     def fake_run_bd_command(
         args, *, beads_root: Path, cwd: Path, allow_failure: bool = False
     ):
-        calls.append(list(args))
-
         class Result:
             stdout = ""
             returncode = 0
@@ -137,27 +133,8 @@ def test_plan_promotes_draft_epic_with_approval(tmp_path: Path) -> None:
         return Result()
 
     def fake_run_bd_json(args, *, beads_root: Path, cwd: Path):
-        if "at:draft" in args:
-            return [
-                {
-                    "id": "atelier-draft",
-                    "title": "Draft",
-                    "status": "open",
-                    "labels": ["at:epic", "at:draft"],
-                }
-            ]
-        if args[:2] == ["list", "--parent"] and "at:changeset" in args:
-            return [
-                {
-                    "id": "atelier-draft.1",
-                    "title": "Planned changeset",
-                    "labels": ["at:changeset", "cs:planned"],
-                }
-            ]
+        json_calls.append(list(args))
         return []
-
-    def fake_prompt(_: str) -> str:
-        return next(prompt_answers)
 
     with (
         patch(
@@ -183,6 +160,12 @@ def test_plan_promotes_draft_epic_with_approval(tmp_path: Path) -> None:
         ),
         patch("atelier.commands.plan.beads.ensure_agent_bead"),
         patch(
+            "atelier.commands.plan.work_cmd.reconcile_blocked_merged_changesets",
+            return_value=SimpleNamespace(
+                scanned=0, actionable=0, reconciled=0, failed=0
+            ),
+        ),
+        patch(
             "atelier.commands.plan.beads.run_bd_command",
             side_effect=fake_run_bd_command,
         ),
@@ -201,18 +184,11 @@ def test_plan_promotes_draft_epic_with_approval(tmp_path: Path) -> None:
                 returncode=0, session_id=None, resume_command=None
             ),
         ),
-        patch("atelier.commands.plan.prompt", side_effect=fake_prompt),
         patch("atelier.commands.plan.say"),
     ):
         plan_cmd.run_planner(SimpleNamespace(epic_id=None))
 
-    assert any(
-        call[:2] == ["update", "atelier-draft"] and "at:draft" in call for call in calls
-    )
-    assert any(
-        call[:2] == ["update", "atelier-draft.1"] and "cs:ready" in call
-        for call in calls
-    )
+    assert not any("at:draft" in call for call in json_calls)
 
 
 def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
@@ -292,7 +268,6 @@ def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
                 returncode=0, session_id=None, resume_command=None
             ),
         ),
-        patch("atelier.commands.plan.prompt", return_value=""),
         patch("atelier.commands.plan.say"),
     ):
         plan_cmd.run_planner(SimpleNamespace(epic_id=None))

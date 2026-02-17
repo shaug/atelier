@@ -13,13 +13,23 @@ description: >-
 
 ## Steps
 
-1. List epics:
-   - `bd list --label at:epic`
-1. Exclude epics labeled `at:draft` unless `show_drafts` is true.
-1. Display summary fields for each epic:
-   - `id`, `status`, `assignee`, `workspace.root_branch`, `title`.
+1. Run the formatter script:
+   - `python3 scripts/list_epics.py` (or
+     `python3 scripts/list_epics.py --show-drafts`)
+1. Do not rewrite the script output. Return it verbatim so the overseer sees a
+   stable format.
+
+## Required output format
+
+The output must be:
+
+- Header line: `Epics:` or `Draft epics:` (when `show_drafts` is true)
+- One epic per line:
+  - `- <id> [<status>] <title>`
+- Detail line per epic:
+  - `  root: <workspace.root_branch|unset> | assignee: <assignee|unassigned>`
 
 ## Verification
 
-- Output includes each eligible epic id and title.
+- Output includes each eligible epic id and title in the required format.
 - Draft epics appear only when `show_drafts` is enabled.
