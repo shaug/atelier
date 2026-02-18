@@ -19,6 +19,7 @@ from .resolve import resolve_current_project_with_repo_root
 class GcAction:
     description: str
     apply: callable
+    details: tuple[str, ...] = ()
 
 
 def _run_git_gc_command(
@@ -79,6 +80,72 @@ def _try_show_issue(
     if isinstance(payload, dict):
         return payload
     return None
+
+
+def _issue_integrated_sha(issue: dict[str, object]) -> str | None:
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    integrated = fields.get("changeset.integrated_sha")
+    if isinstance(integrated, str):
+        value = integrated.strip()
+        if value and value.lower() != "null":
+            return value
+    notes = issue.get("notes")
+    if not isinstance(notes, str) or not notes.strip():
+        return None
+    for line in notes.splitlines():
+        if "changeset.integrated_sha" not in line:
+            continue
+        _prefix, _sep, suffix = line.partition(":")
+        value = suffix.strip()
+        if value and value.lower() != "null":
+            return value
+    return None
+
+
+def _reconcile_preview_lines(
+    epic_id: str,
+    changesets: list[str],
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> tuple[str, ...]:
+    lines: list[str] = []
+    epic_issue = _try_show_issue(epic_id, beads_root=beads_root, cwd=repo_root)
+    if epic_issue:
+        fields = beads.parse_description_fields(
+            epic_issue.get("description")
+            if isinstance(epic_issue.get("description"), str)
+            else ""
+        )
+        root_branch = _normalize_branch(fields.get("workspace.root_branch"))
+        if not root_branch:
+            root_branch = _normalize_branch(fields.get("changeset.root_branch"))
+        parent_branch = _normalize_branch(fields.get("workspace.parent_branch"))
+        if not parent_branch:
+            parent_branch = _normalize_branch(fields.get("changeset.parent_branch"))
+        if root_branch or parent_branch:
+            lines.append(
+                "final integration: "
+                f"{root_branch or 'unset'} -> {parent_branch or 'unset'}"
+            )
+    if changesets:
+        lines.append(f"changesets to reconcile: {', '.join(changesets)}")
+    for changeset_id in changesets:
+        issue = _try_show_issue(changeset_id, beads_root=beads_root, cwd=repo_root)
+        if not issue:
+            lines.append(f"{changeset_id}: status=unknown integrated_sha=missing")
+            continue
+        status = str(issue.get("status") or "unknown")
+        labels = sorted(_issue_labels(issue))
+        integrated_sha = _issue_integrated_sha(issue) or "missing"
+        lines.append(
+            f"{changeset_id}: status={status} labels={','.join(labels)} "
+            f"integrated_sha={integrated_sha}"
+        )
+    return tuple(lines)
 
 
 def _release_epic(epic: dict[str, object], *, beads_root: Path, cwd: Path) -> None:
@@ -387,6 +454,20 @@ def _gc_resolved_epic_artifacts(
             continue
 
         description_text = f"Prune resolved epic artifacts for {epic_id}"
+        changeset_worktree_summary = ", ".join(
+            sorted(mapping.changeset_worktrees.values())
+        )
+        if not changeset_worktree_summary:
+            changeset_worktree_summary = "(none)"
+        branch_summary = ", ".join(sorted(prunable_branches))
+        if not branch_summary:
+            branch_summary = "(none)"
+        details = (
+            f"epic worktree: {mapping.worktree_path}",
+            f"changeset worktrees: {changeset_worktree_summary}",
+            f"branches to prune: {branch_summary}",
+            f"integration target: {target_ref}",
+        )
 
         def _apply_cleanup(
             epic_value: str = epic_id,
@@ -444,7 +525,13 @@ def _gc_resolved_epic_artifacts(
             # Remove stale mapping once worktrees/branches are pruned.
             mapping_path.unlink(missing_ok=True)
 
-        actions.append(GcAction(description=description_text, apply=_apply_cleanup))
+        actions.append(
+            GcAction(
+                description=description_text,
+                apply=_apply_cleanup,
+                details=details,
+            )
+        )
     return actions
 
 
@@ -508,7 +595,16 @@ def _gc_orphan_worktrees(
             )
             mapping_path.unlink(missing_ok=True)
 
-        actions.append(GcAction(description=description, apply=_apply_remove))
+        actions.append(
+            GcAction(
+                description=description,
+                apply=_apply_remove,
+                details=(
+                    f"mapping: {path}",
+                    f"worktree: {mapping.worktree_path}",
+                ),
+            )
+        )
     return actions
 
 
@@ -709,7 +805,27 @@ def gc(args: object) -> None:
 
     if reconcile:
         git_path = config.resolve_git_path(project_config)
+        candidates = work_cmd.list_reconcile_epic_candidates(
+            project_config=project_config,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            git_path=git_path,
+        )
+        if not candidates:
+            say("No reconcile candidates.")
         if dry_run or yes:
+            for epic_id, changesets in candidates.items():
+                say(
+                    f"Reconcile candidate: epic {epic_id} "
+                    f"({len(changesets)} merged changesets)"
+                )
+                for detail in _reconcile_preview_lines(
+                    epic_id,
+                    changesets,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                ):
+                    say(f"- {detail}")
             reconcile_result = work_cmd.reconcile_blocked_merged_changesets(
                 agent_id="atelier/system/gc",
                 agent_bead_id="",
@@ -729,14 +845,6 @@ def gc(args: object) -> None:
                 f"failed={reconcile_result.failed}"
             )
         else:
-            candidates = work_cmd.list_reconcile_epic_candidates(
-                project_config=project_config,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                git_path=git_path,
-            )
-            if not candidates:
-                say("No reconcile candidates.")
             total_scanned = 0
             total_actionable = 0
             total_reconciled = 0
@@ -749,6 +857,14 @@ def gc(args: object) -> None:
                     f"Reconcile epic {epic_id} "
                     f"({len(changesets)} merged changesets: {preview})?"
                 )
+                say(f"Reconcile candidate: epic {epic_id}")
+                for detail in _reconcile_preview_lines(
+                    epic_id,
+                    changesets,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                ):
+                    say(f"- {detail}")
                 if not confirm(prompt_text, default=False):
                     say(f"Skipped reconcile: epic {epic_id}")
                     continue
@@ -830,10 +946,14 @@ def gc(args: object) -> None:
         return
 
     for action in actions:
+        say(f"GC action: {action.description}")
+        for detail in action.details:
+            say(f"- {detail}")
         if dry_run:
             say(f"Would: {action.description}")
             continue
         if yes or confirm(f"{action.description}?", default=False):
+            say(f"Running: {action.description}")
             action.apply()
             say(f"Done: {action.description}")
         else:

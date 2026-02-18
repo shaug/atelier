@@ -194,6 +194,10 @@ def test_gc_reconcile_flag_prompts_and_skips_without_confirmation() -> None:
             return_value={"at-wjj": ["at-wjj.1", "at-wjj.2"]},
         ),
         patch(
+            "atelier.commands.gc._reconcile_preview_lines",
+            return_value=("final integration: feat/root -> main",),
+        ),
+        patch(
             "atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets"
         ) as reconcile,
         patch("atelier.commands.gc.confirm", return_value=False) as confirm,
@@ -242,6 +246,10 @@ def test_gc_reconcile_flag_prompts_and_runs_with_confirmation() -> None:
         patch(
             "atelier.commands.gc.work_cmd.list_reconcile_epic_candidates",
             return_value={"at-wjj": ["at-wjj.1", "at-wjj.2", "at-wjj.3", "at-wjj.4"]},
+        ),
+        patch(
+            "atelier.commands.gc._reconcile_preview_lines",
+            return_value=("final integration: feat/root -> main",),
         ),
         patch(
             "atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets",

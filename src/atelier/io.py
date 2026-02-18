@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from . import log
+
 try:
     import questionary
 except ImportError:  # pragma: no cover - safety fallback when dependency is missing
@@ -17,6 +19,22 @@ def _use_questionary() -> bool:
     if questionary is None:
         return False
     return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _say_style(message: str) -> str:
+    if message.startswith("-> "):
+        return "bold cyan"
+    if message.startswith("ok "):
+        return "green"
+    if message.startswith("DRY-RUN"):
+        return "magenta"
+    if message.startswith("Summary:") or message.startswith("Timing summary:"):
+        return "bold"
+    if message.startswith("Skipped:"):
+        return "yellow"
+    if message.startswith("Done:"):
+        return "green"
+    return ""
 
 
 def say(message: str) -> None:
@@ -31,7 +49,7 @@ def say(message: str) -> None:
     Example:
         >>> say("Hello")
     """
-    print(message)
+    log.info(message, style=_say_style(message))
 
 
 def warn(message: str) -> None:
@@ -46,7 +64,7 @@ def warn(message: str) -> None:
     Example:
         >>> warn("Something looks off")
     """
-    print(f"warning: {message}", file=sys.stderr)
+    log.warning(f"warning: {message}")
 
 
 def die(message: str, code: int = 1) -> None:
@@ -62,7 +80,7 @@ def die(message: str, code: int = 1) -> None:
     Example:
         >>> die("fatal", code=2)
     """
-    print(f"error: {message}", file=sys.stderr)
+    log.error(f"error: {message}")
     sys.exit(code)
 
 
