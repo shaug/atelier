@@ -5,6 +5,9 @@ def test_normalize_pr_strategy_defaults_to_sequential() -> None:
     assert pr_strategy.normalize_pr_strategy(None) == "sequential"
     assert pr_strategy.normalize_pr_strategy("") == "sequential"
     assert pr_strategy.normalize_pr_strategy("ON_READY") == "on-ready"
+    assert (
+        pr_strategy.normalize_pr_strategy("ON_PARENT_APPROVED") == "on-parent-approved"
+    )
 
 
 def test_pr_strategy_decision_allows_parallel() -> None:
@@ -30,6 +33,20 @@ def test_pr_strategy_decision_on_ready_allows_with_parent_pr_state() -> None:
     decision = pr_strategy.pr_strategy_decision("on-ready", parent_state="draft-pr")
     assert decision.allow_pr is True
     assert decision.reason == "parent:draft-pr"
+
+
+def test_pr_strategy_decision_on_parent_approved_blocks_until_parent_approved() -> None:
+    blocked = pr_strategy.pr_strategy_decision(
+        "on-parent-approved", parent_state="in-review"
+    )
+    assert blocked.allow_pr is False
+    assert blocked.reason == "blocked:in-review"
+
+    allowed = pr_strategy.pr_strategy_decision(
+        "on-parent-approved", parent_state="approved"
+    )
+    assert allowed.allow_pr is True
+    assert allowed.reason == "parent:approved"
 
 
 def test_pr_strategy_decision_sequential_allows_when_parent_merged() -> None:

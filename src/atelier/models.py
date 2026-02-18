@@ -29,7 +29,7 @@ class BranchConfig(BaseModel):
         pr: Whether pull requests are expected.
         history: History policy (manual|squash|merge|rebase).
         squash_message: Squash commit message policy (deterministic|agent).
-        pr_strategy: PR creation strategy (sequential|on-ready|parallel).
+        pr_strategy: PR creation strategy (sequential|on-ready|on-parent-approved|parallel).
 
     Example:
         >>> BranchConfig(prefix="scott/", pr=False, history="rebase")

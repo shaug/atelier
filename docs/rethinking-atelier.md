@@ -211,7 +211,7 @@ workspace.root_branch: <string>    # stable workspace branch name
 workspace.parent_branch: <string>  # integration target (usually main)
 workspace.primary_head: <sha>      # optional CAS checkpoint
 workspace.worktree_path: <string>  # epic worktree (convenience view)
-workspace.pr_strategy: <string>    # sequential | on-ready | parallel (future)
+workspace.pr_strategy: <string>    # sequential | on-ready | on-parent-approved | parallel (future)
 ```
 
 Changeset beads:

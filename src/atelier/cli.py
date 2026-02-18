@@ -244,7 +244,7 @@ def init_command(
         str | None,
         typer.Option(
             "--branch-pr-strategy",
-            help="PR strategy (sequential|on-ready|parallel)",
+            help="PR strategy (sequential|on-ready|on-parent-approved|parallel)",
         ),
     ] = None,
     agent: Annotated[
@@ -270,7 +270,7 @@ def init_command(
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
         branch_squash_message: Squash commit subject policy (deterministic|agent).
-        branch_pr_strategy: PR strategy (sequential|on-ready|parallel).
+        branch_pr_strategy: PR strategy (sequential|on-ready|on-parent-approved|parallel).
         agent: Agent name.
         editor_edit: Editor command used for blocking edits (policy docs).
         editor_work: Editor command used for opening the workspace repo.
@@ -332,7 +332,7 @@ def new_command(
         str | None,
         typer.Option(
             "--branch-pr-strategy",
-            help="PR strategy (sequential|on-ready|parallel)",
+            help="PR strategy (sequential|on-ready|on-parent-approved|parallel)",
         ),
     ] = None,
     agent: Annotated[
@@ -359,7 +359,7 @@ def new_command(
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
         branch_squash_message: Squash commit subject policy (deterministic|agent).
-        branch_pr_strategy: PR strategy (sequential|on-ready|parallel).
+        branch_pr_strategy: PR strategy (sequential|on-ready|on-parent-approved|parallel).
         agent: Agent name.
         editor_edit: Editor command used for blocking edits (policy docs).
         editor_work: Editor command used for opening the workspace repo.

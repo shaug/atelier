@@ -37,6 +37,8 @@ description: >-
      (or when there is no parent PR).
    - `on-ready`: allow when parent is not merely `pushed` (no parent,
      draft/open/review/approved/merged/closed are allowed).
+   - `on-parent-approved`: allow only when parent is `approved`, `merged`, or
+     `closed` (or when there is no parent PR).
    - `parallel`: allow immediately.
    - If PR creation is blocked, record the reason and skip PR creation.
 1. Ensure a clean working tree before changes:

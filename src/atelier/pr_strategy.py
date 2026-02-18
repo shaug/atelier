@@ -5,8 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-PR_STRATEGY_VALUES = ("sequential", "on-ready", "parallel")
-PrStrategy = Literal["sequential", "on-ready", "parallel"]
+PR_STRATEGY_VALUES = (
+    "sequential",
+    "on-ready",
+    "on-parent-approved",
+    "parallel",
+)
+PrStrategy = Literal["sequential", "on-ready", "on-parent-approved", "parallel"]
 
 PR_STRATEGY_DEFAULT: PrStrategy = "sequential"
 
@@ -71,6 +76,20 @@ def pr_strategy_decision(
             parent_state=parent_state_normalized,
             allow_pr=True,
             reason=f"parent:{parent_state_normalized}",
+        )
+    if normalized == "on-parent-approved":
+        if parent_state_normalized in {"approved", "merged", "closed"}:
+            return PrStrategyDecision(
+                strategy=normalized,
+                parent_state=parent_state_normalized,
+                allow_pr=True,
+                reason=f"parent:{parent_state_normalized}",
+            )
+        return PrStrategyDecision(
+            strategy=normalized,
+            parent_state=parent_state_normalized,
+            allow_pr=False,
+            reason=f"blocked:{parent_state_normalized}",
         )
     if parent_state_normalized in {"merged", "closed"}:
         return PrStrategyDecision(
