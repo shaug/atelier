@@ -3012,6 +3012,10 @@ def test_list_reconcile_epic_candidates_skips_closed_epic_with_integrated_sha() 
             "atelier.commands.work._changeset_integration_signal",
             return_value=(True, "46628ab7c578d56b7003eb80fd13e44f151676d9"),
         ),
+        patch(
+            "atelier.commands.work._epic_root_integrated_into_parent",
+            return_value=True,
+        ),
     ):
         candidates = work_cmd.list_reconcile_epic_candidates(
             project_config=_fake_project_payload(),
@@ -3020,6 +3024,42 @@ def test_list_reconcile_epic_candidates_skips_closed_epic_with_integrated_sha() 
         )
 
     assert candidates == {}
+
+
+def test_list_reconcile_epic_candidates_keeps_closed_epic_when_not_finalized() -> None:
+    merged_closed = {
+        "id": "at-ati",
+        "status": "closed",
+        "labels": ["at:changeset", "cs:merged"],
+        "description": "changeset.integrated_sha: cc013f53e9abf6e62a163d287364f87a66cf780f\n",
+    }
+    closed_epic = {"id": "at-ati", "labels": ["at:epic"], "status": "closed"}
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args and args[0] == "list":
+            return [merged_closed]
+        if args[:2] == ["show", "at-ati"]:
+            return [closed_epic]
+        return []
+
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.commands.work._changeset_integration_signal",
+            return_value=(True, "cc013f53e9abf6e62a163d287364f87a66cf780f"),
+        ),
+        patch(
+            "atelier.commands.work._epic_root_integrated_into_parent",
+            return_value=False,
+        ),
+    ):
+        candidates = work_cmd.list_reconcile_epic_candidates(
+            project_config=_fake_project_payload(),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert candidates == {"at-ati": ["at-ati"]}
 
 
 def test_reconcile_blocked_merged_changesets_finalizes_actionable_issue() -> None:

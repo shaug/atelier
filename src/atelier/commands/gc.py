@@ -733,6 +733,7 @@ def gc(args: object) -> None:
                 project_config=project_config,
                 beads_root=beads_root,
                 repo_root=repo_root,
+                git_path=git_path,
             )
             if not candidates:
                 say("No reconcile candidates.")

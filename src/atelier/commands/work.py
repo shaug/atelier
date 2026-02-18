@@ -1050,15 +1050,64 @@ def _has_blocking_messages(
     return False
 
 
-def _branch_ref_for_lookup(repo_root: Path, branch: str) -> str | None:
+def _branch_ref_for_lookup(
+    repo_root: Path, branch: str, *, git_path: str | None = None
+) -> str | None:
     normalized = branch.strip()
     if not normalized:
         return None
-    if git.git_ref_exists(repo_root, f"refs/heads/{normalized}"):
+    if git_path is None:
+        local_exists = git.git_ref_exists(repo_root, f"refs/heads/{normalized}")
+    else:
+        local_exists = git.git_ref_exists(
+            repo_root, f"refs/heads/{normalized}", git_path=git_path
+        )
+    if local_exists:
         return normalized
-    if git.git_ref_exists(repo_root, f"refs/remotes/origin/{normalized}"):
+    if git_path is None:
+        remote_exists = git.git_ref_exists(
+            repo_root, f"refs/remotes/origin/{normalized}"
+        )
+    else:
+        remote_exists = git.git_ref_exists(
+            repo_root, f"refs/remotes/origin/{normalized}", git_path=git_path
+        )
+    if remote_exists:
         return f"origin/{normalized}"
     return None
+
+
+def _epic_root_integrated_into_parent(
+    epic_issue: dict[str, object],
+    *,
+    repo_root: Path,
+    git_path: str | None = None,
+) -> bool:
+    root_branch = beads.extract_workspace_root_branch(epic_issue)
+    if not root_branch:
+        root_branch = _extract_changeset_root_branch(epic_issue)
+    parent_branch = _extract_workspace_parent_branch(epic_issue)
+    default_branch = git.git_default_branch(repo_root, git_path=git_path)
+    if not parent_branch or (root_branch and parent_branch == root_branch):
+        parent_branch = default_branch or parent_branch or root_branch
+    if not root_branch or not parent_branch:
+        return False
+    parent_ref = _branch_ref_for_lookup(repo_root, parent_branch, git_path=git_path)
+    if not parent_ref:
+        return False
+    root_ref = _branch_ref_for_lookup(repo_root, root_branch, git_path=git_path)
+    if not root_ref:
+        # Root already pruned; assume finalization path completed.
+        return True
+    is_ancestor = git.git_is_ancestor(
+        repo_root, root_ref, parent_ref, git_path=git_path
+    )
+    if is_ancestor is True:
+        return True
+    fully_applied = git.git_branch_fully_applied(
+        repo_root, parent_ref, root_ref, git_path=git_path
+    )
+    return fully_applied is True
 
 
 def _changeset_integration_signal(
@@ -1066,6 +1115,7 @@ def _changeset_integration_signal(
     *,
     repo_slug: str | None,
     repo_root: Path,
+    git_path: str | None = None,
 ) -> tuple[bool, str | None]:
     description = issue.get("description")
     description_text = description if isinstance(description, str) else ""
@@ -1099,16 +1149,18 @@ def _changeset_integration_signal(
         return False, None
     if root_branch.strip().lower() == "null" or work_branch.strip().lower() == "null":
         return False, None
-    root_ref = _branch_ref_for_lookup(repo_root, root_branch)
-    work_ref = _branch_ref_for_lookup(repo_root, work_branch)
+    root_ref = _branch_ref_for_lookup(repo_root, root_branch, git_path=git_path)
+    work_ref = _branch_ref_for_lookup(repo_root, work_branch, git_path=git_path)
     if not root_ref or not work_ref:
         return False, None
 
-    is_ancestor = git.git_is_ancestor(repo_root, work_ref, root_ref)
+    is_ancestor = git.git_is_ancestor(repo_root, work_ref, root_ref, git_path=git_path)
     if is_ancestor is True:
         return True, git.git_rev_parse(repo_root, root_ref)
 
-    fully_applied = git.git_branch_fully_applied(repo_root, root_ref, work_ref)
+    fully_applied = git.git_branch_fully_applied(
+        repo_root, root_ref, work_ref, git_path=git_path
+    )
     if fully_applied is True:
         return True, git.git_rev_parse(repo_root, root_ref)
 
@@ -1162,6 +1214,7 @@ def list_reconcile_epic_candidates(
     project_config: config.ProjectConfig,
     beads_root: Path,
     repo_root: Path,
+    git_path: str | None = None,
 ) -> dict[str, list[str]]:
     """Return merged changeset reconciliation candidates grouped by epic."""
     issues = beads.run_bd_json(
@@ -1192,7 +1245,7 @@ def list_reconcile_epic_candidates(
         if status not in {"", "blocked", "closed"}:
             continue
         integration_proven, _integrated_sha = _changeset_integration_signal(
-            issue, repo_slug=repo_slug, repo_root=repo_root
+            issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
         )
         if not integration_proven:
             continue
@@ -1207,7 +1260,14 @@ def list_reconcile_epic_candidates(
             epic_closed = bool(epic_issue) and _is_closed_status(
                 epic_issue.get("status")
             )
-            if epic_closed and _integrated_sha:
+            if (
+                epic_closed
+                and _integrated_sha
+                and epic_issue
+                and _epic_root_integrated_into_parent(
+                    epic_issue, repo_root=repo_root, git_path=git_path
+                )
+            ):
                 continue
         candidates.setdefault(epic_id, []).append(issue_id.strip())
     ordered: dict[str, list[str]] = {}
@@ -1301,7 +1361,7 @@ def reconcile_blocked_merged_changesets(
             continue
         scanned += 1
         integration_proven, integrated_sha = _changeset_integration_signal(
-            issue, repo_slug=repo_slug, repo_root=repo_root
+            issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
         )
         if not integration_proven:
             if log:
@@ -1359,7 +1419,7 @@ def reconcile_blocked_merged_changesets(
             dependency_finalized_cache[issue_id] = False
             return False
         integrated, _ = _changeset_integration_signal(
-            issue, repo_slug=repo_slug, repo_root=repo_root
+            issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
         )
         dependency_finalized_cache[issue_id] = integrated
         return integrated
@@ -2284,7 +2344,7 @@ def _finalize_changeset(
             )
         if "cs:merged" in labels:
             integration_proven, integrated_sha = _changeset_integration_signal(
-                issue, repo_slug=repo_slug, repo_root=repo_root
+                issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
             )
             if not integration_proven:
                 _mark_changeset_blocked(
