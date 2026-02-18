@@ -34,6 +34,7 @@ from .commands import new as new_cmd
 from .commands import open as open_cmd
 from .commands import plan as plan_cmd
 from .commands import policy as policy_cmd
+from .commands import remove as remove_cmd
 from .commands import status as status_cmd
 from .commands import work as work_cmd
 from .exec import try_run_command
@@ -619,6 +620,53 @@ def gc_command(
             dry_run=dry_run,
             reconcile=reconcile,
             yes=yes,
+        )
+    )
+
+
+@app.command(
+    "remove",
+    help="Remove Atelier project state for the current repository.",
+)
+def remove_command(
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="apply removal without confirmation"),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="show what would be removed"),
+    ] = False,
+    gc: Annotated[
+        bool,
+        typer.Option(
+            "--gc/--no-gc",
+            help="run gc before deleting project data",
+        ),
+    ] = True,
+    reconcile: Annotated[
+        bool,
+        typer.Option(
+            "--reconcile",
+            help="when --gc is enabled, reconcile merged changesets first",
+        ),
+    ] = False,
+    prune_branches: Annotated[
+        bool,
+        typer.Option(
+            "--prune-branches",
+            help="also prune mapped local/remote branches (destructive)",
+        ),
+    ] = False,
+) -> None:
+    """Remove Atelier project data for the current repository."""
+    remove_cmd.remove_project(
+        SimpleNamespace(
+            yes=yes,
+            dry_run=dry_run,
+            gc=gc,
+            reconcile=reconcile,
+            prune_branches=prune_branches,
         )
     )
 
