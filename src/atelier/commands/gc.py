@@ -109,10 +109,29 @@ def _reconcile_preview_lines(
     epic_id: str,
     changesets: list[str],
     *,
+    project_dir: Path | None,
     beads_root: Path,
     repo_root: Path,
 ) -> tuple[str, ...]:
     lines: list[str] = []
+    if project_dir is not None:
+        mapping = worktrees.load_mapping(worktrees.mapping_path(project_dir, epic_id))
+        if mapping is not None:
+            branch_values = [mapping.root_branch, *mapping.changesets.values()]
+            branches = sorted({value for value in branch_values if value})
+            worktree_values = [
+                mapping.worktree_path,
+                *mapping.changeset_worktrees.values(),
+            ]
+            worktree_paths = sorted({value for value in worktree_values if value})
+            lines.append(
+                f"mapped branches ({len(branches)}): "
+                + (", ".join(branches) if branches else "(none)")
+            )
+            lines.append(
+                f"mapped worktrees ({len(worktree_paths)}): "
+                + (", ".join(worktree_paths) if worktree_paths else "(none)")
+            )
     epic_issue = _try_show_issue(epic_id, beads_root=beads_root, cwd=repo_root)
     if epic_issue:
         fields = beads.parse_description_fields(
@@ -814,6 +833,12 @@ def gc(args: object) -> None:
         if not candidates:
             say("No reconcile candidates.")
         if dry_run or yes:
+            if not candidates:
+                say(
+                    "Reconcile blocked changesets: "
+                    "scanned=0, actionable=0, reconciled=0, failed=0"
+                )
+                return
             for epic_id, changesets in candidates.items():
                 say(
                     f"Reconcile candidate: epic {epic_id} "
@@ -822,6 +847,7 @@ def gc(args: object) -> None:
                 for detail in _reconcile_preview_lines(
                     epic_id,
                     changesets,
+                    project_dir=project_data_dir,
                     beads_root=beads_root,
                     repo_root=repo_root,
                 ):
@@ -861,6 +887,7 @@ def gc(args: object) -> None:
                 for detail in _reconcile_preview_lines(
                     epic_id,
                     changesets,
+                    project_dir=project_data_dir,
                     beads_root=beads_root,
                     repo_root=repo_root,
                 ):

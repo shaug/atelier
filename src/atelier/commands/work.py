@@ -1581,6 +1581,7 @@ def reconcile_blocked_merged_changesets(
                 repo_root=repo_root,
                 project_data_dir=project_data_dir,
                 git_path=git_path,
+                log=log,
             )
             if "_blocked_" in epic_result.reason:
                 failed += 1
@@ -1869,42 +1870,87 @@ def _cleanup_epic_branches_and_worktrees(
     epic_id: str,
     keep_branches: set[str] | None = None,
     git_path: str | None = None,
+    log: Callable[[str], None] | None = None,
 ) -> None:
     keep = {branch for branch in (keep_branches or set()) if branch}
     if project_data_dir is None:
+        if log:
+            log(f"cleanup skip: {epic_id} (project data dir unavailable)")
         return
     mapping_path = worktrees.mapping_path(project_data_dir, epic_id)
     mapping = worktrees.load_mapping(mapping_path)
     if mapping is None:
+        if log:
+            log(f"cleanup skip: {epic_id} (no worktree mapping)")
         return
 
-    relpaths: list[str] = [mapping.worktree_path, *mapping.changeset_worktrees.values()]
+    relpaths = sorted(
+        {
+            relpath
+            for relpath in [
+                mapping.worktree_path,
+                *mapping.changeset_worktrees.values(),
+            ]
+            if relpath
+        }
+    )
     for relpath in relpaths:
         worktree_path = project_data_dir / relpath
         if not worktree_path.exists():
+            if log:
+                log(f"cleanup skip worktree: {worktree_path} (missing)")
             continue
         if not (worktree_path / ".git").exists():
+            if log:
+                log(f"cleanup skip worktree: {worktree_path} (not a git worktree)")
             continue
-        _run_git_status(
+        if log:
+            log(f"cleanup remove worktree: {worktree_path}")
+        ok, detail = _run_git_status(
             ["worktree", "remove", "--force", str(worktree_path)],
             repo_root=repo_root,
             git_path=git_path,
         )
+        if log:
+            if ok:
+                log(f"cleanup removed worktree: {worktree_path}")
+            else:
+                log(f"cleanup failed worktree: {worktree_path} ({detail})")
 
     branches = {mapping.root_branch, *mapping.changesets.values()}
     for branch in branches:
         if not branch or branch in keep:
+            if log and branch:
+                log(f"cleanup keep branch: {branch}")
             continue
-        _run_git_status(
+        if log:
+            log(f"cleanup delete remote branch: origin/{branch}")
+        remote_ok, remote_detail = _run_git_status(
             ["push", "origin", "--delete", branch],
             repo_root=repo_root,
             git_path=git_path,
         )
-        _run_git_status(
+        if log:
+            if remote_ok:
+                log(f"cleanup deleted remote branch: origin/{branch}")
+            else:
+                log(
+                    f"cleanup remote branch skip/fail: origin/{branch} ({remote_detail})"
+                )
+        if log:
+            log(f"cleanup delete local branch: {branch}")
+        local_ok, local_detail = _run_git_status(
             ["branch", "-D", branch], repo_root=repo_root, git_path=git_path
         )
+        if log:
+            if local_ok:
+                log(f"cleanup deleted local branch: {branch}")
+            else:
+                log(f"cleanup local branch skip/fail: {branch} ({local_detail})")
 
     mapping_path.unlink(missing_ok=True)
+    if log:
+        log(f"cleanup removed mapping: {mapping_path}")
 
 
 def _integrate_epic_root_to_parent(
@@ -2151,6 +2197,7 @@ def _finalize_epic_if_complete(
     squash_message_agent_home: Path | None = None,
     squash_message_agent_env: dict[str, str] | None = None,
     git_path: str | None = None,
+    log: Callable[[str], None] | None = None,
 ) -> FinalizeResult:
     if not _epic_ready_to_finalize(epic_id, beads_root=beads_root, repo_root=repo_root):
         return FinalizeResult(continue_running=True, reason="changeset_complete")
@@ -2244,12 +2291,15 @@ def _finalize_epic_if_complete(
         epic_id, agent_bead_id, beads_root=beads_root, cwd=repo_root
     )
     if closed:
+        if log:
+            log(f"finalize epic: {epic_id} closed; pruning mapped artifacts")
         _cleanup_epic_branches_and_worktrees(
             project_data_dir=project_data_dir,
             repo_root=repo_root,
             epic_id=epic_id,
             keep_branches={parent_branch} if "parent_branch" in locals() else set(),
             git_path=git_path,
+            log=log,
         )
     return FinalizeResult(continue_running=True, reason="changeset_complete")
 
@@ -2393,6 +2443,7 @@ def _finalize_changeset(
             squash_message_agent_home=squash_message_agent_home,
             squash_message_agent_env=squash_message_agent_env,
             git_path=git_path,
+            log=say,
         )
     if _has_blocking_messages(
         thread_ids={changeset_id, epic_id},

@@ -143,6 +143,14 @@ def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
         ),
         patch("atelier.commands.gc.beads.run_bd_json", return_value=[]),
         patch(
+            "atelier.commands.gc.work_cmd.list_reconcile_epic_candidates",
+            return_value={"at-wjj": ["at-wjj.1"]},
+        ),
+        patch(
+            "atelier.commands.gc._reconcile_preview_lines",
+            return_value=("final integration: feat/root -> main",),
+        ),
+        patch(
             "atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets",
             return_value=gc_cmd.work_cmd.ReconcileResult(
                 scanned=2, actionable=1, reconciled=1, failed=0
