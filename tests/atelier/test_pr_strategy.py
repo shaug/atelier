@@ -20,6 +20,18 @@ def test_pr_strategy_decision_sequential_blocks_on_open_parent() -> None:
     assert decision.reason == "blocked:pr-open"
 
 
+def test_pr_strategy_decision_on_ready_blocks_until_parent_pr_exists() -> None:
+    decision = pr_strategy.pr_strategy_decision("on-ready", parent_state="pushed")
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:pushed"
+
+
+def test_pr_strategy_decision_on_ready_allows_with_parent_pr_state() -> None:
+    decision = pr_strategy.pr_strategy_decision("on-ready", parent_state="draft-pr")
+    assert decision.allow_pr is True
+    assert decision.reason == "parent:draft-pr"
+
+
 def test_pr_strategy_decision_sequential_allows_when_parent_merged() -> None:
     decision = pr_strategy.pr_strategy_decision("sequential", parent_state="merged")
     assert decision.allow_pr is True

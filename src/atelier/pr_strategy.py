@@ -39,7 +39,7 @@ def pr_strategy_decision(
 ) -> PrStrategyDecision:
     """Return the PR creation decision for a strategy."""
     normalized = normalize_pr_strategy(strategy)
-    if normalized in {"parallel", "on-ready"}:
+    if normalized == "parallel":
         return PrStrategyDecision(
             strategy=normalized,
             parent_state=parent_state,
@@ -57,6 +57,20 @@ def pr_strategy_decision(
             parent_state=None,
             allow_pr=True,
             reason="no-parent",
+        )
+    if normalized == "on-ready":
+        if parent_state_normalized == "pushed":
+            return PrStrategyDecision(
+                strategy=normalized,
+                parent_state=parent_state_normalized,
+                allow_pr=False,
+                reason=f"blocked:{parent_state_normalized}",
+            )
+        return PrStrategyDecision(
+            strategy=normalized,
+            parent_state=parent_state_normalized,
+            allow_pr=True,
+            reason=f"parent:{parent_state_normalized}",
         )
     if parent_state_normalized in {"merged", "closed"}:
         return PrStrategyDecision(

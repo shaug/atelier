@@ -35,7 +35,9 @@ description: >-
 1. Determine whether PR creation is allowed by the PR strategy:
    - `sequential`: allow only when the parent PR state is `merged` or `closed`
      (or when there is no parent PR).
-   - `on-ready` or `parallel`: allow immediately.
+   - `on-ready`: allow when parent is not merely `pushed` (no parent,
+     draft/open/review/approved/merged/closed are allowed).
+   - `parallel`: allow immediately.
    - If PR creation is blocked, record the reason and skip PR creation.
 1. Ensure a clean working tree before changes:
    - Run `scripts/ensure_clean_tree.sh <repo_path>`.
