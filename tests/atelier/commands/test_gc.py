@@ -629,3 +629,116 @@ def test_gc_resolved_epic_artifacts_skips_when_not_integrated() -> None:
             )
 
         assert actions == []
+
+
+def test_gc_closed_workspace_branches_without_mapping_prunes_integrated_root() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        issue = {
+            "id": "at-irs",
+            "status": "closed",
+            "labels": ["at:changeset", "cs:merged", "workspace:project-guardrail"],
+            "description": (
+                "workspace.root_branch: project-guardrail\n"
+                "workspace.parent_branch: main\n"
+                "changeset.root_branch: project-guardrail\n"
+                "changeset.work_branch: project-guardrail-at-irs\n"
+            ),
+        }
+        refs = {
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+            "refs/heads/project-guardrail",
+            "refs/remotes/origin/project-guardrail",
+        }
+        commands: list[list[str]] = []
+
+        with (
+            patch(
+                "atelier.commands.gc.beads.run_bd_json",
+                return_value=[issue],
+            ),
+            patch("atelier.commands.gc.git.git_default_branch", return_value="main"),
+            patch(
+                "atelier.commands.gc.git.git_ref_exists",
+                side_effect=lambda repo, ref, git_path=None: ref in refs,
+            ),
+            patch("atelier.commands.gc.git.git_is_ancestor", return_value=True),
+            patch(
+                "atelier.commands.gc.git.git_branch_fully_applied", return_value=False
+            ),
+            patch("atelier.commands.gc.git.git_current_branch", return_value="main"),
+            patch(
+                "atelier.commands.gc._run_git_gc_command",
+                side_effect=lambda args, repo_root, git_path: (
+                    commands.append(args),
+                    (True, ""),
+                )[1],
+            ),
+        ):
+            actions = gc_cmd._gc_closed_workspace_branches_without_mapping(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+            )
+            assert len(actions) == 1
+            actions[0].apply()
+
+        assert ["push", "origin", "--delete", "project-guardrail"] in commands
+        assert ["branch", "-D", "project-guardrail"] in commands
+
+
+def test_gc_closed_workspace_branches_without_mapping_skips_not_integrated() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        issue = {
+            "id": "at-irs",
+            "status": "closed",
+            "labels": ["at:changeset", "cs:merged", "workspace:project-guardrail"],
+            "description": (
+                "workspace.root_branch: project-guardrail\n"
+                "workspace.parent_branch: main\n"
+                "changeset.root_branch: project-guardrail\n"
+            ),
+        }
+        refs = {
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+            "refs/heads/project-guardrail",
+            "refs/remotes/origin/project-guardrail",
+        }
+
+        with (
+            patch(
+                "atelier.commands.gc.beads.run_bd_json",
+                return_value=[issue],
+            ),
+            patch("atelier.commands.gc.git.git_default_branch", return_value="main"),
+            patch(
+                "atelier.commands.gc.git.git_ref_exists",
+                side_effect=lambda repo, ref, git_path=None: ref in refs,
+            ),
+            patch("atelier.commands.gc.git.git_is_ancestor", return_value=False),
+            patch(
+                "atelier.commands.gc.git.git_branch_fully_applied", return_value=False
+            ),
+        ):
+            actions = gc_cmd._gc_closed_workspace_branches_without_mapping(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+            )
+
+        assert actions == []

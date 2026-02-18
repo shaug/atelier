@@ -60,6 +60,16 @@ def _issue_labels(issue: dict[str, object]) -> set[str]:
     return {str(label) for label in labels if label}
 
 
+def _workspace_branch_from_labels(labels: set[str]) -> str | None:
+    for label in labels:
+        if not label.startswith("workspace:"):
+            continue
+        candidate = label.split(":", 1)[1].strip()
+        if candidate:
+            return candidate
+    return None
+
+
 def _try_show_issue(
     issue_id: str, *, beads_root: Path, cwd: Path
 ) -> dict[str, object] | None:
@@ -554,6 +564,128 @@ def _gc_resolved_epic_artifacts(
     return actions
 
 
+def _gc_closed_workspace_branches_without_mapping(
+    *,
+    project_dir: Path,
+    beads_root: Path,
+    repo_root: Path,
+    git_path: str,
+) -> list[GcAction]:
+    actions: list[GcAction] = []
+    default_branch = git.git_default_branch(repo_root, git_path=git_path) or ""
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:changeset", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in issues:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        status = str(issue.get("status") or "").strip().lower()
+        if status not in {"closed", "done"}:
+            continue
+        labels = _issue_labels(issue)
+        if "cs:merged" not in labels:
+            continue
+        workspace_branch = _workspace_branch_from_labels(labels)
+        if not workspace_branch:
+            continue
+        mapping_path = worktrees.mapping_path(project_dir, issue_id.strip())
+        if mapping_path.exists():
+            continue
+
+        description = issue.get("description")
+        fields = beads.parse_description_fields(
+            description if isinstance(description, str) else ""
+        )
+        root_branch = _normalize_branch(fields.get("workspace.root_branch"))
+        if not root_branch:
+            root_branch = _normalize_branch(fields.get("changeset.root_branch"))
+        if not root_branch:
+            root_branch = _normalize_branch(workspace_branch)
+        parent_branch = _normalize_branch(fields.get("workspace.parent_branch"))
+        if not parent_branch:
+            parent_branch = _normalize_branch(fields.get("changeset.parent_branch"))
+        if not parent_branch or parent_branch == root_branch:
+            parent_branch = _normalize_branch(default_branch) or parent_branch
+        if not root_branch or not parent_branch:
+            continue
+
+        target_local, target_remote = _branch_lookup_ref(
+            repo_root, parent_branch, git_path=git_path
+        )
+        target_ref = target_local or target_remote
+        if not target_ref:
+            continue
+
+        work_branch = _normalize_branch(fields.get("changeset.work_branch"))
+        candidate_values = [root_branch, work_branch, workspace_branch]
+        candidate_branches = {value for value in candidate_values if value}
+        prunable_branches = {
+            branch
+            for branch in candidate_branches
+            if branch and branch != parent_branch and branch != default_branch
+        }
+        if not prunable_branches:
+            continue
+        if any(
+            not _branch_integrated_into_target(
+                repo_root, branch=branch, target_ref=target_ref, git_path=git_path
+            )
+            for branch in prunable_branches
+        ):
+            continue
+
+        has_prunable_branch_ref = False
+        for branch in prunable_branches:
+            local_ref, remote_ref = _branch_lookup_ref(
+                repo_root, branch, git_path=git_path
+            )
+            if local_ref or remote_ref:
+                has_prunable_branch_ref = True
+                break
+        if not has_prunable_branch_ref:
+            continue
+
+        description_text = f"Prune closed workspace branches for {issue_id.strip()}"
+        details = (
+            f"workspace branch: {workspace_branch}",
+            f"root branch: {root_branch}",
+            f"work branch: {work_branch or '(none)'}",
+            f"integration target: {target_ref}",
+            f"branches to prune: {', '.join(sorted(prunable_branches))}",
+        )
+
+        def _apply_cleanup(
+            branches_to_prune: list[str] = sorted(prunable_branches),
+        ) -> None:
+            current_branch = git.git_current_branch(repo_root, git_path=git_path)
+            for branch in branches_to_prune:
+                local_ref, remote_ref = _branch_lookup_ref(
+                    repo_root, branch, git_path=git_path
+                )
+                if remote_ref:
+                    _run_git_gc_command(
+                        ["push", "origin", "--delete", branch],
+                        repo_root=repo_root,
+                        git_path=git_path,
+                    )
+                if local_ref and current_branch != branch:
+                    _run_git_gc_command(
+                        ["branch", "-D", branch], repo_root=repo_root, git_path=git_path
+                    )
+
+        actions.append(
+            GcAction(
+                description=description_text,
+                apply=_apply_cleanup,
+                details=details,
+            )
+        )
+    return actions
+
+
 def _gc_orphan_worktrees(
     *,
     project_dir: Path,
@@ -952,6 +1084,14 @@ def gc(args: object) -> None:
             repo_root=repo_root,
             git_path=config.resolve_git_path(project_config),
             assume_yes=yes,
+        )
+    )
+    actions.extend(
+        _gc_closed_workspace_branches_without_mapping(
+            project_dir=project_data_dir,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            git_path=config.resolve_git_path(project_config),
         )
     )
     actions.extend(
