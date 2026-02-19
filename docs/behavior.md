@@ -119,7 +119,8 @@ Atelier planning state. They are treated as external ticket sources.
 
 - `atelier policy`
 
-  - Edits project-wide policy shared by planner/worker agents.
+  - Shows project-wide policy shared by planner/worker agents.
+  - `--edit` opens policy in `editor.edit`.
 
 - `atelier work`
 

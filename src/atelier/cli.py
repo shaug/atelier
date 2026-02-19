@@ -701,15 +701,23 @@ def config_command(
     )
 
 
-@app.command("policy", help="Edit project-wide agent policy.")
+@app.command("policy", help="Show or edit project-wide agent policy.")
 def policy_command(
     role: Annotated[
         str | None,
         typer.Option("--role", help="policy role (planner|worker|both)"),
     ] = None,
+    edit: Annotated[
+        bool,
+        typer.Option("--edit", help="edit policy in editor.edit"),
+    ] = False,
 ) -> None:
-    """Edit project-wide policy stored in the planning store."""
-    policy_cmd.edit_policy(SimpleNamespace(role=role))
+    """Show policy by default; edit with --edit."""
+    args = SimpleNamespace(role=role)
+    if edit:
+        policy_cmd.edit_policy(args)
+        return
+    policy_cmd.show_policy(args)
 
 
 @app.command("edit", help="Open the workspace repo in the work editor.")

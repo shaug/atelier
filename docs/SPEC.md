@@ -156,7 +156,8 @@ Changeset description fields include:
 
 - `atelier init`: register the current repo and write project config.
 - `atelier plan`: create epics and changesets; assign `workspace.root_branch`.
-- `atelier policy`: edit project-wide policy for planners/workers.
+- `atelier policy`: show project-wide policy for planners/workers (`--edit` to
+  modify).
 - `atelier work`: select/claim an epic, pick the next ready changeset, and
   ensure worktree + branch mappings exist. Run mode controls whether it runs
   once, loops while work is ready, or watches for new work.

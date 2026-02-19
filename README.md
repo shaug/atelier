@@ -248,7 +248,7 @@ atelier gc
 
 - The epic record is the execution contract for each workspace.
 - `AGENTS.md` is a managed prologue used to configure agents.
-- `atelier policy` edits the project-wide policy shared by planning and work
+- `atelier policy` shows the project-wide policy shared by planning and work
   agents.
 - The `publish` skill records integration guidance derived from project config
   and applies it to changeset branches.
@@ -344,17 +344,19 @@ atelier config --installed --prompt
 
 ### `atelier policy`
 
-Edit project-wide agent policy.
+Show or edit project-wide agent policy.
 
 Usage:
 
 ```sh
 atelier policy
+atelier policy --edit
 ```
 
 Options:
 
 - `--role`: Select policy role (`planner`, `worker`, or `both`).
+- `--edit`: Edit policy in `editor.edit`; without this flag policy is printed.
 
 ### `atelier edit <workspace-branch>`
 

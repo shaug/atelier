@@ -179,3 +179,53 @@ def edit_policy(args: object) -> None:
         worker_home, role=policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root
     )
     say("Updated project policy")
+
+
+def show_policy(args: object) -> None:
+    """Show project-wide policy stored in Beads."""
+    project_root, project_config, _enlistment, repo_root = (
+        resolve_current_project_with_repo_root()
+    )
+    project_data_dir = config.resolve_project_data_dir(project_root, project_config)
+    beads_root = config.resolve_beads_root(project_data_dir, repo_root)
+    role = policy.normalize_role(getattr(args, "role", None)) or policy.ROLE_BOTH
+
+    beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
+
+    planner_issues = beads.list_policy_beads(
+        policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
+    )
+    worker_issues = beads.list_policy_beads(
+        policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root
+    )
+    planner_body = (
+        policy.normalize_policy_text(beads.extract_policy_body(planner_issues[0]))
+        if planner_issues
+        else ""
+    )
+    worker_body = (
+        policy.normalize_policy_text(beads.extract_policy_body(worker_issues[0]))
+        if worker_issues
+        else ""
+    )
+
+    if role == policy.ROLE_PLANNER:
+        if planner_body:
+            say(planner_body)
+        else:
+            say("No planner policy set.")
+        return
+
+    if role == policy.ROLE_WORKER:
+        if worker_body:
+            say(worker_body)
+        else:
+            say("No worker policy set.")
+        return
+
+    combined, _ = policy.build_combined_policy(planner_body, worker_body)
+    combined = policy.normalize_policy_text(combined)
+    if combined:
+        say(combined)
+        return
+    say("No project policy set.")
