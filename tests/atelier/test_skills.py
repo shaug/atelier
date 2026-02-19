@@ -111,3 +111,10 @@ def test_ensure_project_skills_installs_if_missing() -> None:
         skills_dir = skills.ensure_project_skills(project_dir)
         assert skills_dir == project_dir / "skills"
         assert (skills_dir / "planner_startup_check" / "SKILL.md").exists()
+
+
+def test_packaged_skill_docs_include_yaml_frontmatter() -> None:
+    definitions = skills.load_packaged_skills()
+    for name, definition in definitions.items():
+        text = definition.files["SKILL.md"].decode("utf-8").lstrip()
+        assert text.startswith("---\n"), f"{name} SKILL.md missing YAML frontmatter"

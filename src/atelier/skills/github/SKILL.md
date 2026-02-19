@@ -1,3 +1,10 @@
+---
+name: github
+description: >-
+  Route GitHub workflows to dedicated skills (`github-prs` and
+  `github-issues`) without executing provider operations directly.
+---
+
 # Skill: github
 
 ## Purpose
