@@ -3271,11 +3271,15 @@ def _run_worker_once(
                 except OSError:
                     skills_dir = None
             if skills_dir is not None:
+                project_lookup_paths, _global_lookup_paths = agents.skill_lookup_paths(
+                    agent_spec.name
+                )
                 agent_home.ensure_agent_links(
                     agent,
                     worktree_path=changeset_worktree_path,
                     beads_root=beads_root,
                     skills_dir=skills_dir,
+                    project_skill_lookup_paths=project_lookup_paths,
                 )
             worker_agents_path = agent.path / "AGENTS.md"
             worker_template = templates.worker_template(

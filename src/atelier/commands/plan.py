@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -410,17 +411,12 @@ def run_planner(args: object) -> None:
             if not default_branch:
                 die("failed to determine default branch for planner worktree")
             finish(f"default branch {default_branch}")
-            provider_contexts = external_registry.resolve_external_providers(
-                project_config, repo_root
+            external_providers = "none"
+            provider_resolution = external_registry.PlannerProviderResolution(
+                selected_provider=None,
+                available_providers=tuple(),
+                github_repo=None,
             )
-            provider_slugs = sorted(
-                {
-                    context.provider.slug
-                    for context in provider_contexts
-                    if context.provider
-                }
-            )
-            external_providers = ", ".join(provider_slugs) if provider_slugs else "none"
             planner_key = f"planner-{agent.name}"
             planner_branch = _planner_branch_name(
                 default_branch=default_branch, agent_name=agent.name
@@ -461,13 +457,42 @@ def run_planner(args: object) -> None:
                     skills_dir = None
             if skills_dir is not None:
                 finish = _step("Link agent home", timings=timings, trace=trace)
+                project_lookup_paths, _global_lookup_paths = agents.skill_lookup_paths(
+                    project_config.agent.default
+                )
                 agent_home.ensure_agent_links(
                     agent,
                     worktree_path=worktree_path,
                     beads_root=beads_root,
                     skills_dir=skills_dir,
+                    project_skill_lookup_paths=project_lookup_paths,
                 )
                 finish()
+            finish = _step("Resolve external provider", timings=timings, trace=trace)
+            provider_resolution = external_registry.resolve_planner_provider(
+                project_config,
+                repo_root,
+                agent_name=project_config.agent.default,
+                project_data_dir=project_data_dir,
+                agent_home=agent.path,
+                interactive=sys.stdin.isatty() and sys.stdout.isatty(),
+            )
+            provider_slugs = list(provider_resolution.available_providers)
+            external_providers = ", ".join(provider_slugs) if provider_slugs else "none"
+            selected_provider = provider_resolution.selected_provider
+            selected_summary = selected_provider or "none"
+            current_provider = (
+                project_config.project.provider or ""
+            ).strip().lower() or None
+            if selected_provider and selected_provider != current_provider:
+                updated_config = project_config.model_copy(deep=True)
+                updated_config.project.provider = selected_provider
+                config.write_project_config(
+                    paths.project_config_path(project_root), updated_config
+                )
+                project_config = updated_config
+                selected_summary = f"{selected_provider} (persisted)"
+            finish(selected_summary)
             hooks_dir = _planner_hooks_dir(agent.path)
             finish = _step("Install read-only guardrails", timings=timings, trace=trace)
             _ensure_planner_read_only_guardrails(
@@ -529,7 +554,11 @@ def run_planner(args: object) -> None:
             )
             env.update(
                 external_registry.planner_provider_environment(
-                    project_config, repo_root
+                    project_config,
+                    repo_root,
+                    selected_provider=provider_resolution.selected_provider,
+                    available_providers=provider_resolution.available_providers,
+                    github_repo=provider_resolution.github_repo,
                 )
             )
             epic_id = getattr(args, "epic_id", None)

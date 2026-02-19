@@ -1,0 +1,11 @@
+{
+  "provider": "github",
+  "operations": [
+    "import",
+    "create",
+    "link",
+    "set_in_progress",
+    "update",
+    "sync_state"
+  ]
+}

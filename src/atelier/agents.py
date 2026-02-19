@@ -28,6 +28,8 @@ class AgentSpec:
     version_args: tuple[str, ...] = ("--version",)
     yolo_flags: tuple[str, ...] = ()
     supports_hooks: bool = False
+    project_skill_lookup_paths: tuple[str, ...] = ()
+    global_skill_lookup_paths: tuple[str, ...] = ()
 
     def _base_command(
         self, workspace_dir: Path, options: list[str]
@@ -79,6 +81,8 @@ AGENTS: dict[str, AgentSpec] = {
         working_dir_flag="--cd",
         resume_subcommand=("resume",),
         yolo_flags=("--yolo",),
+        project_skill_lookup_paths=(".agents/skills",),
+        global_skill_lookup_paths=("~/.codex/skills",),
     ),
     "claude": AgentSpec(
         name="claude",
@@ -87,6 +91,8 @@ AGENTS: dict[str, AgentSpec] = {
         resume_subcommand=("--continue",),
         resume_requires_session_id=False,
         supports_hooks=True,
+        project_skill_lookup_paths=(".claude/skills",),
+        global_skill_lookup_paths=("~/.claude/skills",),
     ),
     "gemini": AgentSpec(
         name="gemini",
@@ -96,12 +102,16 @@ AGENTS: dict[str, AgentSpec] = {
         resume_subcommand=("--resume",),
         resume_requires_session_id=False,
         supports_hooks=True,
+        project_skill_lookup_paths=(".agents/skills",),
+        global_skill_lookup_paths=("~/.gemini/skills",),
     ),
     "opencode": AgentSpec(
         name="opencode",
         display_name="OpenCode",
         command=("opencode",),
         supports_hooks=True,
+        project_skill_lookup_paths=(".agents/skills",),
+        global_skill_lookup_paths=("~/.config/opencode/skills",),
     ),
     "copilot": AgentSpec(
         name="copilot",
@@ -110,6 +120,8 @@ AGENTS: dict[str, AgentSpec] = {
         prompt_flag="--interactive",
         resume_subcommand=("--continue",),
         resume_requires_session_id=False,
+        project_skill_lookup_paths=(".agents/skills",),
+        global_skill_lookup_paths=("~/.copilot/skills",),
     ),
     "aider": AgentSpec(
         name="aider",
@@ -142,6 +154,14 @@ def get_agent(name: str) -> AgentSpec | None:
     if not normalized:
         return None
     return AGENTS.get(normalized)
+
+
+def skill_lookup_paths(agent_name: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return project/global skill lookup paths for an agent."""
+    agent = get_agent(agent_name)
+    if agent is None:
+        return (), ()
+    return agent.project_skill_lookup_paths, agent.global_skill_lookup_paths
 
 
 def is_supported_agent(name: str | None) -> bool:

@@ -118,6 +118,33 @@ def test_ensure_agent_links_creates_symlinks_or_markers() -> None:
         _assert_link_or_marker(home.path, "skills", skills)
 
 
+def test_ensure_agent_links_creates_project_skill_aliases() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "project"
+        project_dir.mkdir(parents=True)
+        home = agent_home.resolve_agent_home(
+            project_dir, ProjectConfig(), role="worker"
+        )
+        worktree = root / "worktree"
+        beads = root / "beads"
+        skills = root / "skills"
+        worktree.mkdir()
+        beads.mkdir()
+        skills.mkdir()
+
+        agent_home.ensure_agent_links(
+            home,
+            worktree_path=worktree,
+            beads_root=beads,
+            skills_dir=skills,
+            project_skill_lookup_paths=(".agents/skills", ".claude/skills"),
+        )
+
+        _assert_link_or_marker(home.path, ".agents/skills", skills)
+        _assert_link_or_marker(home.path, ".claude/skills", skills)
+
+
 def test_cleanup_agent_home_removes_session_dir_and_prunes() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"

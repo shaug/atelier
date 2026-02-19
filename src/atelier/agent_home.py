@@ -361,6 +361,7 @@ def ensure_agent_links(
     worktree_path: Path,
     beads_root: Path,
     skills_dir: Path,
+    project_skill_lookup_paths: tuple[str, ...] = (),
 ) -> None:
     """Ensure the agent home exposes links to worktree, skills, and beads."""
     root = agent.path
@@ -368,6 +369,13 @@ def ensure_agent_links(
         return
     _ensure_dir_link(root / "worktree", worktree_path)
     _ensure_dir_link(root / "skills", skills_dir)
+    for lookup in project_skill_lookup_paths:
+        relative = str(lookup).strip().strip("/")
+        if not relative or relative == "skills":
+            continue
+        alias_path = root / relative
+        alias_path.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_dir_link(alias_path, skills_dir)
     _ensure_dir_link(root / "beads", beads_root)
 
 

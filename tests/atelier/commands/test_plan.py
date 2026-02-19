@@ -85,6 +85,7 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
         patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
         patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.config.write_project_config"),
         patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
         patch(
             "atelier.commands.plan.worktrees.ensure_git_worktree",
@@ -173,6 +174,7 @@ def test_plan_does_not_query_or_prompt_draft_epics_on_startup(tmp_path: Path) ->
         patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
         patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
         patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.config.write_project_config"),
         patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
         patch(
             "atelier.commands.plan.worktrees.ensure_git_worktree",
@@ -202,12 +204,91 @@ def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
     )
     captured: dict[str, str] = {}
 
-    class FakeProvider:
-        slug = "github"
-
     def fake_render_template(template: str, context: dict[str, str]) -> str:
         captured.update({str(k): str(v) for k, v in context.items()})
         return "rendered"
+
+    class DummyResult:
+        stdout = ""
+        returncode = 0
+
+    with (
+        patch(
+            "atelier.commands.plan.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch(
+            "atelier.commands.plan.agent_home.resolve_agent_home",
+            return_value=agent,
+        ),
+        patch("atelier.commands.plan.beads.ensure_agent_bead"),
+        patch(
+            "atelier.commands.plan.beads.run_bd_command",
+            return_value=DummyResult(),
+        ),
+        patch("atelier.commands.plan.beads.run_bd_json", return_value=[]),
+        patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.config.write_project_config"),
+        patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.worktrees.ensure_git_worktree",
+            return_value=worktree_path,
+        ),
+        patch(
+            "atelier.commands.plan.prompting.render_template",
+            side_effect=fake_render_template,
+        ),
+        patch(
+            "atelier.commands.plan.external_registry.resolve_planner_provider",
+            return_value=external_registry.PlannerProviderResolution(
+                selected_provider="github",
+                available_providers=("github",),
+                github_repo="acme/widgets",
+            ),
+        ),
+        patch(
+            "atelier.commands.plan.external_registry.planner_provider_environment",
+            return_value={},
+        ),
+        patch(
+            "atelier.commands.plan.codex.run_codex_command",
+            return_value=codex.CodexRunResult(
+                returncode=0, session_id=None, resume_command=None
+            ),
+        ),
+        patch("atelier.commands.plan.say"),
+    ):
+        plan_cmd.run_planner(SimpleNamespace(epic_id=None))
+
+    assert captured["repo_root"] == "/repo"
+    assert captured["default_branch"] == "main"
+    assert captured["planner_branch"] == "main-planner-planner"
+    assert captured["external_providers"] == "github"
+
+
+def test_plan_persists_selected_provider(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "worktrees" / "planner"
+    agent = AgentHome(
+        name="planner",
+        agent_id="atelier/planner/planner",
+        role="planner",
+        path=Path("/project/agents/planner"),
+    )
 
     class DummyResult:
         stdout = ""
@@ -250,18 +331,12 @@ def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
             return_value=worktree_path,
         ),
         patch(
-            "atelier.commands.plan.prompting.render_template",
-            side_effect=fake_render_template,
-        ),
-        patch(
-            "atelier.commands.plan.external_registry.resolve_external_providers",
-            return_value=[
-                external_registry.ExternalProviderContext(provider=FakeProvider())
-            ],
-        ),
-        patch(
-            "atelier.commands.plan.external_registry.planner_provider_environment",
-            return_value={},
+            "atelier.commands.plan.external_registry.resolve_planner_provider",
+            return_value=external_registry.PlannerProviderResolution(
+                selected_provider="github",
+                available_providers=("github",),
+                github_repo="acme/widgets",
+            ),
         ),
         patch(
             "atelier.commands.plan.codex.run_codex_command",
@@ -270,13 +345,11 @@ def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
             ),
         ),
         patch("atelier.commands.plan.say"),
+        patch("atelier.commands.plan.config.write_project_config") as write_config,
     ):
         plan_cmd.run_planner(SimpleNamespace(epic_id=None))
 
-    assert captured["repo_root"] == "/repo"
-    assert captured["default_branch"] == "main"
-    assert captured["planner_branch"] == "main-planner-planner"
-    assert captured["external_providers"] == "github"
+    write_config.assert_called_once()
 
 
 def test_planner_guardrails_install_commit_blocker(tmp_path: Path) -> None:

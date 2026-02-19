@@ -277,6 +277,29 @@ Planner should use the `tickets` skill as the orchestration layer. It delegates
 provider-specific API calls to provider skills (for example `github-issues`) and
 uses `external_import`/`external_sync` to update Beads metadata.
 
+### Provider manifest discovery
+
+Planner discovers skill-backed providers through a manifest file in skill
+directories:
+
+- filename: `ticket-provider.json`
+- required keys:
+  - `provider` (slug)
+  - `operations` (list of supported operations)
+
+Minimum operation contract for planner selection:
+
+- `import`
+- one of `create` or `link`
+
+Discovery sources:
+
+1. project-installed skills (`<project-data>/skills`)
+1. agent-specific project/global lookup paths (from agent runtime config)
+
+Invalid manifests are ignored (with logging in planner flow) rather than failing
+planner startup.
+
 Required skill inputs:
 
 - `provider`: provider slug (`github`, `linear`, `jira`, `beads`, `custom`).
@@ -358,3 +381,17 @@ Optional operations:
 
 Capabilities should be explicit per provider (for example: `supports_children`,
 `supports_update`, `supports_state_sync`).
+
+## Provider selection and persistence
+
+Planner selects one active external provider using deterministic ordering:
+
+1. configured project provider (if still available)
+1. repo-signal providers (`github`, repo-local `beads`)
+1. discovered skill-backed providers
+
+When multiple providers are available and planner is interactive, user chooses
+the active provider. Otherwise planner selects the deterministic default.
+
+The selected provider is persisted to project config (`project.provider`) so
+future planner sessions reuse the same selection without prompting.

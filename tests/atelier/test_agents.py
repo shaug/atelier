@@ -123,6 +123,19 @@ class TestAgentSpec:
             "aider",
         )
 
+    def test_skill_lookup_paths_codex(self) -> None:
+        project_paths, global_paths = agents.skill_lookup_paths("codex")
+        assert project_paths == (".agents/skills",)
+        assert global_paths == ("~/.codex/skills",)
+
+    def test_skill_lookup_paths_claude(self) -> None:
+        project_paths, global_paths = agents.skill_lookup_paths("claude")
+        assert project_paths == (".claude/skills",)
+        assert global_paths == ("~/.claude/skills",)
+
+    def test_skill_lookup_paths_unsupported_agent(self) -> None:
+        assert agents.skill_lookup_paths("unknown") == ((), ())
+
     def test_agent_config_rejects_unsupported_default(self) -> None:
         with pytest.raises(ValidationError):
             AgentConfig(default="unsupported", options={})
