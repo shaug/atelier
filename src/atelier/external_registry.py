@@ -17,6 +17,18 @@ from .repo_beads_provider import RepoBeadsProvider
 TICKET_PROVIDER_MANIFEST_FILENAME = "ticket-provider.json"
 _REQUIRED_PROVIDER_OPERATIONS = frozenset({"import"})
 _REQUIRED_EXPORT_OPERATIONS = frozenset({"create", "link"})
+_LEGACY_SKILL_PROVIDER_MAP: dict[str, str] = {
+    "linear": "linear",
+    "github": "github",
+    "github-issues": "github",
+    "jira": "jira",
+}
+_LEGACY_SKILL_OPERATIONS: tuple[str, ...] = (
+    "import",
+    "create",
+    "link",
+    "set_in_progress",
+)
 
 
 @dataclass(frozen=True)
@@ -96,6 +108,32 @@ def _parse_manifest(path: Path) -> TicketProviderSkillManifest | None:
     )
 
 
+def _legacy_provider_for_skill(skill_dir: Path) -> str | None:
+    """Best-effort provider inference for skills without manifests."""
+    mapped = _LEGACY_SKILL_PROVIDER_MAP.get(skill_dir.name.strip().lower())
+    if mapped:
+        return mapped
+    skill_doc = skill_dir / "SKILL.md"
+    if not skill_doc.is_file():
+        return None
+    try:
+        content = skill_doc.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for raw in lines[1:]:
+        line = raw.strip()
+        if line == "---":
+            break
+        if not line.lower().startswith("name:"):
+            continue
+        value = line.split(":", 1)[1].strip().strip("'\"").lower()
+        return _LEGACY_SKILL_PROVIDER_MAP.get(value)
+    return None
+
+
 def _manifest_roots(
     *,
     agent_name: str,
@@ -152,8 +190,17 @@ def discover_ticket_provider_manifests(
                 continue
             manifest_path = entry / TICKET_PROVIDER_MANIFEST_FILENAME
             if not manifest_path.is_file():
-                continue
-            manifest = _parse_manifest(manifest_path)
+                legacy_provider = _legacy_provider_for_skill(entry)
+                if legacy_provider is None:
+                    continue
+                manifest = TicketProviderSkillManifest(
+                    provider=legacy_provider,
+                    operations=_LEGACY_SKILL_OPERATIONS,
+                    skill_name=entry.name,
+                    path=entry / "SKILL.md",
+                )
+            else:
+                manifest = _parse_manifest(manifest_path)
             if manifest is None:
                 continue
             manifests_by_provider.setdefault(manifest.provider, manifest)

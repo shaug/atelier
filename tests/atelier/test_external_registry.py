@@ -53,10 +53,28 @@ def test_discover_ticket_provider_manifests_from_project_skills(
     )
 
     manifests = discover_ticket_provider_manifests(
-        agent_name="codex",
+        agent_name="aider",
         project_data_dir=project_data_dir,
     )
     assert [item.provider for item in manifests] == ["github"]
+
+
+def test_discover_ticket_provider_from_legacy_skill_name(tmp_path: Path) -> None:
+    project_data_dir = tmp_path / "project-data"
+    linear_dir = project_data_dir / "skills" / "linear"
+    linear_dir.mkdir(parents=True)
+    (linear_dir / "SKILL.md").write_text(
+        "---\nname: linear\ndescription: test\n---\n\n# Linear\n",
+        encoding="utf-8",
+    )
+
+    manifests = discover_ticket_provider_manifests(
+        agent_name="aider",
+        project_data_dir=project_data_dir,
+    )
+    assert [item.provider for item in manifests] == ["linear"]
+    assert "import" in manifests[0].operations
+    assert "create" in manifests[0].operations
 
 
 def test_resolve_planner_provider_prefers_configured_provider(tmp_path: Path) -> None:
