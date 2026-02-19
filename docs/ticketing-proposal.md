@@ -28,7 +28,7 @@ Provider API behavior belongs in skills.
 
 ## Detection and selection
 
-Detection runs at planner startup (and on explicit request).
+Detection runs at init (and can be re-evaluated on explicit request).
 
 Inputs:
 
@@ -48,29 +48,22 @@ Atelier should discover ticketing skills from:
 The new agent lookup abstraction is the canonical source for agent-specific
 paths.
 
-### Capability manifest
+### Known provider skills
 
-Each provider skill should include a machine-readable manifest, for example:
+Atelier discovers providers from known ticketing skill names (for example:
+`github-issues`, `linear`, `jira`, `asana`, `trello`) in:
 
-`skill.json` (or front matter in `SKILL.md`) with:
-
-- `kind: "ticket-provider"`
-- `provider: "github" | "linear" | "jira" | ...`
-- `operations: ["import", "create", "link", "set_in_progress", ...]`
-- `priority: <int>` (optional, for tie-breaks)
+- project skills
+- agent-specific global skill directories
 
 ### Selection algorithm
 
-1. Build candidate providers from config + repo signals + manifests.
-1. Filter to providers with required minimum operations:
-   - `import`
-   - `create` OR `link`
-   - `set_in_progress` (or explicit `unsupported`)
+1. Build candidate providers from config + repo signals + known provider skills.
 1. Rank candidates:
    - explicit config provider first
    - repo-native providers next (`github` for GitHub remotes, `beads` for repo
      `.beads`)
-   - remaining by manifest priority/name
+   - remaining by deterministic provider order
 1. Prompt user when multiple viable providers exist.
 1. Persist choice in config for future sessions.
 
@@ -107,15 +100,15 @@ At `atelier init`:
 
 At `atelier plan` startup:
 
-- show detected provider + capability summary.
+- show configured provider + detected provider context.
 - optionally prompt to import/sync external tickets for planning context.
 
 ## Rollout phases
 
 1. **Phase 1: Detection**
-   - provider manifest format
+   - known provider skill map
    - path-based skill discovery using agent lookup abstraction
-   - startup provider selection + persistence
+   - init-time provider selection + persistence
 1. **Phase 2: Orchestrator hardening**
    - strict `tickets` skill request/response contract
    - consistent error surfaces and logging
@@ -128,7 +121,7 @@ At `atelier plan` startup:
 
 ## Open decisions
 
-- Manifest location: dedicated `skill.json` vs `SKILL.md` front matter.
+- Whether provider skill name mapping should be configurable per project.
 - Whether `set_in_progress` should be best-effort or optional-by-default.
 - How aggressively planner should auto-suggest provider switches when repo
   signals change.

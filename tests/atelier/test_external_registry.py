@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from atelier.external_registry import (
@@ -41,16 +40,13 @@ def test_discover_ticket_provider_manifests_from_project_skills(
     skills_dir = project_data_dir / "skills"
     github_dir = skills_dir / "github-issues"
     github_dir.mkdir(parents=True)
-    (github_dir / "ticket-provider.json").write_text(
-        json.dumps({"provider": "github", "operations": ["import", "create"]}),
+    (github_dir / "SKILL.md").write_text(
+        "---\nname: github-issues\ndescription: test\n---\n\n# GitHub Issues\n",
         encoding="utf-8",
     )
     invalid_dir = skills_dir / "broken-provider"
     invalid_dir.mkdir(parents=True)
-    (invalid_dir / "ticket-provider.json").write_text(
-        json.dumps({"provider": "broken", "operations": ["create"]}),
-        encoding="utf-8",
-    )
+    (invalid_dir / "SKILL.md").write_text("# Unknown\n", encoding="utf-8")
 
     manifests = discover_ticket_provider_manifests(
         agent_name="aider",
@@ -73,21 +69,14 @@ def test_discover_ticket_provider_from_legacy_skill_name(tmp_path: Path) -> None
         project_data_dir=project_data_dir,
     )
     assert [item.provider for item in manifests] == ["linear"]
-    assert "import" in manifests[0].operations
-    assert "create" in manifests[0].operations
 
 
 def test_resolve_planner_provider_prefers_configured_provider(tmp_path: Path) -> None:
     project_data_dir = tmp_path / "project-data"
     skills_dir = project_data_dir / "skills" / "github-issues"
     skills_dir.mkdir(parents=True)
-    (skills_dir / "ticket-provider.json").write_text(
-        json.dumps(
-            {
-                "provider": "github",
-                "operations": ["import", "create", "set_in_progress"],
-            }
-        ),
+    (skills_dir / "SKILL.md").write_text(
+        "---\nname: github-issues\ndescription: test\n---\n\n# GitHub Issues\n",
         encoding="utf-8",
     )
     config_payload = ProjectConfig(
@@ -110,16 +99,10 @@ def test_resolve_planner_provider_prompts_when_multiple(tmp_path: Path) -> None:
     skills_dir = project_data_dir / "skills"
     github_dir = skills_dir / "github-issues"
     github_dir.mkdir(parents=True)
-    (github_dir / "ticket-provider.json").write_text(
-        json.dumps({"provider": "github", "operations": ["import", "create"]}),
-        encoding="utf-8",
-    )
+    (github_dir / "SKILL.md").write_text("# GitHub Issues\n", encoding="utf-8")
     linear_dir = skills_dir / "linear"
     linear_dir.mkdir(parents=True)
-    (linear_dir / "ticket-provider.json").write_text(
-        json.dumps({"provider": "linear", "operations": ["import", "link"]}),
-        encoding="utf-8",
-    )
+    (linear_dir / "SKILL.md").write_text("# Linear\n", encoding="utf-8")
 
     selected: dict[str, object] = {}
 

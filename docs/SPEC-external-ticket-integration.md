@@ -277,27 +277,18 @@ Planner should use the `tickets` skill as the orchestration layer. It delegates
 provider-specific API calls to provider skills (for example `github-issues`) and
 uses `external_import`/`external_sync` to update Beads metadata.
 
-### Provider manifest discovery
+### Provider skill discovery
 
-Planner discovers skill-backed providers through a manifest file in skill
-directories:
-
-- filename: `ticket-provider.json`
-- required keys:
-  - `provider` (slug)
-  - `operations` (list of supported operations)
-
-Minimum operation contract for planner selection:
-
-- `import`
-- one of `create` or `link`
+Planner discovers skill-backed providers from known ticketing skill names in
+skill directories (for example: `github-issues`, `linear`, `jira`, `asana`,
+`trello`).
 
 Discovery sources:
 
 1. project-installed skills (`<project-data>/skills`)
 1. agent-specific project/global lookup paths (from agent runtime config)
 
-Invalid manifests are ignored (with logging in planner flow) rather than failing
+Unknown skills are ignored (with logging in planner flow) rather than failing
 planner startup.
 
 Required skill inputs:

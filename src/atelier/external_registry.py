@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -14,21 +13,25 @@ from .io import select
 from .models import ProjectConfig
 from .repo_beads_provider import RepoBeadsProvider
 
-TICKET_PROVIDER_MANIFEST_FILENAME = "ticket-provider.json"
-_REQUIRED_PROVIDER_OPERATIONS = frozenset({"import"})
-_REQUIRED_EXPORT_OPERATIONS = frozenset({"create", "link"})
-_LEGACY_SKILL_PROVIDER_MAP: dict[str, str] = {
+_SKILL_PROVIDER_MAP: dict[str, str] = {
     "linear": "linear",
     "github": "github",
     "github-issues": "github",
+    "gh-issues": "github",
     "jira": "jira",
+    "asana": "asana",
+    "trello": "trello",
+    "shortcut": "shortcut",
+    "clubhouse": "shortcut",
+    "youtrack": "youtrack",
+    "clickup": "clickup",
+    "gitlab": "gitlab",
+    "gitlab-issues": "gitlab",
+    "azure-devops": "azure-devops",
+    "azuredevops": "azure-devops",
+    "azure-boards": "azure-devops",
+    "ado": "azure-devops",
 }
-_LEGACY_SKILL_OPERATIONS: tuple[str, ...] = (
-    "import",
-    "create",
-    "link",
-    "set_in_progress",
-)
 
 
 @dataclass(frozen=True)
@@ -58,11 +61,10 @@ def _github_repo_from_git(repo_root: Path) -> str | None:
 
 
 @dataclass(frozen=True)
-class TicketProviderSkillManifest:
-    """Parsed ticket-provider skill manifest."""
+class TicketProviderSkill:
+    """Detected ticket-provider skill metadata."""
 
     provider: str
-    operations: tuple[str, ...]
     skill_name: str
     path: Path
 
@@ -76,41 +78,9 @@ class PlannerProviderResolution:
     github_repo: str | None
 
 
-def _parse_manifest(path: Path) -> TicketProviderSkillManifest | None:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    provider = str(payload.get("provider") or "").strip().lower()
-    if not provider:
-        return None
-    operations_raw = payload.get("operations")
-    operations: list[str] = []
-    if isinstance(operations_raw, list):
-        for item in operations_raw:
-            if not isinstance(item, str):
-                continue
-            normalized = item.strip().lower()
-            if normalized and normalized not in operations:
-                operations.append(normalized)
-    if not _REQUIRED_PROVIDER_OPERATIONS.issubset(
-        set(operations)
-    ) or not _REQUIRED_EXPORT_OPERATIONS.intersection(operations):
-        return None
-    skill_name = path.parent.name
-    return TicketProviderSkillManifest(
-        provider=provider,
-        operations=tuple(operations),
-        skill_name=skill_name,
-        path=path,
-    )
-
-
-def _legacy_provider_for_skill(skill_dir: Path) -> str | None:
-    """Best-effort provider inference for skills without manifests."""
-    mapped = _LEGACY_SKILL_PROVIDER_MAP.get(skill_dir.name.strip().lower())
+def _provider_for_skill(skill_dir: Path) -> str | None:
+    """Best-effort provider inference for known ticketing skill names."""
+    mapped = _SKILL_PROVIDER_MAP.get(skill_dir.name.strip().lower())
     if mapped:
         return mapped
     skill_doc = skill_dir / "SKILL.md"
@@ -130,11 +100,11 @@ def _legacy_provider_for_skill(skill_dir: Path) -> str | None:
         if not line.lower().startswith("name:"):
             continue
         value = line.split(":", 1)[1].strip().strip("'\"").lower()
-        return _LEGACY_SKILL_PROVIDER_MAP.get(value)
+        return _SKILL_PROVIDER_MAP.get(value)
     return None
 
 
-def _manifest_roots(
+def _skill_roots(
     *,
     agent_name: str,
     project_data_dir: Path | None,
@@ -170,15 +140,15 @@ def _manifest_roots(
     return tuple(roots)
 
 
-def discover_ticket_provider_manifests(
+def discover_ticket_provider_skills(
     *,
     agent_name: str,
     project_data_dir: Path | None = None,
     agent_home: Path | None = None,
-) -> tuple[TicketProviderSkillManifest, ...]:
-    """Discover ticket-provider manifests from supported skill lookup paths."""
-    manifests_by_provider: dict[str, TicketProviderSkillManifest] = {}
-    for root in _manifest_roots(
+) -> tuple[TicketProviderSkill, ...]:
+    """Discover ticket-provider skills from supported skill lookup paths."""
+    manifests_by_provider: dict[str, TicketProviderSkill] = {}
+    for root in _skill_roots(
         agent_name=agent_name,
         project_data_dir=project_data_dir,
         agent_home=agent_home,
@@ -188,23 +158,30 @@ def discover_ticket_provider_manifests(
         for entry in sorted(root.iterdir(), key=lambda item: item.name):
             if not entry.is_dir():
                 continue
-            manifest_path = entry / TICKET_PROVIDER_MANIFEST_FILENAME
-            if not manifest_path.is_file():
-                legacy_provider = _legacy_provider_for_skill(entry)
-                if legacy_provider is None:
-                    continue
-                manifest = TicketProviderSkillManifest(
-                    provider=legacy_provider,
-                    operations=_LEGACY_SKILL_OPERATIONS,
-                    skill_name=entry.name,
-                    path=entry / "SKILL.md",
-                )
-            else:
-                manifest = _parse_manifest(manifest_path)
-            if manifest is None:
+            provider = _provider_for_skill(entry)
+            if provider is None:
                 continue
+            manifest = TicketProviderSkill(
+                provider=provider,
+                skill_name=entry.name,
+                path=entry / "SKILL.md",
+            )
             manifests_by_provider.setdefault(manifest.provider, manifest)
     return tuple(sorted(manifests_by_provider.values(), key=lambda item: item.provider))
+
+
+def discover_ticket_provider_manifests(
+    *,
+    agent_name: str,
+    project_data_dir: Path | None = None,
+    agent_home: Path | None = None,
+) -> tuple[TicketProviderSkill, ...]:
+    """Backward-compatible alias for legacy callers."""
+    return discover_ticket_provider_skills(
+        agent_name=agent_name,
+        project_data_dir=project_data_dir,
+        agent_home=agent_home,
+    )
 
 
 def _provider_rank(
@@ -237,7 +214,7 @@ def resolve_planner_provider(
     repo_signals: list[str] = []
     candidates: set[str] = set()
 
-    manifests = discover_ticket_provider_manifests(
+    manifests = discover_ticket_provider_skills(
         agent_name=agent_name,
         project_data_dir=project_data_dir,
         agent_home=agent_home,
