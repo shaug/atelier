@@ -4,9 +4,20 @@
 writes project configuration, and avoids modifying the repo itself.
 """
 
+import sys
 from pathlib import Path
 
-from .. import agent_home, beads, config, git, paths, policy, project
+from .. import (
+    agent_home,
+    beads,
+    config,
+    external_registry,
+    git,
+    paths,
+    policy,
+    project,
+    skills,
+)
 from ..io import confirm, say
 
 
@@ -40,8 +51,28 @@ def init_project(args: object) -> None:
         prompt_missing_only=not bool(config_payload),
         raw_existing=user_payload,
     )
-    say("Writing project configuration...")
     project.ensure_project_dirs(project_dir)
+    try:
+        skills.ensure_project_skills(project_dir)
+    except OSError:
+        pass
+    provider_resolution = external_registry.resolve_planner_provider(
+        payload,
+        Path(enlistment_path),
+        agent_name=payload.agent.default,
+        project_data_dir=project_dir,
+        interactive=sys.stdin.isatty() and sys.stdout.isatty(),
+    )
+    selected_provider = provider_resolution.selected_provider
+    current_provider = (payload.project.provider or "").strip().lower() or None
+    if selected_provider and selected_provider != current_provider:
+        payload = payload.model_copy(deep=True)
+        payload.project.provider = selected_provider
+    if selected_provider:
+        say(f"Selected external provider: {selected_provider}")
+    else:
+        say("Selected external provider: none")
+    say("Writing project configuration...")
     config.write_project_config(config_path, payload)
     project.ensure_project_scaffold(project_dir)
 

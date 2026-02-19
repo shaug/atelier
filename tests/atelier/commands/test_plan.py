@@ -281,7 +281,7 @@ def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
     assert captured["external_providers"] == "github"
 
 
-def test_plan_persists_selected_provider(tmp_path: Path) -> None:
+def test_plan_does_not_persist_selected_provider(tmp_path: Path) -> None:
     worktree_path = tmp_path / "worktrees" / "planner"
     agent = AgentHome(
         name="planner",
@@ -349,7 +349,7 @@ def test_plan_persists_selected_provider(tmp_path: Path) -> None:
     ):
         plan_cmd.run_planner(SimpleNamespace(epic_id=None))
 
-    write_config.assert_called_once()
+    write_config.assert_not_called()
 
 
 def test_planner_guardrails_install_commit_blocker(tmp_path: Path) -> None:

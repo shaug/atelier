@@ -11,6 +11,7 @@ import pytest
 
 import atelier.commands.init as init_cmd
 import atelier.config as config
+import atelier.external_registry as external_registry
 import atelier.paths as paths
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
@@ -142,6 +143,7 @@ class TestInitProject:
                 assert config_payload.project.enlistment == enlistment_path
                 assert config_payload.project.origin == NORMALIZED_ORIGIN
                 assert config_payload.project.repo_url == RAW_ORIGIN
+                assert config_payload.project.provider == "github"
                 assert config_payload.branch.pr is True
                 assert config_payload.branch.history == "manual"
                 assert config_payload.editor.edit == ["cursor", "-w"]
@@ -223,6 +225,61 @@ class TestInitProject:
             for _name, beads_root, cwd in captured:
                 assert beads_root == project_dir / ".beads"
                 assert Path(str(cwd)).resolve() == project_dir.resolve()
+
+    def test_init_persists_provider_selected_during_init(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                args = make_init_args()
+                responses = iter(["", "", "", "", "", "", "", "", ""])
+
+                with (
+                    patch("builtins.input", lambda _: next(responses)),
+                    patch(
+                        "atelier.commands.init.beads.run_bd_command",
+                        return_value=CompletedProcess(
+                            args=["bd"], returncode=0, stdout="", stderr=""
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_store",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.external_registry.resolve_planner_provider",
+                        return_value=external_registry.PlannerProviderResolution(
+                            selected_provider="linear",
+                            available_providers=("github", "linear"),
+                            github_repo="acme/widgets",
+                        ),
+                    ),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                ):
+                    init_cmd.init_project(args)
+                    project_dir = paths.project_dir_for_enlistment(
+                        enlistment_path, NORMALIZED_ORIGIN
+                    )
+
+                config_path = paths.project_config_path(project_dir)
+                config_payload = config.load_project_config(config_path)
+                assert config_payload is not None
+                assert config_payload.project.provider == "linear"
+            finally:
+                os.chdir(original_cwd)
 
     def test_init_prefers_cursor_over_env_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import time
 from pathlib import Path
 
@@ -475,24 +474,12 @@ def run_planner(args: object) -> None:
                 agent_name=project_config.agent.default,
                 project_data_dir=project_data_dir,
                 agent_home=agent.path,
-                interactive=sys.stdin.isatty() and sys.stdout.isatty(),
+                interactive=False,
             )
             provider_slugs = list(provider_resolution.available_providers)
             external_providers = ", ".join(provider_slugs) if provider_slugs else "none"
             selected_provider = provider_resolution.selected_provider
-            selected_summary = selected_provider or "none"
-            current_provider = (
-                project_config.project.provider or ""
-            ).strip().lower() or None
-            if selected_provider and selected_provider != current_provider:
-                updated_config = project_config.model_copy(deep=True)
-                updated_config.project.provider = selected_provider
-                config.write_project_config(
-                    paths.project_config_path(project_root), updated_config
-                )
-                project_config = updated_config
-                selected_summary = f"{selected_provider} (persisted)"
-            finish(selected_summary)
+            finish(selected_provider or "none")
             hooks_dir = _planner_hooks_dir(agent.path)
             finish = _step("Install read-only guardrails", timings=timings, trace=trace)
             _ensure_planner_read_only_guardrails(
