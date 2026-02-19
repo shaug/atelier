@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -19,6 +21,77 @@ from tests.atelier.helpers import (
 
 
 class TestInitProject:
+    @pytest.mark.skipif(shutil.which("bd") is None, reason="bd not installed")
+    def test_init_does_not_modify_repo_files_when_using_real_bd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            repo.mkdir(parents=True, exist_ok=True)
+            data_dir = root / "data"
+
+            subprocess.run(["git", "-C", str(repo), "init"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.email", "test@example.com"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.name", "Test User"],
+                check=True,
+            )
+            (repo / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-m", "chore: init repo"],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo),
+                    "remote",
+                    "add",
+                    "origin",
+                    "https://github.com/example/repo.git",
+                ],
+                check=True,
+            )
+
+            args = make_init_args(
+                branch_prefix="",
+                branch_pr="true",
+                branch_history="manual",
+                branch_pr_strategy="parallel",
+                agent="codex",
+                editor_edit="true",
+                editor_work="true",
+            )
+
+            original_cwd = Path.cwd()
+            os.chdir(repo)
+            try:
+                with (
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.commands.init.confirm", return_value=False),
+                    patch(
+                        "atelier.config.agents.available_agent_names",
+                        return_value=("codex",),
+                    ),
+                ):
+                    init_cmd.init_project(args)
+            finally:
+                os.chdir(original_cwd)
+
+            status = subprocess.run(
+                ["git", "-C", str(repo), "status", "--porcelain"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            assert status.stdout.strip() == ""
+            assert not (repo / ".gitattributes").exists()
+            assert not (repo / "AGENTS.md").exists()
+
     def test_init_creates_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -87,21 +160,37 @@ class TestInitProject:
                 project_dir = paths.project_dir_for_enlistment(
                     enlistment_path, NORMALIZED_ORIGIN
                 )
-            captured: dict[str, object] = {}
+            captured: list[tuple[str, Path, Path]] = []
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
                 args = make_init_args()
                 responses = iter(["", "", "", "", "", "", "", "", ""])
 
+                def _capture(name: str, *, beads_root: Path, cwd: Path) -> None:
+                    captured.append((name, beads_root, cwd))
+
                 def fake_bd(
                     _args: list[str], *, beads_root: Path, cwd: Path
                 ) -> CompletedProcess[str]:
-                    captured["beads_root"] = beads_root
-                    captured["cwd"] = cwd
+                    _capture("run_bd_command", beads_root=beads_root, cwd=cwd)
                     return CompletedProcess(
                         args=["bd"], returncode=0, stdout="", stderr=""
                     )
+
+                def fake_ensure_store(*, beads_root: Path, cwd: Path) -> bool:
+                    _capture("ensure_atelier_store", beads_root=beads_root, cwd=cwd)
+                    return False
+
+                def fake_ensure_prefix(*, beads_root: Path, cwd: Path) -> bool:
+                    _capture(
+                        "ensure_atelier_issue_prefix", beads_root=beads_root, cwd=cwd
+                    )
+                    return False
+
+                def fake_ensure_types(*, beads_root: Path, cwd: Path) -> bool:
+                    _capture("ensure_atelier_types", beads_root=beads_root, cwd=cwd)
+                    return False
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
@@ -112,15 +201,15 @@ class TestInitProject:
                     ),
                     patch(
                         "atelier.commands.init.beads.ensure_atelier_types",
-                        return_value=False,
+                        side_effect=fake_ensure_types,
                     ),
                     patch(
                         "atelier.commands.init.beads.ensure_atelier_store",
-                        return_value=False,
+                        side_effect=fake_ensure_store,
                     ),
                     patch(
                         "atelier.commands.init.beads.ensure_atelier_issue_prefix",
-                        return_value=False,
+                        side_effect=fake_ensure_prefix,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
@@ -130,8 +219,10 @@ class TestInitProject:
             finally:
                 os.chdir(original_cwd)
 
-            assert captured["beads_root"] == project_dir / ".beads"
-            assert Path(str(captured["cwd"])).resolve() == root.resolve()
+            assert captured
+            for _name, beads_root, cwd in captured:
+                assert beads_root == project_dir / ".beads"
+                assert Path(str(cwd)).resolve() == project_dir.resolve()
 
     def test_init_prefers_cursor_over_env_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

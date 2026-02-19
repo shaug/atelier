@@ -46,20 +46,21 @@ def init_project(args: object) -> None:
     project.ensure_project_scaffold(project_dir)
 
     beads_root = config.resolve_beads_root(project_dir, Path(enlistment_path))
+    beads_cwd = project_dir
     say("Preparing Beads store...")
-    beads.ensure_atelier_store(beads_root=beads_root, cwd=Path(enlistment_path))
-    beads.ensure_atelier_issue_prefix(beads_root=beads_root, cwd=Path(enlistment_path))
+    beads.ensure_atelier_store(beads_root=beads_root, cwd=beads_cwd)
+    beads.ensure_atelier_issue_prefix(beads_root=beads_root, cwd=beads_cwd)
     say("Priming Beads store...")
-    beads.run_bd_command(["prime"], beads_root=beads_root, cwd=Path(enlistment_path))
+    beads.run_bd_command(["prime"], beads_root=beads_root, cwd=beads_cwd)
     say("Ensuring Beads issue types...")
-    beads.ensure_atelier_types(beads_root=beads_root, cwd=Path(enlistment_path))
+    beads.ensure_atelier_types(beads_root=beads_root, cwd=beads_cwd)
 
     if confirm("Add project-wide policy for agents?", default=False):
         planner_issue = beads.list_policy_beads(
-            policy.ROLE_PLANNER, beads_root=beads_root, cwd=Path(enlistment_path)
+            policy.ROLE_PLANNER, beads_root=beads_root, cwd=beads_cwd
         )
         worker_issue = beads.list_policy_beads(
-            policy.ROLE_WORKER, beads_root=beads_root, cwd=Path(enlistment_path)
+            policy.ROLE_WORKER, beads_root=beads_root, cwd=beads_cwd
         )
         planner_body = (
             beads.extract_policy_body(planner_issue[0]) if planner_issue else ""
@@ -86,14 +87,14 @@ def init_project(args: object) -> None:
                         issue_id,
                         planner_text,
                         beads_root=beads_root,
-                        cwd=Path(enlistment_path),
+                        cwd=beads_cwd,
                     )
             else:
                 beads.create_policy_bead(
                     policy.ROLE_PLANNER,
                     planner_text,
                     beads_root=beads_root,
-                    cwd=Path(enlistment_path),
+                    cwd=beads_cwd,
                 )
             if worker_issue:
                 issue_id = worker_issue[0].get("id")
@@ -102,14 +103,14 @@ def init_project(args: object) -> None:
                         issue_id,
                         worker_text,
                         beads_root=beads_root,
-                        cwd=Path(enlistment_path),
+                        cwd=beads_cwd,
                     )
             else:
                 beads.create_policy_bead(
                     policy.ROLE_WORKER,
                     worker_text,
                     beads_root=beads_root,
-                    cwd=Path(enlistment_path),
+                    cwd=beads_cwd,
                 )
             planner_home = agent_home.resolve_agent_home(
                 project_dir, payload, role=policy.ROLE_PLANNER
@@ -121,13 +122,13 @@ def init_project(args: object) -> None:
                 planner_home,
                 role=policy.ROLE_PLANNER,
                 beads_root=beads_root,
-                cwd=Path(enlistment_path),
+                cwd=beads_cwd,
             )
             policy.sync_agent_home_policy(
                 worker_home,
                 role=policy.ROLE_WORKER,
                 beads_root=beads_root,
-                cwd=Path(enlistment_path),
+                cwd=beads_cwd,
             )
 
     say("Initialized Atelier project")
