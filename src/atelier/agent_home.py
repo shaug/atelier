@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ CLAUDE_DIRNAME = ".claude"
 CLAUDE_SETTINGS_FILENAME = "settings.json"
 CLAUDE_HOOKS_DIRNAME = "hooks"
 CLAUDE_HOOK_SCRIPT = "append_agentsmd_context.sh"
+BEADS_PRIME_BLOCK_START = "<!-- ATELIER_BEADS_PRIME_START -->"
+BEADS_PRIME_BLOCK_END = "<!-- ATELIER_BEADS_PRIME_END -->"
 
 
 @dataclass(frozen=True)
@@ -428,6 +431,33 @@ done
         settings_path.write_text(
             json.dumps(settings_payload, indent=2) + "\n", encoding="utf-8"
         )
+
+
+def apply_beads_prime_addendum(content: str, addendum: str | None) -> str:
+    """Insert or update the Beads prime addendum block in AGENTS content."""
+    body = (addendum or "").strip("\n")
+    if not body:
+        return content
+    pattern = re.compile(
+        re.escape(BEADS_PRIME_BLOCK_START) + r".*?" + re.escape(BEADS_PRIME_BLOCK_END),
+        re.DOTALL,
+    )
+    block = "\n".join(
+        [
+            BEADS_PRIME_BLOCK_START,
+            "## Beads Runtime Addendum",
+            "",
+            body,
+            BEADS_PRIME_BLOCK_END,
+        ]
+    ).rstrip("\n")
+    if pattern.search(content):
+        updated = pattern.sub(block, content)
+        return updated.rstrip("\n") + "\n"
+    trimmed = content.rstrip("\n")
+    if trimmed:
+        trimmed += "\n\n"
+    return trimmed + block + "\n"
 
 
 def preview_agent_home(

@@ -3261,6 +3261,7 @@ def _run_worker_once(
             )
             if worker_agents_path is not None:
                 _dry_run_log(f"Would write worker AGENTS.md to {worker_agents_path}")
+                _dry_run_log("Would sync Beads addendum into worker AGENTS.md.")
             _dry_run_log("Would prepare workspace environment variables.")
         else:
             skills_dir: Path | None = None
@@ -3300,6 +3301,15 @@ def _run_worker_once(
                     beads_root=beads_root,
                     cwd=repo_root,
                 )
+                prime_addendum = beads.prime_addendum(
+                    beads_root=beads_root, cwd=project_data_dir
+                )
+                updated_content = worker_agents_path.read_text(encoding="utf-8")
+                next_content = agent_home.apply_beads_prime_addendum(
+                    updated_content, prime_addendum
+                )
+                if next_content != updated_content:
+                    worker_agents_path.write_text(next_content, encoding="utf-8")
                 updated_content = worker_agents_path.read_text(encoding="utf-8")
                 agent_home.ensure_claude_compat(agent.path, updated_content)
             env = workspace.workspace_environment(

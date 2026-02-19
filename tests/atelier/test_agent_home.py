@@ -174,3 +174,30 @@ def test_ensure_claude_compat_writes_files() -> None:
             agent_path / agent_home.CLAUDE_DIRNAME / agent_home.CLAUDE_SETTINGS_FILENAME
         )
         assert settings_path.exists()
+
+
+def test_apply_beads_prime_addendum_inserts_block() -> None:
+    content = "# Worker Context\n\nBase instructions.\n"
+    addendum = "# Beads Workflow Context\n\n- Use bd ready."
+
+    updated = agent_home.apply_beads_prime_addendum(content, addendum)
+
+    assert "ATELIER_BEADS_PRIME_START" in updated
+    assert "Beads Runtime Addendum" in updated
+    assert "- Use bd ready." in updated
+
+
+def test_apply_beads_prime_addendum_replaces_existing_block() -> None:
+    initial = (
+        "# Worker Context\n\n"
+        "<!-- ATELIER_BEADS_PRIME_START -->\n"
+        "## Beads Runtime Addendum\n\n"
+        "old\n"
+        "<!-- ATELIER_BEADS_PRIME_END -->\n"
+    )
+
+    updated = agent_home.apply_beads_prime_addendum(initial, "new")
+
+    assert "old" not in updated
+    assert "new" in updated
+    assert updated.count("ATELIER_BEADS_PRIME_START") == 1

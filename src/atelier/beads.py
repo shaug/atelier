@@ -122,6 +122,26 @@ def run_bd_json(
     return []
 
 
+def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
+    """Return `bd prime --full` markdown without failing the caller."""
+    try:
+        result = subprocess.run(
+            ["bd", "prime", "--full", "--no-daemon"],
+            cwd=cwd,
+            env=beads_env(beads_root),
+            capture_output=True,
+            text=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        return None
+    if result.returncode != 0:
+        return None
+    output = (result.stdout or "").strip()
+    return output or None
+
+
 def _parse_types_payload(raw: str) -> dict[str, object] | None:
     if not raw:
         return None

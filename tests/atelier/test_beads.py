@@ -66,6 +66,30 @@ def test_ensure_atelier_store_skips_existing_root() -> None:
     run_command.assert_not_called()
 
 
+def test_prime_addendum_returns_output() -> None:
+    with patch(
+        "atelier.beads.subprocess.run",
+        return_value=CompletedProcess(
+            args=["bd", "prime"], returncode=0, stdout="# Addendum\n", stderr=""
+        ),
+    ):
+        value = beads.prime_addendum(beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert value == "# Addendum"
+
+
+def test_prime_addendum_returns_none_on_error() -> None:
+    with patch(
+        "atelier.beads.subprocess.run",
+        return_value=CompletedProcess(
+            args=["bd", "prime"], returncode=1, stdout="", stderr="boom"
+        ),
+    ):
+        value = beads.prime_addendum(beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert value is None
+
+
 def test_ensure_issue_prefix_noop_when_already_expected() -> None:
     with (
         patch("atelier.beads._current_issue_prefix", return_value="at"),
