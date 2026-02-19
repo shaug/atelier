@@ -18,7 +18,7 @@ from .. import (
     project,
     skills,
 )
-from ..io import confirm, say
+from ..io import confirm, say, select
 
 
 def init_project(args: object) -> None:
@@ -65,9 +65,29 @@ def init_project(args: object) -> None:
     )
     selected_provider = provider_resolution.selected_provider
     current_provider = (payload.project.provider or "").strip().lower() or None
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    if interactive:
+        available = list(provider_resolution.available_providers)
+        if current_provider and current_provider not in available:
+            available.append(current_provider)
+        available = sorted(set(available))
+        if available or current_provider:
+            choices = ["none", *available]
+            default_choice = selected_provider or current_provider or "none"
+            if default_choice not in choices:
+                default_choice = "none"
+            selected_choice = select(
+                "External ticket provider",
+                choices,
+                default_choice,
+            )
+            selected_provider = None if selected_choice == "none" else selected_choice
     if selected_provider and selected_provider != current_provider:
         payload = payload.model_copy(deep=True)
         payload.project.provider = selected_provider
+    if selected_provider is None and current_provider is not None:
+        payload = payload.model_copy(deep=True)
+        payload.project.provider = None
     if selected_provider:
         say(f"Selected external provider: {selected_provider}")
     else:

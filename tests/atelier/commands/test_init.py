@@ -13,6 +13,7 @@ import atelier.commands.init as init_cmd
 import atelier.config as config
 import atelier.external_registry as external_registry
 import atelier.paths as paths
+import atelier.project as project
 from tests.atelier.helpers import (
     NORMALIZED_ORIGIN,
     RAW_ORIGIN,
@@ -278,6 +279,98 @@ class TestInitProject:
                 config_payload = config.load_project_config(config_path)
                 assert config_payload is not None
                 assert config_payload.project.provider == "linear"
+            finally:
+                os.chdir(original_cwd)
+
+    def test_init_prompts_provider_selection_for_existing_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                args = make_init_args(
+                    branch_prefix="",
+                    branch_pr="true",
+                    branch_history="manual",
+                    branch_pr_strategy="parallel",
+                    agent="codex",
+                    editor_edit="cursor -w",
+                    editor_work="cursor",
+                )
+                with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+                    project_dir = paths.project_dir_for_enlistment(
+                        enlistment_path, NORMALIZED_ORIGIN
+                    )
+                project.ensure_project_dirs(project_dir)
+                seed = config.ProjectConfig.model_validate(
+                    {
+                        "project": {
+                            "enlistment": enlistment_path,
+                            "origin": NORMALIZED_ORIGIN,
+                            "repo_url": RAW_ORIGIN,
+                            "provider": "github",
+                        },
+                        "branch": {
+                            "prefix": "",
+                            "pr": True,
+                            "history": "manual",
+                            "pr_strategy": "parallel",
+                        },
+                        "agent": {"default": "codex", "options": {"codex": []}},
+                        "editor": {"edit": ["cursor", "-w"], "work": ["cursor"]},
+                    }
+                )
+                config.write_project_config(
+                    paths.project_config_path(project_dir), seed
+                )
+
+                with (
+                    patch(
+                        "atelier.commands.init.beads.run_bd_command",
+                        return_value=CompletedProcess(
+                            args=["bd"], returncode=0, stdout="", stderr=""
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_store",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.external_registry.resolve_planner_provider",
+                        return_value=external_registry.PlannerProviderResolution(
+                            selected_provider="github",
+                            available_providers=("github", "linear"),
+                            github_repo="acme/widgets",
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.init.select", return_value="none"
+                    ) as choose,
+                    patch("atelier.commands.init.confirm", return_value=False),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("sys.stdin.isatty", return_value=True),
+                    patch("sys.stdout.isatty", return_value=True),
+                ):
+                    init_cmd.init_project(args)
+
+                choose.assert_called_once()
+                config_payload = config.load_project_config(
+                    paths.project_config_path(project_dir)
+                )
+                assert config_payload is not None
+                assert config_payload.project.provider is None
             finally:
                 os.chdir(original_cwd)
 
