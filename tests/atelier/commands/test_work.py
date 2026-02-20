@@ -4902,6 +4902,156 @@ def test_finalize_creates_pr_when_missing_and_strategy_allows() -> None:
     update_review.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    "strategy",
+    ["sequential", "on-ready", "on-parent-approved", "parallel"],
+)
+def test_finalize_top_level_missing_pr_all_strategies_attempt_create(
+    strategy: str,
+) -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "title": "My changeset",
+                    "labels": ["at:changeset", "cs:ready"],
+                    "description": (
+                        "changeset.work_branch: feat/root-atelier-epic.1\n"
+                        "changeset.root_branch: feat/root\n"
+                        "changeset.parent_branch: feat/root\n"
+                    ),
+                    "status": "open",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work._attempt_create_draft_pr",
+            return_value=(False, "gh auth failed"),
+        ) as create_pr,
+        patch("atelier.commands.work._mark_changeset_in_progress"),
+        patch("atelier.commands.work._send_planner_notification"),
+        patch("atelier.commands.work.beads.run_bd_command"),
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+            branch_pr_strategy=strategy,
+        )
+
+    assert result.continue_running is False
+    assert result.reason == "changeset_pr_create_failed"
+    create_pr.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("strategy", "parent_payload", "expected_reason", "expects_create"),
+    [
+        (
+            "sequential",
+            {
+                "state": "OPEN",
+                "isDraft": False,
+                "reviewDecision": None,
+                "reviewRequests": [{"requestedReviewer": {"login": "alice"}}],
+            },
+            "changeset_review_pending",
+            False,
+        ),
+        ("on-ready", None, "changeset_review_pending", False),
+        (
+            "on-parent-approved",
+            {
+                "state": "OPEN",
+                "isDraft": False,
+                "reviewDecision": "APPROVED",
+            },
+            "changeset_pr_create_failed",
+            True,
+        ),
+        ("parallel", None, "changeset_pr_create_failed", True),
+    ],
+)
+def test_finalize_child_pr_creation_respects_strategy_matrix(
+    strategy: str,
+    parent_payload: dict[str, object] | None,
+    expected_reason: str,
+    expects_create: bool,
+) -> None:
+    work_branch = "feat/root-atelier-epic.2"
+    parent_branch = "feat/root-atelier-epic.1"
+
+    def fake_read_github_pr_status(repo: str, head: str) -> dict[str, object] | None:
+        if head == work_branch:
+            return None
+        if head == parent_branch:
+            return parent_payload
+        return None
+
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.2",
+                    "title": "Child changeset",
+                    "labels": ["at:changeset", "cs:ready"],
+                    "description": (
+                        f"changeset.work_branch: {work_branch}\n"
+                        "changeset.root_branch: feat/root\n"
+                        f"changeset.parent_branch: {parent_branch}\n"
+                    ),
+                    "status": "open",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch(
+            "atelier.commands.work.prs.read_github_pr_status",
+            side_effect=fake_read_github_pr_status,
+        ),
+        patch(
+            "atelier.commands.work._attempt_create_draft_pr",
+            return_value=(False, "gh auth failed"),
+        ) as create_pr,
+        patch("atelier.commands.work._mark_changeset_in_progress"),
+        patch("atelier.commands.work._send_planner_notification"),
+        patch("atelier.commands.work.beads.run_bd_command"),
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.2",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+            branch_pr_strategy=strategy,
+        )
+
+    assert result.reason == expected_reason
+    if expects_create:
+        create_pr.assert_called_once()
+    else:
+        create_pr.assert_not_called()
+
+
 def test_finalize_terminalizes_when_pr_is_merged() -> None:
     run_commands: list[list[str]] = []
 
@@ -5019,6 +5169,59 @@ def test_finalize_terminalizes_closed_unmerged_pr_as_abandoned() -> None:
         args[:2] == ["update", "atelier-epic.1"] and "cs:abandoned" in args
         for args in run_commands
     )
+
+
+@pytest.mark.parametrize(
+    "pr_payload",
+    [
+        {"state": "OPEN", "isDraft": True, "reviewDecision": None},
+        {"state": "OPEN", "isDraft": False, "reviewDecision": None},
+        {
+            "state": "OPEN",
+            "isDraft": False,
+            "reviewDecision": None,
+            "reviewRequests": [{"requestedReviewer": {"login": "alice"}}],
+        },
+        {"state": "OPEN", "isDraft": False, "reviewDecision": "APPROVED"},
+    ],
+)
+def test_finalize_keeps_review_pending_for_non_terminal_pr_states(
+    pr_payload: dict[str, object],
+) -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset", "cs:in_progress"],
+                    "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+                    "status": "in_progress",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch(
+            "atelier.commands.work.prs.read_github_pr_status",
+            return_value=pr_payload,
+        ),
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_review_pending"
 
 
 def test_finalize_accepts_pushed_without_pr_when_integration_is_proven() -> None:
