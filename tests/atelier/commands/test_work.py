@@ -1960,6 +1960,60 @@ def test_startup_contract_checks_unhooked_feedback_when_hooked_has_no_work() -> 
     )
 
 
+def test_startup_contract_considers_blocked_epics_for_review_feedback() -> None:
+    epics = [
+        {
+            "id": "atelier-epic-blocked",
+            "title": "Blocked epic",
+            "status": "blocked",
+            "labels": ["at:epic"],
+            "created_at": "2026-02-02T00:00:00+00:00",
+        }
+    ]
+
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", return_value=epics),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch(
+            "atelier.commands.work._select_review_feedback_changeset",
+            return_value=work_cmd._ReviewFeedbackSelection(
+                epic_id="atelier-epic-blocked",
+                changeset_id="atelier-epic-blocked.1",
+                feedback_at="2026-02-20T09:00:00+00:00",
+            ),
+        ),
+        patch(
+            "atelier.commands.work.beads.update_changeset_review_feedback_cursor"
+        ) as update_cursor,
+        patch("atelier.commands.work.say"),
+    ):
+        result = work_cmd._run_startup_contract(
+            agent_id="atelier/worker/agent/p123-t2",
+            agent_bead_id=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            mode="auto",
+            explicit_epic_id=None,
+            queue_only=False,
+            dry_run=False,
+            assume_yes=True,
+            repo_slug="org/repo",
+            branch_pr=True,
+        )
+
+    assert result.should_exit is False
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "atelier-epic-blocked"
+    assert result.changeset_id == "atelier-epic-blocked.1"
+    update_cursor.assert_called_once_with(
+        "atelier-epic-blocked.1",
+        "2026-02-20T09:00:00+00:00",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
 def test_startup_contract_falls_back_to_global_ready_changeset() -> None:
     epics = [
         {

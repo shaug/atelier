@@ -401,6 +401,10 @@ def _is_closed_status(status: object) -> bool:
     return normalized in {"closed", "done"}
 
 
+def _is_feedback_eligible_epic_status(status: object) -> bool:
+    return not _is_closed_status(status)
+
+
 def _sort_by_created_at(
     issues: list[dict[str, object]], *, newest: bool = False
 ) -> list[dict[str, object]]:
@@ -3728,7 +3732,7 @@ def _run_startup_contract(
             if issue_id == hooked_epic:
                 continue
             status = str(issue.get("status") or "")
-            if not _is_eligible_status(status, allow_hooked=True):
+            if not _is_feedback_eligible_epic_status(status):
                 continue
             labels = _issue_labels(issue)
             if "at:draft" in labels:
