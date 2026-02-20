@@ -22,3 +22,31 @@ def test_lifecycle_state_handles_pr_open() -> None:
 
 def test_lifecycle_state_falls_back_to_pushed() -> None:
     assert prs.lifecycle_state(None, pushed=True, review_requested=False) == "pushed"
+
+
+def test_latest_feedback_timestamp_prefers_non_bot_reviewer_events() -> None:
+    payload = {
+        "comments": [
+            {
+                "createdAt": "2026-02-20T10:00:00Z",
+                "author": {"isBot": False},
+            },
+            {
+                "updatedAt": "2026-02-20T11:00:00Z",
+                "author": {"isBot": True},
+            },
+        ],
+        "reviews": [
+            {
+                "state": "COMMENTED",
+                "submittedAt": "2026-02-20T12:00:00Z",
+                "author": {"isBot": False},
+            },
+            {
+                "state": "APPROVED",
+                "submittedAt": "2026-02-20T13:00:00Z",
+                "author": {"isBot": False},
+            },
+        ],
+    }
+    assert prs.latest_feedback_timestamp(payload) == "2026-02-20T12:00:00Z"

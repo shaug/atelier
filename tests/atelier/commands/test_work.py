@@ -1558,6 +1558,76 @@ def test_startup_contract_skips_hooked_epic_without_ready_changesets() -> None:
     assert result.epic_id == "atelier-epic-ready"
 
 
+def test_startup_contract_prioritizes_review_feedback_before_new_work() -> None:
+    epics = [
+        {
+            "id": "atelier-epic-hooked",
+            "title": "Hooked epic",
+            "status": "open",
+            "labels": ["at:epic"],
+            "assignee": "atelier/worker/agent/p123-t2",
+            "created_at": "2026-02-01T00:00:00+00:00",
+        },
+        {
+            "id": "atelier-epic-ready",
+            "title": "Ready epic",
+            "status": "open",
+            "labels": ["at:epic"],
+            "created_at": "2026-02-02T00:00:00+00:00",
+        },
+    ]
+
+    with (
+        patch(
+            "atelier.commands.work._resolve_hooked_epic",
+            return_value="atelier-epic-hooked",
+        ),
+        patch("atelier.commands.work.beads.run_bd_json", return_value=epics),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch(
+            "atelier.commands.work._select_review_feedback_changeset",
+            side_effect=lambda **kwargs: (
+                work_cmd._ReviewFeedbackSelection(
+                    epic_id="atelier-epic-hooked",
+                    changeset_id="atelier-epic-hooked.2",
+                    feedback_at="2026-02-20T12:00:00+00:00",
+                )
+                if kwargs["epic_id"] == "atelier-epic-hooked"
+                else None
+            ),
+        ),
+        patch(
+            "atelier.commands.work.beads.update_changeset_review_feedback_cursor"
+        ) as update_cursor,
+        patch("atelier.commands.work.say"),
+    ):
+        result = work_cmd._run_startup_contract(
+            agent_id="atelier/worker/agent/p123-t2",
+            agent_bead_id="atelier-agent",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            mode="auto",
+            explicit_epic_id=None,
+            queue_only=False,
+            dry_run=False,
+            assume_yes=True,
+            repo_slug="org/repo",
+            branch_pr=True,
+        )
+
+    assert result.should_exit is False
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "atelier-epic-hooked"
+    assert result.changeset_id == "atelier-epic-hooked.2"
+    update_cursor.assert_called_once_with(
+        "atelier-epic-hooked.2",
+        "2026-02-20T12:00:00+00:00",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
 def test_startup_contract_falls_back_to_global_ready_changeset() -> None:
     epics = [
         {
@@ -1865,7 +1935,10 @@ def test_work_invokes_startup_contract() -> None:
         patch(
             "atelier.commands.work._run_startup_contract",
             return_value=work_cmd.StartupContractResult(
-                epic_id=None, should_exit=True, reason="no_eligible_epics"
+                epic_id=None,
+                changeset_id=None,
+                should_exit=True,
+                reason="no_eligible_epics",
             ),
         ) as startup_contract,
         patch(
@@ -1920,7 +1993,10 @@ def test_work_runs_reconcile_when_flag_enabled() -> None:
         patch(
             "atelier.commands.work._run_startup_contract",
             return_value=work_cmd.StartupContractResult(
-                epic_id=None, should_exit=True, reason="no_eligible_epics"
+                epic_id=None,
+                changeset_id=None,
+                should_exit=True,
+                reason="no_eligible_epics",
             ),
         ),
         patch(
@@ -4260,6 +4336,120 @@ def test_finalize_infers_review_pending_from_publish_signals() -> None:
 
     assert result.continue_running is True
     assert result.reason == "changeset_review_pending"
+
+
+def test_finalize_requeues_publish_pending_when_local_state_exists() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset"],
+                    "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+                    "status": "closed",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=False),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work._attempt_push_work_branch",
+            return_value=(False, "push rejected by remote"),
+        ),
+        patch(
+            "atelier.commands.work._collect_publish_signal_diagnostics",
+            return_value=work_cmd._PublishSignalDiagnostics(
+                local_branch_exists=True,
+                remote_branch_exists=False,
+                worktree_path=Path("/repo/worktrees/atelier-epic.1"),
+                dirty_entries=(" M src/module.py",),
+            ),
+        ),
+        patch("atelier.commands.work._mark_changeset_in_progress") as mark_in_progress,
+        patch("atelier.commands.work._mark_changeset_blocked") as mark_blocked,
+        patch("atelier.commands.work._send_planner_notification") as send_notification,
+        patch("atelier.commands.work.beads.run_bd_command") as run_bd_command,
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            project_data_dir=Path("/project"),
+            branch_pr=True,
+        )
+
+    assert result.continue_running is False
+    assert result.reason == "changeset_publish_pending"
+    mark_in_progress.assert_called_once()
+    mark_blocked.assert_not_called()
+    send_notification.assert_called_once()
+    assert any(
+        args[:2] == ["update", "atelier-epic.1"] and "--append-notes" in args
+        for call in run_bd_command.call_args_list
+        for args in [call.args[0]]
+    )
+
+
+def test_finalize_blocks_publish_missing_without_recoverable_state() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset"],
+                    "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+                    "status": "in_progress",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=False),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work._attempt_push_work_branch",
+            return_value=(False, "local branch missing: feat/root-atelier-epic.1"),
+        ),
+        patch(
+            "atelier.commands.work._collect_publish_signal_diagnostics",
+            return_value=work_cmd._PublishSignalDiagnostics(
+                local_branch_exists=False,
+                remote_branch_exists=False,
+                worktree_path=None,
+                dirty_entries=(),
+            ),
+        ),
+        patch("atelier.commands.work._mark_changeset_in_progress") as mark_in_progress,
+        patch("atelier.commands.work._mark_changeset_blocked") as mark_blocked,
+        patch("atelier.commands.work._send_planner_notification") as send_notification,
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            project_data_dir=Path("/project"),
+            branch_pr=True,
+        )
+
+    assert result.continue_running is False
+    assert result.reason == "changeset_blocked_publish_missing"
+    mark_in_progress.assert_not_called()
+    mark_blocked.assert_called_once()
+    send_notification.assert_called_once()
 
 
 def test_finalize_promotes_planned_descendants_when_unblocked() -> None:

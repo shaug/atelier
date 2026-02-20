@@ -85,7 +85,7 @@ def read_github_pr_status(repo: str, head: str) -> dict[str, object] | None:
                 "--repo",
                 repo,
                 "--json",
-                "number,url,state,baseRefName,headRefName,title,body,labels,isDraft,mergedAt,closedAt,updatedAt,reviewDecision,mergeable,reviewRequests",
+                "number,url,state,baseRefName,headRefName,title,body,labels,isDraft,mergedAt,closedAt,updatedAt,reviewDecision,mergeable,reviewRequests,comments,reviews",
             ]
         )
     except (RuntimeError, json.JSONDecodeError):
@@ -116,6 +116,51 @@ def has_review_requests(payload: dict[str, object] | None) -> bool:
         elif requested:
             return True
     return False
+
+
+def latest_feedback_timestamp(payload: dict[str, object] | None) -> str | None:
+    """Return the latest reviewer feedback timestamp for a PR payload."""
+    if not payload:
+        return None
+    latest: str | None = None
+
+    def include(value: object) -> None:
+        nonlocal latest
+        if not isinstance(value, str):
+            return
+        candidate = value.strip()
+        if not candidate:
+            return
+        if latest is None or candidate > latest:
+            latest = candidate
+
+    comments = payload.get("comments")
+    if isinstance(comments, list):
+        for comment in comments:
+            if not isinstance(comment, dict):
+                continue
+            author = comment.get("author")
+            if isinstance(author, dict) and author.get("isBot") is True:
+                continue
+            include(comment.get("updatedAt"))
+            include(comment.get("createdAt"))
+
+    reviews = payload.get("reviews")
+    if isinstance(reviews, list):
+        for review in reviews:
+            if not isinstance(review, dict):
+                continue
+            state = str(review.get("state") or "").upper()
+            if state not in {"COMMENTED", "CHANGES_REQUESTED"}:
+                continue
+            author = review.get("author")
+            if isinstance(author, dict) and author.get("isBot") is True:
+                continue
+            include(review.get("updatedAt"))
+            include(review.get("submittedAt"))
+            include(review.get("createdAt"))
+
+    return latest
 
 
 def lifecycle_state(

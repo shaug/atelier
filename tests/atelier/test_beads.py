@@ -591,6 +591,38 @@ def test_update_changeset_review_updates_description() -> None:
     assert "pr_state: review" in captured["description"]
 
 
+def test_update_changeset_review_feedback_cursor_updates_description() -> None:
+    issue = {"id": "atelier-99", "description": "scope: demo\n"}
+    captured: dict[str, str] = {}
+
+    def fake_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        return [issue]
+
+    def fake_update(
+        issue_id: str, description: str, *, beads_root: Path, cwd: Path
+    ) -> None:
+        captured["id"] = issue_id
+        captured["description"] = description
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+    ):
+        beads.update_changeset_review_feedback_cursor(
+            "atelier-99",
+            "2026-02-20T12:00:00Z",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert captured["id"] == "atelier-99"
+    assert (
+        "review.last_feedback_seen_at: 2026-02-20T12:00:00Z" in captured["description"]
+    )
+
+
 def test_update_worktree_path_writes_description() -> None:
     issue = {"id": "epic-1", "description": "workspace.root_branch: main\n"}
     captured: dict[str, str] = {}

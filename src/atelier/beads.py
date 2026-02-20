@@ -1344,3 +1344,24 @@ def update_changeset_review(
         metadata,
     )
     _update_issue_description(changeset_id, updated, beads_root=beads_root, cwd=cwd)
+
+
+def update_changeset_review_feedback_cursor(
+    changeset_id: str,
+    latest_feedback_at: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    """Persist the latest handled review feedback timestamp on a changeset."""
+    issues = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"changeset not found: {changeset_id}")
+    issue = issues[0]
+    description = issue.get("description")
+    updated = _update_description_field(
+        description if isinstance(description, str) else "",
+        key="review.last_feedback_seen_at",
+        value=latest_feedback_at,
+    )
+    _update_issue_description(changeset_id, updated, beads_root=beads_root, cwd=cwd)
