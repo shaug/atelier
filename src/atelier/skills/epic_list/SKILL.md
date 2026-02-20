@@ -23,8 +23,14 @@ description: >-
 
 The output must be:
 
-- Header line: `Epics:` or `Draft epics:` (when `show_drafts` is true)
-- One epic per line:
+- Header line: `Epics by state:`
+- One or more state sections:
+  - `Draft epics:` (only when `show_drafts` is used and drafts exist)
+  - `Open epics:`
+  - `In-progress epics:`
+  - `Blocked epics:`
+  - `Other active epics:` (only when needed)
+- One epic per line in each section:
   - `- <id> [<status>] <title>`
 - Detail line per epic:
   - `  root: <workspace.root_branch|unset> | assignee: <assignee|unassigned>`
@@ -32,4 +38,5 @@ The output must be:
 ## Verification
 
 - Output includes each eligible epic id and title in the required format.
+- Closed epics are excluded.
 - Draft epics appear only when `show_drafts` is enabled.

@@ -62,31 +62,77 @@ def _parse_description_fields(description: str | None) -> dict[str, str]:
     return fields
 
 
+def _status_bucket(issue: dict[str, object], *, show_drafts: bool) -> str | None:
+    labels = _labels(issue)
+    if "at:draft" in labels:
+        return "draft" if show_drafts else None
+    status = str(issue.get("status") or "").strip().lower()
+    if status in {"closed", "done"}:
+        return None
+    if status in {"blocked"}:
+        return "blocked"
+    if status in {"in_progress", "hooked"}:
+        return "in_progress"
+    if status in {"", "open", "ready"}:
+        return "open"
+    return "other"
+
+
+def _sort_key(issue: dict[str, object]) -> tuple[str, str]:
+    issue_id = str(issue.get("id") or "").strip()
+    title = str(issue.get("title") or "").strip()
+    return (issue_id, title)
+
+
+def _append_issue(lines: list[str], issue: dict[str, object]) -> None:
+    issue_id = str(issue.get("id") or "").strip() or "(unknown)"
+    status = str(issue.get("status") or "unknown").strip() or "unknown"
+    title = str(issue.get("title") or "").strip() or "(untitled)"
+    description = issue.get("description")
+    fields = _parse_description_fields(
+        description if isinstance(description, str) else None
+    )
+    root_branch = fields.get("workspace.root_branch") or "unset"
+    assignee = str(issue.get("assignee") or "").strip() or "unassigned"
+    lines.append(f"- {issue_id} [{status}] {title}")
+    lines.append(f"  root: {root_branch} | assignee: {assignee}")
+
+
 def _render_epics(issues: list[dict[str, object]], *, show_drafts: bool) -> str:
-    filtered: list[dict[str, object]] = []
+    buckets: dict[str, list[dict[str, object]]] = {
+        "draft": [],
+        "open": [],
+        "in_progress": [],
+        "blocked": [],
+        "other": [],
+    }
     for issue in issues:
-        labels = _labels(issue)
-        if not show_drafts and "at:draft" in labels:
+        bucket = _status_bucket(issue, show_drafts=show_drafts)
+        if bucket is None:
             continue
-        filtered.append(issue)
+        buckets[bucket].append(issue)
 
-    heading = "Draft epics:" if show_drafts else "Epics:"
-    if not filtered:
-        return f"{heading}\n- (none)"
+    lines: list[str] = ["Epics by state:"]
+    sections = [
+        ("Draft epics:", buckets["draft"]),
+        ("Open epics:", buckets["open"]),
+        ("In-progress epics:", buckets["in_progress"]),
+        ("Blocked epics:", buckets["blocked"]),
+        ("Other active epics:", buckets["other"]),
+    ]
 
-    lines: list[str] = [heading]
-    for issue in filtered:
-        issue_id = str(issue.get("id") or "").strip() or "(unknown)"
-        status = str(issue.get("status") or "unknown").strip() or "unknown"
-        title = str(issue.get("title") or "").strip() or "(untitled)"
-        description = issue.get("description")
-        fields = _parse_description_fields(
-            description if isinstance(description, str) else None
-        )
-        root_branch = fields.get("workspace.root_branch") or "unset"
-        assignee = str(issue.get("assignee") or "").strip() or "unassigned"
-        lines.append(f"- {issue_id} [{status}] {title}")
-        lines.append(f"  root: {root_branch} | assignee: {assignee}")
+    rendered_any = False
+    for heading, entries in sections:
+        if not entries:
+            continue
+        rendered_any = True
+        lines.append("")
+        lines.append(heading)
+        for issue in sorted(entries, key=_sort_key):
+            _append_issue(lines, issue)
+
+    if not rendered_any:
+        lines.append("- (none)")
     return "\n".join(lines)
 
 
@@ -95,7 +141,7 @@ def main() -> None:
     parser.add_argument(
         "--show-drafts",
         action="store_true",
-        help="include draft epics",
+        help="include draft epics alongside active non-closed epics",
     )
     parser.add_argument(
         "--beads-dir",

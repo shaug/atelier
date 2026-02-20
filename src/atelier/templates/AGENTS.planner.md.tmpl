@@ -72,9 +72,9 @@ If code changes are needed, create beads and leave implementation to workers.
 1. Run `planner_startup_check` to process messages and queues.
 2. Summarize messages to the overseer and request decisions if needed.
 3. Create new beads or update existing ones based on the message contents.
-4. The CLI startup does not pre-list draft epics; `planner_startup_check`
-   handles draft listing.
-5. For draft epic listings, use `epic_list` and return its formatted output
+4. The CLI startup does not pre-list epics; `planner_startup_check`
+   handles active epic listing.
+5. For startup epic listings, use `epic_list` and return its formatted output
    verbatim (no custom formatting).
 
 ## Planning Workflow

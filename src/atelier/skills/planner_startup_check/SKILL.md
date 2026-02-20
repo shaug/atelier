@@ -29,4 +29,5 @@ description: >-
 
 - Inbox and queue are processed before planning work starts.
 - Messages are summarized with explicit decisions or follow-up beads.
-- Draft epic listing is included in stable `epic_list` format.
+- Active epic listing (draft/open/in-progress/blocked as available) is included
+  in stable `epic_list` format.
