@@ -1113,11 +1113,19 @@ def _changeset_parent_lifecycle_state(
         description if isinstance(description, str) else ""
     )
     parent_branch = fields.get("changeset.parent_branch")
+    root_branch = fields.get("changeset.root_branch")
     if not isinstance(parent_branch, str):
         return None
     normalized = parent_branch.strip()
     if not normalized or normalized.lower() == "null":
         return None
+    if isinstance(root_branch, str):
+        normalized_root = root_branch.strip()
+        if normalized_root and normalized_root.lower() != "null":
+            # Top-level changesets commonly use root==parent; treat as no-parent
+            # for PR strategy gating to avoid self-deadlocking PR creation.
+            if normalized_root == normalized:
+                return None
     pushed = git.git_ref_exists(
         repo_root, f"refs/remotes/origin/{normalized}", git_path=git_path
     )

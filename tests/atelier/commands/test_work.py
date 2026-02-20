@@ -4365,6 +4365,50 @@ def test_finalize_infers_review_pending_from_publish_signals() -> None:
     assert result.reason == "changeset_review_pending"
 
 
+def test_pr_creation_decision_treats_root_parent_as_no_parent() -> None:
+    issue = {
+        "id": "atelier-epic.1",
+        "description": (
+            "changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root\n"
+        ),
+    }
+    with (
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+    ):
+        decision = work_cmd._changeset_pr_creation_decision(
+            issue,
+            repo_slug="org/repo",
+            repo_root=Path("/repo"),
+            git_path=None,
+            branch_pr_strategy="sequential",
+        )
+    assert decision.allow_pr is True
+    assert decision.reason == "no-parent"
+
+
+def test_pr_creation_decision_uses_parent_when_distinct_from_root() -> None:
+    issue = {
+        "id": "atelier-epic.2",
+        "description": (
+            "changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root-1\n"
+        ),
+    }
+    with (
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+    ):
+        decision = work_cmd._changeset_pr_creation_decision(
+            issue,
+            repo_slug="org/repo",
+            repo_root=Path("/repo"),
+            git_path=None,
+            branch_pr_strategy="sequential",
+        )
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:pushed"
+
+
 def test_finalize_flags_missing_pr_when_strategy_allows_creation() -> None:
     with (
         patch(
