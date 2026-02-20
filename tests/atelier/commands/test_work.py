@@ -2020,7 +2020,7 @@ def test_select_review_feedback_changeset_ignores_cursor_for_blocked_changeset()
         ),
         patch("atelier.commands.work.prs.read_github_pr_status", return_value={}),
         patch(
-            "atelier.commands.work.prs.latest_feedback_timestamp",
+            "atelier.commands.work.prs.latest_feedback_timestamp_with_inline_comments",
             return_value="2026-02-20T02:57:05Z",
         ),
     ):
@@ -2055,7 +2055,7 @@ def test_select_review_feedback_changeset_respects_cursor_for_open_changeset() -
         ),
         patch("atelier.commands.work.prs.read_github_pr_status", return_value={}),
         patch(
-            "atelier.commands.work.prs.latest_feedback_timestamp",
+            "atelier.commands.work.prs.latest_feedback_timestamp_with_inline_comments",
             return_value="2026-02-20T02:57:05Z",
         ),
     ):
@@ -2090,7 +2090,7 @@ def test_select_review_feedback_changeset_uses_live_pr_state_without_pr_metadata
             return_value={"state": "OPEN", "isDraft": False, "reviewDecision": None},
         ),
         patch(
-            "atelier.commands.work.prs.latest_feedback_timestamp",
+            "atelier.commands.work.prs.latest_feedback_timestamp_with_inline_comments",
             return_value="2026-02-20T03:10:00Z",
         ),
     ):
@@ -2129,7 +2129,7 @@ def test_select_review_feedback_changeset_prefers_live_terminal_state_over_stale
             return_value={"state": "CLOSED", "mergedAt": "2026-02-20T03:10:00Z"},
         ),
         patch(
-            "atelier.commands.work.prs.latest_feedback_timestamp",
+            "atelier.commands.work.prs.latest_feedback_timestamp_with_inline_comments",
             return_value="2026-02-20T03:10:00Z",
         ),
     ):
@@ -2154,7 +2154,7 @@ def test_persist_review_feedback_cursor_updates_when_feedback_present() -> None:
             return_value={"number": 204},
         ),
         patch(
-            "atelier.commands.work.prs.latest_feedback_timestamp",
+            "atelier.commands.work.prs.latest_feedback_timestamp_with_inline_comments",
             return_value="2026-02-20T03:10:00Z",
         ),
         patch(
@@ -2187,7 +2187,10 @@ def test_persist_review_feedback_cursor_skips_without_feedback_timestamp() -> No
             "atelier.commands.work.prs.read_github_pr_status",
             return_value={"number": 204},
         ),
-        patch("atelier.commands.work.prs.latest_feedback_timestamp", return_value=None),
+        patch(
+            "atelier.commands.work.prs.latest_feedback_timestamp_with_inline_comments",
+            return_value=None,
+        ),
         patch(
             "atelier.commands.work.beads.update_changeset_review_feedback_cursor"
         ) as update_cursor,

@@ -142,10 +142,8 @@ def _is_bot_author(author: object) -> bool:
     return False
 
 
-def latest_feedback_timestamp(
-    payload: dict[str, object] | None, *, repo: str | None = None
-) -> str | None:
-    """Return the latest reviewer feedback timestamp for a PR payload."""
+def latest_feedback_timestamp(payload: dict[str, object] | None) -> str | None:
+    """Return the latest reviewer feedback timestamp from a PR payload only."""
     if not payload:
         return None
     latest: str | None = None
@@ -186,35 +184,60 @@ def latest_feedback_timestamp(
             include(review.get("submittedAt"))
             include(review.get("createdAt"))
 
-    if repo:
-        pr_number = payload.get("number")
-        number_str = None
-        if isinstance(pr_number, int):
-            number_str = str(pr_number)
-        elif isinstance(pr_number, str) and pr_number.strip().isdigit():
-            number_str = pr_number.strip()
-        if number_str:
-            try:
-                review_comments = _run_json(
-                    [
-                        "gh",
-                        "api",
-                        f"repos/{repo}/pulls/{number_str}/comments",
-                        "--paginate",
-                    ]
-                )
-            except (RuntimeError, json.JSONDecodeError):
-                review_comments = None
-            if isinstance(review_comments, list):
-                for comment in review_comments:
-                    if not isinstance(comment, dict):
-                        continue
-                    author = comment.get("user")
-                    if _is_bot_author(author):
-                        continue
-                    include(comment.get("updated_at"))
-                    include(comment.get("created_at"))
+    return latest
 
+
+def _latest_inline_review_comment_timestamp(repo: str, pr_number: int) -> str | None:
+    try:
+        review_comments = _run_json(
+            [
+                "gh",
+                "api",
+                f"repos/{repo}/pulls/{pr_number}/comments",
+                "--paginate",
+            ]
+        )
+    except (RuntimeError, json.JSONDecodeError):
+        return None
+    if not isinstance(review_comments, list):
+        return None
+    latest: str | None = None
+    for comment in review_comments:
+        if not isinstance(comment, dict):
+            continue
+        author = comment.get("user")
+        if _is_bot_author(author):
+            continue
+        for key in ("updated_at", "created_at"):
+            value = comment.get(key)
+            if not isinstance(value, str):
+                continue
+            candidate = value.strip()
+            if not candidate:
+                continue
+            if latest is None or candidate > latest:
+                latest = candidate
+    return latest
+
+
+def latest_feedback_timestamp_with_inline_comments(
+    payload: dict[str, object] | None, *, repo: str | None
+) -> str | None:
+    """Return latest feedback timestamp including inline review comments."""
+    latest = latest_feedback_timestamp(payload)
+    if not payload or not repo:
+        return latest
+    pr_number_raw = payload.get("number")
+    pr_number = None
+    if isinstance(pr_number_raw, int):
+        pr_number = pr_number_raw
+    elif isinstance(pr_number_raw, str) and pr_number_raw.strip().isdigit():
+        pr_number = int(pr_number_raw.strip())
+    if pr_number is None:
+        return latest
+    inline_latest = _latest_inline_review_comment_timestamp(repo, pr_number)
+    if inline_latest and (latest is None or inline_latest > latest):
+        return inline_latest
     return latest
 
 

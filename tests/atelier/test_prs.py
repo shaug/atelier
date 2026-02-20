@@ -75,9 +75,18 @@ def test_latest_feedback_timestamp_includes_review_comments() -> None:
     ]
     with patch("atelier.prs._run_json", return_value=review_comments):
         assert (
-            prs.latest_feedback_timestamp(payload, repo="organicvideodev/tuber-service")
+            prs.latest_feedback_timestamp_with_inline_comments(
+                payload, repo="organicvideodev/tuber-service"
+            )
             == "2026-02-20T02:57:06Z"
         )
+
+
+def test_latest_feedback_timestamp_is_payload_only() -> None:
+    payload = {"number": 204, "comments": [], "reviews": []}
+    with patch("atelier.prs._run_json") as run_json:
+        assert prs.latest_feedback_timestamp(payload) is None
+    run_json.assert_not_called()
 
 
 def test_unresolved_review_thread_count_counts_unresolved_threads() -> None:

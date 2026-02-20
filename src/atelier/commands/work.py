@@ -1506,7 +1506,9 @@ def _persist_review_feedback_cursor(
     if not work_branch:
         return
     pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
-    feedback_at = prs.latest_feedback_timestamp(pr_payload, repo=repo_slug)
+    feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
+        pr_payload, repo=repo_slug
+    )
     if not feedback_at:
         return
     beads.update_changeset_review_feedback_cursor(
@@ -1535,7 +1537,9 @@ def _capture_review_feedback_snapshot(
             feedback_at=None, unresolved_threads=None, branch_head=branch_head
         )
     pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
-    feedback_at = prs.latest_feedback_timestamp(pr_payload, repo=repo_slug)
+    feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
+        pr_payload, repo=repo_slug
+    )
     unresolved_threads = None
     if isinstance(pr_payload, dict):
         raw_number = pr_payload.get("number")
@@ -1629,7 +1633,9 @@ def _select_review_feedback_changeset(
             )
         if not _changeset_in_review_candidate(issue, live_state=live_state):
             continue
-        feedback_at = prs.latest_feedback_timestamp(pr_payload, repo=repo_slug)
+        feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
+            pr_payload, repo=repo_slug
+        )
         if not feedback_at:
             continue
         feedback_time = _parse_issue_time(feedback_at)
@@ -1683,7 +1689,9 @@ def _select_global_review_feedback_changeset(
             )
         if not _changeset_in_review_candidate(issue, live_state=live_state):
             continue
-        feedback_at = prs.latest_feedback_timestamp(pr_payload, repo=repo_slug)
+        feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
+            pr_payload, repo=repo_slug
+        )
         if not feedback_at:
             continue
         feedback_time = _parse_issue_time(feedback_at)
