@@ -5,31 +5,19 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
+from pathlib import Path
 from typing import Iterable
 
-
-def run(cmd: list[str]) -> str:
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        message = result.stderr.strip() or result.stdout.strip()
-        if not message:
-            message = f"Command failed: {' '.join(cmd)}"
-        raise RuntimeError(message)
-    return result.stdout
-
-
-def run_json(cmd: list[str]) -> object:
-    output = run(cmd)
-    try:
-        return json.loads(output) if output.strip() else None
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Invalid JSON from {' '.join(cmd)}") from exc
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import _gh  # type: ignore[import-not-found]
+else:  # pragma: no cover
+    from . import _gh
 
 
 def reply_inline_comment(repo: str, comment_id: int, body: str) -> dict[str, object]:
-    payload = run_json(
+    payload = _gh.run_json(
         [
             "gh",
             "api",
@@ -53,7 +41,7 @@ mutation($threadId: ID!) {
   }
 }
 """.strip()
-    payload = run_json(
+    payload = _gh.run_json(
         [
             "gh",
             "api",
