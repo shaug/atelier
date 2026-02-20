@@ -47,6 +47,7 @@ from .. import (
 from ..io import confirm, die, prompt, say, select
 from ..worker import prompts as worker_prompts
 from ..worker import publish as worker_publish
+from ..worker import queueing as worker_queueing
 from ..worker import review as worker_review
 from ..worker import selection as worker_selection
 from ..worker import telemetry as worker_telemetry
@@ -425,30 +426,15 @@ def _send_needs_decision(
     repo_root: Path,
     dry_run: bool,
 ) -> None:
-    ready = _filter_epics(issues, require_unassigned=True)
-    assigned = _filter_epics(issues, assignee=agent_id)
-    subject = "NEEDS-DECISION: No eligible epics"
-    timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
-    body = "\n".join(
-        [
-            f"Agent: {agent_id}",
-            f"Mode: {mode}",
-            f"Total epics: {len(issues)}",
-            f"Ready epics: {len(ready)}",
-            f"Assigned epics: {len(assigned)}",
-            f"Timestamp: {timestamp}",
-        ]
-    )
-    if dry_run:
-        _dry_run_log(f"Would send message: {subject}")
-        _dry_run_log(body)
-        return
-    beads.create_message_bead(
-        subject=subject,
-        body=body,
-        metadata={"from": agent_id, "queue": "overseer", "msg_type": "notification"},
+    worker_queueing.send_needs_decision(
+        agent_id=agent_id,
+        mode=mode,
+        issues=issues,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
+        dry_run=dry_run,
+        filter_epics=_filter_epics,
+        dry_run_log=_dry_run_log,
     )
 
 
@@ -462,23 +448,15 @@ def _send_planner_notification(
     repo_root: Path,
     dry_run: bool,
 ) -> None:
-    if dry_run:
-        _dry_run_log(f"Would send message: {subject}")
-        _dry_run_log(body)
-        return
-    metadata: dict[str, object] = {
-        "from": agent_id,
-        "queue": "planner",
-        "msg_type": "notification",
-    }
-    if thread_id:
-        metadata["thread"] = thread_id
-    beads.create_message_bead(
+    worker_queueing.send_planner_notification(
         subject=subject,
         body=body,
-        metadata=metadata,
+        agent_id=agent_id,
+        thread_id=thread_id,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
+        dry_run=dry_run,
+        dry_run_log=_dry_run_log,
     )
 
 
@@ -491,24 +469,15 @@ def _send_invalid_changeset_labels_notification(
     repo_root: Path,
     dry_run: bool,
 ) -> str:
-    detail = ", ".join(invalid_changesets[:5])
-    if len(invalid_changesets) > 5:
-        detail = f"{detail}, ..."
-    _send_planner_notification(
-        subject=f"NEEDS-DECISION: Invalid changeset labels ({epic_id})",
-        body=(
-            "Found child work items with invalid labels: "
-            f"{', '.join(invalid_changesets)}.\n"
-            "All executable work items must be labeled at:changeset; "
-            "do not use at:subtask."
-        ),
+    return worker_queueing.send_invalid_changeset_labels_notification(
+        epic_id=epic_id,
+        invalid_changesets=invalid_changesets,
         agent_id=agent_id,
-        thread_id=epic_id,
         beads_root=beads_root,
         repo_root=repo_root,
         dry_run=dry_run,
+        dry_run_log=_dry_run_log,
     )
-    return detail
 
 
 def _send_no_ready_changesets(
@@ -519,29 +488,13 @@ def _send_no_ready_changesets(
     repo_root: Path,
     dry_run: bool,
 ) -> None:
-    summary = beads.epic_changeset_summary(
-        epic_id, beads_root=beads_root, cwd=repo_root
-    )
-    timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
-    subject = f"NEEDS-DECISION: No ready changesets for {epic_id}"
-    body = "\n".join(
-        [
-            f"Epic: {epic_id}",
-            f"Agent: {agent_id}",
-            f"Total changesets: {summary.total}",
-            f"Ready changesets: {summary.ready}",
-            f"Remaining changesets: {summary.remaining}",
-            f"Timestamp: {timestamp}",
-        ]
-    )
-    _send_planner_notification(
-        subject=subject,
-        body=body,
+    worker_queueing.send_no_ready_changesets(
+        epic_id=epic_id,
         agent_id=agent_id,
-        thread_id=epic_id,
         beads_root=beads_root,
         repo_root=repo_root,
         dry_run=dry_run,
+        dry_run_log=_dry_run_log,
     )
 
 
@@ -3703,13 +3656,12 @@ def _worker_opening_prompt(
 def _check_inbox_before_claim(
     agent_id: str, *, beads_root: Path, repo_root: Path
 ) -> bool:
-    inbox = beads.list_inbox_messages(
-        agent_id, beads_root=beads_root, cwd=repo_root, unread_only=True
+    return worker_queueing.check_inbox_before_claim(
+        agent_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        emit=say,
     )
-    if inbox:
-        say(f"Inbox has {len(inbox)} unread message(s); review before claiming work.")
-        return True
-    return False
 
 
 def _prompt_queue_claim(
@@ -3720,26 +3672,16 @@ def _prompt_queue_claim(
     repo_root: Path,
     assume_yes: bool = False,
 ) -> bool:
-    say("Queued messages:")
-    for issue in queued:
-        issue_id = issue.get("id") or ""
-        queue_name = issue.get("queue") or "queue"
-        title = issue.get("title") or ""
-        say(f"- {issue_id} [{queue_name}] {title}")
-    selection = ""
-    if assume_yes:
-        first = queued[0].get("id")
-        selection = str(first).strip() if first is not None else ""
-    else:
-        selection = prompt("Queue message id (blank to skip)").strip()
-    if not selection:
-        return False
-    valid_ids = {str(issue.get("id")) for issue in queued if issue.get("id")}
-    if selection not in valid_ids:
-        die(f"unknown queue message id: {selection}")
-    beads.claim_queue_message(selection, agent_id, beads_root=beads_root, cwd=repo_root)
-    say(f"Claimed queue message: {selection}")
-    return True
+    return worker_queueing.prompt_queue_claim(
+        queued,
+        agent_id=agent_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        assume_yes=assume_yes,
+        emit=say,
+        prompt_fn=prompt,
+        die_fn=die,
+    )
 
 
 def _handle_queue_before_claim(
@@ -3752,40 +3694,19 @@ def _handle_queue_before_claim(
     dry_run: bool = False,
     assume_yes: bool = False,
 ) -> bool:
-    queued = beads.list_queue_messages(
-        beads_root=beads_root,
-        cwd=repo_root,
-        queue=queue_name,
-        unread_only=True,
-    )
-    if not queued:
-        if force_prompt:
-            if dry_run:
-                _dry_run_log("No queued messages available.")
-            else:
-                say("No queued messages available.")
-            return True
-        return False
-    if dry_run:
-        say("Queued messages:")
-        for issue in queued:
-            issue_id = issue.get("id") or ""
-            queue_name = issue.get("queue") or "queue"
-            title = issue.get("title") or ""
-            say(f"- {issue_id} [{queue_name}] {title}")
-        _dry_run_log("Would prompt to claim a queue message.")
-        return True
-    claimed = _prompt_queue_claim(
-        queued,
-        agent_id=agent_id,
+    return worker_queueing.handle_queue_before_claim(
+        agent_id,
         beads_root=beads_root,
         repo_root=repo_root,
+        queue_name=queue_name,
+        force_prompt=force_prompt,
+        dry_run=dry_run,
         assume_yes=assume_yes,
+        emit=say,
+        prompt_fn=prompt,
+        die_fn=die,
+        dry_run_log=_dry_run_log,
     )
-    if not claimed:
-        say("Skipped queue; continuing to epic selection.")
-        return False
-    return True
 
 
 def _run_startup_contract(
