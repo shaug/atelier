@@ -1321,7 +1321,8 @@ def _select_review_feedback_changeset(
         if feedback_time is None:
             continue
         cursor = _changeset_feedback_cursor(issue)
-        if cursor is not None and feedback_time <= cursor:
+        status = str(issue.get("status") or "").strip().lower()
+        if status != "blocked" and cursor is not None and feedback_time <= cursor:
             continue
         candidates.append(
             _ReviewFeedbackSelection(
@@ -1367,7 +1368,8 @@ def _select_global_review_feedback_changeset(
         if feedback_time is None:
             continue
         cursor = _changeset_feedback_cursor(issue)
-        if cursor is not None and feedback_time <= cursor:
+        status = str(issue.get("status") or "").strip().lower()
+        if status != "blocked" and cursor is not None and feedback_time <= cursor:
             continue
         epic_id = _resolve_epic_id_for_changeset(
             issue, beads_root=beads_root, repo_root=repo_root
