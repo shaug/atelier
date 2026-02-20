@@ -48,6 +48,7 @@ from ..io import confirm, die, prompt, say, select
 from ..worker import prompts as worker_prompts
 from ..worker import publish as worker_publish
 from ..worker import review as worker_review
+from ..worker import selection as worker_selection
 from ..worker import telemetry as worker_telemetry
 from ..worker.models import (
     FinalizeResult,
@@ -302,7 +303,7 @@ def _issue_labels(issue: dict[str, object]) -> set[str]:
 
 
 def _is_eligible_status(status: str, *, allow_hooked: bool) -> bool:
-    return lifecycle.is_eligible_epic_status(status, allow_hooked=allow_hooked)
+    return worker_selection.is_eligible_status(status, allow_hooked=allow_hooked)
 
 
 def _filter_epics(
@@ -311,34 +312,17 @@ def _filter_epics(
     assignee: str | None = None,
     require_unassigned: bool = False,
 ) -> list[dict[str, object]]:
-    filtered: list[dict[str, object]] = []
-    for issue in issues:
-        status = str(issue.get("status") or "")
-        if not _is_eligible_status(status, allow_hooked=assignee is not None):
-            continue
-        labels = _issue_labels(issue)
-        if "at:draft" in labels:
-            continue
-        issue_assignee = issue.get("assignee")
-        if assignee is not None:
-            if issue_assignee != assignee:
-                continue
-        elif require_unassigned and issue_assignee:
-            continue
-        filtered.append(issue)
-    return filtered
+    return worker_selection.filter_epics(
+        issues,
+        assignee=assignee,
+        require_unassigned=require_unassigned,
+        allow_hooked=assignee is not None,
+        skip_draft=True,
+    )
 
 
 def _parse_issue_time(value: object) -> dt.datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = dt.datetime.fromisoformat(str(value))
-    except (TypeError, ValueError):
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=dt.timezone.utc)
-    return parsed
+    return worker_selection.parse_issue_time(value)
 
 
 def _is_closed_status(status: object) -> bool:
@@ -352,27 +336,11 @@ def _is_feedback_eligible_epic_status(status: object) -> bool:
 def _sort_by_created_at(
     issues: list[dict[str, object]], *, newest: bool = False
 ) -> list[dict[str, object]]:
-    sentinel = dt.datetime.max.replace(tzinfo=dt.timezone.utc)
-    return sorted(
-        issues,
-        key=lambda issue: _parse_issue_time(issue.get("created_at")) or sentinel,
-        reverse=newest,
-    )
+    return worker_selection.sort_by_created_at(issues, newest=newest)
 
 
 def _sort_by_recency(issues: list[dict[str, object]]) -> list[dict[str, object]]:
-    sentinel = dt.datetime.min.replace(tzinfo=dt.timezone.utc)
-
-    def key(issue: dict[str, object]) -> dt.datetime:
-        updated = _parse_issue_time(issue.get("updated_at"))
-        if updated:
-            return updated
-        created = _parse_issue_time(issue.get("created_at"))
-        if created:
-            return created
-        return sentinel
-
-    return sorted(issues, key=key, reverse=True)
+    return worker_selection.sort_by_recency(issues)
 
 
 def _agent_family_id(agent_id: str) -> str:
@@ -422,37 +390,14 @@ def _select_epic_prompt(
     is_actionable: Callable[[str], bool],
     assume_yes: bool = False,
 ) -> str | None:
-    epics = _filter_epics(issues, require_unassigned=True)
-    resume = _filter_epics(issues, assignee=agent_id)
-    if not epics and not resume:
-        return None
-    choices: dict[str, str] = {}
-    for issue in epics:
-        issue_id = issue.get("id") or ""
-        if not issue_id or not is_actionable(str(issue_id)):
-            continue
-        status = issue.get("status") or "unknown"
-        title = issue.get("title") or ""
-        root_branch_value = beads.extract_workspace_root_branch(issue) or "unset"
-        label = f"available | {issue_id} [{status}] {root_branch_value} {title}"
-        choices[label] = str(issue_id)
-    resume = _sort_by_recency(resume)
-    for issue in resume:
-        issue_id = issue.get("id") or ""
-        if not issue_id or not is_actionable(str(issue_id)):
-            continue
-        status = issue.get("status") or "unknown"
-        title = issue.get("title") or ""
-        root_branch_value = beads.extract_workspace_root_branch(issue) or "unset"
-        label = f"resume | {issue_id} [{status}] {root_branch_value} {title}"
-        choices[label] = str(issue_id)
-    if not choices:
-        return None
-    labels = list(choices.keys())
-    if assume_yes:
-        return choices[labels[0]]
-    selected = select("Epic to work on", labels)
-    return choices[selected]
+    return worker_selection.select_epic_prompt(
+        issues,
+        agent_id=agent_id,
+        is_actionable=is_actionable,
+        extract_root_branch=beads.extract_workspace_root_branch,
+        select_fn=lambda title, options: select(title, options),
+        assume_yes=assume_yes,
+    )
 
 
 def _select_epic_auto(
@@ -461,21 +406,11 @@ def _select_epic_auto(
     agent_id: str,
     is_actionable: Callable[[str], bool],
 ) -> str | None:
-    ready = _filter_epics(issues, require_unassigned=True)
-    if ready:
-        ready = _sort_by_created_at(ready)
-        for issue in ready:
-            issue_id = issue.get("id") or ""
-            if issue_id and is_actionable(str(issue_id)):
-                return str(issue_id)
-    unfinished = _filter_epics(issues, assignee=agent_id)
-    if unfinished:
-        unfinished = _sort_by_created_at(unfinished)
-        for issue in unfinished:
-            issue_id = issue.get("id") or ""
-            if issue_id and is_actionable(str(issue_id)):
-                return str(issue_id)
-    return None
+    return worker_selection.select_epic_auto(
+        issues,
+        agent_id=agent_id,
+        is_actionable=is_actionable,
+    )
 
 
 def _select_epic_from_ready_changesets(
