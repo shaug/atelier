@@ -17,6 +17,7 @@ description: >-
 - title: PR title string.
 - body: PR body string.
 - labels: comma-separated label list (use an empty string to clear labels).
+- pr_number: PR number for review-thread operations.
 
 ## Steps
 
@@ -28,18 +29,27 @@ description: >-
    `scripts/retarget_pr_base.py --repo <repo> --head <head> --base <base>`
 1. Read PR status/metadata with:
    `scripts/read_pr_status.py --repo <repo> --head <head>`
+1. For review feedback on inline comments:
+   - List unresolved review threads:
+     `scripts/list_review_threads.py --repo <repo> --pr-number <pr_number>`
+   - Reply inline (do not post a top-level PR comment):
+     `scripts/reply_inline_thread.py --repo <repo> --comment-id <comment_id> --thread-id <thread_id> --body-file <path>`
+   - Resolve the review thread after replying (done by `--thread-id` above).
 
 ## Invariants
 
 - Provide all parameters explicitly; do not infer repo, base, or head.
 - Keep label updates deterministic by matching the exact label set provided.
 - Fail fast when no matching PR exists for an update or status read.
+- When feedback comes from inline review comments, reply inline to that comment
+  and resolve the same thread.
 
 ## Prohibited actions
 
 - Do not mutate local git state or push branches.
 - Do not edit files outside of explicit PR metadata operations.
 - Do not modify repository settings or secrets.
+- Do not replace inline-thread replies with new top-level PR comments.
 
 ## Allowed verification calls
 

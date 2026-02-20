@@ -83,6 +83,10 @@ Skills link: ./skills
   policy allows opening a PR now.
 - Keep `pr_state` accurate in bead metadata (`pushed`, `draft-pr`, `pr-open`,
   `in-review`, `approved`, `merged`, `closed`).
+- For PR feedback runs, inline review comments must be answered inline and then
+  resolved; do not post a new top-level PR comment in place of an inline reply.
+  Use the `github-prs` skill scripts (`list_review_threads.py`,
+  `reply_inline_thread.py`) for deterministic thread handling.
 
 ## Messaging Rules
 

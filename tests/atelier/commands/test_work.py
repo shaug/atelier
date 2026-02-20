@@ -325,6 +325,8 @@ def test_worker_opening_prompt_includes_review_feedback_context() -> None:
     assert "Priority mode: review-feedback" in opening_prompt
     assert "PR: https://github.com/org/repo/pull/42" in opening_prompt
     assert "Do not reset lifecycle labels to ready" in opening_prompt
+    assert "reply inline to each comment and resolve the same thread" in opening_prompt
+    assert "list_review_threads.py" in opening_prompt
 
 
 def test_work_strips_codex_cd_option_override() -> None:

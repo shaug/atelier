@@ -3805,6 +3805,15 @@ def _worker_opening_prompt(
                     "feedback comments and address them directly."
                 ),
                 (
+                    "For inline review comments, reply inline to each comment and "
+                    "resolve the same thread; do not create new top-level PR "
+                    "comments as a substitute."
+                ),
+                (
+                    "Use github-prs skill scripts list_review_threads.py and "
+                    "reply_inline_thread.py for deterministic inline handling."
+                ),
+                (
                     "Do not reset lifecycle labels to ready while feedback remains "
                     "unaddressed."
                 ),
