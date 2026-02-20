@@ -3425,8 +3425,10 @@ def _run_startup_contract(
                 feedback_candidates.append(feedback_selection)
         if feedback_candidates:
             feedback_candidates.sort(
-                key=lambda item: _parse_issue_time(item.feedback_at)
-                or dt.datetime.max.replace(tzinfo=dt.timezone.utc)
+                key=lambda item: (
+                    _parse_issue_time(item.feedback_at)
+                    or dt.datetime.max.replace(tzinfo=dt.timezone.utc)
+                )
             )
             selected_feedback = feedback_candidates[0]
             say(

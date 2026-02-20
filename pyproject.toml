@@ -21,7 +21,7 @@ dev = [
   "mdformat>=0.7.0",
   "mdformat-frontmatter",
   "pytest>=8.0.0",
-  "ruff>=0.1.0",
+  "ruff==0.15.2",
   "shellcheck-py",
 ]
 
