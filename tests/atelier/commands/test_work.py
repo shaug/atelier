@@ -722,6 +722,94 @@ def test_find_invalid_changeset_labels_flags_unknown_cs_label() -> None:
     assert invalid == ["atelier-epic.1"]
 
 
+def test_next_changeset_ignores_draft_top_level_changeset() -> None:
+    with patch(
+        "atelier.commands.work.beads.run_bd_json",
+        return_value=[
+            {
+                "id": "at-9bh",
+                "status": "open",
+                "labels": ["at:changeset", "cs:ready", "at:draft"],
+                "description": "changeset.work_branch: at-9bh\n",
+            }
+        ],
+    ):
+        selected = work_cmd._next_changeset(
+            epic_id="at-9bh",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selected is None
+
+
+def test_select_epic_from_ready_changesets_skips_draft_epics() -> None:
+    issues = [
+        {"id": "at-9bh", "status": "open", "labels": ["at:epic", "at:draft"]},
+        {"id": "at-irs", "status": "open", "labels": ["at:epic", "at:ready"]},
+    ]
+
+    with patch(
+        "atelier.commands.work.beads.run_bd_json",
+        return_value=[
+            {
+                "id": "at-9bh.1",
+                "created_at": "2026-02-01T00:00:00+00:00",
+                "labels": ["at:changeset", "cs:ready"],
+            },
+            {
+                "id": "at-irs.1",
+                "created_at": "2026-02-02T00:00:00+00:00",
+                "labels": ["at:changeset", "cs:ready"],
+            },
+        ],
+    ):
+        selected = work_cmd._select_epic_from_ready_changesets(
+            issues=issues,
+            is_actionable=lambda issue_id: issue_id in {"at-9bh", "at-irs"},
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selected == "at-irs"
+
+
+def test_select_epic_from_ready_changesets_skips_assigned_epics() -> None:
+    issues = [
+        {
+            "id": "at-u9j",
+            "status": "open",
+            "labels": ["at:epic", "at:ready"],
+            "assignee": "atelier/worker/codex/p123-t1",
+        },
+        {"id": "at-irs", "status": "open", "labels": ["at:epic", "at:ready"]},
+    ]
+
+    with patch(
+        "atelier.commands.work.beads.run_bd_json",
+        return_value=[
+            {
+                "id": "at-u9j.1",
+                "created_at": "2026-02-01T00:00:00+00:00",
+                "labels": ["at:changeset", "cs:ready"],
+            },
+            {
+                "id": "at-irs.1",
+                "created_at": "2026-02-02T00:00:00+00:00",
+                "labels": ["at:changeset", "cs:ready"],
+            },
+        ],
+    ):
+        selected = work_cmd._select_epic_from_ready_changesets(
+            issues=issues,
+            is_actionable=lambda issue_id: issue_id in {"at-u9j", "at-irs"},
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selected == "at-irs"
+
+
 def test_work_prompt_yes_uses_first_epic_without_select() -> None:
     epics = [
         {

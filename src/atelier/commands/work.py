@@ -567,8 +567,10 @@ def _select_epic_from_ready_changesets(
     )
     if not ready_changesets:
         return None
-    known_epics = {
-        str(issue_id) for issue in issues if (issue_id := issue.get("id")) is not None
+    known_epics: dict[str, dict[str, object]] = {
+        str(issue_id): issue
+        for issue in issues
+        if (issue_id := issue.get("id")) is not None
     }
     for changeset in _sort_by_created_at(ready_changesets):
         issue_id = changeset.get("id")
@@ -579,6 +581,14 @@ def _select_epic_from_ready_changesets(
             maybe_epic = issue_id.split(".", 1)[0]
             if maybe_epic in known_epics:
                 candidate = maybe_epic
+        candidate_issue = known_epics.get(candidate)
+        source_issue = candidate_issue if candidate_issue is not None else changeset
+        source_labels = _issue_labels(source_issue)
+        if "at:draft" in source_labels:
+            continue
+        assignee = source_issue.get("assignee")
+        if isinstance(assignee, str) and assignee.strip():
+            continue
         if is_actionable(candidate):
             return candidate
     return None
@@ -745,6 +755,8 @@ def _next_changeset(
         issue = target[0]
         issue_id = issue.get("id")
         labels = _issue_labels(issue)
+        if "at:draft" in labels:
+            return None
         if (
             isinstance(issue_id, str)
             and issue_id == epic_id
