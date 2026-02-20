@@ -3047,25 +3047,7 @@ def _finalize_changeset(
             return FinalizeResult(
                 continue_running=True, reason="changeset_review_pending"
             )
-        _mark_changeset_blocked(
-            changeset_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            reason="changeset state not updated after worker session",
-        )
-        _send_planner_notification(
-            subject=f"NEEDS-DECISION: Changeset not updated ({changeset_id})",
-            body="Changeset still marked in_progress after worker completion. "
-            "Confirm desired next state or update the bead.",
-            agent_id=agent_id,
-            thread_id=changeset_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            dry_run=False,
-        )
-        return FinalizeResult(
-            continue_running=False, reason="changeset_blocked_not_updated"
-        )
+        # Keep evaluating publish signals and PR lifecycle below.
     description = issue.get("description")
     fields = beads.parse_description_fields(
         description if isinstance(description, str) else ""
@@ -4111,17 +4093,7 @@ def _run_worker_once(
                         prompt_update=lambda message: confirm(message, default=False),
                     )
                     skills_dir = sync_result.skills_dir
-                    if sync_result.action == "upgrade_available":
-                        detail = (
-                            f" ({sync_result.detail})" if sync_result.detail else ""
-                        )
-                        say(f"Managed skills: update available{detail}")
-                    elif sync_result.action == "skipped_modified":
-                        detail = (
-                            f" ({sync_result.detail})" if sync_result.detail else ""
-                        )
-                        say(f"Managed skills: skipped due to local changes{detail}")
-                    elif sync_result.action in {"installed", "updated"}:
+                    if sync_result.action in {"installed", "updated", "up_to_date"}:
                         say(f"Managed skills: {sync_result.action}")
                 except OSError:
                     skills_dir = None

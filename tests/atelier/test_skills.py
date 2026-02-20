@@ -123,9 +123,7 @@ def test_sync_project_skills_installs_when_missing() -> None:
         assert (project_dir / "skills" / "planner_startup_check" / "SKILL.md").exists()
 
 
-def test_sync_project_skills_reports_upgrade_available_for_missing_packaged_skill() -> (
-    None
-):
+def test_sync_project_skills_updates_when_packaged_skill_missing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)
         skills.install_workspace_skills(project_dir)
@@ -133,13 +131,9 @@ def test_sync_project_skills_reports_upgrade_available_for_missing_packaged_skil
         assert stale_skill.exists()
         shutil.rmtree(stale_skill)
 
-        result = skills.sync_project_skills(
-            project_dir,
-            upgrade_policy="ask",
-            interactive=False,
-        )
-        assert result.action == "upgrade_available"
-        assert result.detail == "non-interactive session"
+        result = skills.sync_project_skills(project_dir)
+        assert result.action == "updated"
+        assert stale_skill.exists()
 
 
 def test_sync_project_skills_applies_upgrade_with_yes() -> None:
@@ -154,19 +148,16 @@ def test_sync_project_skills_applies_upgrade_with_yes() -> None:
         assert (project_dir / "skills" / "planner_startup_check" / "SKILL.md").exists()
 
 
-def test_sync_project_skills_skips_when_locally_modified_without_confirmation() -> None:
+def test_sync_project_skills_overwrites_when_locally_modified() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)
         skills.install_workspace_skills(project_dir)
         skill_doc = project_dir / "skills" / "publish" / "SKILL.md"
         skill_doc.write_text(skill_doc.read_text(encoding="utf-8") + "\nlocal\n")
 
-        result = skills.sync_project_skills(
-            project_dir, upgrade_policy="ask", interactive=False
-        )
-        assert result.action == "skipped_modified"
-        assert result.detail is not None
-        assert "modified=" in result.detail
+        result = skills.sync_project_skills(project_dir)
+        assert result.action == "updated"
+        assert "local" not in skill_doc.read_text(encoding="utf-8")
 
 
 def test_sync_project_skills_overwrites_local_changes_with_yes() -> None:

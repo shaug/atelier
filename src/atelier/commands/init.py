@@ -62,14 +62,8 @@ def init_project(args: object) -> None:
             interactive=(sys.stdin.isatty() and sys.stdout.isatty() and not yes),
             prompt_update=lambda message: confirm(message, default=False),
         )
-        if sync_result.action in {"installed", "updated"}:
+        if sync_result.action in {"installed", "updated", "up_to_date"}:
             say(f"Managed skills: {sync_result.action}")
-        elif sync_result.action == "upgrade_available":
-            detail = f" ({sync_result.detail})" if sync_result.detail else ""
-            say(f"Managed skills: update available{detail}")
-        elif sync_result.action == "skipped_modified":
-            detail = f" ({sync_result.detail})" if sync_result.detail else ""
-            say(f"Managed skills: skipped due to local changes{detail}")
     except OSError:
         pass
     provider_resolution = external_registry.resolve_planner_provider(

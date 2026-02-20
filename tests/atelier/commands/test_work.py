@@ -4247,7 +4247,7 @@ def test_run_worker_once_stops_when_changeset_not_updated() -> None:
         )
 
     assert summary.started is False
-    assert summary.reason == "changeset_blocked_not_updated"
+    assert summary.reason == "changeset_blocked_missing_metadata"
 
 
 def test_finalize_keeps_parent_open_when_children_pending() -> None:
@@ -4412,6 +4412,55 @@ def test_finalize_flags_missing_pr_when_strategy_allows_creation() -> None:
         for call in run_bd_command.call_args_list
         for args in [call.args[0]]
     )
+
+
+def test_finalize_in_progress_changeset_attempts_pr_creation_when_pushed() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "title": "My changeset",
+                    "labels": ["at:changeset", "cs:in_progress"],
+                    "description": (
+                        "changeset.work_branch: feat/root-atelier-epic.1\n"
+                        "pr_state: pushed\n"
+                    ),
+                    "status": "open",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch(
+            "atelier.commands.work._attempt_create_draft_pr",
+            return_value=(False, "gh auth failed"),
+        ) as create_pr,
+        patch("atelier.commands.work.beads.run_bd_command"),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch("atelier.commands.work._mark_changeset_in_progress") as mark_in_progress,
+        patch("atelier.commands.work._send_planner_notification") as notify,
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+            branch_pr_strategy="sequential",
+        )
+
+    assert result.continue_running is False
+    assert result.reason == "changeset_pr_missing"
+    create_pr.assert_called_once()
+    mark_in_progress.assert_called_once()
+    notify.assert_called_once()
 
 
 def test_finalize_creates_pr_when_missing_and_strategy_allows() -> None:

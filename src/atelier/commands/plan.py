@@ -467,16 +467,6 @@ def run_planner(args: object) -> None:
                     skills_dir = sync_result.skills_dir
                     if sync_result.action in {"installed", "updated"}:
                         finish(f"{sync_result.action}: {skills_dir}")
-                    elif sync_result.action == "upgrade_available":
-                        detail = (
-                            f" ({sync_result.detail})" if sync_result.detail else ""
-                        )
-                        finish(f"update available{detail}")
-                    elif sync_result.action == "skipped_modified":
-                        detail = (
-                            f" ({sync_result.detail})" if sync_result.detail else ""
-                        )
-                        finish(f"skipped: local changes{detail}")
                     else:
                         finish(str(skills_dir))
                 except OSError:

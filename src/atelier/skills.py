@@ -222,7 +222,11 @@ def sync_project_skills(
     prompt_update: Callable[[str], bool] | None = None,
     dry_run: bool = False,
 ) -> ProjectSkillsSyncResult:
-    """Reconcile project skills with packaged skills under upgrade policy."""
+    """Reconcile project skills with packaged skills.
+
+    Project skills are Atelier-managed artifacts and are always synchronized
+    to the packaged version when drift is detected.
+    """
     skills_dir = paths.project_skills_dir(project_dir)
     if not skills_dir.exists():
         if dry_run:
@@ -237,49 +241,10 @@ def sync_project_skills(
     state = workspace_skill_state(project_dir, None)
     if not state.needs_install:
         return ProjectSkillsSyncResult(skills_dir=skills_dir, action="up_to_date")
-    detail_parts: list[str] = []
-    if state.modified:
-        detail_parts.append(f"modified={len(state.modified)}")
-    if state.extra:
-        detail_parts.append(f"extra={len(state.extra)}")
-    if state.missing:
-        detail_parts.append(f"missing={len(state.missing)}")
-    detail = ", ".join(detail_parts) or "local changes detected"
-
-    should_apply = yes or upgrade_policy == "always"
-    if not should_apply and upgrade_policy == "ask" and interactive and prompt_update:
-        message = "Update managed skills to the latest packaged set?"
-        if not state.unmodified:
-            message = (
-                "Managed skills changed locally "
-                f"({detail}); overwrite with latest packaged skills?"
-            )
-        should_apply = prompt_update(message)
-
-    if should_apply:
-        if dry_run:
-            return ProjectSkillsSyncResult(
-                skills_dir=skills_dir,
-                action="would_update",
-            )
-        install_workspace_skills(project_dir)
-        return ProjectSkillsSyncResult(skills_dir=skills_dir, action="updated")
-
-    if not state.unmodified:
+    if dry_run:
         return ProjectSkillsSyncResult(
             skills_dir=skills_dir,
-            action="skipped_modified",
-            detail=detail,
+            action="would_update",
         )
-
-    if upgrade_policy == "manual":
-        detail = "upgrade policy is manual"
-    elif upgrade_policy == "ask" and not interactive:
-        detail = "non-interactive session"
-    else:
-        detail = "upgrade declined"
-    return ProjectSkillsSyncResult(
-        skills_dir=skills_dir,
-        action="upgrade_available",
-        detail=detail,
-    )
+    install_workspace_skills(project_dir)
+    return ProjectSkillsSyncResult(skills_dir=skills_dir, action="updated")
