@@ -1161,6 +1161,33 @@ def _changeset_waiting_on_review_or_signals(
     branch_pr_strategy: object,
     git_path: str | None,
 ) -> bool:
+    if not branch_pr:
+        return False
+    work_branch = _changeset_work_branch(issue)
+    if work_branch:
+        pushed = git.git_ref_exists(
+            repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
+        )
+        pr_payload = (
+            prs.read_github_pr_status(repo_slug, work_branch) if repo_slug else None
+        )
+        review_requested = prs.has_review_requests(pr_payload)
+        state = prs.lifecycle_state(
+            pr_payload, pushed=pushed, review_requested=review_requested
+        )
+        if state in {"merged", "closed"}:
+            return False
+        if state in {"draft-pr", "pr-open", "in-review", "approved"}:
+            return True
+        if state == "pushed":
+            decision = _changeset_pr_creation_decision(
+                issue,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                git_path=git_path,
+                branch_pr_strategy=branch_pr_strategy,
+            )
+            return not decision.allow_pr
     review_state = _changeset_review_state(issue)
     if review_state:
         if review_state in {"draft-pr", "pr-open", "in-review", "approved"}:
@@ -1174,32 +1201,6 @@ def _changeset_waiting_on_review_or_signals(
                 branch_pr_strategy=branch_pr_strategy,
             )
             return not decision.allow_pr
-    if not branch_pr:
-        return False
-    work_branch = _changeset_work_branch(issue)
-    if not work_branch:
-        return False
-    pushed = git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
-    )
-    pr_payload = (
-        prs.read_github_pr_status(repo_slug, work_branch) if repo_slug else None
-    )
-    review_requested = prs.has_review_requests(pr_payload)
-    state = prs.lifecycle_state(
-        pr_payload, pushed=pushed, review_requested=review_requested
-    )
-    if state in {"draft-pr", "pr-open", "in-review", "approved"}:
-        return True
-    if state == "pushed":
-        decision = _changeset_pr_creation_decision(
-            issue,
-            repo_slug=repo_slug,
-            repo_root=repo_root,
-            git_path=git_path,
-            branch_pr_strategy=branch_pr_strategy,
-        )
-        return not decision.allow_pr
     return False
 
 
