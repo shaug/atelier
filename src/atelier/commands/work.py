@@ -26,6 +26,7 @@ from .. import (
     exec,
     git,
     hooks,
+    lifecycle,
     messages,
     paths,
     policy,
@@ -60,7 +61,6 @@ _INTEGRATED_SHA_NOTE_PATTERN = re.compile(
     re.MULTILINE,
 )
 _DEPENDENCY_ID_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\b")
-_ACTIVE_REVIEW_STATES = {"draft-pr", "pr-open", "in-review", "approved"}
 
 
 @dataclass(frozen=True)
@@ -355,14 +355,7 @@ def _issue_labels(issue: dict[str, object]) -> set[str]:
 
 
 def _is_eligible_status(status: str, *, allow_hooked: bool) -> bool:
-    if not status:
-        return True
-    normalized = status.lower()
-    if normalized in {"open", "ready", "in_progress"}:
-        return True
-    if allow_hooked and normalized == "hooked":
-        return True
-    return False
+    return lifecycle.is_eligible_epic_status(status, allow_hooked=allow_hooked)
 
 
 def _filter_epics(
@@ -402,8 +395,7 @@ def _parse_issue_time(value: object) -> dt.datetime | None:
 
 
 def _is_closed_status(status: object) -> bool:
-    normalized = str(status or "").strip().lower()
-    return normalized in {"closed", "done"}
+    return lifecycle.is_closed_status(status)
 
 
 def _is_feedback_eligible_epic_status(status: object) -> bool:
@@ -847,29 +839,11 @@ def _has_open_descendant_changesets(
 
 
 def _is_changeset_in_progress(issue: dict[str, object]) -> bool:
-    status = str(issue.get("status") or "").strip().lower()
-    if status == "in_progress":
-        return True
-    labels = _issue_labels(issue)
-    return "cs:in_progress" in labels
+    return lifecycle.is_changeset_in_progress(issue.get("status"), _issue_labels(issue))
 
 
 def _is_changeset_ready(issue: dict[str, object]) -> bool:
-    labels = _issue_labels(issue)
-    if "cs:ready" in labels:
-        return True
-    if "at:changeset" not in labels and "cs:in_progress" not in labels:
-        return False
-    if "cs:planned" in labels or "cs:blocked" in labels:
-        return False
-    if "cs:merged" in labels or "cs:abandoned" in labels:
-        return False
-    status = str(issue.get("status") or "").strip().lower()
-    if status in {"closed", "done", "blocked"}:
-        return False
-    if status in {"open", "in_progress", "hooked"}:
-        return True
-    return "cs:in_progress" in labels
+    return lifecycle.is_changeset_ready(issue.get("status"), _issue_labels(issue))
 
 
 def _changeset_review_state(issue: dict[str, object]) -> str | None:
@@ -877,13 +851,7 @@ def _changeset_review_state(issue: dict[str, object]) -> str | None:
     fields = beads.parse_description_fields(
         description if isinstance(description, str) else ""
     )
-    raw = fields.get("pr_state")
-    if not isinstance(raw, str):
-        return None
-    normalized = raw.strip().lower()
-    if not normalized or normalized == "null":
-        return None
-    return normalized
+    return lifecycle.normalize_review_state(fields.get("pr_state"))
 
 
 def _changeset_waiting_on_review(issue: dict[str, object]) -> bool:
@@ -1553,17 +1521,12 @@ def _review_feedback_progressed(
 def _changeset_in_review_candidate(
     issue: dict[str, object], *, live_state: str | None = None
 ) -> bool:
-    labels = _issue_labels(issue)
-    if "at:changeset" not in labels:
-        return False
-    if "cs:merged" in labels or "cs:abandoned" in labels:
-        return False
-    if _is_closed_status(issue.get("status")):
-        return False
-    if live_state is not None:
-        return live_state in _ACTIVE_REVIEW_STATES
-    state = _changeset_review_state(issue)
-    return state in _ACTIVE_REVIEW_STATES
+    return lifecycle.is_changeset_in_review_candidate(
+        labels=_issue_labels(issue),
+        status=issue.get("status"),
+        live_state=live_state,
+        stored_review_state=_changeset_review_state(issue),
+    )
 
 
 def _select_review_feedback_changeset(
