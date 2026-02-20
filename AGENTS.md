@@ -106,6 +106,21 @@ ______________________________________________________________________
 
 Do not add hidden behavior or implicit defaults.
 
+### Code Shape & Module Boundaries
+
+- Keep modules cognitively scoped:
+  - target **200-500 LOC** for most modules
+  - if a module exceeds **~1,000 LOC**, treat it as a refactor candidate and
+    split by responsibility
+- Treat `src/atelier/commands/*.py` as thin CLI controllers:
+  - parse/normalize inputs
+  - orchestrate calls
+  - render user-facing output
+  - delegate domain/business logic to non-command modules
+- Prefer small, composable functions over monolithic command implementations.
+- Keep command tests thin and focused on wiring/CLI behavior; place business
+  logic tests next to the extracted modules they exercise.
+
 ______________________________________________________________________
 
 ## Templates

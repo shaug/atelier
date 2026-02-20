@@ -45,6 +45,15 @@ from .. import (
     log as atelier_log,
 )
 from ..io import confirm, die, prompt, say, select
+from ..worker import prompts as worker_prompts
+from ..worker import telemetry as worker_telemetry
+from ..worker.models import (
+    FinalizeResult,
+    PublishSignalDiagnostics,
+    ReconcileResult,
+    StartupContractResult,
+    WorkerRunSummary,
+)
 from .resolve import resolve_current_project_with_repo_root
 
 _MODE_VALUES = {"prompt", "auto"}
@@ -67,38 +76,9 @@ _INTEGRATED_SHA_NOTE_PATTERN = re.compile(
 _DEPENDENCY_ID_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\b")
 
 
-@dataclass(frozen=True)
-class StartupContractResult:
-    epic_id: str | None
-    changeset_id: str | None
-    should_exit: bool
-    reason: str
-    reassign_from: str | None = None
-
-
-@dataclass(frozen=True)
-class WorkerRunSummary:
-    started: bool
-    reason: str
-    epic_id: str | None = None
-    changeset_id: str | None = None
-
-
-@dataclass(frozen=True)
-class FinalizeResult:
-    continue_running: bool
-    reason: str
-
-
 ReviewFeedbackSnapshot = work_feedback.ReviewFeedbackSnapshot
-
-
-@dataclass(frozen=True)
-class ReconcileResult:
-    scanned: int
-    actionable: int
-    reconciled: int
-    failed: int
+# Compatibility alias while tests/modules migrate to extracted worker models.
+_PublishSignalDiagnostics = PublishSignalDiagnostics
 
 
 @dataclass(frozen=True)
@@ -109,18 +89,6 @@ class _ReconcileCandidate:
     epic_id: str
     integrated_sha: str | None
     dependency_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class _PublishSignalDiagnostics:
-    local_branch_exists: bool
-    remote_branch_exists: bool
-    worktree_path: Path | None
-    dirty_entries: tuple[str, ...]
-
-    @property
-    def has_recoverable_local_state(self) -> bool:
-        return self.local_branch_exists or bool(self.dirty_entries)
 
 
 @dataclass(frozen=True)
@@ -226,63 +194,22 @@ def _log_warning(message: str) -> None:
 
 
 def _trace_enabled() -> bool:
-    return os.environ.get("ATELIER_WORK_TRACE", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return worker_telemetry.trace_enabled("ATELIER_WORK_TRACE")
 
 
 def _step(label: str, *, timings: list[tuple[str, float]], trace: bool) -> callable:
-    say(f"-> {label}")
-    _log_debug(f"step start label={label}")
-    start = time.perf_counter()
-
-    def finish(extra: str | None = None) -> None:
-        elapsed = time.perf_counter() - start
-        timings.append((label, elapsed))
-        suffix = f" ({elapsed:.2f}s)" if trace or elapsed >= 0.5 else ""
-        if extra:
-            say(f"ok {label}{suffix}: {extra}")
-            _log_debug(
-                f"step finish label={label} elapsed={elapsed:.2f}s detail={extra}"
-            )
-        else:
-            say(f"ok {label}{suffix}")
-            _log_debug(f"step finish label={label} elapsed={elapsed:.2f}s")
-
-    return finish
+    return worker_telemetry.step(
+        label, timings=timings, trace=trace, say=say, log_debug=_log_debug
+    )
 
 
 def _report_timings(timings: list[tuple[str, float]], *, trace: bool) -> None:
-    if not timings:
-        return
-    slow = [(label, elapsed) for label, elapsed in timings if elapsed >= 0.5]
-    if not trace and not slow:
-        return
-    say("Timing summary:")
-    for label, elapsed in sorted(timings, key=lambda item: item[1], reverse=True):
-        if not trace and elapsed < 0.5:
-            continue
-        say(f"- {label}: {elapsed:.2f}s")
+    worker_telemetry.report_timings(timings, trace=trace, say=say)
 
 
 def _report_worker_summary(summary: WorkerRunSummary, *, dry_run: bool) -> None:
-    prefix = "DRY-RUN " if dry_run else ""
-    status = "started worker session" if summary.started else "no worker started"
-    say(f"{prefix}Summary: {status}")
-    if summary.reason:
-        say(f"- Reason: {summary.reason}")
-    if summary.epic_id:
-        say(f"- Epic: {summary.epic_id}")
-    if summary.changeset_id:
-        say(f"- Changeset: {summary.changeset_id}")
-    _log_debug(
-        "summary "
-        f"started={summary.started} reason={summary.reason or 'none'} "
-        f"epic={summary.epic_id or 'none'} "
-        f"changeset={summary.changeset_id or 'none'} dry_run={dry_run}"
+    worker_telemetry.report_worker_summary(
+        summary, dry_run=dry_run, say=say, log_debug=_log_debug
     )
 
 
@@ -2757,7 +2684,7 @@ def _collect_publish_signal_diagnostics(
     project_data_dir: Path | None,
     repo_root: Path,
     git_path: str | None,
-) -> _PublishSignalDiagnostics:
+) -> PublishSignalDiagnostics:
     local_branch_exists = git.git_ref_exists(
         repo_root, f"refs/heads/{work_branch}", git_path=git_path
     )
@@ -2771,7 +2698,7 @@ def _collect_publish_signal_diagnostics(
     )
     status_root = worktree_path or repo_root
     dirty_entries = tuple(git.git_status_porcelain(status_root, git_path=git_path))
-    return _PublishSignalDiagnostics(
+    return PublishSignalDiagnostics(
         local_branch_exists=local_branch_exists,
         remote_branch_exists=remote_branch_exists,
         worktree_path=worktree_path,
@@ -2795,7 +2722,7 @@ def _attempt_push_work_branch(
 
 
 def _format_publish_diagnostics(
-    diagnostics: _PublishSignalDiagnostics, *, push_detail: str | None = None
+    diagnostics: PublishSignalDiagnostics, *, push_detail: str | None = None
 ) -> str:
     lines = [
         f"- local branch exists: {'yes' if diagnostics.local_branch_exists else 'no'}",
@@ -3999,56 +3926,15 @@ def _worker_opening_prompt(
     review_feedback: bool = False,
     review_pr_url: str | None = None,
 ) -> str:
-    session = workspace.workspace_session_identifier(
-        project_enlistment, workspace_branch, changeset_id or None
+    return worker_prompts.worker_opening_prompt(
+        project_enlistment=project_enlistment,
+        workspace_branch=workspace_branch,
+        epic_id=epic_id,
+        changeset_id=changeset_id,
+        changeset_title=changeset_title,
+        review_feedback=review_feedback,
+        review_pr_url=review_pr_url,
     )
-    title = changeset_title.strip() if changeset_title else ""
-    summary = f"{changeset_id}: {title}" if title else changeset_id
-    lines = [
-        session,
-        ("Execute only this assigned changeset and do not ask for task clarification."),
-        f"Epic: {epic_id}",
-        f"Changeset: {summary}",
-        (
-            "If this project uses PR review and PR creation is allowed now, create "
-            "or update the PR during finalize."
-        ),
-        (
-            "PR title/body must be user-facing and based on ticket scope + "
-            "acceptance criteria; do not mention internal bead IDs."
-        ),
-        (
-            "When done, update beads state/labels for this changeset. If blocked,"
-            " send NEEDS-DECISION with details and exit."
-        ),
-    ]
-    if review_feedback:
-        lines.extend(
-            [
-                "",
-                "Priority mode: review-feedback",
-                (
-                    "This run is for PR feedback resolution. First fetch open PR "
-                    "feedback comments and address them directly."
-                ),
-                (
-                    "For inline review comments, reply inline to each comment and "
-                    "resolve the same thread; do not create new top-level PR "
-                    "comments as a substitute."
-                ),
-                (
-                    "Use github-prs skill scripts list_review_threads.py and "
-                    "reply_inline_thread.py for deterministic inline handling."
-                ),
-                (
-                    "Do not reset lifecycle labels to ready while feedback remains "
-                    "unaddressed."
-                ),
-            ]
-        )
-        if review_pr_url:
-            lines.append(f"PR: {review_pr_url}")
-    return "\n".join(lines)
 
 
 def _check_inbox_before_claim(
