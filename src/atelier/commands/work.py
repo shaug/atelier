@@ -4413,6 +4413,7 @@ def _run_worker_once(
     """Start a single worker session by selecting an epic and changeset."""
     timings: list[tuple[str, float]] = []
     trace = _trace_enabled()
+    prs.clear_runtime_cache()
 
     def finish(summary: WorkerRunSummary) -> WorkerRunSummary:
         _report_timings(timings, trace=trace)

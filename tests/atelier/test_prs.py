@@ -1,6 +1,16 @@
+import subprocess
 from unittest.mock import patch
 
+import pytest
+
 from atelier import prs
+
+
+@pytest.fixture(autouse=True)
+def _clear_pr_runtime_cache() -> object:
+    prs.clear_runtime_cache()
+    yield
+    prs.clear_runtime_cache()
 
 
 def test_github_repo_slug() -> None:
@@ -64,6 +74,69 @@ def test_lookup_github_pr_status_reports_query_errors() -> None:
     assert result.outcome == "error"
     assert result.payload is None
     assert result.error == "gh auth failed"
+
+
+def test_run_retries_retryable_errors_before_success() -> None:
+    transient = subprocess.CompletedProcess(
+        args=["gh"], returncode=1, stdout="", stderr="TLS timeout"
+    )
+    success = subprocess.CompletedProcess(
+        args=["gh"], returncode=0, stdout="ok", stderr=""
+    )
+    with (
+        patch(
+            "atelier.prs.subprocess.run", side_effect=[transient, success]
+        ) as run_cmd,
+        patch("atelier.prs.time.sleep") as sleep,
+    ):
+        output = prs._run(["gh", "pr", "list"])
+
+    assert output == "ok"
+    assert run_cmd.call_count == 2
+    sleep.assert_called_once()
+
+
+def test_lookup_github_pr_status_uses_runtime_cache() -> None:
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch("atelier.prs._find_latest_pr_number", return_value=7) as latest_pr,
+        patch(
+            "atelier.prs._run_json",
+            return_value={"number": 7, "state": "OPEN"},
+        ) as run_json,
+    ):
+        first = prs.lookup_github_pr_status("org/repo", "feature/test")
+        second = prs.lookup_github_pr_status("org/repo", "feature/test")
+
+    assert first.found is True
+    assert second.found is True
+    latest_pr.assert_called_once()
+    run_json.assert_called_once()
+
+
+def test_unresolved_review_thread_count_uses_runtime_cache() -> None:
+    payload = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [{"isResolved": False}],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    }
+                }
+            }
+        }
+    }
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch("atelier.prs._run_json", return_value=payload) as run_json,
+    ):
+        first = prs.unresolved_review_thread_count("org/repo", 42)
+        second = prs.unresolved_review_thread_count("org/repo", 42)
+
+    assert first == 1
+    assert second == 1
+    run_json.assert_called_once()
 
 
 def test_latest_feedback_timestamp_prefers_non_bot_reviewer_events() -> None:

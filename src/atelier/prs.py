@@ -5,10 +5,33 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Literal
 
 from . import git
+
+_GH_TIMEOUT_SECONDS = 20.0
+_GH_RETRY_ATTEMPTS = 2
+_GH_RETRY_BACKOFF_SECONDS = 0.4
+_GH_RETRY_ERROR_MARKERS = (
+    "timed out",
+    "timeout",
+    "temporarily unavailable",
+    "connection reset",
+    "connection refused",
+    "connection aborted",
+    "network",
+    "tls",
+    "rate limit",
+    "502",
+    "503",
+    "504",
+)
+
+_PR_LOOKUP_CACHE: dict[tuple[str, str], GithubPrLookup] = {}
+_INLINE_FEEDBACK_CACHE: dict[tuple[str, int], str | None] = {}
+_UNRESOLVED_THREADS_CACHE: dict[tuple[str, int], int | None] = {}
 
 
 @dataclass(frozen=True)
@@ -38,12 +61,52 @@ def github_repo_slug(origin: str | None) -> str | None:
     return None
 
 
+def clear_runtime_cache() -> None:
+    """Clear in-process PR query caches."""
+    _PR_LOOKUP_CACHE.clear()
+    _INLINE_FEEDBACK_CACHE.clear()
+    _UNRESOLVED_THREADS_CACHE.clear()
+
+
+def _is_retryable_message(message: str) -> bool:
+    normalized = message.strip().lower()
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in _GH_RETRY_ERROR_MARKERS)
+
+
 def _run(cmd: list[str]) -> str:
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
+    attempts = max(int(_GH_RETRY_ATTEMPTS), 1)
+    last_error: str | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=_GH_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            last_error = (
+                f"Command timed out after {_GH_TIMEOUT_SECONDS:.0f}s: {' '.join(cmd)}"
+            )
+            if attempt < attempts:
+                time.sleep(_GH_RETRY_BACKOFF_SECONDS * attempt)
+                continue
+            raise RuntimeError(last_error) from None
+
+        if result.returncode == 0:
+            return result.stdout
+
         message = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(message or f"Command failed: {' '.join(cmd)}")
-    return result.stdout
+        last_error = message or f"Command failed: {' '.join(cmd)}"
+        if attempt < attempts and _is_retryable_message(last_error):
+            time.sleep(_GH_RETRY_BACKOFF_SECONDS * attempt)
+            continue
+        raise RuntimeError(last_error)
+
+    raise RuntimeError(last_error or f"Command failed: {' '.join(cmd)}")
 
 
 def _run_json(cmd: list[str]) -> object:
@@ -98,14 +161,24 @@ def _find_latest_pr_number(repo: str, head: str) -> int | None:
 
 def lookup_github_pr_status(repo: str, head: str) -> GithubPrLookup:
     """Return explicit GitHub PR lookup outcome for a head branch."""
+    cache_key = (repo, head)
+    cached = _PR_LOOKUP_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     if not _gh_available():
-        return GithubPrLookup(outcome="error", error="missing required command: gh")
+        result = GithubPrLookup(outcome="error", error="missing required command: gh")
+        _PR_LOOKUP_CACHE[cache_key] = result
+        return result
     try:
         number = _find_latest_pr_number(repo, head)
     except (RuntimeError, json.JSONDecodeError) as exc:
-        return GithubPrLookup(outcome="error", error=str(exc))
+        result = GithubPrLookup(outcome="error", error=str(exc))
+        _PR_LOOKUP_CACHE[cache_key] = result
+        return result
     if number is None:
-        return GithubPrLookup(outcome="not_found")
+        result = GithubPrLookup(outcome="not_found")
+        _PR_LOOKUP_CACHE[cache_key] = result
+        return result
     try:
         payload = _run_json(
             [
@@ -120,10 +193,18 @@ def lookup_github_pr_status(repo: str, head: str) -> GithubPrLookup:
             ]
         )
     except (RuntimeError, json.JSONDecodeError) as exc:
-        return GithubPrLookup(outcome="error", error=str(exc))
+        result = GithubPrLookup(outcome="error", error=str(exc))
+        _PR_LOOKUP_CACHE[cache_key] = result
+        return result
     if not isinstance(payload, dict):
-        return GithubPrLookup(outcome="error", error="Unexpected gh output for PR view")
-    return GithubPrLookup(outcome="found", payload=payload)
+        result = GithubPrLookup(
+            outcome="error", error="Unexpected gh output for PR view"
+        )
+        _PR_LOOKUP_CACHE[cache_key] = result
+        return result
+    result = GithubPrLookup(outcome="found", payload=payload)
+    _PR_LOOKUP_CACHE[cache_key] = result
+    return result
 
 
 def read_github_pr_status(repo: str, head: str) -> dict[str, object] | None:
@@ -218,6 +299,9 @@ def latest_feedback_timestamp(payload: dict[str, object] | None) -> str | None:
 
 
 def _latest_inline_review_comment_timestamp(repo: str, pr_number: int) -> str | None:
+    cache_key = (repo, pr_number)
+    if cache_key in _INLINE_FEEDBACK_CACHE:
+        return _INLINE_FEEDBACK_CACHE[cache_key]
     try:
         review_comments = _run_json(
             [
@@ -228,8 +312,10 @@ def _latest_inline_review_comment_timestamp(repo: str, pr_number: int) -> str | 
             ]
         )
     except (RuntimeError, json.JSONDecodeError):
+        _INLINE_FEEDBACK_CACHE[cache_key] = None
         return None
     if not isinstance(review_comments, list):
+        _INLINE_FEEDBACK_CACHE[cache_key] = None
         return None
     latest: str | None = None
     for comment in review_comments:
@@ -247,6 +333,7 @@ def _latest_inline_review_comment_timestamp(repo: str, pr_number: int) -> str | 
                 continue
             if latest is None or candidate > latest:
                 latest = candidate
+    _INLINE_FEEDBACK_CACHE[cache_key] = latest
     return latest
 
 
@@ -273,13 +360,19 @@ def latest_feedback_timestamp_with_inline_comments(
 
 def unresolved_review_thread_count(repo: str, pr_number: int) -> int | None:
     """Return unresolved inline review thread count for a PR."""
+    cache_key = (repo, pr_number)
+    if cache_key in _UNRESOLVED_THREADS_CACHE:
+        return _UNRESOLVED_THREADS_CACHE[cache_key]
     if not _gh_available():
+        _UNRESOLVED_THREADS_CACHE[cache_key] = None
         return None
     if pr_number <= 0:
+        _UNRESOLVED_THREADS_CACHE[cache_key] = None
         return None
     try:
         owner, name = _split_repo_slug(repo)
     except RuntimeError:
+        _UNRESOLVED_THREADS_CACHE[cache_key] = None
         return None
     query = """
 query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
@@ -314,18 +407,23 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
                 cmd.extend(["-F", f"cursor={cursor}"])
             payload = _run_json(cmd)
             if not isinstance(payload, dict):
+                _UNRESOLVED_THREADS_CACHE[cache_key] = None
                 return None
             data = payload.get("data")
             if not isinstance(data, dict):
+                _UNRESOLVED_THREADS_CACHE[cache_key] = None
                 return None
             repository = data.get("repository")
             if not isinstance(repository, dict):
+                _UNRESOLVED_THREADS_CACHE[cache_key] = None
                 return None
             pull_request = repository.get("pullRequest")
             if not isinstance(pull_request, dict):
+                _UNRESOLVED_THREADS_CACHE[cache_key] = None
                 return None
             review_threads = pull_request.get("reviewThreads")
             if not isinstance(review_threads, dict):
+                _UNRESOLVED_THREADS_CACHE[cache_key] = None
                 return None
             nodes = review_threads.get("nodes")
             if isinstance(nodes, list):
@@ -341,11 +439,14 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
                 if isinstance(raw_cursor, str) and raw_cursor.strip():
                     next_cursor = raw_cursor.strip()
             if not has_next:
+                _UNRESOLVED_THREADS_CACHE[cache_key] = unresolved
                 return unresolved
             cursor = next_cursor
             if not cursor:
+                _UNRESOLVED_THREADS_CACHE[cache_key] = unresolved
                 return unresolved
     except (RuntimeError, json.JSONDecodeError):
+        _UNRESOLVED_THREADS_CACHE[cache_key] = None
         return None
 
 
