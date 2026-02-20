@@ -66,9 +66,23 @@ Skills link: ./skills
 7. If implementation is complete:
    - Update changeset metadata and labels.
    - Publish/persist via the `publish` skill.
+   - In PR projects (`branch.pr=true`), treat completion as:
+     - PR created when policy allows PR creation, OR
+     - branch pushed with an explicit policy gate that defers PR creation.
    - Ensure publish records `changeset.integrated_sha` when integration/merge
      occurs.
    - Update the bead as complete and exit.
+
+## Lifecycle Protocol (Required)
+
+- Use only canonical changeset labels:
+  - `cs:planned`, `cs:ready`, `cs:in_progress`, `cs:blocked`, `cs:merged`,
+    `cs:abandoned`.
+- Do NOT invent lifecycle labels (for example, `cs:done`).
+- In PR projects, do not close a changeset after only pushing a branch when PR
+  policy allows opening a PR now.
+- Keep `pr_state` accurate in bead metadata (`pushed`, `draft-pr`, `pr-open`,
+  `in-review`, `approved`, `merged`, `closed`).
 
 ## Messaging Rules
 

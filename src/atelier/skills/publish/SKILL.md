@@ -55,7 +55,7 @@ description: >-
    - If `branch_pr` is true:
      - Push the work branch.
      - If PR creation is allowed, run `pr_draft` to generate the title/body,
-       then use the `github-prs` skill to create/update the PR.
+       then use the `github-prs` skill to create/update the PR in this run.
      - If PR creation is gated, report the reason and exit after pushing.
    - If `branch_pr` is false:
      - Integrate the rebased work branch onto `root_branch` per `branch_history`
@@ -68,6 +68,13 @@ description: >-
    - Do not set `changeset.integrated_sha` for `persist` runs that did not
      integrate or merge.
    - If the integrated SHA cannot be determined, send `NEEDS-DECISION` and stop.
+1. Enforce lifecycle protocol:
+   - Use canonical state labels only:
+     `cs:planned|cs:ready|cs:in_progress|cs:blocked|cs:merged|cs:abandoned`.
+   - For PR projects:
+     - `pushed` without PR is only acceptable when PR strategy gates PR
+       creation.
+     - Otherwise, the run is incomplete and must be reported as blocked/pending.
 1. Verify results using read-only commands and git:
    - `atelier status --format=json`
    - `scripts/ensure_clean_tree.sh <repo_path>`

@@ -20,6 +20,7 @@ from .. import (
     agents,
     beads,
     branching,
+    changesets,
     codex,
     config,
     exec,
@@ -28,6 +29,7 @@ from .. import (
     messages,
     paths,
     policy,
+    pr_strategy,
     prompting,
     prs,
     root_branch,
@@ -44,6 +46,14 @@ _RUN_MODE_VALUES = {"once", "default", "watch"}
 _WATCH_INTERVAL_SECONDS = 60
 _WORKER_QUEUE_NAME = "worker"
 _SQUASH_MESSAGE_MODES = {"deterministic", "agent"}
+_VALID_CHANGESET_STATE_LABELS = {
+    "cs:planned",
+    "cs:ready",
+    "cs:in_progress",
+    "cs:blocked",
+    "cs:merged",
+    "cs:abandoned",
+}
 _INTEGRATED_SHA_NOTE_PATTERN = re.compile(
     r"`?changeset\.integrated_sha`?\s*[:=]\s*([0-9a-fA-F]{7,40})\b",
     re.MULTILINE,
@@ -727,6 +737,7 @@ def _next_changeset(
     repo_root: Path,
     repo_slug: str | None = None,
     branch_pr: bool = True,
+    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     git_path: str | None = None,
 ) -> dict[str, object] | None:
     target = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
@@ -748,6 +759,7 @@ def _next_changeset(
                         repo_slug=repo_slug,
                         repo_root=repo_root,
                         branch_pr=branch_pr,
+                        branch_pr_strategy=branch_pr_strategy,
                         git_path=git_path,
                     )
                 )
@@ -800,6 +812,7 @@ def _next_changeset(
             repo_slug=repo_slug,
             repo_root=repo_root,
             branch_pr=branch_pr,
+            branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
         )
     ]
@@ -883,16 +896,73 @@ def _changeset_work_branch(issue: dict[str, object]) -> str | None:
     return normalized
 
 
+def _changeset_parent_lifecycle_state(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+) -> str | None:
+    if not repo_slug:
+        return None
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    parent_branch = fields.get("changeset.parent_branch")
+    if not isinstance(parent_branch, str):
+        return None
+    normalized = parent_branch.strip()
+    if not normalized or normalized.lower() == "null":
+        return None
+    pushed = git.git_ref_exists(
+        repo_root, f"refs/remotes/origin/{normalized}", git_path=git_path
+    )
+    payload = prs.read_github_pr_status(repo_slug, normalized)
+    review_requested = prs.has_review_requests(payload)
+    return prs.lifecycle_state(
+        payload, pushed=pushed, review_requested=review_requested
+    )
+
+
+def _changeset_pr_creation_decision(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+    branch_pr_strategy: object,
+) -> pr_strategy.PrStrategyDecision:
+    parent_state = _changeset_parent_lifecycle_state(
+        issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
+    )
+    return pr_strategy.pr_strategy_decision(
+        branch_pr_strategy, parent_state=parent_state
+    )
+
+
 def _changeset_waiting_on_review_or_signals(
     issue: dict[str, object],
     *,
     repo_slug: str | None,
     repo_root: Path,
     branch_pr: bool,
+    branch_pr_strategy: object,
     git_path: str | None,
 ) -> bool:
-    if _changeset_waiting_on_review(issue):
-        return True
+    review_state = _changeset_review_state(issue)
+    if review_state:
+        if review_state in {"draft-pr", "pr-open", "in-review", "approved"}:
+            return True
+        if review_state == "pushed":
+            decision = _changeset_pr_creation_decision(
+                issue,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                git_path=git_path,
+                branch_pr_strategy=branch_pr_strategy,
+            )
+            return not decision.allow_pr
     if not branch_pr:
         return False
     work_branch = _changeset_work_branch(issue)
@@ -908,7 +978,18 @@ def _changeset_waiting_on_review_or_signals(
     state = prs.lifecycle_state(
         pr_payload, pushed=pushed, review_requested=review_requested
     )
-    return state in {"pushed", "draft-pr", "pr-open", "in-review", "approved"}
+    if state in {"draft-pr", "pr-open", "in-review", "approved"}:
+        return True
+    if state == "pushed":
+        decision = _changeset_pr_creation_decision(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            branch_pr_strategy=branch_pr_strategy,
+        )
+        return not decision.allow_pr
+    return False
 
 
 def _changeset_feedback_cursor(issue: dict[str, object]) -> dt.datetime | None:
@@ -1009,9 +1090,18 @@ def _find_invalid_changeset_labels(
             queue.append(issue_id)
             labels = _issue_labels(issue)
             has_cs_label = any(label.startswith("cs:") for label in labels)
+            invalid_cs_labels = {
+                label
+                for label in labels
+                if label.startswith("cs:")
+                and label not in _VALID_CHANGESET_STATE_LABELS
+            }
             if "at:subtask" in labels or (
                 has_cs_label and "at:changeset" not in labels
             ):
+                invalid.append(issue_id)
+                continue
+            if invalid_cs_labels:
                 invalid.append(issue_id)
     return invalid
 
@@ -1687,6 +1777,7 @@ def reconcile_blocked_merged_changesets(
                 beads_root=beads_root,
                 repo_root=repo_root,
                 branch_pr=project_config.branch.pr,
+                branch_pr_strategy=project_config.branch.pr_strategy,
                 branch_history=project_config.branch.history,
                 branch_squash_message=project_config.branch.squash_message,
                 project_data_dir=project_data_dir,
@@ -2583,6 +2674,7 @@ def _finalize_changeset(
     beads_root: Path,
     repo_root: Path,
     branch_pr: bool = True,
+    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     branch_history: str = "manual",
     branch_squash_message: str = "deterministic",
     project_data_dir: Path | None = None,
@@ -2734,6 +2826,7 @@ def _finalize_changeset(
             repo_slug=repo_slug,
             repo_root=repo_root,
             branch_pr=branch_pr,
+            branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
         ):
             return FinalizeResult(
@@ -2789,6 +2882,54 @@ def _finalize_changeset(
     pr_payload = None
     if repo_slug:
         pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+    if branch_pr and pushed and not pr_payload:
+        decision = _changeset_pr_creation_decision(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            branch_pr_strategy=branch_pr_strategy,
+        )
+        if not decision.allow_pr:
+            beads.update_changeset_review(
+                changeset_id,
+                changesets.ReviewMetadata(pr_state="pushed"),
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+            return FinalizeResult(
+                continue_running=True, reason="changeset_review_pending"
+            )
+        _mark_changeset_in_progress(
+            changeset_id, beads_root=beads_root, repo_root=repo_root
+        )
+        beads.run_bd_command(
+            [
+                "update",
+                changeset_id,
+                "--append-notes",
+                (
+                    "publish_pending: branch pushed but PR missing where "
+                    f"strategy allows PR ({decision.reason})."
+                ),
+            ],
+            beads_root=beads_root,
+            cwd=repo_root,
+            allow_failure=True,
+        )
+        _send_planner_notification(
+            subject=f"NEEDS-DECISION: PR missing after publish ({changeset_id})",
+            body=(
+                "Changeset branch is pushed but no PR exists where policy allows PR "
+                f"creation (strategy={decision.strategy}, reason={decision.reason})."
+            ),
+            agent_id=agent_id,
+            thread_id=changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            dry_run=False,
+        )
+        return FinalizeResult(continue_running=False, reason="changeset_pr_missing")
     if not pushed and not pr_payload:
         push_detail: str | None = None
         if branch_pr:
@@ -2998,6 +3139,7 @@ def _run_startup_contract(
     assume_yes: bool,
     repo_slug: str | None = None,
     branch_pr: bool = True,
+    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     git_path: str | None = None,
 ) -> StartupContractResult:
     """Apply startup_contract skill ordering to select the next epic."""
@@ -3042,6 +3184,7 @@ def _run_startup_contract(
                 repo_root=repo_root,
                 repo_slug=repo_slug,
                 branch_pr=branch_pr,
+                branch_pr_strategy=branch_pr_strategy,
                 git_path=git_path,
             )
             is not None
@@ -3339,6 +3482,7 @@ def _run_worker_once(
             assume_yes=assume_yes,
             repo_slug=repo_slug,
             branch_pr=project_config.branch.pr,
+            branch_pr_strategy=project_config.branch.pr_strategy,
             git_path=git_path,
         )
         summary_note = startup_result.reason
@@ -3536,6 +3680,7 @@ def _run_worker_once(
                 repo_root=repo_root,
                 repo_slug=repo_slug,
                 branch_pr=project_config.branch.pr,
+                branch_pr_strategy=project_config.branch.pr_strategy,
                 git_path=git_path,
             )
         if changeset is None:
@@ -3924,6 +4069,7 @@ def _run_worker_once(
             beads_root=beads_root,
             repo_root=repo_root,
             branch_pr=project_config.branch.pr,
+            branch_pr_strategy=project_config.branch.pr_strategy,
             branch_history=project_config.branch.history,
             branch_squash_message=project_config.branch.squash_message,
             project_data_dir=project_data_dir,

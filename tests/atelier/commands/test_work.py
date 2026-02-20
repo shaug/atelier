@@ -459,7 +459,10 @@ def test_next_changeset_skips_in_progress_with_push_signal_in_pr_mode() -> None:
         {
             "id": "atelier-epic.1",
             "labels": ["at:changeset", "cs:in_progress"],
-            "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+            "description": (
+                "changeset.work_branch: feat/root-atelier-epic.1\n"
+                "changeset.parent_branch: feat/root-atelier-epic.0\n"
+            ),
         },
         {"id": "atelier-epic.2", "labels": ["at:changeset", "cs:ready"]},
     ]
@@ -483,6 +486,7 @@ def test_next_changeset_skips_in_progress_with_push_signal_in_pr_mode() -> None:
             repo_root=Path("/repo"),
             repo_slug="org/repo",
             branch_pr=True,
+            branch_pr_strategy="on-parent-approved",
         )
 
     assert selected is not None
@@ -676,6 +680,23 @@ def test_find_invalid_changeset_labels_flags_cs_without_changeset_label() -> Non
         parent = args[2]
         if parent == "atelier-epic":
             return [{"id": "atelier-epic.1", "labels": ["cs:ready"]}]
+        return []
+
+    with patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json):
+        invalid = work_cmd._find_invalid_changeset_labels(
+            "atelier-epic", beads_root=Path("/beads"), repo_root=Path("/repo")
+        )
+
+    assert invalid == ["atelier-epic.1"]
+
+
+def test_find_invalid_changeset_labels_flags_unknown_cs_label() -> None:
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        parent = args[2]
+        if parent == "atelier-epic":
+            return [{"id": "atelier-epic.1", "labels": ["at:changeset", "cs:done"]}]
         return []
 
     with patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json):
@@ -1524,6 +1545,7 @@ def test_startup_contract_skips_hooked_epic_without_ready_changesets() -> None:
         repo_root: Path,
         repo_slug: str | None = None,
         branch_pr: bool = True,
+        branch_pr_strategy: object = "sequential",
         git_path: str | None = None,
     ) -> dict[str, object] | None:
         if epic_id == "atelier-epic-ready":
@@ -1659,6 +1681,7 @@ def test_startup_contract_falls_back_to_global_ready_changeset() -> None:
         repo_root: Path,
         repo_slug: str | None = None,
         branch_pr: bool = True,
+        branch_pr_strategy: object = "sequential",
         git_path: str | None = None,
     ) -> dict[str, object] | None:
         if epic_id == "at-irs":
@@ -4312,7 +4335,10 @@ def test_finalize_infers_review_pending_from_publish_signals() -> None:
                 {
                     "id": "atelier-epic.1",
                     "labels": ["at:changeset", "cs:in_progress"],
-                    "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+                    "description": (
+                        "changeset.work_branch: feat/root-atelier-epic.1\n"
+                        "changeset.parent_branch: feat/root-atelier-epic.0\n"
+                    ),
                     "status": "in_progress",
                 }
             ],
@@ -4332,10 +4358,56 @@ def test_finalize_infers_review_pending_from_publish_signals() -> None:
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
             branch_pr=True,
+            branch_pr_strategy="on-parent-approved",
         )
 
     assert result.continue_running is True
     assert result.reason == "changeset_review_pending"
+
+
+def test_finalize_flags_missing_pr_when_strategy_allows_creation() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset", "cs:ready"],
+                    "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+                    "status": "open",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch("atelier.commands.work._mark_changeset_in_progress") as mark_in_progress,
+        patch("atelier.commands.work._send_planner_notification") as notify,
+        patch("atelier.commands.work.beads.run_bd_command") as run_bd_command,
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+            branch_pr_strategy="sequential",
+        )
+
+    assert result.continue_running is False
+    assert result.reason == "changeset_pr_missing"
+    mark_in_progress.assert_called_once()
+    notify.assert_called_once()
+    assert any(
+        args[:2] == ["update", "atelier-epic.1"] and "--append-notes" in args
+        for call in run_bd_command.call_args_list
+        for args in [call.args[0]]
+    )
 
 
 def test_finalize_requeues_publish_pending_when_local_state_exists() -> None:
