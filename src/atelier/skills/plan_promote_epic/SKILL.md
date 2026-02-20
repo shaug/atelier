@@ -21,6 +21,7 @@ description: >-
     changesets).
 - Changeset guardrails have been validated (run `plan_changeset_guardrails`
   first).
+- Do not require child changesets when the epic itself is guardrail-sized.
 
 ## Steps
 
@@ -29,6 +30,8 @@ description: >-
 1. If there are no child changesets and the epic is single-changeset sized:
    - Add `at:changeset` to the epic.
    - Add `cs:ready` to the epic.
+1. If the epic is not single-changeset sized, create only the minimum child
+   changesets needed for execution and reviewability.
 1. Summarize the executable unit(s) for the user (child changesets or the epic
    itself).
 1. Ask for explicit confirmation to promote.

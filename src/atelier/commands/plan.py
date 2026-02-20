@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -450,8 +451,34 @@ def run_planner(args: object) -> None:
             if project_data_dir.exists():
                 try:
                     finish = _step("Ensure skills", timings=timings, trace=trace)
-                    skills_dir = skills.ensure_project_skills(project_data_dir)
-                    finish(str(skills_dir))
+                    sync_result = skills.sync_project_skills(
+                        project_data_dir,
+                        upgrade_policy=config.resolve_upgrade_policy(
+                            project_config.atelier.upgrade
+                        ),
+                        yes=bool(getattr(args, "yes", False)),
+                        interactive=(
+                            sys.stdin.isatty()
+                            and sys.stdout.isatty()
+                            and not bool(getattr(args, "yes", False))
+                        ),
+                        prompt_update=lambda message: confirm(message, default=False),
+                    )
+                    skills_dir = sync_result.skills_dir
+                    if sync_result.action in {"installed", "updated"}:
+                        finish(f"{sync_result.action}: {skills_dir}")
+                    elif sync_result.action == "upgrade_available":
+                        detail = (
+                            f" ({sync_result.detail})" if sync_result.detail else ""
+                        )
+                        finish(f"update available{detail}")
+                    elif sync_result.action == "skipped_modified":
+                        detail = (
+                            f" ({sync_result.detail})" if sync_result.detail else ""
+                        )
+                        finish(f"skipped: local changes{detail}")
+                    else:
+                        finish(str(skills_dir))
                 except OSError:
                     skills_dir = None
             if skills_dir is not None:

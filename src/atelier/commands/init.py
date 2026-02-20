@@ -52,8 +52,24 @@ def init_project(args: object) -> None:
         raw_existing=user_payload,
     )
     project.ensure_project_dirs(project_dir)
+    yes = bool(getattr(args, "yes", False))
     try:
-        skills.ensure_project_skills(project_dir)
+        upgrade_policy = config.resolve_upgrade_policy(payload.atelier.upgrade)
+        sync_result = skills.sync_project_skills(
+            project_dir,
+            upgrade_policy=upgrade_policy,
+            yes=yes,
+            interactive=(sys.stdin.isatty() and sys.stdout.isatty() and not yes),
+            prompt_update=lambda message: confirm(message, default=False),
+        )
+        if sync_result.action in {"installed", "updated"}:
+            say(f"Managed skills: {sync_result.action}")
+        elif sync_result.action == "upgrade_available":
+            detail = f" ({sync_result.detail})" if sync_result.detail else ""
+            say(f"Managed skills: update available{detail}")
+        elif sync_result.action == "skipped_modified":
+            detail = f" ({sync_result.detail})" if sync_result.detail else ""
+            say(f"Managed skills: skipped due to local changes{detail}")
     except OSError:
         pass
     provider_resolution = external_registry.resolve_planner_provider(
@@ -61,11 +77,12 @@ def init_project(args: object) -> None:
         Path(enlistment_path),
         agent_name=payload.agent.default,
         project_data_dir=project_dir,
-        interactive=sys.stdin.isatty() and sys.stdout.isatty(),
+        # Keep prompting centralized in init so "none" is always available.
+        interactive=False,
     )
     selected_provider = provider_resolution.selected_provider
     current_provider = (payload.project.provider or "").strip().lower() or None
-    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    interactive = sys.stdin.isatty() and sys.stdout.isatty() and not yes
     if interactive:
         available = list(provider_resolution.available_providers)
         if current_provider and current_provider not in available:
@@ -106,7 +123,10 @@ def init_project(args: object) -> None:
     say("Ensuring Beads issue types...")
     beads.ensure_atelier_types(beads_root=beads_root, cwd=beads_cwd)
 
-    if confirm("Add project-wide policy for agents?", default=False):
+    add_policy = (
+        False if yes else confirm("Add project-wide policy for agents?", default=False)
+    )
+    if add_policy:
         planner_issue = beads.list_policy_beads(
             policy.ROLE_PLANNER, beads_root=beads_root, cwd=beads_cwd
         )

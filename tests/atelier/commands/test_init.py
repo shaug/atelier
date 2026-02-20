@@ -474,6 +474,80 @@ class TestInitProject:
             finally:
                 os.chdir(original_cwd)
 
+    def test_init_resolves_provider_non_interactive_then_prompts_with_none(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                args = make_init_args(
+                    branch_prefix="scott/",
+                    branch_pr="true",
+                    branch_history="rebase",
+                    branch_pr_strategy="on-ready",
+                    agent="codex",
+                    editor_edit="cursor -w --new-window",
+                    editor_work="cursor --new-window",
+                )
+                captured_interactive: list[bool] = []
+
+                def fake_resolve_provider(
+                    *_: object,
+                    interactive: bool = True,
+                    **__: object,
+                ) -> external_registry.PlannerProviderResolution:
+                    captured_interactive.append(interactive)
+                    return external_registry.PlannerProviderResolution(
+                        selected_provider="github",
+                        available_providers=("github", "linear"),
+                        github_repo="acme/widgets",
+                    )
+
+                with (
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("atelier.commands.init.confirm", return_value=False),
+                    patch(
+                        "atelier.commands.init.select", return_value="none"
+                    ) as choose,
+                    patch(
+                        "atelier.commands.init.external_registry.resolve_planner_provider",
+                        side_effect=fake_resolve_provider,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.run_bd_command",
+                        return_value=CompletedProcess(
+                            args=["bd"], returncode=0, stdout="", stderr=""
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_store",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        return_value=False,
+                    ),
+                    patch("sys.stdin.isatty", return_value=True),
+                    patch("sys.stdout.isatty", return_value=True),
+                ):
+                    init_cmd.init_project(args)
+
+                assert captured_interactive == [False]
+                choose.assert_called_once()
+                prompt_choices = choose.call_args.args[1]
+                assert prompt_choices[0] == "none"
+            finally:
+                os.chdir(original_cwd)
+
     def test_init_uses_editor_env_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

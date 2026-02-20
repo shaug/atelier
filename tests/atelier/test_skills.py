@@ -1,3 +1,4 @@
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -111,6 +112,74 @@ def test_ensure_project_skills_installs_if_missing() -> None:
         skills_dir = skills.ensure_project_skills(project_dir)
         assert skills_dir == project_dir / "skills"
         assert (skills_dir / "planner_startup_check" / "SKILL.md").exists()
+
+
+def test_sync_project_skills_installs_when_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        result = skills.sync_project_skills(project_dir)
+        assert result.action == "installed"
+        assert result.skills_dir == project_dir / "skills"
+        assert (project_dir / "skills" / "planner_startup_check" / "SKILL.md").exists()
+
+
+def test_sync_project_skills_reports_upgrade_available_for_missing_packaged_skill() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        skills.install_workspace_skills(project_dir)
+        stale_skill = project_dir / "skills" / "planner_startup_check"
+        assert stale_skill.exists()
+        shutil.rmtree(stale_skill)
+
+        result = skills.sync_project_skills(
+            project_dir,
+            upgrade_policy="ask",
+            interactive=False,
+        )
+        assert result.action == "upgrade_available"
+        assert result.detail == "non-interactive session"
+
+
+def test_sync_project_skills_applies_upgrade_with_yes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        skills.install_workspace_skills(project_dir)
+        stale_skill = project_dir / "skills" / "planner_startup_check"
+        shutil.rmtree(stale_skill)
+
+        result = skills.sync_project_skills(project_dir, yes=True)
+        assert result.action == "updated"
+        assert (project_dir / "skills" / "planner_startup_check" / "SKILL.md").exists()
+
+
+def test_sync_project_skills_skips_when_locally_modified_without_confirmation() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        skills.install_workspace_skills(project_dir)
+        skill_doc = project_dir / "skills" / "publish" / "SKILL.md"
+        skill_doc.write_text(skill_doc.read_text(encoding="utf-8") + "\nlocal\n")
+
+        result = skills.sync_project_skills(
+            project_dir, upgrade_policy="ask", interactive=False
+        )
+        assert result.action == "skipped_modified"
+        assert result.detail is not None
+        assert "modified=" in result.detail
+
+
+def test_sync_project_skills_overwrites_local_changes_with_yes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        skills.install_workspace_skills(project_dir)
+        skill_doc = project_dir / "skills" / "publish" / "SKILL.md"
+        original = skill_doc.read_text(encoding="utf-8")
+        skill_doc.write_text(original + "\nlocal\n")
+
+        result = skills.sync_project_skills(project_dir, yes=True)
+        assert result.action == "updated"
+        assert skill_doc.read_text(encoding="utf-8") == original
 
 
 def test_packaged_skill_docs_include_yaml_frontmatter() -> None:

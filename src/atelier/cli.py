@@ -263,6 +263,14 @@ def init_command(
         str | None,
         typer.Option("--editor-work", help="editor command for work actions"),
     ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="accept defaults for interactive choices",
+        ),
+    ] = False,
 ) -> None:
     """Initialize an Atelier project for the current Git repo.
 
@@ -275,6 +283,7 @@ def init_command(
         agent: Agent name.
         editor_edit: Editor command used for blocking edits (policy docs).
         editor_work: Editor command used for opening the workspace repo.
+        yes: Accept defaults for interactive choices.
     Returns:
         None.
 
@@ -291,6 +300,7 @@ def init_command(
             agent=agent,
             editor_edit=editor_edit,
             editor_work=editor_work,
+            yes=yes,
         )
     )
 
@@ -445,9 +455,17 @@ def plan_command(
             help="reconcile merged changesets before starting planner session",
         ),
     ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="accept defaults for interactive choices",
+        ),
+    ] = False,
 ) -> None:
     """Start a planner session."""
-    plan_cmd.run_planner(SimpleNamespace(epic_id=epic_id, reconcile=reconcile))
+    plan_cmd.run_planner(SimpleNamespace(epic_id=epic_id, reconcile=reconcile, yes=yes))
 
 
 @app.command("hook", help="Run an agent hook event handler.")

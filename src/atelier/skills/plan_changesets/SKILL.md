@@ -6,6 +6,10 @@ description: >-
 
 # Plan changesets
 
+Only use this when an epic should be decomposed. If the epic itself is already
+within guardrails, keep the epic as the executable changeset instead of creating
+children.
+
 ## Inputs
 
 - epic_id: Parent epic bead id.
@@ -38,3 +42,4 @@ description: >-
 ## Verification
 
 - Changeset beads exist under the epic with `at:changeset` labels.
+- Decomposition happened only when needed for scope/dependency/reviewability.

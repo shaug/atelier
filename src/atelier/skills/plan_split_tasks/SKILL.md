@@ -1,10 +1,14 @@
 ---
 name: plan_split_tasks
 description: >-
-  Split an epic into changeset beads with dependency-safe labeling.
+  Split an epic into changeset beads with dependency-safe labeling when
+  decomposition is needed.
 ---
 
 # Plan split tasks
+
+Use this only when the epic should be decomposed. If the epic itself is a single
+review-sized unit, keep it as the executable changeset.
 
 ## Inputs
 
