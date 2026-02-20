@@ -123,6 +123,68 @@ def test_gc_removes_stale_session_agent_home() -> None:
         assert not stale_home.exists()
 
 
+def test_normalize_changeset_labels_for_status_uses_status_authority() -> None:
+    issue = {
+        "id": "at-123",
+        "status": "in_progress",
+        "labels": [
+            "at:changeset",
+            "cs:planned",
+            "cs:ready",
+            "cs:in_progress",
+            "cs:blocked",
+        ],
+    }
+
+    normalized, reasons = gc_cmd._normalize_changeset_labels_for_status(issue)
+
+    assert "cs:planned" not in normalized
+    assert "cs:ready" not in normalized
+    assert "cs:in_progress" not in normalized
+    assert "cs:blocked" not in normalized
+    assert "at:changeset" in normalized
+    assert any("status is authoritative" in reason for reason in reasons)
+
+
+def test_gc_normalize_changeset_labels_updates_legacy_labels() -> None:
+    issues = [
+        {
+            "id": "at-123",
+            "status": "open",
+            "labels": ["at:changeset", "cs:ready"],
+        }
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--label", "at:changeset", "--all"]:
+            return issues
+        return []
+
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command
+        ),
+    ):
+        actions = gc_cmd._gc_normalize_changeset_labels(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+        assert len(actions) == 1
+        actions[0].apply()
+
+    assert calls == [["update", "at-123", "--remove-label", "cs:ready"]]
+
+
 def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
     project_root = Path("/project")
     repo_root = Path("/repo")

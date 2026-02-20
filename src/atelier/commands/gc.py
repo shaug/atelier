@@ -60,6 +60,48 @@ def _issue_labels(issue: dict[str, object]) -> set[str]:
     return {str(label) for label in labels if label}
 
 
+def _normalize_changeset_labels_for_status(
+    issue: dict[str, object],
+) -> tuple[set[str], tuple[str, ...]]:
+    labels = _issue_labels(issue)
+    if "at:changeset" not in labels:
+        return labels, ()
+    status = str(issue.get("status") or "").strip().lower()
+    desired = set(labels)
+    reasons: list[str] = []
+
+    def _drop(label: str, reason: str) -> None:
+        if label in desired:
+            desired.remove(label)
+            reasons.append(f"remove {label}: {reason}")
+
+    def _add(label: str, reason: str) -> None:
+        if label not in desired:
+            desired.add(label)
+            reasons.append(f"add {label}: {reason}")
+
+    if status in {"closed", "done"}:
+        for label in ("cs:planned", "cs:ready", "cs:in_progress", "cs:blocked"):
+            _drop(label, "closed changesets should not carry active lifecycle labels")
+        return desired, tuple(reasons)
+
+    if status == "blocked":
+        _add("cs:blocked", "blocked status requires cs:blocked marker")
+        for label in ("cs:planned", "cs:ready", "cs:in_progress"):
+            _drop(label, "blocked changesets should not carry active lifecycle labels")
+        return desired, tuple(reasons)
+
+    # Open/in-progress/hooked work uses issue status as source of truth.
+    for label in ("cs:ready", "cs:in_progress"):
+        _drop(label, "status is authoritative for active lifecycle")
+    if status == "in_progress":
+        _drop("cs:planned", "in_progress changesets are no longer planned")
+        _drop("cs:blocked", "in_progress changesets are not blocked")
+    elif status in {"open", "hooked"}:
+        _drop("cs:blocked", "open changesets are not blocked")
+    return desired, tuple(reasons)
+
+
 def _workspace_branch_from_labels(labels: set[str]) -> str | None:
     for label in labels:
         if not label.startswith("workspace:"):
@@ -175,6 +217,54 @@ def _reconcile_preview_lines(
             f"integrated_sha={integrated_sha}"
         )
     return tuple(lines)
+
+
+def _gc_normalize_changeset_labels(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:changeset", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in issues:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+        labels = _issue_labels(issue)
+        normalized_labels, reasons = _normalize_changeset_labels_for_status(issue)
+        if labels == normalized_labels:
+            continue
+        add_labels = sorted(normalized_labels - labels)
+        remove_labels = sorted(labels - normalized_labels)
+        status = str(issue.get("status") or "unknown")
+        details = [f"status: {status}"]
+        details.extend(reasons)
+
+        def _apply_normalize(
+            bead_id: str = issue_id,
+            add_values: list[str] = list(add_labels),
+            remove_values: list[str] = list(remove_labels),
+        ) -> None:
+            args = ["update", bead_id]
+            for label in add_values:
+                args.extend(["--add-label", label])
+            for label in remove_values:
+                args.extend(["--remove-label", label])
+            beads.run_bd_command(args, beads_root=beads_root, cwd=repo_root)
+
+        actions.append(
+            GcAction(
+                description=f"Normalize changeset labels for {issue_id}",
+                apply=_apply_normalize,
+                details=tuple(details),
+            )
+        )
+    return actions
 
 
 def _release_epic(epic: dict[str, object], *, beads_root: Path, cwd: Path) -> None:
@@ -1060,6 +1150,12 @@ def gc(args: object) -> None:
             )
 
     actions: list[GcAction] = []
+    actions.extend(
+        _gc_normalize_changeset_labels(
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
     actions.extend(
         _gc_hooks(
             beads_root=beads_root,

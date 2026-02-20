@@ -324,8 +324,6 @@ def _list_ready_changesets(
             epic_id,
             "--label",
             "at:changeset",
-            "--label",
-            "cs:ready",
         ],
         beads_root=beads_root,
         cwd=repo_root,

@@ -751,19 +751,14 @@ def _next_changeset(
             and "at:changeset" in labels
             and "cs:merged" not in labels
             and "cs:abandoned" not in labels
-            and (
-                (
-                    _is_changeset_in_progress(issue)
-                    and not _changeset_waiting_on_review_or_signals(
-                        issue,
-                        repo_slug=repo_slug,
-                        repo_root=repo_root,
-                        branch_pr=branch_pr,
-                        branch_pr_strategy=branch_pr_strategy,
-                        git_path=git_path,
-                    )
-                )
-                or _is_changeset_ready(issue)
+            and _is_changeset_ready(issue)
+            and not _changeset_waiting_on_review_or_signals(
+                issue,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                branch_pr=branch_pr,
+                branch_pr_strategy=branch_pr_strategy,
+                git_path=git_path,
             )
         ):
             if not _has_open_descendant_changesets(
@@ -801,12 +796,10 @@ def _next_changeset(
     )
     if not changesets:
         return None
-    in_progress = [
+    actionable = [
         issue
         for issue in changesets
-        if _is_changeset_in_progress(issue)
-        and "cs:merged" not in _issue_labels(issue)
-        and "cs:abandoned" not in _issue_labels(issue)
+        if _is_changeset_ready(issue)
         and not _changeset_waiting_on_review_or_signals(
             issue,
             repo_slug=repo_slug,
@@ -816,23 +809,20 @@ def _next_changeset(
             git_path=git_path,
         )
     ]
-    if in_progress:
-        for issue in in_progress:
-            issue_id = issue.get("id")
-            if isinstance(issue_id, str) and issue_id:
-                if not _has_open_descendant_changesets(
-                    issue_id, beads_root=beads_root, repo_root=repo_root
-                ):
-                    return issue
-    ready = [issue for issue in changesets if _is_changeset_ready(issue)]
-    if ready:
-        for issue in ready:
-            issue_id = issue.get("id")
-            if isinstance(issue_id, str) and issue_id:
-                if not _has_open_descendant_changesets(
-                    issue_id, beads_root=beads_root, repo_root=repo_root
-                ):
-                    return issue
+    prioritized = sorted(
+        actionable,
+        key=lambda issue: (
+            0 if _is_changeset_in_progress(issue) else 1,
+            str(issue.get("id") or ""),
+        ),
+    )
+    for issue in prioritized:
+        issue_id = issue.get("id")
+        if isinstance(issue_id, str) and issue_id:
+            if not _has_open_descendant_changesets(
+                issue_id, beads_root=beads_root, repo_root=repo_root
+            ):
+                return issue
     return None
 
 
@@ -849,16 +839,29 @@ def _has_open_descendant_changesets(
 
 
 def _is_changeset_in_progress(issue: dict[str, object]) -> bool:
-    labels = _issue_labels(issue)
-    if "cs:in_progress" in labels:
+    status = str(issue.get("status") or "").strip().lower()
+    if status == "in_progress":
         return True
-    status = str(issue.get("status") or "").lower()
-    return status == "in_progress"
+    labels = _issue_labels(issue)
+    return "cs:in_progress" in labels
 
 
 def _is_changeset_ready(issue: dict[str, object]) -> bool:
     labels = _issue_labels(issue)
-    return "cs:ready" in labels
+    if "cs:ready" in labels:
+        return True
+    if "at:changeset" not in labels and "cs:in_progress" not in labels:
+        return False
+    if "cs:planned" in labels or "cs:blocked" in labels:
+        return False
+    if "cs:merged" in labels or "cs:abandoned" in labels:
+        return False
+    status = str(issue.get("status") or "").strip().lower()
+    if status in {"closed", "done", "blocked"}:
+        return False
+    if status in {"open", "in_progress", "hooked"}:
+        return True
+    return "cs:in_progress" in labels
 
 
 def _changeset_review_state(issue: dict[str, object]) -> str | None:
@@ -1354,10 +1357,12 @@ def _mark_changeset_in_progress(
             changeset_id,
             "--add-label",
             "at:changeset",
-            "--add-label",
-            "cs:in_progress",
             "--remove-label",
             "cs:ready",
+            "--remove-label",
+            "cs:in_progress",
+            "--remove-label",
+            "cs:planned",
             "--remove-label",
             "cs:blocked",
             "--status",
@@ -1383,6 +1388,8 @@ def _mark_changeset_closed(
             "cs:planned",
             "--remove-label",
             "cs:in_progress",
+            "--remove-label",
+            "cs:blocked",
         ],
         beads_root=beads_root,
         cwd=repo_root,
@@ -1402,6 +1409,8 @@ def _mark_changeset_blocked(
             "cs:in_progress",
             "--remove-label",
             "cs:ready",
+            "--remove-label",
+            "cs:planned",
             "--add-label",
             "cs:blocked",
             "--status",
@@ -1423,10 +1432,14 @@ def _mark_changeset_children_in_progress(
             changeset_id,
             "--status",
             "in_progress",
-            "--add-label",
-            "cs:in_progress",
             "--remove-label",
             "cs:ready",
+            "--remove-label",
+            "cs:in_progress",
+            "--remove-label",
+            "cs:planned",
+            "--remove-label",
+            "cs:blocked",
         ],
         beads_root=beads_root,
         cwd=repo_root,
@@ -1487,6 +1500,8 @@ def _promote_planned_descendant_changesets(
                 "cs:ready",
                 "--remove-label",
                 "cs:planned",
+                "--status",
+                "open",
             ],
             beads_root=beads_root,
             cwd=repo_root,
@@ -3040,7 +3055,7 @@ def _finalize_changeset(
         )
         _send_planner_notification(
             subject=f"NEEDS-DECISION: Changeset not updated ({changeset_id})",
-            body="Changeset still marked cs:in_progress after worker completion. "
+            body="Changeset still marked in_progress after worker completion. "
             "Confirm desired next state or update the bead.",
             agent_id=agent_id,
             thread_id=changeset_id,
@@ -3156,7 +3171,7 @@ def _finalize_changeset(
                 subject=f"NEEDS-DECISION: Publish incomplete ({changeset_id})",
                 body=(
                     "No push or PR detected after worker completion. "
-                    "Recovered to cs:in_progress for retry.\n"
+                    "Recovered to in_progress for retry.\n"
                     f"{diagnostics_text}"
                 ),
                 agent_id=agent_id,
