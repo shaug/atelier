@@ -1859,7 +1859,10 @@ def test_startup_contract_reclaims_stale_same_family_epic() -> None:
             "atelier.commands.work._next_changeset",
             return_value={"id": "atelier-epic-stale.1"},
         ),
-        patch("atelier.commands.work.os.kill", side_effect=ProcessLookupError),
+        patch(
+            "atelier.commands.work.agent_home.is_session_agent_active",
+            return_value=False,
+        ),
         patch("atelier.commands.work.say"),
     ):
         result = work_cmd._run_startup_contract(
@@ -2619,7 +2622,10 @@ def test_startup_contract_review_feedback_reclaims_stale_assignee() -> None:
         patch("atelier.commands.work.beads.run_bd_json", return_value=epics),
         patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
         patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
-        patch("atelier.commands.work.os.kill", side_effect=ProcessLookupError),
+        patch(
+            "atelier.commands.work.agent_home.is_session_agent_active",
+            return_value=False,
+        ),
         patch(
             "atelier.commands.work._select_review_feedback_changeset",
             return_value=work_cmd._ReviewFeedbackSelection(
@@ -2915,7 +2921,10 @@ def test_startup_contract_global_feedback_reclaims_stale_same_family_assignee() 
                 feedback_at="2026-02-20T12:00:00+00:00",
             ),
         ),
-        patch("atelier.commands.work.os.kill", side_effect=ProcessLookupError),
+        patch(
+            "atelier.commands.work.agent_home.is_session_agent_active",
+            return_value=False,
+        ),
         patch("atelier.commands.work.beads.update_changeset_review_feedback_cursor"),
         patch("atelier.commands.work.say"),
     ):

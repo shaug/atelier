@@ -91,6 +91,34 @@ def test_preview_agent_home_uses_session_env_var() -> None:
         assert home.path == project_dir / "agents" / "planner" / "codex" / "p10-t20"
 
 
+def test_session_started_ns_from_agent_id_parses_timestamp() -> None:
+    assert (
+        agent_home.session_started_ns_from_agent_id("atelier/worker/codex/p42-t123456")
+        == 123456
+    )
+    assert (
+        agent_home.session_started_ns_from_agent_id("atelier/worker/codex/p42") is None
+    )
+
+
+def test_is_session_agent_active_rejects_pid_reuse() -> None:
+    agent_id = "atelier/worker/codex/p4242-t1000"
+    with (
+        patch("atelier.agent_home.os.kill"),
+        patch("atelier.agent_home._pid_started_ns", return_value=7_000_000_000),
+    ):
+        assert agent_home.is_session_agent_active(agent_id) is False
+
+
+def test_is_session_agent_active_accepts_matching_process_start() -> None:
+    agent_id = "atelier/worker/codex/p4242-t1000"
+    with (
+        patch("atelier.agent_home.os.kill"),
+        patch("atelier.agent_home._pid_started_ns", return_value=2_000_000_000),
+    ):
+        assert agent_home.is_session_agent_active(agent_id) is True
+
+
 def test_ensure_agent_links_creates_symlinks_or_markers() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

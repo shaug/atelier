@@ -443,32 +443,8 @@ def _agent_family_id(agent_id: str) -> str:
     return str(agent_id)
 
 
-def _agent_session_pid(agent_id: str) -> int | None:
-    parts = [part for part in str(agent_id).split("/") if part]
-    if len(parts) < 4:
-        return None
-    token = parts[3]
-    if not token.startswith("p"):
-        return None
-    pid_part = token[1:].split("-", 1)[0]
-    if not pid_part.isdigit():
-        return None
-    return int(pid_part)
-
-
 def _is_agent_session_active(agent_id: str) -> bool:
-    pid = _agent_session_pid(agent_id)
-    if pid is None:
-        return False
-    if pid == os.getpid():
-        return True
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
+    return agent_home.is_session_agent_active(agent_id)
 
 
 def _stale_family_assigned_epics(

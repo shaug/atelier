@@ -6,8 +6,10 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from . import paths, templates
@@ -35,6 +37,7 @@ class AgentHome:
 
 
 SESSION_ENV_VAR = "ATELIER_AGENT_SESSION"
+_SESSION_START_GRACE_NS = 5_000_000_000
 
 
 def _normalize_agent_name(value: str) -> str:
@@ -106,6 +109,44 @@ def session_pid_from_agent_id(agent_id: str) -> int | None:
     return int(pid_part)
 
 
+def session_started_ns_from_agent_id(agent_id: str) -> int | None:
+    """Extract the session start timestamp (ns) from an agent id when present."""
+    _role, _name, session_key = parse_agent_identity(agent_id)
+    if not session_key:
+        return None
+    marker = "-t"
+    if marker not in session_key:
+        return None
+    _prefix, _sep, raw_ns = session_key.partition(marker)
+    if not raw_ns.isdigit():
+        return None
+    return int(raw_ns)
+
+
+def _pid_started_ns(pid: int) -> int | None:
+    if pid <= 0:
+        return None
+    result = subprocess.run(
+        ["ps", "-o", "lstart=", "-p", str(pid)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    value = (result.stdout or "").strip()
+    if not value:
+        return None
+    try:
+        started = datetime.strptime(value, "%a %b %d %H:%M:%S %Y")
+    except ValueError:
+        return None
+    local_tz = datetime.now().astimezone().tzinfo
+    if local_tz is not None:
+        started = started.replace(tzinfo=local_tz)
+    return int(started.timestamp() * 1_000_000_000)
+
+
 def is_session_agent_active(agent_id: str) -> bool:
     """Return whether a session-scoped agent appears alive."""
     pid = session_pid_from_agent_id(agent_id)
@@ -115,11 +156,20 @@ def is_session_agent_active(agent_id: str) -> bool:
         return True
     try:
         os.kill(pid, 0)
-        return True
+        process_exists = True
     except ProcessLookupError:
         return False
     except PermissionError:
+        process_exists = True
+    if not process_exists:
+        return False
+    session_started_ns = session_started_ns_from_agent_id(agent_id)
+    if session_started_ns is None:
         return True
+    pid_started_ns = _pid_started_ns(pid)
+    if pid_started_ns is None:
+        return True
+    return pid_started_ns <= session_started_ns + _SESSION_START_GRACE_NS
 
 
 def _agent_home_path(
