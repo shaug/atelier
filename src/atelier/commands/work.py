@@ -701,7 +701,13 @@ def _release_epic_assignment(
 
 
 def _next_changeset(
-    *, epic_id: str, beads_root: Path, repo_root: Path
+    *,
+    epic_id: str,
+    beads_root: Path,
+    repo_root: Path,
+    repo_slug: str | None = None,
+    branch_pr: bool = True,
+    git_path: str | None = None,
 ) -> dict[str, object] | None:
     target = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
     if target:
@@ -714,7 +720,19 @@ def _next_changeset(
             and "at:changeset" in labels
             and "cs:merged" not in labels
             and "cs:abandoned" not in labels
-            and (_is_changeset_in_progress(issue) or _is_changeset_ready(issue))
+            and (
+                (
+                    _is_changeset_in_progress(issue)
+                    and not _changeset_waiting_on_review_or_signals(
+                        issue,
+                        repo_slug=repo_slug,
+                        repo_root=repo_root,
+                        branch_pr=branch_pr,
+                        git_path=git_path,
+                    )
+                )
+                or _is_changeset_ready(issue)
+            )
         ):
             if not _has_open_descendant_changesets(
                 epic_id, beads_root=beads_root, repo_root=repo_root
@@ -757,6 +775,13 @@ def _next_changeset(
         if _is_changeset_in_progress(issue)
         and "cs:merged" not in _issue_labels(issue)
         and "cs:abandoned" not in _issue_labels(issue)
+        and not _changeset_waiting_on_review_or_signals(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            branch_pr=branch_pr,
+            git_path=git_path,
+        )
     ]
     if in_progress:
         for issue in in_progress:
@@ -801,6 +826,69 @@ def _is_changeset_in_progress(issue: dict[str, object]) -> bool:
 def _is_changeset_ready(issue: dict[str, object]) -> bool:
     labels = _issue_labels(issue)
     return "cs:ready" in labels
+
+
+def _changeset_review_state(issue: dict[str, object]) -> str | None:
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    raw = fields.get("pr_state")
+    if not isinstance(raw, str):
+        return None
+    normalized = raw.strip().lower()
+    if not normalized or normalized == "null":
+        return None
+    return normalized
+
+
+def _changeset_waiting_on_review(issue: dict[str, object]) -> bool:
+    state = _changeset_review_state(issue)
+    if state is None:
+        return False
+    return state in {"pushed", "draft-pr", "pr-open", "in-review", "approved"}
+
+
+def _changeset_work_branch(issue: dict[str, object]) -> str | None:
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    raw = fields.get("changeset.work_branch")
+    if not isinstance(raw, str):
+        return None
+    normalized = raw.strip()
+    if not normalized or normalized.lower() == "null":
+        return None
+    return normalized
+
+
+def _changeset_waiting_on_review_or_signals(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    branch_pr: bool,
+    git_path: str | None,
+) -> bool:
+    if _changeset_waiting_on_review(issue):
+        return True
+    if not branch_pr:
+        return False
+    work_branch = _changeset_work_branch(issue)
+    if not work_branch:
+        return False
+    pushed = git.git_ref_exists(
+        repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
+    )
+    pr_payload = (
+        prs.read_github_pr_status(repo_slug, work_branch) if repo_slug else None
+    )
+    review_requested = prs.has_review_requests(pr_payload)
+    state = prs.lifecycle_state(
+        pr_payload, pushed=pushed, review_requested=review_requested
+    )
+    return state in {"pushed", "draft-pr", "pr-open", "in-review", "approved"}
 
 
 def _list_child_issues(
@@ -2462,6 +2550,16 @@ def _finalize_changeset(
             continue_running=False, reason="changeset_blocked_message"
         )
     if "cs:in_progress" in labels:
+        if _changeset_waiting_on_review_or_signals(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            branch_pr=branch_pr,
+            git_path=git_path,
+        ):
+            return FinalizeResult(
+                continue_running=True, reason="changeset_review_pending"
+            )
         _mark_changeset_blocked(
             changeset_id,
             beads_root=beads_root,
@@ -2658,6 +2756,9 @@ def _run_startup_contract(
     queue_only: bool,
     dry_run: bool,
     assume_yes: bool,
+    repo_slug: str | None = None,
+    branch_pr: bool = True,
+    git_path: str | None = None,
 ) -> StartupContractResult:
     """Apply startup_contract skill ordering to select the next epic."""
     if explicit_epic_id is not None:
@@ -2691,7 +2792,14 @@ def _run_startup_contract(
         if cached is not None:
             return cached
         actionable = (
-            _next_changeset(epic_id=epic_id, beads_root=beads_root, repo_root=repo_root)
+            _next_changeset(
+                epic_id=epic_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                repo_slug=repo_slug,
+                branch_pr=branch_pr,
+                git_path=git_path,
+            )
             is not None
         )
         actionable_cache[epic_id] = actionable
@@ -2900,6 +3008,9 @@ def _run_worker_once(
                 )
             )
 
+        repo_slug = prs.github_repo_slug(
+            project_config.project.origin or project_config.project.repo_url
+        )
         finish_step = _step("Select epic", timings=timings, trace=trace)
         startup_result = _run_startup_contract(
             agent_id=agent.agent_id,
@@ -2911,6 +3022,9 @@ def _run_worker_once(
             queue_only=queue_only,
             dry_run=dry_run,
             assume_yes=assume_yes,
+            repo_slug=repo_slug,
+            branch_pr=project_config.branch.pr,
+            git_path=git_path,
         )
         summary_note = startup_result.reason
         if startup_result.epic_id:
@@ -3083,7 +3197,12 @@ def _run_worker_once(
         finish_step()
         finish_step = _step("Select changeset", timings=timings, trace=trace)
         changeset = _next_changeset(
-            epic_id=selected_epic, beads_root=beads_root, repo_root=repo_root
+            epic_id=selected_epic,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            repo_slug=repo_slug,
+            branch_pr=project_config.branch.pr,
+            git_path=git_path,
         )
         if changeset is None:
             _send_no_ready_changesets(
@@ -3461,9 +3580,7 @@ def _run_worker_once(
             agent_id=agent.agent_id,
             agent_bead_id=agent_bead_id,
             started_at=started_at,
-            repo_slug=prs.github_repo_slug(
-                project_config.project.origin or project_config.project.repo_url
-            ),
+            repo_slug=repo_slug,
             beads_root=beads_root,
             repo_root=repo_root,
             branch_pr=project_config.branch.pr,

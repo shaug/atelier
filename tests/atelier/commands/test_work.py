@@ -427,6 +427,68 @@ def test_next_changeset_prefers_in_progress() -> None:
     assert selected["id"] == "atelier-epic.3"
 
 
+def test_next_changeset_skips_in_progress_waiting_on_review() -> None:
+    changesets = [
+        {
+            "id": "atelier-epic.1",
+            "labels": ["at:changeset", "cs:in_progress"],
+            "description": "pr_state: in-review\n",
+        },
+        {"id": "atelier-epic.2", "labels": ["at:changeset", "cs:ready"]},
+    ]
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "atelier-epic"]:
+            return [{"id": "atelier-epic", "labels": ["at:epic"]}]
+        return changesets
+
+    with patch(
+        "atelier.commands.work.beads.run_bd_json",
+        side_effect=fake_run_bd_json,
+    ):
+        selected = work_cmd._next_changeset(
+            epic_id="atelier-epic", beads_root=Path("/beads"), repo_root=Path("/repo")
+        )
+
+    assert selected is not None
+    assert selected["id"] == "atelier-epic.2"
+
+
+def test_next_changeset_skips_in_progress_with_push_signal_in_pr_mode() -> None:
+    changesets = [
+        {
+            "id": "atelier-epic.1",
+            "labels": ["at:changeset", "cs:in_progress"],
+            "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+        },
+        {"id": "atelier-epic.2", "labels": ["at:changeset", "cs:ready"]},
+    ]
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "atelier-epic"]:
+            return [{"id": "atelier-epic", "labels": ["at:epic"]}]
+        return changesets
+
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            side_effect=fake_run_bd_json,
+        ),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+    ):
+        selected = work_cmd._next_changeset(
+            epic_id="atelier-epic",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            repo_slug="org/repo",
+            branch_pr=True,
+        )
+
+    assert selected is not None
+    assert selected["id"] == "atelier-epic.2"
+
+
 def test_next_changeset_skips_non_leaf_parent() -> None:
     changesets = [
         {"id": "atelier-epic.1", "labels": ["at:changeset", "cs:in_progress"]},
@@ -1456,7 +1518,13 @@ def test_startup_contract_skips_hooked_epic_without_ready_changesets() -> None:
     ]
 
     def fake_next_changeset(
-        *, epic_id: str, beads_root: Path, repo_root: Path
+        *,
+        epic_id: str,
+        beads_root: Path,
+        repo_root: Path,
+        repo_slug: str | None = None,
+        branch_pr: bool = True,
+        git_path: str | None = None,
     ) -> dict[str, object] | None:
         if epic_id == "atelier-epic-ready":
             return {"id": "atelier-epic-ready.1"}
@@ -1515,7 +1583,13 @@ def test_startup_contract_falls_back_to_global_ready_changeset() -> None:
         return []
 
     def fake_next_changeset(
-        *, epic_id: str, beads_root: Path, repo_root: Path
+        *,
+        epic_id: str,
+        beads_root: Path,
+        repo_root: Path,
+        repo_slug: str | None = None,
+        branch_pr: bool = True,
+        git_path: str | None = None,
     ) -> dict[str, object] | None:
         if epic_id == "at-irs":
             return {"id": "at-irs"}
@@ -3994,7 +4068,6 @@ def test_run_worker_once_stops_when_changeset_not_updated() -> None:
                 {
                     "id": "atelier-epic.1",
                     "labels": ["at:changeset", "cs:in_progress"],
-                    "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
                 }
             ]
         if args[0] == "list":
@@ -4122,6 +4195,71 @@ def test_finalize_keeps_parent_open_when_children_pending() -> None:
         for args in run_commands
     )
     close_epic.assert_not_called()
+
+
+def test_finalize_allows_in_progress_changeset_waiting_on_review() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset", "cs:in_progress"],
+                    "description": "pr_state: in-review\n",
+                    "status": "in_progress",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_review_pending"
+
+
+def test_finalize_infers_review_pending_from_publish_signals() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset", "cs:in_progress"],
+                    "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+                    "status": "in_progress",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_review_pending"
 
 
 def test_finalize_promotes_planned_descendants_when_unblocked() -> None:
