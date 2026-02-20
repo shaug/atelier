@@ -186,6 +186,21 @@ def test_work_prompt_selects_epic_and_changeset() -> None:
     assert select_epic.called
 
 
+def test_mark_changeset_blocked_clears_terminal_labels() -> None:
+    with patch("atelier.commands.work.beads.run_bd_command") as run_bd_command:
+        work_cmd._mark_changeset_blocked(
+            "atelier-epic.1",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            reason="publish/checks signals missing",
+        )
+
+    args = run_bd_command.call_args.args[0]
+    assert "cs:merged" in args
+    assert "cs:abandoned" in args
+    assert "cs:blocked" in args
+
+
 def test_work_starts_codex_in_exec_mode() -> None:
     epics = [
         {

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from .. import agent_home, beads, config, git, messages, worktrees
+from .. import agent_home, beads, changesets, config, git, messages, worktrees
 from .. import exec as exec_util
 from ..io import confirm, die, say, select, warn
 from . import work as work_cmd
@@ -80,13 +80,34 @@ def _normalize_changeset_labels_for_status(
             desired.add(label)
             reasons.append(f"add {label}: {reason}")
 
+    description = issue.get("description")
+    review = changesets.parse_review_metadata(
+        description if isinstance(description, str) else ""
+    )
+    review_state = (review.pr_state or "").strip().lower()
+
     if status in {"closed", "done"}:
         for label in ("cs:planned", "cs:ready", "cs:in_progress", "cs:blocked"):
             _drop(label, "closed changesets should not carry active lifecycle labels")
+        if "cs:merged" in desired and "cs:abandoned" in desired:
+            if review_state in {"closed", "abandoned"}:
+                _drop("cs:merged", "closed review state prefers abandoned terminal")
+            else:
+                _drop("cs:abandoned", "merged terminal state takes precedence")
+        elif "cs:merged" not in desired and "cs:abandoned" not in desired:
+            if review_state == "merged":
+                _add("cs:merged", "merged review state requires terminal merged label")
+            elif review_state in {"closed", "abandoned"}:
+                _add(
+                    "cs:abandoned",
+                    "closed review state requires terminal abandoned label",
+                )
         return desired, tuple(reasons)
 
     if status == "blocked":
         _add("cs:blocked", "blocked status requires cs:blocked marker")
+        for label in ("cs:merged", "cs:abandoned"):
+            _drop(label, "blocked changesets are not terminal")
         for label in ("cs:planned", "cs:ready", "cs:in_progress"):
             _drop(label, "blocked changesets should not carry active lifecycle labels")
         return desired, tuple(reasons)
@@ -99,6 +120,8 @@ def _normalize_changeset_labels_for_status(
         _drop("cs:blocked", "in_progress changesets are not blocked")
     elif status in {"open", "hooked"}:
         _drop("cs:blocked", "open changesets are not blocked")
+    for label in ("cs:merged", "cs:abandoned"):
+        _drop(label, "active changesets are not terminal")
     return desired, tuple(reasons)
 
 

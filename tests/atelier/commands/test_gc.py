@@ -146,6 +146,40 @@ def test_normalize_changeset_labels_for_status_uses_status_authority() -> None:
     assert any("status is authoritative" in reason for reason in reasons)
 
 
+def test_normalize_changeset_labels_for_status_drops_terminal_labels_on_blocked() -> (
+    None
+):
+    issue = {
+        "id": "at-123",
+        "status": "blocked",
+        "labels": ["at:changeset", "cs:blocked", "cs:merged", "cs:abandoned"],
+    }
+
+    normalized, reasons = gc_cmd._normalize_changeset_labels_for_status(issue)
+
+    assert "cs:blocked" in normalized
+    assert "cs:merged" not in normalized
+    assert "cs:abandoned" not in normalized
+    assert any("not terminal" in reason for reason in reasons)
+
+
+def test_normalize_changeset_labels_for_status_adds_terminal_from_review_state() -> (
+    None
+):
+    issue = {
+        "id": "at-123",
+        "status": "closed",
+        "labels": ["at:changeset"],
+        "description": "pr_state: merged\n",
+    }
+
+    normalized, reasons = gc_cmd._normalize_changeset_labels_for_status(issue)
+
+    assert "cs:merged" in normalized
+    assert "cs:abandoned" not in normalized
+    assert any("requires terminal merged label" in reason for reason in reasons)
+
+
 def test_gc_normalize_changeset_labels_updates_legacy_labels() -> None:
     issues = [
         {
