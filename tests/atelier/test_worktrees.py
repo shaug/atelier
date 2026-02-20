@@ -30,6 +30,19 @@ def test_ensure_changeset_branch_writes_mapping() -> None:
         assert mapping.worktree_path == "worktrees/epic"
 
 
+def test_ensure_changeset_branch_reuses_root_for_epic_changeset() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        branch, mapping = worktrees.ensure_changeset_branch(
+            project_dir, "epic", "epic", root_branch="feat/root"
+        )
+        assert branch == "feat/root"
+        mapping_file = worktrees.mapping_path(project_dir, "epic")
+        payload = json.loads(mapping_file.read_text(encoding="utf-8"))
+        assert payload["changesets"]["epic"] == "feat/root"
+        assert mapping.changesets["epic"] == "feat/root"
+
+
 def test_ensure_changeset_worktree_writes_mapping() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"

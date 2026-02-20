@@ -224,7 +224,11 @@ def ensure_changeset_branch(
     branch = mapping.changesets.get(changeset_id)
     if branch:
         return branch, mapping
-    branch = derive_changeset_branch(root_branch, changeset_id)
+    if changeset_id == epic_id:
+        # Epic-as-changeset runs execute directly on the epic root branch.
+        branch = root_branch
+    else:
+        branch = derive_changeset_branch(root_branch, changeset_id)
     updated = WorktreeMapping(
         epic_id=mapping.epic_id,
         worktree_path=mapping.worktree_path,

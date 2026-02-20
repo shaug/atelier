@@ -673,6 +673,110 @@ def test_next_changeset_skips_ready_epic_when_child_changesets_exist() -> None:
     assert selected is None
 
 
+def test_work_reuses_epic_worktree_for_epic_changeset() -> None:
+    epic_issue = {
+        "id": "at-ati",
+        "title": "Epic as changeset",
+        "status": "open",
+        "labels": ["at:epic", "at:changeset", "at:ready", "cs:ready"],
+        "description": (
+            "workspace.root_branch: feat/root\n"
+            "workspace.parent_branch: main\n"
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: feat/root\n"
+        ),
+    }
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "at-ati"]:
+            return [epic_issue]
+        if args and args[0] == "list":
+            return [epic_issue]
+        if args and args[0] == "ready":
+            return []
+        return []
+
+    mapping = worktrees.WorktreeMapping(
+        epic_id="at-ati",
+        worktree_path="worktrees/at-ati",
+        root_branch="feat/root",
+        changesets={"at-ati": "feat/root"},
+        changeset_worktrees={},
+    )
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/agent",
+        role="worker",
+        path=Path("/project/agents/worker"),
+    )
+    epic_worktree = Path("/tmp/project/worktrees/at-ati")
+
+    with (
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.work.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.work.beads.run_bd_command"),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
+        patch(
+            "atelier.commands.work.beads.ensure_agent_bead",
+            return_value={"id": "atelier-agent"},
+        ),
+        patch("atelier.commands.work.policy.sync_agent_home_policy"),
+        patch(
+            "atelier.commands.work.beads.claim_epic",
+            return_value=epic_issue,
+        ),
+        patch("atelier.commands.work.beads.update_worktree_path"),
+        patch("atelier.commands.work.beads.set_agent_hook"),
+        patch(
+            "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
+        ),
+        patch(
+            "atelier.commands.work.worktrees.ensure_git_worktree",
+            return_value=epic_worktree,
+        ),
+        patch(
+            "atelier.commands.work.worktrees.ensure_changeset_branch",
+            return_value=("feat/root", mapping),
+        ),
+        patch("atelier.commands.work.worktrees.ensure_changeset_checkout"),
+        patch(
+            "atelier.commands.work.worktrees.ensure_changeset_worktree"
+        ) as ensure_changeset_worktree,
+        patch(
+            "atelier.commands.work.codex.run_codex_command",
+            return_value=codex.CodexRunResult(
+                returncode=0, session_id=None, resume_command=None
+            ),
+        ),
+        patch(
+            "atelier.commands.work._finalize_changeset",
+            return_value=work_cmd.FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        ),
+        patch("atelier.commands.work.say"),
+    ):
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once")
+        )
+
+    ensure_changeset_worktree.assert_not_called()
+
+
 def test_mark_changeset_in_progress_adds_changeset_label() -> None:
     with patch("atelier.commands.work.beads.run_bd_command") as run_bd_command:
         work_cmd._mark_changeset_in_progress(

@@ -4564,6 +4564,9 @@ def _run_worker_once(
         epic_worktree_path: Path | None = None
         changeset_worktree_path: Path | None = None
         branch: str | None = None
+        epic_is_changeset = bool(changeset_id) and str(changeset_id) == str(
+            selected_epic
+        )
         if dry_run:
             mapping = None
             mapping_path = worktrees.mapping_path(project_data_dir, selected_epic)
@@ -4574,19 +4577,26 @@ def _run_worker_once(
                 if mapping and mapping.worktree_path
                 else worktrees.worktree_dir(project_data_dir, selected_epic)
             )
-            if mapping and changeset_id in mapping.changesets:
+            if epic_is_changeset and root_branch_value:
+                branch = root_branch_value
+            elif mapping and changeset_id in mapping.changesets:
                 branch = mapping.changesets[changeset_id]
             elif root_branch_value:
                 branch = worktrees.derive_changeset_branch(
                     root_branch_value, changeset_id
                 )
-            changeset_relpath = None
-            if mapping and changeset_id in mapping.changeset_worktrees:
-                changeset_relpath = mapping.changeset_worktrees[changeset_id]
-            elif changeset_id:
-                changeset_relpath = worktrees.changeset_worktree_relpath(changeset_id)
-            if changeset_relpath:
-                changeset_worktree_path = project_data_dir / changeset_relpath
+            if epic_is_changeset:
+                changeset_worktree_path = epic_worktree_path
+            else:
+                changeset_relpath = None
+                if mapping and changeset_id in mapping.changeset_worktrees:
+                    changeset_relpath = mapping.changeset_worktrees[changeset_id]
+                elif changeset_id:
+                    changeset_relpath = worktrees.changeset_worktree_relpath(
+                        changeset_id
+                    )
+                if changeset_relpath:
+                    changeset_worktree_path = project_data_dir / changeset_relpath
             _dry_run_log(f"Epic worktree: {epic_worktree_path}")
             if changeset_worktree_path is not None:
                 _dry_run_log(f"Changeset worktree: {changeset_worktree_path}")
@@ -4621,16 +4631,19 @@ def _run_worker_once(
                 beads_root=beads_root,
                 cwd=repo_root,
             )
-            changeset_worktree_path = worktrees.ensure_changeset_worktree(
-                project_data_dir,
-                repo_root,
-                selected_epic,
-                changeset_id,
-                branch=branch,
-                root_branch=root_branch_value,
-                parent_branch=changeset_parent_branch,
-                git_path=git_path,
-            )
+            if epic_is_changeset:
+                changeset_worktree_path = epic_worktree_path
+            else:
+                changeset_worktree_path = worktrees.ensure_changeset_worktree(
+                    project_data_dir,
+                    repo_root,
+                    selected_epic,
+                    changeset_id,
+                    branch=branch,
+                    root_branch=root_branch_value,
+                    parent_branch=changeset_parent_branch,
+                    git_path=git_path,
+                )
             worktrees.ensure_changeset_checkout(
                 changeset_worktree_path,
                 branch,
