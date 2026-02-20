@@ -86,6 +86,13 @@ class FinalizeResult:
 
 
 @dataclass(frozen=True)
+class ReviewFeedbackSnapshot:
+    feedback_at: str | None
+    unresolved_threads: int | None
+    branch_head: str | None
+
+
+@dataclass(frozen=True)
 class ReconcileResult:
     scanned: int
     actionable: int
@@ -1508,6 +1515,69 @@ def _persist_review_feedback_cursor(
         beads_root=beads_root,
         cwd=repo_root,
     )
+
+
+def _capture_review_feedback_snapshot(
+    *,
+    issue: dict[str, object],
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+) -> ReviewFeedbackSnapshot:
+    work_branch = _changeset_work_branch(issue)
+    if not work_branch:
+        return ReviewFeedbackSnapshot(
+            feedback_at=None, unresolved_threads=None, branch_head=None
+        )
+    branch_head = git.git_rev_parse(repo_root, work_branch, git_path=git_path)
+    if not repo_slug:
+        return ReviewFeedbackSnapshot(
+            feedback_at=None, unresolved_threads=None, branch_head=branch_head
+        )
+    pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+    feedback_at = prs.latest_feedback_timestamp(pr_payload, repo=repo_slug)
+    unresolved_threads = None
+    if isinstance(pr_payload, dict):
+        raw_number = pr_payload.get("number")
+        pr_number = raw_number if isinstance(raw_number, int) else None
+        if (
+            pr_number is None
+            and isinstance(raw_number, str)
+            and raw_number.strip().isdigit()
+        ):
+            pr_number = int(raw_number.strip())
+        if pr_number is not None:
+            unresolved_threads = prs.unresolved_review_thread_count(
+                repo_slug, pr_number
+            )
+    return ReviewFeedbackSnapshot(
+        feedback_at=feedback_at,
+        unresolved_threads=unresolved_threads,
+        branch_head=branch_head,
+    )
+
+
+def _review_feedback_progressed(
+    before: ReviewFeedbackSnapshot, after: ReviewFeedbackSnapshot
+) -> bool:
+    if (
+        before.unresolved_threads is not None
+        and after.unresolved_threads is not None
+        and after.unresolved_threads < before.unresolved_threads
+    ):
+        return True
+    if after.feedback_at and (
+        before.feedback_at is None or after.feedback_at > before.feedback_at
+    ):
+        return True
+    if (
+        before.branch_head
+        and after.branch_head
+        and after.branch_head.strip()
+        and after.branch_head != before.branch_head
+    ):
+        return True
+    return False
 
 
 def _changeset_in_review_candidate(
@@ -4855,6 +4925,7 @@ def _run_worker_once(
         finish_step()
         opening_prompt = ""
         review_feedback = startup_result.reason == "review_feedback"
+        feedback_before: ReviewFeedbackSnapshot | None = None
         if agent_spec.name == "codex":
             review_pr_url = _changeset_pr_url(changeset) if review_feedback else None
             if review_feedback and not review_pr_url and repo_slug:
@@ -4873,6 +4944,13 @@ def _run_worker_once(
                 changeset_title=str(changeset_title),
                 review_feedback=review_feedback,
                 review_pr_url=review_pr_url,
+            )
+        if review_feedback:
+            feedback_before = _capture_review_feedback_snapshot(
+                issue=changeset,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                git_path=git_path,
             )
         finish_step = _step("Install agent hooks", timings=timings, trace=trace)
         if dry_run:
@@ -4971,6 +5049,49 @@ def _run_worker_once(
             git_path=git_path,
         )
         if review_feedback and finalize_result.continue_running:
+            feedback_after = _capture_review_feedback_snapshot(
+                issue=changeset,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                git_path=git_path,
+            )
+            if feedback_before is not None and not _review_feedback_progressed(
+                feedback_before, feedback_after
+            ):
+                _mark_changeset_in_progress(
+                    changeset_id, beads_root=beads_root, repo_root=repo_root
+                )
+                _send_planner_notification(
+                    subject=f"NEEDS-DECISION: Review feedback unchanged ({changeset_id})",
+                    body=(
+                        "Review-feedback run completed without detectable feedback "
+                        "progress.\n"
+                        f"Before: feedback_at={feedback_before.feedback_at or 'none'}, "
+                        "unresolved_threads="
+                        f"{feedback_before.unresolved_threads if feedback_before.unresolved_threads is not None else 'unknown'}, "
+                        f"branch_head={feedback_before.branch_head or 'none'}\n"
+                        f"After: feedback_at={feedback_after.feedback_at or 'none'}, "
+                        "unresolved_threads="
+                        f"{feedback_after.unresolved_threads if feedback_after.unresolved_threads is not None else 'unknown'}, "
+                        f"branch_head={feedback_after.branch_head or 'none'}\n"
+                        "Action: address feedback inline (reply + resolve thread) or "
+                        "push changes that respond to review comments, then rerun worker."
+                    ),
+                    agent_id=agent.agent_id,
+                    thread_id=changeset_id,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    dry_run=False,
+                )
+                finish_step(extra="changeset_feedback_not_addressed")
+                return finish(
+                    WorkerRunSummary(
+                        started=False,
+                        reason="changeset_feedback_not_addressed",
+                        epic_id=selected_epic,
+                        changeset_id=str(changeset_id) if changeset_id else None,
+                    )
+                )
             _persist_review_feedback_cursor(
                 changeset_id=changeset_id,
                 issue=changeset,

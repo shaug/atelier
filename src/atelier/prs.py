@@ -38,6 +38,15 @@ def _gh_available() -> bool:
     return shutil.which("gh") is not None
 
 
+def _split_repo_slug(repo: str) -> tuple[str, str]:
+    owner, sep, name = str(repo).partition("/")
+    owner = owner.strip()
+    name = name.strip()
+    if sep != "/" or not owner or not name:
+        raise RuntimeError("repo must be in owner/name format")
+    return owner, name
+
+
 def _find_latest_pr_number(repo: str, head: str) -> int | None:
     payload = _run_json(
         [
@@ -207,6 +216,84 @@ def latest_feedback_timestamp(
                     include(comment.get("created_at"))
 
     return latest
+
+
+def unresolved_review_thread_count(repo: str, pr_number: int) -> int | None:
+    """Return unresolved inline review thread count for a PR."""
+    if not _gh_available():
+        return None
+    if pr_number <= 0:
+        return None
+    try:
+        owner, name = _split_repo_slug(repo)
+    except RuntimeError:
+        return None
+    query = """
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        nodes { isResolved }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+""".strip()
+    cursor: str | None = None
+    unresolved = 0
+    try:
+        while True:
+            cmd = [
+                "gh",
+                "api",
+                "graphql",
+                "-f",
+                f"query={query}",
+                "-F",
+                f"owner={owner}",
+                "-F",
+                f"name={name}",
+                "-F",
+                f"number={pr_number}",
+            ]
+            if cursor:
+                cmd.extend(["-F", f"cursor={cursor}"])
+            payload = _run_json(cmd)
+            if not isinstance(payload, dict):
+                return None
+            data = payload.get("data")
+            if not isinstance(data, dict):
+                return None
+            repository = data.get("repository")
+            if not isinstance(repository, dict):
+                return None
+            pull_request = repository.get("pullRequest")
+            if not isinstance(pull_request, dict):
+                return None
+            review_threads = pull_request.get("reviewThreads")
+            if not isinstance(review_threads, dict):
+                return None
+            nodes = review_threads.get("nodes")
+            if isinstance(nodes, list):
+                for node in nodes:
+                    if isinstance(node, dict) and not bool(node.get("isResolved")):
+                        unresolved += 1
+            page_info = review_threads.get("pageInfo")
+            has_next = False
+            next_cursor: str | None = None
+            if isinstance(page_info, dict):
+                has_next = bool(page_info.get("hasNextPage"))
+                raw_cursor = page_info.get("endCursor")
+                if isinstance(raw_cursor, str) and raw_cursor.strip():
+                    next_cursor = raw_cursor.strip()
+            if not has_next:
+                return unresolved
+            cursor = next_cursor
+            if not cursor:
+                return unresolved
+    except (RuntimeError, json.JSONDecodeError):
+        return None
 
 
 def lifecycle_state(

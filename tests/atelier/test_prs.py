@@ -78,3 +78,31 @@ def test_latest_feedback_timestamp_includes_review_comments() -> None:
             prs.latest_feedback_timestamp(payload, repo="organicvideodev/tuber-service")
             == "2026-02-20T02:57:06Z"
         )
+
+
+def test_unresolved_review_thread_count_counts_unresolved_threads() -> None:
+    payload = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [{"isResolved": False}, {"isResolved": True}],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    }
+                }
+            }
+        }
+    }
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch("atelier.prs._run_json", return_value=payload),
+    ):
+        assert prs.unresolved_review_thread_count("org/repo", 42) == 1
+
+
+def test_unresolved_review_thread_count_returns_none_on_command_failure() -> None:
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch("atelier.prs._run_json", side_effect=RuntimeError("boom")),
+    ):
+        assert prs.unresolved_review_thread_count("org/repo", 42) is None
