@@ -1216,6 +1216,119 @@ def _changeset_pr_creation_decision(
     )
 
 
+def _recover_premature_merged_changeset(
+    *,
+    issue: dict[str, object],
+    changeset_id: str,
+    epic_id: str,
+    agent_id: str,
+    agent_bead_id: str | None,
+    branch_pr: bool,
+    branch_history: str,
+    branch_squash_message: str,
+    branch_pr_strategy: object,
+    repo_slug: str | None,
+    beads_root: Path,
+    repo_root: Path,
+    project_data_dir: Path,
+    squash_message_agent_spec: str | None,
+    squash_message_agent_options: list[str],
+    squash_message_agent_home: Path | None,
+    squash_message_agent_env: dict[str, str] | None,
+    git_path: str | None,
+) -> FinalizeResult | None:
+    """Recover when an agent marks cs:merged before PR/integration signals exist."""
+    if not branch_pr:
+        return None
+    work_branch = _changeset_work_branch(issue)
+    if not work_branch:
+        return None
+    pushed = git.git_ref_exists(
+        repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
+    )
+    pr_payload = (
+        prs.read_github_pr_status(repo_slug, work_branch) if repo_slug else None
+    )
+    review_requested = prs.has_review_requests(pr_payload)
+    lifecycle = prs.lifecycle_state(
+        pr_payload, pushed=pushed, review_requested=review_requested
+    )
+
+    if lifecycle in {"draft-pr", "pr-open", "in-review", "approved"}:
+        _mark_changeset_in_progress(
+            changeset_id, beads_root=beads_root, repo_root=repo_root
+        )
+        _update_changeset_review_from_pr(
+            changeset_id,
+            pr_payload=pr_payload,
+            pushed=pushed,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        return FinalizeResult(continue_running=True, reason="changeset_review_pending")
+    if lifecycle == "merged":
+        _integration_ok, integrated_sha = _changeset_integration_signal(
+            issue, repo_slug=None, repo_root=repo_root, git_path=git_path
+        )
+        return _finalize_terminal_changeset(
+            changeset_id=changeset_id,
+            epic_id=epic_id,
+            agent_id=agent_id,
+            agent_bead_id=agent_bead_id,
+            terminal_state="merged",
+            integrated_sha=integrated_sha,
+            branch_pr=branch_pr,
+            branch_history=branch_history,
+            branch_squash_message=branch_squash_message,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            project_data_dir=project_data_dir,
+            squash_message_agent_spec=squash_message_agent_spec,
+            squash_message_agent_options=squash_message_agent_options,
+            squash_message_agent_home=squash_message_agent_home,
+            squash_message_agent_env=squash_message_agent_env,
+            git_path=git_path,
+        )
+    if lifecycle == "closed":
+        integration_ok, integrated_sha = _changeset_integration_signal(
+            issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
+        )
+        return _finalize_terminal_changeset(
+            changeset_id=changeset_id,
+            epic_id=epic_id,
+            agent_id=agent_id,
+            agent_bead_id=agent_bead_id,
+            terminal_state="merged" if integration_ok else "abandoned",
+            integrated_sha=integrated_sha if integration_ok else None,
+            branch_pr=branch_pr,
+            branch_history=branch_history,
+            branch_squash_message=branch_squash_message,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            project_data_dir=project_data_dir,
+            squash_message_agent_spec=squash_message_agent_spec,
+            squash_message_agent_options=squash_message_agent_options,
+            squash_message_agent_home=squash_message_agent_home,
+            squash_message_agent_env=squash_message_agent_env,
+            git_path=git_path,
+        )
+    if pushed and not pr_payload:
+        _mark_changeset_in_progress(
+            changeset_id, beads_root=beads_root, repo_root=repo_root
+        )
+        return _handle_pushed_without_pr(
+            issue=issue,
+            changeset_id=changeset_id,
+            agent_id=agent_id,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            beads_root=beads_root,
+            branch_pr_strategy=branch_pr_strategy,
+            git_path=git_path,
+        )
+    return None
+
+
 def _changeset_waiting_on_review_or_signals(
     issue: dict[str, object],
     *,
@@ -3222,6 +3335,28 @@ def _finalize_changeset(
                 issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
             )
             if not integration_proven:
+                recovered = _recover_premature_merged_changeset(
+                    issue=issue,
+                    changeset_id=changeset_id,
+                    epic_id=epic_id,
+                    agent_id=agent_id,
+                    agent_bead_id=agent_bead_id,
+                    branch_pr=branch_pr,
+                    branch_history=branch_history,
+                    branch_squash_message=branch_squash_message,
+                    branch_pr_strategy=branch_pr_strategy,
+                    repo_slug=repo_slug,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    project_data_dir=project_data_dir,
+                    squash_message_agent_spec=squash_message_agent_spec,
+                    squash_message_agent_options=squash_message_agent_options,
+                    squash_message_agent_home=squash_message_agent_home,
+                    squash_message_agent_env=squash_message_agent_env,
+                    git_path=git_path,
+                )
+                if recovered is not None:
+                    return recovered
                 _mark_changeset_blocked(
                     changeset_id,
                     beads_root=beads_root,
