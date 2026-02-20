@@ -46,6 +46,8 @@ from .. import (
 )
 from ..io import confirm, die, prompt, say, select
 from ..worker import prompts as worker_prompts
+from ..worker import publish as worker_publish
+from ..worker import review as worker_review
 from ..worker import telemetry as worker_telemetry
 from ..worker.models import (
     FinalizeResult,
@@ -77,6 +79,8 @@ _DEPENDENCY_ID_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\b")
 
 
 ReviewFeedbackSnapshot = work_feedback.ReviewFeedbackSnapshot
+ReviewFeedbackSelection = worker_review.ReviewFeedbackSelection
+_ReviewFeedbackSelection = ReviewFeedbackSelection
 # Compatibility alias while tests/modules migrate to extracted worker models.
 _PublishSignalDiagnostics = PublishSignalDiagnostics
 
@@ -89,13 +93,6 @@ class _ReconcileCandidate:
     epic_id: str
     integrated_sha: str | None
     dependency_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class _ReviewFeedbackSelection:
-    epic_id: str
-    changeset_id: str
-    feedback_at: str
 
 
 def _normalize_branch_value(value: object) -> str | None:
@@ -943,17 +940,7 @@ def _attempt_create_draft_pr(
 
 
 def _normalized_markdown_bullets(value: str) -> list[str]:
-    items: list[str] = []
-    for raw in value.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        if line.startswith("- "):
-            line = line[2:].strip()
-        elif line.startswith("* "):
-            line = line[2:].strip()
-        items.append(line)
-    return items
+    return worker_publish.normalized_markdown_bullets(value)
 
 
 def _render_changeset_pr_body(issue: dict[str, object]) -> str:
@@ -961,26 +948,7 @@ def _render_changeset_pr_body(issue: dict[str, object]) -> str:
     fields = beads.parse_description_fields(
         description if isinstance(description, str) else ""
     )
-    summary = ""
-    for key in ("scope", "intent", "summary", "rationale"):
-        value = fields.get(key)
-        if isinstance(value, str) and value.strip():
-            summary = value.strip()
-            break
-    if not summary:
-        summary = str(issue.get("title") or "Changeset implementation").strip()
-    rationale = fields.get("rationale")
-    rationale_text = rationale.strip() if isinstance(rationale, str) else ""
-    acceptance_raw = issue.get("acceptance_criteria")
-    acceptance_text = acceptance_raw.strip() if isinstance(acceptance_raw, str) else ""
-    lines: list[str] = ["## Summary", summary]
-    if rationale_text and rationale_text != summary:
-        lines.extend(["", "## Why", rationale_text])
-    if acceptance_text:
-        lines.extend(["", "## Acceptance Criteria"])
-        for item in _normalized_markdown_bullets(acceptance_text):
-            lines.append(f"- {item}")
-    return "\n".join(lines).strip()
+    return worker_publish.render_changeset_pr_body(issue, fields=fields)
 
 
 def _set_changeset_review_pending_state(
@@ -1471,14 +1439,6 @@ def _is_changeset_recovery_candidate(
     return pushed
 
 
-def _changeset_feedback_cursor(issue: dict[str, object]) -> dt.datetime | None:
-    description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
-    return _parse_issue_time(fields.get("review.last_feedback_seen_at"))
-
-
 def _persist_review_feedback_cursor(
     *,
     changeset_id: str,
@@ -1517,75 +1477,19 @@ def _review_feedback_progressed(
     return work_feedback.review_feedback_progressed(before, after)
 
 
-def _changeset_in_review_candidate(
-    issue: dict[str, object], *, live_state: str | None = None
-) -> bool:
-    return lifecycle.is_changeset_in_review_candidate(
-        labels=_issue_labels(issue),
-        status=issue.get("status"),
-        live_state=live_state,
-        stored_review_state=_changeset_review_state(issue),
-    )
-
-
 def _select_review_feedback_changeset(
     *,
     epic_id: str,
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
-) -> _ReviewFeedbackSelection | None:
-    if not repo_slug:
-        return None
-    descendants = beads.list_descendant_changesets(
-        epic_id,
+) -> ReviewFeedbackSelection | None:
+    return worker_review.select_review_feedback_changeset(
+        epic_id=epic_id,
+        repo_slug=repo_slug,
         beads_root=beads_root,
-        cwd=repo_root,
-        include_closed=False,
+        repo_root=repo_root,
     )
-    candidates: list[_ReviewFeedbackSelection] = []
-    for issue in descendants:
-        changeset_id = issue.get("id")
-        if not isinstance(changeset_id, str) or not changeset_id:
-            continue
-        work_branch = _changeset_work_branch(issue)
-        if not work_branch:
-            continue
-        pr_payload = _lookup_pr_payload(repo_slug, work_branch)
-        live_state = None
-        if pr_payload:
-            live_state = prs.lifecycle_state(
-                pr_payload,
-                pushed=False,
-                review_requested=prs.has_review_requests(pr_payload),
-            )
-        if not _changeset_in_review_candidate(issue, live_state=live_state):
-            continue
-        feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
-            pr_payload, repo=repo_slug
-        )
-        if not feedback_at:
-            continue
-        feedback_time = _parse_issue_time(feedback_at)
-        if feedback_time is None:
-            continue
-        cursor = _changeset_feedback_cursor(issue)
-        status = str(issue.get("status") or "").strip().lower()
-        if status != "blocked" and cursor is not None and feedback_time <= cursor:
-            continue
-        candidates.append(
-            _ReviewFeedbackSelection(
-                epic_id=epic_id,
-                changeset_id=changeset_id,
-                feedback_at=feedback_at,
-            )
-        )
-    if not candidates:
-        return None
-    candidates.sort(
-        key=lambda item: _parse_issue_time(item.feedback_at) or dt.datetime.max
-    )
-    return candidates[0]
 
 
 def _select_global_review_feedback_changeset(
@@ -1593,60 +1497,21 @@ def _select_global_review_feedback_changeset(
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
-) -> _ReviewFeedbackSelection | None:
-    if not repo_slug:
-        return None
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:changeset"], beads_root=beads_root, cwd=repo_root
-    )
-    candidates: list[_ReviewFeedbackSelection] = []
-    for issue in issues:
-        changeset_id = issue.get("id")
-        if not isinstance(changeset_id, str) or not changeset_id:
-            continue
-        work_branch = _changeset_work_branch(issue)
-        if not work_branch:
-            continue
-        pr_payload = _lookup_pr_payload(repo_slug, work_branch)
-        live_state = None
-        if pr_payload:
-            live_state = prs.lifecycle_state(
-                pr_payload,
-                pushed=False,
-                review_requested=prs.has_review_requests(pr_payload),
+) -> ReviewFeedbackSelection | None:
+    return worker_review.select_global_review_feedback_changeset(
+        repo_slug=repo_slug,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        resolve_epic_id_for_changeset=(
+            lambda issue: (
+                _resolve_epic_id_for_changeset(
+                    issue, beads_root=beads_root, repo_root=repo_root
+                )
+                or str(issue.get("id") or "")
+                or None
             )
-        if not _changeset_in_review_candidate(issue, live_state=live_state):
-            continue
-        feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
-            pr_payload, repo=repo_slug
-        )
-        if not feedback_at:
-            continue
-        feedback_time = _parse_issue_time(feedback_at)
-        if feedback_time is None:
-            continue
-        cursor = _changeset_feedback_cursor(issue)
-        status = str(issue.get("status") or "").strip().lower()
-        if status != "blocked" and cursor is not None and feedback_time <= cursor:
-            continue
-        epic_id = _resolve_epic_id_for_changeset(
-            issue, beads_root=beads_root, repo_root=repo_root
-        )
-        if not epic_id:
-            epic_id = changeset_id
-        candidates.append(
-            _ReviewFeedbackSelection(
-                epic_id=epic_id,
-                changeset_id=changeset_id,
-                feedback_at=feedback_at,
-            )
-        )
-    if not candidates:
-        return None
-    candidates.sort(
-        key=lambda item: _parse_issue_time(item.feedback_at) or dt.datetime.max
+        ),
     )
-    return candidates[0]
 
 
 def _list_child_issues(
@@ -4134,8 +3999,8 @@ def _run_startup_contract(
 
     def select_feedback_candidate(
         epic_ids: list[str],
-    ) -> _ReviewFeedbackSelection | None:
-        feedback_candidates: list[_ReviewFeedbackSelection] = []
+    ) -> ReviewFeedbackSelection | None:
+        feedback_candidates: list[ReviewFeedbackSelection] = []
         seen_epics: set[str] = set()
         for epic_id in epic_ids:
             if epic_id in seen_epics:
@@ -4159,7 +4024,7 @@ def _run_startup_contract(
         )
         return feedback_candidates[0]
 
-    def resume_feedback(selection: _ReviewFeedbackSelection) -> StartupContractResult:
+    def resume_feedback(selection: ReviewFeedbackSelection) -> StartupContractResult:
         say(
             "Prioritizing review feedback: "
             f"{selection.changeset_id} ({selection.epic_id})"
