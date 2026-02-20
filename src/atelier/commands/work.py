@@ -59,6 +59,7 @@ _INTEGRATED_SHA_NOTE_PATTERN = re.compile(
     re.MULTILINE,
 )
 _DEPENDENCY_ID_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\b")
+_ACTIVE_REVIEW_STATES = {"draft-pr", "pr-open", "in-review", "approved"}
 
 
 @dataclass(frozen=True)
@@ -1484,7 +1485,9 @@ def _changeset_feedback_cursor(issue: dict[str, object]) -> dt.datetime | None:
     return _parse_issue_time(fields.get("review.last_feedback_seen_at"))
 
 
-def _changeset_in_review_candidate(issue: dict[str, object]) -> bool:
+def _changeset_in_review_candidate(
+    issue: dict[str, object], *, live_state: str | None = None
+) -> bool:
     labels = _issue_labels(issue)
     if "at:changeset" not in labels:
         return False
@@ -1492,8 +1495,10 @@ def _changeset_in_review_candidate(issue: dict[str, object]) -> bool:
         return False
     if _is_closed_status(issue.get("status")):
         return False
+    if live_state is not None:
+        return live_state in _ACTIVE_REVIEW_STATES
     state = _changeset_review_state(issue)
-    return state in {"draft-pr", "pr-open", "in-review", "approved"}
+    return state in _ACTIVE_REVIEW_STATES
 
 
 def _select_review_feedback_changeset(
@@ -1516,12 +1521,19 @@ def _select_review_feedback_changeset(
         changeset_id = issue.get("id")
         if not isinstance(changeset_id, str) or not changeset_id:
             continue
-        if not _changeset_in_review_candidate(issue):
-            continue
         work_branch = _changeset_work_branch(issue)
         if not work_branch:
             continue
         pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+        live_state = None
+        if pr_payload:
+            live_state = prs.lifecycle_state(
+                pr_payload,
+                pushed=False,
+                review_requested=prs.has_review_requests(pr_payload),
+            )
+        if not _changeset_in_review_candidate(issue, live_state=live_state):
+            continue
         feedback_at = prs.latest_feedback_timestamp(pr_payload, repo=repo_slug)
         if not feedback_at:
             continue
@@ -1563,12 +1575,19 @@ def _select_global_review_feedback_changeset(
         changeset_id = issue.get("id")
         if not isinstance(changeset_id, str) or not changeset_id:
             continue
-        if not _changeset_in_review_candidate(issue):
-            continue
         work_branch = _changeset_work_branch(issue)
         if not work_branch:
             continue
         pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+        live_state = None
+        if pr_payload:
+            live_state = prs.lifecycle_state(
+                pr_payload,
+                pushed=False,
+                review_requested=prs.has_review_requests(pr_payload),
+            )
+        if not _changeset_in_review_candidate(issue, live_state=live_state):
+            continue
         feedback_at = prs.latest_feedback_timestamp(pr_payload, repo=repo_slug)
         if not feedback_at:
             continue

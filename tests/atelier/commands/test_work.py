@@ -2069,6 +2069,80 @@ def test_select_review_feedback_changeset_respects_cursor_for_open_changeset() -
     assert selected is None
 
 
+def test_select_review_feedback_changeset_uses_live_pr_state_without_pr_metadata() -> (
+    None
+):
+    descendants = [
+        {
+            "id": "at-u9j.1",
+            "status": "open",
+            "labels": ["at:changeset"],
+            "description": "changeset.work_branch: scott/gh-181-duplication-of-results-at-u9j.1\n",
+        }
+    ]
+    with (
+        patch(
+            "atelier.commands.work.beads.list_descendant_changesets",
+            return_value=descendants,
+        ),
+        patch(
+            "atelier.commands.work.prs.read_github_pr_status",
+            return_value={"state": "OPEN", "isDraft": False, "reviewDecision": None},
+        ),
+        patch(
+            "atelier.commands.work.prs.latest_feedback_timestamp",
+            return_value="2026-02-20T03:10:00Z",
+        ),
+    ):
+        selected = work_cmd._select_review_feedback_changeset(
+            epic_id="at-u9j",
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selected is not None
+    assert selected.changeset_id == "at-u9j.1"
+
+
+def test_select_review_feedback_changeset_prefers_live_terminal_state_over_stale_metadata() -> (
+    None
+):
+    descendants = [
+        {
+            "id": "at-u9j.1",
+            "status": "open",
+            "labels": ["at:changeset"],
+            "description": (
+                "changeset.work_branch: scott/gh-181-duplication-of-results-at-u9j.1\n"
+                "pr_state: in-review\n"
+            ),
+        }
+    ]
+    with (
+        patch(
+            "atelier.commands.work.beads.list_descendant_changesets",
+            return_value=descendants,
+        ),
+        patch(
+            "atelier.commands.work.prs.read_github_pr_status",
+            return_value={"state": "CLOSED", "mergedAt": "2026-02-20T03:10:00Z"},
+        ),
+        patch(
+            "atelier.commands.work.prs.latest_feedback_timestamp",
+            return_value="2026-02-20T03:10:00Z",
+        ),
+    ):
+        selected = work_cmd._select_review_feedback_changeset(
+            epic_id="at-u9j",
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selected is None
+
+
 def test_startup_contract_review_feedback_reclaims_stale_assignee() -> None:
     epics = [
         {
