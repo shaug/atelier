@@ -118,7 +118,24 @@ def has_review_requests(payload: dict[str, object] | None) -> bool:
     return False
 
 
-def latest_feedback_timestamp(payload: dict[str, object] | None) -> str | None:
+def _is_bot_author(author: object) -> bool:
+    if not isinstance(author, dict):
+        return False
+    is_bot = author.get("isBot")
+    if isinstance(is_bot, bool):
+        return is_bot
+    author_type = author.get("type")
+    if isinstance(author_type, str) and author_type.strip().lower() == "bot":
+        return True
+    login = author.get("login")
+    if isinstance(login, str) and login.strip().lower().endswith("[bot]"):
+        return True
+    return False
+
+
+def latest_feedback_timestamp(
+    payload: dict[str, object] | None, *, repo: str | None = None
+) -> str | None:
     """Return the latest reviewer feedback timestamp for a PR payload."""
     if not payload:
         return None
@@ -140,7 +157,7 @@ def latest_feedback_timestamp(payload: dict[str, object] | None) -> str | None:
             if not isinstance(comment, dict):
                 continue
             author = comment.get("author")
-            if isinstance(author, dict) and author.get("isBot") is True:
+            if _is_bot_author(author):
                 continue
             include(comment.get("updatedAt"))
             include(comment.get("createdAt"))
@@ -154,11 +171,40 @@ def latest_feedback_timestamp(payload: dict[str, object] | None) -> str | None:
             if state not in {"COMMENTED", "CHANGES_REQUESTED"}:
                 continue
             author = review.get("author")
-            if isinstance(author, dict) and author.get("isBot") is True:
+            if _is_bot_author(author):
                 continue
             include(review.get("updatedAt"))
             include(review.get("submittedAt"))
             include(review.get("createdAt"))
+
+    if repo:
+        pr_number = payload.get("number")
+        number_str = None
+        if isinstance(pr_number, int):
+            number_str = str(pr_number)
+        elif isinstance(pr_number, str) and pr_number.strip().isdigit():
+            number_str = pr_number.strip()
+        if number_str:
+            try:
+                review_comments = _run_json(
+                    [
+                        "gh",
+                        "api",
+                        f"repos/{repo}/pulls/{number_str}/comments",
+                        "--paginate",
+                    ]
+                )
+            except (RuntimeError, json.JSONDecodeError):
+                review_comments = None
+            if isinstance(review_comments, list):
+                for comment in review_comments:
+                    if not isinstance(comment, dict):
+                        continue
+                    author = comment.get("user")
+                    if _is_bot_author(author):
+                        continue
+                    include(comment.get("updated_at"))
+                    include(comment.get("created_at"))
 
     return latest
 

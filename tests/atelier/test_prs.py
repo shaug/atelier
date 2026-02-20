@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from atelier import prs
 
 
@@ -50,3 +52,29 @@ def test_latest_feedback_timestamp_prefers_non_bot_reviewer_events() -> None:
         ],
     }
     assert prs.latest_feedback_timestamp(payload) == "2026-02-20T12:00:00Z"
+
+
+def test_latest_feedback_timestamp_includes_review_comments() -> None:
+    payload = {
+        "number": 204,
+        "comments": [],
+        "reviews": [
+            {
+                "state": "COMMENTED",
+                "submittedAt": "2026-02-20T02:57:05Z",
+                "author": {"isBot": False},
+            }
+        ],
+    }
+    review_comments = [
+        {
+            "created_at": "2026-02-20T02:57:06Z",
+            "updated_at": "2026-02-20T02:57:06Z",
+            "user": {"login": "shaug", "type": "User"},
+        }
+    ]
+    with patch("atelier.prs._run_json", return_value=review_comments):
+        assert (
+            prs.latest_feedback_timestamp(payload, repo="organicvideodev/tuber-service")
+            == "2026-02-20T02:57:06Z"
+        )

@@ -1522,7 +1522,7 @@ def _select_review_feedback_changeset(
         if not work_branch:
             continue
         pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
-        feedback_at = prs.latest_feedback_timestamp(pr_payload)
+        feedback_at = prs.latest_feedback_timestamp(pr_payload, repo=repo_slug)
         if not feedback_at:
             continue
         feedback_time = _parse_issue_time(feedback_at)
@@ -1569,7 +1569,7 @@ def _select_global_review_feedback_changeset(
         if not work_branch:
             continue
         pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
-        feedback_at = prs.latest_feedback_timestamp(pr_payload)
+        feedback_at = prs.latest_feedback_timestamp(pr_payload, repo=repo_slug)
         if not feedback_at:
             continue
         feedback_time = _parse_issue_time(feedback_at)
