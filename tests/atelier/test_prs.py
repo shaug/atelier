@@ -115,3 +115,60 @@ def test_unresolved_review_thread_count_returns_none_on_command_failure() -> Non
         patch("atelier.prs._run_json", side_effect=RuntimeError("boom")),
     ):
         assert prs.unresolved_review_thread_count("org/repo", 42) is None
+
+
+def test_latest_feedback_with_inline_prefers_newer_inline_timestamp() -> None:
+    payload = {
+        "number": 204,
+        "comments": [
+            {
+                "createdAt": "2026-02-20T02:57:05Z",
+                "author": {"isBot": False},
+            }
+        ],
+        "reviews": [],
+    }
+    inline_comments = [
+        {
+            "created_at": "2026-02-20T02:57:07Z",
+            "updated_at": "2026-02-20T02:57:07Z",
+            "user": {"login": "reviewer", "type": "User"},
+        }
+    ]
+    with patch("atelier.prs._run_json", return_value=inline_comments):
+        assert (
+            prs.latest_feedback_timestamp_with_inline_comments(payload, repo="org/repo")
+            == "2026-02-20T02:57:07Z"
+        )
+
+
+def test_unresolved_review_thread_count_paginates() -> None:
+    payload_page_1 = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [{"isResolved": False}],
+                        "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
+                    }
+                }
+            }
+        }
+    }
+    payload_page_2 = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [{"isResolved": False}, {"isResolved": True}],
+                        "pageInfo": {"hasNextPage": False, "endCursor": None},
+                    }
+                }
+            }
+        }
+    }
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch("atelier.prs._run_json", side_effect=[payload_page_1, payload_page_2]),
+    ):
+        assert prs.unresolved_review_thread_count("org/repo", 42) == 2
