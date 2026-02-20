@@ -3603,65 +3603,62 @@ def _run_startup_contract(
 
     stale_assigned = _stale_family_assigned_epics(issues, agent_id=agent_id)
 
-    if branch_pr and repo_slug:
-        candidate_epics: list[str] = []
-        if hooked_epic:
-            candidate_epics.append(hooked_epic)
-        candidate_epics.extend(
-            str(issue_id)
-            for issue in assigned
-            if isinstance((issue_id := issue.get("id")), str) and issue_id
-        )
-        candidate_epics.extend(
-            str(issue_id)
-            for issue in stale_assigned
-            if isinstance((issue_id := issue.get("id")), str) and issue_id
-        )
-        seen_epics: set[str] = set()
+    def select_feedback_candidate(
+        epic_ids: list[str],
+    ) -> _ReviewFeedbackSelection | None:
         feedback_candidates: list[_ReviewFeedbackSelection] = []
-        for candidate_epic in candidate_epics:
-            if candidate_epic in seen_epics:
+        seen_epics: set[str] = set()
+        for epic_id in epic_ids:
+            if epic_id in seen_epics:
                 continue
-            seen_epics.add(candidate_epic)
+            seen_epics.add(epic_id)
             feedback_selection = _select_review_feedback_changeset(
-                epic_id=candidate_epic,
+                epic_id=epic_id,
                 repo_slug=repo_slug,
                 beads_root=beads_root,
                 repo_root=repo_root,
             )
             if feedback_selection is not None:
                 feedback_candidates.append(feedback_selection)
-        if feedback_candidates:
-            feedback_candidates.sort(
-                key=lambda item: (
-                    _parse_issue_time(item.feedback_at)
-                    or dt.datetime.max.replace(tzinfo=dt.timezone.utc)
-                )
+        if not feedback_candidates:
+            return None
+        feedback_candidates.sort(
+            key=lambda item: (
+                _parse_issue_time(item.feedback_at)
+                or dt.datetime.max.replace(tzinfo=dt.timezone.utc)
             )
-            selected_feedback = feedback_candidates[0]
-            say(
-                "Prioritizing review feedback: "
-                f"{selected_feedback.changeset_id} ({selected_feedback.epic_id})"
+        )
+        return feedback_candidates[0]
+
+    def resume_feedback(selection: _ReviewFeedbackSelection) -> StartupContractResult:
+        say(
+            "Prioritizing review feedback: "
+            f"{selection.changeset_id} ({selection.epic_id})"
+        )
+        if dry_run:
+            _dry_run_log(
+                "Would update review feedback cursor "
+                f"for {selection.changeset_id} "
+                f"to {selection.feedback_at}."
             )
-            if dry_run:
-                _dry_run_log(
-                    "Would update review feedback cursor "
-                    f"for {selected_feedback.changeset_id} "
-                    f"to {selected_feedback.feedback_at}."
-                )
-            else:
-                beads.update_changeset_review_feedback_cursor(
-                    selected_feedback.changeset_id,
-                    selected_feedback.feedback_at,
-                    beads_root=beads_root,
-                    cwd=repo_root,
-                )
-            return StartupContractResult(
-                epic_id=selected_feedback.epic_id,
-                changeset_id=selected_feedback.changeset_id,
-                should_exit=False,
-                reason="review_feedback",
+        else:
+            beads.update_changeset_review_feedback_cursor(
+                selection.changeset_id,
+                selection.feedback_at,
+                beads_root=beads_root,
+                cwd=repo_root,
             )
+        return StartupContractResult(
+            epic_id=selection.epic_id,
+            changeset_id=selection.changeset_id,
+            should_exit=False,
+            reason="review_feedback",
+        )
+
+    if branch_pr and repo_slug and hooked_epic:
+        hooked_feedback = select_feedback_candidate([hooked_epic])
+        if hooked_feedback is not None:
+            return resume_feedback(hooked_feedback)
 
     if hooked_epic and epic_has_actionable_changeset(hooked_epic):
         say(f"Resuming hooked epic: {hooked_epic}")
@@ -3673,6 +3670,25 @@ def _run_startup_contract(
         )
     if hooked_epic:
         say(f"Hooked epic has no ready changesets: {hooked_epic}")
+
+    if branch_pr and repo_slug:
+        unhooked_epics: list[str] = []
+        for issue in _sort_by_created_at(issues):
+            issue_id = issue.get("id")
+            if not isinstance(issue_id, str) or not issue_id:
+                continue
+            if issue_id == hooked_epic:
+                continue
+            status = str(issue.get("status") or "")
+            if not _is_eligible_status(status, allow_hooked=True):
+                continue
+            labels = _issue_labels(issue)
+            if "at:draft" in labels:
+                continue
+            unhooked_epics.append(issue_id)
+        feedback = select_feedback_candidate(unhooked_epics)
+        if feedback is not None:
+            return resume_feedback(feedback)
 
     for issue in assigned:
         candidate = issue.get("id")

@@ -1650,6 +1650,157 @@ def test_startup_contract_prioritizes_review_feedback_before_new_work() -> None:
     )
 
 
+def test_startup_contract_prefers_hooked_ready_work_before_unhooked_feedback() -> None:
+    epics = [
+        {
+            "id": "atelier-epic-hooked",
+            "title": "Hooked epic",
+            "status": "open",
+            "labels": ["at:epic"],
+            "assignee": "atelier/worker/agent/p123-t2",
+            "created_at": "2026-02-01T00:00:00+00:00",
+        },
+        {
+            "id": "atelier-epic-other",
+            "title": "Other epic",
+            "status": "open",
+            "labels": ["at:epic"],
+            "created_at": "2026-02-02T00:00:00+00:00",
+        },
+    ]
+    selected_epics: list[str] = []
+
+    with (
+        patch(
+            "atelier.commands.work._resolve_hooked_epic",
+            return_value="atelier-epic-hooked",
+        ),
+        patch("atelier.commands.work.beads.run_bd_json", return_value=epics),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch(
+            "atelier.commands.work._next_changeset",
+            side_effect=lambda **kwargs: (
+                {"id": "atelier-epic-hooked.1"}
+                if kwargs["epic_id"] == "atelier-epic-hooked"
+                else {"id": "atelier-epic-other.1"}
+            ),
+        ),
+        patch(
+            "atelier.commands.work._select_review_feedback_changeset",
+            side_effect=lambda **kwargs: (
+                selected_epics.append(kwargs["epic_id"])
+                or (
+                    work_cmd._ReviewFeedbackSelection(
+                        epic_id="atelier-epic-other",
+                        changeset_id="atelier-epic-other.2",
+                        feedback_at="2026-02-20T09:00:00+00:00",
+                    )
+                    if kwargs["epic_id"] == "atelier-epic-other"
+                    else None
+                )
+            ),
+        ),
+        patch("atelier.commands.work.say"),
+    ):
+        result = work_cmd._run_startup_contract(
+            agent_id="atelier/worker/agent/p123-t2",
+            agent_bead_id="atelier-agent",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            mode="auto",
+            explicit_epic_id=None,
+            queue_only=False,
+            dry_run=False,
+            assume_yes=True,
+            repo_slug="org/repo",
+            branch_pr=True,
+        )
+
+    assert result.should_exit is False
+    assert result.reason == "hooked_epic"
+    assert result.epic_id == "atelier-epic-hooked"
+    assert selected_epics == ["atelier-epic-hooked"]
+
+
+def test_startup_contract_checks_unhooked_feedback_when_hooked_has_no_work() -> None:
+    epics = [
+        {
+            "id": "atelier-epic-hooked",
+            "title": "Hooked epic",
+            "status": "open",
+            "labels": ["at:epic"],
+            "assignee": "atelier/worker/agent/p123-t2",
+            "created_at": "2026-02-01T00:00:00+00:00",
+        },
+        {
+            "id": "atelier-epic-other",
+            "title": "Other epic",
+            "status": "open",
+            "labels": ["at:epic"],
+            "created_at": "2026-02-02T00:00:00+00:00",
+        },
+    ]
+
+    with (
+        patch(
+            "atelier.commands.work._resolve_hooked_epic",
+            return_value="atelier-epic-hooked",
+        ),
+        patch("atelier.commands.work.beads.run_bd_json", return_value=epics),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch(
+            "atelier.commands.work._next_changeset",
+            side_effect=lambda **kwargs: (
+                {"id": "atelier-epic-other.1"}
+                if kwargs["epic_id"] == "atelier-epic-other"
+                else None
+            ),
+        ),
+        patch(
+            "atelier.commands.work._select_review_feedback_changeset",
+            side_effect=lambda **kwargs: (
+                work_cmd._ReviewFeedbackSelection(
+                    epic_id="atelier-epic-other",
+                    changeset_id="atelier-epic-other.2",
+                    feedback_at="2026-02-20T09:00:00+00:00",
+                )
+                if kwargs["epic_id"] == "atelier-epic-other"
+                else None
+            ),
+        ),
+        patch(
+            "atelier.commands.work.beads.update_changeset_review_feedback_cursor"
+        ) as update_cursor,
+        patch("atelier.commands.work.say"),
+    ):
+        result = work_cmd._run_startup_contract(
+            agent_id="atelier/worker/agent/p123-t2",
+            agent_bead_id="atelier-agent",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            mode="auto",
+            explicit_epic_id=None,
+            queue_only=False,
+            dry_run=False,
+            assume_yes=True,
+            repo_slug="org/repo",
+            branch_pr=True,
+        )
+
+    assert result.should_exit is False
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "atelier-epic-other"
+    assert result.changeset_id == "atelier-epic-other.2"
+    update_cursor.assert_called_once_with(
+        "atelier-epic-other.2",
+        "2026-02-20T09:00:00+00:00",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
 def test_startup_contract_falls_back_to_global_ready_changeset() -> None:
     epics = [
         {
