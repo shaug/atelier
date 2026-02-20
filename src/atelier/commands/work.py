@@ -945,6 +945,30 @@ def _changeset_pr_url(issue: dict[str, object]) -> str | None:
     return normalized
 
 
+def _lookup_pr_payload(repo_slug: str | None, branch: str) -> dict[str, object] | None:
+    """Lookup PR payload for a branch."""
+    if not repo_slug:
+        return None
+    return prs.read_github_pr_status(repo_slug, branch)
+
+
+def _lookup_pr_payload_diagnostic(
+    repo_slug: str | None, branch: str
+) -> tuple[dict[str, object] | None, str | None]:
+    """Lookup PR payload with explicit query-failure diagnostics."""
+    if not repo_slug:
+        return None, None
+    lookup = prs.lookup_github_pr_status(repo_slug, branch)
+    if lookup.found:
+        return lookup.payload, None
+    if lookup.failed:
+        error = lookup.error or "unknown gh error"
+        if error.startswith("missing required command: gh"):
+            return None, None
+        return None, error
+    return None, None
+
+
 def _changeset_root_branch(issue: dict[str, object]) -> str | None:
     description = issue.get("description")
     fields = beads.parse_description_fields(
@@ -1138,7 +1162,12 @@ def _handle_pushed_without_pr(
             )
             create_detail = detail
             if created:
-                pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+                pr_payload = _lookup_pr_payload(repo_slug, work_branch)
+                lookup_error = None
+                if pr_payload is None:
+                    _payload_check, lookup_error = _lookup_pr_payload_diagnostic(
+                        repo_slug, work_branch
+                    )
                 if pr_payload:
                     _update_changeset_review_from_pr(
                         changeset_id,
@@ -1154,11 +1183,20 @@ def _handle_pushed_without_pr(
                         beads_root=beads_root,
                         cwd=repo_root,
                     )
+                if lookup_error:
+                    create_detail = (
+                        f"{create_detail}; unable to verify created PR: {lookup_error}"
+                    )
                 return FinalizeResult(
                     continue_running=True, reason="changeset_review_pending"
                 )
             # Recover from duplicate/race failures by checking live PR state.
-            pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+            pr_payload = _lookup_pr_payload(repo_slug, work_branch)
+            lookup_error = None
+            if pr_payload is None:
+                _payload_check, lookup_error = _lookup_pr_payload_diagnostic(
+                    repo_slug, work_branch
+                )
             if pr_payload:
                 _update_changeset_review_from_pr(
                     changeset_id,
@@ -1169,6 +1207,12 @@ def _handle_pushed_without_pr(
                 )
                 return FinalizeResult(
                     continue_running=True, reason="changeset_review_pending"
+                )
+            if lookup_error:
+                failure_reason = "changeset_pr_status_query_failed"
+                failure_subject = "NEEDS-DECISION: PR status query failed"
+                create_detail = (
+                    f"{create_detail}; unable to verify existing PR: {lookup_error}"
                 )
 
     _mark_changeset_in_progress(
@@ -1249,7 +1293,7 @@ def _changeset_parent_lifecycle_state(
     pushed = git.git_ref_exists(
         repo_root, f"refs/remotes/origin/{normalized}", git_path=git_path
     )
-    payload = prs.read_github_pr_status(repo_slug, normalized)
+    payload = _lookup_pr_payload(repo_slug, normalized)
     review_requested = prs.has_review_requests(payload)
     return prs.lifecycle_state(
         payload, pushed=pushed, review_requested=review_requested
@@ -1302,9 +1346,16 @@ def _recover_premature_merged_changeset(
     pushed = git.git_ref_exists(
         repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
     )
-    pr_payload = (
-        prs.read_github_pr_status(repo_slug, work_branch) if repo_slug else None
-    )
+    pr_payload = _lookup_pr_payload(repo_slug, work_branch)
+    lookup_error = None
+    if pr_payload is None:
+        _payload_check, lookup_error = _lookup_pr_payload_diagnostic(
+            repo_slug, work_branch
+        )
+    if lookup_error:
+        return FinalizeResult(
+            continue_running=False, reason="changeset_pr_status_query_failed"
+        )
     review_requested = prs.has_review_requests(pr_payload)
     lifecycle = prs.lifecycle_state(
         pr_payload, pushed=pushed, review_requested=review_requested
@@ -1401,9 +1452,7 @@ def _changeset_waiting_on_review_or_signals(
         pushed = git.git_ref_exists(
             repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
         )
-        pr_payload = (
-            prs.read_github_pr_status(repo_slug, work_branch) if repo_slug else None
-        )
+        pr_payload = _lookup_pr_payload(repo_slug, work_branch)
         review_requested = prs.has_review_requests(pr_payload)
         state = prs.lifecycle_state(
             pr_payload, pushed=pushed, review_requested=review_requested
@@ -1461,9 +1510,7 @@ def _is_changeset_recovery_candidate(
         repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
     )
     if branch_pr:
-        pr_payload = (
-            prs.read_github_pr_status(repo_slug, work_branch) if repo_slug else None
-        )
+        pr_payload = _lookup_pr_payload(repo_slug, work_branch)
         review_requested = prs.has_review_requests(pr_payload)
         lifecycle = prs.lifecycle_state(
             pr_payload, pushed=pushed, review_requested=review_requested
@@ -1566,7 +1613,7 @@ def _select_review_feedback_changeset(
         work_branch = _changeset_work_branch(issue)
         if not work_branch:
             continue
-        pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+        pr_payload = _lookup_pr_payload(repo_slug, work_branch)
         live_state = None
         if pr_payload:
             live_state = prs.lifecycle_state(
@@ -1622,7 +1669,7 @@ def _select_global_review_feedback_changeset(
         work_branch = _changeset_work_branch(issue)
         if not work_branch:
             continue
-        pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+        pr_payload = _lookup_pr_payload(repo_slug, work_branch)
         live_state = None
         if pr_payload:
             live_state = prs.lifecycle_state(
@@ -2121,7 +2168,7 @@ def _changeset_integration_signal(
 
     # PR merge signal (review flows).
     if repo_slug and work_branch and work_branch.strip().lower() != "null":
-        pr_payload = prs.read_github_pr_status(repo_slug, work_branch.strip())
+        pr_payload = _lookup_pr_payload(repo_slug, work_branch.strip())
         if pr_payload and pr_payload.get("mergedAt"):
             return True, None
 
@@ -3652,8 +3699,34 @@ def _finalize_changeset(
         repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
     )
     pr_payload = None
+    pr_lookup_error: str | None = None
     if repo_slug:
-        pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+        pr_payload = _lookup_pr_payload(repo_slug, work_branch)
+        if pr_payload is None:
+            _payload_check, pr_lookup_error = _lookup_pr_payload_diagnostic(
+                repo_slug, work_branch
+            )
+    if branch_pr and pr_lookup_error:
+        _mark_changeset_in_progress(
+            changeset_id, beads_root=beads_root, repo_root=repo_root
+        )
+        _send_planner_notification(
+            subject=f"NEEDS-DECISION: PR status query failed ({changeset_id})",
+            body=(
+                "Unable to evaluate PR lifecycle during finalize because GitHub "
+                f"status lookup failed for branch `{work_branch}`.\n"
+                f"Error: {pr_lookup_error}\n"
+                "Action: resolve GitHub access/query issues and rerun worker finalize."
+            ),
+            agent_id=agent_id,
+            thread_id=changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            dry_run=False,
+        )
+        return FinalizeResult(
+            continue_running=False, reason="changeset_pr_status_query_failed"
+        )
     lifecycle: str | None = None
     if branch_pr:
         review_requested = prs.has_review_requests(pr_payload)
@@ -3763,7 +3836,37 @@ def _finalize_changeset(
             )
             if pushed:
                 if repo_slug:
-                    pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+                    pr_payload = _lookup_pr_payload(repo_slug, work_branch)
+                    if pr_payload is None:
+                        _payload_check, pr_lookup_error = _lookup_pr_payload_diagnostic(
+                            repo_slug, work_branch
+                        )
+                    if pr_lookup_error:
+                        _mark_changeset_in_progress(
+                            changeset_id, beads_root=beads_root, repo_root=repo_root
+                        )
+                        _send_planner_notification(
+                            subject=(
+                                "NEEDS-DECISION: PR status query failed "
+                                f"({changeset_id})"
+                            ),
+                            body=(
+                                "Branch push succeeded but GitHub PR status lookup "
+                                f"failed for `{work_branch}`.\n"
+                                f"Error: {pr_lookup_error}\n"
+                                "Action: resolve GitHub access/query issues and "
+                                "rerun worker finalize."
+                            ),
+                            agent_id=agent_id,
+                            thread_id=changeset_id,
+                            beads_root=beads_root,
+                            repo_root=repo_root,
+                            dry_run=False,
+                        )
+                        return FinalizeResult(
+                            continue_running=False,
+                            reason="changeset_pr_status_query_failed",
+                        )
                 if branch_pr and not pr_payload:
                     return _handle_pushed_without_pr(
                         issue=issue,
@@ -4912,7 +5015,7 @@ def _run_worker_once(
             if review_feedback and not review_pr_url and repo_slug:
                 feedback_branch = _changeset_work_branch(changeset)
                 if feedback_branch:
-                    pr_payload = prs.read_github_pr_status(repo_slug, feedback_branch)
+                    pr_payload = _lookup_pr_payload(repo_slug, feedback_branch)
                     if pr_payload:
                         payload_url = pr_payload.get("url")
                         if isinstance(payload_url, str) and payload_url.strip():

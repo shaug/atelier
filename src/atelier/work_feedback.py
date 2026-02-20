@@ -42,7 +42,8 @@ def persist_review_feedback_cursor(
     work_branch = _changeset_work_branch(issue)
     if not work_branch:
         return
-    pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+    lookup = prs.lookup_github_pr_status(repo_slug, work_branch)
+    pr_payload = lookup.payload if lookup.found else None
     feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
         pr_payload, repo=repo_slug
     )
@@ -73,7 +74,8 @@ def capture_review_feedback_snapshot(
         return ReviewFeedbackSnapshot(
             feedback_at=None, unresolved_threads=None, branch_head=branch_head
         )
-    pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+    lookup = prs.lookup_github_pr_status(repo_slug, work_branch)
+    pr_payload = lookup.payload if lookup.found else None
     feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
         pr_payload, repo=repo_slug
     )

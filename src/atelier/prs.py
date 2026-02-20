@@ -5,8 +5,27 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from dataclasses import dataclass
+from typing import Literal
 
 from . import git
+
+
+@dataclass(frozen=True)
+class GithubPrLookup:
+    """Outcome for a GitHub PR lookup by head branch."""
+
+    outcome: Literal["found", "not_found", "error"]
+    payload: dict[str, object] | None = None
+    error: str | None = None
+
+    @property
+    def found(self) -> bool:
+        return self.outcome == "found" and isinstance(self.payload, dict)
+
+    @property
+    def failed(self) -> bool:
+        return self.outcome == "error"
 
 
 def github_repo_slug(origin: str | None) -> str | None:
@@ -77,14 +96,17 @@ def _find_latest_pr_number(repo: str, head: str) -> int | None:
     return numbers[-1] if numbers else None
 
 
-def read_github_pr_status(repo: str, head: str) -> dict[str, object] | None:
-    """Return GitHub PR metadata for a head branch when available."""
+def lookup_github_pr_status(repo: str, head: str) -> GithubPrLookup:
+    """Return explicit GitHub PR lookup outcome for a head branch."""
     if not _gh_available():
-        return None
+        return GithubPrLookup(outcome="error", error="missing required command: gh")
     try:
         number = _find_latest_pr_number(repo, head)
-        if number is None:
-            return None
+    except (RuntimeError, json.JSONDecodeError) as exc:
+        return GithubPrLookup(outcome="error", error=str(exc))
+    if number is None:
+        return GithubPrLookup(outcome="not_found")
+    try:
         payload = _run_json(
             [
                 "gh",
@@ -97,11 +119,19 @@ def read_github_pr_status(repo: str, head: str) -> dict[str, object] | None:
                 "number,url,state,baseRefName,headRefName,title,body,labels,isDraft,mergedAt,closedAt,updatedAt,reviewDecision,mergeable,reviewRequests,comments,reviews",
             ]
         )
-    except (RuntimeError, json.JSONDecodeError):
-        return None
+    except (RuntimeError, json.JSONDecodeError) as exc:
+        return GithubPrLookup(outcome="error", error=str(exc))
     if not isinstance(payload, dict):
-        return None
-    return payload
+        return GithubPrLookup(outcome="error", error="Unexpected gh output for PR view")
+    return GithubPrLookup(outcome="found", payload=payload)
+
+
+def read_github_pr_status(repo: str, head: str) -> dict[str, object] | None:
+    """Return GitHub PR metadata for a head branch when available."""
+    lookup = lookup_github_pr_status(repo, head)
+    if lookup.found:
+        return lookup.payload
+    return None
 
 
 def has_review_requests(payload: dict[str, object] | None) -> bool:

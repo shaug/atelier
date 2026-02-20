@@ -26,6 +26,46 @@ def test_lifecycle_state_falls_back_to_pushed() -> None:
     assert prs.lifecycle_state(None, pushed=True, review_requested=False) == "pushed"
 
 
+def test_lookup_github_pr_status_reports_not_found() -> None:
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch("atelier.prs._find_latest_pr_number", return_value=None),
+    ):
+        result = prs.lookup_github_pr_status("org/repo", "feature/test")
+
+    assert result.outcome == "not_found"
+    assert result.payload is None
+    assert result.error is None
+
+
+def test_lookup_github_pr_status_reports_found_payload() -> None:
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch("atelier.prs._find_latest_pr_number", return_value=42),
+        patch("atelier.prs._run_json", return_value={"number": 42, "state": "OPEN"}),
+    ):
+        result = prs.lookup_github_pr_status("org/repo", "feature/test")
+
+    assert result.outcome == "found"
+    assert result.payload == {"number": 42, "state": "OPEN"}
+    assert result.error is None
+
+
+def test_lookup_github_pr_status_reports_query_errors() -> None:
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch(
+            "atelier.prs._find_latest_pr_number",
+            side_effect=RuntimeError("gh auth failed"),
+        ),
+    ):
+        result = prs.lookup_github_pr_status("org/repo", "feature/test")
+
+    assert result.outcome == "error"
+    assert result.payload is None
+    assert result.error == "gh auth failed"
+
+
 def test_latest_feedback_timestamp_prefers_non_bot_reviewer_events() -> None:
     payload = {
         "comments": [

@@ -9,6 +9,7 @@ import atelier.codex as codex
 import atelier.commands.work as work_cmd
 import atelier.config as config
 import atelier.messages as messages
+import atelier.prs as prs
 import atelier.worktrees as worktrees
 from atelier.agent_home import AgentHome
 
@@ -69,6 +70,10 @@ def _publish_signals() -> object:
     with (
         patch("atelier.commands.work.git.git_ref_exists", return_value=True),
         patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work.prs.lookup_github_pr_status",
+            return_value=prs.GithubPrLookup(outcome="not_found"),
+        ),
     ):
         yield
 
@@ -6061,6 +6066,53 @@ def test_finalize_flags_missing_pr_when_strategy_allows_creation() -> None:
         for call in run_bd_command.call_args_list
         for args in [call.args[0]]
     )
+
+
+def test_finalize_reports_pr_query_failure_separately() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset", "cs:ready"],
+                    "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+                    "status": "open",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work.prs.lookup_github_pr_status",
+            return_value=prs.GithubPrLookup(
+                outcome="error",
+                error="GraphQL: request timed out",
+            ),
+        ),
+        patch("atelier.commands.work._mark_changeset_in_progress") as mark_in_progress,
+        patch("atelier.commands.work._send_planner_notification") as notify,
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+            branch_pr_strategy="sequential",
+        )
+
+    assert result.continue_running is False
+    assert result.reason == "changeset_pr_status_query_failed"
+    mark_in_progress.assert_called_once()
+    notify.assert_called_once()
+    assert "query failed" in notify.call_args.kwargs["subject"].lower()
 
 
 def test_finalize_recovers_when_pr_appears_after_create_failure() -> None:
