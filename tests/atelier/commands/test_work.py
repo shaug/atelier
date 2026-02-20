@@ -810,6 +810,44 @@ def test_select_epic_from_ready_changesets_skips_assigned_epics() -> None:
     assert selected == "at-irs"
 
 
+def test_changeset_base_branch_prefers_workspace_parent_when_parent_equals_root() -> (
+    None
+):
+    issue = {
+        "description": (
+            "changeset.root_branch: scott/gum-1311-admin-role-update-end\n"
+            "changeset.parent_branch: scott/gum-1311-admin-role-update-end\n"
+            "workspace.parent_branch: main\n"
+        )
+    }
+
+    base = work_cmd._changeset_base_branch(
+        issue,
+        repo_root=Path("/repo"),
+        git_path=None,
+    )
+
+    assert base == "main"
+
+
+def test_changeset_base_branch_uses_changeset_parent_when_distinct() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: scott/root\n"
+            "changeset.parent_branch: scott/root-1\n"
+            "workspace.parent_branch: main\n"
+        )
+    }
+
+    base = work_cmd._changeset_base_branch(
+        issue,
+        repo_root=Path("/repo"),
+        git_path=None,
+    )
+
+    assert base == "scott/root-1"
+
+
 def test_work_prompt_yes_uses_first_epic_without_select() -> None:
     epics = [
         {

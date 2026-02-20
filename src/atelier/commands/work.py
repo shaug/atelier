@@ -932,13 +932,32 @@ def _changeset_root_branch(issue: dict[str, object]) -> str | None:
 def _changeset_base_branch(
     issue: dict[str, object], *, repo_root: Path, git_path: str | None
 ) -> str | None:
-    parent_branch = _changeset_parent_branch(
-        issue, root_branch=_changeset_root_branch(issue) or ""
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
     )
+    root_branch = _changeset_root_branch(issue)
+    parent_branch = _changeset_parent_branch(issue, root_branch=root_branch or "")
+    workspace_parent_branch = fields.get("workspace.parent_branch")
     normalized_parent = parent_branch.strip() if isinstance(parent_branch, str) else ""
+    normalized_root = root_branch.strip() if isinstance(root_branch, str) else ""
+    normalized_workspace_parent = (
+        workspace_parent_branch.strip()
+        if isinstance(workspace_parent_branch, str)
+        else ""
+    )
+    # Top-level changesets often persisted parent=root; use workspace parent for
+    # PR base when available so PR creation targets mainline, not the root branch.
+    if (
+        normalized_workspace_parent
+        and normalized_workspace_parent.lower() != "null"
+        and normalized_root
+        and normalized_parent
+        and normalized_parent == normalized_root
+    ):
+        return normalized_workspace_parent
     if normalized_parent and normalized_parent.lower() != "null":
         return normalized_parent
-    root_branch = _changeset_root_branch(issue)
     if root_branch:
         return root_branch
     return git.git_default_branch(repo_root, git_path=git_path)
