@@ -2132,8 +2132,38 @@ def _changeset_integration_signal(
             match.group(1)
             for match in _INTEGRATED_SHA_NOTE_PATTERN.finditer(combined_text)
         )
+    candidate_refs: list[str] = []
+    for key in (
+        "changeset.root_branch",
+        "changeset.parent_branch",
+        "workspace.parent_branch",
+    ):
+        value = fields.get(key)
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip()
+        if not normalized or normalized.lower() == "null":
+            continue
+        if normalized not in candidate_refs:
+            candidate_refs.append(normalized)
     if integrated_sha_candidates:
-        return True, integrated_sha_candidates[-1]
+        for candidate in reversed(integrated_sha_candidates):
+            candidate_sha = git.git_rev_parse(repo_root, candidate, git_path=git_path)
+            if not candidate_sha:
+                continue
+            for ref_name in candidate_refs:
+                ref = _branch_ref_for_lookup(repo_root, ref_name, git_path=git_path)
+                if not ref:
+                    continue
+                if (
+                    git.git_is_ancestor(
+                        repo_root, candidate_sha, ref, git_path=git_path
+                    )
+                    is True
+                ):
+                    return True, candidate_sha
+            # Candidate SHA exists but does not resolve as integrated into expected
+            # target branches; continue with other signals.
 
     root_branch = fields.get("changeset.root_branch")
     work_branch = fields.get("changeset.work_branch")

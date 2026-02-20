@@ -4361,6 +4361,8 @@ def test_finalize_accepts_merged_with_integrated_sha_in_notes() -> None:
                     "id": "atelier-epic.1",
                     "labels": ["at:changeset", "cs:merged"],
                     "description": (
+                        "changeset.root_branch: feat/root\n"
+                        "changeset.parent_branch: main\n"
                         "notes:\n"
                         "- `changeset.integrated_sha`: "
                         "67c7ca10898839106bbb9377e0ed0709fc7c0fbf\n"
@@ -4377,6 +4379,15 @@ def test_finalize_accepts_merged_with_integrated_sha_in_notes() -> None:
         ),
         patch("atelier.commands.work.beads.close_epic_if_complete") as close_epic,
         patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work.git.git_rev_parse",
+            return_value="67c7ca10898839106bbb9377e0ed0709fc7c0fbf",
+        ),
+        patch(
+            "atelier.commands.work._branch_ref_for_lookup",
+            return_value="origin/feat/root",
+        ),
+        patch("atelier.commands.work.git.git_is_ancestor", return_value=True),
     ):
         result = work_cmd._finalize_changeset(
             changeset_id="atelier-epic.1",
@@ -4421,7 +4432,18 @@ def test_integration_signal_reads_sha_from_realistic_notes_payload() -> None:
         ),
     }
 
-    with patch("atelier.commands.work.prs.read_github_pr_status", return_value=None):
+    with (
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work.git.git_rev_parse",
+            return_value="67c7ca10898839106bbb9377e0ed0709fc7c0fbf",
+        ),
+        patch(
+            "atelier.commands.work._branch_ref_for_lookup",
+            return_value="origin/gh-194-data-taking-a-long-time",
+        ),
+        patch("atelier.commands.work.git.git_is_ancestor", return_value=True),
+    ):
         proven, sha = work_cmd._changeset_integration_signal(
             issue, repo_slug=None, repo_root=Path("/repo")
         )
@@ -4447,7 +4469,18 @@ def test_integration_signal_reads_sha_from_issue_notes_field() -> None:
         ),
     }
 
-    with patch("atelier.commands.work.prs.read_github_pr_status", return_value=None):
+    with (
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work.git.git_rev_parse",
+            return_value="dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a",
+        ),
+        patch(
+            "atelier.commands.work._branch_ref_for_lookup",
+            return_value="origin/gh-194-data-taking-a-long-time",
+        ),
+        patch("atelier.commands.work.git.git_is_ancestor", return_value=True),
+    ):
         proven, sha = work_cmd._changeset_integration_signal(
             issue, repo_slug=None, repo_root=Path("/repo")
         )
@@ -4472,13 +4505,78 @@ def test_integration_signal_prefers_last_integrated_sha_entry() -> None:
         ),
     }
 
-    with patch("atelier.commands.work.prs.read_github_pr_status", return_value=None):
+    with (
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work.git.git_rev_parse",
+            side_effect=[
+                "dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a",
+                "dd9fe6ec497565dbf2d4d6a8df8d76af7cb6f8d7",
+            ],
+        ),
+        patch(
+            "atelier.commands.work._branch_ref_for_lookup",
+            return_value="origin/gh-194-data-taking-a-long-time",
+        ),
+        patch("atelier.commands.work.git.git_is_ancestor", return_value=True),
+    ):
         proven, sha = work_cmd._changeset_integration_signal(
             issue, repo_slug=None, repo_root=Path("/repo")
         )
 
     assert proven is True
     assert sha == "dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a"
+
+
+def test_integration_signal_rejects_unvalidated_sha_claim() -> None:
+    issue = {
+        "id": "at-wjj.4.3",
+        "labels": ["at:changeset", "cs:merged"],
+        "description": (
+            "changeset.root_branch: gh-194-data-taking-a-long-time\n"
+            "changeset.parent_branch: gh-194-data-taking-a-long-time\n"
+            "changeset.work_branch: gh-194-data-taking-a-long-time-at-wjj.4.3\n"
+        ),
+        "notes": (
+            "changeset.integrated_sha: dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a\n"
+        ),
+    }
+
+    with (
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch("atelier.commands.work.git.git_rev_parse", return_value=None),
+        patch("atelier.commands.work._branch_ref_for_lookup", return_value=None),
+    ):
+        proven, sha = work_cmd._changeset_integration_signal(
+            issue, repo_slug=None, repo_root=Path("/repo")
+        )
+
+    assert proven is False
+    assert sha is None
+
+
+def test_integration_signal_rejects_notes_only_sha_without_target_refs() -> None:
+    issue = {
+        "id": "at-foo.1",
+        "labels": ["at:changeset", "cs:merged"],
+        "description": "scope: verify integration.\n",
+        "notes": "changeset.integrated_sha: dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a\n",
+    }
+
+    with (
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work.git.git_rev_parse",
+            return_value="dd9fe6e403b7156bc1fa59eb0aaa14f036151e2a",
+        ),
+        patch("atelier.commands.work._branch_ref_for_lookup", return_value=None),
+    ):
+        proven, sha = work_cmd._changeset_integration_signal(
+            issue, repo_slug=None, repo_root=Path("/repo")
+        )
+
+    assert proven is False
+    assert sha is None
 
 
 def test_resolve_epic_id_refreshes_issue_when_parent_missing_in_list_payload() -> None:
@@ -6840,7 +6938,11 @@ def test_work_closes_epic_when_changeset_complete() -> None:
                 {
                     "id": "atelier-epic.1",
                     "labels": ["at:changeset", "cs:merged"],
-                    "description": "changeset.integrated_sha: abc123\n",
+                    "description": (
+                        "changeset.integrated_sha: abc123\n"
+                        "changeset.root_branch: feat/root\n"
+                        "changeset.parent_branch: main\n"
+                    ),
                 }
             ]
         if args[:3] == ["list", "--parent", "atelier-epic"]:
@@ -6873,63 +6975,108 @@ def test_work_closes_epic_when_changeset_complete() -> None:
         path=Path("/project/agents/worker"),
     )
 
-    with (
-        patch(
-            "atelier.commands.work.resolve_current_project_with_repo_root",
-            return_value=(
-                Path("/project"),
-                _fake_project_payload(),
-                "/repo",
-                Path("/repo"),
-            ),
-        ),
-        patch(
-            "atelier.commands.work.config.resolve_beads_root",
-            return_value=Path("/beads"),
-        ),
-        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.commands.work.beads.run_bd_command"),
-        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
-        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
-        patch("atelier.commands.work.beads.get_agent_hook", return_value=None),
-        patch(
-            "atelier.commands.work.worktrees.ensure_changeset_branch",
-            return_value=("feat/root-atelier-epic.1", mapping),
-        ),
-        patch("atelier.commands.work.worktrees.ensure_changeset_checkout"),
-        patch("atelier.commands.work.worktrees.ensure_git_worktree"),
-        patch(
-            "atelier.commands.work.codex.run_codex_command",
-            return_value=codex.CodexRunResult(
-                returncode=0, session_id=None, resume_command=None
-            ),
-        ),
-        patch(
-            "atelier.commands.work.beads.ensure_agent_bead",
-            return_value={"id": "atelier-agent"},
-        ),
-        patch("atelier.commands.work.policy.sync_agent_home_policy"),
-        patch(
-            "atelier.commands.work.beads.claim_epic",
-            return_value={
-                "id": "atelier-epic",
-                "title": "Epic",
-                "description": "workspace.root_branch: feat/root\n",
-            },
-        ),
-        patch("atelier.commands.work.beads.update_worktree_path"),
-        patch("atelier.commands.work.beads.set_agent_hook"),
-        patch(
-            "atelier.commands.work._finalize_epic_if_complete",
-            return_value=work_cmd.FinalizeResult(
-                continue_running=True, reason="changeset_complete"
-            ),
-        ) as finalize_epic,
-        patch(
-            "atelier.commands.work.agent_home.resolve_agent_home", return_value=agent
-        ),
-        patch("atelier.commands.work.say"),
-    ):
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.resolve_current_project_with_repo_root",
+                return_value=(
+                    Path("/project"),
+                    _fake_project_payload(),
+                    "/repo",
+                    Path("/repo"),
+                ),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.config.resolve_beads_root",
+                return_value=Path("/beads"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json
+            )
+        )
+        stack.enter_context(patch("atelier.commands.work.beads.run_bd_command"))
+        stack.enter_context(
+            patch("atelier.commands.work.beads.list_inbox_messages", return_value=[])
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.beads.list_queue_messages", return_value=[])
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.beads.get_agent_hook", return_value=None)
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.worktrees.ensure_changeset_branch",
+                return_value=("feat/root-atelier-epic.1", mapping),
+            )
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.worktrees.ensure_changeset_checkout")
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.worktrees.ensure_git_worktree")
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.codex.run_codex_command",
+                return_value=codex.CodexRunResult(
+                    returncode=0, session_id=None, resume_command=None
+                ),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.beads.ensure_agent_bead",
+                return_value={"id": "atelier-agent"},
+            )
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.policy.sync_agent_home_policy")
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.beads.claim_epic",
+                return_value={
+                    "id": "atelier-epic",
+                    "title": "Epic",
+                    "description": "workspace.root_branch: feat/root\n",
+                },
+            )
+        )
+        stack.enter_context(patch("atelier.commands.work.beads.update_worktree_path"))
+        stack.enter_context(patch("atelier.commands.work.beads.set_agent_hook"))
+        finalize_epic = stack.enter_context(
+            patch(
+                "atelier.commands.work._finalize_epic_if_complete",
+                return_value=work_cmd.FinalizeResult(
+                    continue_running=True, reason="changeset_complete"
+                ),
+            )
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.git.git_rev_parse", return_value="abc123")
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work._branch_ref_for_lookup",
+                return_value="origin/main",
+            )
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.git.git_is_ancestor", return_value=True)
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.agent_home.resolve_agent_home",
+                return_value=agent,
+            )
+        )
+        stack.enter_context(patch("atelier.commands.work.say"))
+
         work_cmd.start_worker(
             SimpleNamespace(epic_id=None, mode="auto", run_mode="once")
         )
