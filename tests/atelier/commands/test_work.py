@@ -4531,6 +4531,7 @@ def test_finalize_creates_pr_when_missing_and_strategy_allows() -> None:
             "atelier.commands.work.prs.read_github_pr_status",
             side_effect=[
                 None,
+                None,
                 {
                     "number": 42,
                     "url": "https://github.com/org/repo/pull/42",
@@ -4562,6 +4563,183 @@ def test_finalize_creates_pr_when_missing_and_strategy_allows() -> None:
     assert result.continue_running is True
     assert result.reason == "changeset_review_pending"
     update_review.assert_called_once()
+
+
+def test_finalize_terminalizes_when_pr_is_merged() -> None:
+    run_commands: list[list[str]] = []
+
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset", "cs:in_progress"],
+                    "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+                    "status": "in_progress",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch(
+            "atelier.commands.work.prs.read_github_pr_status",
+            return_value={
+                "number": 42,
+                "url": "https://github.com/org/repo/pull/42",
+                "state": "MERGED",
+                "isDraft": False,
+                "mergedAt": "2026-01-01T00:00:00Z",
+            },
+        ),
+        patch(
+            "atelier.commands.work.beads.run_bd_command",
+            side_effect=lambda args, **kwargs: run_commands.append(list(args)),
+        ),
+        patch(
+            "atelier.commands.work._finalize_epic_if_complete",
+            return_value=work_cmd.FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        ),
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_complete"
+    assert any(
+        args[:2] == ["update", "atelier-epic.1"] and "cs:merged" in args
+        for args in run_commands
+    )
+
+
+def test_finalize_terminalizes_closed_unmerged_pr_as_abandoned() -> None:
+    run_commands: list[list[str]] = []
+
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset", "cs:in_progress"],
+                    "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+                    "status": "in_progress",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch(
+            "atelier.commands.work.prs.read_github_pr_status",
+            return_value={
+                "number": 42,
+                "url": "https://github.com/org/repo/pull/42",
+                "state": "CLOSED",
+                "isDraft": False,
+                "mergedAt": None,
+                "closedAt": "2026-01-01T00:00:00Z",
+            },
+        ),
+        patch(
+            "atelier.commands.work.beads.run_bd_command",
+            side_effect=lambda args, **kwargs: run_commands.append(list(args)),
+        ),
+        patch(
+            "atelier.commands.work._finalize_epic_if_complete",
+            return_value=work_cmd.FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        ),
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_complete"
+    assert any(
+        args[:2] == ["update", "atelier-epic.1"] and "cs:abandoned" in args
+        for args in run_commands
+    )
+
+
+def test_finalize_accepts_pushed_without_pr_when_integration_is_proven() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset", "cs:in_progress"],
+                    "description": "changeset.work_branch: feat/root-atelier-epic.1\n",
+                    "status": "in_progress",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work._changeset_integration_signal",
+            return_value=(True, "abc123"),
+        ),
+        patch(
+            "atelier.commands.work._finalize_epic_if_complete",
+            return_value=work_cmd.FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        ),
+        patch("atelier.commands.work.beads.run_bd_command"),
+        patch(
+            "atelier.commands.work.beads.update_changeset_integrated_sha"
+        ) as update_sha,
+        patch("atelier.commands.work._handle_pushed_without_pr") as handle_pushed,
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+            branch_pr_strategy="sequential",
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_complete"
+    update_sha.assert_called_once_with(
+        "atelier-epic.1",
+        "abc123",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_override=True,
+    )
+    handle_pushed.assert_not_called()
 
 
 def test_finalize_requeues_publish_pending_when_local_state_exists() -> None:
