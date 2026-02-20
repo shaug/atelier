@@ -41,6 +41,9 @@ from .. import (
     workspace,
     worktrees,
 )
+from .. import (
+    log as atelier_log,
+)
 from ..io import confirm, die, prompt, say, select
 from .resolve import resolve_current_project_with_repo_root
 
@@ -214,6 +217,14 @@ def _dry_run_log(message: str) -> None:
     say(f"DRY-RUN: {message}")
 
 
+def _log_debug(message: str) -> None:
+    atelier_log.debug(f"[work] {message}")
+
+
+def _log_warning(message: str) -> None:
+    atelier_log.warning(f"[work] {message}")
+
+
 def _trace_enabled() -> bool:
     return os.environ.get("ATELIER_WORK_TRACE", "").strip().lower() in {
         "1",
@@ -225,6 +236,7 @@ def _trace_enabled() -> bool:
 
 def _step(label: str, *, timings: list[tuple[str, float]], trace: bool) -> callable:
     say(f"-> {label}")
+    _log_debug(f"step start label={label}")
     start = time.perf_counter()
 
     def finish(extra: str | None = None) -> None:
@@ -233,8 +245,12 @@ def _step(label: str, *, timings: list[tuple[str, float]], trace: bool) -> calla
         suffix = f" ({elapsed:.2f}s)" if trace or elapsed >= 0.5 else ""
         if extra:
             say(f"ok {label}{suffix}: {extra}")
+            _log_debug(
+                f"step finish label={label} elapsed={elapsed:.2f}s detail={extra}"
+            )
         else:
             say(f"ok {label}{suffix}")
+            _log_debug(f"step finish label={label} elapsed={elapsed:.2f}s")
 
     return finish
 
@@ -262,6 +278,12 @@ def _report_worker_summary(summary: WorkerRunSummary, *, dry_run: bool) -> None:
         say(f"- Epic: {summary.epic_id}")
     if summary.changeset_id:
         say(f"- Changeset: {summary.changeset_id}")
+    _log_debug(
+        "summary "
+        f"started={summary.started} reason={summary.reason or 'none'} "
+        f"epic={summary.epic_id or 'none'} "
+        f"changeset={summary.changeset_id or 'none'} dry_run={dry_run}"
+    )
 
 
 def _with_codex_exec(cmd: list[str], opening_prompt: str) -> list[str]:
@@ -1125,6 +1147,9 @@ def _handle_pushed_without_pr(
                 create_detail = (
                     f"{create_detail}; unable to verify existing PR: {lookup_error}"
                 )
+                _log_warning(
+                    f"changeset={changeset_id} PR status lookup failed after create attempt: {lookup_error}"
+                )
 
     _mark_changeset_in_progress(
         changeset_id, beads_root=beads_root, repo_root=repo_root
@@ -1170,6 +1195,9 @@ def _handle_pushed_without_pr(
         beads_root=beads_root,
         repo_root=repo_root,
         dry_run=False,
+    )
+    _log_warning(
+        f"changeset={changeset_id} finalize stopped reason={failure_reason} strategy={decision.strategy} detail={create_detail or 'n/a'}"
     )
     return FinalizeResult(continue_running=False, reason=failure_reason)
 
@@ -1264,6 +1292,9 @@ def _recover_premature_merged_changeset(
             repo_slug, work_branch
         )
     if lookup_error:
+        _log_warning(
+            f"changeset={changeset_id} premature-merged recovery failed PR lookup for branch={work_branch}: {lookup_error}"
+        )
         return FinalizeResult(
             continue_running=False, reason="changeset_pr_status_query_failed"
         )
@@ -3613,6 +3644,9 @@ def _finalize_changeset(
                 repo_slug, work_branch
             )
     if branch_pr and pr_lookup_error:
+        _log_warning(
+            f"changeset={changeset_id} finalize PR status lookup failed branch={work_branch}: {pr_lookup_error}"
+        )
         _mark_changeset_in_progress(
             changeset_id, beads_root=beads_root, repo_root=repo_root
         )
@@ -3640,6 +3674,7 @@ def _finalize_changeset(
             pr_payload, pushed=pushed, review_requested=review_requested
         )
     if lifecycle == "merged":
+        _log_debug(f"changeset={changeset_id} finalize lifecycle=merged")
         _update_changeset_review_from_pr(
             changeset_id,
             pr_payload=pr_payload,
@@ -3670,6 +3705,7 @@ def _finalize_changeset(
             git_path=git_path,
         )
     if lifecycle == "closed":
+        _log_debug(f"changeset={changeset_id} finalize lifecycle=closed")
         _update_changeset_review_from_pr(
             changeset_id,
             pr_payload=pr_payload,
@@ -3748,6 +3784,9 @@ def _finalize_changeset(
                             repo_slug, work_branch
                         )
                     if pr_lookup_error:
+                        _log_warning(
+                            f"changeset={changeset_id} push succeeded but PR status lookup failed branch={work_branch}: {pr_lookup_error}"
+                        )
                         _mark_changeset_in_progress(
                             changeset_id, beads_root=beads_root, repo_root=repo_root
                         )
@@ -4155,6 +4194,9 @@ def _run_startup_contract(
             "Prioritizing review feedback: "
             f"{selection.changeset_id} ({selection.epic_id})"
         )
+        _log_debug(
+            f"startup selected review-feedback changeset={selection.changeset_id} epic={selection.epic_id}"
+        )
         if dry_run:
             _dry_run_log(
                 f"Would select review-feedback changeset {selection.changeset_id}."
@@ -4174,6 +4216,7 @@ def _run_startup_contract(
 
     if hooked_epic and epic_has_actionable_changeset(hooked_epic):
         say(f"Resuming hooked epic: {hooked_epic}")
+        _log_debug(f"startup resuming hooked epic={hooked_epic}")
         return StartupContractResult(
             epic_id=hooked_epic,
             changeset_id=None,
@@ -4182,6 +4225,9 @@ def _run_startup_contract(
         )
     if hooked_epic:
         say(f"Hooked epic has no ready changesets: {hooked_epic}")
+        _log_debug(
+            f"startup hooked epic has no actionable changesets epic={hooked_epic}"
+        )
 
     if branch_pr and repo_slug:
         unhooked_epics: list[str] = []
@@ -4214,6 +4260,7 @@ def _run_startup_contract(
         if candidate and epic_has_actionable_changeset(str(candidate)):
             selected_epic = str(candidate)
             say(f"Resuming assigned epic: {selected_epic}")
+            _log_debug(f"startup resuming assigned epic={selected_epic}")
             return StartupContractResult(
                 epic_id=selected_epic,
                 changeset_id=None,
@@ -4234,6 +4281,9 @@ def _run_startup_contract(
             say(
                 "Reclaiming stale epic assignment: "
                 f"{selected_epic} (from {previous_assignee})"
+            )
+            _log_warning(
+                f"startup reclaiming stale assignment epic={selected_epic} previous_assignee={previous_assignee}"
             )
             return StartupContractResult(
                 epic_id=selected_epic,
@@ -4290,6 +4340,7 @@ def _run_startup_contract(
             )
 
     if selected_epic is None:
+        _log_warning("startup found no eligible epics")
         _send_needs_decision(
             agent_id=agent_id,
             mode=mode,

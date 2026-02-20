@@ -838,3 +838,61 @@ def test_gc_closed_workspace_branches_without_mapping_skips_not_integrated() -> 
             )
 
         assert actions == []
+
+
+def test_gc_logs_action_lifecycle_in_dry_run() -> None:
+    project_root = Path("/project")
+    repo_root = Path("/repo")
+    project_config = config.ProjectConfig()
+    action = gc_cmd.GcAction(description="Test action", apply=lambda: None)
+
+    with (
+        patch(
+            "atelier.commands.gc.resolve_current_project_with_repo_root",
+            return_value=(project_root, project_config, "/repo", repo_root),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_project_data_dir",
+            return_value=Path("/data"),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch(
+            "atelier.commands.gc._gc_normalize_changeset_labels",
+            return_value=[],
+        ),
+        patch("atelier.commands.gc._gc_hooks", return_value=[]),
+        patch("atelier.commands.gc._gc_orphan_worktrees", return_value=[]),
+        patch("atelier.commands.gc._gc_resolved_epic_artifacts", return_value=[]),
+        patch(
+            "atelier.commands.gc._gc_closed_workspace_branches_without_mapping",
+            return_value=[],
+        ),
+        patch("atelier.commands.gc._gc_message_claims", return_value=[]),
+        patch("atelier.commands.gc._gc_message_retention", return_value=[action]),
+        patch("atelier.commands.gc._gc_agent_homes", return_value=[]),
+        patch("atelier.commands.gc.say"),
+        patch("atelier.commands.gc.atelier_log.debug") as log_debug,
+    ):
+        gc_cmd.gc(
+            SimpleNamespace(
+                stale_hours=24.0,
+                stale_if_missing_heartbeat=False,
+                dry_run=True,
+                reconcile=False,
+                yes=False,
+            )
+        )
+
+    debug_messages = [str(call.args[0]) for call in log_debug.call_args_list]
+    assert any("gc start" in message for message in debug_messages)
+    assert any(
+        "gc action queued description=Test action" in message
+        for message in debug_messages
+    )
+    assert any(
+        "gc action dry-run description=Test action" in message
+        for message in debug_messages
+    )

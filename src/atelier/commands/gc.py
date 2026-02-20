@@ -10,6 +10,7 @@ from tempfile import NamedTemporaryFile
 
 from .. import agent_home, beads, changesets, config, git, messages, worktrees
 from .. import exec as exec_util
+from .. import log as atelier_log
 from ..io import confirm, die, say, select, warn
 from . import work as work_cmd
 from .resolve import resolve_current_project_with_repo_root
@@ -22,17 +23,31 @@ class GcAction:
     details: tuple[str, ...] = ()
 
 
+def _log_debug(message: str) -> None:
+    atelier_log.debug(f"[gc] {message}")
+
+
+def _log_warning(message: str) -> None:
+    atelier_log.warning(f"[gc] {message}")
+
+
 def _run_git_gc_command(
     args: list[str], *, repo_root: Path, git_path: str
 ) -> tuple[bool, str]:
+    _log_debug(f"git command start args={' '.join(args)}")
     result = exec_util.try_run_command(
         git.git_command(["-C", str(repo_root), *args], git_path=git_path)
     )
     if result is None:
+        _log_warning(f"git command missing executable args={' '.join(args)}")
         return False, "missing required command: git"
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
+        _log_warning(
+            f"git command failed args={' '.join(args)} detail={detail or 'none'}"
+        )
         return False, detail or f"command failed: git {' '.join(args)}"
+    _log_debug(f"git command ok args={' '.join(args)}")
     return True, (result.stdout or "").strip()
 
 
@@ -617,6 +632,10 @@ def _gc_resolved_epic_artifacts(
             worktree_paths: list[Path] = list(existing_worktrees),
             branches_to_prune: list[str] = sorted(prunable_branches),
         ) -> None:
+            _log_debug(
+                f"cleanup resolved epic start epic={epic_value} "
+                f"worktrees={len(worktree_paths)} branches={len(branches_to_prune)}"
+            )
             for worktree_path in worktree_paths:
                 status_lines = git.git_status_porcelain(
                     worktree_path, git_path=git_path
@@ -639,6 +658,9 @@ def _gc_resolved_epic_artifacts(
                         if choice != "force-remove":
                             die("gc aborted by user")
                         force_remove = True
+                _log_debug(
+                    f"removing resolved worktree path={worktree_path} force={force_remove}"
+                )
                 args = ["worktree", "remove"]
                 if force_remove:
                     args.append("--force")
@@ -655,17 +677,24 @@ def _gc_resolved_epic_artifacts(
                     repo_root, branch, git_path=git_path
                 )
                 if remote_ref:
+                    _log_debug(
+                        f"deleting remote branch branch={branch} epic={epic_value}"
+                    )
                     _run_git_gc_command(
                         ["push", "origin", "--delete", branch],
                         repo_root=repo_root,
                         git_path=git_path,
                     )
                 if local_ref and current_branch != branch:
+                    _log_debug(
+                        f"deleting local branch branch={branch} epic={epic_value}"
+                    )
                     _run_git_gc_command(
                         ["branch", "-D", branch], repo_root=repo_root, git_path=git_path
                     )
             # Remove stale mapping once worktrees/branches are pruned.
             mapping_path.unlink(missing_ok=True)
+            _log_debug(f"cleanup resolved epic complete epic={epic_value}")
 
         actions.append(
             GcAction(
@@ -779,12 +808,14 @@ def _gc_closed_workspace_branches_without_mapping(
                     repo_root, branch, git_path=git_path
                 )
                 if remote_ref:
+                    _log_debug(f"deleting remote workspace branch branch={branch}")
                     _run_git_gc_command(
                         ["push", "origin", "--delete", branch],
                         repo_root=repo_root,
                         git_path=git_path,
                     )
                 if local_ref and current_branch != branch:
+                    _log_debug(f"deleting local workspace branch branch={branch}")
                     _run_git_gc_command(
                         ["branch", "-D", branch], repo_root=repo_root, git_path=git_path
                     )
@@ -850,6 +881,9 @@ def _gc_orphan_worktrees(
                     if choice != "force-remove":
                         die("gc aborted by user")
                     force_remove = True
+            _log_debug(
+                f"removing orphaned worktree epic={epic} path={worktree_path} force={force_remove}"
+            )
             worktrees.remove_git_worktree(
                 project_dir,
                 repo_root,
@@ -858,6 +892,7 @@ def _gc_orphan_worktrees(
                 force=force_remove,
             )
             mapping_path.unlink(missing_ok=True)
+            _log_debug(f"removed orphaned worktree epic={epic}")
 
         actions.append(
             GcAction(
@@ -1066,6 +1101,11 @@ def gc(args: object) -> None:
     yes = bool(getattr(args, "yes", False))
     reconcile = bool(getattr(args, "reconcile", False))
     include_missing_heartbeat = bool(getattr(args, "stale_if_missing_heartbeat", False))
+    _log_debug(
+        "gc start "
+        f"dry_run={dry_run} yes={yes} reconcile={reconcile} "
+        f"stale_hours={stale_hours} include_missing_heartbeat={include_missing_heartbeat}"
+    )
 
     if reconcile:
         git_path = config.resolve_git_path(project_config)
@@ -1077,6 +1117,7 @@ def gc(args: object) -> None:
         )
         if not candidates:
             say("No reconcile candidates.")
+            _log_debug("reconcile candidates none")
         if dry_run or yes:
             if not candidates:
                 say(
@@ -1085,6 +1126,9 @@ def gc(args: object) -> None:
                 )
                 return
             for epic_id, changesets in candidates.items():
+                _log_debug(
+                    f"reconcile candidate epic={epic_id} changesets={len(changesets)} mode={'dry-run' if dry_run else 'yes'}"
+                )
                 say(
                     f"Reconcile candidate: epic {epic_id} "
                     f"({len(changesets)} merged changesets)"
@@ -1115,6 +1159,11 @@ def gc(args: object) -> None:
                 f"reconciled={reconcile_result.reconciled}, "
                 f"failed={reconcile_result.failed}"
             )
+            _log_debug(
+                "reconcile totals "
+                f"scanned={reconcile_result.scanned} actionable={reconcile_result.actionable} "
+                f"reconciled={reconcile_result.reconciled} failed={reconcile_result.failed}"
+            )
         else:
             total_scanned = 0
             total_actionable = 0
@@ -1139,6 +1188,7 @@ def gc(args: object) -> None:
                     say(f"- {detail}")
                 if not confirm(prompt_text, default=False):
                     say(f"Skipped reconcile: epic {epic_id}")
+                    _log_debug(f"reconcile skipped epic={epic_id}")
                     continue
                 reconcile_result = work_cmd.reconcile_blocked_merged_changesets(
                     agent_id="atelier/system/gc",
@@ -1164,12 +1214,22 @@ def gc(args: object) -> None:
                     f"reconciled={reconcile_result.reconciled}, "
                     f"failed={reconcile_result.failed}"
                 )
+                _log_debug(
+                    f"reconcile epic={epic_id} scanned={reconcile_result.scanned} "
+                    f"actionable={reconcile_result.actionable} reconciled={reconcile_result.reconciled} "
+                    f"failed={reconcile_result.failed}"
+                )
             say(
                 "Reconcile blocked changesets: "
                 f"scanned={total_scanned}, "
                 f"actionable={total_actionable}, "
                 f"reconciled={total_reconciled}, "
                 f"failed={total_failed}"
+            )
+            _log_debug(
+                "reconcile totals "
+                f"scanned={total_scanned} actionable={total_actionable} "
+                f"reconciled={total_reconciled} failed={total_failed}"
             )
 
     actions: list[GcAction] = []
@@ -1229,18 +1289,24 @@ def gc(args: object) -> None:
 
     if not actions:
         say("No GC actions needed.")
+        _log_debug("gc no actions")
         return
 
     for action in actions:
+        _log_debug(f"gc action queued description={action.description}")
         say(f"GC action: {action.description}")
         for detail in action.details:
             say(f"- {detail}")
         if dry_run:
             say(f"Would: {action.description}")
+            _log_debug(f"gc action dry-run description={action.description}")
             continue
         if yes or confirm(f"{action.description}?", default=False):
             say(f"Running: {action.description}")
+            _log_debug(f"gc action run description={action.description}")
             action.apply()
             say(f"Done: {action.description}")
+            _log_debug(f"gc action done description={action.description}")
         else:
             say(f"Skipped: {action.description}")
+            _log_debug(f"gc action skipped description={action.description}")

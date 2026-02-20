@@ -334,6 +334,24 @@ def test_worker_opening_prompt_includes_review_feedback_context() -> None:
     assert "list_review_threads.py" in opening_prompt
 
 
+def test_step_emits_debug_logs() -> None:
+    timings: list[tuple[str, float]] = []
+
+    with (
+        patch("atelier.commands.work.say"),
+        patch("atelier.commands.work.atelier_log.debug") as log_debug,
+    ):
+        finish = work_cmd._step("Select epic", timings=timings, trace=False)
+        finish("selected_prompt (at-123)")
+
+    debug_messages = [str(call.args[0]) for call in log_debug.call_args_list]
+    assert any("step start label=Select epic" in message for message in debug_messages)
+    assert any("step finish label=Select epic" in message for message in debug_messages)
+    assert any(
+        "detail=selected_prompt (at-123)" in message for message in debug_messages
+    )
+
+
 def test_work_strips_codex_cd_option_override() -> None:
     project_config = _fake_project_payload()
     project_config.agent.options["codex"] = [
