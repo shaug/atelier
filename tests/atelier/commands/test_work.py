@@ -1665,6 +1665,62 @@ def test_startup_contract_prioritizes_review_feedback_before_new_work() -> None:
     )
 
 
+def test_startup_contract_review_feedback_reclaims_stale_assignee() -> None:
+    epics = [
+        {
+            "id": "atelier-epic-stale",
+            "title": "Stale epic",
+            "status": "hooked",
+            "labels": ["at:epic", "at:hooked"],
+            "assignee": "atelier/worker/agent/p999999-t1",
+            "created_at": "2026-02-01T00:00:00+00:00",
+        }
+    ]
+
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", return_value=epics),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.work.os.kill", side_effect=ProcessLookupError),
+        patch(
+            "atelier.commands.work._select_review_feedback_changeset",
+            return_value=work_cmd._ReviewFeedbackSelection(
+                epic_id="atelier-epic-stale",
+                changeset_id="atelier-epic-stale.1",
+                feedback_at="2026-02-20T12:00:00+00:00",
+            ),
+        ),
+        patch(
+            "atelier.commands.work.beads.update_changeset_review_feedback_cursor"
+        ) as update_cursor,
+        patch("atelier.commands.work.say"),
+    ):
+        result = work_cmd._run_startup_contract(
+            agent_id="atelier/worker/agent/p123-t2",
+            agent_bead_id=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            mode="auto",
+            explicit_epic_id=None,
+            queue_only=False,
+            dry_run=False,
+            assume_yes=True,
+            repo_slug="org/repo",
+            branch_pr=True,
+        )
+
+    assert result.should_exit is False
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "atelier-epic-stale"
+    assert result.reassign_from == "atelier/worker/agent/p999999-t1"
+    update_cursor.assert_called_once_with(
+        "atelier-epic-stale.1",
+        "2026-02-20T12:00:00+00:00",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
 def test_startup_contract_prefers_hooked_ready_work_before_unhooked_feedback() -> None:
     epics = [
         {

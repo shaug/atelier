@@ -3629,6 +3629,14 @@ def _run_startup_contract(
     assigned = _sort_by_created_at(assigned)
 
     stale_assigned = _stale_family_assigned_epics(issues, agent_id=agent_id)
+    stale_assignee_by_epic = {
+        str(issue.get("id")): str(issue.get("assignee"))
+        for issue in stale_assigned
+        if isinstance(issue.get("id"), str)
+        and issue.get("id")
+        and isinstance(issue.get("assignee"), str)
+        and issue.get("assignee")
+    }
 
     def select_feedback_candidate(
         epic_ids: list[str],
@@ -3680,6 +3688,7 @@ def _run_startup_contract(
             changeset_id=selection.changeset_id,
             should_exit=False,
             reason="review_feedback",
+            reassign_from=stale_assignee_by_epic.get(selection.epic_id),
         )
 
     if branch_pr and repo_slug and hooked_epic:
