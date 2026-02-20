@@ -112,3 +112,54 @@ def test_select_epic_prompt_supports_assume_yes() -> None:
     )
 
     assert selected == "at-ready"
+
+
+def test_stale_family_assigned_epics_filters_to_inactive_family_members() -> None:
+    issues = [
+        {
+            "id": "at-stale",
+            "status": "in_progress",
+            "labels": ["at:epic"],
+            "assignee": "atelier/worker/codex/p111",
+            "created_at": "2026-02-20T00:00:00+00:00",
+        },
+        {
+            "id": "at-active",
+            "status": "in_progress",
+            "labels": ["at:epic"],
+            "assignee": "atelier/worker/codex/p222",
+            "created_at": "2026-02-21T00:00:00+00:00",
+        },
+        {
+            "id": "at-other-family",
+            "status": "in_progress",
+            "labels": ["at:epic"],
+            "assignee": "atelier/planner/codex/p333",
+            "created_at": "2026-02-22T00:00:00+00:00",
+        },
+    ]
+
+    stale = selection.stale_family_assigned_epics(
+        issues,
+        agent_id="atelier/worker/codex/p999",
+        is_session_active=lambda assignee: assignee.endswith("/p222"),
+    )
+
+    assert [item["id"] for item in stale] == ["at-stale"]
+
+
+def test_select_epic_from_ready_changesets_uses_epic_for_child_issue() -> None:
+    issues = [
+        {"id": "at-epic", "labels": ["at:epic"], "assignee": None},
+    ]
+    ready_changesets = [
+        {"id": "at-epic.1", "created_at": "2026-02-20T00:00:00+00:00"},
+    ]
+
+    selected = selection.select_epic_from_ready_changesets(
+        issues=issues,
+        ready_changesets=ready_changesets,
+        is_actionable=lambda issue_id: issue_id == "at-epic",
+    )
+
+    assert selected == "at-epic"

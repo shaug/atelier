@@ -344,10 +344,7 @@ def _sort_by_recency(issues: list[dict[str, object]]) -> list[dict[str, object]]
 
 
 def _agent_family_id(agent_id: str) -> str:
-    parts = [part for part in str(agent_id).split("/") if part]
-    if len(parts) >= 3 and parts[0] == "atelier":
-        return "/".join(parts[:3])
-    return str(agent_id)
+    return worker_selection.agent_family_id(agent_id)
 
 
 def _is_agent_session_active(agent_id: str) -> bool:
@@ -357,24 +354,11 @@ def _is_agent_session_active(agent_id: str) -> bool:
 def _stale_family_assigned_epics(
     issues: list[dict[str, object]], *, agent_id: str
 ) -> list[dict[str, object]]:
-    family = _agent_family_id(agent_id)
-    candidates: list[dict[str, object]] = []
-    for issue in issues:
-        status = str(issue.get("status") or "")
-        if not _is_eligible_status(status, allow_hooked=True):
-            continue
-        labels = _issue_labels(issue)
-        if "at:draft" in labels:
-            continue
-        assignee = issue.get("assignee")
-        if not isinstance(assignee, str) or not assignee or assignee == agent_id:
-            continue
-        if _agent_family_id(assignee) != family:
-            continue
-        if _is_agent_session_active(assignee):
-            continue
-        candidates.append(issue)
-    return _sort_by_created_at(candidates)
+    return worker_selection.stale_family_assigned_epics(
+        issues,
+        agent_id=agent_id,
+        is_session_active=_is_agent_session_active,
+    )
 
 
 def _list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
@@ -420,37 +404,16 @@ def _select_epic_from_ready_changesets(
     beads_root: Path,
     repo_root: Path,
 ) -> str | None:
-    """Pick an actionable epic (or standalone changeset) from global ready work."""
     ready_changesets = beads.run_bd_json(
         ["ready", "--label", "at:changeset"], beads_root=beads_root, cwd=repo_root
     )
     if not ready_changesets:
         return None
-    known_epics: dict[str, dict[str, object]] = {
-        str(issue_id): issue
-        for issue in issues
-        if (issue_id := issue.get("id")) is not None
-    }
-    for changeset in _sort_by_created_at(ready_changesets):
-        issue_id = changeset.get("id")
-        if not isinstance(issue_id, str) or not issue_id:
-            continue
-        candidate = issue_id
-        if "." in issue_id:
-            maybe_epic = issue_id.split(".", 1)[0]
-            if maybe_epic in known_epics:
-                candidate = maybe_epic
-        candidate_issue = known_epics.get(candidate)
-        source_issue = candidate_issue if candidate_issue is not None else changeset
-        source_labels = _issue_labels(source_issue)
-        if "at:draft" in source_labels:
-            continue
-        assignee = source_issue.get("assignee")
-        if isinstance(assignee, str) and assignee.strip():
-            continue
-        if is_actionable(candidate):
-            return candidate
-    return None
+    return worker_selection.select_epic_from_ready_changesets(
+        issues=issues,
+        ready_changesets=ready_changesets,
+        is_actionable=is_actionable,
+    )
 
 
 def _send_needs_decision(

@@ -6,6 +6,13 @@ import datetime as dt
 from collections.abc import Callable
 
 
+def issue_labels(issue: dict[str, object]) -> set[str]:
+    labels = issue.get("labels")
+    if not isinstance(labels, list):
+        return set()
+    return {str(label) for label in labels if label is not None}
+
+
 def is_eligible_status(status: str, *, allow_hooked: bool) -> bool:
     normalized = status.strip().lower()
     if normalized in {"open", "ready", "in_progress"}:
@@ -30,10 +37,7 @@ def filter_epics(
         if not is_eligible_status(status, allow_hooked=allow_hooked):
             continue
         if skip_draft:
-            labels = issue.get("labels")
-            if isinstance(labels, list) and "at:draft" in {
-                str(label) for label in labels if label is not None
-            }:
+            if "at:draft" in issue_labels(issue):
                 continue
         issue_assignee = issue.get("assignee")
         if assignee is not None:
@@ -81,6 +85,71 @@ def sort_by_recency(issues: list[dict[str, object]]) -> list[dict[str, object]]:
         return sentinel
 
     return sorted(issues, key=key, reverse=True)
+
+
+def agent_family_id(agent_id: str) -> str:
+    parts = [part for part in str(agent_id).split("/") if part]
+    if len(parts) >= 3 and parts[0] == "atelier":
+        return "/".join(parts[:3])
+    return str(agent_id)
+
+
+def stale_family_assigned_epics(
+    issues: list[dict[str, object]],
+    *,
+    agent_id: str,
+    is_session_active: Callable[[str], bool],
+) -> list[dict[str, object]]:
+    family = agent_family_id(agent_id)
+    candidates: list[dict[str, object]] = []
+    for issue in issues:
+        status = str(issue.get("status") or "")
+        if not is_eligible_status(status, allow_hooked=True):
+            continue
+        if "at:draft" in issue_labels(issue):
+            continue
+        assignee = issue.get("assignee")
+        if not isinstance(assignee, str) or not assignee or assignee == agent_id:
+            continue
+        if agent_family_id(assignee) != family:
+            continue
+        if is_session_active(assignee):
+            continue
+        candidates.append(issue)
+    return sort_by_created_at(candidates)
+
+
+def select_epic_from_ready_changesets(
+    *,
+    issues: list[dict[str, object]],
+    ready_changesets: list[dict[str, object]],
+    is_actionable: Callable[[str], bool],
+) -> str | None:
+    """Pick an actionable epic (or standalone changeset) from global ready work."""
+    known_epics: dict[str, dict[str, object]] = {
+        str(issue_id): issue
+        for issue in issues
+        if (issue_id := issue.get("id")) is not None
+    }
+    for changeset in sort_by_created_at(ready_changesets):
+        issue_id = changeset.get("id")
+        if not isinstance(issue_id, str) or not issue_id:
+            continue
+        candidate = issue_id
+        if "." in issue_id:
+            maybe_epic = issue_id.split(".", 1)[0]
+            if maybe_epic in known_epics:
+                candidate = maybe_epic
+        candidate_issue = known_epics.get(candidate)
+        source_issue = candidate_issue if candidate_issue is not None else changeset
+        if "at:draft" in issue_labels(source_issue):
+            continue
+        assignee = source_issue.get("assignee")
+        if isinstance(assignee, str) and assignee.strip():
+            continue
+        if is_actionable(candidate):
+            return candidate
+    return None
 
 
 def select_epic_prompt(
