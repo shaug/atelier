@@ -311,6 +311,22 @@ def test_work_starts_codex_in_exec_mode() -> None:
     assert run_codex.call_args.kwargs["env"]["BEADS_DIR"] == "/beads"
 
 
+def test_worker_opening_prompt_includes_review_feedback_context() -> None:
+    opening_prompt = work_cmd._worker_opening_prompt(
+        project_enlistment="/repo",
+        workspace_branch="feat/root",
+        epic_id="atelier-epic",
+        changeset_id="atelier-epic.1",
+        changeset_title="First changeset",
+        review_feedback=True,
+        review_pr_url="https://github.com/org/repo/pull/42",
+    )
+
+    assert "Priority mode: review-feedback" in opening_prompt
+    assert "PR: https://github.com/org/repo/pull/42" in opening_prompt
+    assert "Do not reset lifecycle labels to ready" in opening_prompt
+
+
 def test_work_strips_codex_cd_option_override() -> None:
     project_config = _fake_project_payload()
     project_config.agent.options["codex"] = [
@@ -1840,12 +1856,7 @@ def test_startup_contract_prioritizes_review_feedback_before_new_work() -> None:
     assert result.reason == "review_feedback"
     assert result.epic_id == "atelier-epic-hooked"
     assert result.changeset_id == "atelier-epic-hooked.2"
-    update_cursor.assert_called_once_with(
-        "atelier-epic-hooked.2",
-        "2026-02-20T12:00:00+00:00",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
+    update_cursor.assert_not_called()
 
 
 def test_select_review_feedback_changeset_ignores_cursor_for_blocked_changeset() -> (
@@ -1967,12 +1978,7 @@ def test_startup_contract_review_feedback_reclaims_stale_assignee() -> None:
     assert result.reason == "review_feedback"
     assert result.epic_id == "atelier-epic-stale"
     assert result.reassign_from == "atelier/worker/agent/p999999-t1"
-    update_cursor.assert_called_once_with(
-        "atelier-epic-stale.1",
-        "2026-02-20T12:00:00+00:00",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
+    update_cursor.assert_not_called()
 
 
 def test_startup_contract_prefers_hooked_ready_work_before_unhooked_feedback() -> None:
@@ -2118,12 +2124,7 @@ def test_startup_contract_checks_unhooked_feedback_when_hooked_has_no_work() -> 
     assert result.reason == "review_feedback"
     assert result.epic_id == "atelier-epic-other"
     assert result.changeset_id == "atelier-epic-other.2"
-    update_cursor.assert_called_once_with(
-        "atelier-epic-other.2",
-        "2026-02-20T09:00:00+00:00",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
+    update_cursor.assert_not_called()
 
 
 def test_startup_contract_considers_blocked_epics_for_review_feedback() -> None:
@@ -2172,12 +2173,7 @@ def test_startup_contract_considers_blocked_epics_for_review_feedback() -> None:
     assert result.reason == "review_feedback"
     assert result.epic_id == "atelier-epic-blocked"
     assert result.changeset_id == "atelier-epic-blocked.1"
-    update_cursor.assert_called_once_with(
-        "atelier-epic-blocked.1",
-        "2026-02-20T09:00:00+00:00",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
+    update_cursor.assert_not_called()
 
 
 def test_startup_contract_uses_global_feedback_when_no_epics_available() -> None:
@@ -2216,12 +2212,7 @@ def test_startup_contract_uses_global_feedback_when_no_epics_available() -> None
     assert result.reason == "review_feedback"
     assert result.epic_id == "at-u9j"
     assert result.changeset_id == "at-u9j.1"
-    update_cursor.assert_called_once_with(
-        "at-u9j.1",
-        "2026-02-20T12:00:00+00:00",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
+    update_cursor.assert_not_called()
 
 
 def test_startup_contract_global_feedback_reclaims_stale_same_family_assignee() -> None:

@@ -926,6 +926,20 @@ def _changeset_work_branch(issue: dict[str, object]) -> str | None:
     return normalized
 
 
+def _changeset_pr_url(issue: dict[str, object]) -> str | None:
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    raw = fields.get("pr_url")
+    if not isinstance(raw, str):
+        return None
+    normalized = raw.strip()
+    if not normalized or normalized.lower() == "null":
+        return None
+    return normalized
+
+
 def _changeset_root_branch(issue: dict[str, object]) -> str | None:
     description = issue.get("description")
     fields = beads.parse_description_fields(
@@ -3737,6 +3751,8 @@ def _worker_opening_prompt(
     epic_id: str,
     changeset_id: str,
     changeset_title: str,
+    review_feedback: bool = False,
+    review_pr_url: str | None = None,
 ) -> str:
     session = workspace.workspace_session_identifier(
         project_enlistment, workspace_branch, changeset_id or None
@@ -3753,6 +3769,23 @@ def _worker_opening_prompt(
             " send NEEDS-DECISION with details and exit."
         ),
     ]
+    if review_feedback:
+        lines.extend(
+            [
+                "",
+                "Priority mode: review-feedback",
+                (
+                    "This run is for PR feedback resolution. First fetch open PR "
+                    "feedback comments and address them directly."
+                ),
+                (
+                    "Do not reset lifecycle labels to ready while feedback remains "
+                    "unaddressed."
+                ),
+            ]
+        )
+        if review_pr_url:
+            lines.append(f"PR: {review_pr_url}")
     return "\n".join(lines)
 
 
@@ -3985,16 +4018,7 @@ def _run_startup_contract(
         )
         if dry_run:
             _dry_run_log(
-                "Would update review feedback cursor "
-                f"for {selection.changeset_id} "
-                f"to {selection.feedback_at}."
-            )
-        else:
-            beads.update_changeset_review_feedback_cursor(
-                selection.changeset_id,
-                selection.feedback_at,
-                beads_root=beads_root,
-                cwd=repo_root,
+                f"Would select review-feedback changeset {selection.changeset_id}."
             )
         return StartupContractResult(
             epic_id=selection.epic_id,
@@ -4739,12 +4763,24 @@ def _run_worker_once(
         finish_step()
         opening_prompt = ""
         if agent_spec.name == "codex":
+            review_feedback = startup_result.reason == "review_feedback"
+            review_pr_url = _changeset_pr_url(changeset) if review_feedback else None
+            if review_feedback and not review_pr_url and repo_slug:
+                feedback_branch = _changeset_work_branch(changeset)
+                if feedback_branch:
+                    pr_payload = prs.read_github_pr_status(repo_slug, feedback_branch)
+                    if pr_payload:
+                        payload_url = pr_payload.get("url")
+                        if isinstance(payload_url, str) and payload_url.strip():
+                            review_pr_url = payload_url.strip()
             opening_prompt = _worker_opening_prompt(
                 project_enlistment=project_enlistment,
                 workspace_branch=workspace_branch,
                 epic_id=selected_epic,
                 changeset_id=str(changeset_id),
                 changeset_title=str(changeset_title),
+                review_feedback=review_feedback,
+                review_pr_url=review_pr_url,
             )
         finish_step = _step("Install agent hooks", timings=timings, trace=trace)
         if dry_run:
