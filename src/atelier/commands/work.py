@@ -767,14 +767,25 @@ def _next_changeset(
             and "at:changeset" in labels
             and "cs:merged" not in labels
             and "cs:abandoned" not in labels
-            and _is_changeset_ready(issue)
-            and not _changeset_waiting_on_review_or_signals(
-                issue,
-                repo_slug=repo_slug,
-                repo_root=repo_root,
-                branch_pr=branch_pr,
-                branch_pr_strategy=branch_pr_strategy,
-                git_path=git_path,
+            and (
+                (
+                    _is_changeset_ready(issue)
+                    and not _changeset_waiting_on_review_or_signals(
+                        issue,
+                        repo_slug=repo_slug,
+                        repo_root=repo_root,
+                        branch_pr=branch_pr,
+                        branch_pr_strategy=branch_pr_strategy,
+                        git_path=git_path,
+                    )
+                )
+                or _is_changeset_recovery_candidate(
+                    issue,
+                    repo_slug=repo_slug,
+                    repo_root=repo_root,
+                    branch_pr=branch_pr,
+                    git_path=git_path,
+                )
             )
         ):
             if not _has_open_descendant_changesets(
@@ -1379,6 +1390,50 @@ def _changeset_waiting_on_review_or_signals(
             )
             return not decision.allow_pr
     return False
+
+
+def _is_changeset_recovery_candidate(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    branch_pr: bool,
+    git_path: str | None,
+) -> bool:
+    """Return True when a blocked changeset has enough publish/review signals to retry."""
+    labels = _issue_labels(issue)
+    status = str(issue.get("status") or "").strip().lower()
+    if "cs:blocked" not in labels and status != "blocked":
+        return False
+    if "cs:merged" in labels or "cs:abandoned" in labels:
+        return False
+    if status in {"closed", "done"}:
+        return False
+    work_branch = _changeset_work_branch(issue)
+    if not work_branch:
+        return False
+    pushed = git.git_ref_exists(
+        repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
+    )
+    if branch_pr:
+        pr_payload = (
+            prs.read_github_pr_status(repo_slug, work_branch) if repo_slug else None
+        )
+        review_requested = prs.has_review_requests(pr_payload)
+        lifecycle = prs.lifecycle_state(
+            pr_payload, pushed=pushed, review_requested=review_requested
+        )
+        if lifecycle in {"pushed", "draft-pr", "pr-open", "in-review", "approved"}:
+            return True
+        review_state = _changeset_review_state(issue)
+        return review_state in {
+            "pushed",
+            "draft-pr",
+            "pr-open",
+            "in-review",
+            "approved",
+        }
+    return pushed
 
 
 def _changeset_feedback_cursor(issue: dict[str, object]) -> dt.datetime | None:

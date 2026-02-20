@@ -743,6 +743,63 @@ def test_next_changeset_ignores_draft_top_level_changeset() -> None:
     assert selected is None
 
 
+def test_next_changeset_selects_blocked_top_level_with_push_signal() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "at-7tk",
+                    "status": "in_progress",
+                    "labels": ["at:changeset", "cs:blocked"],
+                    "description": "changeset.work_branch: scott/at-7tk\n",
+                }
+            ],
+        ),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+    ):
+        selected = work_cmd._next_changeset(
+            epic_id="at-7tk",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            repo_slug="org/repo",
+            branch_pr=True,
+            branch_pr_strategy="sequential",
+        )
+
+    assert selected is not None
+    assert selected["id"] == "at-7tk"
+
+
+def test_next_changeset_skips_blocked_top_level_without_publish_signal() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "at-7tk",
+                    "status": "in_progress",
+                    "labels": ["at:changeset", "cs:blocked"],
+                    "description": "changeset.work_branch: scott/at-7tk\n",
+                }
+            ],
+        ),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=False),
+        patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+    ):
+        selected = work_cmd._next_changeset(
+            epic_id="at-7tk",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            repo_slug="org/repo",
+            branch_pr=True,
+            branch_pr_strategy="sequential",
+        )
+
+    assert selected is None
+
+
 def test_select_epic_from_ready_changesets_skips_draft_epics() -> None:
     issues = [
         {"id": "at-9bh", "status": "open", "labels": ["at:epic", "at:draft"]},
