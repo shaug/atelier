@@ -1082,6 +1082,19 @@ def _handle_pushed_without_pr(
                 return FinalizeResult(
                     continue_running=True, reason="changeset_review_pending"
                 )
+            # Recover from duplicate/race failures by checking live PR state.
+            pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+            if pr_payload:
+                _update_changeset_review_from_pr(
+                    changeset_id,
+                    pr_payload=pr_payload,
+                    pushed=True,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                )
+                return FinalizeResult(
+                    continue_running=True, reason="changeset_review_pending"
+                )
 
     _mark_changeset_in_progress(
         changeset_id, beads_root=beads_root, repo_root=repo_root
@@ -1109,6 +1122,7 @@ def _handle_pushed_without_pr(
     )
     if create_detail:
         body = f"{body}\nPR creation attempt failed: {create_detail}"
+        say(f"PR creation failed for {changeset_id}: {create_detail}")
     if failure_reason == "changeset_pr_missing_repo_slug":
         body = (
             f"{body}\nAction: configure GitHub provider metadata so finalize can "
