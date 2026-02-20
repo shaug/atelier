@@ -1485,6 +1485,31 @@ def _changeset_feedback_cursor(issue: dict[str, object]) -> dt.datetime | None:
     return _parse_issue_time(fields.get("review.last_feedback_seen_at"))
 
 
+def _persist_review_feedback_cursor(
+    *,
+    changeset_id: str,
+    issue: dict[str, object],
+    repo_slug: str | None,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    if not repo_slug:
+        return
+    work_branch = _changeset_work_branch(issue)
+    if not work_branch:
+        return
+    pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+    feedback_at = prs.latest_feedback_timestamp(pr_payload, repo=repo_slug)
+    if not feedback_at:
+        return
+    beads.update_changeset_review_feedback_cursor(
+        changeset_id,
+        feedback_at,
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+
+
 def _changeset_in_review_candidate(
     issue: dict[str, object], *, live_state: str | None = None
 ) -> bool:
@@ -4829,8 +4854,8 @@ def _run_worker_once(
             env["BEADS_DIR"] = str(beads_root)
         finish_step()
         opening_prompt = ""
+        review_feedback = startup_result.reason == "review_feedback"
         if agent_spec.name == "codex":
-            review_feedback = startup_result.reason == "review_feedback"
             review_pr_url = _changeset_pr_url(changeset) if review_feedback else None
             if review_feedback and not review_pr_url and repo_slug:
                 feedback_branch = _changeset_work_branch(changeset)
@@ -4945,6 +4970,14 @@ def _run_worker_once(
             squash_message_agent_env=env,
             git_path=git_path,
         )
+        if review_feedback and finalize_result.continue_running:
+            _persist_review_feedback_cursor(
+                changeset_id=changeset_id,
+                issue=changeset,
+                repo_slug=repo_slug,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
         finish_step(extra=finalize_result.reason)
         if not finalize_result.continue_running:
             return finish(

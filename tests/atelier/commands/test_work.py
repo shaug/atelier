@@ -2143,6 +2143,225 @@ def test_select_review_feedback_changeset_prefers_live_terminal_state_over_stale
     assert selected is None
 
 
+def test_persist_review_feedback_cursor_updates_when_feedback_present() -> None:
+    issue = {
+        "id": "at-u9j.1",
+        "description": "changeset.work_branch: scott/gh-181-duplication-of-results-at-u9j.1\n",
+    }
+    with (
+        patch(
+            "atelier.commands.work.prs.read_github_pr_status",
+            return_value={"number": 204},
+        ),
+        patch(
+            "atelier.commands.work.prs.latest_feedback_timestamp",
+            return_value="2026-02-20T03:10:00Z",
+        ),
+        patch(
+            "atelier.commands.work.beads.update_changeset_review_feedback_cursor"
+        ) as update_cursor,
+    ):
+        work_cmd._persist_review_feedback_cursor(
+            changeset_id="at-u9j.1",
+            issue=issue,
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    update_cursor.assert_called_once_with(
+        "at-u9j.1",
+        "2026-02-20T03:10:00Z",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
+def test_persist_review_feedback_cursor_skips_without_feedback_timestamp() -> None:
+    issue = {
+        "id": "at-u9j.1",
+        "description": "changeset.work_branch: scott/gh-181-duplication-of-results-at-u9j.1\n",
+    }
+    with (
+        patch(
+            "atelier.commands.work.prs.read_github_pr_status",
+            return_value={"number": 204},
+        ),
+        patch("atelier.commands.work.prs.latest_feedback_timestamp", return_value=None),
+        patch(
+            "atelier.commands.work.beads.update_changeset_review_feedback_cursor"
+        ) as update_cursor,
+    ):
+        work_cmd._persist_review_feedback_cursor(
+            changeset_id="at-u9j.1",
+            issue=issue,
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    update_cursor.assert_not_called()
+
+
+def test_run_worker_once_persists_feedback_cursor_for_review_feedback() -> None:
+    project_config = _fake_project_payload()
+    project_config.branch.pr = True
+    mapping = worktrees.WorktreeMapping(
+        epic_id="atelier-epic",
+        worktree_path="worktrees/atelier-epic",
+        root_branch="feat/root",
+        changesets={"atelier-epic.1": "feat/root-atelier-epic.1"},
+        changeset_worktrees={},
+    )
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/agent",
+        role="worker",
+        path=Path("/project/agents/worker"),
+    )
+    changeset = {
+        "id": "atelier-epic.1",
+        "title": "Feedback changeset",
+        "labels": ["at:changeset", "cs:in_progress"],
+        "description": (
+            "changeset.work_branch: feat/root-atelier-epic.1\npr_state: in-review\n"
+        ),
+        "parent": "atelier-epic",
+        "status": "in_progress",
+    }
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "atelier-epic.1"]:
+            return [changeset]
+        if args[:2] == ["show", "atelier-epic"]:
+            return [{"id": "atelier-epic", "labels": ["at:epic"], "status": "open"}]
+        return []
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.resolve_current_project_with_repo_root",
+                return_value=(
+                    Path("/project"),
+                    project_config,
+                    "/repo",
+                    Path("/repo"),
+                ),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.config.resolve_beads_root",
+                return_value=Path("/beads"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json
+            )
+        )
+        stack.enter_context(patch("atelier.commands.work.beads.run_bd_command"))
+        stack.enter_context(
+            patch("atelier.commands.work.beads.list_inbox_messages", return_value=[])
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.beads.list_queue_messages", return_value=[])
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.beads.get_agent_hook", return_value=None)
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.beads.ensure_agent_bead",
+                return_value={"id": "atelier-agent"},
+            )
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.policy.sync_agent_home_policy")
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.beads.claim_epic",
+                return_value={
+                    "id": "atelier-epic",
+                    "title": "Epic",
+                    "description": (
+                        "workspace.root_branch: feat/root\n"
+                        "workspace.parent_branch: main\n"
+                    ),
+                },
+            )
+        )
+        stack.enter_context(patch("atelier.commands.work.beads.update_worktree_path"))
+        stack.enter_context(patch("atelier.commands.work.beads.set_agent_hook"))
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.agent_home.resolve_agent_home",
+                return_value=agent,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.worktrees.ensure_changeset_branch",
+                return_value=("feat/root-atelier-epic.1", mapping),
+            )
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.worktrees.ensure_changeset_checkout")
+        )
+        stack.enter_context(
+            patch("atelier.commands.work.worktrees.ensure_git_worktree")
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work._run_startup_contract",
+                return_value=work_cmd.StartupContractResult(
+                    epic_id="atelier-epic",
+                    changeset_id="atelier-epic.1",
+                    should_exit=False,
+                    reason="review_feedback",
+                ),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work._find_invalid_changeset_labels", return_value=[]
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work.codex.run_codex_command",
+                return_value=codex.CodexRunResult(
+                    returncode=0, session_id=None, resume_command=None
+                ),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.commands.work._finalize_changeset",
+                return_value=work_cmd.FinalizeResult(
+                    continue_running=True, reason="changeset_review_pending"
+                ),
+            )
+        )
+        persist_cursor = stack.enter_context(
+            patch("atelier.commands.work._persist_review_feedback_cursor")
+        )
+        stack.enter_context(patch("atelier.commands.work.say"))
+
+        summary = work_cmd._run_worker_once(
+            SimpleNamespace(epic_id=None, mode="prompt", run_mode="once"),
+            mode="prompt",
+            dry_run=False,
+            session_key="worker-test",
+        )
+
+    assert summary.started is True
+    assert summary.reason == "agent_session_complete"
+    persist_cursor.assert_called_once()
+    assert persist_cursor.call_args.kwargs["changeset_id"] == "atelier-epic.1"
+
+
 def test_startup_contract_review_feedback_reclaims_stale_assignee() -> None:
     epics = [
         {
