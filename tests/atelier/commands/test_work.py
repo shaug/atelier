@@ -4382,6 +4382,10 @@ def test_finalize_flags_missing_pr_when_strategy_allows_creation() -> None:
         patch("atelier.commands.work._has_blocking_messages", return_value=False),
         patch("atelier.commands.work.git.git_ref_exists", return_value=True),
         patch("atelier.commands.work.prs.read_github_pr_status", return_value=None),
+        patch(
+            "atelier.commands.work._attempt_create_draft_pr",
+            return_value=(False, "gh auth failed"),
+        ),
         patch("atelier.commands.work._mark_changeset_in_progress") as mark_in_progress,
         patch("atelier.commands.work._send_planner_notification") as notify,
         patch("atelier.commands.work.beads.run_bd_command") as run_bd_command,
@@ -4408,6 +4412,63 @@ def test_finalize_flags_missing_pr_when_strategy_allows_creation() -> None:
         for call in run_bd_command.call_args_list
         for args in [call.args[0]]
     )
+
+
+def test_finalize_creates_pr_when_missing_and_strategy_allows() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "title": "My changeset",
+                    "labels": ["at:changeset", "cs:ready"],
+                    "description": (
+                        "changeset.work_branch: feat/root-atelier-epic.1\n"
+                        "changeset.parent_branch: main\n"
+                    ),
+                    "status": "open",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch(
+            "atelier.commands.work.prs.read_github_pr_status",
+            side_effect=[
+                None,
+                {
+                    "number": 42,
+                    "url": "https://github.com/org/repo/pull/42",
+                    "state": "OPEN",
+                    "isDraft": True,
+                    "reviewDecision": None,
+                },
+            ],
+        ),
+        patch(
+            "atelier.commands.work._attempt_create_draft_pr",
+            return_value=(True, "created"),
+        ),
+        patch("atelier.commands.work.beads.update_changeset_review") as update_review,
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+            branch_pr_strategy="sequential",
+        )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_review_pending"
+    update_review.assert_called_once()
 
 
 def test_finalize_requeues_publish_pending_when_local_state_exists() -> None:
