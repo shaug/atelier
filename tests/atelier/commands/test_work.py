@@ -2014,6 +2014,99 @@ def test_startup_contract_considers_blocked_epics_for_review_feedback() -> None:
     )
 
 
+def test_startup_contract_uses_global_feedback_when_no_epics_available() -> None:
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", return_value=[]),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch(
+            "atelier.commands.work._select_global_review_feedback_changeset",
+            return_value=work_cmd._ReviewFeedbackSelection(
+                epic_id="at-u9j",
+                changeset_id="at-u9j.1",
+                feedback_at="2026-02-20T12:00:00+00:00",
+            ),
+        ),
+        patch(
+            "atelier.commands.work.beads.update_changeset_review_feedback_cursor"
+        ) as update_cursor,
+        patch("atelier.commands.work.say"),
+    ):
+        result = work_cmd._run_startup_contract(
+            agent_id="atelier/worker/agent/p123-t2",
+            agent_bead_id=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            mode="auto",
+            explicit_epic_id=None,
+            queue_only=False,
+            dry_run=False,
+            assume_yes=True,
+            repo_slug="org/repo",
+            branch_pr=True,
+        )
+
+    assert result.should_exit is False
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "at-u9j"
+    assert result.changeset_id == "at-u9j.1"
+    update_cursor.assert_called_once_with(
+        "at-u9j.1",
+        "2026-02-20T12:00:00+00:00",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
+def test_startup_contract_global_feedback_reclaims_stale_same_family_assignee() -> None:
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["list", "--label"]:
+            return []
+        if args[:2] == ["show", "at-u9j"]:
+            return [
+                {
+                    "id": "at-u9j",
+                    "assignee": "atelier/worker/agent/p999999-t1",
+                    "labels": ["at:epic"],
+                    "status": "open",
+                }
+            ]
+        return []
+
+    with (
+        patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.work.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.work.beads.list_queue_messages", return_value=[]),
+        patch(
+            "atelier.commands.work._select_global_review_feedback_changeset",
+            return_value=work_cmd._ReviewFeedbackSelection(
+                epic_id="at-u9j",
+                changeset_id="at-u9j.1",
+                feedback_at="2026-02-20T12:00:00+00:00",
+            ),
+        ),
+        patch("atelier.commands.work.os.kill", side_effect=ProcessLookupError),
+        patch("atelier.commands.work.beads.update_changeset_review_feedback_cursor"),
+        patch("atelier.commands.work.say"),
+    ):
+        result = work_cmd._run_startup_contract(
+            agent_id="atelier/worker/agent/p123-t2",
+            agent_bead_id=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            mode="auto",
+            explicit_epic_id=None,
+            queue_only=False,
+            dry_run=False,
+            assume_yes=True,
+            repo_slug="org/repo",
+            branch_pr=True,
+        )
+
+    assert result.reason == "review_feedback"
+    assert result.reassign_from == "atelier/worker/agent/p999999-t1"
+
+
 def test_startup_contract_falls_back_to_global_ready_changeset() -> None:
     epics = [
         {

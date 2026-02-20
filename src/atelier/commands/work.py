@@ -1319,6 +1319,57 @@ def _select_review_feedback_changeset(
     return candidates[0]
 
 
+def _select_global_review_feedback_changeset(
+    *,
+    repo_slug: str | None,
+    beads_root: Path,
+    repo_root: Path,
+) -> _ReviewFeedbackSelection | None:
+    if not repo_slug:
+        return None
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:changeset"], beads_root=beads_root, cwd=repo_root
+    )
+    candidates: list[_ReviewFeedbackSelection] = []
+    for issue in issues:
+        changeset_id = issue.get("id")
+        if not isinstance(changeset_id, str) or not changeset_id:
+            continue
+        if not _changeset_in_review_candidate(issue):
+            continue
+        work_branch = _changeset_work_branch(issue)
+        if not work_branch:
+            continue
+        pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+        feedback_at = prs.latest_feedback_timestamp(pr_payload)
+        if not feedback_at:
+            continue
+        feedback_time = _parse_issue_time(feedback_at)
+        if feedback_time is None:
+            continue
+        cursor = _changeset_feedback_cursor(issue)
+        if cursor is not None and feedback_time <= cursor:
+            continue
+        epic_id = _resolve_epic_id_for_changeset(
+            issue, beads_root=beads_root, repo_root=repo_root
+        )
+        if not epic_id:
+            epic_id = changeset_id
+        candidates.append(
+            _ReviewFeedbackSelection(
+                epic_id=epic_id,
+                changeset_id=changeset_id,
+                feedback_at=feedback_at,
+            )
+        )
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda item: _parse_issue_time(item.feedback_at) or dt.datetime.max
+    )
+    return candidates[0]
+
+
 def _list_child_issues(
     parent_id: str, *, beads_root: Path, repo_root: Path, include_closed: bool = False
 ) -> list[dict[str, object]]:
@@ -3668,6 +3719,27 @@ def _run_startup_contract(
         and issue.get("assignee")
     }
 
+    def stale_reassign_for_epic(epic_id: str) -> str | None:
+        assignee = stale_assignee_by_epic.get(epic_id)
+        if assignee:
+            return assignee
+        loaded = beads.run_bd_json(
+            ["show", epic_id], beads_root=beads_root, cwd=repo_root
+        )
+        if not loaded:
+            return None
+        issue = loaded[0]
+        existing_assignee = issue.get("assignee")
+        if not isinstance(existing_assignee, str) or not existing_assignee:
+            return None
+        if existing_assignee == agent_id:
+            return None
+        if _agent_family_id(existing_assignee) != _agent_family_id(agent_id):
+            return None
+        if _is_agent_session_active(existing_assignee):
+            return None
+        return existing_assignee
+
     def select_feedback_candidate(
         epic_ids: list[str],
     ) -> _ReviewFeedbackSelection | None:
@@ -3718,7 +3790,7 @@ def _run_startup_contract(
             changeset_id=selection.changeset_id,
             should_exit=False,
             reason="review_feedback",
-            reassign_from=stale_assignee_by_epic.get(selection.epic_id),
+            reassign_from=stale_reassign_for_epic(selection.epic_id),
         )
 
     if branch_pr and repo_slug and hooked_epic:
@@ -3755,6 +3827,13 @@ def _run_startup_contract(
         feedback = select_feedback_candidate(unhooked_epics)
         if feedback is not None:
             return resume_feedback(feedback)
+        global_feedback = _select_global_review_feedback_changeset(
+            repo_slug=repo_slug,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        if global_feedback is not None:
+            return resume_feedback(global_feedback)
 
     for issue in assigned:
         candidate = issue.get("id")
