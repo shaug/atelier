@@ -20,6 +20,7 @@ from .. import (
     agents,
     beads,
     branching,
+    changeset_fields,
     changesets,
     codex,
     config,
@@ -847,11 +848,7 @@ def _is_changeset_ready(issue: dict[str, object]) -> bool:
 
 
 def _changeset_review_state(issue: dict[str, object]) -> str | None:
-    description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
-    return lifecycle.normalize_review_state(fields.get("pr_state"))
+    return changeset_fields.review_state(issue)
 
 
 def _changeset_waiting_on_review(issue: dict[str, object]) -> bool:
@@ -862,31 +859,11 @@ def _changeset_waiting_on_review(issue: dict[str, object]) -> bool:
 
 
 def _changeset_work_branch(issue: dict[str, object]) -> str | None:
-    description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
-    raw = fields.get("changeset.work_branch")
-    if not isinstance(raw, str):
-        return None
-    normalized = raw.strip()
-    if not normalized or normalized.lower() == "null":
-        return None
-    return normalized
+    return changeset_fields.work_branch(issue)
 
 
 def _changeset_pr_url(issue: dict[str, object]) -> str | None:
-    description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
-    raw = fields.get("pr_url")
-    if not isinstance(raw, str):
-        return None
-    normalized = raw.strip()
-    if not normalized or normalized.lower() == "null":
-        return None
-    return normalized
+    return changeset_fields.pr_url(issue)
 
 
 def _lookup_pr_payload(repo_slug: str | None, branch: str) -> dict[str, object] | None:
@@ -914,17 +891,7 @@ def _lookup_pr_payload_diagnostic(
 
 
 def _changeset_root_branch(issue: dict[str, object]) -> str | None:
-    description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
-    raw = fields.get("changeset.root_branch")
-    if not isinstance(raw, str):
-        return None
-    normalized = raw.strip()
-    if not normalized or normalized.lower() == "null":
-        return None
-    return normalized
+    return changeset_fields.root_branch(issue)
 
 
 def _changeset_base_branch(

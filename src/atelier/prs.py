@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Literal
 
 from . import git
@@ -66,6 +67,29 @@ def clear_runtime_cache() -> None:
     _PR_LOOKUP_CACHE.clear()
     _INLINE_FEEDBACK_CACHE.clear()
     _UNRESOLVED_THREADS_CACHE.clear()
+
+
+def parse_timestamp(value: object) -> datetime | None:
+    """Parse ISO-8601 timestamps used by GitHub APIs."""
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    normalized = raw
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _is_retryable_message(message: str) -> bool:
@@ -257,17 +281,15 @@ def latest_feedback_timestamp(payload: dict[str, object] | None) -> str | None:
     """Return the latest reviewer feedback timestamp from a PR payload only."""
     if not payload:
         return None
-    latest: str | None = None
+    latest: datetime | None = None
 
     def include(value: object) -> None:
         nonlocal latest
-        if not isinstance(value, str):
+        parsed = parse_timestamp(value)
+        if parsed is None:
             return
-        candidate = value.strip()
-        if not candidate:
-            return
-        if latest is None or candidate > latest:
-            latest = candidate
+        if latest is None or parsed > latest:
+            latest = parsed
 
     comments = payload.get("comments")
     if isinstance(comments, list):
@@ -295,7 +317,9 @@ def latest_feedback_timestamp(payload: dict[str, object] | None) -> str | None:
             include(review.get("submittedAt"))
             include(review.get("createdAt"))
 
-    return latest
+    if latest is None:
+        return None
+    return _format_timestamp(latest)
 
 
 def _latest_inline_review_comment_timestamp(repo: str, pr_number: int) -> str | None:
@@ -317,7 +341,7 @@ def _latest_inline_review_comment_timestamp(repo: str, pr_number: int) -> str | 
     if not isinstance(review_comments, list):
         _INLINE_FEEDBACK_CACHE[cache_key] = None
         return None
-    latest: str | None = None
+    latest: datetime | None = None
     for comment in review_comments:
         if not isinstance(comment, dict):
             continue
@@ -325,16 +349,17 @@ def _latest_inline_review_comment_timestamp(repo: str, pr_number: int) -> str | 
         if _is_bot_author(author):
             continue
         for key in ("updated_at", "created_at"):
-            value = comment.get(key)
-            if not isinstance(value, str):
+            parsed = parse_timestamp(comment.get(key))
+            if parsed is None:
                 continue
-            candidate = value.strip()
-            if not candidate:
-                continue
-            if latest is None or candidate > latest:
-                latest = candidate
-    _INLINE_FEEDBACK_CACHE[cache_key] = latest
-    return latest
+            if latest is None or parsed > latest:
+                latest = parsed
+    if latest is None:
+        _INLINE_FEEDBACK_CACHE[cache_key] = None
+        return None
+    formatted = _format_timestamp(latest)
+    _INLINE_FEEDBACK_CACHE[cache_key] = formatted
+    return formatted
 
 
 def latest_feedback_timestamp_with_inline_comments(

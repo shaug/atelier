@@ -2418,6 +2418,20 @@ def test_review_feedback_progressed_when_feedback_timestamp_advances() -> None:
     assert work_cmd._review_feedback_progressed(before, after) is True
 
 
+def test_review_feedback_progressed_compares_timestamp_instants() -> None:
+    before = work_cmd.ReviewFeedbackSnapshot(
+        feedback_at="2026-02-20T12:30:00Z",
+        unresolved_threads=2,
+        branch_head="abc1234",
+    )
+    after = work_cmd.ReviewFeedbackSnapshot(
+        feedback_at="2026-02-20T09:31:00-05:00",
+        unresolved_threads=2,
+        branch_head="abc1234",
+    )
+    assert work_cmd._review_feedback_progressed(before, after) is True
+
+
 def test_run_worker_once_blocks_when_review_feedback_makes_no_progress() -> None:
     project_config = _fake_project_payload()
     project_config.branch.pr = True

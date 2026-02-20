@@ -167,6 +167,25 @@ def test_latest_feedback_timestamp_prefers_non_bot_reviewer_events() -> None:
     assert prs.latest_feedback_timestamp(payload) == "2026-02-20T12:00:00Z"
 
 
+def test_latest_feedback_timestamp_compares_timezones_by_instant() -> None:
+    payload = {
+        "comments": [
+            {
+                "createdAt": "2026-02-20T09:30:00-05:00",
+                "author": {"isBot": False},
+            }
+        ],
+        "reviews": [
+            {
+                "state": "COMMENTED",
+                "submittedAt": "2026-02-20T13:00:00Z",
+                "author": {"isBot": False},
+            }
+        ],
+    }
+    assert prs.latest_feedback_timestamp(payload) == "2026-02-20T14:30:00Z"
+
+
 def test_latest_feedback_timestamp_includes_review_comments() -> None:
     payload = {
         "number": 204,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
-from . import beads, git, prs
+from . import beads, changeset_fields, git, prs
 
 
 @dataclasses.dataclass(frozen=True)
@@ -13,20 +13,6 @@ class ReviewFeedbackSnapshot:
     feedback_at: str | None
     unresolved_threads: int | None
     branch_head: str | None
-
-
-def _changeset_work_branch(issue: dict[str, object]) -> str | None:
-    description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
-    raw = fields.get("changeset.work_branch")
-    if not isinstance(raw, str):
-        return None
-    normalized = raw.strip()
-    if not normalized or normalized.lower() == "null":
-        return None
-    return normalized
 
 
 def persist_review_feedback_cursor(
@@ -39,7 +25,7 @@ def persist_review_feedback_cursor(
 ) -> None:
     if not repo_slug:
         return
-    work_branch = _changeset_work_branch(issue)
+    work_branch = changeset_fields.work_branch(issue)
     if not work_branch:
         return
     lookup = prs.lookup_github_pr_status(repo_slug, work_branch)
@@ -64,7 +50,7 @@ def capture_review_feedback_snapshot(
     repo_root: Path,
     git_path: str | None,
 ) -> ReviewFeedbackSnapshot:
-    work_branch = _changeset_work_branch(issue)
+    work_branch = changeset_fields.work_branch(issue)
     if not work_branch:
         return ReviewFeedbackSnapshot(
             feedback_at=None, unresolved_threads=None, branch_head=None
@@ -109,8 +95,10 @@ def review_feedback_progressed(
         and after.unresolved_threads < before.unresolved_threads
     ):
         return True
-    if after.feedback_at and (
-        before.feedback_at is None or after.feedback_at > before.feedback_at
+    before_feedback = prs.parse_timestamp(before.feedback_at)
+    after_feedback = prs.parse_timestamp(after.feedback_at)
+    if after_feedback is not None and (
+        before_feedback is None or after_feedback > before_feedback
     ):
         return True
     if (
