@@ -955,7 +955,11 @@ def _changeset_root_branch(issue: dict[str, object]) -> str | None:
 
 
 def _changeset_base_branch(
-    issue: dict[str, object], *, repo_root: Path, git_path: str | None
+    issue: dict[str, object],
+    *,
+    beads_root: Path | None = None,
+    repo_root: Path,
+    git_path: str | None,
 ) -> str | None:
     description = issue.get("description")
     fields = beads.parse_description_fields(
@@ -971,6 +975,24 @@ def _changeset_base_branch(
         if isinstance(workspace_parent_branch, str)
         else ""
     )
+    if (
+        not normalized_workspace_parent
+        and beads_root is not None
+        and normalized_root
+        and normalized_parent
+        and normalized_parent == normalized_root
+    ):
+        epic_id = _resolve_epic_id_for_changeset(
+            issue, beads_root=beads_root, repo_root=repo_root
+        )
+        if epic_id:
+            epic_issues = beads.run_bd_json(
+                ["show", epic_id], beads_root=beads_root, cwd=repo_root
+            )
+            if epic_issues:
+                resolved_parent = _extract_workspace_parent_branch(epic_issues[0])
+                if resolved_parent:
+                    normalized_workspace_parent = resolved_parent
     # Top-level changesets often persisted parent=root; use workspace parent for
     # PR base when available so PR creation targets mainline, not the root branch.
     if (
@@ -993,10 +1015,13 @@ def _attempt_create_draft_pr(
     repo_slug: str,
     issue: dict[str, object],
     work_branch: str,
+    beads_root: Path,
     repo_root: Path,
     git_path: str | None,
 ) -> tuple[bool, str]:
-    base_branch = _changeset_base_branch(issue, repo_root=repo_root, git_path=git_path)
+    base_branch = _changeset_base_branch(
+        issue, beads_root=beads_root, repo_root=repo_root, git_path=git_path
+    )
     if not base_branch:
         return False, "missing PR base branch metadata"
     title = str(issue.get("title") or "").strip() or work_branch
@@ -1102,6 +1127,7 @@ def _handle_pushed_without_pr(
                 repo_slug=repo_slug,
                 issue=issue,
                 work_branch=work_branch,
+                beads_root=beads_root,
                 repo_root=repo_root,
                 git_path=git_path,
             )

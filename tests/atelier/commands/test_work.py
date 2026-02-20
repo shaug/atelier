@@ -921,6 +921,39 @@ def test_changeset_base_branch_uses_changeset_parent_when_distinct() -> None:
     assert base == "scott/root-1"
 
 
+def test_changeset_base_branch_falls_back_to_epic_workspace_parent() -> None:
+    issue = {
+        "id": "at-7tk.1",
+        "labels": ["at:changeset"],
+        "parent": "at-7tk",
+        "description": (
+            "changeset.root_branch: scott/gum-1310-stripe-billing-webhoo\n"
+            "changeset.parent_branch: scott/gum-1310-stripe-billing-webhoo\n"
+        ),
+    }
+
+    def fake_run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict]:
+        if args[:2] == ["show", "at-7tk"]:
+            return [
+                {
+                    "id": "at-7tk",
+                    "labels": ["at:epic"],
+                    "description": "workspace.parent_branch: main\n",
+                }
+            ]
+        return []
+
+    with patch("atelier.commands.work.beads.run_bd_json", side_effect=fake_run_bd_json):
+        base = work_cmd._changeset_base_branch(
+            issue,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            git_path=None,
+        )
+
+    assert base == "main"
+
+
 def test_work_prompt_yes_uses_first_epic_without_select() -> None:
     epics = [
         {
