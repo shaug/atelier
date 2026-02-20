@@ -4722,9 +4722,11 @@ def test_finalize_flags_missing_pr_when_strategy_allows_creation() -> None:
         )
 
     assert result.continue_running is False
-    assert result.reason == "changeset_pr_missing"
+    assert result.reason == "changeset_pr_create_failed"
     mark_in_progress.assert_called_once()
     notify.assert_called_once()
+    assert "pr creation failed" in notify.call_args.kwargs["subject"].lower()
+    assert "resolve `gh pr create` failure" in notify.call_args.kwargs["body"].lower()
     assert any(
         args[:2] == ["update", "atelier-epic.1"] and "--append-notes" in args
         for call in run_bd_command.call_args_list
@@ -4775,10 +4777,56 @@ def test_finalize_in_progress_changeset_attempts_pr_creation_when_pushed() -> No
         )
 
     assert result.continue_running is False
-    assert result.reason == "changeset_pr_missing"
+    assert result.reason == "changeset_pr_create_failed"
     create_pr.assert_called_once()
     mark_in_progress.assert_called_once()
     notify.assert_called_once()
+
+
+def test_finalize_flags_missing_pr_when_repo_slug_unavailable() -> None:
+    with (
+        patch(
+            "atelier.commands.work.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "atelier-epic.1",
+                    "labels": ["at:changeset", "cs:ready"],
+                    "description": (
+                        "changeset.work_branch: feat/root-atelier-epic.1\n"
+                        "changeset.parent_branch: main\n"
+                    ),
+                    "status": "open",
+                }
+            ],
+        ),
+        patch("atelier.commands.work._find_invalid_changeset_labels", return_value=[]),
+        patch("atelier.commands.work._has_blocking_messages", return_value=False),
+        patch("atelier.commands.work.git.git_ref_exists", return_value=True),
+        patch("atelier.commands.work.beads.run_bd_command"),
+        patch("atelier.commands.work._mark_changeset_in_progress") as mark_in_progress,
+        patch("atelier.commands.work._send_planner_notification") as notify,
+    ):
+        result = work_cmd._finalize_changeset(
+            changeset_id="atelier-epic.1",
+            epic_id="atelier-epic",
+            agent_id="atelier/worker/agent",
+            agent_bead_id="atelier-agent",
+            started_at=work_cmd.dt.datetime.now(tz=work_cmd.dt.timezone.utc),
+            repo_slug=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            branch_pr=True,
+            branch_pr_strategy="sequential",
+        )
+
+    assert result.continue_running is False
+    assert result.reason == "changeset_pr_missing_repo_slug"
+    mark_in_progress.assert_called_once()
+    notify.assert_called_once()
+    assert "provider config missing" in notify.call_args.kwargs["subject"].lower()
+    assert (
+        "configure github provider metadata" in notify.call_args.kwargs["body"].lower()
+    )
 
 
 def test_finalize_creates_pr_when_missing_and_strategy_allows() -> None:

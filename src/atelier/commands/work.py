@@ -1026,10 +1026,18 @@ def _handle_pushed_without_pr(
         )
         return FinalizeResult(continue_running=True, reason="changeset_review_pending")
 
+    failure_reason = "changeset_pr_create_failed"
+    failure_subject = "NEEDS-DECISION: PR creation failed"
     create_detail = create_detail_prefix or ""
-    if repo_slug:
+    if not repo_slug:
+        failure_reason = "changeset_pr_missing_repo_slug"
+        failure_subject = "NEEDS-DECISION: PR provider config missing"
+        create_detail = "missing GitHub repo slug for PR creation"
+    else:
         work_branch = _changeset_work_branch(issue)
-        if work_branch:
+        if not work_branch:
+            create_detail = "missing changeset.work_branch metadata for PR creation"
+        else:
             created, detail = _attempt_create_draft_pr(
                 repo_slug=repo_slug,
                 issue=issue,
@@ -1058,8 +1066,6 @@ def _handle_pushed_without_pr(
                 return FinalizeResult(
                     continue_running=True, reason="changeset_review_pending"
                 )
-    else:
-        create_detail = "missing GitHub repo slug for PR creation"
 
     _mark_changeset_in_progress(
         changeset_id, beads_root=beads_root, repo_root=repo_root
@@ -1087,8 +1093,17 @@ def _handle_pushed_without_pr(
     )
     if create_detail:
         body = f"{body}\nPR creation attempt failed: {create_detail}"
+    if failure_reason == "changeset_pr_missing_repo_slug":
+        body = (
+            f"{body}\nAction: configure GitHub provider metadata so finalize can "
+            "create PRs automatically."
+        )
+    else:
+        body = (
+            f"{body}\nAction: resolve `gh pr create` failure and rerun worker finalize."
+        )
     _send_planner_notification(
-        subject=f"NEEDS-DECISION: PR missing after publish ({changeset_id})",
+        subject=f"{failure_subject} ({changeset_id})",
         body=body,
         agent_id=agent_id,
         thread_id=changeset_id,
@@ -1096,7 +1111,7 @@ def _handle_pushed_without_pr(
         repo_root=repo_root,
         dry_run=False,
     )
-    return FinalizeResult(continue_running=False, reason="changeset_pr_missing")
+    return FinalizeResult(continue_running=False, reason=failure_reason)
 
 
 def _changeset_parent_lifecycle_state(
