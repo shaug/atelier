@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ... import log as atelier_log
+from .. import selection as worker_selection
 from ..models import StartupContractResult
 from ..review import ReviewFeedbackSelection
 
@@ -16,8 +17,6 @@ from ..review import ReviewFeedbackSelection
 @dataclass(frozen=True)
 class NextChangesetContext:
     epic_id: str
-    beads_root: Path
-    repo_root: Path
     repo_slug: str | None
     branch_pr: bool
     branch_pr_strategy: object
@@ -27,13 +26,9 @@ class NextChangesetContext:
 class NextChangesetService(Protocol):
     """Typed next-changeset service boundary."""
 
-    def show_issue(
-        self, issue_id: str, *, beads_root: Path, repo_root: Path
-    ) -> dict[str, object] | None: ...
+    def show_issue(self, issue_id: str) -> dict[str, object] | None: ...
 
-    def ready_changesets(
-        self, *, epic_id: str, beads_root: Path, repo_root: Path
-    ) -> list[dict[str, object]]: ...
+    def ready_changesets(self, *, epic_id: str) -> list[dict[str, object]]: ...
 
     def issue_labels(self, issue: dict[str, object]) -> set[str]: ...
 
@@ -44,7 +39,6 @@ class NextChangesetService(Protocol):
         issue: dict[str, object],
         *,
         repo_slug: str | None,
-        repo_root: Path,
         branch_pr: bool,
         branch_pr_strategy: object,
         git_path: str | None,
@@ -55,21 +49,16 @@ class NextChangesetService(Protocol):
         issue: dict[str, object],
         *,
         repo_slug: str | None,
-        repo_root: Path,
         branch_pr: bool,
         git_path: str | None,
     ) -> bool: ...
 
-    def has_open_descendant_changesets(
-        self, changeset_id: str, *, beads_root: Path, repo_root: Path
-    ) -> bool: ...
+    def has_open_descendant_changesets(self, changeset_id: str) -> bool: ...
 
     def list_descendant_changesets(
         self,
         parent_id: str,
         *,
-        beads_root: Path,
-        repo_root: Path,
         include_closed: bool,
     ) -> list[dict[str, object]]: ...
 
@@ -79,9 +68,7 @@ class NextChangesetService(Protocol):
 def next_changeset_service(
     *, context: NextChangesetContext, service: NextChangesetService
 ) -> dict[str, object] | None:
-    target = service.show_issue(
-        context.epic_id, beads_root=context.beads_root, repo_root=context.repo_root
-    )
+    target = service.show_issue(context.epic_id)
     if target:
         issue = target
         issue_id = issue.get("id")
@@ -100,7 +87,6 @@ def next_changeset_service(
                     and not service.changeset_waiting_on_review_or_signals(
                         issue,
                         repo_slug=context.repo_slug,
-                        repo_root=context.repo_root,
                         branch_pr=context.branch_pr,
                         branch_pr_strategy=context.branch_pr_strategy,
                         git_path=context.git_path,
@@ -109,17 +95,12 @@ def next_changeset_service(
                 or service.is_changeset_recovery_candidate(
                     issue,
                     repo_slug=context.repo_slug,
-                    repo_root=context.repo_root,
                     branch_pr=context.branch_pr,
                     git_path=context.git_path,
                 )
             )
         ):
-            if not service.has_open_descendant_changesets(
-                context.epic_id,
-                beads_root=context.beads_root,
-                repo_root=context.repo_root,
-            ):
+            if not service.has_open_descendant_changesets(context.epic_id):
                 return issue
         status = str(issue.get("status") or "").strip().lower()
         if (
@@ -131,18 +112,12 @@ def next_changeset_service(
         ):
             descendants = service.list_descendant_changesets(
                 context.epic_id,
-                beads_root=context.beads_root,
-                repo_root=context.repo_root,
                 include_closed=True,
             )
             if not descendants:
                 return issue
 
-    changesets = service.ready_changesets(
-        epic_id=context.epic_id,
-        beads_root=context.beads_root,
-        repo_root=context.repo_root,
-    )
+    changesets = service.ready_changesets(epic_id=context.epic_id)
     if not changesets:
         return None
     actionable = [
@@ -152,7 +127,6 @@ def next_changeset_service(
         and not service.changeset_waiting_on_review_or_signals(
             issue,
             repo_slug=context.repo_slug,
-            repo_root=context.repo_root,
             branch_pr=context.branch_pr,
             branch_pr_strategy=context.branch_pr_strategy,
             git_path=context.git_path,
@@ -168,11 +142,7 @@ def next_changeset_service(
     for issue in prioritized:
         issue_id = issue.get("id")
         if isinstance(issue_id, str) and issue_id:
-            if not service.has_open_descendant_changesets(
-                issue_id,
-                beads_root=context.beads_root,
-                repo_root=context.repo_root,
-            ):
+            if not service.has_open_descendant_changesets(issue_id):
                 return issue
     return None
 
@@ -202,71 +172,49 @@ class StartupContractService(Protocol):
         self,
         agent_id: str,
         *,
-        beads_root: Path,
-        repo_root: Path,
         queue_name: str,
         force_prompt: bool = False,
         dry_run: bool = False,
         assume_yes: bool = False,
     ) -> bool: ...
 
-    def list_epics(
-        self, *, beads_root: Path, repo_root: Path
-    ) -> list[dict[str, object]]: ...
+    def list_epics(self) -> list[dict[str, object]]: ...
 
     def next_changeset(
         self,
         *,
         epic_id: str,
-        beads_root: Path,
-        repo_root: Path,
         repo_slug: str | None,
         branch_pr: bool,
         branch_pr_strategy: object,
         git_path: str | None,
     ) -> dict[str, object] | None: ...
 
-    def resolve_hooked_epic(
-        self, agent_bead_id: str, agent_id: str, *, beads_root: Path, repo_root: Path
-    ) -> str | None: ...
-
-    def filter_epics(
-        self, issues: list[dict[str, object]], *, assignee: str | None = None
-    ) -> list[dict[str, object]]: ...
-
-    def sort_by_created_at(
-        self, issues: list[dict[str, object]]
-    ) -> list[dict[str, object]]: ...
+    def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None: ...
 
     def stale_family_assigned_epics(
-        self, issues: list[dict[str, object]], *, agent_id: str
-    ) -> list[dict[str, object]]: ...
-
-    def select_review_feedback_changeset(
-        self, *, epic_id: str, repo_slug: str | None, beads_root: Path, repo_root: Path
-    ) -> ReviewFeedbackSelection | None: ...
-
-    def parse_issue_time(self, value: object) -> dt.datetime | None: ...
-
-    def select_global_review_feedback_changeset(
-        self, *, repo_slug: str | None, beads_root: Path, repo_root: Path
-    ) -> ReviewFeedbackSelection | None: ...
-
-    def is_feedback_eligible_epic_status(self, status: object) -> bool: ...
-
-    def issue_labels(self, issue: dict[str, object]) -> set[str]: ...
-
-    def check_inbox_before_claim(
-        self, agent_id: str, *, beads_root: Path, repo_root: Path
-    ) -> bool: ...
-
-    def select_epic_auto(
         self,
         issues: list[dict[str, object]],
         *,
         agent_id: str,
-        is_actionable: Callable[[str], bool],
-    ) -> str | None: ...
+    ) -> list[dict[str, object]]: ...
+
+    def select_review_feedback_changeset(
+        self,
+        *,
+        epic_id: str,
+        repo_slug: str | None,
+    ) -> ReviewFeedbackSelection | None: ...
+
+    def select_global_review_feedback_changeset(
+        self,
+        *,
+        repo_slug: str | None,
+    ) -> ReviewFeedbackSelection | None: ...
+
+    def check_inbox_before_claim(self, agent_id: str) -> bool: ...
+
+    def ready_changesets_global(self) -> list[dict[str, object]]: ...
 
     def select_epic_prompt(
         self,
@@ -277,37 +225,18 @@ class StartupContractService(Protocol):
         assume_yes: bool,
     ) -> str | None: ...
 
-    def select_epic_from_ready_changesets(
-        self,
-        *,
-        issues: list[dict[str, object]],
-        is_actionable: Callable[[str], bool],
-        beads_root: Path,
-        repo_root: Path,
-    ) -> str | None: ...
-
     def send_needs_decision(
         self,
         *,
         agent_id: str,
         mode: str,
         issues: list[dict[str, object]],
-        beads_root: Path,
-        repo_root: Path,
         dry_run: bool,
     ) -> None: ...
 
     def dry_run_log(self, message: str) -> None: ...
 
     def emit(self, message: str) -> None: ...
-
-    def show_issue(
-        self, issue_id: str, *, beads_root: Path, repo_root: Path
-    ) -> dict[str, object] | None: ...
-
-    def agent_family_id(self, agent_id: str) -> str: ...
-
-    def is_agent_session_active(self, agent_id: str) -> bool: ...
 
     def die(self, message: str) -> None: ...
 
@@ -318,8 +247,6 @@ def run_startup_contract_service(
     """Typed startup contract service entrypoint."""
     agent_id = context.agent_id
     agent_bead_id = context.agent_bead_id
-    beads_root = context.beads_root
-    repo_root = context.repo_root
     mode = context.mode
     explicit_epic_id = context.explicit_epic_id
     queue_only = context.queue_only
@@ -346,8 +273,6 @@ def run_startup_contract_service(
     if queue_only:
         service.handle_queue_before_claim(
             agent_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
             queue_name=worker_queue_name,
             force_prompt=True,
             dry_run=dry_run,
@@ -359,7 +284,7 @@ def run_startup_contract_service(
             epic_id=None, changeset_id=None, should_exit=True, reason="queue_only"
         )
 
-    issues = service.list_epics(beads_root=beads_root, repo_root=repo_root)
+    issues = service.list_epics()
     actionable_cache: dict[str, bool] = {}
 
     def epic_has_actionable_changeset(epic_id: str) -> bool:
@@ -369,8 +294,6 @@ def run_startup_contract_service(
         actionable = (
             service.next_changeset(
                 epic_id=epic_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
                 repo_slug=repo_slug,
                 branch_pr=branch_pr,
                 branch_pr_strategy=branch_pr_strategy,
@@ -383,13 +306,13 @@ def run_startup_contract_service(
 
     hooked_epic = None
     if agent_bead_id:
-        hooked_epic = service.resolve_hooked_epic(
-            agent_bead_id, agent_id, beads_root=beads_root, repo_root=repo_root
-        )
+        hooked_epic = service.resolve_hooked_epic(agent_bead_id, agent_id)
     elif dry_run:
         service.dry_run_log("Would create agent bead before checking for hooks.")
-    assigned = service.filter_epics(issues, assignee=agent_id)
-    assigned = service.sort_by_created_at(assigned)
+    assigned = worker_selection.filter_epics(
+        issues, assignee=agent_id, allow_hooked=True, skip_draft=True
+    )
+    assigned = worker_selection.sort_by_created_at(assigned)
 
     stale_assigned = service.stale_family_assigned_epics(issues, agent_id=agent_id)
     stale_assignee_by_epic = {
@@ -402,25 +325,7 @@ def run_startup_contract_service(
     }
 
     def stale_reassign_for_epic(epic_id: str) -> str | None:
-        assignee = stale_assignee_by_epic.get(epic_id)
-        if assignee:
-            return assignee
-        loaded = service.show_issue(epic_id, beads_root=beads_root, repo_root=repo_root)
-        if not loaded:
-            return None
-        issue = loaded
-        existing_assignee = issue.get("assignee")
-        if not isinstance(existing_assignee, str) or not existing_assignee:
-            return None
-        if existing_assignee == agent_id:
-            return None
-        if service.agent_family_id(existing_assignee) != service.agent_family_id(
-            agent_id
-        ):
-            return None
-        if service.is_agent_session_active(existing_assignee):
-            return None
-        return existing_assignee
+        return stale_assignee_by_epic.get(epic_id)
 
     def select_feedback_candidate(
         epic_ids: list[str],
@@ -434,8 +339,6 @@ def run_startup_contract_service(
             feedback_selection = service.select_review_feedback_changeset(
                 epic_id=epic_id,
                 repo_slug=repo_slug,
-                beads_root=beads_root,
-                repo_root=repo_root,
             )
             if feedback_selection is not None:
                 feedback_candidates.append(feedback_selection)
@@ -443,7 +346,7 @@ def run_startup_contract_service(
             return None
         feedback_candidates.sort(
             key=lambda item: (
-                service.parse_issue_time(item.feedback_at)
+                worker_selection.parse_issue_time(item.feedback_at)
                 or dt.datetime.max.replace(tzinfo=dt.timezone.utc)
             )
         )
@@ -492,16 +395,16 @@ def run_startup_contract_service(
 
     if branch_pr and repo_slug:
         unhooked_epics: list[str] = []
-        for issue in service.sort_by_created_at(issues):
+        for issue in worker_selection.sort_by_created_at(issues):
             issue_id = issue.get("id")
             if not isinstance(issue_id, str) or not issue_id:
                 continue
             if issue_id == hooked_epic:
                 continue
             status = str(issue.get("status") or "")
-            if not service.is_feedback_eligible_epic_status(status):
+            if str(status).strip().lower() not in {"open", "ready", "in_progress"}:
                 continue
-            labels = service.issue_labels(issue)
+            labels = worker_selection.issue_labels(issue)
             if "at:draft" in labels:
                 continue
             unhooked_epics.append(issue_id)
@@ -509,9 +412,7 @@ def run_startup_contract_service(
         if feedback is not None:
             return resume_feedback(feedback)
         global_feedback = service.select_global_review_feedback_changeset(
-            repo_slug=repo_slug,
-            beads_root=beads_root,
-            repo_root=repo_root,
+            repo_slug=repo_slug
         )
         if global_feedback is not None:
             return resume_feedback(global_feedback)
@@ -555,9 +456,7 @@ def run_startup_contract_service(
                 reassign_from=previous_assignee,
             )
 
-    if service.check_inbox_before_claim(
-        agent_id, beads_root=beads_root, repo_root=repo_root
-    ):
+    if service.check_inbox_before_claim(agent_id):
         if dry_run:
             service.dry_run_log(
                 "Inbox has unread messages; would exit before claiming work."
@@ -567,8 +466,6 @@ def run_startup_contract_service(
         )
     if service.handle_queue_before_claim(
         agent_id,
-        beads_root=beads_root,
-        repo_root=repo_root,
         queue_name=worker_queue_name,
         dry_run=dry_run,
         assume_yes=assume_yes,
@@ -582,8 +479,10 @@ def run_startup_contract_service(
         )
 
     if mode == "auto":
-        selected_epic = service.select_epic_auto(
-            issues, agent_id=agent_id, is_actionable=epic_has_actionable_changeset
+        selected_epic = worker_selection.select_epic_auto(
+            issues,
+            agent_id=agent_id,
+            is_actionable=epic_has_actionable_changeset,
         )
     else:
         selected_epic = service.select_epic_prompt(
@@ -593,11 +492,10 @@ def run_startup_contract_service(
             assume_yes=assume_yes,
         )
     if selected_epic is None:
-        selected_epic = service.select_epic_from_ready_changesets(
+        selected_epic = worker_selection.select_epic_from_ready_changesets(
             issues=issues,
+            ready_changesets=service.ready_changesets_global(),
             is_actionable=epic_has_actionable_changeset,
-            beads_root=beads_root,
-            repo_root=repo_root,
         )
         if selected_epic:
             return StartupContractResult(
@@ -613,8 +511,6 @@ def run_startup_contract_service(
             agent_id=agent_id,
             mode=mode,
             issues=issues,
-            beads_root=beads_root,
-            repo_root=repo_root,
             dry_run=dry_run,
         )
         return StartupContractResult(

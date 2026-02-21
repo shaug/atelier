@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -14,19 +13,10 @@ class FakeStartupService:
         self._handle_queue_before_claim = overrides.pop(
             "handle_queue_before_claim", lambda *_args, **_kwargs: False
         )
-        self._list_epics = overrides.pop("list_epics", lambda **_kwargs: [])
+        self._list_epics = overrides.pop("list_epics", lambda: [])
         self._next_changeset = overrides.pop("next_changeset", lambda **_kwargs: None)
         self._resolve_hooked_epic = overrides.pop(
-            "resolve_hooked_epic", lambda *_args, **_kwargs: None
-        )
-        self._filter_epics = overrides.pop(
-            "filter_epics",
-            lambda issues, assignee=None: [
-                issue for issue in issues if issue.get("assignee") == assignee
-            ],
-        )
-        self._sort_by_created_at = overrides.pop(
-            "sort_by_created_at", lambda issues: issues
+            "resolve_hooked_epic", lambda *_args: None
         )
         self._stale_family_assigned_epics = overrides.pop(
             "stale_family_assigned_epics", lambda issues, agent_id: []
@@ -34,41 +24,23 @@ class FakeStartupService:
         self._select_review_feedback_changeset = overrides.pop(
             "select_review_feedback_changeset", lambda **_kwargs: None
         )
-        self._parse_issue_time = overrides.pop("parse_issue_time", lambda _value: None)
         self._select_global_review_feedback_changeset = overrides.pop(
             "select_global_review_feedback_changeset", lambda **_kwargs: None
         )
-        self._is_feedback_eligible_epic_status = overrides.pop(
-            "is_feedback_eligible_epic_status", lambda _status: True
-        )
-        self._issue_labels = overrides.pop(
-            "issue_labels", lambda issue: set(issue.get("labels") or [])
-        )
         self._check_inbox_before_claim = overrides.pop(
-            "check_inbox_before_claim", lambda *_args, **_kwargs: False
+            "check_inbox_before_claim", lambda *_args: False
         )
-        self._select_epic_auto = overrides.pop(
-            "select_epic_auto", lambda issues, agent_id, is_actionable: None
+        self._ready_changesets_global = overrides.pop(
+            "ready_changesets_global", lambda: []
         )
         self._select_epic_prompt = overrides.pop(
-            "select_epic_prompt",
-            lambda issues, agent_id, is_actionable, assume_yes: None,
-        )
-        self._select_epic_from_ready_changesets = overrides.pop(
-            "select_epic_from_ready_changesets", lambda **_kwargs: None
+            "select_epic_prompt", lambda **_kwargs: None
         )
         self._send_needs_decision = overrides.pop(
             "send_needs_decision", lambda **_kwargs: None
         )
         self._dry_run_log = overrides.pop("dry_run_log", lambda _message: None)
         self._emit = overrides.pop("emit", lambda _message: None)
-        self._show_issue = overrides.pop("show_issue", lambda *_args, **_kwargs: None)
-        self._agent_family_id = overrides.pop(
-            "agent_family_id", lambda value: str(value).split("/p", 1)[0]
-        )
-        self._is_agent_session_active = overrides.pop(
-            "is_agent_session_active", lambda _agent_id: False
-        )
         self._die = overrides.pop(
             "die", lambda message: (_ for _ in ()).throw(RuntimeError(message))
         )
@@ -80,8 +52,6 @@ class FakeStartupService:
         self,
         agent_id: str,
         *,
-        beads_root: Path,
-        repo_root: Path,
         queue_name: str,
         force_prompt: bool = False,
         dry_run: bool = False,
@@ -89,25 +59,19 @@ class FakeStartupService:
     ) -> bool:
         return self._handle_queue_before_claim(
             agent_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
             queue_name=queue_name,
             force_prompt=force_prompt,
             dry_run=dry_run,
             assume_yes=assume_yes,
         )
 
-    def list_epics(
-        self, *, beads_root: Path, repo_root: Path
-    ) -> list[dict[str, object]]:
-        return self._list_epics(beads_root=beads_root, repo_root=repo_root)
+    def list_epics(self) -> list[dict[str, object]]:
+        return self._list_epics()
 
     def next_changeset(
         self,
         *,
         epic_id: str,
-        beads_root: Path,
-        repo_root: Path,
         repo_slug: str | None,
         branch_pr: bool,
         branch_pr_strategy: object,
@@ -115,30 +79,14 @@ class FakeStartupService:
     ) -> dict[str, object] | None:
         return self._next_changeset(
             epic_id=epic_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
             repo_slug=repo_slug,
             branch_pr=branch_pr,
             branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
         )
 
-    def resolve_hooked_epic(
-        self, agent_bead_id: str, agent_id: str, *, beads_root: Path, repo_root: Path
-    ) -> str | None:
-        return self._resolve_hooked_epic(
-            agent_bead_id, agent_id, beads_root=beads_root, repo_root=repo_root
-        )
-
-    def filter_epics(
-        self, issues: list[dict[str, object]], *, assignee: str | None = None
-    ) -> list[dict[str, object]]:
-        return self._filter_epics(issues, assignee=assignee)
-
-    def sort_by_created_at(
-        self, issues: list[dict[str, object]]
-    ) -> list[dict[str, object]]:
-        return self._sort_by_created_at(issues)
+    def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None:
+        return self._resolve_hooked_epic(agent_bead_id, agent_id)
 
     def stale_family_assigned_epics(
         self, issues: list[dict[str, object]], *, agent_id: str
@@ -146,50 +94,28 @@ class FakeStartupService:
         return self._stale_family_assigned_epics(issues, agent_id=agent_id)
 
     def select_review_feedback_changeset(
-        self, *, epic_id: str, repo_slug: str | None, beads_root: Path, repo_root: Path
+        self,
+        *,
+        epic_id: str,
+        repo_slug: str | None,
     ) -> ReviewFeedbackSelection | None:
         return self._select_review_feedback_changeset(
             epic_id=epic_id,
             repo_slug=repo_slug,
-            beads_root=beads_root,
-            repo_root=repo_root,
         )
-
-    def parse_issue_time(self, value: object) -> dt.datetime | None:
-        return self._parse_issue_time(value)
 
     def select_global_review_feedback_changeset(
-        self, *, repo_slug: str | None, beads_root: Path, repo_root: Path
-    ) -> ReviewFeedbackSelection | None:
-        return self._select_global_review_feedback_changeset(
-            repo_slug=repo_slug,
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
-
-    def is_feedback_eligible_epic_status(self, status: object) -> bool:
-        return self._is_feedback_eligible_epic_status(status)
-
-    def issue_labels(self, issue: dict[str, object]) -> set[str]:
-        return self._issue_labels(issue)
-
-    def check_inbox_before_claim(
-        self, agent_id: str, *, beads_root: Path, repo_root: Path
-    ) -> bool:
-        return self._check_inbox_before_claim(
-            agent_id, beads_root=beads_root, repo_root=repo_root
-        )
-
-    def select_epic_auto(
         self,
-        issues: list[dict[str, object]],
         *,
-        agent_id: str,
-        is_actionable: Callable[[str], bool],
-    ) -> str | None:
-        return self._select_epic_auto(
-            issues, agent_id=agent_id, is_actionable=is_actionable
-        )
+        repo_slug: str | None,
+    ) -> ReviewFeedbackSelection | None:
+        return self._select_global_review_feedback_changeset(repo_slug=repo_slug)
+
+    def check_inbox_before_claim(self, agent_id: str) -> bool:
+        return self._check_inbox_before_claim(agent_id)
+
+    def ready_changesets_global(self) -> list[dict[str, object]]:
+        return self._ready_changesets_global()
 
     def select_epic_prompt(
         self,
@@ -200,25 +126,10 @@ class FakeStartupService:
         assume_yes: bool,
     ) -> str | None:
         return self._select_epic_prompt(
-            issues,
+            issues=issues,
             agent_id=agent_id,
             is_actionable=is_actionable,
             assume_yes=assume_yes,
-        )
-
-    def select_epic_from_ready_changesets(
-        self,
-        *,
-        issues: list[dict[str, object]],
-        is_actionable: Callable[[str], bool],
-        beads_root: Path,
-        repo_root: Path,
-    ) -> str | None:
-        return self._select_epic_from_ready_changesets(
-            issues=issues,
-            is_actionable=is_actionable,
-            beads_root=beads_root,
-            repo_root=repo_root,
         )
 
     def send_needs_decision(
@@ -227,16 +138,12 @@ class FakeStartupService:
         agent_id: str,
         mode: str,
         issues: list[dict[str, object]],
-        beads_root: Path,
-        repo_root: Path,
         dry_run: bool,
     ) -> None:
         self._send_needs_decision(
             agent_id=agent_id,
             mode=mode,
             issues=issues,
-            beads_root=beads_root,
-            repo_root=repo_root,
             dry_run=dry_run,
         )
 
@@ -245,17 +152,6 @@ class FakeStartupService:
 
     def emit(self, message: str) -> None:
         self._emit(message)
-
-    def show_issue(
-        self, issue_id: str, *, beads_root: Path, repo_root: Path
-    ) -> dict[str, object] | None:
-        return self._show_issue(issue_id, beads_root=beads_root, repo_root=repo_root)
-
-    def agent_family_id(self, agent_id: str) -> str:
-        return self._agent_family_id(agent_id)
-
-    def is_agent_session_active(self, agent_id: str) -> bool:
-        return self._is_agent_session_active(agent_id)
 
     def die(self, message: str) -> None:
         self._die(message)
@@ -343,12 +239,10 @@ def test_run_startup_contract_prioritizes_review_feedback() -> None:
     result = _run_startup(
         branch_pr=True,
         repo_slug="org/repo",
-        resolve_hooked_epic=lambda *_args, **_kwargs: "at-epic",
+        resolve_hooked_epic=lambda *_args: "at-epic",
         select_review_feedback_changeset=lambda **_kwargs: feedback,
         next_changeset=next_changeset,
-        list_epics=lambda **_kwargs: [
-            {"id": "at-epic", "assignee": "atelier/worker/codex/p010"}
-        ],
+        list_epics=lambda: [{"id": "at-epic", "assignee": "atelier/worker/codex/p010"}],
     )
 
     assert result.reason == "review_feedback"
@@ -362,7 +256,7 @@ def test_run_startup_contract_reclaims_stale_family_assignment() -> None:
 
     result = _run_startup(
         agent_bead_id=None,
-        list_epics=lambda **_kwargs: issues,
+        list_epics=lambda: issues,
         stale_family_assigned_epics=lambda _issues, agent_id: issues,
         next_changeset=lambda **_kwargs: {"id": "at-epic.1"},
     )
@@ -376,10 +270,11 @@ def test_run_startup_contract_uses_ready_changeset_fallback() -> None:
     issues = [{"id": "at-other"}]
 
     result = _run_startup(
-        list_epics=lambda **_kwargs: issues,
+        list_epics=lambda: issues,
         mode="prompt",
-        select_epic_prompt=lambda *_args, **_kwargs: None,
-        select_epic_from_ready_changesets=lambda **_kwargs: "at-ready",
+        select_epic_prompt=lambda **_kwargs: None,
+        ready_changesets_global=lambda: [{"id": "at-ready"}],
+        next_changeset=lambda **_kwargs: {"id": "at-ready"},
     )
 
     assert result.reason == "selected_ready_changeset"
@@ -387,11 +282,11 @@ def test_run_startup_contract_uses_ready_changeset_fallback() -> None:
 
 
 def test_run_startup_contract_selects_auto_epic() -> None:
-    issues = [{"id": "at-auto"}]
+    issues = [{"id": "at-auto", "status": "open"}]
 
     result = _run_startup(
-        list_epics=lambda **_kwargs: issues,
-        select_epic_auto=lambda _issues, agent_id, is_actionable: "at-auto",
+        list_epics=lambda: issues,
+        next_changeset=lambda **_kwargs: {"id": "at-auto.1"},
     )
 
     assert result.reason == "selected_auto"
@@ -403,7 +298,7 @@ def test_run_startup_contract_sends_needs_decision_when_no_eligible_epics() -> N
 
     result = _run_startup(
         send_needs_decision=lambda **kwargs: sent.append(kwargs),
-        parse_issue_time=lambda value: dt.datetime.now(dt.timezone.utc),
+        list_epics=lambda: [],
     )
 
     assert result.should_exit is True
