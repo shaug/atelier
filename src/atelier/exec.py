@@ -3,9 +3,11 @@
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import Callable, Generic, Mapping, Protocol, TypeVar
 
 from .io import die
+
+ParsedT = TypeVar("ParsedT")
 
 
 @dataclass(frozen=True)
@@ -82,12 +84,89 @@ class SubprocessCommandRunner:
 _DEFAULT_COMMAND_RUNNER: CommandRunner = SubprocessCommandRunner()
 
 
+@dataclass(frozen=True)
+class CommandSpec(Generic[ParsedT]):
+    """Typed command spec with a parser for command output."""
+
+    request: CommandRequest
+    parser: Callable[[CommandResult], ParsedT]
+    context: str | None = None
+
+
+@dataclass(frozen=True)
+class CommandExecutionError(RuntimeError):
+    """Raised when command execution fails before parsing can occur."""
+
+    request: CommandRequest
+    detail: str
+    result: CommandResult | None = None
+
+    def __str__(self) -> str:
+        return self.detail
+
+
+@dataclass(frozen=True)
+class CommandParseError(RuntimeError):
+    """Raised when command output parsing fails."""
+
+    request: CommandRequest
+    detail: str
+    context: str | None = None
+
+    def __str__(self) -> str:
+        return self.detail
+
+
 def run_with_runner(
     request: CommandRequest, *, runner: CommandRunner | None = None
 ) -> CommandResult | None:
     """Execute a typed command request with the given runner."""
     active_runner = runner or _DEFAULT_COMMAND_RUNNER
     return active_runner.run(request)
+
+
+def _missing_command_detail(request: CommandRequest) -> str:
+    argv = request.argv
+    if not argv:
+        return "missing required command"
+    return f"missing required command: {argv[0]}"
+
+
+def _command_failure_detail(request: CommandRequest, result: CommandResult) -> str:
+    output = (result.stderr or result.stdout or "").strip()
+    command_text = " ".join(request.argv)
+    if output:
+        return f"command failed: {command_text}\n{output}"
+    return f"command failed: {command_text}"
+
+
+def run_typed(
+    spec: CommandSpec[ParsedT], *, runner: CommandRunner | None = None
+) -> ParsedT:
+    """Execute a command and parse its successful output into a typed value."""
+    result = run_with_runner(spec.request, runner=runner)
+    if result is None:
+        raise CommandExecutionError(
+            request=spec.request,
+            detail=_missing_command_detail(spec.request),
+        )
+    if result.returncode != 0:
+        raise CommandExecutionError(
+            request=spec.request,
+            result=result,
+            detail=_command_failure_detail(spec.request, result),
+        )
+    try:
+        return spec.parser(result)
+    except CommandParseError:
+        raise
+    except Exception as exc:
+        context = f" ({spec.context})" if spec.context else ""
+        raise CommandParseError(
+            request=spec.request,
+            detail=f"failed to parse command output{context}: {exc}",
+            context=spec.context,
+        ) from exc
 
 
 def run_command(

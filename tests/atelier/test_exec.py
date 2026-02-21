@@ -164,3 +164,97 @@ def test_run_command_fails_when_command_errors(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(SystemExit):
         exec_util.run_command(["bd", "sync"])
+
+
+def test_run_typed_parses_with_spec() -> None:
+    """run_typed executes and parses typed command output."""
+
+    class FakeRunner:
+        def run(
+            self, request: exec_util.CommandRequest
+        ) -> exec_util.CommandResult | None:
+            assert request.argv == ("bd", "status")
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="7",
+                stderr="",
+            )
+
+    spec = exec_util.CommandSpec[int](
+        request=exec_util.CommandRequest(argv=("bd", "status")),
+        parser=lambda result: int(result.stdout.strip()),
+        context="status-int",
+    )
+    value = exec_util.run_typed(spec, runner=FakeRunner())
+    assert value == 7
+
+
+def test_run_typed_raises_execution_error_for_missing_command() -> None:
+    """run_typed raises a typed execution error when executable is missing."""
+
+    class MissingRunner:
+        def run(
+            self, request: exec_util.CommandRequest
+        ) -> exec_util.CommandResult | None:
+            del request
+            return None
+
+    spec = exec_util.CommandSpec[str](
+        request=exec_util.CommandRequest(argv=("missing-cmd",)),
+        parser=lambda result: result.stdout,
+    )
+    with pytest.raises(exec_util.CommandExecutionError) as exc:
+        exec_util.run_typed(spec, runner=MissingRunner())
+
+    assert "missing required command: missing-cmd" in str(exc.value)
+
+
+def test_run_typed_raises_execution_error_for_non_zero_status() -> None:
+    """run_typed raises a typed execution error when command fails."""
+
+    class ErrorRunner:
+        def run(
+            self, request: exec_util.CommandRequest
+        ) -> exec_util.CommandResult | None:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=3,
+                stdout="",
+                stderr="boom",
+            )
+
+    spec = exec_util.CommandSpec[str](
+        request=exec_util.CommandRequest(argv=("bd", "sync")),
+        parser=lambda result: result.stdout,
+    )
+    with pytest.raises(exec_util.CommandExecutionError) as exc:
+        exec_util.run_typed(spec, runner=ErrorRunner())
+
+    assert "command failed: bd sync" in str(exc.value)
+    assert "boom" in str(exc.value)
+
+
+def test_run_typed_raises_parse_error_with_context() -> None:
+    """run_typed wraps parser failures in a deterministic parse error."""
+
+    class GoodRunner:
+        def run(
+            self, request: exec_util.CommandRequest
+        ) -> exec_util.CommandResult | None:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="not-an-int",
+                stderr="",
+            )
+
+    spec = exec_util.CommandSpec[int](
+        request=exec_util.CommandRequest(argv=("bd", "status")),
+        parser=lambda result: int(result.stdout.strip()),
+        context="parse-int",
+    )
+    with pytest.raises(exec_util.CommandParseError) as exc:
+        exec_util.run_typed(spec, runner=GoodRunner())
+
+    assert "failed to parse command output (parse-int)" in str(exc.value)
