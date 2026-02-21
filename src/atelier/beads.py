@@ -49,21 +49,15 @@ class _IssueTypesPayloadModel(BaseModel):
     def as_payload(self) -> dict[str, object]:
         return {
             "core_types": [
-                entry.model_dump(exclude_none=True)
-                if isinstance(entry, _IssueTypeModel)
-                else entry
+                entry.model_dump(exclude_none=True) if isinstance(entry, _IssueTypeModel) else entry
                 for entry in self.core_types
             ],
             "custom_types": [
-                entry.model_dump(exclude_none=True)
-                if isinstance(entry, _IssueTypeModel)
-                else entry
+                entry.model_dump(exclude_none=True) if isinstance(entry, _IssueTypeModel) else entry
                 for entry in self.custom_types
             ],
             "types": [
-                entry.model_dump(exclude_none=True)
-                if isinstance(entry, _IssueTypeModel)
-                else entry
+                entry.model_dump(exclude_none=True) if isinstance(entry, _IssueTypeModel) else entry
                 for entry in self.types
             ],
         }
@@ -103,14 +97,10 @@ class BeadsClient:
         return run_bd_json(args, beads_root=self.beads_root, cwd=self.cwd)
 
     def issue_records(self, args: list[str], *, source: str) -> list[BeadsIssueRecord]:
-        return run_bd_issue_records(
-            args, beads_root=self.beads_root, cwd=self.cwd, source=source
-        )
+        return run_bd_issue_records(args, beads_root=self.beads_root, cwd=self.cwd, source=source)
 
     def issues(self, args: list[str], *, source: str) -> list[BeadsIssueBoundary]:
-        return run_bd_issues(
-            args, beads_root=self.beads_root, cwd=self.cwd, source=source
-        )
+        return run_bd_issues(args, beads_root=self.beads_root, cwd=self.cwd, source=source)
 
     def show_issue(self, issue_id: str, *, source: str) -> BeadsIssueRecord | None:
         records = self.issue_records(["show", issue_id], source=source)
@@ -118,7 +108,7 @@ class BeadsClient:
 
 
 def create_client(*, beads_root: Path, cwd: Path) -> BeadsClient:
-    """Create a typed Beads client for a specific store and working directory."""
+    """Create a typed Beads client for a given store and working directory."""
     return BeadsClient(beads_root=beads_root, cwd=cwd)
 
 
@@ -197,9 +187,7 @@ def run_bd_command(
     )
 
 
-def run_bd_json(
-    args: list[str], *, beads_root: Path, cwd: Path
-) -> list[dict[str, object]]:
+def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
     """Run a bd command with --json and return parsed output."""
     cmd = list(args)
     if "--json" not in cmd:
@@ -219,9 +207,7 @@ def run_bd_json(
     return []
 
 
-def parse_issue_records(
-    issues: list[dict[str, object]], *, source: str
-) -> list[BeadsIssueRecord]:
+def parse_issue_records(issues: list[dict[str, object]], *, source: str) -> list[BeadsIssueRecord]:
     """Validate Beads issue payloads while preserving raw issue mappings."""
     records: list[BeadsIssueRecord] = []
     for index, raw in enumerate(issues):
@@ -234,9 +220,7 @@ def run_bd_issue_records(
     args: list[str], *, beads_root: Path, cwd: Path, source: str
 ) -> list[BeadsIssueRecord]:
     """Run a Beads query and return validated issue records."""
-    return parse_issue_records(
-        run_bd_json(args, beads_root=beads_root, cwd=cwd), source=source
-    )
+    return parse_issue_records(run_bd_json(args, beads_root=beads_root, cwd=cwd), source=source)
 
 
 def run_bd_issues(
@@ -245,9 +229,7 @@ def run_bd_issues(
     """Run a Beads query and return validated issue boundary models."""
     return [
         record.issue
-        for record in run_bd_issue_records(
-            args, beads_root=beads_root, cwd=cwd, source=source
-        )
+        for record in run_bd_issue_records(args, beads_root=beads_root, cwd=cwd, source=source)
     ]
 
 
@@ -403,13 +385,9 @@ def ensure_issue_prefix(
     current = _current_issue_prefix(beads_root=beads_root, cwd=cwd)
     if current == expected:
         return False
-    run_bd_command(
-        ["config", "set", "issue_prefix", expected], beads_root=beads_root, cwd=cwd
-    )
+    run_bd_command(["config", "set", "issue_prefix", expected], beads_root=beads_root, cwd=cwd)
     # Keep existing issue ids aligned with configured prefix.
-    run_bd_command(
-        ["rename-prefix", f"{expected}-", "--repair"], beads_root=beads_root, cwd=cwd
-    )
+    run_bd_command(["rename-prefix", f"{expected}-", "--repair"], beads_root=beads_root, cwd=cwd)
     return True
 
 
@@ -451,18 +429,14 @@ def ensure_custom_types(
     if not missing:
         return False
     updated = ",".join([*existing, *missing])
-    run_bd_command(
-        ["config", "set", "types.custom", updated], beads_root=beads_root, cwd=cwd
-    )
+    run_bd_command(["config", "set", "types.custom", updated], beads_root=beads_root, cwd=cwd)
     _ISSUE_TYPE_CACHE.pop(beads_root, None)
     return True
 
 
 def ensure_atelier_types(*, beads_root: Path, cwd: Path) -> bool:
     """Ensure Atelier-required custom issue types are configured."""
-    return ensure_custom_types(
-        list(ATELIER_CUSTOM_TYPES), beads_root=beads_root, cwd=cwd
-    )
+    return ensure_custom_types(list(ATELIER_CUSTOM_TYPES), beads_root=beads_root, cwd=cwd)
 
 
 def _issue_labels(issue: dict[str, object]) -> set[str]:
@@ -662,9 +636,7 @@ def get_agent_hook(
         return None
     issue = issues[0]
     description = issue.get("description")
-    fields = _parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = _parse_description_fields(description if isinstance(description, str) else "")
     hook = _normalize_hook_value(fields.get("hook_bead"))
     if hook:
         _slot_set_hook(agent_bead_id, hook, beads_root=beads_root, cwd=cwd)
@@ -689,9 +661,7 @@ def policy_role_label(role: str) -> str:
 def extract_workspace_root_branch(issue: dict[str, object]) -> str | None:
     """Extract the workspace root branch from a bead."""
     description = issue.get("description")
-    fields = _parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = _parse_description_fields(description if isinstance(description, str) else "")
     root_branch = fields.get("workspace.root_branch")
     if root_branch:
         return root_branch
@@ -706,9 +676,7 @@ def extract_workspace_root_branch(issue: dict[str, object]) -> str | None:
 def extract_worktree_path(issue: dict[str, object]) -> str | None:
     """Extract the worktree path from a bead description."""
     description = issue.get("description")
-    fields = _parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = _parse_description_fields(description if isinstance(description, str) else "")
     worktree_path = fields.get("worktree_path")
     if worktree_path:
         return worktree_path
@@ -763,9 +731,7 @@ def find_epics_by_root_branch(
         beads_root=beads_root,
         cwd=cwd,
     )
-    return [
-        issue for issue in issues if extract_workspace_root_branch(issue) == root_branch
-    ]
+    return [issue for issue in issues if extract_workspace_root_branch(issue) == root_branch]
 
 
 def update_workspace_root_branch(
@@ -795,9 +761,7 @@ def update_workspace_root_branch(
     labels = issue.get("labels") if isinstance(issue.get("labels"), list) else []
     labels = [label for label in labels if isinstance(label, str)]
     remove_labels = [
-        existing
-        for existing in labels
-        if existing.startswith("workspace:") and existing != label
+        existing for existing in labels if existing.startswith("workspace:") and existing != label
     ]
 
     if label not in labels or remove_labels:
@@ -829,9 +793,7 @@ def update_workspace_parent_branch(
         die(f"epic not found: {epic_id}")
     issue = issues[0]
     description = issue.get("description")
-    fields = _parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = _parse_description_fields(description if isinstance(description, str) else "")
     current = fields.get("workspace.parent_branch")
     if current and current.lower() != "null" and current != parent_branch:
         if not allow_override:
@@ -893,9 +855,7 @@ def update_changeset_branch_metadata(
         die(f"changeset not found: {changeset_id}")
     issue = issues[0]
     description = issue.get("description")
-    fields = _parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = _parse_description_fields(description if isinstance(description, str) else "")
 
     def normalize(value: str | None) -> str | None:
         if value is None:
@@ -963,9 +923,7 @@ def update_external_tickets(
     labels = issue.get("labels") if isinstance(issue.get("labels"), list) else []
     labels = [label for label in labels if isinstance(label, str)]
     remove_labels = [
-        label
-        for label in labels
-        if label.startswith("ext:") and label not in desired_labels
+        label for label in labels if label.startswith("ext:") and label not in desired_labels
     ]
     add_labels = [label for label in desired_labels if label not in labels]
     if add_labels or remove_labels:
@@ -1007,9 +965,7 @@ def clear_agent_hook(
     _update_issue_description(agent_bead_id, updated, beads_root=beads_root, cwd=cwd)
 
 
-def list_policy_beads(
-    role: str | None, *, beads_root: Path, cwd: Path
-) -> list[dict[str, object]]:
+def list_policy_beads(role: str | None, *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
     """List project policy beads for the given role."""
     args = ["list", "--label", POLICY_LABEL, "--label", POLICY_SCOPE_LABEL]
     if role:
@@ -1071,9 +1027,7 @@ def update_policy_bead(
     _update_issue_description(issue_id, body, beads_root=beads_root, cwd=cwd)
 
 
-def _update_description_field(
-    description: str | None, *, key: str, value: str | None
-) -> str:
+def _update_description_field(description: str | None, *, key: str, value: str | None) -> str:
     target = _normalize_description(description)
     lines = target.splitlines() if target else []
     updated: list[str] = []
@@ -1137,9 +1091,7 @@ def _create_issue_with_body(
     return issue_id
 
 
-def find_agent_bead(
-    agent_id: str, *, beads_root: Path, cwd: Path
-) -> dict[str, object] | None:
+def find_agent_bead(agent_id: str, *, beads_root: Path, cwd: Path) -> dict[str, object] | None:
     """Find an agent bead by agent identity."""
     issues = run_bd_json(
         ["list", "--label", "at:agent", "--title-contains", agent_id],
@@ -1329,9 +1281,7 @@ def create_message_bead(
     ]
     if assignee:
         args.extend(["--assignee", assignee])
-    issue_id = _create_issue_with_body(
-        args, description, beads_root=beads_root, cwd=cwd
-    )
+    issue_id = _create_issue_with_body(args, description, beads_root=beads_root, cwd=cwd)
     issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
     return issues[0] if issues else {"id": issue_id, "title": subject}
 
@@ -1398,9 +1348,7 @@ def claim_queue_message(
         die(f"message not found: {message_id}")
     issue = issues[0]
     description = issue.get("description")
-    payload = messages.parse_message(
-        description if isinstance(description, str) else ""
-    )
+    payload = messages.parse_message(description if isinstance(description, str) else "")
     queue_name = payload.metadata.get("queue")
     if not isinstance(queue_name, str) or not queue_name.strip():
         die(f"message {message_id} is not in a queue")
@@ -1447,9 +1395,7 @@ def update_changeset_integrated_sha(
         die(f"changeset not found: {changeset_id}")
     issue = issues[0]
     description = issue.get("description")
-    fields = _parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = _parse_description_fields(description if isinstance(description, str) else "")
     current = fields.get("changeset.integrated_sha")
     if current and current.lower() != "null" and current != integrated_sha:
         if not allow_override:

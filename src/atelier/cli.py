@@ -88,9 +88,7 @@ def _resolve_completion_project(
     cwd: Path | None = None,
 ) -> tuple[Path, Path, config.ProjectConfig, str | None] | None:
     try:
-        repo_root, enlistment_path, _, origin = git.resolve_repo_enlistment(
-            cwd or Path.cwd()
-        )
+        repo_root, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd or Path.cwd())
     except SystemExit:
         return None
     except Exception:
@@ -142,9 +140,7 @@ def _filter_completion_candidates(values: list[str], incomplete: str) -> list[st
     filtered = [
         value
         for value in values
-        if value
-        and value.startswith(incomplete)
-        and value not in _DEFAULT_BRANCH_EXCLUDES
+        if value and value.startswith(incomplete) and value not in _DEFAULT_BRANCH_EXCLUDES
     ]
     seen: set[str] = set()
     deduped: list[str] = []
@@ -278,8 +274,10 @@ def init_command(
         branch_prefix: Prefix for new workspace branches (optional).
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
-        branch_squash_message: Squash commit subject policy (deterministic|agent).
-        branch_pr_strategy: PR strategy (sequential|on-ready|on-parent-approved|parallel).
+        branch_squash_message: Squash commit subject policy
+            (deterministic|agent).
+        branch_pr_strategy: PR strategy
+            (sequential|on-ready|on-parent-approved|parallel).
         agent: Agent name.
         editor_edit: Editor command used for blocking edits (policy docs).
         editor_work: Editor command used for opening the workspace repo.
@@ -369,8 +367,10 @@ def new_command(
         branch_prefix: Prefix for new workspace branches (optional).
         branch_pr: Whether workspace branches expect pull requests (true/false).
         branch_history: History policy (manual|squash|merge|rebase).
-        branch_squash_message: Squash commit subject policy (deterministic|agent).
-        branch_pr_strategy: PR strategy (sequential|on-ready|on-parent-approved|parallel).
+        branch_squash_message: Squash commit subject policy
+            (deterministic|agent).
+        branch_pr_strategy: PR strategy
+            (sequential|on-ready|on-parent-approved|parallel).
         agent: Agent name.
         editor_edit: Editor command used for blocking edits (policy docs).
         editor_work: Editor command used for opening the workspace repo.

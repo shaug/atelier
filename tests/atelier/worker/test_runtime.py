@@ -7,9 +7,7 @@ def test_run_worker_sessions_queue_mode_runs_once() -> None:
     calls: list[str] = []
     reported: list[str] = []
 
-    def run_once(
-        args: object, *, mode: str, dry_run: bool, session_key: str
-    ) -> WorkerRunSummary:
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
         calls.append(f"{mode}:{dry_run}:{session_key}")
         return WorkerRunSummary(started=False, reason="queue_blocked")
 
@@ -33,9 +31,7 @@ def test_run_worker_sessions_queue_mode_runs_once() -> None:
 def test_run_worker_sessions_dry_run_once_exits_after_started() -> None:
     calls = 0
 
-    def run_once(
-        args: object, *, mode: str, dry_run: bool, session_key: str
-    ) -> WorkerRunSummary:
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
         nonlocal calls
         calls += 1
         return WorkerRunSummary(started=True, reason="agent_session_complete")
@@ -61,9 +57,7 @@ def test_run_worker_sessions_watch_logs_and_sleeps_on_no_ready() -> None:
     emitted: list[str] = []
     slept: list[float] = []
 
-    def run_once(
-        args: object, *, mode: str, dry_run: bool, session_key: str
-    ) -> WorkerRunSummary:
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -96,9 +90,7 @@ def test_run_worker_sessions_dry_watch_uses_dry_run_log() -> None:
     logs: list[str] = []
     slept: list[float] = []
 
-    def run_once(
-        args: object, *, mode: str, dry_run: bool, session_key: str
-    ) -> WorkerRunSummary:
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
         nonlocal calls
         calls += 1
         if calls == 1:

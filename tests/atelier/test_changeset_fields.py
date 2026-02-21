@@ -17,11 +17,7 @@ def test_changeset_fields_extract_core_values() -> None:
 
 
 def test_changeset_fields_normalizes_empty_and_null_values() -> None:
-    issue = {
-        "description": (
-            "changeset.work_branch: null\nchangeset.root_branch:\npr_url:   \n"
-        )
-    }
+    issue = {"description": ("changeset.work_branch: null\nchangeset.root_branch:\npr_url:   \n")}
     assert changeset_fields.work_branch(issue) is None
     assert changeset_fields.root_branch(issue) is None
     assert changeset_fields.pr_url(issue) is None

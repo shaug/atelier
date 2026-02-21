@@ -40,9 +40,7 @@ def test_parse_pr_boundary_normalizes_numeric_string_number() -> None:
     payload = {
         "number": "204",
         "state": "OPEN",
-        "reviewRequests": [
-            {"requestedReviewer": {"login": "reviewer", "isBot": False}}
-        ],
+        "reviewRequests": [{"requestedReviewer": {"login": "reviewer", "isBot": False}}],
     }
 
     boundary = parse_pr_boundary(payload, source="test")

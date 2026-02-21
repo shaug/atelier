@@ -40,11 +40,9 @@ from .work_finalization_state import (
 
 
 class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService):
-    """Concrete finalize pipeline dependencies bound to a worker repository context."""
+    """Finalize pipeline dependencies bound to worker repository context."""
 
-    def __init__(
-        self, *, beads_root: Path, repo_root: Path, git_path: str | None
-    ) -> None:
+    def __init__(self, *, beads_root: Path, repo_root: Path, git_path: str | None) -> None:
         self._beads_root = beads_root
         self._repo_root = repo_root
         self._git_path = git_path
@@ -74,9 +72,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
             changeset_id, beads_root=self._beads_root, repo_root=self._repo_root
         )
 
-    def has_blocking_messages(
-        self, *, thread_ids: set[str], started_at: dt.datetime
-    ) -> bool:
+    def has_blocking_messages(self, *, thread_ids: set[str], started_at: dt.datetime) -> bool:
         return _has_blocking_messages(
             thread_ids=thread_ids,
             started_at=started_at,
@@ -162,9 +158,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         )
 
     def mark_changeset_closed(self, changeset_id: str) -> None:
-        _mark_changeset_closed(
-            changeset_id, beads_root=self._beads_root, repo_root=self._repo_root
-        )
+        _mark_changeset_closed(changeset_id, beads_root=self._beads_root, repo_root=self._repo_root)
 
     def finalize_epic_if_complete(
         self, *, context: worker_finalize_pipeline.FinalizePipelineContext
@@ -206,9 +200,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
             git_path=context.git_path,
         )
 
-    def lookup_pr_payload(
-        self, repo_slug: str | None, branch: str
-    ) -> dict[str, object] | None:
+    def lookup_pr_payload(self, repo_slug: str | None, branch: str) -> dict[str, object] | None:
         return _lookup_pr_payload(repo_slug, branch)
 
     def lookup_pr_payload_diagnostic(

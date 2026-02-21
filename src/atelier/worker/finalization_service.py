@@ -10,9 +10,7 @@ from .. import beads, messages
 from . import changeset_state as worker_changeset_state
 
 
-def mark_changeset_in_progress(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     worker_changeset_state.mark_changeset_in_progress(
         changeset_id,
         beads_root=beads_root,
@@ -20,9 +18,7 @@ def mark_changeset_in_progress(
     )
 
 
-def mark_changeset_closed(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     worker_changeset_state.mark_changeset_closed(
         changeset_id,
         beads_root=beads_root,
@@ -30,9 +26,7 @@ def mark_changeset_closed(
     )
 
 
-def mark_changeset_merged(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     worker_changeset_state.mark_changeset_merged(
         changeset_id,
         beads_root=beads_root,
@@ -40,9 +34,7 @@ def mark_changeset_merged(
     )
 
 
-def mark_changeset_abandoned(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     worker_changeset_state.mark_changeset_abandoned(
         changeset_id,
         beads_root=beads_root,
@@ -138,9 +130,7 @@ def has_blocking_messages(
         if created_at is not None and created_at < started_at:
             continue
         description = issue.get("description")
-        payload = messages.parse_message(
-            description if isinstance(description, str) else ""
-        )
+        payload = messages.parse_message(description if isinstance(description, str) else "")
         thread = payload.metadata.get("thread")
         if isinstance(thread, str) and thread in thread_ids:
             return True

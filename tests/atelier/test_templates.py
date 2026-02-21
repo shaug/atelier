@@ -16,9 +16,7 @@ class TestInstalledTemplateComparison:
                 installed_path.parent.mkdir(parents=True)
                 installed_path.write_text(packaged, encoding="utf-8")
 
-                assert (
-                    templates.installed_template_modified("agent", "AGENTS.md") is False
-                )
+                assert templates.installed_template_modified("agent", "AGENTS.md") is False
 
     def test_installed_template_differs_from_packaged_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -29,6 +27,4 @@ class TestInstalledTemplateComparison:
                 installed_path.parent.mkdir(parents=True)
                 installed_path.write_text("custom agents\n", encoding="utf-8")
 
-                assert (
-                    templates.installed_template_modified("agent", "AGENTS.md") is True
-                )
+                assert templates.installed_template_modified("agent", "AGENTS.md") is True

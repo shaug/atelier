@@ -144,9 +144,7 @@ def _command_failure_detail(request: CommandRequest, result: CommandResult) -> s
     return f"command failed: {command_text}"
 
 
-def run_typed(
-    spec: CommandSpec[ParsedT], *, runner: CommandRunner | None = None
-) -> ParsedT:
+def run_typed(spec: CommandSpec[ParsedT], *, runner: CommandRunner | None = None) -> ParsedT:
     """Execute a command and parse its successful output into a typed value."""
     result = run_with_runner(spec.request, runner=runner)
     if result is None:
@@ -231,9 +229,7 @@ def parse_json_model_list(
         context_suffix = f" ({context})" if context else ""
         raise CommandParseError(
             request=CommandRequest(argv=result.argv),
-            detail=(
-                f"failed to parse command output{context_suffix}: expected a JSON list"
-            ),
+            detail=(f"failed to parse command output{context_suffix}: expected a JSON list"),
             context=context,
         )
     models: list[ModelT] = []
@@ -245,8 +241,7 @@ def parse_json_model_list(
             raise CommandParseError(
                 request=CommandRequest(argv=result.argv),
                 detail=(
-                    f"failed to validate command output{context_suffix}"
-                    f" at index {index}: {exc}"
+                    f"failed to validate command output{context_suffix} at index {index}: {exc}"
                 ),
                 context=context,
             ) from exc
@@ -304,9 +299,7 @@ def try_run_command(
         True
     """
     try:
-        return subprocess.run(
-            cmd, cwd=cwd, env=env, capture_output=True, text=True, check=False
-        )
+        return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, check=False)
     except FileNotFoundError:
         return None
 

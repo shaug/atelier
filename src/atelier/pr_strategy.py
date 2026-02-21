@@ -39,9 +39,7 @@ class PrStrategyDecision:
     reason: str
 
 
-def pr_strategy_decision(
-    strategy: object, *, parent_state: str | None
-) -> PrStrategyDecision:
+def pr_strategy_decision(strategy: object, *, parent_state: str | None) -> PrStrategyDecision:
     """Return the PR creation decision for a strategy."""
     normalized = normalize_pr_strategy(strategy)
     if normalized == "parallel":

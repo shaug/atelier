@@ -13,9 +13,7 @@ from . import gc as gc_cmd
 from .resolve import resolve_current_project_with_repo_root
 
 
-def _run_git(
-    repo_root: Path, args: list[str], *, git_path: str
-) -> tuple[bool, str | None]:
+def _run_git(repo_root: Path, args: list[str], *, git_path: str) -> tuple[bool, str | None]:
     result = exec_util.try_run_command(
         git.git_command(["-C", str(repo_root), *args], git_path=git_path)
     )
@@ -47,9 +45,7 @@ def _managed_worktrees_from_git(
     git_path: str,
 ) -> list[Path]:
     managed_root = worktrees.worktrees_root(project_data_dir).resolve()
-    ok, output = _run_git(
-        repo_root, ["worktree", "list", "--porcelain"], git_path=git_path
-    )
+    ok, output = _run_git(repo_root, ["worktree", "list", "--porcelain"], git_path=git_path)
     if not ok or not output:
         return []
     found: set[Path] = set()
@@ -90,10 +86,7 @@ def _remove_worktree(repo_root: Path, worktree_path: Path, *, git_path: str) -> 
         git_path=git_path,
     )
     if not ok:
-        die(
-            "failed to remove git worktree "
-            f"{worktree_path}: {detail or 'unknown error'}"
-        )
+        die(f"failed to remove git worktree {worktree_path}: {detail or 'unknown error'}")
 
 
 def _prune_worktree_registry(repo_root: Path, *, git_path: str) -> None:
@@ -106,9 +99,7 @@ def _delete_branch_refs(
     *,
     git_path: str,
 ) -> None:
-    if git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{branch}", git_path=git_path
-    ):
+    if git.git_ref_exists(repo_root, f"refs/remotes/origin/{branch}", git_path=git_path):
         _run_git(repo_root, ["push", "origin", "--delete", branch], git_path=git_path)
     current_branch = git.git_current_branch(repo_root, git_path=git_path)
     if current_branch != branch and git.git_ref_exists(
@@ -119,9 +110,7 @@ def _delete_branch_refs(
 
 def remove_project(args: object) -> None:
     """Remove Atelier project state for the current repo."""
-    project_root, project_config, _enlistment, repo_root = (
-        resolve_current_project_with_repo_root()
-    )
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
     git_path = config.resolve_git_path(project_config)
@@ -152,9 +141,7 @@ def remove_project(args: object) -> None:
         for branch in sorted(mapped_branches):
             say(f"  - {branch}")
     else:
-        say(
-            "- Branch pruning: disabled (use --prune-branches to remove mapped branches)"
-        )
+        say("- Branch pruning: disabled (use --prune-branches to remove mapped branches)")
     if run_gc:
         say(f"- GC before removal: enabled (reconcile={reconcile})")
     else:
@@ -168,9 +155,7 @@ def remove_project(args: object) -> None:
         say("Cancelled.")
         return
 
-    stopped_worker, stopped_bd = _stop_project_daemons(
-        project_data_dir, beads_root=beads_root
-    )
+    stopped_worker, stopped_bd = _stop_project_daemons(project_data_dir, beads_root=beads_root)
     if stopped_worker:
         say("Stopped worker daemon.")
     if stopped_bd:

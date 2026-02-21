@@ -33,17 +33,13 @@ def test_build_project_config_sets_data_dir() -> None:
                     args,
                     allow_editor_empty=True,
                 )
-            expected = str(
-                paths.project_dir_for_enlistment("/repo", "github.com/org/repo")
-            )
+            expected = str(paths.project_dir_for_enlistment("/repo", "github.com/org/repo"))
     assert payload.atelier.data_dir == expected
 
 
 def test_resolve_project_data_dir_prefers_config() -> None:
     config_payload = ProjectConfig(atelier=AtelierSection(data_dir="/custom"))
-    assert config.resolve_project_data_dir(Path("/project"), config_payload) == Path(
-        "/custom"
-    )
+    assert config.resolve_project_data_dir(Path("/project"), config_payload) == Path("/custom")
 
 
 def test_resolve_beads_root_is_project_scoped() -> None:

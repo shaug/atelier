@@ -39,18 +39,12 @@ def finalize_epic_if_complete(
         return FinalizeResult(continue_running=True, reason="changeset_complete")
 
     if not branch_pr:
-        issues = beads.run_bd_json(
-            ["show", epic_id], beads_root=beads_root, cwd=repo_root
-        )
+        issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
         if not issues:
-            return FinalizeResult(
-                continue_running=False, reason="epic_blocked_missing_metadata"
-            )
+            return FinalizeResult(continue_running=False, reason="epic_blocked_missing_metadata")
         issue = issues[0]
         fields = beads.parse_description_fields(
-            issue.get("description")
-            if isinstance(issue.get("description"), str)
-            else ""
+            issue.get("description") if isinstance(issue.get("description"), str) else ""
         )
         root_branch = normalize_branch_value(fields.get("workspace.root_branch"))
         if not root_branch:
@@ -70,9 +64,7 @@ def finalize_epic_if_complete(
                 repo_root=repo_root,
                 dry_run=False,
             )
-            return FinalizeResult(
-                continue_running=False, reason="epic_blocked_missing_metadata"
-            )
+            return FinalizeResult(continue_running=False, reason="epic_blocked_missing_metadata")
         cleanup_keep_branches = {parent_branch}
 
         beads.update_workspace_parent_branch(
@@ -119,9 +111,7 @@ def finalize_epic_if_complete(
                 repo_root=repo_root,
                 dry_run=False,
             )
-            return FinalizeResult(
-                continue_running=False, reason="epic_blocked_finalization"
-            )
+            return FinalizeResult(continue_running=False, reason="epic_blocked_finalization")
 
     closed = beads.close_epic_if_complete(
         epic_id, agent_bead_id, beads_root=beads_root, cwd=repo_root

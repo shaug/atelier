@@ -210,7 +210,7 @@ def resolve_planner_provider(
     interactive: bool = True,
     chooser: Callable[[str, Sequence[str], str | None], str] | None = None,
 ) -> PlannerProviderResolution:
-    """Resolve provider candidates and selected provider for planner sessions."""
+    """Resolve provider candidates and selected provider for planner runs."""
     repo_signals: list[str] = []
     candidates: set[str] = set()
 
@@ -233,9 +233,7 @@ def resolve_planner_provider(
         candidates.add("beads")
         repo_signals.append("beads")
 
-    configured_provider = (
-        project_config.project.provider or ""
-    ).strip().lower() or None
+    configured_provider = (project_config.project.provider or "").strip().lower() or None
     available = sorted(
         candidates,
         key=lambda provider: _provider_rank(
@@ -283,13 +281,9 @@ def resolve_external_providers(
     if repo_slug is None:
         repo_slug = _github_repo_from_git(repo_root)
 
-    if repo_slug and (
-        config.is_github_provider(project_config.project.provider) or repo_slug
-    ):
+    if repo_slug and (config.is_github_provider(project_config.project.provider) or repo_slug):
         provider_contexts.append(
-            ExternalProviderContext(
-                provider=GithubIssuesProvider(repo=repo_slug), repo=repo_slug
-            )
+            ExternalProviderContext(provider=GithubIssuesProvider(repo=repo_slug), repo=repo_slug)
         )
 
     return provider_contexts
@@ -322,9 +316,7 @@ def planner_provider_environment(
     env: dict[str, str] = {}
     if resolved_providers:
         env["ATELIER_EXTERNAL_PROVIDERS"] = ",".join(sorted(set(resolved_providers)))
-    configured_provider = (
-        project_config.project.provider or ""
-    ).strip().lower() or None
+    configured_provider = (project_config.project.provider or "").strip().lower() or None
     active_provider = selected_provider or configured_provider
     if active_provider is None and resolved_providers:
         if "github" in resolved_providers:

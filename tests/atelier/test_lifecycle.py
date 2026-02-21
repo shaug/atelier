@@ -18,9 +18,7 @@ def test_is_changeset_ready_rejects_planned_blocked_or_terminal_labels() -> None
     assert lifecycle.is_changeset_ready("open", {"at:changeset", "cs:planned"}) is False
     assert lifecycle.is_changeset_ready("open", {"at:changeset", "cs:blocked"}) is False
     assert lifecycle.is_changeset_ready("open", {"at:changeset", "cs:merged"}) is False
-    assert (
-        lifecycle.is_changeset_ready("open", {"at:changeset", "cs:abandoned"}) is False
-    )
+    assert lifecycle.is_changeset_ready("open", {"at:changeset", "cs:abandoned"}) is False
 
 
 def test_is_changeset_ready_rejects_closed_status() -> None:

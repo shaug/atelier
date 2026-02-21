@@ -28,15 +28,11 @@ def _select_epic_by_workspace(
     repo_root: Path,
 ) -> tuple[dict[str, object], str]:
     if workspace_name:
-        candidates = branching.candidates_for_root_branch(
-            workspace_name, branch_prefix, raw
-        )
+        candidates = branching.candidates_for_root_branch(workspace_name, branch_prefix, raw)
         matches: list[dict[str, object]] = []
         for candidate in candidates:
             matches.extend(
-                beads.find_epics_by_root_branch(
-                    candidate, beads_root=beads_root, cwd=repo_root
-                )
+                beads.find_epics_by_root_branch(candidate, beads_root=beads_root, cwd=repo_root)
             )
         if not matches:
             die(f"no epic found for workspace {workspace_name!r}")
@@ -48,8 +44,7 @@ def _select_epic_by_workspace(
             issue
             for issue in matches
             if beads.extract_workspace_root_branch(issue) is not None
-            and str(issue.get("status") or "").lower()
-            in {"", "open", "in_progress", "ready"}
+            and str(issue.get("status") or "").lower() in {"", "open", "in_progress", "ready"}
         ]
         if not matches:
             die("no epics with workspace branches found")
@@ -87,9 +82,7 @@ def _resolve_worktree_path(
         if not worktree_relpath:
             die("worktree not initialized; run 'atelier work' first")
         candidate = Path(worktree_relpath)
-        worktree_path = (
-            candidate if candidate.is_absolute() else project_dir / candidate
-        )
+        worktree_path = candidate if candidate.is_absolute() else project_dir / candidate
     else:
         if mapping.root_branch and mapping.root_branch != root_branch:
             die("workspace root branch does not match worktree mapping")

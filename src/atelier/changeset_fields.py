@@ -7,9 +7,7 @@ from . import beads, lifecycle
 
 def issue_fields(issue: dict[str, object]) -> dict[str, str]:
     description = issue.get("description")
-    return beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    return beads.parse_description_fields(description if isinstance(description, str) else "")
 
 
 def normalized_field(fields: dict[str, str], key: str) -> str | None:

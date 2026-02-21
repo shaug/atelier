@@ -123,7 +123,9 @@ def extract_first_user_from_obj(data: object) -> str | None:
         First user message text, or ``None``.
 
     Example:
-        >>> extract_first_user_from_obj({"messages": [{"role": "user", "content": "hi"}]})
+        >>> extract_first_user_from_obj(
+        ...     {"messages": [{"role": "user", "content": "hi"}]}
+        ... )
         'hi'
     """
     if isinstance(data, dict):
@@ -241,7 +243,7 @@ def iter_user_messages_from_record(data: dict) -> Iterator[str]:
 
 
 def session_contains_target(path: Path, target: str) -> bool:
-    """Check if the first command-line user message contains the target token."""
+    """Check whether first command-line user message contains target token."""
     message = read_first_user_message(path)
     if not message:
         return False
@@ -268,9 +270,7 @@ def find_codex_session(
     sessions_root = Path.home() / ".codex" / "sessions"
     if not sessions_root.exists():
         return None
-    target = workspace_session_identifier(
-        project_enlistment, workspace_branch, workspace_uid
-    )
+    target = workspace_session_identifier(project_enlistment, workspace_branch, workspace_uid)
     matches: list[tuple[float, Path, str | None]] = []
     for path in sessions_root.rglob("*"):
         if path.suffix not in {".json", ".jsonl"}:

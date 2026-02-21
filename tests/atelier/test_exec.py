@@ -72,9 +72,7 @@ def test_subprocess_command_runner_timeout(monkeypatch: pytest.MonkeyPatch) -> N
 
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         del kwargs
-        raise subprocess.TimeoutExpired(
-            cmd=argv, timeout=0.05, output="slow", stderr="timeout"
-        )
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=0.05, output="slow", stderr="timeout")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -92,9 +90,7 @@ def test_run_with_runner_uses_injected_runner() -> None:
     """run_with_runner uses the provided command-runner implementation."""
 
     class FakeRunner:
-        def run(
-            self, request: exec_util.CommandRequest
-        ) -> exec_util.CommandResult | None:
+        def run(self, request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
             assert request.argv == ("git", "status")
             return exec_util.CommandResult(
                 argv=request.argv,
@@ -132,9 +128,7 @@ def test_run_command_forwards_env_and_cwd(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(exec_util, "run_with_runner", fake_run_with_runner)
 
-    exec_util.run_command(
-        ["bd", "sync"], cwd=Path("/tmp/atelier"), env={"BEADS_DIR": "/tmp/beads"}
-    )
+    exec_util.run_command(["bd", "sync"], cwd=Path("/tmp/atelier"), env={"BEADS_DIR": "/tmp/beads"})
 
     request = captured["request"]
     assert isinstance(request, exec_util.CommandRequest)
@@ -171,9 +165,7 @@ def test_run_typed_parses_with_spec() -> None:
     """run_typed executes and parses typed command output."""
 
     class FakeRunner:
-        def run(
-            self, request: exec_util.CommandRequest
-        ) -> exec_util.CommandResult | None:
+        def run(self, request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
             assert request.argv == ("bd", "status")
             return exec_util.CommandResult(
                 argv=request.argv,
@@ -195,9 +187,7 @@ def test_run_typed_raises_execution_error_for_missing_command() -> None:
     """run_typed raises a typed execution error when executable is missing."""
 
     class MissingRunner:
-        def run(
-            self, request: exec_util.CommandRequest
-        ) -> exec_util.CommandResult | None:
+        def run(self, request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
             del request
             return None
 
@@ -215,9 +205,7 @@ def test_run_typed_raises_execution_error_for_non_zero_status() -> None:
     """run_typed raises a typed execution error when command fails."""
 
     class ErrorRunner:
-        def run(
-            self, request: exec_util.CommandRequest
-        ) -> exec_util.CommandResult | None:
+        def run(self, request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
             return exec_util.CommandResult(
                 argv=request.argv,
                 returncode=3,
@@ -240,9 +228,7 @@ def test_run_typed_raises_parse_error_with_context() -> None:
     """run_typed wraps parser failures in a deterministic parse error."""
 
     class GoodRunner:
-        def run(
-            self, request: exec_util.CommandRequest
-        ) -> exec_util.CommandResult | None:
+        def run(self, request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
             return exec_util.CommandResult(
                 argv=request.argv,
                 returncode=0,
@@ -273,9 +259,7 @@ def test_parse_json_model_validates_payload() -> None:
         stdout='{"id":"at-1","count":2}',
         stderr="",
     )
-    parsed = exec_util.parse_json_model(
-        result, model_type=_SampleModel, context="sample"
-    )
+    parsed = exec_util.parse_json_model(result, model_type=_SampleModel, context="sample")
     assert parsed.id == "at-1"
     assert parsed.count == 2
 
@@ -311,9 +295,7 @@ def test_parse_json_model_optional_returns_none_for_empty_output() -> None:
         stdout="   ",
         stderr="",
     )
-    parsed = exec_util.parse_json_model_optional(
-        result, model_type=_SampleModel, context="sample"
-    )
+    parsed = exec_util.parse_json_model_optional(result, model_type=_SampleModel, context="sample")
     assert parsed is None
 
 
@@ -324,9 +306,7 @@ def test_parse_json_model_list_parses_and_validates() -> None:
         stdout='[{"id":"at-1","count":1},{"id":"at-2","count":3}]',
         stderr="",
     )
-    parsed = exec_util.parse_json_model_list(
-        result, model_type=_SampleModel, context="sample-list"
-    )
+    parsed = exec_util.parse_json_model_list(result, model_type=_SampleModel, context="sample-list")
     assert [item.id for item in parsed] == ["at-1", "at-2"]
     assert [item.count for item in parsed] == [1, 3]
 
@@ -339,7 +319,5 @@ def test_parse_json_model_list_rejects_non_list_payload() -> None:
         stderr="",
     )
     with pytest.raises(exec_util.CommandParseError) as exc:
-        exec_util.parse_json_model_list(
-            result, model_type=_SampleModel, context="sample-list"
-        )
+        exec_util.parse_json_model_list(result, model_type=_SampleModel, context="sample-list")
     assert "expected a JSON list" in str(exc.value)

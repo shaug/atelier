@@ -28,9 +28,7 @@ def test_show_policy_prints_combined_policy() -> None:
         worker_issue = {"id": "pol-2", "description": "worker rules"}
         project_config = _project_config(repo_root)
 
-        def fake_list(
-            role: str | None, *, beads_root: Path, cwd: Path
-        ) -> list[dict[str, object]]:
+        def fake_list(role: str | None, *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
             if role == "planner":
                 return [planner_issue]
             if role == "worker":

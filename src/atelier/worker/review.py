@@ -61,13 +61,9 @@ def _selection_candidates(
                 pushed=False,
                 review_requested=prs.has_review_requests(pr_payload),
             )
-        if not _is_in_review_candidate(
-            issue, raw_issue=raw_issue, live_state=live_state
-        ):
+        if not _is_in_review_candidate(issue, raw_issue=raw_issue, live_state=live_state):
             continue
-        feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
-            pr_payload, repo=repo_slug
-        )
+        feedback_at = prs.latest_feedback_timestamp_with_inline_comments(pr_payload, repo=repo_slug)
         if not feedback_at:
             continue
         feedback_time = prs.parse_timestamp(feedback_at)
@@ -78,14 +74,10 @@ def _selection_candidates(
         if status != "blocked" and cursor is not None and feedback_time <= cursor:
             continue
         if isinstance(pr_payload, dict):
-            pr_boundary = prs.parse_pr_boundary(
-                pr_payload, source="_selection_candidates:pr"
-            )
+            pr_boundary = prs.parse_pr_boundary(pr_payload, source="_selection_candidates:pr")
             pr_number = pr_boundary.number if pr_boundary is not None else None
             if pr_number is not None:
-                unresolved_threads = prs.unresolved_review_thread_count(
-                    repo_slug, pr_number
-                )
+                unresolved_threads = prs.unresolved_review_thread_count(repo_slug, pr_number)
                 if unresolved_threads == 0:
                     continue
         epic_id = resolve_epic_id(raw_issue)

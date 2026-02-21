@@ -35,9 +35,7 @@ def main() -> None:
     args = parser.parse_args()
 
     fields = ",".join(FIELDS)
-    payload = run_gh(
-        ["issue", "view", args.issue, "--repo", args.repo, "--json", fields]
-    )
+    payload = run_gh(["issue", "view", args.issue, "--repo", args.repo, "--json", fields])
     json.loads(payload)
     print(payload)
 

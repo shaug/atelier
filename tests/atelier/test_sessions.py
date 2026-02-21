@@ -157,9 +157,7 @@ class TestFindCodexSession:
             )
 
             with patch("atelier.sessions.Path.home", return_value=home):
-                session = sessions_mod.find_codex_session(
-                    "01TEST", "feat-demo", workspace_uid
-                )
+                session = sessions_mod.find_codex_session("01TEST", "feat-demo", workspace_uid)
 
             assert session is None
 
@@ -171,8 +169,6 @@ class TestFindCodexSession:
             )
 
             with patch("atelier.sessions.Path.home", return_value=home):
-                session = sessions_mod.find_codex_session(
-                    "01TEST", "feat-demo", workspace_uid
-                )
+                session = sessions_mod.find_codex_session("01TEST", "feat-demo", workspace_uid)
 
             assert session == "session-uid"

@@ -36,9 +36,7 @@ class StepFinish(Protocol):
 class StepFactory(Protocol):
     """Factory for timed step wrappers."""
 
-    def __call__(
-        self, label: str, *, timings: StepTimings, trace: bool
-    ) -> StepFinish: ...
+    def __call__(self, label: str, *, timings: StepTimings, trace: bool) -> StepFinish: ...
 
 
 class AgentHomeService(Protocol):
@@ -117,9 +115,7 @@ class BeadsService(Protocol):
         allow_takeover_from: str | None = None,
     ) -> Issue: ...
 
-    def clear_agent_hook(
-        self, agent_issue_id: str, *, beads_root: Path, cwd: Path
-    ) -> None: ...
+    def clear_agent_hook(self, agent_issue_id: str, *, beads_root: Path, cwd: Path) -> None: ...
 
     def extract_workspace_root_branch(self, issue: Issue) -> str | None: ...
 
@@ -167,9 +163,7 @@ class ConfigService(Protocol):
 class GitService(Protocol):
     """Git metadata operations needed by worker runtime."""
 
-    def git_default_branch(
-        self, repo_root: Path, *, git_path: str | None = None
-    ) -> str | None: ...
+    def git_default_branch(self, repo_root: Path, *, git_path: str | None = None) -> str | None: ...
 
 
 class PrsService(Protocol):
@@ -264,9 +258,7 @@ class ConfirmFn(Protocol):
 class WorkerInfrastructurePorts:
     """External module integrations required by worker runtime."""
 
-    resolve_current_project_with_repo_root: Callable[
-        [], tuple[Path, ProjectConfig, str, Path]
-    ]
+    resolve_current_project_with_repo_root: Callable[[], tuple[Path, ProjectConfig, str, Path]]
     agent_home: AgentHomeService
     agents: AgentsService
     beads: BeadsService
@@ -386,9 +378,7 @@ class WorkerLifecycleService(Protocol):
         self, before: ReviewFeedbackSnapshot, after: ReviewFeedbackSnapshot
     ) -> bool: ...
 
-    def run_startup_contract(
-        self, *, context: StartupContractContext
-    ) -> StartupContractResult: ...
+    def run_startup_contract(self, *, context: StartupContractContext) -> StartupContractResult: ...
 
     def send_invalid_changeset_labels_notification(
         self,

@@ -39,9 +39,7 @@ def test_issue_payload_to_ref_respects_state_toggle() -> None:
         "stateReason": "planned",
         "updatedAt": "2026-02-08T10:00:00Z",
     }
-    ref = issue_payload_to_ref(
-        payload, sync_options=ExternalTicketSyncOptions(include_state=False)
-    )
+    ref = issue_payload_to_ref(payload, sync_options=ExternalTicketSyncOptions(include_state=False))
     assert ref is not None
     assert ref.state is None
     assert ref.raw_state is None
@@ -96,8 +94,6 @@ def test_import_tickets_parses_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("atelier.github_issues_provider._run_json", fake_run_json)
     monkeypatch.setattr("atelier.github_issues_provider._require_gh", lambda: None)
 
-    records = provider.import_tickets(
-        request=ExternalTicketImportRequest(include_closed=True)
-    )
+    records = provider.import_tickets(request=ExternalTicketImportRequest(include_closed=True))
     assert len(records) == 2
     assert records[0].ref.ticket_id == "1"

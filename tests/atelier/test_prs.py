@@ -27,9 +27,7 @@ def test_lifecycle_state_prefers_merged() -> None:
 
 def test_lifecycle_state_handles_pr_open() -> None:
     payload = {"state": "OPEN", "isDraft": False, "reviewDecision": None}
-    assert (
-        prs.lifecycle_state(payload, pushed=True, review_requested=False) == "pr-open"
-    )
+    assert prs.lifecycle_state(payload, pushed=True, review_requested=False) == "pr-open"
 
 
 def test_lifecycle_state_falls_back_to_pushed() -> None:
@@ -86,12 +84,8 @@ def test_lookup_github_pr_status_reports_query_errors() -> None:
 
 
 def test_run_retries_retryable_errors_before_success() -> None:
-    transient = exec_util.CommandResult(
-        argv=("gh",), returncode=1, stdout="", stderr="TLS timeout"
-    )
-    success = exec_util.CommandResult(
-        argv=("gh",), returncode=0, stdout="ok", stderr=""
-    )
+    transient = exec_util.CommandResult(argv=("gh",), returncode=1, stdout="", stderr="TLS timeout")
+    success = exec_util.CommandResult(argv=("gh",), returncode=0, stdout="ok", stderr="")
     with (
         patch(
             "atelier.prs.exec_util.run_with_runner",

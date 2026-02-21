@@ -47,9 +47,7 @@ def test_changeset_integration_signal_uses_integrated_sha_from_notes() -> None:
 
 def test_changeset_integration_signal_uses_merged_pr_signal() -> None:
     issue = {
-        "description": (
-            "changeset.root_branch: feat/root\nchangeset.work_branch: feat/work\n"
-        )
+        "description": ("changeset.root_branch: feat/root\nchangeset.work_branch: feat/work\n")
     }
     ok, integrated_sha = integration.changeset_integration_signal(
         issue,
@@ -87,9 +85,7 @@ def test_cleanup_epic_branches_and_worktrees_invokes_git_actions() -> None:
             "atelier.worker.integration.worktrees.mapping_path",
             return_value=Path("/tmp/mapping.json"),
         ),
-        patch(
-            "atelier.worker.integration.worktrees.load_mapping", return_value=mapping
-        ),
+        patch("atelier.worker.integration.worktrees.load_mapping", return_value=mapping),
         patch("pathlib.Path.exists", return_value=True),
         patch("pathlib.Path.unlink", return_value=None),
     ):

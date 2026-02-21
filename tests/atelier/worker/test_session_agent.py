@@ -93,9 +93,7 @@ def test_prepare_agent_session_dry_run_sets_workspace_env(monkeypatch) -> None:
     assert prep.env["ATELIER_EPIC_ID"] == "at-epic"
     assert prep.env["ATELIER_CHANGESET_ID"] == "at-epic.1"
     assert prep.env["BEADS_DIR"] == "/beads"
-    assert any(
-        "Would prepare workspace environment variables." in msg for msg in control.logs
-    )
+    assert any("Would prepare workspace environment variables." in msg for msg in control.logs)
 
 
 def test_start_agent_session_dry_run_returns_none() -> None:

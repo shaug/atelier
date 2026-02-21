@@ -12,9 +12,7 @@ def test_external_provider_capabilities_export_flag() -> None:
 
 
 def test_external_provider_capabilities_optional_sync() -> None:
-    caps = ExternalProviderCapabilities(
-        supports_update=False, supports_state_sync=False
-    )
+    caps = ExternalProviderCapabilities(supports_update=False, supports_state_sync=False)
     assert caps.supports_optional_sync is False
 
     caps = ExternalProviderCapabilities(supports_update=True, supports_state_sync=False)

@@ -122,12 +122,8 @@ def normalize_threads(
                     if latest is None:
                         latest = comment
                         continue
-                    current = str(
-                        comment.get("updatedAt") or comment.get("createdAt") or ""
-                    )
-                    previous = str(
-                        latest.get("updatedAt") or latest.get("createdAt") or ""
-                    )
+                    current = str(comment.get("updatedAt") or comment.get("createdAt") or "")
+                    previous = str(latest.get("updatedAt") or latest.get("createdAt") or "")
                     if current >= previous:
                         latest = comment
         if latest is None:

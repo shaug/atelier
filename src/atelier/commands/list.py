@@ -13,9 +13,7 @@ def list_workspaces(args: object) -> None:
     project_data_dir = config.resolve_project_data_dir(project_root, config_payload)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root
-    )
+    issues = beads.run_bd_json(["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root)
     names: list[str] = []
     for issue in issues:
         status = str(issue.get("status") or "").lower()

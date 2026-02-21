@@ -115,9 +115,7 @@ def new_project(args: object) -> None:
             project_section = config_payload.project.model_copy(
                 update={"allow_mainline_workspace": True}
             )
-            config_payload = config_payload.model_copy(
-                update={"project": project_section}
-            )
+            config_payload = config_payload.model_copy(update={"project": project_section})
             config.write_project_config(config_path, config_payload)
 
         plan_cmd.run_planner(SimpleNamespace(create_epic=False, epic_id=None))

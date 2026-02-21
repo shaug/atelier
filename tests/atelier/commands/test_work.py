@@ -19,15 +19,9 @@ def _project_config() -> config.ProjectConfig:
 
 def test_start_worker_dry_run_skips_project_resolution() -> None:
     with (
-        patch(
-            "atelier.commands.work.resolve_current_project_with_repo_root"
-        ) as resolve_project,
-        patch(
-            "atelier.commands.work.agent_home.preview_agent_home"
-        ) as preview_agent_home,
-        patch(
-            "atelier.commands.work.agent_home.cleanup_agent_home"
-        ) as cleanup_agent_home,
+        patch("atelier.commands.work.resolve_current_project_with_repo_root") as resolve_project,
+        patch("atelier.commands.work.agent_home.preview_agent_home") as preview_agent_home,
+        patch("atelier.commands.work.agent_home.cleanup_agent_home") as cleanup_agent_home,
         patch("atelier.commands.work.worker_runtime.run_worker_sessions"),
     ):
         work_cmd.start_worker(
@@ -68,12 +62,8 @@ def test_start_worker_non_dry_run_previews_and_cleans_agent_home(
             "atelier.commands.work.agent_home.preview_agent_home",
             return_value=session_agent,
         ) as preview_agent_home,
-        patch(
-            "atelier.commands.work.worker_runtime.run_worker_sessions"
-        ) as run_sessions,
-        patch(
-            "atelier.commands.work.agent_home.cleanup_agent_home"
-        ) as cleanup_agent_home,
+        patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions,
+        patch("atelier.commands.work.agent_home.cleanup_agent_home") as cleanup_agent_home,
     ):
         work_cmd.start_worker(
             SimpleNamespace(epic_id=None, mode="auto", run_mode="once", dry_run=False)

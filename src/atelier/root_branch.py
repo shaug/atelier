@@ -24,9 +24,7 @@ def prompt_root_branch(
             if not root_branch:
                 die("unable to choose a default root branch; rerun without --yes")
         else:
-            root_branch = prompt(
-                "Root branch", default=suggested or None, required=True
-            )
+            root_branch = prompt("Root branch", default=suggested or None, required=True)
         root_branch = branching.normalize_root_branch(root_branch)
         if branch_prefix and not root_branch.startswith(branch_prefix):
             if assume_yes or confirm(

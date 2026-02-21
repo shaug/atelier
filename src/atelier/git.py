@@ -32,9 +32,7 @@ def _run_git_capture(
     )
 
 
-def _run_git_or_die(
-    cmd: list[str], *, cwd: Path | None = None
-) -> subprocess.CompletedProcess[str]:
+def _run_git_or_die(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     result = _run_git_capture(cmd, cwd=cwd)
     if result is None:
         die("missing required command: git")
@@ -71,7 +69,8 @@ def git_command(args: list[str], *, git_path: str | None = None) -> list[str]:
 def normalize_origin_url(value: str) -> str:
     """Normalize a Git origin URL to a stable identifier string.
 
-    Supports SSH SCP-style URLs, HTTP(S) URLs, ``file://`` URLs, and local paths.
+    Supports SSH SCP-style URLs, HTTP(S) URLs, ``file://`` URLs,
+    and local paths.
 
     Args:
         value: Raw origin URL string.
@@ -125,7 +124,7 @@ def resolve_relative_origin_path(origin_raw: str, repo_root: Path) -> str | None
         repo_root: Absolute path to the enlistment repo root.
 
     Returns:
-        Absolute filesystem path string when the origin is a relative local path,
+        Absolute filesystem path string when origin is a relative local path;
         otherwise ``None``.
     """
     raw = origin_raw.strip()
@@ -169,9 +168,7 @@ def git_repo_root(start: Path, *, git_path: str | None = None) -> Path | None:
         True
     """
     result = _run_git_or_die(
-        git_command(
-            ["-C", str(start), "rev-parse", "--show-toplevel"], git_path=git_path
-        )
+        git_command(["-C", str(start), "rev-parse", "--show-toplevel"], git_path=git_path)
     )
     if result.returncode != 0:
         return None
@@ -195,9 +192,7 @@ def git_origin_url(repo_dir: Path, *, git_path: str | None = None) -> str | None
         True
     """
     result = _run_git_or_die(
-        git_command(
-            ["-C", str(repo_dir), "remote", "get-url", "origin"], git_path=git_path
-        )
+        git_command(["-C", str(repo_dir), "remote", "get-url", "origin"], git_path=git_path)
     )
     if result.returncode != 0:
         return None
@@ -205,9 +200,7 @@ def git_origin_url(repo_dir: Path, *, git_path: str | None = None) -> str | None
     return origin or None
 
 
-def resolve_repo_origin(
-    start: Path, *, git_path: str | None = None
-) -> tuple[Path, str, str]:
+def resolve_repo_origin(start: Path, *, git_path: str | None = None) -> tuple[Path, str, str]:
     """Resolve the repo root, raw origin URL, and normalized origin.
 
     Args:
@@ -257,7 +250,8 @@ def resolve_repo_enlistment(
         start: Directory to search from.
 
     Returns:
-        Tuple of ``(repo_root, enlistment_path, origin_raw, origin_normalized)``.
+        Tuple of
+        ``(repo_root, enlistment_path, origin_raw, origin_normalized)``.
 
     Example:
         >>> resolve_repo_enlistment(Path("."))  # doctest: +SKIP
@@ -419,9 +413,7 @@ def git_upstream_branch(repo_dir: Path, *, git_path: str | None = None) -> str |
     return result.stdout.strip() or None
 
 
-def git_branch_fully_pushed(
-    repo_dir: Path, *, git_path: str | None = None
-) -> bool | None:
+def git_branch_fully_pushed(repo_dir: Path, *, git_path: str | None = None) -> bool | None:
     """Return whether the current branch matches its upstream.
 
     Args:
@@ -518,9 +510,7 @@ def git_tag_exists(repo_dir: Path, tag: str, *, git_path: str | None = None) -> 
     return git_ref_exists(repo_dir, f"refs/tags/{tag}", git_path=git_path)
 
 
-def git_rev_parse(
-    repo_dir: Path, ref: str, *, git_path: str | None = None
-) -> str | None:
+def git_rev_parse(repo_dir: Path, ref: str, *, git_path: str | None = None) -> str | None:
     """Resolve a ref to its commit hash.
 
     Args:
@@ -746,9 +736,7 @@ def git_ls_files(repo_dir: Path, *, git_path: str | None = None) -> list[str]:
         >>> isinstance(git_ls_files(Path(".")), list)
         True
     """
-    result = _run_git_or_die(
-        git_command(["-C", str(repo_dir), "ls-files"], git_path=git_path)
-    )
+    result = _run_git_or_die(git_command(["-C", str(repo_dir), "ls-files"], git_path=git_path))
     if result.returncode != 0:
         return []
     return [line for line in result.stdout.splitlines() if line.strip()]
@@ -772,9 +760,7 @@ def git_merge_base(
         True
     """
     result = _run_git_or_die(
-        git_command(
-            ["-C", str(repo_dir), "merge-base", base, branch], git_path=git_path
-        )
+        git_command(["-C", str(repo_dir), "merge-base", base, branch], git_path=git_path)
     )
     if result.returncode != 0:
         return None
@@ -822,8 +808,9 @@ def git_branch_fully_applied(
 ) -> bool | None:
     """Return whether ``head`` changes are fully represented in ``upstream``.
 
-    Uses `git cherry upstream head`: any `+` line means a commit from ``head`` is
-    not yet applied to ``upstream``; `-` lines are equivalent/applied commits.
+    Uses ``git cherry upstream head``. A ``+`` line means a commit from
+    ``head`` is not yet applied to ``upstream``. A ``-`` line means the commit
+    is equivalent/applied.
     """
     result = _run_git_or_die(
         git_command(
@@ -860,7 +847,14 @@ def git_commit_subjects_since_merge_base(
         List of commit subject lines.
 
     Example:
-        >>> isinstance(git_commit_subjects_since_merge_base(Path("."), "main", "HEAD"), list)
+        >>> isinstance(
+        ...     git_commit_subjects_since_merge_base(
+        ...         Path("."),
+        ...         "main",
+        ...         "HEAD",
+        ...     ),
+        ...     list,
+        ... )
         True
     """
     merge_base = git_merge_base(repo_dir, base, branch, git_path=git_path)
@@ -928,9 +922,7 @@ def gh_pr_message(repo_dir: Path) -> dict | None:
         >>> gh_pr_message(Path(".")) is None or True
         True
     """
-    result = _run_git_capture(
-        ["gh", "pr", "view", "--json", "title,body,number"], cwd=repo_dir
-    )
+    result = _run_git_capture(["gh", "pr", "view", "--json", "title,body,number"], cwd=repo_dir)
     if result is None or result.returncode != 0:
         return None
     try:

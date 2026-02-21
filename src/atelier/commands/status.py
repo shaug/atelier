@@ -23,9 +23,7 @@ def status(args: object) -> None:
     if format_value not in _FORMATS:
         die(f"unsupported format: {format_value}")
 
-    project_root, project_config, _enlistment, repo_root = (
-        resolve_current_project_with_repo_root()
-    )
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
 
@@ -97,9 +95,7 @@ def _build_agent_payloads(
     agent_index: dict[str, dict[str, object]] = {}
     for issue in issues:
         description = issue.get("description")
-        fields = beads.parse_description_fields(
-            description if isinstance(description, str) else ""
-        )
+        fields = beads.parse_description_fields(description if isinstance(description, str) else "")
         agent_id = fields.get("agent_id") or issue.get("title") or issue.get("id") or ""
         if not isinstance(agent_id, str):
             agent_id = str(agent_id)
@@ -108,9 +104,7 @@ def _build_agent_payloads(
         hook_bead = None
         issue_id = issue.get("id")
         if isinstance(issue_id, str) and issue_id:
-            hook_bead = beads.get_agent_hook(
-                issue_id, beads_root=beads_root, cwd=repo_root
-            )
+            hook_bead = beads.get_agent_hook(issue_id, beads_root=beads_root, cwd=repo_root)
         if not hook_bead:
             hook_bead = fields.get("hook_bead")
         heartbeat_at = fields.get("heartbeat_at")
@@ -137,12 +131,7 @@ def _build_agent_payloads(
         payloads.append(payload)
         if isinstance(agent_id, str) and agent_id:
             agent_index[agent_id] = payload
-        if (
-            isinstance(hook_bead, str)
-            and hook_bead
-            and isinstance(agent_id, str)
-            and agent_id
-        ):
+        if isinstance(hook_bead, str) and hook_bead and isinstance(agent_id, str) and agent_id:
             hook_map.setdefault(hook_bead, []).append(agent_id)
     return payloads, hook_map, agent_index
 
@@ -163,14 +152,10 @@ def _build_epic_payloads(
         if not isinstance(epic_id, str) or not epic_id:
             continue
         description = issue.get("description")
-        fields = beads.parse_description_fields(
-            description if isinstance(description, str) else ""
-        )
+        fields = beads.parse_description_fields(description if isinstance(description, str) else "")
         labels = _issue_labels(issue)
         root_branch = beads.extract_workspace_root_branch(issue) or None
-        mapping = worktrees.load_mapping(
-            worktrees.mapping_path(project_data_dir, epic_id)
-        )
+        mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, epic_id))
         worktree_relpath = beads.extract_worktree_path(issue)
         if not worktree_relpath and mapping:
             worktree_relpath = mapping.worktree_path
@@ -178,13 +163,9 @@ def _build_epic_payloads(
         if worktree_relpath:
             candidate = Path(worktree_relpath)
             worktree_path = (
-                str(candidate)
-                if candidate.is_absolute()
-                else str(project_data_dir / candidate)
+                str(candidate) if candidate.is_absolute() else str(project_data_dir / candidate)
             )
-        changesets = _list_changesets(
-            epic_id, beads_root=beads_root, repo_root=repo_root
-        )
+        changesets = _list_changesets(epic_id, beads_root=beads_root, repo_root=repo_root)
         changeset_details = _build_changeset_details(
             changesets,
             mapping=mapping,
@@ -214,9 +195,7 @@ def _build_epic_payloads(
                 "labels": labels,
                 "root_branch": root_branch,
                 "pr_strategy": fields.get("workspace.pr_strategy") or None,
-                "workspace_label": beads.workspace_label(root_branch)
-                if root_branch
-                else None,
+                "workspace_label": beads.workspace_label(root_branch) if root_branch else None,
                 "worktree_path": worktree_path,
                 "worktree_relpath": worktree_relpath,
                 "hooked_by": hook_map.get(epic_id, []),
@@ -245,9 +224,7 @@ def _build_changeset_details(
             continue
         labels = _issue_labels(issue)
         description = issue.get("description")
-        fields = beads.parse_description_fields(
-            description if isinstance(description, str) else ""
-        )
+        fields = beads.parse_description_fields(description if isinstance(description, str) else "")
         parent_branch = fields.get("changeset.parent_branch")
         branch = None
         if mapping is not None:
@@ -282,9 +259,7 @@ def _build_changeset_details(
         parent_state = None
         if isinstance(parent_branch, str):
             parent_state = branch_states.get(parent_branch)
-        decision = pr_strategy.pr_strategy_decision(
-            pr_strategy_value, parent_state=parent_state
-        )
+        decision = pr_strategy.pr_strategy_decision(pr_strategy_value, parent_state=parent_state)
         detail["pr_allowed"] = decision.allow_pr
         detail["pr_gate_reason"] = decision.reason
     return details
@@ -304,9 +279,7 @@ def _summarize_pr(payload: dict[str, object] | None) -> dict[str, object] | None
     }
 
 
-def _list_changesets(
-    epic_id: str, *, beads_root: Path, repo_root: Path
-) -> list[dict[str, object]]:
+def _list_changesets(epic_id: str, *, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
     return beads.run_bd_json(
         ["list", "--parent", epic_id, "--label", "at:changeset"],
         beads_root=beads_root,
@@ -426,9 +399,7 @@ def _status_counts(
             ready_changesets += int(changesets.get("ready", 0))
     queue_total = sum(int(queue.get("total", 0)) for queue in queues)
     queue_claimed = sum(int(queue.get("claimed", 0)) for queue in queues)
-    stale_agents = sum(
-        1 for agent in agents if str(agent.get("session_state") or "") == "stale"
-    )
+    stale_agents = sum(1 for agent in agents if str(agent.get("session_state") or "") == "stale")
     reclaimable_epics = sum(1 for epic in epics if bool(epic.get("reclaimable")))
     return {
         "epics": len(epics),
@@ -444,9 +415,7 @@ def _status_counts(
     }
 
 
-def _build_queue_payloads(
-    *, beads_root: Path, repo_root: Path
-) -> list[dict[str, object]]:
+def _build_queue_payloads(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
     issues = beads.run_bd_json(
         ["list", "--label", "at:message"], beads_root=beads_root, cwd=repo_root
     )
@@ -460,9 +429,7 @@ def _build_queue_payloads(
         if not isinstance(queue_name, str) or not queue_name.strip():
             continue
         claimed_by = payload.metadata.get("claimed_by")
-        entry = queues.setdefault(
-            queue_name, {"total": 0, "claimed": 0, "unclaimed": 0}
-        )
+        entry = queues.setdefault(queue_name, {"total": 0, "claimed": 0, "unclaimed": 0})
         entry["total"] += 1
         if isinstance(claimed_by, str) and claimed_by.strip():
             entry["claimed"] += 1
@@ -491,9 +458,7 @@ def _render_status(
     overview.add_row("Stale agents", _display_value(counts.get("agents_stale")))
     overview.add_row("Changesets", _display_value(counts.get("changesets")))
     overview.add_row("Ready changesets", _display_value(counts.get("changesets_ready")))
-    overview.add_row(
-        "Reclaimable epics", _display_value(counts.get("epics_reclaimable"))
-    )
+    overview.add_row("Reclaimable epics", _display_value(counts.get("epics_reclaimable")))
     overview.add_row("Queues", _display_value(counts.get("queues")))
     overview.add_row("Queued messages", _display_value(counts.get("queue_messages")))
     overview.add_row("Claimed messages", _display_value(counts.get("queue_claimed")))
@@ -515,14 +480,10 @@ def _render_status(
             changesets = epic.get("changesets") or {}
             ready = changesets.get("ready")
             total = changesets.get("total")
-            ready_display = (
-                f"{ready}/{total}" if ready is not None and total is not None else "0/0"
-            )
+            ready_display = f"{ready}/{total}" if ready is not None and total is not None else "0/0"
             hooked_by = epic.get("hooked_by") or []
             if isinstance(hooked_by, list):
-                hooked_by_display = ", ".join(
-                    [value for value in hooked_by if value]
-                ).strip()
+                hooked_by_display = ", ".join([value for value in hooked_by if value]).strip()
             else:
                 hooked_by_display = str(hooked_by or "").strip()
             table.add_row(

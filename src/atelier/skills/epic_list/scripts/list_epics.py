@@ -89,9 +89,7 @@ def _append_issue(lines: list[str], issue: dict[str, object]) -> None:
     status = str(issue.get("status") or "unknown").strip() or "unknown"
     title = str(issue.get("title") or "").strip() or "(untitled)"
     description = issue.get("description")
-    fields = _parse_description_fields(
-        description if isinstance(description, str) else None
-    )
+    fields = _parse_description_fields(description if isinstance(description, str) else None)
     root_branch = fields.get("workspace.root_branch") or "unset"
     assignee = str(issue.get("assignee") or "").strip() or "unassigned"
     lines.append(f"- {issue_id} [{status}] {title}")

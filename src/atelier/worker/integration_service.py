@@ -21,26 +21,20 @@ def normalize_branch_value(value: object) -> str | None:
 
 def extract_changeset_root_branch(issue: dict[str, object]) -> str | None:
     description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     return normalize_branch_value(fields.get("changeset.root_branch"))
 
 
 def extract_workspace_parent_branch(issue: dict[str, object]) -> str | None:
     description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     return normalize_branch_value(fields.get("workspace.parent_branch"))
 
 
 def branch_ref_for_lookup(
     repo_root: Path, branch: str, *, git_path: str | None = None
 ) -> str | None:
-    return worker_integration.branch_ref_for_lookup(
-        repo_root, branch, git_path=git_path
-    )
+    return worker_integration.branch_ref_for_lookup(repo_root, branch, git_path=git_path)
 
 
 def epic_root_integrated_into_parent(
@@ -75,17 +69,13 @@ def changeset_integration_signal(
     )
 
 
-def ensure_local_branch(
-    branch: str, *, repo_root: Path, git_path: str | None = None
-) -> bool:
+def ensure_local_branch(branch: str, *, repo_root: Path, git_path: str | None = None) -> bool:
     branch_name = branch.strip()
     if not branch_name:
         return False
     if git.git_ref_exists(repo_root, f"refs/heads/{branch_name}", git_path=git_path):
         return True
-    if not git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{branch_name}", git_path=git_path
-    ):
+    if not git.git_ref_exists(repo_root, f"refs/remotes/origin/{branch_name}", git_path=git_path):
         return False
     result = exec.try_run_command(
         git.git_command(
@@ -200,9 +190,7 @@ def collect_publish_signal_diagnostics(
 def attempt_push_work_branch(
     work_branch: str, *, repo_root: Path, git_path: str | None = None
 ) -> tuple[bool, str]:
-    if not git.git_ref_exists(
-        repo_root, f"refs/heads/{work_branch}", git_path=git_path
-    ):
+    if not git.git_ref_exists(repo_root, f"refs/heads/{work_branch}", git_path=git_path):
         return False, f"local branch missing: {work_branch}"
     ok, detail = run_git_status(
         ["push", "-u", "origin", work_branch], repo_root=repo_root, git_path=git_path
@@ -247,9 +235,7 @@ def sync_local_branch_from_remote(
     branch_name = branch.strip()
     if not branch_name:
         return False
-    if not git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{branch_name}", git_path=git_path
-    ):
+    if not git.git_ref_exists(repo_root, f"refs/remotes/origin/{branch_name}", git_path=git_path):
         return False
     ensure_branch_not_checked_out(branch_name, repo_root=repo_root, git_path=git_path)
     ok, _ = run_git_status(
@@ -262,9 +248,7 @@ def sync_local_branch_from_remote(
 
 def first_external_ticket_id(issue: dict[str, object]) -> str | None:
     description = issue.get("description")
-    tickets = beads.parse_external_tickets(
-        description if isinstance(description, str) else None
-    )
+    tickets = beads.parse_external_tickets(description if isinstance(description, str) else None)
     if not tickets:
         return None
     primary = [ticket for ticket in tickets if ticket.relation == "primary"]
@@ -362,12 +346,9 @@ def agent_generated_squash_subject(
     ticket_id = first_external_ticket_id(epic_issue) or "none"
     title = str(epic_issue.get("title") or epic_id).strip() or epic_id
     commits_preview = (
-        "\n".join(f"- {message}" for message in commit_messages[:12] if message)
-        or "- (none)"
+        "\n".join(f"- {message}" for message in commit_messages[:12] if message) or "- (none)"
     )
-    files_preview = "\n".join(
-        f"- {entry}" for entry in files_changed[:30] if entry
-    ) or ("- (none)")
+    files_preview = "\n".join(f"- {entry}" for entry in files_changed[:30] if entry) or ("- (none)")
     prompt_text = "\n".join(
         [
             "Draft a single git squash commit subject for integrating an epic branch.",
@@ -472,9 +453,7 @@ def integrate_epic_root_to_parent(
             lambda **kwargs: agent_generated_squash_subject(
                 **kwargs,
                 with_codex_exec=with_codex_exec or (lambda cmd, _prompt: cmd),
-                strip_flag_with_value=(
-                    strip_flag_with_value or (lambda args, _flag: args)
-                ),
+                strip_flag_with_value=(strip_flag_with_value or (lambda args, _flag: args)),
                 ensure_exec_subcommand_flag=(
                     ensure_exec_subcommand_flag or (lambda args, _flag: args)
                 ),

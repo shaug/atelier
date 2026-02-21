@@ -113,9 +113,7 @@ class ExternalProvider(Protocol):
     ) -> Sequence[ExternalTicketRecord]:
         """Return external tickets for planner import."""
 
-    def create_ticket(
-        self, request: ExternalTicketCreateRequest
-    ) -> ExternalTicketRecord:
+    def create_ticket(self, request: ExternalTicketCreateRequest) -> ExternalTicketRecord:
         """Create a new external ticket from a local bead."""
 
     def link_ticket(self, request: ExternalTicketLinkRequest) -> ExternalTicketRecord:

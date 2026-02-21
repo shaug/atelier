@@ -24,7 +24,7 @@ _PublishSignalDiagnostics = PublishSignalDiagnostics
 
 
 def __getattr__(name: str) -> object:
-    """Expose private helpers across split runtime modules for legacy imports."""
+    """Expose split runtime helpers for legacy import compatibility."""
     for module in (
         _work_startup_runtime,
         _work_finalization_runtime,

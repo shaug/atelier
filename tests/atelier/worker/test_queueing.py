@@ -77,9 +77,7 @@ def test_handle_queue_before_claim_dry_run_reports_messages() -> None:
     emitted: list[str] = []
     dry_logs: list[str] = []
 
-    with patch(
-        "atelier.worker.queueing.beads.list_queue_messages", return_value=queued
-    ):
+    with patch("atelier.worker.queueing.beads.list_queue_messages", return_value=queued):
         handled = queueing.handle_queue_before_claim(
             "worker/1",
             beads_root=Path("/beads"),

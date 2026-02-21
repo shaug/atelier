@@ -150,7 +150,9 @@ def legacy_project_dir_name(origin: str) -> str:
         Normalized project directory name with a short hash suffix.
 
     Example:
-        >>> legacy_project_dir_name("git@github.com:org/repo.git").startswith("github.com-org-repo-")
+        >>> legacy_project_dir_name(
+        ...     "git@github.com:org/repo.git"
+        ... ).startswith("github.com-org-repo-")
         True
     """
     base = _normalize_filespace(origin, strip_git=True)
@@ -190,7 +192,10 @@ def project_dir_for_origin(origin: str) -> Path:
         Project directory path.
 
     Example:
-        >>> project_dir_for_origin("github.com/org/repo").parent.name == PROJECTS_DIRNAME
+        >>> (
+        ...     project_dir_for_origin("github.com/org/repo").parent.name
+        ...     == PROJECTS_DIRNAME
+        ... )
         True
     """
     legacy_dir = projects_root() / project_key(origin)
@@ -210,7 +215,10 @@ def project_dir_for_enlistment(enlistment_path: str, origin: str | None) -> Path
         Project directory path.
 
     Example:
-        >>> project_dir_for_enlistment("/repo", None).parent.name == PROJECTS_DIRNAME
+        >>> (
+        ...     project_dir_for_enlistment("/repo", None).parent.name
+        ...     == PROJECTS_DIRNAME
+        ... )
         True
     """
     if origin:
@@ -233,7 +241,10 @@ def project_config_sys_path(project_dir: Path) -> Path:
         Path to ``config.sys.json``.
 
     Example:
-        >>> project_config_sys_path(Path("/tmp/project")).name == PROJECT_CONFIG_SYS_FILENAME
+        >>> (
+        ...     project_config_sys_path(Path("/tmp/project")).name
+        ...     == PROJECT_CONFIG_SYS_FILENAME
+        ... )
         True
     """
     return project_dir / PROJECT_CONFIG_SYS_FILENAME

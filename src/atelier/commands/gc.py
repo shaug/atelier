@@ -30,9 +30,7 @@ def _log_warning(message: str) -> None:
     atelier_log.warning(f"[gc] {message}")
 
 
-def _run_git_gc_command(
-    args: list[str], *, repo_root: Path, git_path: str
-) -> tuple[bool, str]:
+def _run_git_gc_command(args: list[str], *, repo_root: Path, git_path: str) -> tuple[bool, str]:
     _log_debug(f"git command start args={' '.join(args)}")
     result = exec_util.try_run_command(
         git.git_command(["-C", str(repo_root), *args], git_path=git_path)
@@ -42,9 +40,7 @@ def _run_git_gc_command(
         return False, "missing required command: git"
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
-        _log_warning(
-            f"git command failed args={' '.join(args)} detail={detail or 'none'}"
-        )
+        _log_warning(f"git command failed args={' '.join(args)} detail={detail or 'none'}")
         return False, detail or f"command failed: git {' '.join(args)}"
     _log_debug(f"git command ok args={' '.join(args)}")
     return True, (result.stdout or "").strip()
@@ -95,9 +91,7 @@ def _normalize_changeset_labels_for_status(
             reasons.append(f"add {label}: {reason}")
 
     description = issue.get("description")
-    review = changesets.parse_review_metadata(
-        description if isinstance(description, str) else ""
-    )
+    review = changesets.parse_review_metadata(description if isinstance(description, str) else "")
     review_state = (review.pr_state or "").strip().lower()
 
     if status in {"closed", "done"}:
@@ -149,9 +143,7 @@ def _workspace_branch_from_labels(labels: set[str]) -> str | None:
     return None
 
 
-def _try_show_issue(
-    issue_id: str, *, beads_root: Path, cwd: Path
-) -> dict[str, object] | None:
+def _try_show_issue(issue_id: str, *, beads_root: Path, cwd: Path) -> dict[str, object] | None:
     try:
         records = beads.run_bd_issue_records(
             ["show", issue_id], beads_root=beads_root, cwd=cwd, source="_try_show_issue"
@@ -165,9 +157,7 @@ def _try_show_issue(
 
 def _issue_integrated_sha(issue: dict[str, object]) -> str | None:
     description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     integrated = fields.get("changeset.integrated_sha")
     if isinstance(integrated, str):
         value = integrated.strip()
@@ -216,9 +206,7 @@ def _reconcile_preview_lines(
     epic_issue = _try_show_issue(epic_id, beads_root=beads_root, cwd=repo_root)
     if epic_issue:
         fields = beads.parse_description_fields(
-            epic_issue.get("description")
-            if isinstance(epic_issue.get("description"), str)
-            else ""
+            epic_issue.get("description") if isinstance(epic_issue.get("description"), str) else ""
         )
         root_branch = _normalize_branch(fields.get("workspace.root_branch"))
         if not root_branch:
@@ -228,8 +216,7 @@ def _reconcile_preview_lines(
             parent_branch = _normalize_branch(fields.get("changeset.parent_branch"))
         if root_branch or parent_branch:
             lines.append(
-                "final integration: "
-                f"{root_branch or 'unset'} -> {parent_branch or 'unset'}"
+                f"final integration: {root_branch or 'unset'} -> {parent_branch or 'unset'}"
             )
     if changesets:
         lines.append(f"changesets to reconcile: {', '.join(changesets)}")
@@ -327,9 +314,7 @@ def _gc_hooks(
     agents: dict[str, dict[str, object]] = {}
     for issue in agent_issues:
         description = issue.get("description")
-        fields = beads.parse_description_fields(
-            description if isinstance(description, str) else ""
-        )
+        fields = beads.parse_description_fields(description if isinstance(description, str) else "")
         agent_id = fields.get("agent_id") or issue.get("title")
         if not isinstance(agent_id, str) or not agent_id:
             continue
@@ -339,9 +324,7 @@ def _gc_hooks(
         issue_id = issue.get("id") if isinstance(issue, dict) else None
         hook_bead = None
         if isinstance(issue_id, str) and issue_id:
-            hook_bead = beads.get_agent_hook(
-                issue_id, beads_root=beads_root, cwd=repo_root
-            )
+            hook_bead = beads.get_agent_hook(issue_id, beads_root=beads_root, cwd=repo_root)
         if not hook_bead:
             hook_bead = fields.get("hook_bead")
         agents[agent_id] = {
@@ -352,18 +335,14 @@ def _gc_hooks(
             "heartbeat_at": fields.get("heartbeat_at"),
         }
 
-    epics = beads.run_bd_json(
-        ["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root
-    )
+    epics = beads.run_bd_json(["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root)
 
     for agent_id, payload in agents.items():
         hook_bead = payload.get("hook_bead")
         if not isinstance(hook_bead, str) or not hook_bead:
             continue
         heartbeat_raw = payload.get("heartbeat_at")
-        heartbeat = _parse_rfc3339(
-            heartbeat_raw if isinstance(heartbeat_raw, str) else None
-        )
+        heartbeat = _parse_rfc3339(heartbeat_raw if isinstance(heartbeat_raw, str) else None)
         stale = False
         if heartbeat is None:
             stale = include_missing_heartbeat
@@ -393,9 +372,7 @@ def _gc_hooks(
         assignee = epic.get("assignee")
         epic_id = epic.get("id")
         description = epic.get("description")
-        fields = beads.parse_description_fields(
-            description if isinstance(description, str) else ""
-        )
+        fields = beads.parse_description_fields(description if isinstance(description, str) else "")
         claim_expires_raw = fields.get("claim_expires_at")
         claim_expires_at = _parse_rfc3339(
             claim_expires_raw if isinstance(claim_expires_raw, str) else None
@@ -420,9 +397,7 @@ def _gc_hooks(
                 if agent_payload and agent_payload.get("hook_bead") == epic_id_value:
                     agent_issue_id = agent_payload.get("issue_id")
                     if isinstance(agent_issue_id, str) and agent_issue_id:
-                        beads.clear_agent_hook(
-                            agent_issue_id, beads_root=beads_root, cwd=repo_root
-                        )
+                        beads.clear_agent_hook(agent_issue_id, beads_root=beads_root, cwd=repo_root)
 
             actions.append(GcAction(description=description, apply=_apply_expired))
             continue
@@ -442,9 +417,7 @@ def _gc_hooks(
                 if agent_payload and agent_payload.get("hook_bead") == epic_id_value:
                     agent_issue_id = agent_payload.get("issue_id")
                     if isinstance(agent_issue_id, str) and agent_issue_id:
-                        beads.clear_agent_hook(
-                            agent_issue_id, beads_root=beads_root, cwd=repo_root
-                        )
+                        beads.clear_agent_hook(agent_issue_id, beads_root=beads_root, cwd=repo_root)
 
             actions.append(GcAction(description=description, apply=_apply_closed))
             continue
@@ -473,13 +446,9 @@ def _branch_lookup_ref(
 ) -> tuple[str | None, str | None]:
     local_ref = f"refs/heads/{branch}"
     remote_ref = f"refs/remotes/origin/{branch}"
-    local = (
-        branch if git.git_ref_exists(repo_root, local_ref, git_path=git_path) else None
-    )
+    local = branch if git.git_ref_exists(repo_root, local_ref, git_path=git_path) else None
     remote = (
-        f"origin/{branch}"
-        if git.git_ref_exists(repo_root, remote_ref, git_path=git_path)
-        else None
+        f"origin/{branch}" if git.git_ref_exists(repo_root, remote_ref, git_path=git_path) else None
     )
     return local, remote
 
@@ -496,9 +465,7 @@ def _branch_integrated_into_target(
     if not branch_refs:
         return True
     for branch_ref in branch_refs:
-        is_ancestor = git.git_is_ancestor(
-            repo_root, branch_ref, target_ref, git_path=git_path
-        )
+        is_ancestor = git.git_is_ancestor(repo_root, branch_ref, target_ref, git_path=git_path)
         if is_ancestor is True:
             return True
         fully_applied = git.git_branch_fully_applied(
@@ -536,15 +503,11 @@ def _gc_resolved_epic_artifacts(
         if status not in {"closed", "done"}:
             continue
         labels = _issue_labels(epic)
-        if "at:changeset" in labels and not (
-            "cs:merged" in labels or "cs:abandoned" in labels
-        ):
+        if "at:changeset" in labels and not ("cs:merged" in labels or "cs:abandoned" in labels):
             continue
 
         description = epic.get("description")
-        fields = beads.parse_description_fields(
-            description if isinstance(description, str) else ""
-        )
+        fields = beads.parse_description_fields(description if isinstance(description, str) else "")
         parent_branch = _normalize_branch(fields.get("workspace.parent_branch"))
         if not parent_branch:
             parent_branch = _normalize_branch(fields.get("changeset.parent_branch"))
@@ -592,9 +555,7 @@ def _gc_resolved_epic_artifacts(
 
         has_prunable_branch_ref = False
         for branch in prunable_branches:
-            local_ref, remote_ref = _branch_lookup_ref(
-                repo_root, branch, git_path=git_path
-            )
+            local_ref, remote_ref = _branch_lookup_ref(repo_root, branch, git_path=git_path)
             if local_ref or remote_ref:
                 has_prunable_branch_ref = True
                 break
@@ -602,9 +563,7 @@ def _gc_resolved_epic_artifacts(
             continue
 
         description_text = f"Prune resolved epic artifacts for {epic_id}"
-        changeset_worktree_summary = ", ".join(
-            sorted(mapping.changeset_worktrees.values())
-        )
+        changeset_worktree_summary = ", ".join(sorted(mapping.changeset_worktrees.values()))
         if not changeset_worktree_summary:
             changeset_worktree_summary = "(none)"
         branch_summary = ", ".join(sorted(prunable_branches))
@@ -628,9 +587,7 @@ def _gc_resolved_epic_artifacts(
                 f"worktrees={len(worktree_paths)} branches={len(branches_to_prune)}"
             )
             for worktree_path in worktree_paths:
-                status_lines = git.git_status_porcelain(
-                    worktree_path, git_path=git_path
-                )
+                status_lines = git.git_status_porcelain(worktree_path, git_path=git_path)
                 force_remove = False
                 if status_lines:
                     say(f"Resolved worktree has local changes: {worktree_path}")
@@ -649,37 +606,27 @@ def _gc_resolved_epic_artifacts(
                         if choice != "force-remove":
                             die("gc aborted by user")
                         force_remove = True
-                _log_debug(
-                    f"removing resolved worktree path={worktree_path} force={force_remove}"
-                )
+                _log_debug(f"removing resolved worktree path={worktree_path} force={force_remove}")
                 args = ["worktree", "remove"]
                 if force_remove:
                     args.append("--force")
                 args.append(str(worktree_path))
-                ok, detail = _run_git_gc_command(
-                    args, repo_root=repo_root, git_path=git_path
-                )
+                ok, detail = _run_git_gc_command(args, repo_root=repo_root, git_path=git_path)
                 if not ok:
                     die(detail)
 
             current_branch = git.git_current_branch(repo_root, git_path=git_path)
             for branch in branches_to_prune:
-                local_ref, remote_ref = _branch_lookup_ref(
-                    repo_root, branch, git_path=git_path
-                )
+                local_ref, remote_ref = _branch_lookup_ref(repo_root, branch, git_path=git_path)
                 if remote_ref:
-                    _log_debug(
-                        f"deleting remote branch branch={branch} epic={epic_value}"
-                    )
+                    _log_debug(f"deleting remote branch branch={branch} epic={epic_value}")
                     _run_git_gc_command(
                         ["push", "origin", "--delete", branch],
                         repo_root=repo_root,
                         git_path=git_path,
                     )
                 if local_ref and current_branch != branch:
-                    _log_debug(
-                        f"deleting local branch branch={branch} epic={epic_value}"
-                    )
+                    _log_debug(f"deleting local branch branch={branch} epic={epic_value}")
                     _run_git_gc_command(
                         ["branch", "-D", branch], repo_root=repo_root, git_path=git_path
                     )
@@ -729,9 +676,7 @@ def _gc_closed_workspace_branches_without_mapping(
             continue
 
         description = issue.get("description")
-        fields = beads.parse_description_fields(
-            description if isinstance(description, str) else ""
-        )
+        fields = beads.parse_description_fields(description if isinstance(description, str) else "")
         root_branch = _normalize_branch(fields.get("workspace.root_branch"))
         if not root_branch:
             root_branch = _normalize_branch(fields.get("changeset.root_branch"))
@@ -772,9 +717,7 @@ def _gc_closed_workspace_branches_without_mapping(
 
         has_prunable_branch_ref = False
         for branch in prunable_branches:
-            local_ref, remote_ref = _branch_lookup_ref(
-                repo_root, branch, git_path=git_path
-            )
+            local_ref, remote_ref = _branch_lookup_ref(repo_root, branch, git_path=git_path)
             if local_ref or remote_ref:
                 has_prunable_branch_ref = True
                 break
@@ -795,9 +738,7 @@ def _gc_closed_workspace_branches_without_mapping(
         ) -> None:
             current_branch = git.git_current_branch(repo_root, git_path=git_path)
             for branch in branches_to_prune:
-                local_ref, remote_ref = _branch_lookup_ref(
-                    repo_root, branch, git_path=git_path
-                )
+                local_ref, remote_ref = _branch_lookup_ref(repo_root, branch, git_path=git_path)
                 if remote_ref:
                     _log_debug(f"deleting remote workspace branch branch={branch}")
                     _run_git_gc_command(
@@ -995,9 +936,7 @@ def _gc_message_retention(
             expiry_time = _parse_rfc3339(expires_at)
         if expiry_time is None and retention_days is not None:
             created_at_raw = issue.get("created_at")
-            created_at = _parse_rfc3339(
-                created_at_raw if isinstance(created_at_raw, str) else None
-            )
+            created_at = _parse_rfc3339(created_at_raw if isinstance(created_at_raw, str) else None)
             if created_at is not None:
                 expiry_time = created_at + dt.timedelta(days=retention_days)
         if expiry_time is None or now < expiry_time:
@@ -1026,9 +965,7 @@ def _gc_agent_homes(
     agent_issues = beads.run_bd_json(
         ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
     )
-    epics = beads.run_bd_json(
-        ["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root
-    )
+    epics = beads.run_bd_json(["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root)
     active_assignees = {
         str(epic.get("assignee"))
         for epic in epics
@@ -1036,9 +973,7 @@ def _gc_agent_homes(
     }
     for issue in agent_issues:
         description = issue.get("description")
-        fields = beads.parse_description_fields(
-            description if isinstance(description, str) else ""
-        )
+        fields = beads.parse_description_fields(description if isinstance(description, str) else "")
         agent_id = fields.get("agent_id") or issue.get("title") or ""
         if not isinstance(agent_id, str) or not agent_id.strip():
             continue
@@ -1050,9 +985,7 @@ def _gc_agent_homes(
         issue_id = issue.get("id")
         hook_bead = None
         if isinstance(issue_id, str) and issue_id:
-            hook_bead = beads.get_agent_hook(
-                issue_id, beads_root=beads_root, cwd=repo_root
-            )
+            hook_bead = beads.get_agent_hook(issue_id, beads_root=beads_root, cwd=repo_root)
         if not hook_bead:
             hook_bead = fields.get("hook_bead")
         if hook_bead:
@@ -1073,9 +1006,7 @@ def _gc_agent_homes(
 
 def gc(args: object) -> None:
     """Garbage collect stale hooks and orphaned worktrees."""
-    project_root, project_config, _enlistment, repo_root = (
-        resolve_current_project_with_repo_root()
-    )
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
 
@@ -1111,19 +1042,13 @@ def gc(args: object) -> None:
             _log_debug("reconcile candidates none")
         if dry_run or yes:
             if not candidates:
-                say(
-                    "Reconcile blocked changesets: "
-                    "scanned=0, actionable=0, reconciled=0, failed=0"
-                )
+                say("Reconcile blocked changesets: scanned=0, actionable=0, reconciled=0, failed=0")
                 return
             for epic_id, changesets in candidates.items():
                 _log_debug(
                     f"reconcile candidate epic={epic_id} changesets={len(changesets)} mode={'dry-run' if dry_run else 'yes'}"
                 )
-                say(
-                    f"Reconcile candidate: epic {epic_id} "
-                    f"({len(changesets)} merged changesets)"
-                )
+                say(f"Reconcile candidate: epic {epic_id} ({len(changesets)} merged changesets)")
                 for detail in _reconcile_preview_lines(
                     epic_id,
                     changesets,
@@ -1165,8 +1090,7 @@ def gc(args: object) -> None:
                 if len(changesets) > 3:
                     preview = f"{preview}, +{len(changesets) - 3} more"
                 prompt_text = (
-                    f"Reconcile epic {epic_id} "
-                    f"({len(changesets)} merged changesets: {preview})?"
+                    f"Reconcile epic {epic_id} ({len(changesets)} merged changesets: {preview})?"
                 )
                 say(f"Reconcile candidate: epic {epic_id}")
                 for detail in _reconcile_preview_lines(
@@ -1265,9 +1189,7 @@ def gc(args: object) -> None:
         )
     )
     actions.extend(
-        _gc_message_claims(
-            beads_root=beads_root, repo_root=repo_root, stale_hours=stale_hours
-        )
+        _gc_message_claims(beads_root=beads_root, repo_root=repo_root, stale_hours=stale_hours)
     )
     actions.extend(_gc_message_retention(beads_root=beads_root, repo_root=repo_root))
     actions.extend(

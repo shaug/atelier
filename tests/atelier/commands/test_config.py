@@ -23,17 +23,13 @@ class TestConfigCommand:
             enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
-                )
+                project_dir = paths.project_dir_for_enlistment(enlistment_path, NORMALIZED_ORIGIN)
             write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(
-                    ["team/", "false", "rebase", "", "codex", "vim -w", "vim", ""]
-                )
+                responses = iter(["team/", "false", "rebase", "", "codex", "vim -w", "vim", ""])
                 with (
                     patch("builtins.input", lambda _: next(responses)),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -65,9 +61,7 @@ class TestConfigCommand:
             enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
-                )
+                project_dir = paths.project_dir_for_enlistment(enlistment_path, NORMALIZED_ORIGIN)
             write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
@@ -112,9 +106,7 @@ class TestConfigCommand:
             enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
-                )
+                project_dir = paths.project_dir_for_enlistment(enlistment_path, NORMALIZED_ORIGIN)
             write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
@@ -169,9 +161,7 @@ class TestConfigCommand:
             enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
-                )
+                project_dir = paths.project_dir_for_enlistment(enlistment_path, NORMALIZED_ORIGIN)
             write_open_config(project_dir, enlistment_path)
 
             defaults = {
@@ -217,17 +207,13 @@ class TestConfigCommand:
             enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
-                )
+                project_dir = paths.project_dir_for_enlistment(enlistment_path, NORMALIZED_ORIGIN)
             write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(
-                    ["prefs/", "true", "merge", "", "codex", "code -w", "code", ""]
-                )
+                responses = iter(["prefs/", "true", "merge", "", "codex", "code -w", "code", ""])
                 with (
                     patch("builtins.input", lambda _: next(responses)),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -259,9 +245,7 @@ class TestConfigCommand:
             enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
-                )
+                project_dir = paths.project_dir_for_enlistment(enlistment_path, NORMALIZED_ORIGIN)
             write_open_config(project_dir, enlistment_path)
 
             original_cwd = Path.cwd()

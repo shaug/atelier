@@ -29,9 +29,7 @@ class GithubIssuesProvider:
 
     slug: str = "github"
     display_name: str = "GitHub Issues"
-    sync_options: ExternalTicketSyncOptions = field(
-        default_factory=ExternalTicketSyncOptions
-    )
+    sync_options: ExternalTicketSyncOptions = field(default_factory=ExternalTicketSyncOptions)
     capabilities: ExternalProviderCapabilities = ExternalProviderCapabilities(
         supports_import=True,
         supports_create=True,
@@ -74,9 +72,7 @@ class GithubIssuesProvider:
                 records.append(record)
         return records
 
-    def create_ticket(
-        self, request: ExternalTicketCreateRequest
-    ) -> ExternalTicketRecord:
+    def create_ticket(self, request: ExternalTicketCreateRequest) -> ExternalTicketRecord:
         _require_gh()
         cmd = [
             "gh",
@@ -101,9 +97,7 @@ class GithubIssuesProvider:
 
     def link_ticket(self, request: ExternalTicketLinkRequest) -> ExternalTicketRecord:
         _require_gh()
-        payload = _run_json(
-            ["gh", "api", f"repos/{self.repo}/issues/{request.ticket.ticket_id}"]
-        )
+        payload = _run_json(["gh", "api", f"repos/{self.repo}/issues/{request.ticket.ticket_id}"])
         if not isinstance(payload, dict):
             raise RuntimeError("Unexpected gh issue view output")
         sync_options = request.sync_options or self.sync_options

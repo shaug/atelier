@@ -34,7 +34,7 @@ def normalize_root_branch(value: str) -> str:
 
 
 def is_valid_root_branch(value: str) -> bool:
-    """Return True when the root branch matches lowercase hyphenated segments."""
+    """Return True when root branch matches lowercase hyphenated segments."""
     if not value:
         return False
     normalized = normalize_root_branch(value)

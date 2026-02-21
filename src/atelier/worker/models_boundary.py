@@ -132,9 +132,7 @@ class GithubReviewRequestBoundary(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    requested_reviewer: GithubAuthorBoundary | None = Field(
-        default=None, alias="requestedReviewer"
-    )
+    requested_reviewer: GithubAuthorBoundary | None = Field(default=None, alias="requestedReviewer")
 
 
 class GithubCommentBoundary(BaseModel):
@@ -237,9 +235,7 @@ class ReviewFeedbackBoundary(BaseModel):
         return _clean_str(value)
 
 
-def parse_issue_boundary(
-    raw_issue: dict[str, object], *, source: str
-) -> BeadsIssueBoundary:
+def parse_issue_boundary(raw_issue: dict[str, object], *, source: str) -> BeadsIssueBoundary:
     """Validate a Beads issue payload for worker decision logic."""
     payload = dict(raw_issue)
     if "parent_id" not in payload:

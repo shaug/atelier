@@ -27,9 +27,7 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
     calls: list[list[str]] = []
     captured_env: dict[str, str] = {}
 
-    def fake_run_bd_command(
-        args, *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ):
+    def fake_run_bd_command(args, *, beads_root: Path, cwd: Path, allow_failure: bool = False):
         calls.append(args)
 
         class Result:
@@ -73,9 +71,7 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         patch("atelier.commands.plan.beads.ensure_agent_bead"),
         patch(
             "atelier.commands.plan.work_cmd.reconcile_blocked_merged_changesets",
-            return_value=SimpleNamespace(
-                scanned=0, actionable=0, reconciled=0, failed=0
-            ),
+            return_value=SimpleNamespace(scanned=0, actionable=0, reconciled=0, failed=0),
         ) as reconcile,
         patch(
             "atelier.commands.plan.beads.run_bd_command",
@@ -124,9 +120,7 @@ def test_plan_does_not_query_or_prompt_draft_epics_on_startup(tmp_path: Path) ->
     )
     json_calls: list[list[str]] = []
 
-    def fake_run_bd_command(
-        args, *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ):
+    def fake_run_bd_command(args, *, beads_root: Path, cwd: Path, allow_failure: bool = False):
         class Result:
             stdout = ""
             returncode = 0
@@ -162,9 +156,7 @@ def test_plan_does_not_query_or_prompt_draft_epics_on_startup(tmp_path: Path) ->
         patch("atelier.commands.plan.beads.ensure_agent_bead"),
         patch(
             "atelier.commands.plan.work_cmd.reconcile_blocked_merged_changesets",
-            return_value=SimpleNamespace(
-                scanned=0, actionable=0, reconciled=0, failed=0
-            ),
+            return_value=SimpleNamespace(scanned=0, actionable=0, reconciled=0, failed=0),
         ) as reconcile,
         patch(
             "atelier.commands.plan.beads.run_bd_command",
@@ -182,9 +174,7 @@ def test_plan_does_not_query_or_prompt_draft_epics_on_startup(tmp_path: Path) ->
         ),
         patch(
             "atelier.commands.plan.codex.run_codex_command",
-            return_value=codex.CodexRunResult(
-                returncode=0, session_id=None, resume_command=None
-            ),
+            return_value=codex.CodexRunResult(returncode=0, session_id=None, resume_command=None),
         ),
         patch("atelier.commands.plan.say"),
     ):
@@ -267,9 +257,7 @@ def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
         ),
         patch(
             "atelier.commands.plan.codex.run_codex_command",
-            return_value=codex.CodexRunResult(
-                returncode=0, session_id=None, resume_command=None
-            ),
+            return_value=codex.CodexRunResult(returncode=0, session_id=None, resume_command=None),
         ),
         patch("atelier.commands.plan.say"),
     ):
@@ -340,9 +328,7 @@ def test_plan_does_not_persist_selected_provider(tmp_path: Path) -> None:
         ),
         patch(
             "atelier.commands.plan.codex.run_codex_command",
-            return_value=codex.CodexRunResult(
-                returncode=0, session_id=None, resume_command=None
-            ),
+            return_value=codex.CodexRunResult(returncode=0, session_id=None, resume_command=None),
         ),
         patch("atelier.commands.plan.say"),
         patch("atelier.commands.plan.config.write_project_config") as write_config,
@@ -421,7 +407,6 @@ def test_planner_migration_prompts_when_worktree_dirty(tmp_path: Path) -> None:
 
     confirm.assert_called_once()
     assert any(
-        "Planner worktree has local changes" in str(call.args[0])
-        for call in say.call_args_list
+        "Planner worktree has local changes" in str(call.args[0]) for call in say.call_args_list
     )
     assert any("Local changes:" in str(call.args[0]) for call in say.call_args_list)

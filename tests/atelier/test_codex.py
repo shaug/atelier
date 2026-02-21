@@ -16,9 +16,7 @@ def test_parse_codex_resume_line_handles_session_id_label() -> None:
 
 
 def test_extract_session_id_from_command_with_flags() -> None:
-    session_id = codex.extract_session_id_from_command(
-        "codex resume --profile fast sess-789"
-    )
+    session_id = codex.extract_session_id_from_command("codex resume --profile fast sess-789")
     assert session_id == "sess-789"
 
 

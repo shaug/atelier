@@ -26,9 +26,7 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
         )
         self.recover_premature_merged_changeset_fn = lambda *, issue, context: None
         self.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: None
-        self.send_planner_notification_fn = (
-            lambda *, subject, body, agent_id, thread_id: None
-        )
+        self.send_planner_notification_fn = lambda *, subject, body, agent_id, thread_id: None
         self.mark_changeset_closed_fn = lambda _changeset_id: None
         self.finalize_epic_if_complete_fn = lambda *, context: FinalizeResult(
             continue_running=True, reason="changeset_complete"
@@ -37,17 +35,15 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
         self.changeset_waiting_on_review_or_signals_fn = lambda issue, *, context: False
         self.lookup_pr_payload_fn = lambda repo_slug, branch: None
         self.lookup_pr_payload_diagnostic_fn = lambda repo_slug, branch: (None, None)
-        self.update_changeset_review_from_pr_fn = (
-            lambda changeset_id, *, pr_payload, pushed: None
-        )
-        self.finalize_terminal_changeset_fn = (
-            lambda *, context, terminal_state, integrated_sha: FinalizeResult(
+        self.update_changeset_review_from_pr_fn = lambda changeset_id, *, pr_payload, pushed: None
+        self.finalize_terminal_changeset_fn = lambda *, context, terminal_state, integrated_sha: (
+            FinalizeResult(
                 continue_running=True,
                 reason="changeset_terminal",
             )
         )
-        self.handle_pushed_without_pr_fn = (
-            lambda *, issue, context, create_detail_prefix=None: FinalizeResult(
+        self.handle_pushed_without_pr_fn = lambda *, issue, context, create_detail_prefix=None: (
+            FinalizeResult(
                 continue_running=True,
                 reason="changeset_review_pending",
             )
@@ -61,9 +57,7 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
                 dirty_entries=(),
             )
         )
-        self.format_publish_diagnostics_fn = lambda diagnostics, *, push_detail=None: (
-            "diag"
-        )
+        self.format_publish_diagnostics_fn = lambda diagnostics, *, push_detail=None: "diag"
         self.set_changeset_review_pending_state_fn = (
             lambda *, changeset_id, pr_payload, pushed, fallback_pr_state: None
         )
@@ -86,12 +80,8 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
     def has_open_descendant_changesets(self, changeset_id: str) -> bool:
         return self.has_open_descendant_changesets_fn(changeset_id)
 
-    def has_blocking_messages(
-        self, *, thread_ids: set[str], started_at: dt.datetime
-    ) -> bool:
-        return self.has_blocking_messages_fn(
-            thread_ids=thread_ids, started_at=started_at
-        )
+    def has_blocking_messages(self, *, thread_ids: set[str], started_at: dt.datetime) -> bool:
+        return self.has_blocking_messages_fn(thread_ids=thread_ids, started_at=started_at)
 
     def mark_changeset_children_in_progress(self, changeset_id: str) -> None:
         self.mark_changeset_children_in_progress_fn(changeset_id)
@@ -105,9 +95,7 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
     def changeset_integration_signal(
         self, issue: dict[str, object], *, repo_slug: str | None, git_path: str | None
     ) -> tuple[bool, str | None]:
-        return self.changeset_integration_signal_fn(
-            issue, repo_slug=repo_slug, git_path=git_path
-        )
+        return self.changeset_integration_signal_fn(issue, repo_slug=repo_slug, git_path=git_path)
 
     def recover_premature_merged_changeset(
         self,
@@ -149,9 +137,7 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
     ) -> bool:
         return self.changeset_waiting_on_review_or_signals_fn(issue, context=context)
 
-    def lookup_pr_payload(
-        self, repo_slug: str | None, branch: str
-    ) -> dict[str, object] | None:
+    def lookup_pr_payload(self, repo_slug: str | None, branch: str) -> dict[str, object] | None:
         return self.lookup_pr_payload_fn(repo_slug, branch)
 
     def lookup_pr_payload_diagnostic(

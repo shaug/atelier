@@ -25,9 +25,10 @@ def init_project(args: object) -> None:
     """Initialize an Atelier project for the current Git repository.
 
     Args:
-        args: CLI argument object with optional fields such as ``branch_prefix``,
-            ``branch_pr``, ``branch_history``, ``branch_pr_strategy``, ``agent``,
-            ``editor_edit``, and ``editor_work``.
+        args: CLI argument object with optional fields such as
+            ``branch_prefix``, ``branch_pr``, ``branch_history``,
+            ``branch_pr_strategy``, ``agent``, ``editor_edit``, and
+            ``editor_work``.
 
     Returns:
         None.
@@ -117,9 +118,7 @@ def init_project(args: object) -> None:
     say("Ensuring Beads issue types...")
     beads.ensure_atelier_types(beads_root=beads_root, cwd=beads_cwd)
 
-    add_policy = (
-        False if yes else confirm("Add project-wide policy for agents?", default=False)
-    )
+    add_policy = False if yes else confirm("Add project-wide policy for agents?", default=False)
     if add_policy:
         planner_issue = beads.list_policy_beads(
             policy.ROLE_PLANNER, beads_root=beads_root, cwd=beads_cwd
@@ -127,9 +126,7 @@ def init_project(args: object) -> None:
         worker_issue = beads.list_policy_beads(
             policy.ROLE_WORKER, beads_root=beads_root, cwd=beads_cwd
         )
-        planner_body = (
-            beads.extract_policy_body(planner_issue[0]) if planner_issue else ""
-        )
+        planner_body = beads.extract_policy_body(planner_issue[0]) if planner_issue else ""
         worker_body = beads.extract_policy_body(worker_issue[0]) if worker_issue else ""
         combined, split = policy.build_combined_policy(planner_body, worker_body)
         text = policy.edit_policy_text(combined, project_config=payload, cwd=cwd)

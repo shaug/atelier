@@ -29,7 +29,8 @@ class BranchConfig(BaseModel):
         pr: Whether pull requests are expected.
         history: History policy (manual|squash|merge|rebase).
         squash_message: Squash commit message policy (deterministic|agent).
-        pr_strategy: PR creation strategy (sequential|on-ready|on-parent-approved|parallel).
+        pr_strategy: PR creation strategy
+            (sequential|on-ready|on-parent-approved|parallel).
 
     Example:
         >>> BranchConfig(prefix="scott/", pr=False, history="rebase")
@@ -199,7 +200,10 @@ class AgentConfig(BaseModel):
         options: Mapping of agent names to argument lists.
 
     Example:
-        >>> AgentConfig(default="codex", options={"codex": ["--profile", "fast"]})
+        >>> AgentConfig(
+        ...     default="codex",
+        ...     options={"codex": ["--profile", "fast"]},
+        ... )
         AgentConfig(...)
     """
 
@@ -278,9 +282,7 @@ class EditorConfig(BaseModel):
     @classmethod
     def reject_legacy_editor_config(cls, value: object) -> object:
         if isinstance(value, dict) and {"default", "options"} & set(value.keys()):
-            raise ValueError(
-                "legacy editor config detected; use editor.edit/editor.work instead"
-            )
+            raise ValueError("legacy editor config detected; use editor.edit/editor.work instead")
         return value
 
     @field_validator("edit", "work", mode="before")
@@ -292,9 +294,7 @@ class EditorConfig(BaseModel):
 
         normalized = command_util.normalize_command(value)
         if normalized is None:
-            raise ValueError(
-                "editor commands must be lists of arguments or command strings"
-            )
+            raise ValueError("editor commands must be lists of arguments or command strings")
         return normalized
 
 

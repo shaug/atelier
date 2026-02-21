@@ -79,9 +79,7 @@ def _bd_daemon_status(
     if db_path is None:
         return None
     cmd = ["bd", "daemon", "status", "--json", "--db", str(db_path)]
-    result = exec.try_run_command(
-        cmd, cwd=project_data_dir, env=beads.beads_env(beads_root)
-    )
+    result = exec.try_run_command(cmd, cwd=project_data_dir, env=beads.beads_env(beads_root))
     if result is None or result.returncode != 0:
         return None
     raw = (result.stdout or "").strip()
@@ -133,9 +131,7 @@ def _stop_worker(project_data_dir: Path) -> bool:
 
 
 def start_daemon(args: object) -> None:
-    project_root, project_config, _enlistment, repo_root = (
-        resolve_current_project_with_repo_root()
-    )
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
 
@@ -175,9 +171,7 @@ def start_daemon(args: object) -> None:
 
 
 def stop_daemon(args: object) -> None:
-    project_root, project_config, _enlistment, repo_root = (
-        resolve_current_project_with_repo_root()
-    )
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
 
@@ -193,9 +187,7 @@ def stop_daemon(args: object) -> None:
         return
 
     cmd = ["bd", "daemon", "stop", "--db", str(db_path)]
-    result = exec.try_run_command(
-        cmd, cwd=project_data_dir, env=beads.beads_env(beads_root)
-    )
+    result = exec.try_run_command(cmd, cwd=project_data_dir, env=beads.beads_env(beads_root))
     if result is None or result.returncode != 0:
         say("bd daemon not running.")
         return
@@ -203,9 +195,7 @@ def stop_daemon(args: object) -> None:
 
 
 def status_daemon(args: object) -> None:
-    project_root, project_config, _enlistment, repo_root = (
-        resolve_current_project_with_repo_root()
-    )
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
 

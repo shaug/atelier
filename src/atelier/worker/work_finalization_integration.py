@@ -34,15 +34,11 @@ def _epic_ready_to_finalize(epic_id: str, *, beads_root: Path, repo_root: Path) 
     labels = _issue_labels(issue)
     if "at:changeset" in labels and ("cs:merged" in labels or "cs:abandoned" in labels):
         return True
-    summary = beads.epic_changeset_summary(
-        epic_id, beads_root=beads_root, cwd=repo_root
-    )
+    summary = beads.epic_changeset_summary(epic_id, beads_root=beads_root, cwd=repo_root)
     return summary.ready_to_close
 
 
-def _ensure_local_branch(
-    branch: str, *, repo_root: Path, git_path: str | None = None
-) -> bool:
+def _ensure_local_branch(branch: str, *, repo_root: Path, git_path: str | None = None) -> bool:
     return worker_integration_service.ensure_local_branch(
         branch, repo_root=repo_root, git_path=git_path
     )

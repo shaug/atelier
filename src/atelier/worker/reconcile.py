@@ -46,9 +46,7 @@ def list_reconcile_epic_candidates(
     def load_epic(epic_id: str) -> dict[str, object] | None:
         if epic_id in epic_cache:
             return epic_cache[epic_id]
-        loaded = beads.run_bd_json(
-            ["show", epic_id], beads_root=beads_root, cwd=repo_root
-        )
+        loaded = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
         epic_cache[epic_id] = loaded[0] if loaded else None
         return epic_cache[epic_id]
 
@@ -65,17 +63,13 @@ def list_reconcile_epic_candidates(
         )
         if not integration_proven:
             continue
-        epic_id = resolve_epic_id_for_changeset(
-            issue, beads_root=beads_root, repo_root=repo_root
-        )
+        epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
         if not epic_id:
             continue
         issue_status = str(issue.get("status") or "").strip().lower()
         if issue_status == "closed":
             epic_issue = load_epic(epic_id)
-            epic_closed = bool(epic_issue) and is_closed_status(
-                epic_issue.get("status")
-            )
+            epic_closed = bool(epic_issue) and is_closed_status(epic_issue.get("status"))
             if (
                 epic_closed
                 and integrated_sha
@@ -169,9 +163,7 @@ def reconcile_blocked_merged_changesets(
                 log(f"reconcile scan: {changeset_id} status={status or 'unknown'}")
                 log(f"reconcile skip: {changeset_id} (status={status})")
             continue
-        epic_id = resolve_epic_id_for_changeset(
-            issue, beads_root=beads_root, repo_root=repo_root
-        )
+        epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
         if epic_filter and epic_id != epic_filter:
             continue
         if log:
@@ -213,9 +205,7 @@ def reconcile_blocked_merged_changesets(
     def load_issue(issue_id: str) -> dict[str, object] | None:
         if issue_id in issue_cache:
             return issue_cache[issue_id]
-        loaded = beads.run_bd_json(
-            ["show", issue_id], beads_root=beads_root, cwd=repo_root
-        )
+        loaded = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
         issue_cache[issue_id] = loaded[0] if loaded else None
         return issue_cache[issue_id]
 
@@ -304,8 +294,7 @@ def reconcile_blocked_merged_changesets(
                     )
                 if log:
                     log(
-                        f"reconcile ok: {changeset_id} -> epic={candidate.epic_id} "
-                        "(already closed)"
+                        f"reconcile ok: {changeset_id} -> epic={candidate.epic_id} (already closed)"
                     )
                 reconciled += 1
                 reconciled_ids.add(changeset_id)
@@ -409,10 +398,7 @@ def reconcile_blocked_merged_changesets(
             if "_blocked_" in epic_result.reason:
                 failed += 1
                 if log:
-                    log(
-                        f"reconcile error: epic {epic_id} "
-                        f"(finalize reason={epic_result.reason})"
-                    )
+                    log(f"reconcile error: epic {epic_id} (finalize reason={epic_result.reason})")
                 continue
             if log:
                 log(f"reconcile epic: {epic_id} (finalize reason={epic_result.reason})")

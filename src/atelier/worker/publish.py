@@ -18,9 +18,7 @@ def normalized_markdown_bullets(value: str) -> list[str]:
     return items
 
 
-def render_changeset_pr_body(
-    issue: dict[str, object], *, fields: dict[str, str]
-) -> str:
+def render_changeset_pr_body(issue: dict[str, object], *, fields: dict[str, str]) -> str:
     """Render a user-facing PR body from bead fields."""
     summary = ""
     for key in ("scope", "intent", "summary", "rationale"):

@@ -107,9 +107,7 @@ class TestInitProject:
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
-                    patch(
-                        "atelier.config.shutil.which", return_value="/usr/bin/cursor"
-                    ),
+                    patch("atelier.config.shutil.which", return_value="/usr/bin/cursor"),
                     patch(
                         "atelier.commands.init.beads.run_bd_command",
                         return_value=CompletedProcess(
@@ -160,9 +158,7 @@ class TestInitProject:
             enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
-                )
+                project_dir = paths.project_dir_for_enlistment(enlistment_path, NORMALIZED_ORIGIN)
             captured: list[tuple[str, Path, Path]] = []
             original_cwd = Path.cwd()
             os.chdir(root)
@@ -177,18 +173,14 @@ class TestInitProject:
                     _args: list[str], *, beads_root: Path, cwd: Path
                 ) -> CompletedProcess[str]:
                     _capture("run_bd_command", beads_root=beads_root, cwd=cwd)
-                    return CompletedProcess(
-                        args=["bd"], returncode=0, stdout="", stderr=""
-                    )
+                    return CompletedProcess(args=["bd"], returncode=0, stdout="", stderr="")
 
                 def fake_ensure_store(*, beads_root: Path, cwd: Path) -> bool:
                     _capture("ensure_atelier_store", beads_root=beads_root, cwd=cwd)
                     return False
 
                 def fake_ensure_prefix(*, beads_root: Path, cwd: Path) -> bool:
-                    _capture(
-                        "ensure_atelier_issue_prefix", beads_root=beads_root, cwd=cwd
-                    )
+                    _capture("ensure_atelier_issue_prefix", beads_root=beads_root, cwd=cwd)
                     return False
 
                 def fake_ensure_types(*, beads_root: Path, cwd: Path) -> bool:
@@ -322,9 +314,7 @@ class TestInitProject:
                         "editor": {"edit": ["cursor", "-w"], "work": ["cursor"]},
                     }
                 )
-                config.write_project_config(
-                    paths.project_config_path(project_dir), seed
-                )
+                config.write_project_config(paths.project_config_path(project_dir), seed)
 
                 with (
                     patch(
@@ -353,9 +343,7 @@ class TestInitProject:
                             github_repo="acme/widgets",
                         ),
                     ),
-                    patch(
-                        "atelier.commands.init.select", return_value="none"
-                    ) as choose,
+                    patch("atelier.commands.init.select", return_value="none") as choose,
                     patch("atelier.commands.init.confirm", return_value=False),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
@@ -366,9 +354,7 @@ class TestInitProject:
                     init_cmd.init_project(args)
 
                 choose.assert_called_once()
-                config_payload = config.load_project_config(
-                    paths.project_config_path(project_dir)
-                )
+                config_payload = config.load_project_config(paths.project_config_path(project_dir))
                 assert config_payload is not None
                 assert config_payload.project.provider is None
             finally:
@@ -387,9 +373,7 @@ class TestInitProject:
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
-                    patch(
-                        "atelier.config.shutil.which", return_value="/usr/bin/cursor"
-                    ),
+                    patch("atelier.config.shutil.which", return_value="/usr/bin/cursor"),
                     patch.dict(os.environ, {"EDITOR": "nano -w"}),
                     patch(
                         "atelier.commands.init.beads.run_bd_command",
@@ -511,9 +495,7 @@ class TestInitProject:
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                     patch("atelier.commands.init.confirm", return_value=False),
-                    patch(
-                        "atelier.commands.init.select", return_value="none"
-                    ) as choose,
+                    patch("atelier.commands.init.select", return_value="none") as choose,
                     patch(
                         "atelier.commands.init.external_registry.resolve_planner_provider",
                         side_effect=fake_resolve_provider,
@@ -631,9 +613,7 @@ class TestInitProject:
                     )
                 project_dir.mkdir(parents=True, exist_ok=True)
                 parsed = config.ProjectConfig.model_validate(payload)
-                config.write_project_config(
-                    paths.project_config_path(project_dir), parsed
-                )
+                config.write_project_config(paths.project_config_path(project_dir), parsed)
 
                 args = make_init_args(
                     branch_prefix="feat/",
@@ -722,9 +702,7 @@ class TestInitProject:
                     )
                 project_dir.mkdir(parents=True, exist_ok=True)
                 parsed = config.ProjectConfig.model_validate(payload)
-                config.write_project_config(
-                    paths.project_config_path(project_dir), parsed
-                )
+                config.write_project_config(paths.project_config_path(project_dir), parsed)
 
                 args = make_init_args()
                 responses = iter(["", "", "", "", "", "", "", "", ""])
@@ -774,9 +752,7 @@ class TestInitProject:
             enlistment_path = enlistment_path_for(root)
             data_dir = root / "data"
             with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
-                project_dir = paths.project_dir_for_enlistment(
-                    enlistment_path, NORMALIZED_ORIGIN
-                )
+                project_dir = paths.project_dir_for_enlistment(enlistment_path, NORMALIZED_ORIGIN)
             project_dir.mkdir(parents=True, exist_ok=True)
             legacy_payload = {
                 "project": {

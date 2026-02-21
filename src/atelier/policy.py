@@ -62,7 +62,7 @@ def build_combined_policy(planner_text: str, worker_text: str) -> tuple[str, boo
 
 
 def split_combined_policy(text: str) -> dict[str, str] | None:
-    """Split combined policy text into role sections when markers are present."""
+    """Split combined policy text into role sections when markers exist."""
     lines = text.splitlines()
     marker_map = {value: key for key, value in COMBINED_MARKERS.items()}
     current: str | None = None
@@ -87,14 +87,10 @@ def split_combined_policy(text: str) -> dict[str, str] | None:
     return result
 
 
-def edit_policy_text(
-    initial_text: str, *, project_config: ProjectConfig, cwd: Path
-) -> str:
+def edit_policy_text(initial_text: str, *, project_config: ProjectConfig, cwd: Path) -> str:
     """Open a temp file in the editor and return the edited text."""
     editor_cmd = editor.resolve_editor_command(project_config, role="edit")
-    with NamedTemporaryFile(
-        "w", encoding="utf-8", delete=False, suffix=".md"
-    ) as handle:
+    with NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".md") as handle:
         handle.write(initial_text.rstrip("\n") + ("\n" if initial_text else ""))
         temp_path = Path(handle.name)
     try:

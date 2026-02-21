@@ -82,9 +82,7 @@ class TestAgentSpec:
             resume_subcommand=("continue",),
             resume_requires_session_id=False,
         )
-        cmd, cwd = spec.build_resume_command(
-            Path("/tmp/workspace"), ["--opt"], None
-        ) or (
+        cmd, cwd = spec.build_resume_command(Path("/tmp/workspace"), ["--opt"], None) or (
             [],
             None,
         )
@@ -93,10 +91,7 @@ class TestAgentSpec:
 
     def test_build_resume_command_no_subcommand(self) -> None:
         spec = AgentSpec(name="demo", display_name="Demo", command=("demo",))
-        assert (
-            spec.build_resume_command(Path("/tmp/workspace"), ["--opt"], "sess-1")
-            is None
-        )
+        assert spec.build_resume_command(Path("/tmp/workspace"), ["--opt"], "sess-1") is None
 
     def test_copilot_defaults(self) -> None:
         copilot = get_agent("copilot")
@@ -161,9 +156,7 @@ class TestAgentSpec:
             workspace_dir = Path(tmp)
             history = workspace_dir / "custom.history"
             history.write_text("hello\n", encoding="utf-8")
-            with patch.dict(
-                os.environ, {"AIDER_CHAT_HISTORY_FILE": "custom.history"}, clear=True
-            ):
+            with patch.dict(os.environ, {"AIDER_CHAT_HISTORY_FILE": "custom.history"}, clear=True):
                 assert agents.aider_chat_history_path(workspace_dir) == history
 
     def test_aider_chat_history_path_missing(self) -> None:

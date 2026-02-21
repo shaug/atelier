@@ -25,15 +25,11 @@ def branch_ref_for_lookup(
     if git_path is None:
         local_exists = git.git_ref_exists(repo_root, f"refs/heads/{normalized}")
     else:
-        local_exists = git.git_ref_exists(
-            repo_root, f"refs/heads/{normalized}", git_path=git_path
-        )
+        local_exists = git.git_ref_exists(repo_root, f"refs/heads/{normalized}", git_path=git_path)
     if local_exists:
         return normalized
     if git_path is None:
-        remote_exists = git.git_ref_exists(
-            repo_root, f"refs/remotes/origin/{normalized}"
-        )
+        remote_exists = git.git_ref_exists(repo_root, f"refs/remotes/origin/{normalized}")
     else:
         remote_exists = git.git_ref_exists(
             repo_root, f"refs/remotes/origin/{normalized}", git_path=git_path
@@ -66,14 +62,10 @@ def epic_root_integrated_into_parent(
     root_ref = branch_ref_for_lookup(repo_root, root_branch, git_path=git_path)
     if not root_ref:
         return True
-    is_ancestor = git.git_is_ancestor(
-        repo_root, root_ref, parent_ref, git_path=git_path
-    )
+    is_ancestor = git.git_is_ancestor(repo_root, root_ref, parent_ref, git_path=git_path)
     if is_ancestor is True:
         return True
-    fully_applied = git.git_branch_fully_applied(
-        repo_root, parent_ref, root_ref, git_path=git_path
-    )
+    fully_applied = git.git_branch_fully_applied(repo_root, parent_ref, root_ref, git_path=git_path)
     return fully_applied is True
 
 
@@ -97,8 +89,7 @@ def changeset_integration_signal(
     combined_text = "\n".join(part for part in (description_text, notes_text) if part)
     if combined_text:
         integrated_sha_candidates.extend(
-            match.group(1)
-            for match in INTEGRATED_SHA_NOTE_PATTERN.finditer(combined_text)
+            match.group(1) for match in INTEGRATED_SHA_NOTE_PATTERN.finditer(combined_text)
         )
     candidate_refs: list[str] = []
     for key in (
@@ -123,12 +114,7 @@ def changeset_integration_signal(
                 ref = branch_ref_for_lookup(repo_root, ref_name, git_path=git_path)
                 if not ref:
                     continue
-                if (
-                    git.git_is_ancestor(
-                        repo_root, candidate_sha, ref, git_path=git_path
-                    )
-                    is True
-                ):
+                if git.git_is_ancestor(repo_root, candidate_sha, ref, git_path=git_path) is True:
                     return True, candidate_sha
 
     root_branch = fields.get("changeset.root_branch")
@@ -151,9 +137,7 @@ def changeset_integration_signal(
     if is_ancestor is True:
         return True, git.git_rev_parse(repo_root, root_ref)
 
-    fully_applied = git.git_branch_fully_applied(
-        repo_root, root_ref, work_ref, git_path=git_path
-    )
+    fully_applied = git.git_branch_fully_applied(repo_root, root_ref, work_ref, git_path=git_path)
     if fully_applied is True:
         return True, git.git_rev_parse(repo_root, root_ref)
     return False, None
@@ -231,9 +215,7 @@ def cleanup_epic_branches_and_worktrees(
             if remote_ok:
                 log(f"cleanup deleted remote branch: origin/{branch}")
             else:
-                log(
-                    f"cleanup remote branch skip/fail: origin/{branch} ({remote_detail})"
-                )
+                log(f"cleanup remote branch skip/fail: origin/{branch} ({remote_detail})")
         if log:
             log(f"cleanup delete local branch: {branch}")
         local_ok, local_detail = run_git_status(
@@ -296,9 +278,7 @@ def integrate_epic_root_to_parent(
         is_ancestor = git.git_is_ancestor(repo_root, root, parent, git_path=git_path)
         if is_ancestor is True:
             return True, parent_head, None
-        fully_applied = git.git_branch_fully_applied(
-            repo_root, parent, root, git_path=git_path
-        )
+        fully_applied = git.git_branch_fully_applied(repo_root, parent, root, git_path=git_path)
         if fully_applied is True:
             return True, parent_head, None
 
@@ -307,9 +287,7 @@ def integrate_epic_root_to_parent(
         if history == "rebase":
             rebase_args = ["rebase", parent, root]
             if operation_cwd != repo_root:
-                current_branch = git.git_current_branch(
-                    operation_cwd, git_path=git_path
-                )
+                current_branch = git.git_current_branch(operation_cwd, git_path=git_path)
                 if current_branch == root:
                     rebase_args = ["rebase", parent]
             ok, detail = run_git_status(
@@ -382,13 +360,9 @@ def integrate_epic_root_to_parent(
                     ["merge", "--no-edit", root], repo_root=repo_root, git_path=git_path
                 )
                 if current and current != parent:
-                    run_git_status(
-                        ["checkout", current], repo_root=repo_root, git_path=git_path
-                    )
+                    run_git_status(["checkout", current], repo_root=repo_root, git_path=git_path)
                 if not ok:
-                    run_git_status(
-                        ["merge", "--abort"], repo_root=repo_root, git_path=git_path
-                    )
+                    run_git_status(["merge", "--abort"], repo_root=repo_root, git_path=git_path)
                     return (
                         False,
                         None,
@@ -420,13 +394,9 @@ def integrate_epic_root_to_parent(
                 ["merge", "--squash", root], repo_root=repo_root, git_path=git_path
             )
             if not ok:
-                run_git_status(
-                    ["merge", "--abort"], repo_root=repo_root, git_path=git_path
-                )
+                run_git_status(["merge", "--abort"], repo_root=repo_root, git_path=git_path)
                 if current and current != parent:
-                    run_git_status(
-                        ["checkout", current], repo_root=repo_root, git_path=git_path
-                    )
+                    run_git_status(["checkout", current], repo_root=repo_root, git_path=git_path)
                 return (
                     False,
                     None,
@@ -452,13 +422,9 @@ def integrate_epic_root_to_parent(
                 ["commit", "-m", message], repo_root=repo_root, git_path=git_path
             )
             if current and current != parent:
-                run_git_status(
-                    ["checkout", current], repo_root=repo_root, git_path=git_path
-                )
+                run_git_status(["checkout", current], repo_root=repo_root, git_path=git_path)
             if not ok:
-                run_git_status(
-                    ["merge", "--abort"], repo_root=repo_root, git_path=git_path
-                )
+                run_git_status(["merge", "--abort"], repo_root=repo_root, git_path=git_path)
                 return (
                     False,
                     None,

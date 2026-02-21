@@ -54,9 +54,7 @@ def test_gc_closes_expired_channel_messages() -> None:
             return_value=Path("/beads"),
         ),
         patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch(
-            "atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command
-        ),
+        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
         patch("atelier.commands.gc.say"),
     ):
         gc_cmd.gc(SimpleNamespace(stale_hours=24.0, dry_run=False, yes=True))
@@ -107,9 +105,7 @@ def test_gc_removes_stale_session_agent_home() -> None:
                 "atelier.commands.gc.config.resolve_beads_root",
                 return_value=Path("/beads"),
             ),
-            patch(
-                "atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json
-            ),
+            patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
             patch("atelier.commands.gc.beads.run_bd_command"),
             patch("atelier.commands.gc.beads.get_agent_hook", return_value=None),
             patch(
@@ -146,9 +142,7 @@ def test_normalize_changeset_labels_for_status_uses_status_authority() -> None:
     assert any("status is authoritative" in reason for reason in reasons)
 
 
-def test_normalize_changeset_labels_for_status_drops_terminal_labels_on_blocked() -> (
-    None
-):
+def test_normalize_changeset_labels_for_status_drops_terminal_labels_on_blocked() -> None:
     issue = {
         "id": "at-123",
         "status": "blocked",
@@ -163,9 +157,7 @@ def test_normalize_changeset_labels_for_status_drops_terminal_labels_on_blocked(
     assert any("not terminal" in reason for reason in reasons)
 
 
-def test_normalize_changeset_labels_for_status_adds_terminal_from_review_state() -> (
-    None
-):
+def test_normalize_changeset_labels_for_status_adds_terminal_from_review_state() -> None:
     issue = {
         "id": "at-123",
         "status": "closed",
@@ -205,9 +197,7 @@ def test_gc_normalize_changeset_labels_updates_legacy_labels() -> None:
 
     with (
         patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch(
-            "atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command
-        ),
+        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
     ):
         actions = gc_cmd._gc_normalize_changeset_labels(
             beads_root=Path("/beads"),
@@ -301,9 +291,7 @@ def test_gc_reconcile_flag_prompts_and_skips_without_confirmation() -> None:
             "atelier.commands.gc._reconcile_preview_lines",
             return_value=("final integration: feat/root -> main",),
         ),
-        patch(
-            "atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets"
-        ) as reconcile,
+        patch("atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets") as reconcile,
         patch("atelier.commands.gc.confirm", return_value=False) as confirm,
         patch("atelier.commands.gc.say") as say,
     ):
@@ -322,10 +310,7 @@ def test_gc_reconcile_flag_prompts_and_skips_without_confirmation() -> None:
         default=False,
     )
     reconcile.assert_not_called()
-    assert any(
-        "Skipped reconcile: epic at-wjj" in str(call.args[0])
-        for call in say.call_args_list
-    )
+    assert any("Skipped reconcile: epic at-wjj" in str(call.args[0]) for call in say.call_args_list)
 
 
 def test_gc_reconcile_flag_prompts_and_runs_with_confirmation() -> None:
@@ -416,9 +401,7 @@ def test_gc_reconcile_flag_no_candidates_skips_prompts() -> None:
             "atelier.commands.gc.work_cmd.list_reconcile_epic_candidates",
             return_value={},
         ),
-        patch(
-            "atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets"
-        ) as reconcile,
+        patch("atelier.commands.gc.work_cmd.reconcile_blocked_merged_changesets") as reconcile,
         patch("atelier.commands.gc.confirm") as confirm,
         patch("atelier.commands.gc.say") as say,
     ):
@@ -434,9 +417,7 @@ def test_gc_reconcile_flag_no_candidates_skips_prompts() -> None:
 
     reconcile.assert_not_called()
     confirm.assert_not_called()
-    assert any(
-        "No reconcile candidates." in str(call.args[0]) for call in say.call_args_list
-    )
+    assert any("No reconcile candidates." in str(call.args[0]) for call in say.call_args_list)
 
 
 def test_gc_orphan_worktree_dirty_prompts_force_or_exit() -> None:
@@ -483,9 +464,7 @@ def test_gc_orphan_worktree_dirty_prompts_force_or_exit() -> None:
                 "atelier.commands.gc.git.git_status_porcelain",
                 return_value=[" M foo.py", "?? bar.txt"],
             ),
-            patch(
-                "atelier.commands.gc.worktrees.remove_git_worktree"
-            ) as remove_worktree,
+            patch("atelier.commands.gc.worktrees.remove_git_worktree") as remove_worktree,
             patch("atelier.commands.gc.confirm", return_value=True),
             patch("atelier.commands.gc.select", return_value="exit"),
             patch("atelier.commands.gc.say"),
@@ -548,9 +527,7 @@ def test_gc_orphan_worktree_dirty_force_remove_calls_force() -> None:
                 "atelier.commands.gc.git.git_status_porcelain",
                 return_value=[" M foo.py"],
             ),
-            patch(
-                "atelier.commands.gc.worktrees.remove_git_worktree"
-            ) as remove_worktree,
+            patch("atelier.commands.gc.worktrees.remove_git_worktree") as remove_worktree,
             patch("atelier.commands.gc.confirm", return_value=True),
             patch("atelier.commands.gc.select", return_value="force-remove"),
             patch("atelier.commands.gc.say"),
@@ -620,9 +597,7 @@ def test_gc_resolved_epic_artifacts_prunes_worktrees_and_branches() -> None:
             patch("atelier.commands.gc._try_show_issue", return_value=epic_issue),
             patch(
                 "atelier.commands.gc.beads.epic_changeset_summary",
-                side_effect=AssertionError(
-                    "summary should not gate closed epic cleanup"
-                ),
+                side_effect=AssertionError("summary should not gate closed epic cleanup"),
             ),
             patch("atelier.commands.gc.git.git_default_branch", return_value="main"),
             patch(
@@ -630,9 +605,7 @@ def test_gc_resolved_epic_artifacts_prunes_worktrees_and_branches() -> None:
                 side_effect=lambda repo, ref, git_path=None: ref in refs,
             ),
             patch("atelier.commands.gc.git.git_is_ancestor", return_value=True),
-            patch(
-                "atelier.commands.gc.git.git_branch_fully_applied", return_value=False
-            ),
+            patch("atelier.commands.gc.git.git_branch_fully_applied", return_value=False),
             patch("atelier.commands.gc.git.git_status_porcelain", return_value=[]),
             patch("atelier.commands.gc.git.git_current_branch", return_value="main"),
             patch(
@@ -702,9 +675,7 @@ def test_gc_resolved_epic_artifacts_skips_when_not_integrated() -> None:
             patch("atelier.commands.gc._try_show_issue", return_value=epic_issue),
             patch(
                 "atelier.commands.gc.beads.epic_changeset_summary",
-                side_effect=AssertionError(
-                    "summary should not gate closed epic cleanup"
-                ),
+                side_effect=AssertionError("summary should not gate closed epic cleanup"),
             ),
             patch("atelier.commands.gc.git.git_default_branch", return_value="main"),
             patch(
@@ -712,9 +683,7 @@ def test_gc_resolved_epic_artifacts_skips_when_not_integrated() -> None:
                 side_effect=lambda repo, ref, git_path=None: ref in refs,
             ),
             patch("atelier.commands.gc.git.git_is_ancestor", return_value=False),
-            patch(
-                "atelier.commands.gc.git.git_branch_fully_applied", return_value=False
-            ),
+            patch("atelier.commands.gc.git.git_branch_fully_applied", return_value=False),
         ):
             actions = gc_cmd._gc_resolved_epic_artifacts(
                 project_dir=project_dir,
@@ -765,9 +734,7 @@ def test_gc_closed_workspace_branches_without_mapping_prunes_integrated_root() -
                 side_effect=lambda repo, ref, git_path=None: ref in refs,
             ),
             patch("atelier.commands.gc.git.git_is_ancestor", return_value=True),
-            patch(
-                "atelier.commands.gc.git.git_branch_fully_applied", return_value=False
-            ),
+            patch("atelier.commands.gc.git.git_branch_fully_applied", return_value=False),
             patch("atelier.commands.gc.git.git_current_branch", return_value="main"),
             patch(
                 "atelier.commands.gc._run_git_gc_command",
@@ -826,9 +793,7 @@ def test_gc_closed_workspace_branches_without_mapping_skips_not_integrated() -> 
                 side_effect=lambda repo, ref, git_path=None: ref in refs,
             ),
             patch("atelier.commands.gc.git.git_is_ancestor", return_value=False),
-            patch(
-                "atelier.commands.gc.git.git_branch_fully_applied", return_value=False
-            ),
+            patch("atelier.commands.gc.git.git_branch_fully_applied", return_value=False),
         ):
             actions = gc_cmd._gc_closed_workspace_branches_without_mapping(
                 project_dir=project_dir,
@@ -888,11 +853,5 @@ def test_gc_logs_action_lifecycle_in_dry_run() -> None:
 
     debug_messages = [str(call.args[0]) for call in log_debug.call_args_list]
     assert any("gc start" in message for message in debug_messages)
-    assert any(
-        "gc action queued description=Test action" in message
-        for message in debug_messages
-    )
-    assert any(
-        "gc action dry-run description=Test action" in message
-        for message in debug_messages
-    )
+    assert any("gc action queued description=Test action" in message for message in debug_messages)
+    assert any("gc action dry-run description=Test action" in message for message in debug_messages)

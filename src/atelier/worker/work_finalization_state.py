@@ -94,9 +94,7 @@ def _send_no_ready_changesets(
     )
 
 
-def _release_epic_assignment(
-    epic_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def _release_epic_assignment(epic_id: str, *, beads_root: Path, repo_root: Path) -> None:
     issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
     if not issues:
         return
@@ -186,18 +184,14 @@ def _changeset_base_branch(
     git_path: str | None,
 ) -> str | None:
     description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     root_branch = _changeset_root_branch(issue)
     parent_branch = _changeset_parent_branch(issue, root_branch=root_branch or "")
     workspace_parent_branch = fields.get("workspace.parent_branch")
     normalized_parent = parent_branch.strip() if isinstance(parent_branch, str) else ""
     normalized_root = root_branch.strip() if isinstance(root_branch, str) else ""
     normalized_workspace_parent = (
-        workspace_parent_branch.strip()
-        if isinstance(workspace_parent_branch, str)
-        else ""
+        workspace_parent_branch.strip() if isinstance(workspace_parent_branch, str) else ""
     )
     if (
         not normalized_workspace_parent
@@ -206,19 +200,15 @@ def _changeset_base_branch(
         and normalized_parent
         and normalized_parent == normalized_root
     ):
-        epic_id = _resolve_epic_id_for_changeset(
-            issue, beads_root=beads_root, repo_root=repo_root
-        )
+        epic_id = _resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
         if epic_id:
-            epic_issues = beads.run_bd_json(
-                ["show", epic_id], beads_root=beads_root, cwd=repo_root
-            )
+            epic_issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
             if epic_issues:
                 resolved_parent = _extract_workspace_parent_branch(epic_issues[0])
                 if resolved_parent:
                     normalized_workspace_parent = resolved_parent
-    # Top-level changesets often persisted parent=root; use workspace parent for
-    # PR base when available so PR creation targets mainline, not the root branch.
+    # Top-level changesets often persisted parent=root; use workspace parent
+    # for PR base when available so PR creation targets mainline.
     if (
         normalized_workspace_parent
         and normalized_workspace_parent.lower() != "null"
@@ -236,9 +226,7 @@ def _changeset_base_branch(
 
 def _render_changeset_pr_body(issue: dict[str, object]) -> str:
     description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     return worker_publish.render_changeset_pr_body(issue, fields=fields)
 
 
@@ -297,9 +285,7 @@ def _update_changeset_review_from_pr(
     if not pr_payload:
         return
     review_requested = prs.has_review_requests(pr_payload)
-    lifecycle = prs.lifecycle_state(
-        pr_payload, pushed=pushed, review_requested=review_requested
-    )
+    lifecycle = prs.lifecycle_state(pr_payload, pushed=pushed, review_requested=review_requested)
     metadata = changesets.ReviewMetadata(
         pr_url=str(pr_payload.get("url") or "") or None,
         pr_number=str(pr_payload.get("number") or "") or None,
@@ -454,9 +440,7 @@ def _changeset_waiting_on_review_or_signals(
         )
         pr_payload = _lookup_pr_payload(repo_slug, work_branch)
         review_requested = prs.has_review_requests(pr_payload)
-        state = prs.lifecycle_state(
-            pr_payload, pushed=pushed, review_requested=review_requested
-        )
+        state = prs.lifecycle_state(pr_payload, pushed=pushed, review_requested=review_requested)
         if state in {"merged", "closed"}:
             return False
         if state in {"draft-pr", "pr-open", "in-review", "approved"}:
@@ -494,7 +478,7 @@ def _is_changeset_recovery_candidate(
     branch_pr: bool,
     git_path: str | None,
 ) -> bool:
-    """Return True when a blocked changeset has enough publish/review signals to retry."""
+    """Return True when blocked changeset has enough signals to retry."""
     labels = _issue_labels(issue)
     status = str(issue.get("status") or "").strip().lower()
     if "cs:blocked" not in labels and status != "blocked":
@@ -506,9 +490,7 @@ def _is_changeset_recovery_candidate(
     work_branch = _changeset_work_branch(issue)
     if not work_branch:
         return False
-    pushed = git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
-    )
+    pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path)
     if branch_pr:
         pr_payload = _lookup_pr_payload(repo_slug, work_branch)
         review_requested = prs.has_review_requests(pr_payload)
@@ -539,9 +521,7 @@ def _list_child_issues(
     )
 
 
-def _find_invalid_changeset_labels(
-    root_id: str, *, beads_root: Path, repo_root: Path
-) -> list[str]:
+def _find_invalid_changeset_labels(root_id: str, *, beads_root: Path, repo_root: Path) -> list[str]:
     return worker_finalization_service.find_invalid_changeset_labels(
         root_id,
         beads_root=beads_root,
@@ -552,9 +532,7 @@ def _find_invalid_changeset_labels(
 
 def _changeset_parent_branch(issue: dict[str, object], *, root_branch: str) -> str:
     description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     parent_branch = fields.get("changeset.parent_branch")
     if not parent_branch:
         return root_branch
@@ -564,9 +542,7 @@ def _changeset_parent_branch(issue: dict[str, object], *, root_branch: str) -> s
     return normalized
 
 
-def _mark_changeset_in_progress(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def _mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     worker_finalization_service.mark_changeset_in_progress(
         changeset_id,
         beads_root=beads_root,
@@ -574,9 +550,7 @@ def _mark_changeset_in_progress(
     )
 
 
-def _mark_changeset_closed(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def _mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     worker_finalization_service.mark_changeset_closed(
         changeset_id,
         beads_root=beads_root,
@@ -584,9 +558,7 @@ def _mark_changeset_closed(
     )
 
 
-def _mark_changeset_merged(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def _mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     worker_finalization_service.mark_changeset_merged(
         changeset_id,
         beads_root=beads_root,
@@ -594,9 +566,7 @@ def _mark_changeset_merged(
     )
 
 
-def _mark_changeset_abandoned(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def _mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     worker_finalization_service.mark_changeset_abandoned(
         changeset_id,
         beads_root=beads_root,
@@ -665,9 +635,7 @@ def _has_blocking_messages(
 def _branch_ref_for_lookup(
     repo_root: Path, branch: str, *, git_path: str | None = None
 ) -> str | None:
-    return worker_integration_service.branch_ref_for_lookup(
-        repo_root, branch, git_path=git_path
-    )
+    return worker_integration_service.branch_ref_for_lookup(repo_root, branch, git_path=git_path)
 
 
 def _epic_root_integrated_into_parent(

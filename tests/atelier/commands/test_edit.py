@@ -75,6 +75,4 @@ def test_edit_opens_workspace_repo_in_editor(tmp_path: Path) -> None:
             )
         )
 
-    run_detached.assert_called_once_with(
-        ["code", str(worktree_path)], cwd=worktree_path, env=env
-    )
+    run_detached.assert_called_once_with(["code", str(worktree_path)], cwd=worktree_path, env=env)

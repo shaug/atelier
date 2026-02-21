@@ -32,39 +32,31 @@ def recover_premature_merged_changeset(
     git_path: str | None,
     changeset_work_branch: Callable[[dict[str, object]], str],
     lookup_pr_payload: Callable[..., dict[str, object] | None],
-    lookup_pr_payload_diagnostic: Callable[
-        ..., tuple[dict[str, object] | None, str | None]
-    ],
+    lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]],
     changeset_integration_signal: Callable[..., tuple[bool, str | None]],
     finalize_terminal_changeset: Callable[..., FinalizeResult],
     mark_changeset_in_progress: Callable[..., None],
     update_changeset_review_from_pr: Callable[..., None],
     handle_pushed_without_pr: Callable[..., FinalizeResult],
 ) -> FinalizeResult | None:
-    """Recover when a changeset is marked merged before publish/review signals."""
+    """Recover changeset marked merged before publish/review signals exist."""
     if not branch_pr:
         return None
     work_branch = changeset_work_branch(issue)
     if not work_branch:
         return None
-    pushed = git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
-    )
+    pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path)
     payload = lookup_pr_payload(repo_slug, work_branch)
     lookup_error = None
     if payload is None:
-        _payload_check, lookup_error = lookup_pr_payload_diagnostic(
-            repo_slug, work_branch
-        )
+        _payload_check, lookup_error = lookup_pr_payload_diagnostic(repo_slug, work_branch)
     if lookup_error:
         atelier_log.warning(
             "changeset="
             f"{changeset_id} premature-merged recovery failed PR lookup "
             f"for branch={work_branch}: {lookup_error}"
         )
-        return FinalizeResult(
-            continue_running=False, reason="changeset_pr_status_query_failed"
-        )
+        return FinalizeResult(continue_running=False, reason="changeset_pr_status_query_failed")
     if payload:
         pr_state = prs.lifecycle_state(
             payload,
@@ -74,9 +66,7 @@ def recover_premature_merged_changeset(
     else:
         pr_state = "pushed" if pushed else "local-only"
     if pr_state in {"draft-pr", "pr-open", "in-review", "approved"}:
-        mark_changeset_in_progress(
-            changeset_id, beads_root=beads_root, repo_root=repo_root
-        )
+        mark_changeset_in_progress(changeset_id, beads_root=beads_root, repo_root=repo_root)
         update_changeset_review_from_pr(
             changeset_id,
             pr_payload=payload,
@@ -132,9 +122,7 @@ def recover_premature_merged_changeset(
             git_path=git_path,
         )
     if pushed and pr_state in {"pushed", "local-only"}:
-        mark_changeset_in_progress(
-            changeset_id, beads_root=beads_root, repo_root=repo_root
-        )
+        mark_changeset_in_progress(changeset_id, beads_root=beads_root, repo_root=repo_root)
         return handle_pushed_without_pr(
             issue=issue,
             changeset_id=changeset_id,

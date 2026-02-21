@@ -131,6 +131,25 @@ Do not add hidden behavior or implicit defaults.
     subprocess parsing
   - validate external JSON payloads with Pydantic at the edge before business
     logic consumes them
+- Treat `_`-prefixed functions as module-private implementation details:
+  - do not export `_`-prefixed names via `__all__`
+  - do not rely on wildcard re-export patterns (`from module import *`) to share
+    private helpers across modules
+  - if a function is intended for cross-module use, make it public
+    (non-underscore) and type it explicitly
+
+______________________________________________________________________
+
+## API Documentation & Style Rules
+
+- Every exported function (public name or included in `__all__`) must have a
+  thorough docstring in **reST (PEP 287) style**.
+- Exported docstrings should describe behavior, inputs, return values, and
+  expected failure modes (for example, raised exceptions or blocking
+  conditions).
+- Keep line lengths strict:
+  - code lines: **100** max
+  - comments and docstring prose: **80** max
 
 ______________________________________________________________________
 

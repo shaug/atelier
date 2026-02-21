@@ -191,7 +191,7 @@ def probe_agent_version(agent: AgentSpec) -> str | None:
 
 
 def available_agents() -> dict[str, str | None]:
-    """Return available agent names mapped to their version string when known."""
+    """Return available agent names mapped to version strings, when known."""
     available: dict[str, str | None] = {}
     for agent in AGENTS.values():
         executable = agent.command[0]
@@ -253,9 +253,7 @@ def find_resume_session(
         return None
     from . import sessions
 
-    return sessions.find_codex_session(
-        project_enlistment, workspace_branch, workspace_uid
-    )
+    return sessions.find_codex_session(project_enlistment, workspace_branch, workspace_uid)
 
 
 def apply_yolo_options(agent: AgentSpec, options: list[str]) -> list[str]:

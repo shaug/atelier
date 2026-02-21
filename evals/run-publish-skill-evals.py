@@ -58,12 +58,8 @@ def write_workspace_config(workspace: Path) -> None:
             "base": {"default_branch": "main"},
         }
     }
-    (workspace / "config.sys.json").write_text(
-        json.dumps(config, indent=2), encoding="utf-8"
-    )
-    (workspace / "config.user.json").write_text(
-        json.dumps({}, indent=2), encoding="utf-8"
-    )
+    (workspace / "config.sys.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+    (workspace / "config.user.json").write_text(json.dumps({}, indent=2), encoding="utf-8")
     (workspace / "SUCCESS.md").write_text(
         "# Success\n\nRun publish evals.\n",
         encoding="utf-8",
@@ -84,9 +80,7 @@ def setup_workspace(workspace: Path) -> None:
         ["git", "-C", str(repo_dir), "config", "user.email", "test@example.com"],
         check=True,
     )
-    subprocess.run(
-        ["git", "-C", str(repo_dir), "config", "user.name", "Test User"], check=True
-    )
+    subprocess.run(["git", "-C", str(repo_dir), "config", "user.name", "Test User"], check=True)
     (repo_dir / "README.md").write_text("init\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repo_dir), "add", "README.md"], check=True)
     subprocess.run(["git", "-C", str(repo_dir), "commit", "-m", "init"], check=True)

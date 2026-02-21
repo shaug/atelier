@@ -32,17 +32,13 @@ def _normalize_branch_value(value: object) -> str | None:
 
 def _extract_changeset_root_branch(issue: dict[str, object]) -> str | None:
     description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     return _normalize_branch_value(fields.get("changeset.root_branch"))
 
 
 def _extract_workspace_parent_branch(issue: dict[str, object]) -> str | None:
     description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     return _normalize_branch_value(fields.get("workspace.parent_branch"))
 
 
@@ -69,9 +65,7 @@ def _trace_enabled() -> bool:
 
 
 def _step(label: str, *, timings: list[tuple[str, float]], trace: bool) -> Callable:
-    return worker_telemetry.step(
-        label, timings=timings, trace=trace, say=say, log_debug=_log_debug
-    )
+    return worker_telemetry.step(label, timings=timings, trace=trace, say=say, log_debug=_log_debug)
 
 
 def _report_timings(timings: list[tuple[str, float]], *, trace: bool) -> None:
@@ -79,9 +73,7 @@ def _report_timings(timings: list[tuple[str, float]], *, trace: bool) -> None:
 
 
 def _report_worker_summary(summary: WorkerRunSummary, *, dry_run: bool) -> None:
-    worker_telemetry.report_worker_summary(
-        summary, dry_run=dry_run, say=say, log_debug=_log_debug
-    )
+    worker_telemetry.report_worker_summary(summary, dry_run=dry_run, say=say, log_debug=_log_debug)
 
 
 def _with_codex_exec(cmd: list[str], opening_prompt: str) -> list[str]:

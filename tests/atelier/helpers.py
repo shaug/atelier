@@ -167,9 +167,7 @@ def make_fake_git(
     normalized_remotes = {
         (path.resolve(), branch): value for (path, branch), value in remotes.items()
     }
-    normalized_tags = {
-        path.resolve(): set(values) for path, values in (tags or {}).items()
-    }
+    normalized_tags = {path.resolve(): set(values) for path, values in (tags or {}).items()}
 
     def fake_run(
         cmd: list[str],

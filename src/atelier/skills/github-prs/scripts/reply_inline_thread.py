@@ -59,14 +59,10 @@ mutation($threadId: ID!) {
 
 def main(argv: Iterable[str]) -> int:
     parser = argparse.ArgumentParser(
-        description=(
-            "Reply inline to a PR review comment and optionally resolve the thread."
-        )
+        description=("Reply inline to a PR review comment and optionally resolve the thread.")
     )
     parser.add_argument("--repo", required=True, help="GitHub repo slug (owner/name)")
-    parser.add_argument(
-        "--comment-id", required=True, type=int, help="Inline review comment id"
-    )
+    parser.add_argument("--comment-id", required=True, type=int, help="Inline review comment id")
     parser.add_argument(
         "--thread-id",
         help="GraphQL review thread id to resolve after reply (optional)",
@@ -95,13 +91,9 @@ def main(argv: Iterable[str]) -> int:
                     "thread_resolved": bool(
                         isinstance(resolved, dict)
                         and isinstance(resolved.get("data"), dict)
+                        and isinstance(resolved.get("data", {}).get("resolveReviewThread"), dict)
                         and isinstance(
-                            resolved.get("data", {}).get("resolveReviewThread"), dict
-                        )
-                        and isinstance(
-                            resolved.get("data", {})
-                            .get("resolveReviewThread", {})
-                            .get("thread"),
+                            resolved.get("data", {}).get("resolveReviewThread", {}).get("thread"),
                             dict,
                         )
                         and bool(

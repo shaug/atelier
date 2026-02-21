@@ -8,9 +8,7 @@ import atelier.worktrees as worktrees
 
 
 def test_derive_changeset_branch_uses_root_branch() -> None:
-    assert (
-        worktrees.derive_changeset_branch("feat/root", "epic.2") == "feat/root-epic.2"
-    )
+    assert worktrees.derive_changeset_branch("feat/root", "epic.2") == "feat/root-epic.2"
 
 
 def test_ensure_changeset_branch_writes_mapping() -> None:
@@ -50,9 +48,7 @@ def test_ensure_changeset_worktree_writes_mapping() -> None:
         project_dir.mkdir(parents=True)
         repo_root.mkdir(parents=True)
 
-        def fake_ref_exists(
-            _repo: Path, ref: str, *, git_path: str | None = None
-        ) -> bool:
+        def fake_ref_exists(_repo: Path, ref: str, *, git_path: str | None = None) -> bool:
             return ref == "refs/heads/feat/root"
 
         with (
@@ -82,9 +78,7 @@ def test_ensure_git_worktree_creates_when_missing() -> None:
         project_dir.mkdir(parents=True)
         repo_root.mkdir(parents=True)
 
-        def fake_ref_exists(
-            _repo: Path, ref: str, *, git_path: str | None = None
-        ) -> bool:
+        def fake_ref_exists(_repo: Path, ref: str, *, git_path: str | None = None) -> bool:
             return ref == "refs/remotes/origin/main"
 
         with (
@@ -116,9 +110,7 @@ def test_ensure_git_worktree_detaches_when_branch_in_use() -> None:
         project_dir.mkdir(parents=True)
         repo_root.mkdir(parents=True)
 
-        def fake_ref_exists(
-            _repo: Path, ref: str, *, git_path: str | None = None
-        ) -> bool:
+        def fake_ref_exists(_repo: Path, ref: str, *, git_path: str | None = None) -> bool:
             return ref == "refs/heads/feat/root"
 
         def fake_try_run(
@@ -134,14 +126,10 @@ def test_ensure_git_worktree_detaches_when_branch_in_use() -> None:
         with (
             patch("atelier.worktrees.git.git_default_branch", return_value="main"),
             patch("atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists),
-            patch(
-                "atelier.worktrees.exec_util.try_run_command", side_effect=fake_try_run
-            ),
+            patch("atelier.worktrees.exec_util.try_run_command", side_effect=fake_try_run),
             patch("atelier.worktrees.exec_util.run_command") as run_command,
         ):
-            worktrees.ensure_git_worktree(
-                project_dir, repo_root, "epic", root_branch="feat/root"
-            )
+            worktrees.ensure_git_worktree(project_dir, repo_root, "epic", root_branch="feat/root")
 
         assert "--detach" in run_command.call_args.args[0]
 
@@ -158,9 +146,7 @@ def test_ensure_git_worktree_existing_path_still_materializes_root_branch() -> N
         worktree_path.mkdir(parents=True)
         (worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
 
-        def fake_ref_exists(
-            _repo: Path, ref: str, *, git_path: str | None = None
-        ) -> bool:
+        def fake_ref_exists(_repo: Path, ref: str, *, git_path: str | None = None) -> bool:
             return ref == "refs/heads/main"
 
         with (

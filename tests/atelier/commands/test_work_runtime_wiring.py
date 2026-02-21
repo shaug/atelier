@@ -24,9 +24,7 @@ def test_start_worker_delegates_loop_to_runtime() -> None:
             "atelier.commands.work.agent_home.generate_session_key",
             return_value="sess-1",
         ),
-        patch(
-            "atelier.commands.work.worker_runtime.run_worker_sessions"
-        ) as run_sessions,
+        patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions,
     ):
         work_cmd.start_worker(
             SimpleNamespace(epic_id=None, mode="auto", run_mode="once", dry_run=True)
@@ -65,9 +63,7 @@ def test_start_worker_cleans_up_agent_home_after_runtime_failure(
             "atelier.commands.work.config.resolve_project_data_dir",
             return_value=tmp_path,
         ),
-        patch(
-            "atelier.commands.work.agent_home.preview_agent_home", return_value=agent
-        ),
+        patch("atelier.commands.work.agent_home.preview_agent_home", return_value=agent),
         patch(
             "atelier.commands.work.worker_runtime.run_worker_sessions",
             side_effect=RuntimeError("boom"),
@@ -76,9 +72,7 @@ def test_start_worker_cleans_up_agent_home_after_runtime_failure(
     ):
         with pytest.raises(RuntimeError, match="boom"):
             work_cmd.start_worker(
-                SimpleNamespace(
-                    epic_id=None, mode="auto", run_mode="default", dry_run=False
-                )
+                SimpleNamespace(epic_id=None, mode="auto", run_mode="default", dry_run=False)
             )
 
     cleanup_home.assert_called_once_with(agent, project_dir=tmp_path)

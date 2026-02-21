@@ -22,9 +22,7 @@ def test_resolve_agent_home_creates_metadata_and_instructions() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"
         project_dir.mkdir(parents=True)
-        home = agent_home.resolve_agent_home(
-            project_dir, ProjectConfig(), role="worker"
-        )
+        home = agent_home.resolve_agent_home(project_dir, ProjectConfig(), role="worker")
 
         assert home.path.exists()
         assert (home.path / agent_home.AGENT_INSTRUCTIONS_FILENAME).exists()
@@ -41,9 +39,7 @@ def test_env_agent_id_overrides_default_name() -> None:
         project_dir = Path(tmp) / "project"
         project_dir.mkdir(parents=True)
         with patch.dict(os.environ, {"ATELIER_AGENT_ID": "atelier/worker/alice"}):
-            home = agent_home.resolve_agent_home(
-                project_dir, ProjectConfig(), role="worker"
-            )
+            home = agent_home.resolve_agent_home(project_dir, ProjectConfig(), role="worker")
         assert home.name == "alice"
         assert home.agent_id == "atelier/worker/alice"
         assert home.path == project_dir / "agents" / "worker" / "alice"
@@ -92,13 +88,8 @@ def test_preview_agent_home_uses_session_env_var() -> None:
 
 
 def test_session_started_ns_from_agent_id_parses_timestamp() -> None:
-    assert (
-        agent_home.session_started_ns_from_agent_id("atelier/worker/codex/p42-t123456")
-        == 123456
-    )
-    assert (
-        agent_home.session_started_ns_from_agent_id("atelier/worker/codex/p42") is None
-    )
+    assert agent_home.session_started_ns_from_agent_id("atelier/worker/codex/p42-t123456") == 123456
+    assert agent_home.session_started_ns_from_agent_id("atelier/worker/codex/p42") is None
 
 
 def test_is_session_agent_active_rejects_pid_reuse() -> None:
@@ -124,9 +115,7 @@ def test_ensure_agent_links_creates_symlinks_or_markers() -> None:
         root = Path(tmp)
         project_dir = root / "project"
         project_dir.mkdir(parents=True)
-        home = agent_home.resolve_agent_home(
-            project_dir, ProjectConfig(), role="worker"
-        )
+        home = agent_home.resolve_agent_home(project_dir, ProjectConfig(), role="worker")
         worktree = root / "worktree"
         beads = root / "beads"
         skills = root / "skills"
@@ -151,9 +140,7 @@ def test_ensure_agent_links_creates_project_skill_aliases() -> None:
         root = Path(tmp)
         project_dir = root / "project"
         project_dir.mkdir(parents=True)
-        home = agent_home.resolve_agent_home(
-            project_dir, ProjectConfig(), role="worker"
-        )
+        home = agent_home.resolve_agent_home(project_dir, ProjectConfig(), role="worker")
         worktree = root / "worktree"
         beads = root / "beads"
         skills = root / "skills"
@@ -198,9 +185,7 @@ def test_cleanup_agent_home_by_id_ignores_non_session_identity() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"
         project_dir.mkdir(parents=True)
-        removed = agent_home.cleanup_agent_home_by_id(
-            project_dir, "atelier/worker/codex"
-        )
+        removed = agent_home.cleanup_agent_home_by_id(project_dir, "atelier/worker/codex")
         assert removed is False
 
 
@@ -225,9 +210,7 @@ def test_ensure_claude_compat_writes_files() -> None:
         )
         assert hook_path.exists()
 
-        settings_path = (
-            agent_path / agent_home.CLAUDE_DIRNAME / agent_home.CLAUDE_SETTINGS_FILENAME
-        )
+        settings_path = agent_path / agent_home.CLAUDE_DIRNAME / agent_home.CLAUDE_SETTINGS_FILENAME
         assert settings_path.exists()
 
 

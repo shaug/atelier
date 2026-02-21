@@ -38,9 +38,9 @@ _WORKER_QUEUE_NAME = "worker"
 def __getattr__(name: str) -> object:
     """Compatibility fallback for legacy callers importing this module directly.
 
-    Worker runtime internals were split across startup/finalization/common modules.
-    Some installed clients still resolve helpers from `work_startup_runtime`; forward
-    unknown attributes to the newer modules to prevent runtime AttributeError.
+    Worker runtime internals were split across startup/finalization/common
+    modules. Some clients still resolve helpers from this module; forward
+    unknown attributes to newer modules to avoid runtime AttributeError.
     """
     for module in (_work_finalization_runtime, _work_runtime_common):
         if hasattr(module, name):
@@ -216,9 +216,7 @@ def _select_global_review_feedback_changeset(
         repo_root=repo_root,
         resolve_epic_id_for_changeset=(
             lambda issue: (
-                _resolve_epic_id_for_changeset(
-                    issue, beads_root=beads_root, repo_root=repo_root
-                )
+                _resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
                 or str(issue.get("id") or "")
                 or None
             )
@@ -272,9 +270,7 @@ def _worker_opening_prompt(
     )
 
 
-def _check_inbox_before_claim(
-    agent_id: str, *, beads_root: Path, repo_root: Path
-) -> bool:
+def _check_inbox_before_claim(agent_id: str, *, beads_root: Path, repo_root: Path) -> bool:
     return worker_queueing.check_inbox_before_claim(
         agent_id,
         beads_root=beads_root,
@@ -458,9 +454,7 @@ def _run_startup_contract(
     *,
     context: worker_startup.StartupContractContext,
 ) -> StartupContractResult:
-    service = _StartupContractService(
-        beads_root=context.beads_root, repo_root=context.repo_root
-    )
+    service = _StartupContractService(beads_root=context.beads_root, repo_root=context.repo_root)
     return worker_startup.run_startup_contract_service(context=context, service=service)
 
 

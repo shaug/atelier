@@ -9,9 +9,7 @@ from ..io import die, say, select
 from .resolve import resolve_current_project_with_repo_root
 
 
-def _select_policy_issue(
-    issues: list[dict[str, object]], *, role: str
-) -> dict[str, object] | None:
+def _select_policy_issue(issues: list[dict[str, object]], *, role: str) -> dict[str, object] | None:
     if not issues:
         return None
     if len(issues) == 1:
@@ -29,9 +27,7 @@ def _select_policy_issue(
     return issues[0]
 
 
-def _resolve_role_choice(
-    role_flag: str | None, planner_body: str, worker_body: str
-) -> str:
+def _resolve_role_choice(role_flag: str | None, planner_body: str, worker_body: str) -> str:
     if role_flag:
         return role_flag
     planner_body = policy.normalize_policy_text(planner_body)
@@ -66,9 +62,7 @@ def _apply_policy(
 
 def edit_policy(args: object) -> None:
     """Edit project-wide policy stored in Beads."""
-    project_root, project_config, _enlistment, repo_root = (
-        resolve_current_project_with_repo_root()
-    )
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
     role_flag = policy.normalize_role(getattr(args, "role", None))
@@ -76,15 +70,11 @@ def edit_policy(args: object) -> None:
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
 
     planner_issue = _select_policy_issue(
-        beads.list_policy_beads(
-            policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root
-        ),
+        beads.list_policy_beads(policy.ROLE_PLANNER, beads_root=beads_root, cwd=repo_root),
         role=policy.ROLE_PLANNER,
     )
     worker_issue = _select_policy_issue(
-        beads.list_policy_beads(
-            policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root
-        ),
+        beads.list_policy_beads(policy.ROLE_WORKER, beads_root=beads_root, cwd=repo_root),
         role=policy.ROLE_WORKER,
     )
 
@@ -95,9 +85,7 @@ def edit_policy(args: object) -> None:
 
     if role_choice == policy.ROLE_PLANNER:
         seed = planner_body or worker_body
-        edited = policy.edit_policy_text(
-            seed, project_config=project_config, cwd=repo_root
-        )
+        edited = policy.edit_policy_text(seed, project_config=project_config, cwd=repo_root)
         _apply_policy(
             policy.ROLE_PLANNER,
             edited,
@@ -116,9 +104,7 @@ def edit_policy(args: object) -> None:
 
     if role_choice == policy.ROLE_WORKER:
         seed = worker_body or planner_body
-        edited = policy.edit_policy_text(
-            seed, project_config=project_config, cwd=repo_root
-        )
+        edited = policy.edit_policy_text(seed, project_config=project_config, cwd=repo_root)
         _apply_policy(
             policy.ROLE_WORKER,
             edited,
@@ -136,9 +122,7 @@ def edit_policy(args: object) -> None:
         return
 
     combined, split = policy.build_combined_policy(planner_body, worker_body)
-    edited = policy.edit_policy_text(
-        combined, project_config=project_config, cwd=repo_root
-    )
+    edited = policy.edit_policy_text(combined, project_config=project_config, cwd=repo_root)
     if split:
         sections = policy.split_combined_policy(edited)
         if sections:
@@ -183,9 +167,7 @@ def edit_policy(args: object) -> None:
 
 def show_policy(args: object) -> None:
     """Show project-wide policy stored in Beads."""
-    project_root, project_config, _enlistment, repo_root = (
-        resolve_current_project_with_repo_root()
-    )
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
     role = policy.normalize_role(getattr(args, "role", None)) or policy.ROLE_BOTH

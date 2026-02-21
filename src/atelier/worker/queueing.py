@@ -122,9 +122,7 @@ def send_no_ready_changesets(
     dry_run: bool,
     dry_run_log: EmitFn,
 ) -> None:
-    summary = beads.epic_changeset_summary(
-        epic_id, beads_root=beads_root, cwd=repo_root
-    )
+    summary = beads.epic_changeset_summary(epic_id, beads_root=beads_root, cwd=repo_root)
     timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
     subject = f"NEEDS-DECISION: No ready changesets for {epic_id}"
     body = "\n".join(

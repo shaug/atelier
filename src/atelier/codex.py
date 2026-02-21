@@ -63,9 +63,7 @@ def extract_session_id_from_command(command: str) -> str | None:
         if token.lower() != "resume":
             continue
         candidates = [
-            _clean_token(item)
-            for item in tokens[index + 1 :]
-            if item and not item.startswith("-")
+            _clean_token(item) for item in tokens[index + 1 :] if item and not item.startswith("-")
         ]
         for candidate in candidates:
             if _looks_like_session_id(candidate):

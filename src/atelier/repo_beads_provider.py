@@ -30,9 +30,7 @@ class RepoBeadsProvider:
 
     slug: str = "beads"
     display_name: str = "Repo Beads"
-    sync_options: ExternalTicketSyncOptions = field(
-        default_factory=ExternalTicketSyncOptions
-    )
+    sync_options: ExternalTicketSyncOptions = field(default_factory=ExternalTicketSyncOptions)
 
     @property
     def capabilities(self) -> ExternalProviderCapabilities:
@@ -72,14 +70,10 @@ class RepoBeadsProvider:
         sync_options = request.sync_options or self.sync_options
         record = _issue_payload_to_record(payload[0], sync_options=sync_options)
         if not record:
-            raise RuntimeError(
-                f"Failed to parse Beads issue: {request.ticket.ticket_id}"
-            )
+            raise RuntimeError(f"Failed to parse Beads issue: {request.ticket.ticket_id}")
         return record
 
-    def create_ticket(
-        self, request: ExternalTicketCreateRequest
-    ) -> ExternalTicketRecord:
+    def create_ticket(self, request: ExternalTicketCreateRequest) -> ExternalTicketRecord:
         if not self.allow_write:
             raise RuntimeError("Repo Beads export disabled (allow_write=false)")
         issue_type = _resolve_issue_type(request.labels)
@@ -180,9 +174,7 @@ def _issue_payload_to_record(
         return None
     title = payload.get("title") if isinstance(payload.get("title"), str) else None
     description = (
-        payload.get("description")
-        if isinstance(payload.get("description"), str)
-        else None
+        payload.get("description") if isinstance(payload.get("description"), str) else None
     )
     acceptance = (
         payload.get("acceptance_criteria")
@@ -192,9 +184,7 @@ def _issue_payload_to_record(
     body = None
     if sync_options.include_body:
         body = _format_body(description, acceptance)
-    labels = tuple(
-        label for label in payload.get("labels", []) if isinstance(label, str) and label
-    )
+    labels = tuple(label for label in payload.get("labels", []) if isinstance(label, str) and label)
     return ExternalTicketRecord(
         ref=ref,
         title=title,

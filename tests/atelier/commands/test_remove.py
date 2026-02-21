@@ -97,9 +97,7 @@ def test_remove_project_applies_cleanup_and_deletes_project_dir() -> None:
             ),
             patch("atelier.commands.remove.gc_cmd.gc") as run_gc,
             patch("atelier.commands.remove._remove_worktree") as remove_worktree,
-            patch(
-                "atelier.commands.remove._prune_worktree_registry"
-            ) as prune_worktrees,
+            patch("atelier.commands.remove._prune_worktree_registry") as prune_worktrees,
             patch(
                 "atelier.commands.remove.git.git_default_branch",
                 return_value="main",

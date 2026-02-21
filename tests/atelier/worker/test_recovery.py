@@ -43,20 +43,14 @@ def test_recovery_moves_back_to_review_pending_when_pr_is_open(monkeypatch) -> N
         finalize_terminal_changeset=lambda **_kwargs: FinalizeResult(
             continue_running=False, reason="terminal"
         ),
-        mark_changeset_in_progress=lambda *_args, **_kwargs: mark_calls.append(
-            "in_progress"
-        ),
-        update_changeset_review_from_pr=lambda *_args, **_kwargs: update_calls.append(
-            "updated"
-        ),
+        mark_changeset_in_progress=lambda *_args, **_kwargs: mark_calls.append("in_progress"),
+        update_changeset_review_from_pr=lambda *_args, **_kwargs: update_calls.append("updated"),
         handle_pushed_without_pr=lambda **_kwargs: FinalizeResult(
             continue_running=False, reason="pushed_without_pr"
         ),
     )
 
-    assert result == FinalizeResult(
-        continue_running=True, reason="changeset_review_pending"
-    )
+    assert result == FinalizeResult(continue_running=True, reason="changeset_review_pending")
     assert mark_calls == ["in_progress"]
     assert update_calls == ["updated"]
 
@@ -99,6 +93,4 @@ def test_recovery_routes_pushed_without_pr_back_to_pr_gate(monkeypatch) -> None:
         ),
     )
 
-    assert result == FinalizeResult(
-        continue_running=False, reason="changeset_pr_create_failed"
-    )
+    assert result == FinalizeResult(continue_running=False, reason="changeset_pr_create_failed")

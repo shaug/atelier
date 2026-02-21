@@ -50,9 +50,7 @@ def _list_inbox_messages(
 
 
 def _list_queue_messages(*, beads_root: Path, repo_root: Path) -> None:
-    queued = beads.list_queue_messages(
-        beads_root=beads_root, cwd=repo_root, unread_only=True
-    )
+    queued = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root, unread_only=True)
     if queued:
         say("Queued messages:")
         for issue in queued:
@@ -82,7 +80,7 @@ def _install_planner_commit_blocker(
     hook_path = hooks_dir / "pre-commit"
     hook_path.write_text(_PLANNER_PRECOMMIT, encoding="utf-8")
     hook_path.chmod(0o755)
-    # Enable per-worktree config so hooksPath can be scoped to this worktree only.
+    # Enable per-worktree config so hooksPath scopes to this worktree only.
     exec.run_command(
         git.git_command(
             [
@@ -167,9 +165,7 @@ def _trace_enabled() -> bool:
 
 
 def _planner_branch_name(*, default_branch: str, agent_name: str) -> str:
-    token = "".join(
-        ch.lower() if ch.isalnum() else "-" for ch in agent_name.strip() or "planner"
-    )
+    token = "".join(ch.lower() if ch.isalnum() else "-" for ch in agent_name.strip() or "planner")
     token = "-".join(part for part in token.split("-") if part)
     if not token:
         token = "planner"
@@ -179,9 +175,7 @@ def _planner_branch_name(*, default_branch: str, agent_name: str) -> str:
 def _planner_worktree_path(
     project_data_dir: Path, planner_key: str
 ) -> tuple[worktrees.WorktreeMapping | None, Path]:
-    mapping = worktrees.load_mapping(
-        worktrees.mapping_path(project_data_dir, planner_key)
-    )
+    mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, planner_key))
     if mapping is None:
         return None, worktrees.worktree_dir(project_data_dir, planner_key)
     mapped = Path(mapping.worktree_path)
@@ -228,8 +222,7 @@ def _maybe_migrate_planner_mapping(
                 if len(status) > 20:
                     say(f"- ... ({len(status) - 20} more)")
             proceed = confirm(
-                f"Discard local planner worktree changes and migrate to "
-                f"{planner_branch!r}?",
+                f"Discard local planner worktree changes and migrate to {planner_branch!r}?",
                 default=False,
             )
             if not proceed:
@@ -242,9 +235,7 @@ def _maybe_migrate_planner_mapping(
         )
         if fetch_result is None:
             die("missing required command: git")
-        sync_ref = _resolve_default_sync_ref(
-            mapped_path, default_branch, git_path=git_path
-        )
+        sync_ref = _resolve_default_sync_ref(mapped_path, default_branch, git_path=git_path)
         if sync_ref is None:
             die(f"default branch {default_branch!r} not found for planner migration")
         exec.run_command(
@@ -267,9 +258,7 @@ def _maybe_migrate_planner_mapping(
         changesets=mapping.changesets,
         changeset_worktrees=mapping.changeset_worktrees,
     )
-    worktrees.write_mapping(
-        worktrees.mapping_path(project_data_dir, planner_key), updated
-    )
+    worktrees.write_mapping(worktrees.mapping_path(project_data_dir, planner_key), updated)
 
 
 def _sync_planner_branch(
@@ -295,13 +284,9 @@ def _sync_planner_branch(
     if fetch_result.returncode != 0:
         say(f"Warning: failed to fetch origin/{default_branch}; skipping planner sync.")
         return
-    sync_ref = _resolve_default_sync_ref(
-        worktree_path, default_branch, git_path=git_path
-    )
+    sync_ref = _resolve_default_sync_ref(worktree_path, default_branch, git_path=git_path)
     if sync_ref is None:
-        say(
-            f"Warning: default branch {default_branch!r} not found; skipping planner sync."
-        )
+        say(f"Warning: default branch {default_branch!r} not found; skipping planner sync.")
         return
     exec.run_command(
         git.git_command(
@@ -350,9 +335,7 @@ def run_planner(args: object) -> None:
     """Start a planning session for Beads epics and changesets."""
     timings: list[tuple[str, float]] = []
     trace = _trace_enabled()
-    project_root, project_config, _enlistment, repo_root = (
-        resolve_current_project_with_repo_root()
-    )
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
     project_enlistment = project_config.project.enlistment or _enlistment
@@ -376,9 +359,7 @@ def run_planner(args: object) -> None:
             )
             finish()
             if bool(getattr(args, "reconcile", False)):
-                finish = _step(
-                    "Reconcile blocked changesets", timings=timings, trace=trace
-                )
+                finish = _step("Reconcile blocked changesets", timings=timings, trace=trace)
                 reconcile_result = work_cmd.reconcile_blocked_merged_changesets(
                     agent_id=agent.agent_id,
                     agent_bead_id=str(agent_bead.get("id") or ""),
@@ -398,9 +379,7 @@ def run_planner(args: object) -> None:
                     )
                 )
             finish = _step("Check inbox", timings=timings, trace=trace)
-            _list_inbox_messages(
-                agent.agent_id, beads_root=beads_root, repo_root=repo_root
-            )
+            _list_inbox_messages(agent.agent_id, beads_root=beads_root, repo_root=repo_root)
             finish()
             finish = _step("Check queue", timings=timings, trace=trace)
             _list_queue_messages(beads_root=beads_root, repo_root=repo_root)
@@ -499,14 +478,10 @@ def run_planner(args: object) -> None:
             finish(selected_provider or "none")
             hooks_dir = _planner_hooks_dir(agent.path)
             finish = _step("Install read-only guardrails", timings=timings, trace=trace)
-            _ensure_planner_read_only_guardrails(
-                worktree_path, hooks_dir, git_path=git_path
-            )
+            _ensure_planner_read_only_guardrails(worktree_path, hooks_dir, git_path=git_path)
             finish()
             planner_agents_path = agent.path / "AGENTS.md"
-            planner_template = templates.planner_template(
-                prefer_installed_if_modified=True
-            )
+            planner_template = templates.planner_template(prefer_installed_if_modified=True)
             finish = _step("Render planner AGENTS.md", timings=timings, trace=trace)
             planner_content = prompting.render_template(
                 planner_template,
@@ -538,9 +513,7 @@ def run_planner(args: object) -> None:
                 )
                 finish()
                 finish = _step("Sync Beads addendum", timings=timings, trace=trace)
-                prime_addendum = beads.prime_addendum(
-                    beads_root=beads_root, cwd=project_data_dir
-                )
+                prime_addendum = beads.prime_addendum(beads_root=beads_root, cwd=project_data_dir)
                 updated_content = planner_agents_path.read_text(encoding="utf-8")
                 next_content = agent_home.apply_beads_prime_addendum(
                     updated_content, prime_addendum

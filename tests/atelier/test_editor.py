@@ -34,6 +34,4 @@ class TestResolveEditorCommand:
                 str(editor_path),
                 "-w",
             ]
-            assert editor.resolve_editor_command(config_payload, role="work") == [
-                str(editor_path)
-            ]
+            assert editor.resolve_editor_command(config_payload, role="work") == [str(editor_path)]

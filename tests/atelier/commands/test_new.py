@@ -36,9 +36,7 @@ def test_new_creates_project_and_starts_planning() -> None:
                 patch("atelier.config.shutil.which", return_value="/usr/bin/cursor"),
                 patch(
                     "atelier.commands.init.beads.run_bd_command",
-                    return_value=CompletedProcess(
-                        args=["bd"], returncode=0, stdout="", stderr=""
-                    ),
+                    return_value=CompletedProcess(args=["bd"], returncode=0, stdout="", stderr=""),
                 ),
                 patch(
                     "atelier.commands.init.beads.ensure_atelier_types",
@@ -85,8 +83,7 @@ def test_new_creates_project_and_starts_planning() -> None:
         assert commands[0][0][:3] == ["git", "init", "-b"]
         assert commands[0][1] == target_dir
         assert any(
-            cmd[:4] == ["git", "-C", str(target_dir), "commit"]
-            and "--allow-empty" in cmd
+            cmd[:4] == ["git", "-C", str(target_dir), "commit"] and "--allow-empty" in cmd
             for cmd, _ in commands
         )
         assert planned

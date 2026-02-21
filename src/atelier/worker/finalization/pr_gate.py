@@ -30,9 +30,7 @@ def changeset_parent_lifecycle_state(
     if not repo_slug:
         return None
     description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     parent_branch = fields.get("changeset.parent_branch")
     root_branch = fields.get("changeset.root_branch")
     if not isinstance(parent_branch, str):
@@ -47,14 +45,10 @@ def changeset_parent_lifecycle_state(
             # for PR strategy gating to avoid self-deadlocking PR creation.
             if normalized_root == normalized:
                 return None
-    pushed = git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{normalized}", git_path=git_path
-    )
+    pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{normalized}", git_path=git_path)
     payload = lookup_pr_payload(repo_slug, normalized)
     review_requested = prs.has_review_requests(payload)
-    return prs.lifecycle_state(
-        payload, pushed=pushed, review_requested=review_requested
-    )
+    return prs.lifecycle_state(payload, pushed=pushed, review_requested=review_requested)
 
 
 def changeset_pr_creation_decision(
@@ -73,9 +67,7 @@ def changeset_pr_creation_decision(
         git_path=git_path,
         lookup_pr_payload=lookup_pr_payload,
     )
-    return pr_strategy.pr_strategy_decision(
-        branch_pr_strategy, parent_state=parent_state
-    )
+    return pr_strategy.pr_strategy_decision(branch_pr_strategy, parent_state=parent_state)
 
 
 def set_changeset_review_pending_state(
@@ -168,9 +160,7 @@ def handle_pushed_without_pr(
     changeset_work_branch: Callable[[dict[str, object]], str],
     render_changeset_pr_body: Callable[[dict[str, object]], str],
     lookup_pr_payload: Callable[..., dict[str, object] | None],
-    lookup_pr_payload_diagnostic: Callable[
-        ..., tuple[dict[str, object] | None, str | None]
-    ],
+    lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]],
     mark_changeset_in_progress: Callable[..., None],
     send_planner_notification: Callable[..., None],
     update_changeset_review_from_pr: Callable[..., None],
@@ -257,9 +247,7 @@ def handle_pushed_without_pr(
                         update_changeset_review_from_pr=update_changeset_review_from_pr,
                     )
                 if lookup_error:
-                    create_detail = (
-                        f"{create_detail}; unable to verify created PR: {lookup_error}"
-                    )
+                    create_detail = f"{create_detail}; unable to verify created PR: {lookup_error}"
                 return PrGateResult(
                     finalize_result=FinalizeResult(
                         continue_running=True, reason="changeset_review_pending"
@@ -270,9 +258,7 @@ def handle_pushed_without_pr(
             pr_payload = lookup_pr_payload(repo_slug, work_branch)
             lookup_error = None
             if pr_payload is None:
-                _payload_check, lookup_error = lookup_pr_payload_diagnostic(
-                    repo_slug, work_branch
-                )
+                _payload_check, lookup_error = lookup_pr_payload_diagnostic(repo_slug, work_branch)
             if pr_payload:
                 set_changeset_review_pending_state(
                     changeset_id=changeset_id,
@@ -293,9 +279,7 @@ def handle_pushed_without_pr(
             if lookup_error:
                 failure_reason = "changeset_pr_status_query_failed"
                 failure_subject = "NEEDS-DECISION: PR status query failed"
-                create_detail = (
-                    f"{create_detail}; unable to verify existing PR: {lookup_error}"
-                )
+                create_detail = f"{create_detail}; unable to verify existing PR: {lookup_error}"
                 atelier_log.warning(
                     "changeset="
                     f"{changeset_id} PR status lookup failed after create attempt: "
@@ -333,9 +317,7 @@ def handle_pushed_without_pr(
             "create PRs automatically."
         )
     else:
-        body = (
-            f"{body}\nAction: resolve `gh pr create` failure and rerun worker finalize."
-        )
+        body = f"{body}\nAction: resolve `gh pr create` failure and rerun worker finalize."
     send_planner_notification(
         subject=f"{failure_subject} ({changeset_id})",
         body=body,

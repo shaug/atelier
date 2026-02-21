@@ -11,9 +11,7 @@ from atelier.models import ProjectConfig, ProjectSection
 
 
 def test_planner_provider_environment_includes_github_repo() -> None:
-    config_payload = ProjectConfig(
-        project=ProjectSection(origin="github.com/acme/widgets")
-    )
+    config_payload = ProjectConfig(project=ProjectSection(origin="github.com/acme/widgets"))
     env = planner_provider_environment(config_payload, Path("/repo"))
     assert env["ATELIER_EXTERNAL_PROVIDERS"] == "github"
     assert env["ATELIER_EXTERNAL_PROVIDER"] == "github"
@@ -24,9 +22,7 @@ def test_planner_provider_environment_includes_repo_beads(
     tmp_path: Path,
 ) -> None:
     (tmp_path / ".beads").mkdir()
-    config_payload = ProjectConfig(
-        project=ProjectSection(origin="github.com/acme/widgets")
-    )
+    config_payload = ProjectConfig(project=ProjectSection(origin="github.com/acme/widgets"))
     env = planner_provider_environment(config_payload, tmp_path)
     assert env["ATELIER_EXTERNAL_PROVIDERS"] == "beads,github"
     assert env["ATELIER_EXTERNAL_PROVIDER"] == "github"
@@ -106,9 +102,7 @@ def test_resolve_planner_provider_prompts_when_multiple(tmp_path: Path) -> None:
 
     selected: dict[str, object] = {}
 
-    def chooser(
-        text: str, choices: list[str] | tuple[str, ...], default: str | None
-    ) -> str:
+    def chooser(text: str, choices: list[str] | tuple[str, ...], default: str | None) -> str:
         selected["text"] = text
         selected["choices"] = list(choices)
         selected["default"] = default

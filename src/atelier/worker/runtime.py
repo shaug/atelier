@@ -179,12 +179,8 @@ class WorkerLifecycleAdapter:
             repo_root=repo_root,
         )
 
-    def release_epic_assignment(
-        self, epic_id: str, *, beads_root: Path, repo_root: Path
-    ) -> None:
-        worker_work._release_epic_assignment(
-            epic_id, beads_root=beads_root, repo_root=repo_root
-        )
+    def release_epic_assignment(self, epic_id: str, *, beads_root: Path, repo_root: Path) -> None:
+        worker_work._release_epic_assignment(epic_id, beads_root=beads_root, repo_root=repo_root)
 
     def reconcile_blocked_merged_changesets(
         self,
@@ -223,9 +219,7 @@ class WorkerLifecycleAdapter:
     ) -> bool:
         return worker_work._review_feedback_progressed(before, after)
 
-    def run_startup_contract(
-        self, *, context: StartupContractContext
-    ) -> StartupContractResult:
+    def run_startup_contract(self, *, context: StartupContractContext) -> StartupContractResult:
         return worker_work._run_startup_contract(context=context)
 
     def send_invalid_changeset_labels_notification(
@@ -348,9 +342,7 @@ class WorkerControlAdapter:
     def report_timings(self, timings: list[tuple[str, float]], *, trace: bool) -> None:
         self._report_timings_fn(timings, trace=trace)
 
-    def step(
-        self, label: str, *, timings: list[tuple[str, float]], trace: bool
-    ) -> StepFinish:
+    def step(self, label: str, *, timings: list[tuple[str, float]], trace: bool) -> StepFinish:
         return self._step_fn(label, timings=timings, trace=trace)
 
     def trace_enabled(self) -> bool:
@@ -381,17 +373,13 @@ def run_worker_sessions(
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> None:
     if bool(getattr(args, "queue", False)):
-        summary = run_worker_once(
-            args, mode=mode, dry_run=dry_run, session_key=session_key
-        )
+        summary = run_worker_once(args, mode=mode, dry_run=dry_run, session_key=session_key)
         report_worker_summary(summary, dry_run)
         return
 
     if dry_run:
         while True:
-            summary = run_worker_once(
-                args, mode=mode, dry_run=True, session_key=session_key
-            )
+            summary = run_worker_once(args, mode=mode, dry_run=True, session_key=session_key)
             report_worker_summary(summary, True)
             if summary.started:
                 if run_mode == "once":
@@ -400,25 +388,18 @@ def run_worker_sessions(
             if summary.reason == "no_ready_changesets":
                 if run_mode == "watch":
                     interval = watch_interval_seconds()
-                    dry_run_log(
-                        "Watching for updates "
-                        f"(sleeping {interval}s before next check)."
-                    )
+                    dry_run_log(f"Watching for updates (sleeping {interval}s before next check).")
                     sleep_fn(interval)
                 continue
             if run_mode != "watch":
                 return
             interval = watch_interval_seconds()
-            dry_run_log(
-                f"Watching for updates (sleeping {interval}s before next check)."
-            )
+            dry_run_log(f"Watching for updates (sleeping {interval}s before next check).")
             sleep_fn(interval)
         return
 
     while True:
-        summary = run_worker_once(
-            args, mode=mode, dry_run=False, session_key=session_key
-        )
+        summary = run_worker_once(args, mode=mode, dry_run=False, session_key=session_key)
         report_worker_summary(summary, False)
         if summary.started:
             if run_mode == "once":
@@ -440,9 +421,7 @@ def run_worker_sessions(
 
 def build_worker_runtime_dependencies(
     *,
-    resolve_current_project_with_repo_root: Callable[
-        [], tuple[Path, ProjectConfig, str, Path]
-    ],
+    resolve_current_project_with_repo_root: Callable[[], tuple[Path, ProjectConfig, str, Path]],
     confirm_fn: ConfirmFn,
     die_fn: Callable[[str], None],
     emit: Callable[[str], None],

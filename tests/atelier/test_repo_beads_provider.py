@@ -146,9 +146,7 @@ def test_repo_beads_provider_create_ticket_when_allowed(
 
         return Result()
 
-    def fake_run_bd(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_run_bd(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return payload
 
     monkeypatch.setattr("atelier.beads.run_bd_command", fake_run_bd_command)

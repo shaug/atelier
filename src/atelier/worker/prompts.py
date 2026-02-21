@@ -57,10 +57,7 @@ def worker_opening_prompt(
                     "Use github-prs skill scripts list_review_threads.py and "
                     "reply_inline_thread.py for deterministic inline handling."
                 ),
-                (
-                    "Do not reset lifecycle labels to ready while feedback remains "
-                    "unaddressed."
-                ),
+                ("Do not reset lifecycle labels to ready while feedback remains unaddressed."),
             ]
         )
         if review_pr_url:

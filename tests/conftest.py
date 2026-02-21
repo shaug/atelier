@@ -46,9 +46,7 @@ def _git_non_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def pytest_collect_file(
-    parent: pytest.Collector, file_path: Path
-) -> DoctestModule | None:
+def pytest_collect_file(parent: pytest.Collector, file_path: Path) -> DoctestModule | None:
     path = file_path if isinstance(file_path, Path) else Path(str(file_path))
     if path in DOCTEST_MODULES:
         return DoctestModule.from_parent(parent, path=path)

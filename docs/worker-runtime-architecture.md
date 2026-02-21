@@ -62,3 +62,11 @@ This document describes the worker runtime contracts used by `atelier work`.
   request propagation.
 - Avoid legacy ad-hoc subprocess helpers in new code; use typed command specs
   and edge validation at adapter boundaries.
+
+## Formatting and Lint Baseline
+
+- Python code lines are limited to 100 characters.
+- Comment and docstring prose lines are limited to 80 characters.
+- The stricter prose width keeps runtime contracts readable in terminals and
+  review tools, while 100-character code lines avoid excessive wrapping for
+  typed signatures.

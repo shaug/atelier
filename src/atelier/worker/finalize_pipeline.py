@@ -48,9 +48,7 @@ class FinalizePipelineService(Protocol):
 
     def has_open_descendant_changesets(self, changeset_id: str) -> bool: ...
 
-    def has_blocking_messages(
-        self, *, thread_ids: set[str], started_at: dt.datetime
-    ) -> bool: ...
+    def has_blocking_messages(self, *, thread_ids: set[str], started_at: dt.datetime) -> bool: ...
 
     def mark_changeset_children_in_progress(self, changeset_id: str) -> None: ...
 
@@ -74,9 +72,7 @@ class FinalizePipelineService(Protocol):
 
     def mark_changeset_closed(self, changeset_id: str) -> None: ...
 
-    def finalize_epic_if_complete(
-        self, *, context: FinalizePipelineContext
-    ) -> FinalizeResult: ...
+    def finalize_epic_if_complete(self, *, context: FinalizePipelineContext) -> FinalizeResult: ...
 
     def mark_changeset_in_progress(self, changeset_id: str) -> None: ...
 
@@ -150,9 +146,7 @@ def run_finalize_pipeline(
     git_path = context.git_path
     if not changeset_id:
         return FinalizeResult(continue_running=False, reason="changeset_missing")
-    issues = beads.run_bd_json(
-        ["show", changeset_id], beads_root=beads_root, cwd=repo_root
-    )
+    issues = beads.run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=repo_root)
     if not issues:
         return FinalizeResult(continue_running=False, reason="changeset_not_found")
     issue = issues[0]
@@ -164,9 +158,7 @@ def run_finalize_pipeline(
             invalid_changesets=invalid_changesets,
             agent_id=agent_id,
         )
-        return FinalizeResult(
-            continue_running=False, reason="changeset_label_violation"
-        )
+        return FinalizeResult(continue_running=False, reason="changeset_label_violation")
     if "cs:merged" in labels or "cs:abandoned" in labels:
         if service.has_open_descendant_changesets(changeset_id):
             descendants = beads.list_descendant_changesets(
@@ -194,9 +186,7 @@ def run_finalize_pipeline(
             service.promote_planned_descendant_changesets(changeset_id)
             service.mark_changeset_children_in_progress(changeset_id)
             service.close_completed_container_changesets(epic_id)
-            return FinalizeResult(
-                continue_running=True, reason="changeset_children_pending"
-            )
+            return FinalizeResult(continue_running=True, reason="changeset_children_pending")
         if "cs:merged" in labels:
             integration_proven, integrated_sha = service.changeset_integration_signal(
                 issue, repo_slug=repo_slug, git_path=git_path
@@ -212,9 +202,7 @@ def run_finalize_pipeline(
                     changeset_id, reason="missing integration signal for cs:merged"
                 )
                 service.send_planner_notification(
-                    subject=(
-                        f"NEEDS-DECISION: Missing integration signal ({changeset_id})"
-                    ),
+                    subject=(f"NEEDS-DECISION: Missing integration signal ({changeset_id})"),
                     body="Changeset is labeled cs:merged but no integration signal "
                     "(changeset.integrated_sha or merged PR) was found.",
                     agent_id=agent_id,
@@ -238,22 +226,14 @@ def run_finalize_pipeline(
         thread_ids={changeset_id, epic_id},
         started_at=started_at,
     ):
-        service.mark_changeset_blocked(
-            changeset_id, reason="message requires planner decision"
-        )
-        return FinalizeResult(
-            continue_running=False, reason="changeset_blocked_message"
-        )
+        service.mark_changeset_blocked(changeset_id, reason="message requires planner decision")
+        return FinalizeResult(continue_running=False, reason="changeset_blocked_message")
     if "cs:in_progress" in labels:
         if service.changeset_waiting_on_review_or_signals(issue, context=context):
-            return FinalizeResult(
-                continue_running=True, reason="changeset_review_pending"
-            )
+            return FinalizeResult(continue_running=True, reason="changeset_review_pending")
 
     description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     work_branch = fields.get("changeset.work_branch")
     if not work_branch or work_branch.strip().lower() == "null":
         service.mark_changeset_blocked(
@@ -265,13 +245,9 @@ def run_finalize_pipeline(
             agent_id=agent_id,
             thread_id=changeset_id,
         )
-        return FinalizeResult(
-            continue_running=False, reason="changeset_blocked_missing_metadata"
-        )
+        return FinalizeResult(continue_running=False, reason="changeset_blocked_missing_metadata")
     work_branch = work_branch.strip()
-    pushed = git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
-    )
+    pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path)
     pr_payload = None
     pr_lookup_error: str | None = None
     if repo_slug:
@@ -298,9 +274,7 @@ def run_finalize_pipeline(
             agent_id=agent_id,
             thread_id=changeset_id,
         )
-        return FinalizeResult(
-            continue_running=False, reason="changeset_pr_status_query_failed"
-        )
+        return FinalizeResult(continue_running=False, reason="changeset_pr_status_query_failed")
     lifecycle: str | None = None
     if branch_pr:
         review_requested = prs.has_review_requests(pr_payload)
@@ -360,8 +334,8 @@ def run_finalize_pipeline(
                 if repo_slug:
                     pr_payload = service.lookup_pr_payload(repo_slug, work_branch)
                     if pr_payload is None:
-                        _payload_check, pr_lookup_error = (
-                            service.lookup_pr_payload_diagnostic(repo_slug, work_branch)
+                        _payload_check, pr_lookup_error = service.lookup_pr_payload_diagnostic(
+                            repo_slug, work_branch
                         )
                     if pr_lookup_error:
                         atelier_log.warning(
@@ -371,10 +345,7 @@ def run_finalize_pipeline(
                         )
                         service.mark_changeset_in_progress(changeset_id)
                         service.send_planner_notification(
-                            subject=(
-                                "NEEDS-DECISION: PR status query failed "
-                                f"({changeset_id})"
-                            ),
+                            subject=(f"NEEDS-DECISION: PR status query failed ({changeset_id})"),
                             body=(
                                 "Branch push succeeded but GitHub PR status lookup "
                                 f"failed for `{work_branch}`.\n"
@@ -401,17 +372,13 @@ def run_finalize_pipeline(
                     pushed=True,
                     fallback_pr_state=None,
                 )
-                return FinalizeResult(
-                    continue_running=True, reason="changeset_review_pending"
-                )
+                return FinalizeResult(continue_running=True, reason="changeset_review_pending")
 
         diagnostics = service.collect_publish_signal_diagnostics(
             work_branch=work_branch,
             context=context,
         )
-        diagnostics_text = service.format_publish_diagnostics(
-            diagnostics, push_detail=push_detail
-        )
+        diagnostics_text = service.format_publish_diagnostics(diagnostics, push_detail=push_detail)
         if diagnostics.has_recoverable_local_state:
             service.mark_changeset_in_progress(changeset_id)
             beads.run_bd_command(
@@ -436,13 +403,9 @@ def run_finalize_pipeline(
                 agent_id=agent_id,
                 thread_id=changeset_id,
             )
-            return FinalizeResult(
-                continue_running=False, reason="changeset_publish_pending"
-            )
+            return FinalizeResult(continue_running=False, reason="changeset_publish_pending")
 
-        service.mark_changeset_blocked(
-            changeset_id, reason="publish/checks signals missing"
-        )
+        service.mark_changeset_blocked(changeset_id, reason="publish/checks signals missing")
         service.send_planner_notification(
             subject=f"NEEDS-DECISION: Publish/checks missing ({changeset_id})",
             body=(
@@ -453,9 +416,7 @@ def run_finalize_pipeline(
             agent_id=agent_id,
             thread_id=changeset_id,
         )
-        return FinalizeResult(
-            continue_running=False, reason="changeset_blocked_publish_missing"
-        )
+        return FinalizeResult(continue_running=False, reason="changeset_blocked_publish_missing")
     if branch_pr and pr_payload:
         service.set_changeset_review_pending_state(
             changeset_id=changeset_id,

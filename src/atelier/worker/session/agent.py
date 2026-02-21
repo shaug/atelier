@@ -102,19 +102,13 @@ def prepare_agent_session(
             agent.path / "AGENTS.md" if changeset_worktree_path is not None else None
         )
         if worker_agents_path is not None:
-            session_control.dry_run_log(
-                f"Would write worker AGENTS.md to {worker_agents_path}"
-            )
-            session_control.dry_run_log(
-                "Would sync Beads addendum into worker AGENTS.md."
-            )
+            session_control.dry_run_log(f"Would write worker AGENTS.md to {worker_agents_path}")
+            session_control.dry_run_log("Would sync Beads addendum into worker AGENTS.md.")
         if project_data_dir.exists():
             try:
                 sync_result = skills.sync_project_skills(
                     project_data_dir,
-                    upgrade_policy=config.resolve_upgrade_policy(
-                        project_config.atelier.upgrade
-                    ),
+                    upgrade_policy=config.resolve_upgrade_policy(project_config.atelier.upgrade),
                     yes=yes,
                     interactive=False,
                     dry_run=True,
@@ -132,16 +126,10 @@ def prepare_agent_session(
             try:
                 sync_result = skills.sync_project_skills(
                     project_data_dir,
-                    upgrade_policy=config.resolve_upgrade_policy(
-                        project_config.atelier.upgrade
-                    ),
+                    upgrade_policy=config.resolve_upgrade_policy(project_config.atelier.upgrade),
                     yes=yes,
-                    interactive=(
-                        sys.stdin.isatty() and sys.stdout.isatty() and not yes
-                    ),
-                    prompt_update=lambda message: session_control.confirm(
-                        message, default=False
-                    ),
+                    interactive=(sys.stdin.isatty() and sys.stdout.isatty() and not yes),
+                    prompt_update=lambda message: session_control.confirm(message, default=False),
                 )
                 skills_dir = sync_result.skills_dir
                 if sync_result.action in {"installed", "updated", "up_to_date"}:
@@ -149,9 +137,7 @@ def prepare_agent_session(
             except OSError:
                 skills_dir = None
         if skills_dir is not None:
-            project_lookup_paths, _global_lookup_paths = agents.skill_lookup_paths(
-                agent_spec.name
-            )
+            project_lookup_paths, _global_lookup_paths = agents.skill_lookup_paths(agent_spec.name)
             agent_home.ensure_agent_links(
                 agent,
                 worktree_path=changeset_worktree_path,
@@ -181,21 +167,15 @@ def prepare_agent_session(
                 beads_root=beads_root,
                 cwd=repo_root,
             )
-            prime_addendum = beads.prime_addendum(
-                beads_root=beads_root, cwd=project_data_dir
-            )
+            prime_addendum = beads.prime_addendum(beads_root=beads_root, cwd=project_data_dir)
             updated_content = worker_agents_path.read_text(encoding="utf-8")
-            next_content = agent_home.apply_beads_prime_addendum(
-                updated_content, prime_addendum
-            )
+            next_content = agent_home.apply_beads_prime_addendum(updated_content, prime_addendum)
             if next_content != updated_content:
                 worker_agents_path.write_text(next_content, encoding="utf-8")
             updated_content = worker_agents_path.read_text(encoding="utf-8")
             agent_home.ensure_claude_compat(agent.path, updated_content)
 
-    env_workspace_path = changeset_worktree_path or (
-        project_data_dir / "worktrees" / "unknown"
-    )
+    env_workspace_path = changeset_worktree_path or (project_data_dir / "worktrees" / "unknown")
     env = workspace.workspace_environment(
         project_enlistment,
         workspace_branch,
@@ -252,9 +232,7 @@ def start_agent_session(
     if agent_spec.name == "codex":
         start_cmd = command_ops.with_codex_exec(start_cmd, opening_prompt)
         start_cmd = command_ops.strip_flag_with_value(start_cmd, "--cd")
-        start_cmd = command_ops.ensure_exec_subcommand_flag(
-            start_cmd, "--skip-git-repo-check"
-        )
+        start_cmd = command_ops.ensure_exec_subcommand_flag(start_cmd, "--skip-git-repo-check")
         start_cwd = agent.path
     if dry_run:
         session_control.dry_run_log(f"Agent command: {' '.join(start_cmd)}")
@@ -267,15 +245,11 @@ def start_agent_session(
     if agent_spec.name == "codex":
         result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
         if result is None:
-            blocked_handler.mark_changeset_blocked(
-                f"missing required command: {start_cmd[0]}"
-            )
+            blocked_handler.mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
             session_control.die(f"missing required command: {start_cmd[0]}")
         if result.returncode != 0:
             returncode = result.returncode
-            blocked_handler.mark_changeset_blocked(
-                f"command failed: {' '.join(start_cmd)}"
-            )
+            blocked_handler.mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
             session_control.die(f"command failed: {' '.join(start_cmd)}")
     else:
         result = exec.run_with_runner(
@@ -288,15 +262,11 @@ def start_agent_session(
             )
         )
         if result is None:
-            blocked_handler.mark_changeset_blocked(
-                f"missing required command: {start_cmd[0]}"
-            )
+            blocked_handler.mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
             session_control.die(f"missing required command: {start_cmd[0]}")
         if result.returncode != 0:
             returncode = result.returncode
-            blocked_handler.mark_changeset_blocked(
-                f"command failed: {' '.join(start_cmd)}"
-            )
+            blocked_handler.mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
             session_control.die(f"command failed: {' '.join(start_cmd)}")
 
     return AgentSessionRunResult(

@@ -170,9 +170,7 @@ def _ensure_root_branch_exists(
     die(f"default branch {default_branch!r} not found for worktree")
 
 
-def ensure_worktree_mapping(
-    project_dir: Path, epic_id: str, root_branch: str
-) -> WorktreeMapping:
+def ensure_worktree_mapping(project_dir: Path, epic_id: str, root_branch: str) -> WorktreeMapping:
     """Ensure a worktree mapping exists and return it."""
     if not epic_id:
         die("epic id must not be empty")
@@ -451,9 +449,7 @@ def ensure_changeset_checkout(
                 if git.git_ref_exists(worktree_path, parent_ref, git_path=git_path)
                 else (
                     f"origin/{parent}"
-                    if git.git_ref_exists(
-                        worktree_path, remote_parent, git_path=git_path
-                    )
+                    if git.git_ref_exists(worktree_path, remote_parent, git_path=git_path)
                     else root_branch
                 ),
             ],

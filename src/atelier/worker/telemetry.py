@@ -40,9 +40,7 @@ def step(
         if extra:
             say(f"ok {label}{suffix}: {extra}")
             if log_debug is not None:
-                log_debug(
-                    f"step finish label={label} elapsed={elapsed:.2f}s detail={extra}"
-                )
+                log_debug(f"step finish label={label} elapsed={elapsed:.2f}s detail={extra}")
             return
         say(f"ok {label}{suffix}")
         if log_debug is not None:

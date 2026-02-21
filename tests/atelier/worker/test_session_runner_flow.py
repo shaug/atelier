@@ -53,12 +53,8 @@ def _build_runner_deps(
     startup_result: StartupContractResult,
     preview_agent: AgentHome,
 ) -> WorkerRuntimeDependencies:
-    project_config = config.ProjectConfig(
-        project=config.ProjectSection(origin="org/repo")
-    )
-    resolve_project = Mock(
-        return_value=(Path("/project"), project_config, "/repo", Path("/repo"))
-    )
+    project_config = config.ProjectConfig(project=config.ProjectSection(origin="org/repo"))
+    resolve_project = Mock(return_value=(Path("/project"), project_config, "/repo", Path("/repo")))
     resolve_project_data_dir = Mock(return_value=Path("/project/.atelier"))
     resolve_beads_root = Mock(return_value=Path("/project/.atelier/.beads"))
 
@@ -99,9 +95,7 @@ def _build_runner_deps(
                 clear_runtime_cache=Mock(),
                 github_repo_slug=lambda _origin: "org/repo",
             ),
-            root_branch=SimpleNamespace(
-                prompt_root_branch=Mock(return_value="feat/root")
-            ),
+            root_branch=SimpleNamespace(prompt_root_branch=Mock(return_value="feat/root")),
             worker_session_agent=SimpleNamespace(
                 prepare_agent_session=Mock(
                     side_effect=RuntimeError("prepare_agent_session should not run")

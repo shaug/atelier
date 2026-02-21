@@ -45,9 +45,7 @@ def _run_worker_once(
     )
     return worker_session_runner.run_worker_once(
         args,
-        run_context=WorkerRunContext(
-            mode=mode, dry_run=dry_run, session_key=session_key
-        ),
+        run_context=WorkerRunContext(mode=mode, dry_run=dry_run, session_key=session_key),
         deps=runner_deps,
     )
 
@@ -94,6 +92,4 @@ def start_worker(args: object) -> None:
         )
     finally:
         if cleanup_agent is not None and cleanup_project_dir is not None:
-            agent_home.cleanup_agent_home(
-                cleanup_agent, project_dir=cleanup_project_dir
-            )
+            agent_home.cleanup_agent_home(cleanup_agent, project_dir=cleanup_project_dir)

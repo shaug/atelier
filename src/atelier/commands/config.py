@@ -18,9 +18,7 @@ def _emit_json(payload: dict) -> None:
 def _apply_user_sections(
     base: config.ProjectConfig, updates: config.ProjectConfig
 ) -> config.ProjectConfig:
-    atelier_section = base.atelier.model_copy(
-        update={"upgrade": updates.atelier.upgrade}
-    )
+    atelier_section = base.atelier.model_copy(update={"upgrade": updates.atelier.upgrade})
     project_section = base.project
     project_updates: dict[str, object] = {}
     for key in ("provider", "provider_url", "owner"):
@@ -91,9 +89,7 @@ def show_config(args: object) -> None:
             if confirm("Reset installed defaults to packaged defaults?", default=False):
                 user_defaults = config.default_user_config()
                 config.write_installed_defaults(user_defaults)
-                defaults = config.merge_project_configs(
-                    config.ProjectSystemConfig(), user_defaults
-                )
+                defaults = config.merge_project_configs(config.ProjectSystemConfig(), user_defaults)
             else:
                 defaults = config.load_installed_defaults()
         if edit_values:
@@ -125,9 +121,7 @@ def show_config(args: object) -> None:
         if confirm("Reset config values to installed defaults?", default=False):
             defaults = config.load_installed_defaults()
             updated = _apply_user_sections(updated, defaults)
-            user_config = config.parse_project_user_config(
-                config.user_config_payload(updated)
-            )
+            user_config = config.parse_project_user_config(config.user_config_payload(updated))
             config.write_project_user_config(
                 paths.project_config_user_path(project_root), user_config
             )
@@ -153,11 +147,7 @@ def show_config(args: object) -> None:
             allow_editor_empty=True,
         )
         updated = _apply_user_sections(updated, prompted)
-        user_config = config.parse_project_user_config(
-            config.user_config_payload(updated)
-        )
-        config.write_project_user_config(
-            paths.project_config_user_path(project_root), user_config
-        )
+        user_config = config.parse_project_user_config(config.user_config_payload(updated))
+        config.write_project_user_config(paths.project_config_user_path(project_root), user_config)
 
     _emit_json(updated.model_dump())

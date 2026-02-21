@@ -234,9 +234,7 @@ def lookup_github_pr_status(repo: str, head: str) -> GithubPrLookup:
         _PR_LOOKUP_CACHE[cache_key] = result
         return result
     if not isinstance(payload, dict):
-        result = GithubPrLookup(
-            outcome="error", error="Unexpected gh output for PR view"
-        )
+        result = GithubPrLookup(outcome="error", error="Unexpected gh output for PR view")
         _PR_LOOKUP_CACHE[cache_key] = result
         return result
     try:

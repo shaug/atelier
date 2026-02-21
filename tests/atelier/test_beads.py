@@ -35,21 +35,15 @@ def test_run_bd_issue_records_rejects_invalid_payload() -> None:
 def test_ensure_agent_bead_returns_existing() -> None:
     existing = {"id": "atelier-1", "title": "agent"}
     with patch("atelier.beads.find_agent_bead", return_value=existing):
-        result = beads.ensure_agent_bead(
-            "agent", beads_root=Path("/beads"), cwd=Path("/repo")
-        )
+        result = beads.ensure_agent_bead("agent", beads_root=Path("/beads"), cwd=Path("/repo"))
     assert result == existing
 
 
 def test_ensure_agent_bead_creates_when_missing() -> None:
     def fake_command(*_args, **_kwargs) -> CompletedProcess[str]:
-        return CompletedProcess(
-            args=["bd"], returncode=0, stdout="atelier-2\n", stderr=""
-        )
+        return CompletedProcess(args=["bd"], returncode=0, stdout="atelier-2\n", stderr="")
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args[0] == "show":
             return [{"id": "atelier-2", "title": "agent"}]
         return []
@@ -71,9 +65,7 @@ def test_ensure_atelier_store_initializes_missing_root() -> None:
     with TemporaryDirectory() as tmp:
         beads_root = Path(tmp) / ".beads"
         with patch("atelier.beads.run_bd_command") as run_command:
-            changed = beads.ensure_atelier_store(
-                beads_root=beads_root, cwd=Path("/repo")
-            )
+            changed = beads.ensure_atelier_store(beads_root=beads_root, cwd=Path("/repo"))
 
     assert changed is True
     assert run_command.call_args.args[0] == ["init", "--prefix", "at", "--quiet"]
@@ -84,9 +76,7 @@ def test_ensure_atelier_store_skips_existing_root() -> None:
         beads_root = Path(tmp) / ".beads"
         beads_root.mkdir(parents=True)
         with patch("atelier.beads.run_bd_command") as run_command:
-            changed = beads.ensure_atelier_store(
-                beads_root=beads_root, cwd=Path("/repo")
-            )
+            changed = beads.ensure_atelier_store(beads_root=beads_root, cwd=Path("/repo"))
 
     assert changed is False
     run_command.assert_not_called()
@@ -107,9 +97,7 @@ def test_prime_addendum_returns_output() -> None:
 def test_prime_addendum_returns_none_on_error() -> None:
     with patch(
         "atelier.beads.subprocess.run",
-        return_value=CompletedProcess(
-            args=["bd", "prime"], returncode=1, stdout="", stderr="boom"
-        ),
+        return_value=CompletedProcess(args=["bd", "prime"], returncode=1, stdout="", stderr="boom"),
     ):
         value = beads.prime_addendum(beads_root=Path("/beads"), cwd=Path("/repo"))
 
@@ -121,9 +109,7 @@ def test_ensure_issue_prefix_noop_when_already_expected() -> None:
         patch("atelier.beads._current_issue_prefix", return_value="at"),
         patch("atelier.beads.run_bd_command") as run_command,
     ):
-        changed = beads.ensure_issue_prefix(
-            "at", beads_root=Path("/beads"), cwd=Path("/repo")
-        )
+        changed = beads.ensure_issue_prefix("at", beads_root=Path("/beads"), cwd=Path("/repo"))
 
     assert changed is False
     run_command.assert_not_called()
@@ -142,9 +128,7 @@ def test_ensure_issue_prefix_updates_when_mismatched() -> None:
         patch("atelier.beads._current_issue_prefix", return_value="atelier"),
         patch("atelier.beads.run_bd_command", side_effect=fake_command),
     ):
-        changed = beads.ensure_issue_prefix(
-            "at", beads_root=Path("/beads"), cwd=Path("/repo")
-        )
+        changed = beads.ensure_issue_prefix("at", beads_root=Path("/beads"), cwd=Path("/repo"))
 
     assert changed is True
     assert calls[0] == ["config", "set", "issue_prefix", "at"]
@@ -155,9 +139,7 @@ def test_claim_epic_updates_assignee_and_status() -> None:
     issue = {"id": "atelier-9", "labels": [], "assignee": None}
     updated = {"id": "atelier-9", "labels": ["at:hooked"], "assignee": "agent"}
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args and args[0] == "show":
             return [updated]
         return [issue]
@@ -184,9 +166,7 @@ def test_claim_epic_allows_expected_takeover() -> None:
     issue = {"id": "atelier-9", "labels": [], "assignee": "agent-old"}
     updated = {"id": "atelier-9", "labels": ["at:hooked"], "assignee": "agent-new"}
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args and args[0] == "show":
             return [updated]
         return [issue]
@@ -213,9 +193,7 @@ def test_set_agent_hook_updates_description() -> None:
     captured: dict[str, str] = {}
     called: dict[str, list[str]] = {}
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return [issue]
 
     def fake_command(
@@ -224,9 +202,7 @@ def test_set_agent_hook_updates_description() -> None:
         called["args"] = args
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
-    def fake_update(
-        issue_id: str, description: str, *, beads_root: Path, cwd: Path
-    ) -> None:
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
         captured["id"] = issue_id
         captured["description"] = description
 
@@ -284,22 +260,16 @@ def test_get_agent_hook_prefers_slot() -> None:
     def fake_command(
         args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
     ) -> CompletedProcess[str]:
-        return CompletedProcess(
-            args=args, returncode=0, stdout='{"hook":"epic-1"}\n', stderr=""
-        )
+        return CompletedProcess(args=args, returncode=0, stdout='{"hook":"epic-1"}\n', stderr="")
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return [issue]
 
     with (
         patch("atelier.beads.run_bd_command", side_effect=fake_command),
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
     ):
-        hook = beads.get_agent_hook(
-            "atelier-agent", beads_root=Path("/beads"), cwd=Path("/repo")
-        )
+        hook = beads.get_agent_hook("atelier-agent", beads_root=Path("/beads"), cwd=Path("/repo"))
 
     assert hook == "epic-1"
 
@@ -312,18 +282,14 @@ def test_get_agent_hook_falls_back_to_description() -> None:
     ) -> CompletedProcess[str]:
         return CompletedProcess(args=args, returncode=1, stdout="", stderr="err")
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return [issue]
 
     with (
         patch("atelier.beads.run_bd_command", side_effect=fake_command),
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
     ):
-        hook = beads.get_agent_hook(
-            "atelier-agent", beads_root=Path("/beads"), cwd=Path("/repo")
-        )
+        hook = beads.get_agent_hook("atelier-agent", beads_root=Path("/beads"), cwd=Path("/repo"))
 
     assert hook == "epic-2"
 
@@ -340,18 +306,14 @@ def test_get_agent_hook_backfills_slot() -> None:
             return CompletedProcess(args=args, returncode=0, stdout="{}\n", stderr="")
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return [issue]
 
     with (
         patch("atelier.beads.run_bd_command", side_effect=fake_command),
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
     ):
-        hook = beads.get_agent_hook(
-            "atelier-agent", beads_root=Path("/beads"), cwd=Path("/repo")
-        )
+        hook = beads.get_agent_hook("atelier-agent", beads_root=Path("/beads"), cwd=Path("/repo"))
 
     assert hook == "epic-2"
     assert any(args[:2] == ["slot", "set"] for args in calls)
@@ -382,14 +344,10 @@ def test_claim_queue_message_sets_claimed_metadata() -> None:
     issue = {"id": "msg-1", "description": description}
     captured: dict[str, str] = {}
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return [issue]
 
-    def fake_update(
-        issue_id: str, description: str, *, beads_root: Path, cwd: Path
-    ) -> None:
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
         captured["id"] = issue_id
         captured["description"] = description
 
@@ -410,12 +368,8 @@ def test_claim_queue_message_sets_claimed_metadata() -> None:
 
 
 def test_list_inbox_messages_filters_unread() -> None:
-    with patch(
-        "atelier.beads.run_bd_json", return_value=[{"id": "atelier-77"}]
-    ) as run_json:
-        result = beads.list_inbox_messages(
-            "alice", beads_root=Path("/beads"), cwd=Path("/repo")
-        )
+    with patch("atelier.beads.run_bd_json", return_value=[{"id": "atelier-77"}]) as run_json:
+        result = beads.list_inbox_messages("alice", beads_root=Path("/beads"), cwd=Path("/repo"))
     assert result
     called_args = run_json.call_args.args[0]
     assert "--label" in called_args
@@ -431,18 +385,14 @@ def test_list_queue_messages_filters_unread_by_default() -> None:
 
 def test_list_queue_messages_can_include_read_messages() -> None:
     with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
-        beads.list_queue_messages(
-            beads_root=Path("/beads"), cwd=Path("/repo"), unread_only=False
-        )
+        beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"), unread_only=False)
     called_args = run_json.call_args.args[0]
     assert called_args == ["list", "--label", "at:message"]
 
 
 def test_mark_message_read_updates_labels() -> None:
     with patch("atelier.beads.run_bd_command") as run_command:
-        beads.mark_message_read(
-            "atelier-88", beads_root=Path("/beads"), cwd=Path("/repo")
-        )
+        beads.mark_message_read("atelier-88", beads_root=Path("/beads"), cwd=Path("/repo"))
     called_args = run_command.call_args.args[0]
     assert "update" in called_args
     assert "--remove-label" in called_args
@@ -451,9 +401,7 @@ def test_mark_message_read_updates_labels() -> None:
 def test_list_descendant_changesets_walks_tree() -> None:
     calls: list[str] = []
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         parent = args[2]
         calls.append(parent)
         if parent == "epic-1":
@@ -473,9 +421,7 @@ def test_list_descendant_changesets_walks_tree() -> None:
 
 def test_list_child_changesets_uses_changeset_label() -> None:
     with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
-        beads.list_child_changesets(
-            "epic-1", beads_root=Path("/beads"), cwd=Path("/repo")
-        )
+        beads.list_child_changesets("epic-1", beads_root=Path("/beads"), cwd=Path("/repo"))
     called_args = run_json.call_args.args[0]
     assert called_args == ["list", "--parent", "epic-1", "--label", "at:changeset"]
 
@@ -502,9 +448,7 @@ def test_epic_changeset_summary_ready_to_close() -> None:
         "epic-1.1.1": [],
     }
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args[:2] == ["show", "epic-1"]:
             return [{"id": "epic-1", "labels": ["at:epic"]}]
         if args[:2] == ["list", "--parent"]:
@@ -525,9 +469,7 @@ def test_close_epic_if_complete_closes_and_clears_hook() -> None:
         "epic-1.1": [],
     }
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args[:2] == ["show", "epic-1"]:
             return [{"id": "epic-1", "labels": ["at:epic"]}]
         if args[:2] == ["list", "--parent"]:
@@ -560,9 +502,7 @@ def test_close_epic_if_complete_respects_confirm() -> None:
         "epic-1.1": [],
     }
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args[:2] == ["list", "--parent"]:
             return changesets.get(args[2], [])
         return []
@@ -585,9 +525,7 @@ def test_close_epic_if_complete_respects_confirm() -> None:
 
 
 def test_close_epic_if_complete_closes_standalone_changeset() -> None:
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args[:2] == ["show", "at-irs"]:
             return [
                 {
@@ -622,14 +560,10 @@ def test_update_changeset_review_updates_description() -> None:
     issue = {"id": "atelier-99", "description": "scope: demo\n"}
     captured: dict[str, str] = {}
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return [issue]
 
-    def fake_update(
-        issue_id: str, description: str, *, beads_root: Path, cwd: Path
-    ) -> None:
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
         captured["id"] = issue_id
         captured["description"] = description
 
@@ -652,14 +586,10 @@ def test_update_changeset_review_feedback_cursor_updates_description() -> None:
     issue = {"id": "atelier-99", "description": "scope: demo\n"}
     captured: dict[str, str] = {}
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return [issue]
 
-    def fake_update(
-        issue_id: str, description: str, *, beads_root: Path, cwd: Path
-    ) -> None:
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
         captured["id"] = issue_id
         captured["description"] = description
 
@@ -675,23 +605,17 @@ def test_update_changeset_review_feedback_cursor_updates_description() -> None:
         )
 
     assert captured["id"] == "atelier-99"
-    assert (
-        "review.last_feedback_seen_at: 2026-02-20T12:00:00Z" in captured["description"]
-    )
+    assert "review.last_feedback_seen_at: 2026-02-20T12:00:00Z" in captured["description"]
 
 
 def test_update_worktree_path_writes_description() -> None:
     issue = {"id": "epic-1", "description": "workspace.root_branch: main\n"}
     captured: dict[str, str] = {}
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return [issue]
 
-    def fake_update(
-        issue_id: str, description: str, *, beads_root: Path, cwd: Path
-    ) -> None:
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
         captured["id"] = issue_id
         captured["description"] = description
 
@@ -730,17 +654,13 @@ def test_update_external_tickets_updates_labels() -> None:
     issue = {"id": "issue-1", "description": "scope: demo\n", "labels": ["ext:github"]}
     captured: dict[str, object] = {"commands": []}
 
-    def fake_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return [issue]
 
     def fake_command(args: list[str], *, beads_root: Path, cwd: Path) -> None:
         captured["commands"].append(args)
 
-    def fake_update(
-        issue_id: str, description: str, *, beads_root: Path, cwd: Path
-    ) -> None:
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
         captured["description"] = description
 
     with (

@@ -354,17 +354,14 @@ def run_startup_contract_service(
 
     def resume_feedback(selection: ReviewFeedbackSelection) -> StartupContractResult:
         service.emit(
-            "Prioritizing review feedback: "
-            f"{selection.changeset_id} ({selection.epic_id})"
+            f"Prioritizing review feedback: {selection.changeset_id} ({selection.epic_id})"
         )
         atelier_log.debug(
             "startup selected review-feedback "
             f"changeset={selection.changeset_id} epic={selection.epic_id}"
         )
         if dry_run:
-            service.dry_run_log(
-                f"Would select review-feedback changeset {selection.changeset_id}."
-            )
+            service.dry_run_log(f"Would select review-feedback changeset {selection.changeset_id}.")
         return StartupContractResult(
             epic_id=selection.epic_id,
             changeset_id=selection.changeset_id,
@@ -389,9 +386,7 @@ def run_startup_contract_service(
         )
     if hooked_epic:
         service.emit(f"Hooked epic has no ready changesets: {hooked_epic}")
-        atelier_log.debug(
-            f"startup hooked epic has no actionable changesets epic={hooked_epic}"
-        )
+        atelier_log.debug(f"startup hooked epic has no actionable changesets epic={hooked_epic}")
 
     if branch_pr and repo_slug:
         unhooked_epics: list[str] = []
@@ -411,9 +406,7 @@ def run_startup_contract_service(
         feedback = select_feedback_candidate(unhooked_epics)
         if feedback is not None:
             return resume_feedback(feedback)
-        global_feedback = service.select_global_review_feedback_changeset(
-            repo_slug=repo_slug
-        )
+        global_feedback = service.select_global_review_feedback_changeset(repo_slug=repo_slug)
         if global_feedback is not None:
             return resume_feedback(global_feedback)
 
@@ -441,8 +434,7 @@ def run_startup_contract_service(
         ):
             selected_epic = str(candidate)
             service.emit(
-                "Reclaiming stale epic assignment: "
-                f"{selected_epic} (from {previous_assignee})"
+                f"Reclaiming stale epic assignment: {selected_epic} (from {previous_assignee})"
             )
             atelier_log.warning(
                 "startup reclaiming stale assignment "
@@ -458,9 +450,7 @@ def run_startup_contract_service(
 
     if service.check_inbox_before_claim(agent_id):
         if dry_run:
-            service.dry_run_log(
-                "Inbox has unread messages; would exit before claiming work."
-            )
+            service.dry_run_log("Inbox has unread messages; would exit before claiming work.")
         return StartupContractResult(
             epic_id=None, changeset_id=None, should_exit=True, reason="inbox_blocked"
         )
@@ -471,9 +461,7 @@ def run_startup_contract_service(
         assume_yes=assume_yes,
     ):
         if dry_run:
-            service.dry_run_log(
-                "Queue messages available; would exit before claiming work."
-            )
+            service.dry_run_log("Queue messages available; would exit before claiming work.")
         return StartupContractResult(
             epic_id=None, changeset_id=None, should_exit=True, reason="queue_blocked"
         )

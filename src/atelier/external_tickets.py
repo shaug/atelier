@@ -134,33 +134,23 @@ def _normalize_enum(
 
 
 def normalize_relation(value: object) -> str | None:
-    return _normalize_enum(
-        value, allowed=EXTERNAL_TICKET_RELATIONS, aliases=_RELATION_ALIASES
-    )
+    return _normalize_enum(value, allowed=EXTERNAL_TICKET_RELATIONS, aliases=_RELATION_ALIASES)
 
 
 def normalize_direction(value: object) -> str | None:
-    return _normalize_enum(
-        value, allowed=EXTERNAL_TICKET_DIRECTIONS, aliases=_DIRECTION_ALIASES
-    )
+    return _normalize_enum(value, allowed=EXTERNAL_TICKET_DIRECTIONS, aliases=_DIRECTION_ALIASES)
 
 
 def normalize_sync_mode(value: object) -> str | None:
-    return _normalize_enum(
-        value, allowed=EXTERNAL_TICKET_SYNC_MODES, aliases=_SYNC_MODE_ALIASES
-    )
+    return _normalize_enum(value, allowed=EXTERNAL_TICKET_SYNC_MODES, aliases=_SYNC_MODE_ALIASES)
 
 
 def normalize_state(value: object) -> str | None:
-    return _normalize_enum(
-        value, allowed=EXTERNAL_TICKET_STATES, aliases=_STATE_ALIASES
-    )
+    return _normalize_enum(value, allowed=EXTERNAL_TICKET_STATES, aliases=_STATE_ALIASES)
 
 
 def normalize_on_close(value: object) -> str | None:
-    return _normalize_enum(
-        value, allowed=EXTERNAL_TICKET_ON_CLOSE_ACTIONS, aliases=None
-    )
+    return _normalize_enum(value, allowed=EXTERNAL_TICKET_ON_CLOSE_ACTIONS, aliases=None)
 
 
 def normalize_timestamp(value: object) -> str | None:
@@ -261,10 +251,7 @@ def validate_external_ticket_ref(ticket: ExternalTicketRef) -> list[str]:
         errors.append("state_updated_at must be ISO-8601")
     if ticket.last_synced_at and normalize_timestamp(ticket.last_synced_at) is None:
         errors.append("last_synced_at must be ISO-8601")
-    if (
-        ticket.content_updated_at
-        and normalize_timestamp(ticket.content_updated_at) is None
-    ):
+    if ticket.content_updated_at and normalize_timestamp(ticket.content_updated_at) is None:
         errors.append("content_updated_at must be ISO-8601")
     if ticket.notes_updated_at and normalize_timestamp(ticket.notes_updated_at) is None:
         errors.append("notes_updated_at must be ISO-8601")

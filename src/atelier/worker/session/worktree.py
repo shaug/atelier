@@ -143,9 +143,7 @@ def prepare_worktrees(
         git_path=git_path,
     )
     if changeset_id:
-        root_base = git.git_rev_parse(
-            changeset_worktree_path, root_branch_value, git_path=git_path
-        )
+        root_base = git.git_rev_parse(changeset_worktree_path, root_branch_value, git_path=git_path)
         parent_base = git.git_rev_parse(
             changeset_worktree_path,
             changeset_parent_branch,

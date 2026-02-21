@@ -40,14 +40,10 @@ def integrate_changeset(
         die("worktree path is not a git worktree")
 
     exec_util.run_command(
-        git.git_command(
-            ["-C", str(worktree_path), "checkout", work_branch], git_path=git_path
-        )
+        git.git_command(["-C", str(worktree_path), "checkout", work_branch], git_path=git_path)
     )
     exec_util.run_command(
-        git.git_command(
-            ["-C", str(worktree_path), "rebase", root_branch], git_path=git_path
-        )
+        git.git_command(["-C", str(worktree_path), "rebase", root_branch], git_path=git_path)
     )
 
     new_head = git.git_rev_parse(worktree_path, work_branch, git_path=git_path)
@@ -68,9 +64,7 @@ def integrate_changeset(
         new_head,
         expected,
     ]
-    result = exec_util.try_run_command(
-        git.git_command(update_ref_args, git_path=git_path)
-    )
+    result = exec_util.try_run_command(git.git_command(update_ref_args, git_path=git_path))
     if result is None:
         die("missing required command: git")
     if result.returncode != 0:

@@ -57,9 +57,7 @@ def _derive_agent_name(agent_id: str) -> str:
     return _normalize_agent_name(parts[-1])
 
 
-def _derive_agent_id(
-    role: str, agent_name: str, *, session_key: str | None = None
-) -> str:
+def _derive_agent_id(role: str, agent_name: str, *, session_key: str | None = None) -> str:
     normalized_role = role.strip().lower()
     if not normalized_role:
         die("agent role must not be empty")
@@ -110,7 +108,7 @@ def session_pid_from_agent_id(agent_id: str) -> int | None:
 
 
 def session_started_ns_from_agent_id(agent_id: str) -> int | None:
-    """Extract the session start timestamp (ns) from an agent id when present."""
+    """Extract the session start timestamp from an agent id, when present."""
     _role, _name, session_key = parse_agent_identity(agent_id)
     if not session_key:
         return None
@@ -221,9 +219,7 @@ def cleanup_agent_home(agent: AgentHome, *, project_dir: Path) -> bool:
     except OSError:
         warn(f"failed to remove agent home: {target}")
         return False
-    _prune_empty_agent_parents(
-        target.parent, stop=paths.project_agents_dir(project_dir)
-    )
+    _prune_empty_agent_parents(target.parent, stop=paths.project_agents_dir(project_dir))
     return True
 
 
@@ -303,9 +299,7 @@ def _write_metadata(home_dir: Path, agent: AgentHome) -> None:
         "role": agent.role,
         "session_key": agent.session_key,
     }
-    _metadata_path(home_dir).write_text(
-        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
-    )
+    _metadata_path(home_dir).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def ensure_agent_home(
@@ -361,9 +355,7 @@ def resolve_agent_home(
     """Resolve the agent identity and ensure the home directory exists."""
     env_agent_id = os.environ.get("ATELIER_AGENT_ID")
     config_agent_id = project_config.agent.identity
-    resolved_session = _normalize_session_key(
-        session_key or os.environ.get(SESSION_ENV_VAR)
-    )
+    resolved_session = _normalize_session_key(session_key or os.environ.get(SESSION_ENV_VAR))
     if env_agent_id:
         agent_id = env_agent_id.strip()
         if not agent_id:
@@ -486,9 +478,7 @@ done
         except json.JSONDecodeError:
             current = None
     if current != settings_payload:
-        settings_path.write_text(
-            json.dumps(settings_payload, indent=2) + "\n", encoding="utf-8"
-        )
+        settings_path.write_text(json.dumps(settings_payload, indent=2) + "\n", encoding="utf-8")
 
 
 def apply_beads_prime_addendum(content: str, addendum: str | None) -> str:
@@ -528,9 +518,7 @@ def preview_agent_home(
     """Return agent identity and path without creating files."""
     env_agent_id = os.environ.get("ATELIER_AGENT_ID")
     config_agent_id = project_config.agent.identity
-    resolved_session = _normalize_session_key(
-        session_key or os.environ.get(SESSION_ENV_VAR)
-    )
+    resolved_session = _normalize_session_key(session_key or os.environ.get(SESSION_ENV_VAR))
     if env_agent_id:
         agent_id = env_agent_id.strip()
         if not agent_id:

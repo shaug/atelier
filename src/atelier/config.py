@@ -151,9 +151,7 @@ def parse_project_system_config(
         die(f"invalid project system config{location}:\n{exc}")
 
 
-def parse_project_user_config(
-    payload: dict, source: Path | str | None = None
-) -> ProjectUserConfig:
+def parse_project_user_config(payload: dict, source: Path | str | None = None) -> ProjectUserConfig:
     """Validate a project user config payload."""
     try:
         return ProjectUserConfig.model_validate(payload)
@@ -272,15 +270,11 @@ def write_project_config(path: Path, payload: ProjectConfig) -> None:
     """Write a merged project config to system/user files."""
     project_dir = path.parent
     system_config, user_config = split_project_config(payload)
-    write_project_system_config(
-        paths.project_config_sys_path(project_dir), system_config
-    )
+    write_project_system_config(paths.project_config_sys_path(project_dir), system_config)
     write_project_user_config(paths.project_config_user_path(project_dir), user_config)
 
 
-def parse_project_config(
-    payload: dict, source: Path | str | None = None
-) -> ProjectConfig:
+def parse_project_config(payload: dict, source: Path | str | None = None) -> ProjectConfig:
     """Validate a project config payload.
 
     Args:
@@ -373,7 +367,8 @@ def normalize_branch_history(value: object, source: str) -> str:
         source: Label to include in error messages.
 
     Returns:
-        Normalized history string (``manual``, ``squash``, ``merge``, ``rebase``).
+        Normalized history string (``manual``, ``squash``, ``merge``,
+        ``rebase``).
 
     Example:
         >>> normalize_branch_history("squash", "branch.history")
@@ -479,9 +474,7 @@ def normalize_upgrade_policy(value: object, source: str) -> str:
     return normalized
 
 
-def resolve_upgrade_policy(
-    value: object | None, source: str = "atelier.upgrade"
-) -> str:
+def resolve_upgrade_policy(value: object | None, source: str = "atelier.upgrade") -> str:
     """Resolve an upgrade policy value, defaulting to ``ask`` when missing."""
     if value is None:
         return "ask"
@@ -525,7 +518,13 @@ def resolve_branch_overrides(
         value is ``None`` when unset.
 
     Example:
-        >>> resolve_branch_overrides(type("Args", (), {"branch_pr": None, "branch_history": None})())
+        >>> resolve_branch_overrides(
+        ...     type(
+        ...         "Args",
+        ...         (),
+        ...         {"branch_pr": None, "branch_history": None},
+        ...     )()
+        ... )
         (None, None)
     """
     branch_pr_override = getattr(args, "branch_pr", None)
@@ -535,9 +534,7 @@ def resolve_branch_overrides(
     if branch_pr_override is not None:
         resolved_pr = parse_branch_pr_override(branch_pr_override)
     if branch_history_override is not None:
-        resolved_history = normalize_branch_history(
-            branch_history_override, "--branch-history"
-        )
+        resolved_history = normalize_branch_history(branch_history_override, "--branch-history")
     return resolved_pr, resolved_history
 
 
@@ -630,13 +627,10 @@ def ensure_agent_available(
     available: tuple[str, ...] | None = None,
     label: str | None = None,
 ) -> tuple[str, ...]:
-    """Ensure at least one agent CLI is available and the configured agent exists."""
+    """Ensure at least one agent CLI is available and config agent exists."""
     resolved = available or agents.available_agent_names()
     if not resolved:
-        die(
-            "no supported agent CLIs found on PATH; "
-            "install at least one agent to use Atelier"
-        )
+        die("no supported agent CLIs found on PATH; install at least one agent to use Atelier")
     if agent_name not in resolved:
         prefix = f"{label} " if label else ""
         die(f"{prefix}configured agent {agent_name!r} is not available on PATH")
@@ -665,7 +659,7 @@ def _legacy_editor_command(default: object, options: object) -> list[str]:
 
 
 def migrate_legacy_editor_payload(payload: dict) -> tuple[dict, bool]:
-    """Convert legacy editor config (default/options) into edit/work commands."""
+    """Convert legacy editor config fields into edit/work commands."""
     if not isinstance(payload, dict):
         return payload, False
     editor_payload = payload.get("editor")
@@ -763,13 +757,9 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
     if not _path_has_value(payload, "branch", "history"):
         branch = branch.model_copy(update={"history": default_config.branch.history})
     if not _path_has_value(payload, "branch", "squash_message"):
-        branch = branch.model_copy(
-            update={"squash_message": default_config.branch.squash_message}
-        )
+        branch = branch.model_copy(update={"squash_message": default_config.branch.squash_message})
     if not _path_has_value(payload, "branch", "pr_strategy"):
-        branch = branch.model_copy(
-            update={"pr_strategy": default_config.branch.pr_strategy}
-        )
+        branch = branch.model_copy(update={"pr_strategy": default_config.branch.pr_strategy})
 
     agent = parsed.agent
     if not _path_has_value(payload, "agent", "default"):
@@ -781,13 +771,9 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
 
     editor_config = parsed.editor
     if not _path_has_value(payload, "editor", "edit"):
-        editor_config = editor_config.model_copy(
-            update={"edit": default_config.editor.edit}
-        )
+        editor_config = editor_config.model_copy(update={"edit": default_config.editor.edit})
     if not _path_has_value(payload, "editor", "work"):
-        editor_config = editor_config.model_copy(
-            update={"work": default_config.editor.work}
-        )
+        editor_config = editor_config.model_copy(update={"work": default_config.editor.work})
 
     git_config = parsed.git
     if not _path_has_value(payload, "git", "path"):
@@ -838,7 +824,8 @@ def build_project_config(
     Args:
         existing: Existing config payload or ``ProjectConfig``.
         enlistment_path: Resolved local enlistment path.
-        origin: Normalized repo origin (e.g., ``github.com/org/repo``) or ``None``.
+        origin: Normalized repo origin (for example, ``github.com/org/repo``)
+            or ``None``.
         origin_raw: Raw origin URL from Git or ``None``.
         args: CLI argument object for overrides, or ``None`` to prompt.
         prompt_missing_only: When true, prompt only for missing user fields.
@@ -850,13 +837,17 @@ def build_project_config(
         atelier metadata.
 
     Example:
-        >>> build_project_config({}, "/repo", "example.com/repo", "https://example.com/repo", None)
+        >>> build_project_config(
+        ...     {},
+        ...     "/repo",
+        ...     "example.com/repo",
+        ...     "https://example.com/repo",
+        ...     None,
+        ... )
         ProjectConfig(...)
     """
     existing_config = (
-        existing
-        if isinstance(existing, ProjectConfig)
-        else parse_project_config(existing)
+        existing if isinstance(existing, ProjectConfig) else parse_project_config(existing)
     )
     raw_payload = existing if isinstance(existing, dict) else raw_existing
 
@@ -895,18 +886,14 @@ def build_project_config(
 
     branch_history_arg = read_arg(args, "branch_history")
     if branch_history_arg is not None:
-        branch_history = normalize_branch_history(
-            branch_history_arg, "--branch-history"
-        )
+        branch_history = normalize_branch_history(branch_history_arg, "--branch-history")
     elif should_prompt("branch", "history"):
         branch_history_input = select(
             "Branch history policy",
             BRANCH_HISTORY_VALUES,
             branch_history_default,
         )
-        branch_history = normalize_branch_history(
-            branch_history_input, "branch.history"
-        )
+        branch_history = normalize_branch_history(branch_history_input, "branch.history")
     else:
         branch_history = branch_history_default
 
@@ -917,37 +904,27 @@ def build_project_config(
                 {"squash_message": branch_squash_message_arg}
             ).squash_message
         except ValidationError:
-            die(
-                "branch.squash_message must be one of: "
-                + ", ".join(BRANCH_SQUASH_MESSAGE_VALUES)
-            )
+            die("branch.squash_message must be one of: " + ", ".join(BRANCH_SQUASH_MESSAGE_VALUES))
     else:
         branch_squash_message = branch_squash_message_default
 
     branch_pr_strategy_default = branch_config.pr_strategy
     branch_pr_strategy_arg = read_arg(args, "branch_pr_strategy")
     if branch_pr_strategy_arg is not None:
-        branch_pr_strategy = normalize_pr_strategy(
-            branch_pr_strategy_arg, "--branch-pr-strategy"
-        )
+        branch_pr_strategy = normalize_pr_strategy(branch_pr_strategy_arg, "--branch-pr-strategy")
     elif should_prompt("branch", "pr_strategy"):
         branch_pr_strategy_input = select(
             "PR strategy",
             pr_strategy.PR_STRATEGY_VALUES,
             branch_pr_strategy_default,
         )
-        branch_pr_strategy = normalize_pr_strategy(
-            branch_pr_strategy_input, "branch.pr_strategy"
-        )
+        branch_pr_strategy = normalize_pr_strategy(branch_pr_strategy_input, "branch.pr_strategy")
     else:
         branch_pr_strategy = branch_pr_strategy_default
 
     available_agents = agents.available_agent_names()
     if not available_agents:
-        die(
-            "no supported agent CLIs found on PATH; "
-            "install at least one agent to use Atelier"
-        )
+        die("no supported agent CLIs found on PATH; install at least one agent to use Atelier")
     agent_default_default = existing_config.agent.default or agents.DEFAULT_AGENT
     if not agents.is_supported_agent(agent_default_default):
         agent_default_default = agents.DEFAULT_AGENT
@@ -1023,9 +1000,7 @@ def build_project_config(
     atelier_managed_files = dict(existing_config.atelier.managed_files)
     atelier_data_dir = existing_config.atelier.data_dir
     if not atelier_data_dir:
-        atelier_data_dir = str(
-            paths.project_dir_for_enlistment(enlistment_path, origin)
-        )
+        atelier_data_dir = str(paths.project_dir_for_enlistment(enlistment_path, origin))
 
     agent_options = dict(existing_config.agent.options)
     agent_options.setdefault(agent_default, [])
@@ -1038,9 +1013,7 @@ def build_project_config(
     project_owner = existing_config.project.owner
 
     beads_location = "project"
-    beads_section = existing_config.beads.model_copy(
-        update={"location": beads_location}
-    )
+    beads_section = existing_config.beads.model_copy(update={"location": beads_location})
 
     return ProjectConfig(
         project=ProjectSection(

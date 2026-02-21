@@ -80,9 +80,7 @@ def test_reconcile_blocked_merged_changesets_dry_run_counts_candidates() -> None
             resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
             changeset_integration_signal=lambda *_args, **_kwargs: (True, "abc1234"),
             issue_dependency_ids=lambda _issue: tuple(),
-            issue_labels=lambda issue: {
-                str(label) for label in issue.get("labels", [])
-            },
+            issue_labels=lambda issue: {str(label) for label in issue.get("labels", [])},
             finalize_changeset=lambda **_kwargs: FinalizeResult(
                 continue_running=True, reason="changeset_complete"
             ),

@@ -22,12 +22,7 @@ class Iterm2Adapter(TerminalAdapter):
     def _write_osc(self, code: int, title: str) -> bool:
         if not sys.stdout.isatty():
             return False
-        safe = (
-            title.replace("\033", "")
-            .replace("\007", "")
-            .replace("\n", " ")
-            .replace("\r", " ")
-        )
+        safe = title.replace("\033", "").replace("\007", "").replace("\n", " ").replace("\r", " ")
         try:
             sys.stdout.write(f"\033]{code};{safe}\007")
             sys.stdout.flush()

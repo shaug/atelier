@@ -15,9 +15,7 @@ class FakeStartupService:
         )
         self._list_epics = overrides.pop("list_epics", lambda: [])
         self._next_changeset = overrides.pop("next_changeset", lambda **_kwargs: None)
-        self._resolve_hooked_epic = overrides.pop(
-            "resolve_hooked_epic", lambda *_args: None
-        )
+        self._resolve_hooked_epic = overrides.pop("resolve_hooked_epic", lambda *_args: None)
         self._stale_family_assigned_epics = overrides.pop(
             "stale_family_assigned_epics", lambda issues, agent_id: []
         )
@@ -30,15 +28,9 @@ class FakeStartupService:
         self._check_inbox_before_claim = overrides.pop(
             "check_inbox_before_claim", lambda *_args: False
         )
-        self._ready_changesets_global = overrides.pop(
-            "ready_changesets_global", lambda: []
-        )
-        self._select_epic_prompt = overrides.pop(
-            "select_epic_prompt", lambda **_kwargs: None
-        )
-        self._send_needs_decision = overrides.pop(
-            "send_needs_decision", lambda **_kwargs: None
-        )
+        self._ready_changesets_global = overrides.pop("ready_changesets_global", lambda: [])
+        self._select_epic_prompt = overrides.pop("select_epic_prompt", lambda **_kwargs: None)
+        self._send_needs_decision = overrides.pop("send_needs_decision", lambda **_kwargs: None)
         self._dry_run_log = overrides.pop("dry_run_log", lambda _message: None)
         self._emit = overrides.pop("emit", lambda _message: None)
         self._die = overrides.pop(

@@ -7,9 +7,7 @@ from unittest.mock import patch
 
 
 def _load_script(filename: str):
-    scripts_dir = (
-        Path(__file__).resolve().parents[3] / "src/atelier/skills/github-prs/scripts"
-    )
+    scripts_dir = Path(__file__).resolve().parents[3] / "src/atelier/skills/github-prs/scripts"
     path = scripts_dir / filename
     module_name = f"test_{filename.replace('.', '_')}"
     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -69,9 +67,7 @@ def test_list_review_threads_query_threads_paginates() -> None:
             "repository": {
                 "pullRequest": {
                     "reviewThreads": {
-                        "nodes": [
-                            {"id": "t1", "isResolved": False, "comments": {"nodes": []}}
-                        ],
+                        "nodes": [{"id": "t1", "isResolved": False, "comments": {"nodes": []}}],
                         "pageInfo": {"hasNextPage": True, "endCursor": "cursor-1"},
                     }
                 }
@@ -83,9 +79,7 @@ def test_list_review_threads_query_threads_paginates() -> None:
             "repository": {
                 "pullRequest": {
                     "reviewThreads": {
-                        "nodes": [
-                            {"id": "t2", "isResolved": False, "comments": {"nodes": []}}
-                        ],
+                        "nodes": [{"id": "t2", "isResolved": False, "comments": {"nodes": []}}],
                         "pageInfo": {"hasNextPage": False, "endCursor": None},
                     }
                 }
@@ -114,9 +108,7 @@ def test_reply_inline_thread_main_resolves_thread(capsys) -> None:
             module,
             "resolve_review_thread",
             return_value={
-                "data": {
-                    "resolveReviewThread": {"thread": {"id": "t1", "isResolved": True}}
-                }
+                "data": {"resolveReviewThread": {"thread": {"id": "t1", "isResolved": True}}}
             },
         ),
     ):

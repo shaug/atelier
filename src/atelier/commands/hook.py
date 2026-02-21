@@ -19,9 +19,7 @@ def _issue_title(issue_id: str, *, beads_root, repo_root) -> str | None:
 
 def run_hook(args: object) -> None:
     """Run a hook event handler for agent runtimes."""
-    project_root, project_config, _enlistment, repo_root = (
-        resolve_current_project_with_repo_root()
-    )
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
     event = hooks.parse_hook_event(getattr(args, "event", None))

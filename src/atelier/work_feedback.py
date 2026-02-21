@@ -35,9 +35,7 @@ def persist_review_feedback_cursor(
         return
     lookup = prs.lookup_github_pr_status(repo_slug, work_branch)
     pr_payload = lookup.payload if lookup.found else None
-    feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
-        pr_payload, repo=repo_slug
-    )
+    feedback_at = prs.latest_feedback_timestamp_with_inline_comments(pr_payload, repo=repo_slug)
     if not feedback_at:
         return
     beads.update_changeset_review_feedback_cursor(
@@ -84,23 +82,15 @@ def capture_review_feedback_snapshot(
         )
     lookup = prs.lookup_github_pr_status(repo_slug, work_branch)
     pr_payload = lookup.payload if lookup.found else None
-    feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
-        pr_payload, repo=repo_slug
-    )
+    feedback_at = prs.latest_feedback_timestamp_with_inline_comments(pr_payload, repo=repo_slug)
     unresolved_threads = None
     if isinstance(pr_payload, dict):
         raw_number = pr_payload.get("number")
         pr_number = raw_number if isinstance(raw_number, int) else None
-        if (
-            pr_number is None
-            and isinstance(raw_number, str)
-            and raw_number.strip().isdigit()
-        ):
+        if pr_number is None and isinstance(raw_number, str) and raw_number.strip().isdigit():
             pr_number = int(raw_number.strip())
         if pr_number is not None:
-            unresolved_threads = prs.unresolved_review_thread_count(
-                repo_slug, pr_number
-            )
+            unresolved_threads = prs.unresolved_review_thread_count(repo_slug, pr_number)
     snapshot = parse_review_feedback_boundary(
         feedback_at=feedback_at,
         unresolved_threads=unresolved_threads,
@@ -117,7 +107,8 @@ def capture_review_feedback_snapshot(
 def review_feedback_progressed(
     before: ReviewFeedbackSnapshot, after: ReviewFeedbackSnapshot
 ) -> bool:
-    # When there are no unresolved inline threads left, consider feedback handled
+    # When there are no unresolved inline threads left, consider feedback
+    # handled
     # even when no new commits/timestamps were introduced in this pass.
     if after.unresolved_threads is not None and after.unresolved_threads == 0:
         return True
@@ -129,9 +120,7 @@ def review_feedback_progressed(
         return True
     before_feedback = prs.parse_timestamp(before.feedback_at)
     after_feedback = prs.parse_timestamp(after.feedback_at)
-    if after_feedback is not None and (
-        before_feedback is None or after_feedback > before_feedback
-    ):
+    if after_feedback is not None and (before_feedback is None or after_feedback > before_feedback):
         return True
     if (
         before.branch_head

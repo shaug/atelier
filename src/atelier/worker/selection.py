@@ -125,11 +125,9 @@ def select_epic_from_ready_changesets(
     ready_changesets: list[dict[str, object]],
     is_actionable: Callable[[str], bool],
 ) -> str | None:
-    """Pick an actionable epic (or standalone changeset) from global ready work."""
+    """Pick actionable epic (or standalone changeset) from global ready work."""
     known_epics: dict[str, dict[str, object]] = {
-        str(issue_id): issue
-        for issue in issues
-        if (issue_id := issue.get("id")) is not None
+        str(issue_id): issue for issue in issues if (issue_id := issue.get("id")) is not None
     }
     for changeset in sort_by_created_at(ready_changesets):
         issue_id = changeset.get("id")
@@ -162,9 +160,7 @@ def select_epic_prompt(
     assume_yes: bool = False,
 ) -> str | None:
     """Select an epic using prompt-mode semantics."""
-    epics = filter_epics(
-        issues, require_unassigned=True, allow_hooked=False, skip_draft=True
-    )
+    epics = filter_epics(issues, require_unassigned=True, allow_hooked=False, skip_draft=True)
     resume = filter_epics(issues, assignee=agent_id, allow_hooked=True, skip_draft=True)
     if not epics and not resume:
         return None
@@ -204,18 +200,14 @@ def select_epic_auto(
     is_actionable: Callable[[str], bool],
 ) -> str | None:
     """Select an epic using auto-mode semantics."""
-    ready = filter_epics(
-        issues, require_unassigned=True, allow_hooked=False, skip_draft=True
-    )
+    ready = filter_epics(issues, require_unassigned=True, allow_hooked=False, skip_draft=True)
     if ready:
         ready = sort_by_created_at(ready)
         for issue in ready:
             issue_id = issue.get("id") or ""
             if issue_id and is_actionable(str(issue_id)):
                 return str(issue_id)
-    unfinished = filter_epics(
-        issues, assignee=agent_id, allow_hooked=True, skip_draft=True
-    )
+    unfinished = filter_epics(issues, assignee=agent_id, allow_hooked=True, skip_draft=True)
     if unfinished:
         unfinished = sort_by_created_at(unfinished)
         for issue in unfinished:

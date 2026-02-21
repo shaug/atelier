@@ -30,10 +30,8 @@ def resolve_current_project() -> tuple[Path, config.ProjectConfig, str]:
     return resolve_project_for_enlistment(enlistment_path, origin)
 
 
-def resolve_current_project_with_repo_root() -> tuple[
-    Path, config.ProjectConfig, str, Path
-]:
-    """Resolve the current project plus the repo root from the working directory."""
+def resolve_current_project_with_repo_root() -> tuple[Path, config.ProjectConfig, str, Path]:
+    """Resolve current project config plus repo root from working directory."""
     cwd = Path.cwd()
     repo_root, enlistment_path, _, origin = git.resolve_repo_enlistment(cwd)
     project_root, config_payload, enlistment_path = resolve_project_for_enlistment(

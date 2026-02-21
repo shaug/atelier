@@ -47,11 +47,7 @@ def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
     def fake_feedback(payload: dict[str, object] | None, *, repo: str) -> str | None:
         if not payload:
             return None
-        return (
-            "2026-02-20T11:00:00Z"
-            if payload.get("number") == 11
-            else "2026-02-20T10:30:00Z"
-        )
+        return "2026-02-20T11:00:00Z" if payload.get("number") == 11 else "2026-02-20T10:30:00Z"
 
     record_by_id = {
         record.issue.id: record
@@ -67,9 +63,7 @@ def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
             "atelier.worker.review.beads.BeadsClient.show_issue",
             side_effect=lambda issue_id, *, source: record_by_id.get(issue_id),
         ),
-        patch(
-            "atelier.worker.review.prs.lookup_github_pr_status", side_effect=fake_lookup
-        ),
+        patch("atelier.worker.review.prs.lookup_github_pr_status", side_effect=fake_lookup),
         patch(
             "atelier.worker.review.prs.latest_feedback_timestamp_with_inline_comments",
             side_effect=fake_feedback,

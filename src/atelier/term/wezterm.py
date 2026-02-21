@@ -26,12 +26,7 @@ class WezTermAdapter(TerminalAdapter):
     def set_pane_title(self, title: str) -> bool:
         if not sys.stdout.isatty():
             return False
-        safe = (
-            title.replace("\033", "")
-            .replace("\007", "")
-            .replace("\n", " ")
-            .replace("\r", " ")
-        )
+        safe = title.replace("\033", "").replace("\007", "").replace("\n", " ").replace("\r", " ")
         try:
             sys.stdout.write(f"\033]2;{safe}\007")
             sys.stdout.flush()

@@ -255,9 +255,7 @@ def test_status_marks_stale_sessions_and_reclaimable_epics() -> None:
             "title": "atelier/worker/codex/p424242-t1",
             "labels": ["at:agent"],
             "description": (
-                "agent_id: atelier/worker/codex/p424242-t1\n"
-                "hook_bead: epic-stale\n"
-                "role: worker\n"
+                "agent_id: atelier/worker/codex/p424242-t1\nhook_bead: epic-stale\nrole: worker\n"
             ),
         }
 

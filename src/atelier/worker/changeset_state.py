@@ -53,9 +53,7 @@ def find_invalid_changeset_labels(
                 for label in labels
                 if label.startswith("cs:") and label not in valid_changeset_state_labels
             }
-            if "at:subtask" in labels or (
-                has_cs_label and "at:changeset" not in labels
-            ):
+            if "at:subtask" in labels or (has_cs_label and "at:changeset" not in labels):
                 invalid.append(issue_id)
                 continue
             if invalid_cs_labels:
@@ -63,9 +61,7 @@ def find_invalid_changeset_labels(
     return invalid
 
 
-def mark_changeset_in_progress(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     beads.run_bd_command(
         [
             "update",
@@ -92,9 +88,7 @@ def mark_changeset_in_progress(
     )
 
 
-def mark_changeset_closed(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     beads.run_bd_command(
         [
             "update",
@@ -115,9 +109,7 @@ def mark_changeset_closed(
     )
 
 
-def mark_changeset_merged(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     beads.run_bd_command(
         [
             "update",
@@ -142,9 +134,7 @@ def mark_changeset_merged(
     )
 
 
-def mark_changeset_abandoned(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> None:
+def mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     beads.run_bd_command(
         [
             "update",
