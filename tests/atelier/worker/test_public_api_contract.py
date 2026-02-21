@@ -35,7 +35,7 @@ def test_runtime_exports_do_not_use_private_names() -> None:
             assert not name.startswith("_"), f"{module_name} exports private symbol {name!r}"
 
 
-def test_runtime_public_functions_have_rest_docstrings() -> None:
+def test_runtime_public_functions_have_google_docstrings() -> None:
     for module_name in PUBLIC_API_MODULES:
         for name, exported in _iter_exports(module_name):
             if not inspect.isfunction(exported):

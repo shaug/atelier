@@ -58,7 +58,7 @@ This document describes the worker runtime contracts used by `atelier work`.
 - Runtime helper modules should define public functions directly instead of
   creating `_private` function names and aliasing them in `__all__`.
 - `_`-prefixed helpers are module-private and must not be exported.
-- Every exported runtime function must include a reST-style docstring with:
+- Every exported runtime function must include a Google-style docstring with:
   - a clear one-line summary
   - an `Args:` section when the function accepts inputs
   - a `Returns:` section describing the output contract

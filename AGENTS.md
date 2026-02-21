@@ -143,7 +143,8 @@ ______________________________________________________________________
 ## API Documentation & Style Rules
 
 - Every exported function (public name or included in `__all__`) must have a
-  thorough docstring in **reST (PEP 287) style**.
+  thorough docstring in **Google style** (summary plus `Args:`/`Returns:`;
+  include `Raises:` where relevant).
 - Exported docstrings should describe behavior, inputs, return values, and
   expected failure modes (for example, raised exceptions or blocking
   conditions).
