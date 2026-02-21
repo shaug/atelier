@@ -10,10 +10,17 @@ from typing import Protocol
 from .. import agent_home, agents, beads, branching, config, git, prs
 from .. import root_branch as root_branch_module
 from ..config import ProjectConfig
+from ..work_feedback import ReviewFeedbackSnapshot
 from . import work_command_helpers as worker_work
-from .models import WorkerRunSummary
+from .models import (
+    FinalizeResult,
+    ReconcileResult,
+    StartupContractResult,
+    WorkerRunSummary,
+)
 from .ports import (
     ConfirmFn,
+    Issue,
     WorkerCommandService,
     WorkerControlPorts,
     WorkerInfrastructurePorts,
@@ -22,6 +29,7 @@ from .ports import (
 )
 from .session import agent as worker_session_agent
 from .session import worktree as worker_session_worktree
+from .session.startup import StartupContractContext
 
 
 class RunWorkerOnceFn(Protocol):
@@ -33,48 +41,280 @@ class RunWorkerOnceFn(Protocol):
 class WorkerLifecycleAdapter:
     """Concrete lifecycle service object backed by worker helper functions."""
 
-    def __init__(self) -> None:
-        self.capture_review_feedback_snapshot = (
-            worker_work._capture_review_feedback_snapshot
+    def capture_review_feedback_snapshot(
+        self,
+        *,
+        issue: Issue,
+        repo_slug: str | None,
+        repo_root: Path,
+        git_path: str | None,
+    ) -> ReviewFeedbackSnapshot:
+        return worker_work._capture_review_feedback_snapshot(
+            issue=issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
         )
-        self.changeset_parent_branch = worker_work._changeset_parent_branch
-        self.changeset_pr_url = worker_work._changeset_pr_url
-        self.changeset_work_branch = worker_work._changeset_work_branch
-        self.extract_changeset_root_branch = worker_work._extract_changeset_root_branch
-        self.extract_workspace_parent_branch = (
-            worker_work._extract_workspace_parent_branch
+
+    def changeset_parent_branch(self, issue: Issue, *, root_branch: str) -> str:
+        return worker_work._changeset_parent_branch(issue, root_branch=root_branch)
+
+    def changeset_pr_url(self, issue: Issue) -> str | None:
+        return worker_work._changeset_pr_url(issue)
+
+    def changeset_work_branch(self, issue: Issue) -> str | None:
+        return worker_work._changeset_work_branch(issue)
+
+    def extract_changeset_root_branch(self, issue: Issue) -> str | None:
+        return worker_work._extract_changeset_root_branch(issue)
+
+    def extract_workspace_parent_branch(self, issue: Issue) -> str | None:
+        return worker_work._extract_workspace_parent_branch(issue)
+
+    def finalize_changeset(
+        self,
+        *,
+        changeset_id: str,
+        epic_id: str,
+        agent_id: str,
+        agent_bead_id: str,
+        started_at: object,
+        repo_slug: str | None,
+        beads_root: Path,
+        repo_root: Path,
+        branch_pr: bool,
+        branch_pr_strategy: object,
+        branch_history: str,
+        branch_squash_message: str,
+        project_data_dir: Path | None,
+        squash_message_agent_spec: object,
+        squash_message_agent_options: list[str],
+        squash_message_agent_home: Path,
+        squash_message_agent_env: dict[str, str],
+        git_path: str | None,
+    ) -> FinalizeResult:
+        return worker_work._finalize_changeset(
+            changeset_id=changeset_id,
+            epic_id=epic_id,
+            agent_id=agent_id,
+            agent_bead_id=agent_bead_id,
+            started_at=started_at,
+            repo_slug=repo_slug,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            branch_pr=branch_pr,
+            branch_pr_strategy=branch_pr_strategy,
+            branch_history=branch_history,
+            branch_squash_message=branch_squash_message,
+            project_data_dir=project_data_dir,
+            squash_message_agent_spec=squash_message_agent_spec,
+            squash_message_agent_options=squash_message_agent_options,
+            squash_message_agent_home=squash_message_agent_home,
+            squash_message_agent_env=squash_message_agent_env,
+            git_path=git_path,
         )
-        self.finalize_changeset = worker_work._finalize_changeset
-        self.find_invalid_changeset_labels = worker_work._find_invalid_changeset_labels
-        self.lookup_pr_payload = worker_work._lookup_pr_payload
-        self.mark_changeset_blocked = worker_work._mark_changeset_blocked
-        self.mark_changeset_in_progress = worker_work._mark_changeset_in_progress
-        self.next_changeset = worker_work._next_changeset
-        self.persist_review_feedback_cursor = (
-            worker_work._persist_review_feedback_cursor
+
+    def find_invalid_changeset_labels(
+        self, root_id: str, *, beads_root: Path, repo_root: Path
+    ) -> list[str]:
+        return worker_work._find_invalid_changeset_labels(
+            root_id, beads_root=beads_root, repo_root=repo_root
         )
-        self.release_epic_assignment = worker_work._release_epic_assignment
-        self.reconcile_blocked_merged_changesets = (
-            worker_work.reconcile_blocked_merged_changesets
+
+    def lookup_pr_payload(self, repo_slug: str | None, branch: str) -> Issue | None:
+        return worker_work._lookup_pr_payload(repo_slug, branch)
+
+    def mark_changeset_blocked(
+        self, changeset_id: str, *, beads_root: Path, repo_root: Path, reason: str
+    ) -> None:
+        worker_work._mark_changeset_blocked(
+            changeset_id, beads_root=beads_root, repo_root=repo_root, reason=reason
         )
-        self.resolve_epic_id_for_changeset = worker_work._resolve_epic_id_for_changeset
-        self.review_feedback_progressed = worker_work._review_feedback_progressed
-        self.run_startup_contract = worker_work._run_startup_contract
-        self.send_invalid_changeset_labels_notification = (
-            worker_work._send_invalid_changeset_labels_notification
+
+    def mark_changeset_in_progress(
+        self, changeset_id: str, *, beads_root: Path, repo_root: Path
+    ) -> None:
+        worker_work._mark_changeset_in_progress(
+            changeset_id, beads_root=beads_root, repo_root=repo_root
         )
-        self.send_no_ready_changesets = worker_work._send_no_ready_changesets
-        self.send_planner_notification = worker_work._send_planner_notification
+
+    def next_changeset(
+        self,
+        *,
+        epic_id: str,
+        beads_root: Path,
+        repo_root: Path,
+        repo_slug: str | None,
+        branch_pr: bool,
+        branch_pr_strategy: object,
+        git_path: str | None,
+    ) -> Issue | None:
+        return worker_work._next_changeset(
+            epic_id=epic_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            repo_slug=repo_slug,
+            branch_pr=branch_pr,
+            branch_pr_strategy=branch_pr_strategy,
+            git_path=git_path,
+        )
+
+    def persist_review_feedback_cursor(
+        self,
+        *,
+        changeset_id: str,
+        issue: Issue,
+        repo_slug: str | None,
+        beads_root: Path,
+        repo_root: Path,
+    ) -> None:
+        worker_work._persist_review_feedback_cursor(
+            changeset_id=changeset_id,
+            issue=issue,
+            repo_slug=repo_slug,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+
+    def release_epic_assignment(
+        self, epic_id: str, *, beads_root: Path, repo_root: Path
+    ) -> None:
+        worker_work._release_epic_assignment(
+            epic_id, beads_root=beads_root, repo_root=repo_root
+        )
+
+    def reconcile_blocked_merged_changesets(
+        self,
+        *,
+        agent_id: str,
+        agent_bead_id: str | None,
+        project_config: ProjectConfig,
+        project_data_dir: Path | None,
+        beads_root: Path,
+        repo_root: Path,
+        git_path: str | None,
+        dry_run: bool,
+        log: Callable[[str], None] | None,
+    ) -> ReconcileResult:
+        return worker_work.reconcile_blocked_merged_changesets(
+            agent_id=agent_id,
+            agent_bead_id=agent_bead_id,
+            project_config=project_config,
+            project_data_dir=project_data_dir,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            git_path=git_path,
+            dry_run=dry_run,
+            log=log,
+        )
+
+    def resolve_epic_id_for_changeset(
+        self, issue: Issue, *, beads_root: Path, repo_root: Path
+    ) -> str | None:
+        return worker_work._resolve_epic_id_for_changeset(
+            issue, beads_root=beads_root, repo_root=repo_root
+        )
+
+    def review_feedback_progressed(
+        self, before: ReviewFeedbackSnapshot, after: ReviewFeedbackSnapshot
+    ) -> bool:
+        return worker_work._review_feedback_progressed(before, after)
+
+    def run_startup_contract(
+        self, *, context: StartupContractContext
+    ) -> StartupContractResult:
+        return worker_work._run_startup_contract(context=context)
+
+    def send_invalid_changeset_labels_notification(
+        self,
+        *,
+        epic_id: str,
+        invalid_changesets: list[str],
+        agent_id: str,
+        beads_root: Path,
+        repo_root: Path,
+        dry_run: bool,
+    ) -> str:
+        return worker_work._send_invalid_changeset_labels_notification(
+            epic_id=epic_id,
+            invalid_changesets=invalid_changesets,
+            agent_id=agent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            dry_run=dry_run,
+        )
+
+    def send_no_ready_changesets(
+        self,
+        *,
+        epic_id: str,
+        agent_id: str,
+        beads_root: Path,
+        repo_root: Path,
+        dry_run: bool,
+    ) -> None:
+        worker_work._send_no_ready_changesets(
+            epic_id=epic_id,
+            agent_id=agent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            dry_run=dry_run,
+        )
+
+    def send_planner_notification(
+        self,
+        *,
+        subject: str,
+        body: str,
+        agent_id: str,
+        thread_id: str | None,
+        beads_root: Path,
+        repo_root: Path,
+        dry_run: bool,
+    ) -> None:
+        worker_work._send_planner_notification(
+            subject=subject,
+            body=body,
+            agent_id=agent_id,
+            thread_id=thread_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            dry_run=dry_run,
+        )
 
 
 class WorkerCommandAdapter:
     """Concrete command service object backed by worker helper functions."""
 
-    def __init__(self) -> None:
-        self.ensure_exec_subcommand_flag = worker_work._ensure_exec_subcommand_flag
-        self.strip_flag_with_value = worker_work._strip_flag_with_value
-        self.with_codex_exec = worker_work._with_codex_exec
-        self.worker_opening_prompt = worker_work._worker_opening_prompt
+    def ensure_exec_subcommand_flag(self, args: list[str], flag: str) -> list[str]:
+        return worker_work._ensure_exec_subcommand_flag(args, flag)
+
+    def strip_flag_with_value(self, args: list[str], flag: str) -> list[str]:
+        return worker_work._strip_flag_with_value(args, flag)
+
+    def with_codex_exec(self, cmd: list[str], prompt: str) -> list[str]:
+        return worker_work._with_codex_exec(cmd, prompt)
+
+    def worker_opening_prompt(
+        self,
+        *,
+        project_enlistment: Path,
+        workspace_branch: str,
+        epic_id: str,
+        changeset_id: str,
+        changeset_title: str,
+        review_feedback: bool = False,
+        review_pr_url: str | None = None,
+    ) -> str:
+        return worker_work._worker_opening_prompt(
+            project_enlistment=str(project_enlistment),
+            workspace_branch=workspace_branch,
+            epic_id=epic_id,
+            changeset_id=changeset_id,
+            changeset_title=changeset_title,
+            review_feedback=review_feedback,
+            review_pr_url=review_pr_url,
+        )
 
 
 def run_worker_sessions(
