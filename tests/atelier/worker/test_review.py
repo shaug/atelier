@@ -53,10 +53,19 @@ def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
             else "2026-02-20T10:30:00Z"
         )
 
+    record_by_id = {
+        record.issue.id: record
+        for record in beads.parse_issue_records(issues, source="review_test")
+    }
+
     with (
         patch(
             "atelier.worker.review.beads.list_descendant_changesets",
             return_value=issues,
+        ),
+        patch(
+            "atelier.worker.review.beads.BeadsClient.show_issue",
+            side_effect=lambda issue_id, *, source: record_by_id.get(issue_id),
         ),
         patch(
             "atelier.worker.review.prs.lookup_github_pr_status", side_effect=fake_lookup
@@ -90,11 +99,16 @@ def test_select_global_review_feedback_changeset_uses_resolver() -> None:
     issue_records = beads.parse_issue_records(
         issues, source="test_select_global_review_feedback_changeset_uses_resolver"
     )
+    record_by_id = {record.issue.id: record for record in issue_records}
 
     with (
         patch(
             "atelier.worker.review.beads.BeadsClient.issue_records",
             return_value=issue_records,
+        ),
+        patch(
+            "atelier.worker.review.beads.BeadsClient.show_issue",
+            side_effect=lambda issue_id, *, source: record_by_id.get(issue_id),
         ),
         patch(
             "atelier.worker.review.prs.lookup_github_pr_status",
@@ -129,9 +143,12 @@ def test_select_global_review_feedback_changeset_uses_resolver() -> None:
 def test_select_review_feedback_changeset_invalid_issue_payload_fails() -> None:
     issues = [{"status": "in_progress", "labels": ["at:changeset"]}]
 
-    with patch(
-        "atelier.worker.review.beads.list_descendant_changesets",
-        return_value=issues,
+    with (
+        patch(
+            "atelier.worker.review.beads.list_descendant_changesets",
+            return_value=issues,
+        ),
+        patch("atelier.worker.review.beads.BeadsClient.show_issue", return_value=None),
     ):
         with pytest.raises(ValueError, match="invalid beads issue payload"):
             review.select_review_feedback_changeset(
