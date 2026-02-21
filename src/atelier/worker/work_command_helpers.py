@@ -1785,35 +1785,9 @@ class _StartupContractService(worker_startup.StartupContractService):
 
 def _run_startup_contract(
     *,
-    agent_id: str,
-    agent_bead_id: str | None,
-    beads_root: Path,
-    repo_root: Path,
-    mode: str,
-    explicit_epic_id: str | None,
-    queue_only: bool,
-    dry_run: bool,
-    assume_yes: bool,
-    repo_slug: str | None = None,
-    branch_pr: bool = True,
-    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
-    git_path: str | None = None,
+    context: worker_startup.StartupContractContext,
 ) -> StartupContractResult:
-    context = worker_startup.StartupContractContext(
-        agent_id=agent_id,
-        agent_bead_id=agent_bead_id,
-        beads_root=beads_root,
-        repo_root=repo_root,
-        mode=mode,
-        explicit_epic_id=explicit_epic_id,
-        queue_only=queue_only,
-        dry_run=dry_run,
-        assume_yes=assume_yes,
-        repo_slug=repo_slug,
-        branch_pr=branch_pr,
-        branch_pr_strategy=branch_pr_strategy,
-        git_path=git_path,
-        worker_queue_name=_WORKER_QUEUE_NAME,
+    service = _StartupContractService(
+        beads_root=context.beads_root, repo_root=context.repo_root
     )
-    service = _StartupContractService(beads_root=beads_root, repo_root=repo_root)
     return worker_startup.run_startup_contract_service(context=context, service=service)

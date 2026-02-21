@@ -40,12 +40,6 @@ def test_changeset_selection_context_captures_startup_override() -> None:
     payload = ChangesetSelectionContext(
         selected_epic="at-epic",
         startup_changeset_id="at-epic.2",
-        beads_root=Path("/beads"),
-        repo_root=Path("/repo"),
-        repo_slug=None,
-        branch_pr=False,
-        branch_pr_strategy="on-ready",
-        git_path="git",
     )
 
     assert payload.selected_epic == "at-epic"

@@ -38,9 +38,3 @@ class ChangesetSelectionContext:
 
     selected_epic: str
     startup_changeset_id: str | None
-    beads_root: Path
-    repo_root: Path
-    repo_slug: str | None
-    branch_pr: bool
-    branch_pr_strategy: object
-    git_path: str | None

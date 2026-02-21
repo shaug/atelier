@@ -14,6 +14,7 @@ from ..config import ProjectConfig
 from ..work_feedback import ReviewFeedbackSnapshot
 from .models import FinalizeResult, ReconcileResult, StartupContractResult
 from .session.agent import AgentSessionPreparation, AgentSessionRunResult
+from .session.startup import StartupContractContext
 from .session.worktree import WorktreePreparation
 
 Issue = dict[str, object]
@@ -371,23 +372,7 @@ class ResolveEpicIdForChangesetFn(Protocol):
 
 
 class RunStartupContractFn(Protocol):
-    def __call__(
-        self,
-        *,
-        agent_id: str,
-        agent_bead_id: str | None,
-        beads_root: Path,
-        repo_root: Path,
-        mode: str,
-        explicit_epic_id: str | None,
-        queue_only: bool,
-        dry_run: bool,
-        assume_yes: bool,
-        repo_slug: str | None,
-        branch_pr: bool,
-        branch_pr_strategy: object,
-        git_path: str | None,
-    ) -> StartupContractResult: ...
+    def __call__(self, *, context: StartupContractContext) -> StartupContractResult: ...
 
 
 class SendInvalidChangesetLabelsNotificationFn(Protocol):
@@ -538,12 +523,3 @@ class WorkerRuntimeDependencies:
     lifecycle: WorkerLifecycleService
     commands: WorkerCommandService
     control: WorkerControlPorts
-
-
-@dataclass(frozen=True)
-class ChangesetSelectionPorts:
-    """Dependency ports used by changeset selection."""
-
-    run_bd_json: RunBdJsonFn
-    resolve_epic_id_for_changeset: ResolveEpicIdForChangesetFn
-    next_changeset: NextChangesetFn
