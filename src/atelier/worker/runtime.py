@@ -52,7 +52,7 @@ class WorkerLifecycleAdapter:
         repo_root: Path,
         git_path: str | None,
     ) -> ReviewFeedbackSnapshot:
-        return worker_work._capture_review_feedback_snapshot(
+        return worker_work.capture_review_feedback_snapshot(
             issue=issue,
             repo_slug=repo_slug,
             repo_root=repo_root,
@@ -60,19 +60,19 @@ class WorkerLifecycleAdapter:
         )
 
     def changeset_parent_branch(self, issue: Issue, *, root_branch: str) -> str:
-        return worker_work._changeset_parent_branch(issue, root_branch=root_branch)
+        return worker_work.changeset_parent_branch(issue, root_branch=root_branch)
 
     def changeset_pr_url(self, issue: Issue) -> str | None:
-        return worker_work._changeset_pr_url(issue)
+        return worker_work.changeset_pr_url(issue)
 
     def changeset_work_branch(self, issue: Issue) -> str | None:
-        return worker_work._changeset_work_branch(issue)
+        return worker_work.changeset_work_branch(issue)
 
     def extract_changeset_root_branch(self, issue: Issue) -> str | None:
-        return worker_work._extract_changeset_root_branch(issue)
+        return worker_work.extract_changeset_root_branch(issue)
 
     def extract_workspace_parent_branch(self, issue: Issue) -> str | None:
-        return worker_work._extract_workspace_parent_branch(issue)
+        return worker_work.extract_workspace_parent_branch(issue)
 
     def finalize_changeset(
         self,
@@ -96,7 +96,7 @@ class WorkerLifecycleAdapter:
         squash_message_agent_env: dict[str, str],
         git_path: str | None,
     ) -> FinalizeResult:
-        return worker_work._finalize_changeset(
+        return worker_work.finalize_changeset(
             changeset_id=changeset_id,
             epic_id=epic_id,
             agent_id=agent_id,
@@ -120,24 +120,24 @@ class WorkerLifecycleAdapter:
     def find_invalid_changeset_labels(
         self, root_id: str, *, beads_root: Path, repo_root: Path
     ) -> list[str]:
-        return worker_work._find_invalid_changeset_labels(
+        return worker_work.find_invalid_changeset_labels(
             root_id, beads_root=beads_root, repo_root=repo_root
         )
 
     def lookup_pr_payload(self, repo_slug: str | None, branch: str) -> Issue | None:
-        return worker_work._lookup_pr_payload(repo_slug, branch)
+        return worker_work.lookup_pr_payload(repo_slug, branch)
 
     def mark_changeset_blocked(
         self, changeset_id: str, *, beads_root: Path, repo_root: Path, reason: str
     ) -> None:
-        worker_work._mark_changeset_blocked(
+        worker_work.mark_changeset_blocked(
             changeset_id, beads_root=beads_root, repo_root=repo_root, reason=reason
         )
 
     def mark_changeset_in_progress(
         self, changeset_id: str, *, beads_root: Path, repo_root: Path
     ) -> None:
-        worker_work._mark_changeset_in_progress(
+        worker_work.mark_changeset_in_progress(
             changeset_id, beads_root=beads_root, repo_root=repo_root
         )
 
@@ -152,7 +152,7 @@ class WorkerLifecycleAdapter:
         branch_pr_strategy: object,
         git_path: str | None,
     ) -> Issue | None:
-        return worker_work._next_changeset(
+        return worker_work.next_changeset(
             epic_id=epic_id,
             beads_root=beads_root,
             repo_root=repo_root,
@@ -171,7 +171,7 @@ class WorkerLifecycleAdapter:
         beads_root: Path,
         repo_root: Path,
     ) -> None:
-        worker_work._persist_review_feedback_cursor(
+        worker_work.persist_review_feedback_cursor(
             changeset_id=changeset_id,
             issue=issue,
             repo_slug=repo_slug,
@@ -180,7 +180,7 @@ class WorkerLifecycleAdapter:
         )
 
     def release_epic_assignment(self, epic_id: str, *, beads_root: Path, repo_root: Path) -> None:
-        worker_work._release_epic_assignment(epic_id, beads_root=beads_root, repo_root=repo_root)
+        worker_work.release_epic_assignment(epic_id, beads_root=beads_root, repo_root=repo_root)
 
     def reconcile_blocked_merged_changesets(
         self,
@@ -210,17 +210,17 @@ class WorkerLifecycleAdapter:
     def resolve_epic_id_for_changeset(
         self, issue: Issue, *, beads_root: Path, repo_root: Path
     ) -> str | None:
-        return worker_work._resolve_epic_id_for_changeset(
+        return worker_work.resolve_epic_id_for_changeset(
             issue, beads_root=beads_root, repo_root=repo_root
         )
 
     def review_feedback_progressed(
         self, before: ReviewFeedbackSnapshot, after: ReviewFeedbackSnapshot
     ) -> bool:
-        return worker_work._review_feedback_progressed(before, after)
+        return worker_work.review_feedback_progressed(before, after)
 
     def run_startup_contract(self, *, context: StartupContractContext) -> StartupContractResult:
-        return worker_work._run_startup_contract(context=context)
+        return worker_work.run_startup_contract(context=context)
 
     def send_invalid_changeset_labels_notification(
         self,
@@ -232,7 +232,7 @@ class WorkerLifecycleAdapter:
         repo_root: Path,
         dry_run: bool,
     ) -> str:
-        return worker_work._send_invalid_changeset_labels_notification(
+        return worker_work.send_invalid_changeset_labels_notification(
             epic_id=epic_id,
             invalid_changesets=invalid_changesets,
             agent_id=agent_id,
@@ -250,7 +250,7 @@ class WorkerLifecycleAdapter:
         repo_root: Path,
         dry_run: bool,
     ) -> None:
-        worker_work._send_no_ready_changesets(
+        worker_work.send_no_ready_changesets(
             epic_id=epic_id,
             agent_id=agent_id,
             beads_root=beads_root,
@@ -269,7 +269,7 @@ class WorkerLifecycleAdapter:
         repo_root: Path,
         dry_run: bool,
     ) -> None:
-        worker_work._send_planner_notification(
+        worker_work.send_planner_notification(
             subject=subject,
             body=body,
             agent_id=agent_id,
@@ -284,13 +284,13 @@ class WorkerCommandAdapter:
     """Concrete command service object backed by worker helper functions."""
 
     def ensure_exec_subcommand_flag(self, args: list[str], flag: str) -> list[str]:
-        return worker_work._ensure_exec_subcommand_flag(args, flag)
+        return worker_work.ensure_exec_subcommand_flag(args, flag)
 
     def strip_flag_with_value(self, args: list[str], flag: str) -> list[str]:
-        return worker_work._strip_flag_with_value(args, flag)
+        return worker_work.strip_flag_with_value(args, flag)
 
     def with_codex_exec(self, cmd: list[str], prompt: str) -> list[str]:
-        return worker_work._with_codex_exec(cmd, prompt)
+        return worker_work.with_codex_exec(cmd, prompt)
 
     def worker_opening_prompt(
         self,
@@ -303,7 +303,7 @@ class WorkerCommandAdapter:
         review_feedback: bool = False,
         review_pr_url: str | None = None,
     ) -> str:
-        return worker_work._worker_opening_prompt(
+        return worker_work.worker_opening_prompt(
             project_enlistment=str(project_enlistment),
             workspace_branch=workspace_branch,
             epic_id=epic_id,
@@ -430,10 +430,10 @@ def build_worker_runtime_dependencies(
     lifecycle: WorkerLifecycleService = WorkerLifecycleAdapter()
     commands: WorkerCommandService = WorkerCommandAdapter()
     control: WorkerControlService = WorkerControlAdapter(
-        dry_run_log_fn=worker_work._dry_run_log,
-        report_timings_fn=worker_work._report_timings,
-        step_fn=worker_work._step,
-        trace_enabled_fn=worker_work._trace_enabled,
+        dry_run_log_fn=worker_work.dry_run_log,
+        report_timings_fn=worker_work.report_timings,
+        step_fn=worker_work.step,
+        trace_enabled_fn=worker_work.trace_enabled,
         confirm_fn=confirm_fn,
         die_fn=die_fn,
         say_fn=emit,

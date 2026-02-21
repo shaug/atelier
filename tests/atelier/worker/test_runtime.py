@@ -138,11 +138,10 @@ def test_build_worker_runtime_dependencies_wires_port_groups() -> None:
     assert deps.control.step is not None
 
 
-def test_work_command_helpers_exposes_split_private_helpers() -> None:
-    helper = getattr(work_command_helpers, "_find_invalid_changeset_labels")
+def test_work_command_helpers_exposes_public_finalize_helpers() -> None:
+    helper = getattr(work_command_helpers, "find_invalid_changeset_labels")
     assert callable(helper)
 
 
-def test_work_startup_runtime_fallback_exposes_finalize_helper() -> None:
-    helper = getattr(work_startup_runtime, "_find_invalid_changeset_labels")
-    assert callable(helper)
+def test_work_startup_runtime_does_not_expose_finalize_private_helpers() -> None:
+    assert not hasattr(work_startup_runtime, "_find_invalid_changeset_labels")

@@ -11,14 +11,14 @@ from ..worker import runtime as worker_runtime
 from ..worker.context import WorkerRunContext
 from ..worker.session import runner as worker_session_runner
 from ..worker.work_command_helpers import (
-    _dry_run_log,
-    _normalize_mode,
-    _normalize_run_mode,
-    _report_worker_summary,
-    _watch_interval_seconds,
+    dry_run_log,
     list_reconcile_epic_candidates,
+    normalize_mode,
+    normalize_run_mode,
     reconcile_blocked_merged_changesets,
+    report_worker_summary,
     root_branch,
+    watch_interval_seconds,
 )
 from .resolve import resolve_current_project_with_repo_root
 
@@ -52,8 +52,8 @@ def _run_worker_once(
 
 def start_worker(args: object) -> None:
     """Start worker sessions based on the configured run mode."""
-    mode = _normalize_mode(getattr(args, "mode", None))
-    run_mode = _normalize_run_mode(getattr(args, "run_mode", None))
+    mode = normalize_mode(getattr(args, "mode", None))
+    run_mode = normalize_run_mode(getattr(args, "run_mode", None))
     dry_run = bool(getattr(args, "dry_run", False))
     session_key = agent_home.generate_session_key()
     cleanup_agent: agent_home.AgentHome | None = None
@@ -82,11 +82,11 @@ def start_worker(args: object) -> None:
             dry_run=dry_run,
             session_key=session_key,
             run_worker_once=_run_worker_once,
-            report_worker_summary=lambda summary, is_dry_run: _report_worker_summary(
+            report_worker_summary=lambda summary, is_dry_run: report_worker_summary(
                 summary, dry_run=is_dry_run
             ),
-            watch_interval_seconds=_watch_interval_seconds,
-            dry_run_log=_dry_run_log,
+            watch_interval_seconds=watch_interval_seconds,
+            dry_run_log=dry_run_log,
             emit=say,
             sleep_fn=time.sleep,
         )

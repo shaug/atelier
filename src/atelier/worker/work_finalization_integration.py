@@ -11,18 +11,18 @@ from ..worker import finalize as worker_finalize
 from ..worker import integration_service as worker_integration_service
 from ..worker.models import FinalizeResult, PublishSignalDiagnostics
 from .work_finalization_state import (
-    _close_completed_container_changesets,
-    _mark_changeset_abandoned,
-    _mark_changeset_merged,
-    _send_planner_notification,
+    close_completed_container_changesets,
+    mark_changeset_abandoned,
+    mark_changeset_merged,
+    send_planner_notification,
 )
 from .work_runtime_common import (
-    _ensure_exec_subcommand_flag,
-    _extract_changeset_root_branch,
-    _issue_labels,
-    _normalize_branch_value,
-    _strip_flag_with_value,
-    _with_codex_exec,
+    ensure_exec_subcommand_flag,
+    extract_changeset_root_branch,
+    issue_labels,
+    normalize_branch_value,
+    strip_flag_with_value,
+    with_codex_exec,
 )
 
 
@@ -31,7 +31,7 @@ def _epic_ready_to_finalize(epic_id: str, *, beads_root: Path, repo_root: Path) 
     if not issues:
         return False
     issue = issues[0]
-    labels = _issue_labels(issue)
+    labels = issue_labels(issue)
     if "at:changeset" in labels and ("cs:merged" in labels or "cs:abandoned" in labels):
         return True
     summary = beads.epic_changeset_summary(epic_id, beads_root=beads_root, cwd=repo_root)
@@ -177,9 +177,9 @@ def _agent_generated_squash_subject(
         agent_options=agent_options,
         agent_home=agent_home,
         agent_env=agent_env,
-        with_codex_exec=_with_codex_exec,
-        strip_flag_with_value=_strip_flag_with_value,
-        ensure_exec_subcommand_flag=_ensure_exec_subcommand_flag,
+        with_codex_exec=with_codex_exec,
+        strip_flag_with_value=strip_flag_with_value,
+        ensure_exec_subcommand_flag=ensure_exec_subcommand_flag,
     )
 
 
@@ -232,9 +232,9 @@ def _integrate_epic_root_to_parent(
         integration_cwd=integration_cwd,
         repo_root=repo_root,
         git_path=git_path,
-        with_codex_exec=_with_codex_exec,
-        strip_flag_with_value=_strip_flag_with_value,
-        ensure_exec_subcommand_flag=_ensure_exec_subcommand_flag,
+        with_codex_exec=with_codex_exec,
+        strip_flag_with_value=strip_flag_with_value,
+        ensure_exec_subcommand_flag=ensure_exec_subcommand_flag,
     )
 
 
@@ -275,9 +275,9 @@ def _finalize_epic_if_complete(
         epic_ready_to_finalize=lambda target_epic_id: _epic_ready_to_finalize(
             target_epic_id, beads_root=beads_root, repo_root=repo_root
         ),
-        normalize_branch_value=_normalize_branch_value,
-        extract_changeset_root_branch=_extract_changeset_root_branch,
-        send_planner_notification=_send_planner_notification,
+        normalize_branch_value=normalize_branch_value,
+        extract_changeset_root_branch=extract_changeset_root_branch,
+        send_planner_notification=send_planner_notification,
         resolve_epic_integration_cwd=_resolve_epic_integration_cwd,
         integrate_epic_root_to_parent=_integrate_epic_root_to_parent,
         cleanup_epic_branches_and_worktrees=_cleanup_epic_branches_and_worktrees,
@@ -312,14 +312,14 @@ def _finalize_terminal_changeset(
             integrated_sha=integrated_sha,
             beads_root=beads_root,
             repo_root=repo_root,
-            mark_changeset_merged=lambda target_id: _mark_changeset_merged(
+            mark_changeset_merged=lambda target_id: mark_changeset_merged(
                 target_id, beads_root=beads_root, repo_root=repo_root
             ),
-            mark_changeset_abandoned=lambda target_id: _mark_changeset_abandoned(
+            mark_changeset_abandoned=lambda target_id: mark_changeset_abandoned(
                 target_id, beads_root=beads_root, repo_root=repo_root
             ),
             close_completed_container_changesets=lambda target_epic_id: (
-                _close_completed_container_changesets(
+                close_completed_container_changesets(
                     target_epic_id, beads_root=beads_root, repo_root=repo_root
                 )
             ),
@@ -346,4 +346,44 @@ def _finalize_terminal_changeset(
         return FinalizeResult(continue_running=False, reason="changeset_finalize_error")
 
 
-__all__ = [name for name in globals() if name.startswith("_")]
+epic_ready_to_finalize = _epic_ready_to_finalize
+ensure_local_branch = _ensure_local_branch
+run_git_status = _run_git_status
+resolve_epic_integration_cwd = _resolve_epic_integration_cwd
+resolve_changeset_worktree_path = _resolve_changeset_worktree_path
+collect_publish_signal_diagnostics = _collect_publish_signal_diagnostics
+attempt_push_work_branch = _attempt_push_work_branch
+format_publish_diagnostics = _format_publish_diagnostics
+ensure_branch_not_checked_out = _ensure_branch_not_checked_out
+sync_local_branch_from_remote = _sync_local_branch_from_remote
+first_external_ticket_id = _first_external_ticket_id
+squash_subject = _squash_subject
+normalize_squash_message_mode = _normalize_squash_message_mode
+parse_squash_subject_output = _parse_squash_subject_output
+agent_generated_squash_subject = _agent_generated_squash_subject
+cleanup_epic_branches_and_worktrees = _cleanup_epic_branches_and_worktrees
+integrate_epic_root_to_parent = _integrate_epic_root_to_parent
+finalize_epic_if_complete = _finalize_epic_if_complete
+finalize_terminal_changeset = _finalize_terminal_changeset
+
+__all__ = [
+    "agent_generated_squash_subject",
+    "attempt_push_work_branch",
+    "cleanup_epic_branches_and_worktrees",
+    "collect_publish_signal_diagnostics",
+    "ensure_branch_not_checked_out",
+    "ensure_local_branch",
+    "epic_ready_to_finalize",
+    "finalize_epic_if_complete",
+    "finalize_terminal_changeset",
+    "first_external_ticket_id",
+    "format_publish_diagnostics",
+    "integrate_epic_root_to_parent",
+    "normalize_squash_message_mode",
+    "parse_squash_subject_output",
+    "resolve_changeset_worktree_path",
+    "resolve_epic_integration_cwd",
+    "run_git_status",
+    "squash_subject",
+    "sync_local_branch_from_remote",
+]

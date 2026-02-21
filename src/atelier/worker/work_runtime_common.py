@@ -192,4 +192,50 @@ def _is_feedback_eligible_epic_status(status: object) -> bool:
     return not _is_closed_status(status)
 
 
-__all__ = [name for name in globals() if name.startswith("_")]
+normalize_branch_value = _normalize_branch_value
+extract_changeset_root_branch = _extract_changeset_root_branch
+extract_workspace_parent_branch = _extract_workspace_parent_branch
+issue_parent_id = _issue_parent_id
+issue_dependency_ids = _issue_dependency_ids
+dry_run_log = _dry_run_log
+log_debug = _log_debug
+trace_enabled = _trace_enabled
+step = _step
+report_timings = _report_timings
+report_worker_summary = _report_worker_summary
+with_codex_exec = _with_codex_exec
+strip_flag_with_value = _strip_flag_with_value
+ensure_exec_subcommand_flag = _ensure_exec_subcommand_flag
+normalize_mode = _normalize_mode
+normalize_run_mode = _normalize_run_mode
+watch_interval_seconds = _watch_interval_seconds
+issue_labels = _issue_labels
+filter_epics = _filter_epics
+parse_issue_time = _parse_issue_time
+is_closed_status = _is_closed_status
+is_feedback_eligible_epic_status = _is_feedback_eligible_epic_status
+
+__all__ = [
+    "dry_run_log",
+    "ensure_exec_subcommand_flag",
+    "extract_changeset_root_branch",
+    "extract_workspace_parent_branch",
+    "filter_epics",
+    "is_closed_status",
+    "is_feedback_eligible_epic_status",
+    "issue_dependency_ids",
+    "issue_labels",
+    "issue_parent_id",
+    "log_debug",
+    "normalize_branch_value",
+    "normalize_mode",
+    "normalize_run_mode",
+    "parse_issue_time",
+    "report_timings",
+    "report_worker_summary",
+    "step",
+    "strip_flag_with_value",
+    "trace_enabled",
+    "watch_interval_seconds",
+    "with_codex_exec",
+]

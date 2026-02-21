@@ -1,20 +1,50 @@
-"""Backward-compatible facade for worker command helper functions.
-
-This module stays intentionally thin. Implementations live in specialized
-runtime modules and are re-exported here for legacy imports.
-"""
+"""Compatibility facade exposing public worker runtime helper APIs."""
 
 from __future__ import annotations
 
 from .. import root_branch as root_branch_module
-from . import work_finalization_runtime as _work_finalization_runtime
-from . import work_runtime_common as _work_runtime_common
-from . import work_startup_runtime as _work_startup_runtime
 from .models import PublishSignalDiagnostics
 from .review import ReviewFeedbackSelection
-from .work_finalization_runtime import *  # noqa: F401,F403
-from .work_runtime_common import *  # noqa: F401,F403
-from .work_startup_runtime import *  # noqa: F401,F403
+from .work_finalization_runtime import (
+    changeset_parent_branch,
+    changeset_pr_url,
+    changeset_work_branch,
+    finalize_changeset,
+    find_invalid_changeset_labels,
+    list_reconcile_epic_candidates,
+    lookup_pr_payload,
+    mark_changeset_blocked,
+    mark_changeset_in_progress,
+    reconcile_blocked_merged_changesets,
+    release_epic_assignment,
+    resolve_epic_id_for_changeset,
+    send_invalid_changeset_labels_notification,
+    send_no_ready_changesets,
+    send_planner_notification,
+)
+from .work_runtime_common import (
+    dry_run_log,
+    ensure_exec_subcommand_flag,
+    extract_changeset_root_branch,
+    extract_workspace_parent_branch,
+    normalize_mode,
+    normalize_run_mode,
+    report_timings,
+    report_worker_summary,
+    step,
+    strip_flag_with_value,
+    trace_enabled,
+    watch_interval_seconds,
+    with_codex_exec,
+)
+from .work_startup_runtime import (
+    capture_review_feedback_snapshot,
+    next_changeset,
+    persist_review_feedback_cursor,
+    review_feedback_progressed,
+    run_startup_contract,
+    worker_opening_prompt,
+)
 
 root_branch = root_branch_module
 
@@ -22,14 +52,40 @@ root_branch = root_branch_module
 _ReviewFeedbackSelection = ReviewFeedbackSelection
 _PublishSignalDiagnostics = PublishSignalDiagnostics
 
-
-def __getattr__(name: str) -> object:
-    """Expose split runtime helpers for legacy import compatibility."""
-    for module in (
-        _work_startup_runtime,
-        _work_finalization_runtime,
-        _work_runtime_common,
-    ):
-        if hasattr(module, name):
-            return getattr(module, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__all__ = [
+    "capture_review_feedback_snapshot",
+    "changeset_parent_branch",
+    "changeset_pr_url",
+    "changeset_work_branch",
+    "dry_run_log",
+    "ensure_exec_subcommand_flag",
+    "extract_changeset_root_branch",
+    "extract_workspace_parent_branch",
+    "finalize_changeset",
+    "find_invalid_changeset_labels",
+    "list_reconcile_epic_candidates",
+    "lookup_pr_payload",
+    "mark_changeset_blocked",
+    "mark_changeset_in_progress",
+    "next_changeset",
+    "normalize_mode",
+    "normalize_run_mode",
+    "persist_review_feedback_cursor",
+    "reconcile_blocked_merged_changesets",
+    "release_epic_assignment",
+    "report_timings",
+    "report_worker_summary",
+    "resolve_epic_id_for_changeset",
+    "review_feedback_progressed",
+    "root_branch",
+    "run_startup_contract",
+    "send_invalid_changeset_labels_notification",
+    "send_no_ready_changesets",
+    "send_planner_notification",
+    "step",
+    "strip_flag_with_value",
+    "trace_enabled",
+    "watch_interval_seconds",
+    "with_codex_exec",
+    "worker_opening_prompt",
+]

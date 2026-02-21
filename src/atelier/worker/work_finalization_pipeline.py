@@ -9,33 +9,33 @@ from .. import agents, pr_strategy
 from ..worker import finalize_pipeline as worker_finalize_pipeline
 from ..worker.models import FinalizeResult, PublishSignalDiagnostics
 from .work_finalization_integration import (
-    _attempt_push_work_branch,
-    _collect_publish_signal_diagnostics,
-    _finalize_epic_if_complete,
-    _finalize_terminal_changeset,
-    _format_publish_diagnostics,
+    attempt_push_work_branch,
+    collect_publish_signal_diagnostics,
+    finalize_epic_if_complete,
+    finalize_terminal_changeset,
+    format_publish_diagnostics,
 )
 from .work_finalization_state import (
-    _changeset_integration_signal,
-    _changeset_waiting_on_review_or_signals,
-    _close_completed_container_changesets,
-    _find_invalid_changeset_labels,
-    _handle_pushed_without_pr,
-    _has_blocking_messages,
-    _has_open_descendant_changesets,
-    _issue_labels,
-    _lookup_pr_payload,
-    _lookup_pr_payload_diagnostic,
-    _mark_changeset_blocked,
-    _mark_changeset_children_in_progress,
-    _mark_changeset_closed,
-    _mark_changeset_in_progress,
-    _promote_planned_descendant_changesets,
-    _recover_premature_merged_changeset,
-    _send_invalid_changeset_labels_notification,
-    _send_planner_notification,
-    _set_changeset_review_pending_state,
-    _update_changeset_review_from_pr,
+    changeset_integration_signal,
+    changeset_waiting_on_review_or_signals,
+    close_completed_container_changesets,
+    find_invalid_changeset_labels,
+    handle_pushed_without_pr,
+    has_blocking_messages,
+    has_open_descendant_changesets,
+    issue_labels,
+    lookup_pr_payload,
+    lookup_pr_payload_diagnostic,
+    mark_changeset_blocked,
+    mark_changeset_children_in_progress,
+    mark_changeset_closed,
+    mark_changeset_in_progress,
+    promote_planned_descendant_changesets,
+    recover_premature_merged_changeset,
+    send_invalid_changeset_labels_notification,
+    send_planner_notification,
+    set_changeset_review_pending_state,
+    update_changeset_review_from_pr,
 )
 
 
@@ -48,17 +48,17 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         self._git_path = git_path
 
     def issue_labels(self, issue: dict[str, object]) -> set[str]:
-        return _issue_labels(issue)
+        return issue_labels(issue)
 
     def find_invalid_changeset_labels(self, epic_id: str) -> list[str]:
-        return _find_invalid_changeset_labels(
+        return find_invalid_changeset_labels(
             epic_id, beads_root=self._beads_root, repo_root=self._repo_root
         )
 
     def send_invalid_changeset_labels_notification(
         self, *, epic_id: str, invalid_changesets: list[str], agent_id: str
     ) -> str:
-        return _send_invalid_changeset_labels_notification(
+        return send_invalid_changeset_labels_notification(
             epic_id=epic_id,
             invalid_changesets=invalid_changesets,
             agent_id=agent_id,
@@ -68,12 +68,12 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         )
 
     def has_open_descendant_changesets(self, changeset_id: str) -> bool:
-        return _has_open_descendant_changesets(
+        return has_open_descendant_changesets(
             changeset_id, beads_root=self._beads_root, repo_root=self._repo_root
         )
 
     def has_blocking_messages(self, *, thread_ids: set[str], started_at: dt.datetime) -> bool:
-        return _has_blocking_messages(
+        return has_blocking_messages(
             thread_ids=thread_ids,
             started_at=started_at,
             beads_root=self._beads_root,
@@ -81,17 +81,17 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         )
 
     def mark_changeset_children_in_progress(self, changeset_id: str) -> None:
-        _mark_changeset_children_in_progress(
+        mark_changeset_children_in_progress(
             changeset_id, beads_root=self._beads_root, repo_root=self._repo_root
         )
 
     def close_completed_container_changesets(self, epic_id: str) -> list[str]:
-        return _close_completed_container_changesets(
+        return close_completed_container_changesets(
             epic_id, beads_root=self._beads_root, repo_root=self._repo_root
         )
 
     def promote_planned_descendant_changesets(self, changeset_id: str) -> None:
-        _promote_planned_descendant_changesets(
+        promote_planned_descendant_changesets(
             changeset_id, beads_root=self._beads_root, repo_root=self._repo_root
         )
 
@@ -102,7 +102,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         repo_slug: str | None,
         git_path: str | None,
     ) -> tuple[bool, str | None]:
-        return _changeset_integration_signal(
+        return changeset_integration_signal(
             issue,
             repo_slug=repo_slug,
             repo_root=self._repo_root,
@@ -115,7 +115,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         issue: dict[str, object],
         context: worker_finalize_pipeline.FinalizePipelineContext,
     ) -> FinalizeResult | None:
-        return _recover_premature_merged_changeset(
+        return recover_premature_merged_changeset(
             issue=issue,
             changeset_id=context.changeset_id,
             epic_id=context.epic_id,
@@ -137,7 +137,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         )
 
     def mark_changeset_blocked(self, changeset_id: str, *, reason: str) -> None:
-        _mark_changeset_blocked(
+        mark_changeset_blocked(
             changeset_id,
             beads_root=self._beads_root,
             repo_root=self._repo_root,
@@ -147,7 +147,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
     def send_planner_notification(
         self, *, subject: str, body: str, agent_id: str, thread_id: str | None
     ) -> None:
-        _send_planner_notification(
+        send_planner_notification(
             subject=subject,
             body=body,
             agent_id=agent_id,
@@ -158,12 +158,12 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         )
 
     def mark_changeset_closed(self, changeset_id: str) -> None:
-        _mark_changeset_closed(changeset_id, beads_root=self._beads_root, repo_root=self._repo_root)
+        mark_changeset_closed(changeset_id, beads_root=self._beads_root, repo_root=self._repo_root)
 
     def finalize_epic_if_complete(
         self, *, context: worker_finalize_pipeline.FinalizePipelineContext
     ) -> FinalizeResult:
-        return _finalize_epic_if_complete(
+        return finalize_epic_if_complete(
             epic_id=context.epic_id,
             agent_id=context.agent_id,
             agent_bead_id=context.agent_bead_id,
@@ -181,7 +181,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         )
 
     def mark_changeset_in_progress(self, changeset_id: str) -> None:
-        _mark_changeset_in_progress(
+        mark_changeset_in_progress(
             changeset_id, beads_root=self._beads_root, repo_root=self._repo_root
         )
 
@@ -191,7 +191,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         *,
         context: worker_finalize_pipeline.FinalizePipelineContext,
     ) -> bool:
-        return _changeset_waiting_on_review_or_signals(
+        return changeset_waiting_on_review_or_signals(
             issue,
             repo_slug=context.repo_slug,
             repo_root=self._repo_root,
@@ -201,12 +201,12 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         )
 
     def lookup_pr_payload(self, repo_slug: str | None, branch: str) -> dict[str, object] | None:
-        return _lookup_pr_payload(repo_slug, branch)
+        return lookup_pr_payload(repo_slug, branch)
 
     def lookup_pr_payload_diagnostic(
         self, repo_slug: str | None, branch: str
     ) -> tuple[dict[str, object] | None, str | None]:
-        return _lookup_pr_payload_diagnostic(repo_slug, branch)
+        return lookup_pr_payload_diagnostic(repo_slug, branch)
 
     def update_changeset_review_from_pr(
         self,
@@ -215,7 +215,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         pr_payload: dict[str, object] | None,
         pushed: bool,
     ) -> None:
-        _update_changeset_review_from_pr(
+        update_changeset_review_from_pr(
             changeset_id,
             pr_payload=pr_payload,
             pushed=pushed,
@@ -230,7 +230,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         terminal_state: str,
         integrated_sha: str | None,
     ) -> FinalizeResult:
-        return _finalize_terminal_changeset(
+        return finalize_terminal_changeset(
             changeset_id=context.changeset_id,
             epic_id=context.epic_id,
             agent_id=context.agent_id,
@@ -257,7 +257,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         context: worker_finalize_pipeline.FinalizePipelineContext,
         create_detail_prefix: str | None = None,
     ) -> FinalizeResult:
-        return _handle_pushed_without_pr(
+        return handle_pushed_without_pr(
             issue=issue,
             changeset_id=context.changeset_id,
             agent_id=context.agent_id,
@@ -270,7 +270,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         )
 
     def attempt_push_work_branch(self, work_branch: str) -> tuple[bool, str | None]:
-        return _attempt_push_work_branch(
+        return attempt_push_work_branch(
             work_branch, repo_root=self._repo_root, git_path=self._git_path
         )
 
@@ -280,7 +280,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         work_branch: str,
         context: worker_finalize_pipeline.FinalizePipelineContext,
     ) -> PublishSignalDiagnostics:
-        return _collect_publish_signal_diagnostics(
+        return collect_publish_signal_diagnostics(
             work_branch=work_branch,
             epic_id=context.epic_id,
             changeset_id=context.changeset_id,
@@ -292,7 +292,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
     def format_publish_diagnostics(
         self, diagnostics: PublishSignalDiagnostics, *, push_detail: str | None = None
     ) -> str:
-        return _format_publish_diagnostics(diagnostics, push_detail=push_detail)
+        return format_publish_diagnostics(diagnostics, push_detail=push_detail)
 
     def set_changeset_review_pending_state(
         self,
@@ -302,7 +302,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         pushed: bool,
         fallback_pr_state: str | None,
     ) -> None:
-        _set_changeset_review_pending_state(
+        set_changeset_review_pending_state(
             changeset_id=changeset_id,
             pr_payload=pr_payload,
             pushed=pushed,
@@ -312,7 +312,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         )
 
 
-def _finalize_changeset(
+def finalize_changeset(
     *,
     changeset_id: str,
     epic_id: str,
@@ -362,4 +362,4 @@ def _finalize_changeset(
     )
 
 
-__all__ = [name for name in globals() if name.startswith("_")]
+__all__ = ["finalize_changeset"]

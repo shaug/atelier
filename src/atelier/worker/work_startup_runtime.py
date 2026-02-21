@@ -14,38 +14,23 @@ from ..worker import review as worker_review
 from ..worker import selection as worker_selection
 from ..worker.models import StartupContractResult
 from ..worker.session import startup as worker_startup
-from . import work_finalization_runtime as _work_finalization_runtime
-from . import work_runtime_common as _work_runtime_common
 from .work_finalization_runtime import (
-    _changeset_waiting_on_review_or_signals,
-    _has_open_descendant_changesets,
-    _is_changeset_in_progress,
-    _is_changeset_ready,
-    _is_changeset_recovery_candidate,
-    _resolve_epic_id_for_changeset,
+    changeset_waiting_on_review_or_signals,
+    has_open_descendant_changesets,
+    is_changeset_in_progress,
+    is_changeset_ready,
+    is_changeset_recovery_candidate,
+    resolve_epic_id_for_changeset,
 )
 from .work_runtime_common import (
-    _dry_run_log,
-    _filter_epics,
-    _issue_labels,
+    dry_run_log,
+    filter_epics,
+    issue_labels,
 )
 
 ReviewFeedbackSelection = worker_review.ReviewFeedbackSelection
 
 _WORKER_QUEUE_NAME = "worker"
-
-
-def __getattr__(name: str) -> object:
-    """Compatibility fallback for legacy callers importing this module directly.
-
-    Worker runtime internals were split across startup/finalization/common
-    modules. Some clients still resolve helpers from this module; forward
-    unknown attributes to newer modules to avoid runtime AttributeError.
-    """
-    for module in (_work_finalization_runtime, _work_runtime_common):
-        if hasattr(module, name):
-            return getattr(module, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class _NextChangesetService(worker_startup.NextChangesetService):
@@ -69,10 +54,10 @@ class _NextChangesetService(worker_startup.NextChangesetService):
         )
 
     def issue_labels(self, issue: dict[str, object]) -> set[str]:
-        return _issue_labels(issue)
+        return issue_labels(issue)
 
     def is_changeset_ready(self, issue: dict[str, object]) -> bool:
-        return _is_changeset_ready(issue)
+        return is_changeset_ready(issue)
 
     def changeset_waiting_on_review_or_signals(
         self,
@@ -83,7 +68,7 @@ class _NextChangesetService(worker_startup.NextChangesetService):
         branch_pr_strategy: object,
         git_path: str | None,
     ) -> bool:
-        return _changeset_waiting_on_review_or_signals(
+        return changeset_waiting_on_review_or_signals(
             issue,
             repo_slug=repo_slug,
             repo_root=self._repo_root,
@@ -100,7 +85,7 @@ class _NextChangesetService(worker_startup.NextChangesetService):
         branch_pr: bool,
         git_path: str | None,
     ) -> bool:
-        return _is_changeset_recovery_candidate(
+        return is_changeset_recovery_candidate(
             issue,
             repo_slug=repo_slug,
             repo_root=self._repo_root,
@@ -109,7 +94,7 @@ class _NextChangesetService(worker_startup.NextChangesetService):
         )
 
     def has_open_descendant_changesets(self, changeset_id: str) -> bool:
-        return _has_open_descendant_changesets(
+        return has_open_descendant_changesets(
             changeset_id, beads_root=self._beads_root, repo_root=self._repo_root
         )
 
@@ -127,10 +112,10 @@ class _NextChangesetService(worker_startup.NextChangesetService):
         )
 
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool:
-        return _is_changeset_in_progress(issue)
+        return is_changeset_in_progress(issue)
 
 
-def _next_changeset(
+def next_changeset(
     *,
     epic_id: str,
     beads_root: Path,
@@ -151,7 +136,7 @@ def _next_changeset(
     return worker_startup.next_changeset_service(context=context, service=service)
 
 
-def _persist_review_feedback_cursor(
+def persist_review_feedback_cursor(
     *,
     changeset_id: str,
     issue: dict[str, object],
@@ -168,7 +153,7 @@ def _persist_review_feedback_cursor(
     )
 
 
-def _capture_review_feedback_snapshot(
+def capture_review_feedback_snapshot(
     *,
     issue: dict[str, object],
     repo_slug: str | None,
@@ -183,13 +168,13 @@ def _capture_review_feedback_snapshot(
     )
 
 
-def _review_feedback_progressed(
+def review_feedback_progressed(
     before: ReviewFeedbackSnapshot, after: ReviewFeedbackSnapshot
 ) -> bool:
     return work_feedback.review_feedback_progressed(before, after)
 
 
-def _select_review_feedback_changeset(
+def select_review_feedback_changeset(
     *,
     epic_id: str,
     repo_slug: str | None,
@@ -204,7 +189,7 @@ def _select_review_feedback_changeset(
     )
 
 
-def _select_global_review_feedback_changeset(
+def select_global_review_feedback_changeset(
     *,
     repo_slug: str | None,
     beads_root: Path,
@@ -216,7 +201,7 @@ def _select_global_review_feedback_changeset(
         repo_root=repo_root,
         resolve_epic_id_for_changeset=(
             lambda issue: (
-                _resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
+                resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
                 or str(issue.get("id") or "")
                 or None
             )
@@ -224,7 +209,7 @@ def _select_global_review_feedback_changeset(
     )
 
 
-def _resolve_hooked_epic(
+def resolve_hooked_epic(
     agent_bead_id: str,
     agent_id: str,
     *,
@@ -249,7 +234,7 @@ def _resolve_hooked_epic(
     return hook_id
 
 
-def _worker_opening_prompt(
+def worker_opening_prompt(
     *,
     project_enlistment: str,
     workspace_branch: str,
@@ -270,7 +255,7 @@ def _worker_opening_prompt(
     )
 
 
-def _check_inbox_before_claim(agent_id: str, *, beads_root: Path, repo_root: Path) -> bool:
+def check_inbox_before_claim(agent_id: str, *, beads_root: Path, repo_root: Path) -> bool:
     return worker_queueing.check_inbox_before_claim(
         agent_id,
         beads_root=beads_root,
@@ -279,7 +264,7 @@ def _check_inbox_before_claim(agent_id: str, *, beads_root: Path, repo_root: Pat
     )
 
 
-def _handle_queue_before_claim(
+def handle_queue_before_claim(
     agent_id: str,
     *,
     beads_root: Path,
@@ -300,7 +285,7 @@ def _handle_queue_before_claim(
         emit=say,
         prompt_fn=prompt,
         die_fn=die,
-        dry_run_log=_dry_run_log,
+        dry_run_log=dry_run_log,
     )
 
 
@@ -320,7 +305,7 @@ class _StartupContractService(worker_startup.StartupContractService):
         dry_run: bool = False,
         assume_yes: bool = False,
     ) -> bool:
-        return _handle_queue_before_claim(
+        return handle_queue_before_claim(
             agent_id,
             beads_root=self._beads_root,
             repo_root=self._repo_root,
@@ -346,7 +331,7 @@ class _StartupContractService(worker_startup.StartupContractService):
         branch_pr_strategy: object,
         git_path: str | None,
     ) -> dict[str, object] | None:
-        return _next_changeset(
+        return next_changeset(
             epic_id=epic_id,
             beads_root=self._beads_root,
             repo_root=self._repo_root,
@@ -357,7 +342,7 @@ class _StartupContractService(worker_startup.StartupContractService):
         )
 
     def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None:
-        return _resolve_hooked_epic(
+        return resolve_hooked_epic(
             agent_bead_id,
             agent_id,
             beads_root=self._beads_root,
@@ -376,7 +361,7 @@ class _StartupContractService(worker_startup.StartupContractService):
     def select_review_feedback_changeset(
         self, *, epic_id: str, repo_slug: str | None
     ) -> ReviewFeedbackSelection | None:
-        return _select_review_feedback_changeset(
+        return select_review_feedback_changeset(
             epic_id=epic_id,
             repo_slug=repo_slug,
             beads_root=self._beads_root,
@@ -386,14 +371,14 @@ class _StartupContractService(worker_startup.StartupContractService):
     def select_global_review_feedback_changeset(
         self, *, repo_slug: str | None
     ) -> ReviewFeedbackSelection | None:
-        return _select_global_review_feedback_changeset(
+        return select_global_review_feedback_changeset(
             repo_slug=repo_slug,
             beads_root=self._beads_root,
             repo_root=self._repo_root,
         )
 
     def check_inbox_before_claim(self, agent_id: str) -> bool:
-        return _check_inbox_before_claim(
+        return check_inbox_before_claim(
             agent_id, beads_root=self._beads_root, repo_root=self._repo_root
         )
 
@@ -436,12 +421,12 @@ class _StartupContractService(worker_startup.StartupContractService):
             beads_root=self._beads_root,
             repo_root=self._repo_root,
             dry_run=dry_run,
-            filter_epics=_filter_epics,
-            dry_run_log=_dry_run_log,
+            filter_epics=filter_epics,
+            dry_run_log=dry_run_log,
         )
 
     def dry_run_log(self, message: str) -> None:
-        _dry_run_log(message)
+        dry_run_log(message)
 
     def emit(self, message: str) -> None:
         say(message)
@@ -450,7 +435,7 @@ class _StartupContractService(worker_startup.StartupContractService):
         die(message)
 
 
-def _run_startup_contract(
+def run_startup_contract(
     *,
     context: worker_startup.StartupContractContext,
 ) -> StartupContractResult:
@@ -458,4 +443,16 @@ def _run_startup_contract(
     return worker_startup.run_startup_contract_service(context=context, service=service)
 
 
-__all__ = [name for name in globals() if name.startswith("_")]
+__all__ = [
+    "capture_review_feedback_snapshot",
+    "check_inbox_before_claim",
+    "handle_queue_before_claim",
+    "next_changeset",
+    "persist_review_feedback_cursor",
+    "resolve_hooked_epic",
+    "review_feedback_progressed",
+    "run_startup_contract",
+    "select_global_review_feedback_changeset",
+    "select_review_feedback_changeset",
+    "worker_opening_prompt",
+]

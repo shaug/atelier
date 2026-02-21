@@ -17,11 +17,11 @@ from ..worker.finalization import pr_gate as worker_pr_gate
 from ..worker.finalization import recovery as worker_recovery
 from ..worker.models import FinalizeResult
 from .work_runtime_common import (
-    _dry_run_log,
-    _extract_workspace_parent_branch,
-    _issue_labels,
-    _issue_parent_id,
-    _parse_issue_time,
+    dry_run_log,
+    extract_workspace_parent_branch,
+    issue_labels,
+    issue_parent_id,
+    parse_issue_time,
 )
 
 _VALID_CHANGESET_STATE_LABELS = {
@@ -52,7 +52,7 @@ def _send_planner_notification(
         beads_root=beads_root,
         repo_root=repo_root,
         dry_run=dry_run,
-        dry_run_log=_dry_run_log,
+        dry_run_log=dry_run_log,
     )
 
 
@@ -72,7 +72,7 @@ def _send_invalid_changeset_labels_notification(
         beads_root=beads_root,
         repo_root=repo_root,
         dry_run=dry_run,
-        dry_run_log=_dry_run_log,
+        dry_run_log=dry_run_log,
     )
 
 
@@ -90,7 +90,7 @@ def _send_no_ready_changesets(
         beads_root=beads_root,
         repo_root=repo_root,
         dry_run=dry_run,
-        dry_run_log=_dry_run_log,
+        dry_run_log=dry_run_log,
     )
 
 
@@ -99,7 +99,7 @@ def _release_epic_assignment(epic_id: str, *, beads_root: Path, repo_root: Path)
     if not issues:
         return
     issue = issues[0]
-    labels = _issue_labels(issue)
+    labels = issue_labels(issue)
     status = str(issue.get("status") or "")
     args = ["update", epic_id, "--assignee", ""]
     if "at:hooked" in labels:
@@ -122,11 +122,11 @@ def _has_open_descendant_changesets(
 
 
 def _is_changeset_in_progress(issue: dict[str, object]) -> bool:
-    return lifecycle.is_changeset_in_progress(issue.get("status"), _issue_labels(issue))
+    return lifecycle.is_changeset_in_progress(issue.get("status"), issue_labels(issue))
 
 
 def _is_changeset_ready(issue: dict[str, object]) -> bool:
-    return lifecycle.is_changeset_ready(issue.get("status"), _issue_labels(issue))
+    return lifecycle.is_changeset_ready(issue.get("status"), issue_labels(issue))
 
 
 def _changeset_review_state(issue: dict[str, object]) -> str | None:
@@ -204,7 +204,7 @@ def _changeset_base_branch(
         if epic_id:
             epic_issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
             if epic_issues:
-                resolved_parent = _extract_workspace_parent_branch(epic_issues[0])
+                resolved_parent = extract_workspace_parent_branch(epic_issues[0])
                 if resolved_parent:
                     normalized_workspace_parent = resolved_parent
     # Top-level changesets often persisted parent=root; use workspace parent
@@ -390,7 +390,7 @@ def _recover_premature_merged_changeset(
     squash_message_agent_env: dict[str, str] | None,
     git_path: str | None,
 ) -> FinalizeResult | None:
-    from .work_finalization_integration import _finalize_terminal_changeset
+    from .work_finalization_integration import finalize_terminal_changeset
 
     return worker_recovery.recover_premature_merged_changeset(
         issue=issue,
@@ -415,7 +415,7 @@ def _recover_premature_merged_changeset(
         lookup_pr_payload=_lookup_pr_payload,
         lookup_pr_payload_diagnostic=_lookup_pr_payload_diagnostic,
         changeset_integration_signal=_changeset_integration_signal,
-        finalize_terminal_changeset=_finalize_terminal_changeset,
+        finalize_terminal_changeset=finalize_terminal_changeset,
         mark_changeset_in_progress=_mark_changeset_in_progress,
         update_changeset_review_from_pr=_update_changeset_review_from_pr,
         handle_pushed_without_pr=_handle_pushed_without_pr,
@@ -479,7 +479,7 @@ def _is_changeset_recovery_candidate(
     git_path: str | None,
 ) -> bool:
     """Return True when blocked changeset has enough signals to retry."""
-    labels = _issue_labels(issue)
+    labels = issue_labels(issue)
     status = str(issue.get("status") or "").strip().lower()
     if "cs:blocked" not in labels and status != "blocked":
         return False
@@ -628,7 +628,7 @@ def _has_blocking_messages(
         started_at=started_at,
         beads_root=beads_root,
         repo_root=repo_root,
-        parse_issue_time=_parse_issue_time,
+        parse_issue_time=parse_issue_time,
     )
 
 
@@ -674,9 +674,93 @@ def _resolve_epic_id_for_changeset(
         issue,
         beads_root=beads_root,
         repo_root=repo_root,
-        issue_labels=_issue_labels,
-        issue_parent_id=_issue_parent_id,
+        issue_labels=issue_labels,
+        issue_parent_id=issue_parent_id,
     )
 
 
-__all__ = [name for name in globals() if name.startswith("_")]
+send_planner_notification = _send_planner_notification
+send_invalid_changeset_labels_notification = _send_invalid_changeset_labels_notification
+send_no_ready_changesets = _send_no_ready_changesets
+release_epic_assignment = _release_epic_assignment
+has_open_descendant_changesets = _has_open_descendant_changesets
+is_changeset_in_progress = _is_changeset_in_progress
+is_changeset_ready = _is_changeset_ready
+changeset_review_state = _changeset_review_state
+changeset_waiting_on_review = _changeset_waiting_on_review
+changeset_work_branch = _changeset_work_branch
+changeset_pr_url = _changeset_pr_url
+lookup_pr_payload = _lookup_pr_payload
+lookup_pr_payload_diagnostic = _lookup_pr_payload_diagnostic
+changeset_root_branch = _changeset_root_branch
+changeset_base_branch = _changeset_base_branch
+render_changeset_pr_body = _render_changeset_pr_body
+attempt_create_draft_pr = _attempt_create_draft_pr
+set_changeset_review_pending_state = _set_changeset_review_pending_state
+update_changeset_review_from_pr = _update_changeset_review_from_pr
+handle_pushed_without_pr = _handle_pushed_without_pr
+changeset_parent_lifecycle_state = _changeset_parent_lifecycle_state
+changeset_pr_creation_decision = _changeset_pr_creation_decision
+recover_premature_merged_changeset = _recover_premature_merged_changeset
+changeset_waiting_on_review_or_signals = _changeset_waiting_on_review_or_signals
+is_changeset_recovery_candidate = _is_changeset_recovery_candidate
+list_child_issues = _list_child_issues
+find_invalid_changeset_labels = _find_invalid_changeset_labels
+changeset_parent_branch = _changeset_parent_branch
+mark_changeset_in_progress = _mark_changeset_in_progress
+mark_changeset_closed = _mark_changeset_closed
+mark_changeset_merged = _mark_changeset_merged
+mark_changeset_abandoned = _mark_changeset_abandoned
+mark_changeset_blocked = _mark_changeset_blocked
+mark_changeset_children_in_progress = _mark_changeset_children_in_progress
+close_completed_container_changesets = _close_completed_container_changesets
+promote_planned_descendant_changesets = _promote_planned_descendant_changesets
+has_blocking_messages = _has_blocking_messages
+branch_ref_for_lookup = _branch_ref_for_lookup
+epic_root_integrated_into_parent = _epic_root_integrated_into_parent
+changeset_integration_signal = _changeset_integration_signal
+resolve_epic_id_for_changeset = _resolve_epic_id_for_changeset
+
+__all__ = [
+    "attempt_create_draft_pr",
+    "branch_ref_for_lookup",
+    "changeset_base_branch",
+    "changeset_integration_signal",
+    "changeset_parent_branch",
+    "changeset_parent_lifecycle_state",
+    "changeset_pr_creation_decision",
+    "changeset_pr_url",
+    "changeset_review_state",
+    "changeset_root_branch",
+    "changeset_waiting_on_review",
+    "changeset_waiting_on_review_or_signals",
+    "changeset_work_branch",
+    "close_completed_container_changesets",
+    "epic_root_integrated_into_parent",
+    "find_invalid_changeset_labels",
+    "handle_pushed_without_pr",
+    "has_blocking_messages",
+    "has_open_descendant_changesets",
+    "is_changeset_in_progress",
+    "is_changeset_ready",
+    "is_changeset_recovery_candidate",
+    "list_child_issues",
+    "lookup_pr_payload",
+    "lookup_pr_payload_diagnostic",
+    "mark_changeset_abandoned",
+    "mark_changeset_blocked",
+    "mark_changeset_children_in_progress",
+    "mark_changeset_closed",
+    "mark_changeset_in_progress",
+    "mark_changeset_merged",
+    "promote_planned_descendant_changesets",
+    "recover_premature_merged_changeset",
+    "release_epic_assignment",
+    "render_changeset_pr_body",
+    "resolve_epic_id_for_changeset",
+    "send_invalid_changeset_labels_notification",
+    "send_no_ready_changesets",
+    "send_planner_notification",
+    "set_changeset_review_pending_state",
+    "update_changeset_review_from_pr",
+]
