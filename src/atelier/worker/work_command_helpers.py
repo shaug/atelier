@@ -16,16 +16,12 @@ from .. import (
     beads,
     changeset_fields,
     changesets,
-    codex,
     config,
-    exec,
     git,
     lifecycle,
-    messages,
     pr_strategy,
     prs,
     work_feedback,
-    worktrees,
 )
 from .. import (
     log as atelier_log,
@@ -34,14 +30,14 @@ from .. import (
     root_branch as root_branch_module,
 )
 from ..io import die, prompt, say, select
-from ..worker import changeset_state as worker_changeset_state
+from ..worker import finalization_service as worker_finalization_service
 from ..worker import finalize as worker_finalize
 from ..worker import finalize_pipeline as worker_finalize_pipeline
-from ..worker import integration as worker_integration
+from ..worker import integration_service as worker_integration_service
 from ..worker import prompts as worker_prompts
 from ..worker import publish as worker_publish
 from ..worker import queueing as worker_queueing
-from ..worker import reconcile as worker_reconcile
+from ..worker import reconcile_service as worker_reconcile_service
 from ..worker import review as worker_review
 from ..worker import selection as worker_selection
 from ..worker import telemetry as worker_telemetry
@@ -880,7 +876,7 @@ def _select_global_review_feedback_changeset(
 def _list_child_issues(
     parent_id: str, *, beads_root: Path, repo_root: Path, include_closed: bool = False
 ) -> list[dict[str, object]]:
-    return worker_changeset_state.list_child_issues(
+    return worker_finalization_service.list_child_issues(
         parent_id,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -891,7 +887,7 @@ def _list_child_issues(
 def _find_invalid_changeset_labels(
     root_id: str, *, beads_root: Path, repo_root: Path
 ) -> list[str]:
-    return worker_changeset_state.find_invalid_changeset_labels(
+    return worker_finalization_service.find_invalid_changeset_labels(
         root_id,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -941,7 +937,7 @@ def _resolve_hooked_epic(
 def _mark_changeset_in_progress(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> None:
-    worker_changeset_state.mark_changeset_in_progress(
+    worker_finalization_service.mark_changeset_in_progress(
         changeset_id,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -951,7 +947,7 @@ def _mark_changeset_in_progress(
 def _mark_changeset_closed(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> None:
-    worker_changeset_state.mark_changeset_closed(
+    worker_finalization_service.mark_changeset_closed(
         changeset_id,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -961,7 +957,7 @@ def _mark_changeset_closed(
 def _mark_changeset_merged(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> None:
-    worker_changeset_state.mark_changeset_merged(
+    worker_finalization_service.mark_changeset_merged(
         changeset_id,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -971,7 +967,7 @@ def _mark_changeset_merged(
 def _mark_changeset_abandoned(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> None:
-    worker_changeset_state.mark_changeset_abandoned(
+    worker_finalization_service.mark_changeset_abandoned(
         changeset_id,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -981,7 +977,7 @@ def _mark_changeset_abandoned(
 def _mark_changeset_blocked(
     changeset_id: str, *, beads_root: Path, repo_root: Path, reason: str
 ) -> None:
-    worker_changeset_state.mark_changeset_blocked(
+    worker_finalization_service.mark_changeset_blocked(
         changeset_id,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -992,7 +988,7 @@ def _mark_changeset_blocked(
 def _mark_changeset_children_in_progress(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> None:
-    worker_changeset_state.mark_changeset_children_in_progress(
+    worker_finalization_service.mark_changeset_children_in_progress(
         changeset_id,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -1002,7 +998,7 @@ def _mark_changeset_children_in_progress(
 def _close_completed_container_changesets(
     epic_id: str, *, beads_root: Path, repo_root: Path
 ) -> list[str]:
-    return worker_changeset_state.close_completed_container_changesets(
+    return worker_finalization_service.close_completed_container_changesets(
         epic_id,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -1015,7 +1011,7 @@ def _close_completed_container_changesets(
 def _promote_planned_descendant_changesets(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> list[str]:
-    return worker_changeset_state.promote_planned_descendant_changesets(
+    return worker_finalization_service.promote_planned_descendant_changesets(
         changeset_id, beads_root=beads_root, repo_root=repo_root
     )
 
@@ -1027,29 +1023,19 @@ def _has_blocking_messages(
     beads_root: Path,
     repo_root: Path,
 ) -> bool:
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:message", "--label", "at:unread"],
+    return worker_finalization_service.has_blocking_messages(
+        thread_ids=thread_ids,
+        started_at=started_at,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
+        parse_issue_time=_parse_issue_time,
     )
-    for issue in issues:
-        created_at = _parse_issue_time(issue.get("created_at"))
-        if created_at is not None and created_at < started_at:
-            continue
-        description = issue.get("description")
-        payload = messages.parse_message(
-            description if isinstance(description, str) else ""
-        )
-        thread = payload.metadata.get("thread")
-        if isinstance(thread, str) and thread in thread_ids:
-            return True
-    return False
 
 
 def _branch_ref_for_lookup(
     repo_root: Path, branch: str, *, git_path: str | None = None
 ) -> str | None:
-    return worker_integration.branch_ref_for_lookup(
+    return worker_integration_service.branch_ref_for_lookup(
         repo_root, branch, git_path=git_path
     )
 
@@ -1060,11 +1046,9 @@ def _epic_root_integrated_into_parent(
     repo_root: Path,
     git_path: str | None = None,
 ) -> bool:
-    return worker_integration.epic_root_integrated_into_parent(
+    return worker_integration_service.epic_root_integrated_into_parent(
         epic_issue,
         repo_root=repo_root,
-        extract_changeset_root_branch=_extract_changeset_root_branch,
-        extract_workspace_parent_branch=_extract_workspace_parent_branch,
         git_path=git_path,
     )
 
@@ -1076,7 +1060,7 @@ def _changeset_integration_signal(
     repo_root: Path,
     git_path: str | None = None,
 ) -> tuple[bool, str | None]:
-    return worker_integration.changeset_integration_signal(
+    return worker_integration_service.changeset_integration_signal(
         issue,
         repo_slug=repo_slug,
         repo_root=repo_root,
@@ -1088,43 +1072,13 @@ def _changeset_integration_signal(
 def _resolve_epic_id_for_changeset(
     issue: dict[str, object], *, beads_root: Path, repo_root: Path
 ) -> str | None:
-    current = issue
-    current_id = issue.get("id")
-    if not isinstance(current_id, str) or not current_id.strip():
-        return None
-    visited: set[str] = set()
-    while True:
-        issue_id = current_id.strip()
-        if not issue_id or issue_id in visited:
-            return None
-        visited.add(issue_id)
-        labels = _issue_labels(current)
-        if "at:epic" in labels:
-            return issue_id
-        parent_id = _issue_parent_id(current)
-        if not parent_id:
-            # `bd list` payloads can omit parent details; refresh full issue once.
-            if current is issue:
-                loaded = beads.run_bd_json(
-                    ["show", issue_id], beads_root=beads_root, cwd=repo_root
-                )
-                if loaded:
-                    refreshed = loaded[0]
-                    refreshed_parent = _issue_parent_id(refreshed)
-                    if refreshed_parent:
-                        current = refreshed
-                        parent_id = refreshed_parent
-                        current_id = issue_id
-            # Standalone top-level changeset can act as its own epic root.
-            if not parent_id:
-                return issue_id
-        parent_issues = beads.run_bd_json(
-            ["show", parent_id], beads_root=beads_root, cwd=repo_root
-        )
-        if not parent_issues:
-            return parent_id
-        current = parent_issues[0]
-        current_id = parent_id
+    return worker_reconcile_service.resolve_epic_id_for_changeset(
+        issue,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        issue_labels=_issue_labels,
+        issue_parent_id=_issue_parent_id,
+    )
 
 
 def list_reconcile_epic_candidates(
@@ -1134,7 +1088,7 @@ def list_reconcile_epic_candidates(
     repo_root: Path,
     git_path: str | None = None,
 ) -> dict[str, list[str]]:
-    return worker_reconcile.list_reconcile_epic_candidates(
+    return worker_reconcile_service.list_reconcile_epic_candidates(
         project_config=project_config,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -1160,7 +1114,7 @@ def reconcile_blocked_merged_changesets(
     dry_run: bool = False,
     log: Callable[[str], None] | None = None,
 ) -> ReconcileResult:
-    return worker_reconcile.reconcile_blocked_merged_changesets(
+    return worker_reconcile_service.reconcile_blocked_merged_changesets(
         agent_id=agent_id,
         agent_bead_id=agent_bead_id,
         project_config=project_config,
@@ -1198,28 +1152,9 @@ def _epic_ready_to_finalize(epic_id: str, *, beads_root: Path, repo_root: Path) 
 def _ensure_local_branch(
     branch: str, *, repo_root: Path, git_path: str | None = None
 ) -> bool:
-    branch_name = branch.strip()
-    if not branch_name:
-        return False
-    if git.git_ref_exists(repo_root, f"refs/heads/{branch_name}", git_path=git_path):
-        return True
-    if not git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{branch_name}", git_path=git_path
-    ):
-        return False
-    result = exec.try_run_command(
-        git.git_command(
-            [
-                "-C",
-                str(repo_root),
-                "branch",
-                branch_name,
-                f"origin/{branch_name}",
-            ],
-            git_path=git_path,
-        )
+    return worker_integration_service.ensure_local_branch(
+        branch, repo_root=repo_root, git_path=git_path
     )
-    return bool(result and result.returncode == 0)
 
 
 def _run_git_status(
@@ -1229,16 +1164,9 @@ def _run_git_status(
     git_path: str | None = None,
     cwd: Path | None = None,
 ) -> tuple[bool, str]:
-    target_cwd = cwd or repo_root
-    result = exec.try_run_command(
-        git.git_command(["-C", str(target_cwd), *args], git_path=git_path)
+    return worker_integration_service.run_git_status(
+        args, repo_root=repo_root, git_path=git_path, cwd=cwd
     )
-    if result is None:
-        return False, "missing required command: git"
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        return False, detail or f"command failed: git {' '.join(args)}"
-    return True, (result.stdout or "").strip()
 
 
 def _resolve_epic_integration_cwd(
@@ -1249,21 +1177,13 @@ def _resolve_epic_integration_cwd(
     root_branch: str,
     git_path: str | None = None,
 ) -> Path:
-    """Prefer the epic worktree when it has the root branch checked out."""
-    if project_data_dir is None or not epic_id:
-        return repo_root
-    mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, epic_id))
-    if mapping is None or not mapping.worktree_path:
-        return repo_root
-    worktree_path = Path(mapping.worktree_path)
-    if not worktree_path.is_absolute():
-        worktree_path = project_data_dir / worktree_path
-    if not worktree_path.exists() or not (worktree_path / ".git").exists():
-        return repo_root
-    current_branch = git.git_current_branch(worktree_path, git_path=git_path)
-    if current_branch == root_branch:
-        return worktree_path
-    return repo_root
+    return worker_integration_service.resolve_epic_integration_cwd(
+        project_data_dir=project_data_dir,
+        repo_root=repo_root,
+        epic_id=epic_id,
+        root_branch=root_branch,
+        git_path=git_path,
+    )
 
 
 def _resolve_changeset_worktree_path(
@@ -1272,20 +1192,11 @@ def _resolve_changeset_worktree_path(
     epic_id: str,
     changeset_id: str,
 ) -> Path | None:
-    if project_data_dir is None or not epic_id or not changeset_id:
-        return None
-    mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, epic_id))
-    if mapping is None:
-        return None
-    relpath = mapping.changeset_worktrees.get(changeset_id)
-    if not relpath:
-        return None
-    worktree_path = Path(relpath)
-    if not worktree_path.is_absolute():
-        worktree_path = project_data_dir / worktree_path
-    if not worktree_path.exists() or not (worktree_path / ".git").exists():
-        return None
-    return worktree_path
+    return worker_integration_service.resolve_changeset_worktree_path(
+        project_data_dir=project_data_dir,
+        epic_id=epic_id,
+        changeset_id=changeset_id,
+    )
 
 
 def _collect_publish_signal_diagnostics(
@@ -1297,154 +1208,62 @@ def _collect_publish_signal_diagnostics(
     repo_root: Path,
     git_path: str | None,
 ) -> PublishSignalDiagnostics:
-    local_branch_exists = git.git_ref_exists(
-        repo_root, f"refs/heads/{work_branch}", git_path=git_path
-    )
-    remote_branch_exists = git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
-    )
-    worktree_path = _resolve_changeset_worktree_path(
-        project_data_dir=project_data_dir,
+    return worker_integration_service.collect_publish_signal_diagnostics(
+        work_branch=work_branch,
         epic_id=epic_id,
         changeset_id=changeset_id,
-    )
-    status_root = worktree_path or repo_root
-    dirty_entries = tuple(git.git_status_porcelain(status_root, git_path=git_path))
-    return PublishSignalDiagnostics(
-        local_branch_exists=local_branch_exists,
-        remote_branch_exists=remote_branch_exists,
-        worktree_path=worktree_path,
-        dirty_entries=dirty_entries,
+        project_data_dir=project_data_dir,
+        repo_root=repo_root,
+        git_path=git_path,
     )
 
 
 def _attempt_push_work_branch(
     work_branch: str, *, repo_root: Path, git_path: str | None = None
 ) -> tuple[bool, str]:
-    if not git.git_ref_exists(
-        repo_root, f"refs/heads/{work_branch}", git_path=git_path
-    ):
-        return False, f"local branch missing: {work_branch}"
-    ok, detail = _run_git_status(
-        ["push", "-u", "origin", work_branch], repo_root=repo_root, git_path=git_path
+    return worker_integration_service.attempt_push_work_branch(
+        work_branch, repo_root=repo_root, git_path=git_path
     )
-    if ok:
-        return True, detail or f"pushed {work_branch} to origin"
-    return False, detail
 
 
 def _format_publish_diagnostics(
     diagnostics: PublishSignalDiagnostics, *, push_detail: str | None = None
 ) -> str:
-    lines = [
-        f"- local branch exists: {'yes' if diagnostics.local_branch_exists else 'no'}",
-        f"- remote branch exists: {'yes' if diagnostics.remote_branch_exists else 'no'}",
-    ]
-    if diagnostics.worktree_path is not None:
-        lines.append(f"- changeset worktree: {diagnostics.worktree_path}")
-    if diagnostics.dirty_entries:
-        lines.append("- dirty files:")
-        for entry in diagnostics.dirty_entries[:8]:
-            lines.append(f"  - {entry}")
-        if len(diagnostics.dirty_entries) > 8:
-            lines.append(f"  - ... (+{len(diagnostics.dirty_entries) - 8} more)")
-    if push_detail:
-        lines.append(f"- push attempt: {push_detail}")
-    return "\n".join(lines)
+    return worker_integration_service.format_publish_diagnostics(
+        diagnostics, push_detail=push_detail
+    )
 
 
 def _ensure_branch_not_checked_out(
     branch: str, *, repo_root: Path, git_path: str | None = None
 ) -> None:
-    current = git.git_current_branch(repo_root, git_path=git_path)
-    if current != branch:
-        return
-    _run_git_status(["checkout", "--detach"], repo_root=repo_root, git_path=git_path)
+    worker_integration_service.ensure_branch_not_checked_out(
+        branch, repo_root=repo_root, git_path=git_path
+    )
 
 
 def _sync_local_branch_from_remote(
     branch: str, *, repo_root: Path, git_path: str | None = None
 ) -> bool:
-    branch_name = branch.strip()
-    if not branch_name:
-        return False
-    if not git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{branch_name}", git_path=git_path
-    ):
-        return False
-    _ensure_branch_not_checked_out(branch_name, repo_root=repo_root, git_path=git_path)
-    ok, _ = _run_git_status(
-        ["branch", "-f", branch_name, f"origin/{branch_name}"],
-        repo_root=repo_root,
-        git_path=git_path,
+    return worker_integration_service.sync_local_branch_from_remote(
+        branch, repo_root=repo_root, git_path=git_path
     )
-    return ok
 
 
 def _first_external_ticket_id(issue: dict[str, object]) -> str | None:
-    description = issue.get("description")
-    tickets = beads.parse_external_tickets(
-        description if isinstance(description, str) else None
-    )
-    if not tickets:
-        return None
-    primary = [ticket for ticket in tickets if ticket.relation == "primary"]
-    source = primary or tickets
-    for ticket in source:
-        ticket_id = (ticket.ticket_id or "").strip()
-        if ticket_id:
-            return ticket_id
-    return None
+    return worker_integration_service.first_external_ticket_id(issue)
 
 
 def _squash_subject(issue: dict[str, object], *, epic_id: str) -> str:
-    ticket_id = _first_external_ticket_id(issue)
-    title = str(issue.get("title") or "").strip()
-    if ticket_id and title:
-        return f"{ticket_id}: {title}"
-    if ticket_id:
-        return ticket_id
-    if title:
-        return title
-    return epic_id
+    return worker_integration_service.squash_subject(issue, epic_id=epic_id)
 
 
 def _normalize_squash_message_mode(value: object) -> str:
-    if not isinstance(value, str):
-        return "deterministic"
-    normalized = value.strip().lower()
-    if normalized in _SQUASH_MESSAGE_MODES:
-        return normalized
-    return "deterministic"
+    return worker_integration_service.normalize_squash_message_mode(value)
 
 
 def _parse_squash_subject_output(output: str) -> str | None:
-    cleaned = codex.strip_ansi(output).replace("\r", "\n")
-    for raw_line in cleaned.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        lowered = line.lower()
-        if lowered in {"thinking", "user", "assistant", "codex", "--------"}:
-            continue
-        if lowered.startswith(
-            (
-                "warning:",
-                "deprecated:",
-                "mcp:",
-                "tokens used",
-                "openai codex",
-                "session id:",
-            )
-        ):
-            continue
-        line = line.strip("`\"'").strip()
-        if line.startswith(("-", "*")):
-            line = line[1:].strip()
-        line = " ".join(line.split())
-        if line:
-            return line[:120]
-    return None
+    return worker_integration_service.parse_squash_subject_output(output)
 
 
 def _agent_generated_squash_subject(
@@ -1460,73 +1279,21 @@ def _agent_generated_squash_subject(
     agent_home: Path | None,
     agent_env: dict[str, str] | None,
 ) -> str | None:
-    if agent_spec is None or agent_home is None:
-        return None
-    if agent_spec.name != "codex":
-        return None
-
-    commit_messages = git.git_commit_messages(
-        repo_root,
-        parent_branch,
-        root_branch,
+    return worker_integration_service.agent_generated_squash_subject(
+        epic_issue=epic_issue,
+        epic_id=epic_id,
+        root_branch=root_branch,
+        parent_branch=parent_branch,
+        repo_root=repo_root,
         git_path=git_path,
+        agent_spec=agent_spec,
+        agent_options=agent_options,
+        agent_home=agent_home,
+        agent_env=agent_env,
+        with_codex_exec=_with_codex_exec,
+        strip_flag_with_value=_strip_flag_with_value,
+        ensure_exec_subcommand_flag=_ensure_exec_subcommand_flag,
     )
-    files_changed = git.git_diff_name_status(
-        repo_root,
-        parent_branch,
-        root_branch,
-        git_path=git_path,
-    )
-    ticket_id = _first_external_ticket_id(epic_issue) or "none"
-    title = str(epic_issue.get("title") or epic_id).strip() or epic_id
-    commits_preview = (
-        "\n".join(f"- {message}" for message in commit_messages[:12] if message)
-        or "- (none)"
-    )
-    files_preview = "\n".join(
-        f"- {entry}" for entry in files_changed[:30] if entry
-    ) or ("- (none)")
-    prompt_text = "\n".join(
-        [
-            "Draft a single git squash commit subject for integrating an epic branch.",
-            "",
-            "Constraints:",
-            "- Output exactly one line (no markdown, no bullets, no quotes).",
-            "- Imperative mood, no trailing period.",
-            "- Maximum 72 characters.",
-            "",
-            f"Epic id: {epic_id}",
-            f"Primary ticket: {ticket_id}",
-            f"Epic title: {title}",
-            f"Parent branch: {parent_branch}",
-            f"Root branch: {root_branch}",
-            "",
-            "Commit messages being squashed:",
-            commits_preview,
-            "",
-            "Changed files:",
-            files_preview,
-            "",
-            "Return only the commit subject.",
-        ]
-    )
-
-    start_cmd, start_cwd = agent_spec.build_start_command(
-        agent_home,
-        list(agent_options or []),
-        prompt_text,
-    )
-    start_cmd = _with_codex_exec(start_cmd, prompt_text)
-    start_cmd = _strip_flag_with_value(start_cmd, "--cd")
-    start_cmd = _ensure_exec_subcommand_flag(start_cmd, "--skip-git-repo-check")
-    start_cwd = agent_home
-    result = exec.try_run_command(start_cmd, cwd=start_cwd, env=agent_env)
-    if result is None or result.returncode != 0:
-        return None
-    parsed = _parse_squash_subject_output(result.stdout or "")
-    if parsed:
-        return parsed
-    return _parse_squash_subject_output(result.stderr or "")
 
 
 def _cleanup_epic_branches_and_worktrees(
@@ -1538,14 +1305,13 @@ def _cleanup_epic_branches_and_worktrees(
     git_path: str | None = None,
     log: Callable[[str], None] | None = None,
 ) -> None:
-    worker_integration.cleanup_epic_branches_and_worktrees(
+    worker_integration_service.cleanup_epic_branches_and_worktrees(
         project_data_dir=project_data_dir,
         repo_root=repo_root,
         epic_id=epic_id,
         keep_branches=keep_branches,
         git_path=git_path,
         log=log,
-        run_git_status=_run_git_status,
     )
 
 
@@ -1565,7 +1331,7 @@ def _integrate_epic_root_to_parent(
     repo_root: Path,
     git_path: str | None = None,
 ) -> tuple[bool, str | None, str | None]:
-    return worker_integration.integrate_epic_root_to_parent(
+    return worker_integration_service.integrate_epic_root_to_parent(
         epic_issue=epic_issue,
         epic_id=epic_id,
         root_branch=root_branch,
@@ -1579,12 +1345,9 @@ def _integrate_epic_root_to_parent(
         integration_cwd=integration_cwd,
         repo_root=repo_root,
         git_path=git_path,
-        ensure_local_branch=_ensure_local_branch,
-        run_git_status=_run_git_status,
-        sync_local_branch_from_remote=_sync_local_branch_from_remote,
-        normalize_squash_message_mode=_normalize_squash_message_mode,
-        agent_generated_squash_subject=_agent_generated_squash_subject,
-        squash_subject=lambda issue, eid: _squash_subject(issue, epic_id=eid),
+        with_codex_exec=_with_codex_exec,
+        strip_flag_with_value=_strip_flag_with_value,
+        ensure_exec_subcommand_flag=_ensure_exec_subcommand_flag,
     )
 
 
