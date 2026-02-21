@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -62,13 +63,55 @@ def _parse_description_fields(description: str | None) -> dict[str, str]:
     return fields
 
 
+def _normalize_status(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def _dependency_id_status(dep: object) -> tuple[str | None, str | None]:
+    if isinstance(dep, dict):
+        dep_id = str(dep.get("id") or "").strip() or None
+        status = _normalize_status(dep.get("status")) or None
+        return dep_id, status
+    if isinstance(dep, str):
+        text = dep.strip()
+        if not text:
+            return None, None
+        match = re.match(r"^(?P<id>[^\s(]+)(?:\s*\((?P<meta>[^)]*)\))?$", text)
+        if not match:
+            return text, None
+        dep_id = (match.group("id") or "").strip() or None
+        meta = (match.group("meta") or "").strip()
+        if not meta:
+            return dep_id, None
+        status = _normalize_status(meta.split(",", 1)[0])
+        return dep_id, status or None
+    return None, None
+
+
+def _blocking_dependencies(issue: dict[str, object]) -> list[str]:
+    deps = issue.get("dependencies")
+    if not isinstance(deps, list):
+        return []
+    blockers: list[str] = []
+    for dep in deps:
+        dep_id, status = _dependency_id_status(dep)
+        if not dep_id:
+            continue
+        if status in {"closed", "done"}:
+            continue
+        blockers.append(f"{dep_id} [{status or 'unknown'}]")
+    return blockers
+
+
 def _status_bucket(issue: dict[str, object], *, show_drafts: bool) -> str | None:
     labels = _labels(issue)
     if "at:draft" in labels:
         return "draft" if show_drafts else None
-    status = str(issue.get("status") or "").strip().lower()
+    status = _normalize_status(issue.get("status"))
     if status in {"closed", "done"}:
         return None
+    if _blocking_dependencies(issue):
+        return "blocked"
     if status in {"blocked"}:
         return "blocked"
     if status in {"in_progress", "hooked"}:
@@ -92,8 +135,11 @@ def _append_issue(lines: list[str], issue: dict[str, object]) -> None:
     fields = _parse_description_fields(description if isinstance(description, str) else None)
     root_branch = fields.get("workspace.root_branch") or "unset"
     assignee = str(issue.get("assignee") or "").strip() or "unassigned"
+    blockers = _blocking_dependencies(issue)
     lines.append(f"- {issue_id} [{status}] {title}")
     lines.append(f"  root: {root_branch} | assignee: {assignee}")
+    if blockers:
+        lines.append(f"  blockers: {', '.join(blockers)}")
 
 
 def _render_epics(issues: list[dict[str, object]], *, show_drafts: bool) -> str:
