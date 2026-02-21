@@ -21,7 +21,7 @@ from .session.agent import (
     AgentSessionRunResult,
 )
 from .session.startup import StartupContractContext
-from .session.worktree import WorktreePreparation
+from .session.worktree import WorktreePreparation, WorktreePreparationContext
 
 Issue = dict[str, object]
 StepTimings = list[tuple[str, float]]
@@ -247,17 +247,8 @@ class WorkerSessionWorktreeService(Protocol):
     def prepare_worktrees(
         self,
         *,
-        dry_run: bool,
-        project_data_dir: Path,
-        repo_root: Path,
-        beads_root: Path,
-        selected_epic: str,
-        changeset_id: str,
-        root_branch_value: str,
-        changeset_parent_branch: str,
-        git_path: str | None,
-        emit: Callable[[str], None],
-        dry_run_log: Callable[[str], None],
+        context: WorktreePreparationContext,
+        control: WorkerControlService,
     ) -> WorktreePreparation: ...
 
 

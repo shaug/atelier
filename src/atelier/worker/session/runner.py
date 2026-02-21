@@ -11,6 +11,7 @@ from ..models import WorkerRunSummary
 from ..models_boundary import parse_issue_boundary
 from ..ports import BeadsService, WorkerLifecycleService, WorkerRuntimeDependencies
 from .startup import StartupContractContext
+from .worktree import WorktreePreparationContext
 
 _WORKER_QUEUE_NAME = "worker"
 
@@ -495,17 +496,18 @@ def run_worker_once(
             control.say(f"Next changeset: {changeset_id} {changeset_title}")
         finishstep = control.step("Prepare worktrees", timings=timings, trace=trace)
         worktree_prep = infra.worker_session_worktree.prepare_worktrees(
-            dry_run=dry_run,
-            project_data_dir=project_data_dir,
-            repo_root=repo_root,
-            beads_root=beads_root,
-            selected_epic=selected_epic,
-            changeset_id=str(changeset_id),
-            root_branch_value=root_branch_value or "",
-            changeset_parent_branch=parent_branch_for_changeset or "",
-            git_path=git_path,
-            emit=control.say,
-            dry_run_log=control.dry_run_log,
+            context=WorktreePreparationContext(
+                dry_run=dry_run,
+                project_data_dir=project_data_dir,
+                repo_root=repo_root,
+                beads_root=beads_root,
+                selected_epic=selected_epic,
+                changeset_id=str(changeset_id),
+                root_branch_value=root_branch_value or "",
+                changeset_parent_branch=parent_branch_for_changeset or "",
+                git_path=git_path,
+            ),
+            control=control,
         )
         changeset_worktree_path = worktree_prep.changeset_worktree_path
         finishstep()

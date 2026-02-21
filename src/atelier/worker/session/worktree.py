@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Protocol
 
 from ... import beads, git, worktrees
 
@@ -16,21 +16,42 @@ class WorktreePreparation:
     branch: str | None
 
 
+@dataclass(frozen=True)
+class WorktreePreparationContext:
+    dry_run: bool
+    project_data_dir: Path
+    repo_root: Path
+    beads_root: Path
+    selected_epic: str
+    changeset_id: str
+    root_branch_value: str
+    changeset_parent_branch: str
+    git_path: str | None
+
+
+class WorktreePreparationControl(Protocol):
+    """Runtime logging hooks used by worktree preparation."""
+
+    def say(self, message: str) -> None: ...
+
+    def dry_run_log(self, message: str) -> None: ...
+
+
 def prepare_worktrees(
     *,
-    dry_run: bool,
-    project_data_dir: Path,
-    repo_root: Path,
-    beads_root: Path,
-    selected_epic: str,
-    changeset_id: str,
-    root_branch_value: str,
-    changeset_parent_branch: str,
-    git_path: str | None,
-    emit: Callable[[str], None],
-    dry_run_log: Callable[[str], None],
+    context: WorktreePreparationContext,
+    control: WorktreePreparationControl,
 ) -> WorktreePreparation:
     """Ensure epic/changeset worktrees and branch metadata exist."""
+    dry_run = context.dry_run
+    project_data_dir = context.project_data_dir
+    repo_root = context.repo_root
+    beads_root = context.beads_root
+    selected_epic = context.selected_epic
+    changeset_id = context.changeset_id
+    root_branch_value = context.root_branch_value
+    changeset_parent_branch = context.changeset_parent_branch
+    git_path = context.git_path
     epic_worktree_path: Path | None = None
     changeset_worktree_path: Path | None = None
     branch: str | None = None
@@ -62,20 +83,20 @@ def prepare_worktrees(
                 changeset_relpath = worktrees.changeset_worktree_relpath(changeset_id)
             if changeset_relpath:
                 changeset_worktree_path = project_data_dir / changeset_relpath
-        dry_run_log(f"Epic worktree: {epic_worktree_path}")
+        control.dry_run_log(f"Epic worktree: {epic_worktree_path}")
         if changeset_worktree_path is not None:
-            dry_run_log(f"Changeset worktree: {changeset_worktree_path}")
+            control.dry_run_log(f"Changeset worktree: {changeset_worktree_path}")
         else:
-            dry_run_log("Changeset worktree: <unknown>")
-        dry_run_log(f"Changeset branch: {branch or '<unknown>'}")
+            control.dry_run_log("Changeset worktree: <unknown>")
+        control.dry_run_log(f"Changeset branch: {branch or '<unknown>'}")
         if changeset_id:
-            dry_run_log(
+            control.dry_run_log(
                 "Would update changeset branch metadata "
                 f"(root={root_branch_value!r}, "
                 f"parent={changeset_parent_branch!r}, "
                 f"work={branch!r})."
             )
-        dry_run_log("Would ensure git worktrees and checkout.")
+        control.dry_run_log("Would ensure git worktrees and checkout.")
         return WorktreePreparation(
             epic_worktree_path=epic_worktree_path,
             changeset_worktree_path=changeset_worktree_path,
@@ -140,9 +161,9 @@ def prepare_worktrees(
             beads_root=beads_root,
             cwd=repo_root,
         )
-    emit(f"Epic worktree: {epic_worktree_path}")
-    emit(f"Changeset worktree: {changeset_worktree_path}")
-    emit(f"Changeset branch: {branch}")
+    control.say(f"Epic worktree: {epic_worktree_path}")
+    control.say(f"Changeset worktree: {changeset_worktree_path}")
+    control.say(f"Changeset branch: {branch}")
     return WorktreePreparation(
         epic_worktree_path=epic_worktree_path,
         changeset_worktree_path=changeset_worktree_path,
