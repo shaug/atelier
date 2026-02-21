@@ -117,6 +117,12 @@ Atelier planning state. They are treated as external ticket sources.
   - Installs a read-only guardrail hook for planner worktrees and warns on dirty
     working trees.
 
+- `atelier plan-overview`
+
+  - Prints a read-only planner startup overview on demand.
+  - Includes unread planner inbox messages, queued messages with claim state,
+    and active epics in stable `epic_list --show-drafts` format.
+
 - `atelier policy`
 
   - Shows project-wide policy shared by planner/worker agents.

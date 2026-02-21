@@ -19,6 +19,7 @@ from .. import (
     git,
     hooks,
     paths,
+    planner_overview,
     policy,
     prompting,
     skills,
@@ -29,6 +30,17 @@ from .. import (
 from ..io import confirm, die, say
 from . import work as work_cmd
 from .resolve import resolve_current_project_with_repo_root
+
+
+def _issue_sort_key(issue: dict[str, object]) -> tuple[str, str]:
+    issue_id = str(issue.get("id") or "").strip()
+    title = str(issue.get("title") or "").strip()
+    return (issue_id, title)
+
+
+def _emit_multiline(text: str) -> None:
+    for line in text.splitlines():
+        say(line)
 
 
 def _list_inbox_messages(
@@ -42,7 +54,7 @@ def _list_inbox_messages(
     )
     if inbox:
         say("Unread messages:")
-        for issue in inbox:
+        for issue in sorted(inbox, key=_issue_sort_key):
             issue_id = issue.get("id") or ""
             title = issue.get("title") or ""
             say(f"- {issue_id} {title}")
@@ -50,17 +62,72 @@ def _list_inbox_messages(
     say("No unread messages.")
 
 
-def _list_queue_messages(*, beads_root: Path, repo_root: Path) -> None:
-    queued = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root, unread_only=True)
+def _queue_claim_state(issue: dict[str, object]) -> str:
+    claimed_by = issue.get("claimed_by")
+    if isinstance(claimed_by, str) and claimed_by.strip():
+        return f"claimed by {claimed_by.strip()}"
+    return "unclaimed"
+
+
+def _list_queue_messages(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    include_claimed: bool = False,
+    include_claim_state: bool = False,
+) -> None:
+    queued = beads.list_queue_messages(
+        beads_root=beads_root,
+        cwd=repo_root,
+        unread_only=True,
+        unclaimed_only=not include_claimed,
+    )
     if queued:
         say("Queued messages:")
-        for issue in queued:
+        for issue in sorted(queued, key=_issue_sort_key):
             issue_id = issue.get("id") or ""
             queue_name = issue.get("queue") or "queue"
             title = issue.get("title") or ""
-            say(f"- {issue_id} [{queue_name}] {title}")
+            claim_segment = ""
+            if include_claim_state:
+                claim_segment = f" | claim: {_queue_claim_state(issue)}"
+            say(f"- {issue_id} [{queue_name}] {title}{claim_segment}")
         return
     say("No queued messages.")
+
+
+def _list_active_epics(*, beads_root: Path, repo_root: Path) -> None:
+    issues = planner_overview.list_epics(beads_root=beads_root, repo_root=repo_root)
+    _emit_multiline(planner_overview.render_epics(issues, show_drafts=True))
+
+
+def _resolve_overview_agent_id(requested_agent_id: str | None) -> str:
+    candidate = str(requested_agent_id or "").strip()
+    if candidate:
+        return candidate
+    env_agent_id = os.environ.get("ATELIER_AGENT_ID", "").strip()
+    if env_agent_id:
+        return env_agent_id
+    die("planner overview requires --agent-id or ATELIER_AGENT_ID in the environment")
+    raise AssertionError("unreachable")
+
+
+def run_planner_overview(args: object) -> None:
+    """Print a read-only planner startup overview snapshot."""
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
+    project_data_dir = config.resolve_project_data_dir(project_root, project_config)
+    beads_root = config.resolve_beads_root(project_data_dir, repo_root)
+    agent_id = _resolve_overview_agent_id(getattr(args, "agent_id", None))
+
+    say("Planner startup overview")
+    _list_inbox_messages(agent_id, beads_root=beads_root, repo_root=repo_root)
+    _list_queue_messages(
+        beads_root=beads_root,
+        repo_root=repo_root,
+        include_claimed=True,
+        include_claim_state=True,
+    )
+    _list_active_epics(beads_root=beads_root, repo_root=repo_root)
 
 
 _PLANNER_HOOKS_DIR = "planner-git-hooks"

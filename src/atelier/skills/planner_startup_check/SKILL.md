@@ -31,3 +31,8 @@ description: >-
 - Messages are summarized with explicit decisions or follow-up beads.
 - Active epic listing (draft/open/in-progress/blocked as available) is included
   in stable `epic_list` format.
+
+## On-demand refresh
+
+- Operators can print the same read-only overview at any time with:
+  `atelier plan-overview --agent-id "$ATELIER_AGENT_ID"`.
