@@ -206,10 +206,6 @@ def _log_debug(message: str) -> None:
     atelier_log.debug(f"[work] {message}")
 
 
-def _log_warning(message: str) -> None:
-    atelier_log.warning(f"[work] {message}")
-
-
 def _trace_enabled() -> bool:
     return worker_telemetry.trace_enabled("ATELIER_WORK_TRACE")
 
@@ -708,7 +704,6 @@ def _handle_pushed_without_pr(
         send_planner_notification=_send_planner_notification,
         update_changeset_review_from_pr=_update_changeset_review_from_pr,
         emit=say,
-        log_warning=_log_warning,
         attempt_create_draft_pr_fn=_attempt_create_draft_pr,
     )
     return gate_result.finalize_result
@@ -796,7 +791,6 @@ def _recover_premature_merged_changeset(
         mark_changeset_in_progress=_mark_changeset_in_progress,
         update_changeset_review_from_pr=_update_changeset_review_from_pr,
         handle_pushed_without_pr=_handle_pushed_without_pr,
-        log_warning=_log_warning,
     )
 
 
@@ -1844,8 +1838,6 @@ def _finalize_changeset(
         changeset_waiting_on_review_or_signals=_changeset_waiting_on_review_or_signals,
         lookup_pr_payload=_lookup_pr_payload,
         lookup_pr_payload_diagnostic=_lookup_pr_payload_diagnostic,
-        log_warning=_log_warning,
-        log_debug=_log_debug,
         update_changeset_review_from_pr=_update_changeset_review_from_pr,
         finalize_terminal_changeset=_finalize_terminal_changeset,
         handle_pushed_without_pr=_handle_pushed_without_pr,
@@ -2001,8 +1993,6 @@ def _run_startup_contract(
                 dry_run_log=_dry_run_log,
             )
         ),
-        log_debug=_log_debug,
-        log_warning=_log_warning,
         dry_run_log=_dry_run_log,
         emit=say,
         run_bd_json=beads.run_bd_json,

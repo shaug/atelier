@@ -69,7 +69,6 @@ def test_handle_pushed_without_pr_returns_review_pending_when_strategy_blocks(
             AssertionError("no PR payload should be applied")
         ),
         emit=lambda _message: None,
-        log_warning=lambda _message: None,
     )
 
     assert marked == ["in_progress"]
@@ -124,7 +123,6 @@ def test_handle_pushed_without_pr_reports_failure_when_pr_create_fails(
         ),
         update_changeset_review_from_pr=lambda **_kwargs: None,
         emit=lambda _message: None,
-        log_warning=lambda _message: None,
     )
 
     assert result.finalize_result.continue_running is False

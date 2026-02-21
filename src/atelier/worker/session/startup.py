@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ... import log as atelier_log
 from ..models import StartupContractResult
 from ..review import ReviewFeedbackSelection
 
@@ -160,8 +161,6 @@ class StartupContractPorts:
     select_epic_prompt: Callable[..., str | None]
     select_epic_from_ready_changesets: Callable[..., str | None]
     send_needs_decision: Callable[..., None]
-    log_debug: Callable[[str], None]
-    log_warning: Callable[[str], None]
     dry_run_log: Callable[[str], None]
     emit: Callable[[str], None]
     run_bd_json: Callable[..., list[dict[str, object]]]
@@ -208,8 +207,6 @@ def run_startup_contract_service(
         select_epic_prompt=ports.select_epic_prompt,
         select_epic_from_ready_changesets=ports.select_epic_from_ready_changesets,
         send_needs_decision=ports.send_needs_decision,
-        log_debug=ports.log_debug,
-        log_warning=ports.log_warning,
         dry_run_log=ports.dry_run_log,
         emit=ports.emit,
         run_bd_json=ports.run_bd_json,
@@ -254,8 +251,6 @@ def run_startup_contract(
     select_epic_prompt: Callable[..., str | None],
     select_epic_from_ready_changesets: Callable[..., str | None],
     send_needs_decision: Callable[..., None],
-    log_debug: Callable[[str], None],
-    log_warning: Callable[[str], None],
     dry_run_log: Callable[[str], None],
     emit: Callable[[str], None],
     run_bd_json: Callable[..., list[dict[str, object]]],
@@ -384,7 +379,7 @@ def run_startup_contract(
             "Prioritizing review feedback: "
             f"{selection.changeset_id} ({selection.epic_id})"
         )
-        log_debug(
+        atelier_log.debug(
             "startup selected review-feedback "
             f"changeset={selection.changeset_id} epic={selection.epic_id}"
         )
@@ -407,7 +402,7 @@ def run_startup_contract(
 
     if hooked_epic and epic_has_actionable_changeset(hooked_epic):
         emit(f"Resuming hooked epic: {hooked_epic}")
-        log_debug(f"startup resuming hooked epic={hooked_epic}")
+        atelier_log.debug(f"startup resuming hooked epic={hooked_epic}")
         return StartupContractResult(
             epic_id=hooked_epic,
             changeset_id=None,
@@ -416,7 +411,7 @@ def run_startup_contract(
         )
     if hooked_epic:
         emit(f"Hooked epic has no ready changesets: {hooked_epic}")
-        log_debug(
+        atelier_log.debug(
             f"startup hooked epic has no actionable changesets epic={hooked_epic}"
         )
 
@@ -451,7 +446,7 @@ def run_startup_contract(
         if candidate and epic_has_actionable_changeset(str(candidate)):
             selected_epic = str(candidate)
             emit(f"Resuming assigned epic: {selected_epic}")
-            log_debug(f"startup resuming assigned epic={selected_epic}")
+            atelier_log.debug(f"startup resuming assigned epic={selected_epic}")
             return StartupContractResult(
                 epic_id=selected_epic,
                 changeset_id=None,
@@ -473,7 +468,7 @@ def run_startup_contract(
                 "Reclaiming stale epic assignment: "
                 f"{selected_epic} (from {previous_assignee})"
             )
-            log_warning(
+            atelier_log.warning(
                 "startup reclaiming stale assignment "
                 f"epic={selected_epic} previous_assignee={previous_assignee}"
             )
@@ -532,7 +527,7 @@ def run_startup_contract(
             )
 
     if selected_epic is None:
-        log_warning("startup found no eligible epics")
+        atelier_log.warning("startup found no eligible epics")
         send_needs_decision(
             agent_id=agent_id,
             mode=mode,

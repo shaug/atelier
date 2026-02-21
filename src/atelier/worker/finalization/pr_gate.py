@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ... import beads, changesets, exec, git, pr_strategy, prs
+from ... import log as atelier_log
 from ..models import FinalizeResult
 
 
@@ -174,7 +175,6 @@ def handle_pushed_without_pr(
     send_planner_notification: Callable[..., None],
     update_changeset_review_from_pr: Callable[..., None],
     emit: Callable[[str], None],
-    log_warning: Callable[[str], None],
     attempt_create_draft_pr_fn: Callable[..., tuple[bool, str]] | None = None,
 ) -> PrGateResult:
     decision = changeset_pr_creation_decision(
@@ -296,7 +296,7 @@ def handle_pushed_without_pr(
                 create_detail = (
                     f"{create_detail}; unable to verify existing PR: {lookup_error}"
                 )
-                log_warning(
+                atelier_log.warning(
                     "changeset="
                     f"{changeset_id} PR status lookup failed after create attempt: "
                     f"{lookup_error}"
@@ -345,7 +345,7 @@ def handle_pushed_without_pr(
         repo_root=repo_root,
         dry_run=False,
     )
-    log_warning(
+    atelier_log.warning(
         "changeset="
         f"{changeset_id} finalize stopped reason={failure_reason} "
         f"strategy={decision.strategy} detail={create_detail or 'n/a'}"

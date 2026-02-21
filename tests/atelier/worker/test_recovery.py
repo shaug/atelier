@@ -52,7 +52,6 @@ def test_recovery_moves_back_to_review_pending_when_pr_is_open(monkeypatch) -> N
         handle_pushed_without_pr=lambda **_kwargs: FinalizeResult(
             continue_running=False, reason="pushed_without_pr"
         ),
-        log_warning=lambda _message: None,
     )
 
     assert result == FinalizeResult(
@@ -98,7 +97,6 @@ def test_recovery_routes_pushed_without_pr_back_to_pr_gate(monkeypatch) -> None:
         handle_pushed_without_pr=lambda **_kwargs: FinalizeResult(
             continue_running=False, reason="changeset_pr_create_failed"
         ),
-        log_warning=lambda _message: None,
     )
 
     assert result == FinalizeResult(

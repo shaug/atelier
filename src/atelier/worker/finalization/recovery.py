@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ... import git, prs
+from ... import log as atelier_log
 from ..models import FinalizeResult
 
 
@@ -39,7 +40,6 @@ def recover_premature_merged_changeset(
     mark_changeset_in_progress: Callable[..., None],
     update_changeset_review_from_pr: Callable[..., None],
     handle_pushed_without_pr: Callable[..., FinalizeResult],
-    log_warning: Callable[[str], None],
 ) -> FinalizeResult | None:
     """Recover when a changeset is marked merged before publish/review signals."""
     if not branch_pr:
@@ -57,7 +57,7 @@ def recover_premature_merged_changeset(
             repo_slug, work_branch
         )
     if lookup_error:
-        log_warning(
+        atelier_log.warning(
             "changeset="
             f"{changeset_id} premature-merged recovery failed PR lookup "
             f"for branch={work_branch}: {lookup_error}"

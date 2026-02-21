@@ -45,8 +45,6 @@ def _pipeline_kwargs(**overrides: Any) -> dict[str, Any]:
         "changeset_waiting_on_review_or_signals": lambda *_args, **_kwargs: False,
         "lookup_pr_payload": lambda *_args, **_kwargs: None,
         "lookup_pr_payload_diagnostic": lambda *_args, **_kwargs: (None, None),
-        "log_warning": lambda _message: None,
-        "log_debug": lambda _message: None,
         "update_changeset_review_from_pr": lambda *_args, **_kwargs: None,
         "finalize_terminal_changeset": lambda **_kwargs: None,
         "handle_pushed_without_pr": lambda **_kwargs: None,

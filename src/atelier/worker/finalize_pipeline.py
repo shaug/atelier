@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import beads, git, prs
+from .. import log as atelier_log
 from .models import FinalizeResult
 
 
@@ -51,8 +52,6 @@ def run_finalize_pipeline(
     lookup_pr_payload_diagnostic: Callable[
         ..., tuple[dict[str, object] | None, str | None]
     ],
-    log_warning: Callable[[str], None],
-    log_debug: Callable[[str], None],
     update_changeset_review_from_pr: Callable[..., None],
     finalize_terminal_changeset: Callable[..., FinalizeResult],
     handle_pushed_without_pr: Callable[..., FinalizeResult],
@@ -270,7 +269,7 @@ def run_finalize_pipeline(
                 repo_slug, work_branch
             )
     if branch_pr and pr_lookup_error:
-        log_warning(
+        atelier_log.warning(
             "changeset="
             f"{changeset_id} finalize PR status lookup failed branch={work_branch}: "
             f"{pr_lookup_error}"
@@ -302,7 +301,7 @@ def run_finalize_pipeline(
             pr_payload, pushed=pushed, review_requested=review_requested
         )
     if lifecycle == "merged":
-        log_debug(f"changeset={changeset_id} finalize lifecycle=merged")
+        atelier_log.debug(f"changeset={changeset_id} finalize lifecycle=merged")
         update_changeset_review_from_pr(
             changeset_id,
             pr_payload=pr_payload,
@@ -333,7 +332,7 @@ def run_finalize_pipeline(
             git_path=git_path,
         )
     if lifecycle == "closed":
-        log_debug(f"changeset={changeset_id} finalize lifecycle=closed")
+        atelier_log.debug(f"changeset={changeset_id} finalize lifecycle=closed")
         update_changeset_review_from_pr(
             changeset_id,
             pr_payload=pr_payload,
@@ -412,7 +411,7 @@ def run_finalize_pipeline(
                             repo_slug, work_branch
                         )
                     if pr_lookup_error:
-                        log_warning(
+                        atelier_log.warning(
                             "changeset="
                             f"{changeset_id} push succeeded but PR status lookup "
                             f"failed branch={work_branch}: {pr_lookup_error}"
