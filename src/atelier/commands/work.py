@@ -33,7 +33,6 @@ from .. import (
     pr_strategy,
     prompting,
     prs,
-    root_branch as root_branch_module,
     skills,
     templates,
     work_feedback,
@@ -42,6 +41,9 @@ from .. import (
 )
 from .. import (
     log as atelier_log,
+)
+from .. import (
+    root_branch as root_branch_module,
 )
 from ..io import confirm, die, prompt, say, select
 from ..worker import changeset_state as worker_changeset_state

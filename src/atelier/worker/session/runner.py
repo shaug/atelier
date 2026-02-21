@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
+from ..context import ChangesetSelectionContext
 from ..models import WorkerRunSummary
+from ..ports import ChangesetSelectionPorts
 
 
 @dataclass(frozen=True)
@@ -17,42 +18,39 @@ class ChangesetSelection:
 
 def select_changeset(
     *,
-    selected_epic: str,
-    startup_changeset_id: str | None,
-    beads_root: Path,
-    repo_root: Path,
-    repo_slug: str | None,
-    branch_pr: bool,
-    branch_pr_strategy: object,
-    git_path: str | None,
-    run_bd_json: Callable[..., list[dict[str, object]]],
-    resolve_epic_id_for_changeset: Callable[..., str | None],
-    next_changeset: Callable[..., dict[str, object] | None],
+    context: ChangesetSelectionContext,
+    ports: ChangesetSelectionPorts,
 ) -> ChangesetSelection:
     """Resolve explicit startup changeset override, then fallback to next-ready."""
     selected_override = (
-        str(startup_changeset_id).strip() if startup_changeset_id else ""
+        str(context.startup_changeset_id).strip()
+        if context.startup_changeset_id
+        else ""
     )
     changeset: dict[str, object] | None = None
     if selected_override:
-        override_issue = run_bd_json(
-            ["show", selected_override], beads_root=beads_root, cwd=repo_root
+        override_issue = ports.run_bd_json(
+            ["show", selected_override],
+            beads_root=context.beads_root,
+            cwd=context.repo_root,
         )
         if override_issue:
-            resolved_epic = resolve_epic_id_for_changeset(
-                override_issue[0], beads_root=beads_root, repo_root=repo_root
+            resolved_epic = ports.resolve_epic_id_for_changeset(
+                override_issue[0],
+                beads_root=context.beads_root,
+                repo_root=context.repo_root,
             )
-            if resolved_epic == selected_epic:
+            if resolved_epic == context.selected_epic:
                 changeset = override_issue[0]
     if changeset is None:
-        changeset = next_changeset(
-            epic_id=selected_epic,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            repo_slug=repo_slug,
-            branch_pr=branch_pr,
-            branch_pr_strategy=branch_pr_strategy,
-            git_path=git_path,
+        changeset = ports.next_changeset(
+            epic_id=context.selected_epic,
+            beads_root=context.beads_root,
+            repo_root=context.repo_root,
+            repo_slug=context.repo_slug,
+            branch_pr=context.branch_pr,
+            branch_pr_strategy=context.branch_pr_strategy,
+            git_path=context.git_path,
         )
     return ChangesetSelection(issue=changeset, selected_override=selected_override)
 
@@ -385,17 +383,21 @@ def run_worker_once(
         finish_step()
         finish_step = _step("Select changeset", timings=timings, trace=trace)
         selected = worker_session_runner.select_changeset(
-            selected_epic=selected_epic,
-            startup_changeset_id=startup_result.changeset_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            repo_slug=repo_slug,
-            branch_pr=project_config.branch.pr,
-            branch_pr_strategy=project_config.branch.pr_strategy,
-            git_path=git_path,
-            run_bd_json=beads.run_bd_json,
-            resolve_epic_id_for_changeset=_resolve_epic_id_for_changeset,
-            next_changeset=_next_changeset,
+            context=ChangesetSelectionContext(
+                selected_epic=selected_epic,
+                startup_changeset_id=startup_result.changeset_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                repo_slug=repo_slug,
+                branch_pr=project_config.branch.pr,
+                branch_pr_strategy=project_config.branch.pr_strategy,
+                git_path=git_path,
+            ),
+            ports=ChangesetSelectionPorts(
+                run_bd_json=beads.run_bd_json,
+                resolve_epic_id_for_changeset=_resolve_epic_id_for_changeset,
+                next_changeset=_next_changeset,
+            ),
         )
         changeset = selected.issue
         selected_changeset_override = selected.selected_override
