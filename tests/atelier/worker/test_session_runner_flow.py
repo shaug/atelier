@@ -199,3 +199,71 @@ def test_run_worker_once_dry_run_without_epic_stops_cleanly() -> None:
     assert summary.reason == "no_epic_selected"
     deps.infra.agent_home.preview_agent_home.assert_called_once()
     deps.infra.agent_home.resolve_agent_home.assert_not_called()
+
+
+def test_run_worker_once_retries_after_claim_conflict() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p3",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p3",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-conflict",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    startup_contexts: list[runner.StartupContractContext] = []
+
+    def run_startup_contract(*, context: runner.StartupContractContext) -> StartupContractResult:
+        startup_contexts.append(context)
+        if "at-conflict" in context.excluded_epic_ids:
+            return StartupContractResult(
+                epic_id="at-alt",
+                changeset_id=None,
+                should_exit=False,
+                reason="selected_auto",
+            )
+        return StartupContractResult(
+            epic_id="at-conflict",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        )
+
+    claim_attempts: list[str] = []
+
+    def claim_epic(epic_id: str, *_args: object, **_kwargs: object) -> dict[str, object]:
+        claim_attempts.append(epic_id)
+        if epic_id == "at-conflict":
+            raise SystemExit(1)
+        return {"id": epic_id, "title": epic_id}
+
+    def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
+        if args[:2] == ["show", "at-conflict"]:
+            return [{"id": "at-conflict", "assignee": "atelier/planner/codex/p777"}]
+        return []
+
+    deps.lifecycle.run_startup_contract = Mock(side_effect=run_startup_contract)
+    deps.infra.beads.claim_epic = Mock(side_effect=claim_epic)
+    deps.infra.beads.run_bd_json = Mock(side_effect=run_bd_json)
+    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p3"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "no_ready_changesets"
+    assert summary.epic_id == "at-alt"
+    assert claim_attempts == ["at-conflict", "at-alt"]
+    assert len(startup_contexts) == 2
+    assert startup_contexts[0].excluded_epic_ids == ()
+    assert startup_contexts[1].excluded_epic_ids == ("at-conflict",)
