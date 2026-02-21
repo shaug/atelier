@@ -7,6 +7,7 @@ import pytest
 from atelier import config
 from atelier.agent_home import AgentHome
 from atelier.commands import work as work_cmd
+from atelier.worker.models import WorkerRunSummary
 
 
 def _project_config() -> config.ProjectConfig:
@@ -81,3 +82,30 @@ def test_start_worker_cleans_up_agent_home_after_runtime_failure(
             )
 
     cleanup_home.assert_called_once_with(agent, project_dir=tmp_path)
+
+
+def test_run_worker_once_uses_runtime_builder_and_runner() -> None:
+    deps = object()
+    expected = WorkerRunSummary(started=False, reason="queue_blocked")
+
+    with (
+        patch(
+            "atelier.commands.work.worker_runtime.build_worker_runtime_dependencies",
+            return_value=deps,
+        ) as build_deps,
+        patch(
+            "atelier.commands.work.worker_session_runner.run_worker_once",
+            return_value=expected,
+        ) as run_once,
+    ):
+        result = work_cmd._run_worker_once(
+            SimpleNamespace(), mode="auto", dry_run=True, session_key="sess-1"
+        )
+
+    assert result is expected
+    build_deps.assert_called_once()
+    kwargs = run_once.call_args.kwargs
+    assert kwargs["deps"] is deps
+    assert kwargs["run_context"].mode == "auto"
+    assert kwargs["run_context"].dry_run is True
+    assert kwargs["run_context"].session_key == "sess-1"
