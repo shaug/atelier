@@ -16,6 +16,8 @@ description: >-
 - parent_branch: parent branch for the changeset (from bead metadata).
 - work_branch: changeset work branch (from bead metadata).
 - template_path: template file path (default: `references/pr-template.md`).
+- ticket_section_script: helper script path (default:
+  `scripts/render_tickets_section.py`).
 
 ## Steps
 
@@ -26,6 +28,10 @@ description: >-
    - Changeset description (scope, intent, constraints).
    - Actual code changes (from diff + files touched).
    - Tests executed (if any). If none, state why.
+1. Render ticket references from bead metadata:
+   - `python3 <ticket_section_script> --changeset-id <changeset_id> --repo-path <repo_path>`
+   - If output is non-empty, include it as the `## Tickets` section.
+   - If output is empty, remove the `## Tickets` section entirely.
 1. Produce:
    - PR title (clear, imperative).
    - PR body (filled template).
@@ -34,6 +40,8 @@ description: >-
 ## Guardrails
 
 - Keep the PR body factual and bounded to the changeset scope.
+- Never mention bead ids in title/body.
+- Reference only external tickets in `## Tickets`.
 - If the diff is large or unclear, call it out explicitly in the notes.
 - Do not modify code, commits, or beads.
 
@@ -41,3 +49,4 @@ description: >-
 
 - PR title is concise and matches the changeset scope.
 - Template sections are populated or explicitly marked as not applicable.
+- `## Tickets` is present only when external tickets are linked.

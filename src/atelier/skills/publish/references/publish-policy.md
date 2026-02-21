@@ -71,3 +71,11 @@ and exit without opening a PR.
 When PR creation is allowed, draft the PR title/body with the `pr_draft` skill
 and hand the result to `github-prs`. When PR creation is gated, report the
 reason and skip PR creation after pushing the branch.
+
+PR descriptions must include a `## Tickets` section when external tickets are
+linked on the changeset bead. The section must use:
+
+- `- Fixes <ticket-id>` for tickets resolved by this changeset.
+- `- Addresses <ticket-id>` for partially addressed or context tickets.
+
+If no external tickets are linked, omit the section entirely.
