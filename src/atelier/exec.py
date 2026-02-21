@@ -1,10 +1,93 @@
 """Subprocess helpers for running external commands."""
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Protocol
 
 from .io import die
+
+
+@dataclass(frozen=True)
+class CommandRequest:
+    """Typed command invocation request."""
+
+    argv: tuple[str, ...]
+    cwd: Path | None = None
+    env: Mapping[str, str] | None = None
+    capture_output: bool = True
+    text: bool = True
+    timeout_seconds: float | None = None
+    stdin: int | None = None
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    """Typed command execution result."""
+
+    argv: tuple[str, ...]
+    returncode: int
+    stdout: str
+    stderr: str
+    timed_out: bool = False
+
+
+class CommandRunner(Protocol):
+    """Runtime command-execution interface."""
+
+    def run(self, request: CommandRequest) -> CommandResult | None: ...
+
+
+class SubprocessCommandRunner:
+    """Default command-runner adapter backed by subprocess."""
+
+    def run(self, request: CommandRequest) -> CommandResult | None:
+        run_kwargs: dict[str, object] = {
+            "cwd": request.cwd,
+            "env": request.env,
+            "check": False,
+        }
+        if request.capture_output:
+            run_kwargs["capture_output"] = True
+            run_kwargs["text"] = request.text
+        if request.timeout_seconds is not None:
+            run_kwargs["timeout"] = request.timeout_seconds
+        if request.stdin is not None:
+            run_kwargs["stdin"] = request.stdin
+        try:
+            completed = subprocess.run(list(request.argv), **run_kwargs)
+        except FileNotFoundError:
+            return None
+        except subprocess.TimeoutExpired as exc:
+            stdout = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
+            stderr = (exc.stderr or "") if isinstance(exc.stderr, str) else ""
+            return CommandResult(
+                argv=request.argv,
+                returncode=124,
+                stdout=stdout,
+                stderr=stderr,
+                timed_out=True,
+            )
+
+        stdout = completed.stdout if isinstance(completed.stdout, str) else ""
+        stderr = completed.stderr if isinstance(completed.stderr, str) else ""
+        return CommandResult(
+            argv=request.argv,
+            returncode=completed.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+
+_DEFAULT_COMMAND_RUNNER: CommandRunner = SubprocessCommandRunner()
+
+
+def run_with_runner(
+    request: CommandRequest, *, runner: CommandRunner | None = None
+) -> CommandResult | None:
+    """Execute a typed command request with the given runner."""
+    active_runner = runner or _DEFAULT_COMMAND_RUNNER
+    return active_runner.run(request)
 
 
 def run_command(
@@ -24,11 +107,18 @@ def run_command(
     Example:
         >>> run_command(["true"])
     """
-    try:
-        subprocess.run(cmd, cwd=cwd, env=env, check=True)
-    except FileNotFoundError:
+    result = run_with_runner(
+        CommandRequest(
+            argv=tuple(cmd),
+            cwd=cwd,
+            env=env,
+            capture_output=False,
+            text=False,
+        )
+    )
+    if result is None:
         die(f"missing required command: {cmd[0]}")
-    except subprocess.CalledProcessError:
+    if result.returncode != 0:
         die(f"command failed: {' '.join(cmd)}")
 
 

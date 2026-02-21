@@ -251,9 +251,7 @@ def run_worker_once(
                     str(agent_bead.get("id")) if agent_bead.get("id") else None
                 )
             if not agent_bead_id:
-                dry_run_log(
-                    f"Would create agent bead for {agent.agent_id!r} (worker)."
-                )
+                dry_run_log(f"Would create agent bead for {agent.agent_id!r} (worker).")
             dry_run_log("Would sync agent home policy.")
         else:
             agent_bead = beads.ensure_agent_bead(

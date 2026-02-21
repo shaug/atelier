@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from . import changesets, messages
+from . import changesets, exec, messages
 from .external_tickets import (
     ExternalTicketRef,
     external_ticket_payload,
@@ -79,17 +79,17 @@ def run_bd_command(
     cmd = ["bd", *args]
     if not daemon and "--no-daemon" not in cmd:
         cmd.append("--no-daemon")
-    try:
-        result = subprocess.run(
-            cmd,
+    result = exec.run_with_runner(
+        exec.CommandRequest(
+            argv=tuple(cmd),
             cwd=cwd,
             env=beads_env(beads_root),
             capture_output=True,
             text=True,
-            check=False,
             stdin=subprocess.DEVNULL,
         )
-    except FileNotFoundError:
+    )
+    if result is None:
         die("missing required command: bd")
     if result.returncode != 0 and not allow_failure:
         detail = (result.stderr or result.stdout or "").strip()
@@ -97,7 +97,12 @@ def run_bd_command(
         if detail:
             message = f"{message}\n{detail}"
         die(message)
-    return result
+    return subprocess.CompletedProcess(
+        args=list(result.argv),
+        returncode=result.returncode,
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
 
 
 def run_bd_json(
@@ -124,17 +129,17 @@ def run_bd_json(
 
 def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
     """Return `bd prime --full` markdown without failing the caller."""
-    try:
-        result = subprocess.run(
-            ["bd", "prime", "--full", "--no-daemon"],
+    result = exec.run_with_runner(
+        exec.CommandRequest(
+            argv=("bd", "prime", "--full", "--no-daemon"),
             cwd=cwd,
             env=beads_env(beads_root),
             capture_output=True,
             text=True,
-            check=False,
             stdin=subprocess.DEVNULL,
         )
-    except FileNotFoundError:
+    )
+    if result is None:
         return None
     if result.returncode != 0:
         return None
@@ -183,17 +188,17 @@ def _list_issue_types(*, beads_root: Path, cwd: Path) -> set[str]:
     cached = _ISSUE_TYPE_CACHE.get(beads_root)
     if cached is not None:
         return cached
-    try:
-        result = subprocess.run(
-            ["bd", "types", "--json", "--no-daemon"],
+    result = exec.run_with_runner(
+        exec.CommandRequest(
+            argv=("bd", "types", "--json", "--no-daemon"),
             cwd=cwd,
             env=beads_env(beads_root),
             capture_output=True,
             text=True,
-            check=False,
             stdin=subprocess.DEVNULL,
         )
-    except FileNotFoundError:
+    )
+    if result is None:
         types = {_FALLBACK_ISSUE_TYPE}
         _ISSUE_TYPE_CACHE[beads_root] = types
         return types
