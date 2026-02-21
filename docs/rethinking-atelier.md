@@ -181,11 +181,13 @@ Store the worktree path in the epic bead description:
 worktree_path: worktrees/at-abc12
 ```
 
-Changesets should always have a corresponding bead that is a child of the epic.
-In PR-based workflows, each changeset bead maps to its own branch and PR.
-Changesets are still modeled as branches, but parallel work requires separate
-worktrees per changeset session. The epic worktree remains a convenience view
-for the root branch.
+Changesets normally have a corresponding child bead under the epic. For
+single-unit work that fits guardrails, the epic itself may be the executable
+changeset (`at:changeset`) with no children. In PR-based workflows, each
+executable changeset maps to its own branch and PR, except epic-as-changeset
+work that runs on the root branch. Changesets are still modeled as branches, but
+parallel work requires separate worktrees per changeset session. The epic
+worktree remains a convenience view for the root branch.
 
 ## Changeset Branch Naming
 

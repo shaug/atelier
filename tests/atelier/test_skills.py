@@ -178,3 +178,25 @@ def test_packaged_skill_docs_include_yaml_frontmatter() -> None:
     for name, definition in definitions.items():
         text = definition.files["SKILL.md"].decode("utf-8").lstrip()
         assert text.startswith("---\n"), f"{name} SKILL.md missing YAML frontmatter"
+
+
+def test_plan_changesets_skill_requires_rationale_for_one_child_split() -> None:
+    skill = skills.load_packaged_skills()["plan_changesets"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "one child changeset" in text
+    assert "decomposition rationale" in text
+
+
+def test_plan_changeset_guardrails_skill_mentions_checker_script() -> None:
+    skill = skills.load_packaged_skills()["plan_changeset_guardrails"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "scripts/check_guardrails.py" in text
+    assert "one child changeset" in text
+    assert "decomposition rationale" in text
+
+
+def test_plan_promote_epic_skill_requires_one_child_rationale() -> None:
+    skill = skills.load_packaged_skills()["plan_promote_epic"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "exactly one child changeset" in text
+    assert "decomposition rationale" in text

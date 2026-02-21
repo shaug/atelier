@@ -19,7 +19,8 @@ source of truth and that changesets remain reviewable.
 1. Start planner session.
 1. Planner checks messages first and reports any worker requests.
 1. Planner creates a draft epic with acceptance criteria and intent.
-1. Planner creates 1-2 changesets with guardrails.
+1. Planner keeps the epic as the executable changeset when scope fits, or
+   creates child changesets only when decomposition is required.
 1. Planner requests approval to promote the epic from `draft` to `ready`.
 1. Worker session starts on the approved epic.
 1. Worker implements a single changeset and runs required checks.
@@ -36,6 +37,7 @@ source of truth and that changesets remain reviewable.
 
 - Beads contain full intent, constraints, and acceptance criteria.
 - Changesets stay human-sized unless explicitly approved.
+- One-child decomposition is avoided unless rationale is explicitly recorded.
 - Worker never expands scope; ambiguities are surfaced via messages.
 - Planner does not auto-promote epics without user approval.
 

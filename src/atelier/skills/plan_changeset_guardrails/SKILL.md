@@ -20,15 +20,23 @@ description: >-
 - If a changeset exceeds the approval threshold (default 800 LOC), notes should
   include an explicit approval record.
 - Guardrails should be recorded in notes or description when exceptions apply.
+- Detect anti-pattern: an epic with exactly one child changeset and no
+  decomposition rationale.
 
 ## Steps
 
+1. Run the deterministic checker script:
+   - `python3 scripts/check_guardrails.py --epic-id <epic_id>`
+   - or
+     `python3 scripts/check_guardrails.py --changeset-id <id> [--changeset-id <id> ...]`
 1. Resolve target changesets:
-   - If `changeset_ids` is provided, use those.
+   - If `changeset_ids` is provided, validate those.
    - Else list children of `epic_id` with `at:changeset`.
 1. For each changeset, inspect description/notes:
    - Look for a LOC estimate (e.g., `loc`, `LOC`, `estimate`).
    - If a large estimate is found (>800), ensure approval is recorded.
+1. If an epic has exactly one child changeset, require explicit decomposition
+   rationale in the epic or child notes/description.
 1. Summarize any violations and send a message to the planner/overseer with
    actionable fixes.
 1. Do not block planning; use messages and bead notes instead.
@@ -36,4 +44,5 @@ description: >-
 ## Verification
 
 - Violations are reported with bead ids and missing guardrail details.
+- One-child anti-pattern warnings are reported when rationale is missing.
 - No beads are blocked or re-labeled automatically.

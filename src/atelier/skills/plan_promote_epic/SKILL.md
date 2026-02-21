@@ -22,6 +22,8 @@ description: >-
 - Changeset guardrails have been validated (run `plan_changeset_guardrails`
   first).
 - Do not require child changesets when the epic itself is guardrail-sized.
+- If the epic has exactly one child changeset, explicit decomposition rationale
+  must be recorded before promotion.
 
 ## Steps
 
@@ -30,6 +32,10 @@ description: >-
 1. If there are no child changesets and the epic is single-changeset sized:
    - Add `at:changeset` to the epic.
    - Add `cs:ready` to the epic.
+1. If there is exactly one child changeset:
+   - Verify decomposition rationale is recorded in epic/child notes.
+   - If rationale is missing, keep the epic as executable changeset or add the
+     rationale before promotion.
 1. If the epic is not single-changeset sized, create only the minimum child
    changesets needed for execution and reviewability.
 1. Summarize the executable unit(s) for the user (child changesets or the epic
@@ -48,3 +54,4 @@ description: >-
   `cs:ready`.
 - If the epic has no child changesets, the epic itself is labeled `at:changeset`
   \+ `cs:ready`.
+- Any one-child decomposition has explicit rationale in notes/description.
