@@ -1,0 +1,125 @@
+from atelier.worker import runtime
+from atelier.worker.models import WorkerRunSummary
+
+
+def test_run_worker_sessions_queue_mode_runs_once() -> None:
+    calls: list[str] = []
+    reported: list[str] = []
+
+    def run_once(
+        args: object, *, mode: str, dry_run: bool, session_key: str
+    ) -> WorkerRunSummary:
+        calls.append(f"{mode}:{dry_run}:{session_key}")
+        return WorkerRunSummary(started=False, reason="queue_blocked")
+
+    runtime.run_worker_sessions(
+        args=type("Args", (), {"queue": True})(),
+        mode="prompt",
+        run_mode="default",
+        dry_run=False,
+        session_key="sess",
+        run_worker_once=run_once,
+        report_worker_summary=lambda summary, _dry: reported.append(summary.reason),
+        watch_interval_seconds=lambda: 5,
+        dry_run_log=lambda _message: None,
+        emit=lambda _message: None,
+    )
+
+    assert calls == ["prompt:False:sess"]
+    assert reported == ["queue_blocked"]
+
+
+def test_run_worker_sessions_dry_run_once_exits_after_started() -> None:
+    calls = 0
+
+    def run_once(
+        args: object, *, mode: str, dry_run: bool, session_key: str
+    ) -> WorkerRunSummary:
+        nonlocal calls
+        calls += 1
+        return WorkerRunSummary(started=True, reason="agent_session_complete")
+
+    runtime.run_worker_sessions(
+        args=type("Args", (), {"queue": False})(),
+        mode="auto",
+        run_mode="once",
+        dry_run=True,
+        session_key="sess",
+        run_worker_once=run_once,
+        report_worker_summary=lambda _summary, _dry: None,
+        watch_interval_seconds=lambda: 5,
+        dry_run_log=lambda _message: None,
+        emit=lambda _message: None,
+    )
+
+    assert calls == 1
+
+
+def test_run_worker_sessions_watch_logs_and_sleeps_on_no_ready() -> None:
+    calls = 0
+    emitted: list[str] = []
+    slept: list[float] = []
+
+    def run_once(
+        args: object, *, mode: str, dry_run: bool, session_key: str
+    ) -> WorkerRunSummary:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return WorkerRunSummary(started=False, reason="no_ready_changesets")
+        raise RuntimeError("stop-loop")
+
+    try:
+        runtime.run_worker_sessions(
+            args=type("Args", (), {"queue": False})(),
+            mode="auto",
+            run_mode="watch",
+            dry_run=False,
+            session_key="sess",
+            run_worker_once=run_once,
+            report_worker_summary=lambda _summary, _dry: None,
+            watch_interval_seconds=lambda: 9,
+            dry_run_log=lambda _message: None,
+            emit=emitted.append,
+            sleep_fn=lambda seconds: slept.append(seconds),
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "stop-loop"
+
+    assert slept == [9]
+    assert emitted == ["No ready work; watching for updates (sleeping 9s)."]
+
+
+def test_run_worker_sessions_dry_watch_uses_dry_run_log() -> None:
+    calls = 0
+    logs: list[str] = []
+    slept: list[float] = []
+
+    def run_once(
+        args: object, *, mode: str, dry_run: bool, session_key: str
+    ) -> WorkerRunSummary:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return WorkerRunSummary(started=False, reason="no_ready_changesets")
+        raise RuntimeError("stop-loop")
+
+    try:
+        runtime.run_worker_sessions(
+            args=type("Args", (), {"queue": False})(),
+            mode="auto",
+            run_mode="watch",
+            dry_run=True,
+            session_key="sess",
+            run_worker_once=run_once,
+            report_worker_summary=lambda _summary, _dry: None,
+            watch_interval_seconds=lambda: 7,
+            dry_run_log=logs.append,
+            emit=lambda _message: None,
+            sleep_fn=lambda seconds: slept.append(seconds),
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "stop-loop"
+
+    assert slept == [7]
+    assert logs == ["Watching for updates (sleeping 7s before next check)."]

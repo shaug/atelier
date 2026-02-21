@@ -52,6 +52,7 @@ from ..worker import publish as worker_publish
 from ..worker import queueing as worker_queueing
 from ..worker import reconcile as worker_reconcile
 from ..worker import review as worker_review
+from ..worker import runtime as worker_runtime
 from ..worker import selection as worker_selection
 from ..worker import telemetry as worker_telemetry
 from ..worker.models import (
@@ -3896,60 +3897,21 @@ def start_worker(args: object) -> None:
             session_key=session_key,
         )
     try:
-        if bool(getattr(args, "queue", False)):
-            summary = _run_worker_once(
-                args, mode=mode, dry_run=dry_run, session_key=session_key
-            )
-            _report_worker_summary(summary, dry_run=dry_run)
-            return
-        if dry_run:
-            while True:
-                summary = _run_worker_once(
-                    args, mode=mode, dry_run=True, session_key=session_key
-                )
-                _report_worker_summary(summary, dry_run=True)
-                if summary.started:
-                    if run_mode == "once":
-                        return
-                    continue
-                if summary.reason == "no_ready_changesets":
-                    if run_mode == "watch":
-                        interval = _watch_interval_seconds()
-                        _dry_run_log(
-                            "Watching for updates "
-                            f"(sleeping {interval}s before next check)."
-                        )
-                        time.sleep(interval)
-                    continue
-                if run_mode != "watch":
-                    return
-                interval = _watch_interval_seconds()
-                _dry_run_log(
-                    f"Watching for updates (sleeping {interval}s before next check)."
-                )
-                time.sleep(interval)
-
-        while True:
-            summary = _run_worker_once(
-                args, mode=mode, dry_run=False, session_key=session_key
-            )
-            _report_worker_summary(summary, dry_run=False)
-            if summary.started:
-                if run_mode == "once":
-                    return
-                continue
-            if summary.reason == "no_ready_changesets":
-                if run_mode == "watch":
-                    interval = _watch_interval_seconds()
-                    say(f"No ready work; watching for updates (sleeping {interval}s).")
-                    time.sleep(interval)
-                continue
-            if run_mode == "watch":
-                interval = _watch_interval_seconds()
-                say(f"No ready work; watching for updates (sleeping {interval}s).")
-                time.sleep(interval)
-                continue
-            return
+        worker_runtime.run_worker_sessions(
+            args=args,
+            mode=mode,
+            run_mode=run_mode,
+            dry_run=dry_run,
+            session_key=session_key,
+            run_worker_once=_run_worker_once,
+            report_worker_summary=lambda summary, is_dry_run: _report_worker_summary(
+                summary, dry_run=is_dry_run
+            ),
+            watch_interval_seconds=_watch_interval_seconds,
+            dry_run_log=_dry_run_log,
+            emit=say,
+            sleep_fn=time.sleep,
+        )
     finally:
         if cleanup_agent is not None and cleanup_project_dir is not None:
             agent_home.cleanup_agent_home(
