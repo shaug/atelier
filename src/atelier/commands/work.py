@@ -6,59 +6,36 @@ import time
 
 from .. import agent_home, config
 from ..io import confirm, die, say
+from ..worker import models as worker_models
 from ..worker import runtime as worker_runtime
-from ..worker import work_command_helpers as worker_work
 from ..worker.context import WorkerRunContext
 from ..worker.session import runner as worker_session_runner
+from ..worker.work_command_helpers import (
+    _dry_run_log,
+    _normalize_mode,
+    _normalize_run_mode,
+    _report_worker_summary,
+    _watch_interval_seconds,
+    list_reconcile_epic_candidates,
+    reconcile_blocked_merged_changesets,
+    root_branch,
+)
 from .resolve import resolve_current_project_with_repo_root
 
-# Backward compatibility for tests while command internals are being decomposed.
-_COMPAT_EXPORTS = tuple(name for name in dir(worker_work) if not name.startswith("__"))
-for _name in _COMPAT_EXPORTS:
-    globals().setdefault(_name, getattr(worker_work, _name))
+__all__ = [
+    "ReconcileResult",
+    "list_reconcile_epic_candidates",
+    "reconcile_blocked_merged_changesets",
+    "root_branch",
+    "start_worker",
+]
 
-# Explicit aliases keep command wiring type-check/lint friendly.
-_capture_review_feedback_snapshot = worker_work._capture_review_feedback_snapshot
-_changeset_parent_branch = worker_work._changeset_parent_branch
-_changeset_pr_url = worker_work._changeset_pr_url
-_changeset_work_branch = worker_work._changeset_work_branch
-_dry_run_log = worker_work._dry_run_log
-_ensure_exec_subcommand_flag = worker_work._ensure_exec_subcommand_flag
-_extract_changeset_root_branch = worker_work._extract_changeset_root_branch
-_extract_workspace_parent_branch = worker_work._extract_workspace_parent_branch
-_finalize_changeset = worker_work._finalize_changeset
-_find_invalid_changeset_labels = worker_work._find_invalid_changeset_labels
-_lookup_pr_payload = worker_work._lookup_pr_payload
-_mark_changeset_blocked = worker_work._mark_changeset_blocked
-_mark_changeset_in_progress = worker_work._mark_changeset_in_progress
-_next_changeset = worker_work._next_changeset
-_normalize_mode = worker_work._normalize_mode
-_normalize_run_mode = worker_work._normalize_run_mode
-_persist_review_feedback_cursor = worker_work._persist_review_feedback_cursor
-_release_epic_assignment = worker_work._release_epic_assignment
-_report_timings = worker_work._report_timings
-_report_worker_summary = worker_work._report_worker_summary
-_resolve_epic_id_for_changeset = worker_work._resolve_epic_id_for_changeset
-_review_feedback_progressed = worker_work._review_feedback_progressed
-_run_startup_contract = worker_work._run_startup_contract
-_send_invalid_changeset_labels_notification = (
-    worker_work._send_invalid_changeset_labels_notification
-)
-_send_no_ready_changesets = worker_work._send_no_ready_changesets
-_send_planner_notification = worker_work._send_planner_notification
-_step = worker_work._step
-_strip_flag_with_value = worker_work._strip_flag_with_value
-_trace_enabled = worker_work._trace_enabled
-_watch_interval_seconds = worker_work._watch_interval_seconds
-_with_codex_exec = worker_work._with_codex_exec
-_worker_opening_prompt = worker_work._worker_opening_prompt
-reconcile_blocked_merged_changesets = worker_work.reconcile_blocked_merged_changesets
-root_branch = worker_work.root_branch
+ReconcileResult = worker_models.ReconcileResult
 
 
 def _run_worker_once(
     args: object, *, mode: str, dry_run: bool, session_key: str
-) -> worker_work.WorkerRunSummary:
+) -> worker_models.WorkerRunSummary:
     """Start a single worker session by selecting an epic and changeset."""
     runner_deps = worker_runtime.build_worker_runtime_dependencies(
         resolve_current_project_with_repo_root=resolve_current_project_with_repo_root,
