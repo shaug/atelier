@@ -247,6 +247,37 @@ def test_set_agent_hook_updates_description() -> None:
     assert called["args"][:3] == ["slot", "set", "atelier-agent"]
 
 
+def test_update_changeset_branch_metadata_skips_base_overwrite_by_default() -> None:
+    issue = {
+        "id": "at-1.1",
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/root-at-1.1\n"
+            "changeset.root_base: aaa111\n"
+            "changeset.parent_base: bbb222\n"
+        ),
+    }
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[issue]),
+        patch("atelier.beads._update_issue_description") as update_desc,
+    ):
+        result = beads.update_changeset_branch_metadata(
+            "at-1.1",
+            root_branch="feat/root",
+            parent_branch="main",
+            work_branch="feat/root-at-1.1",
+            root_base="ccc333",
+            parent_base="ddd444",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    update_desc.assert_not_called()
+    assert result == issue
+
+
 def test_get_agent_hook_prefers_slot() -> None:
     issue = {"id": "atelier-agent", "description": "hook_bead: epic-2\n"}
 

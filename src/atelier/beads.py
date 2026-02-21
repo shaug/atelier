@@ -915,6 +915,10 @@ def update_changeset_branch_metadata(
             return
         current = normalize(fields.get(key))
         if current and current != normalized and not allow_override:
+            if key in {"changeset.root_base", "changeset.parent_base"}:
+                # Preserve originally recorded lineage bases on subsequent
+                # worker runs unless an explicit override was requested.
+                return
             die(f"{key} already set; override not permitted")
         if current == normalized:
             return
