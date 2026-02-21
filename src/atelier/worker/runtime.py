@@ -4,8 +4,22 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from pathlib import Path
 
+from .. import agent_home, agents, beads, branching, config, git, prs
+from .. import root_branch as root_branch_module
+from ..config import ProjectConfig
+from . import work_command_helpers as worker_work
 from .models import WorkerRunSummary
+from .ports import (
+    WorkerCommandPorts,
+    WorkerControlPorts,
+    WorkerInfrastructurePorts,
+    WorkerLifecyclePorts,
+    WorkerRuntimeDependencies,
+)
+from .session import agent as worker_session_agent
+from .session import worktree as worker_session_worktree
 
 
 def run_worker_sessions(
@@ -78,3 +92,70 @@ def run_worker_sessions(
             sleep_fn(interval)
             continue
         return
+
+
+def build_worker_runtime_dependencies(
+    *,
+    resolve_current_project_with_repo_root: Callable[
+        [], tuple[Path, ProjectConfig, str, Path]
+    ],
+    confirm_fn: Callable[..., bool],
+    die_fn: Callable[[str], None],
+    emit: Callable[[str], None],
+) -> WorkerRuntimeDependencies:
+    """Build worker runtime service ports for runner orchestration."""
+    return WorkerRuntimeDependencies(
+        infra=WorkerInfrastructurePorts(
+            resolve_current_project_with_repo_root=resolve_current_project_with_repo_root,
+            agent_home=agent_home,
+            agents=agents,
+            beads=beads,
+            branching=branching,
+            config=config,
+            git=git,
+            prs=prs,
+            root_branch=root_branch_module,
+            worker_session_agent=worker_session_agent,
+            worker_session_worktree=worker_session_worktree,
+        ),
+        lifecycle=WorkerLifecyclePorts(
+            capture_review_feedback_snapshot=worker_work._capture_review_feedback_snapshot,
+            changeset_parent_branch=worker_work._changeset_parent_branch,
+            changeset_pr_url=worker_work._changeset_pr_url,
+            changeset_work_branch=worker_work._changeset_work_branch,
+            extract_changeset_root_branch=worker_work._extract_changeset_root_branch,
+            extract_workspace_parent_branch=worker_work._extract_workspace_parent_branch,
+            finalize_changeset=worker_work._finalize_changeset,
+            find_invalid_changeset_labels=worker_work._find_invalid_changeset_labels,
+            lookup_pr_payload=worker_work._lookup_pr_payload,
+            mark_changeset_blocked=worker_work._mark_changeset_blocked,
+            mark_changeset_in_progress=worker_work._mark_changeset_in_progress,
+            next_changeset=worker_work._next_changeset,
+            persist_review_feedback_cursor=worker_work._persist_review_feedback_cursor,
+            release_epic_assignment=worker_work._release_epic_assignment,
+            reconcile_blocked_merged_changesets=worker_work.reconcile_blocked_merged_changesets,
+            resolve_epic_id_for_changeset=worker_work._resolve_epic_id_for_changeset,
+            review_feedback_progressed=worker_work._review_feedback_progressed,
+            run_startup_contract=worker_work._run_startup_contract,
+            send_invalid_changeset_labels_notification=(
+                worker_work._send_invalid_changeset_labels_notification
+            ),
+            send_no_ready_changesets=worker_work._send_no_ready_changesets,
+            send_planner_notification=worker_work._send_planner_notification,
+        ),
+        commands=WorkerCommandPorts(
+            ensure_exec_subcommand_flag=worker_work._ensure_exec_subcommand_flag,
+            strip_flag_with_value=worker_work._strip_flag_with_value,
+            with_codex_exec=worker_work._with_codex_exec,
+            worker_opening_prompt=worker_work._worker_opening_prompt,
+        ),
+        control=WorkerControlPorts(
+            dry_run_log=worker_work._dry_run_log,
+            report_timings=worker_work._report_timings,
+            step=worker_work._step,
+            trace_enabled=worker_work._trace_enabled,
+            confirm=confirm_fn,
+            die=die_fn,
+            say=emit,
+        ),
+    )

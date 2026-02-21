@@ -1,5 +1,6 @@
 from atelier.worker import runtime
 from atelier.worker.models import WorkerRunSummary
+from atelier.worker.ports import WorkerRuntimeDependencies
 
 
 def test_run_worker_sessions_queue_mode_runs_once() -> None:
@@ -123,3 +124,23 @@ def test_run_worker_sessions_dry_watch_uses_dry_run_log() -> None:
 
     assert slept == [7]
     assert logs == ["Watching for updates (sleeping 7s before next check)."]
+
+
+def test_build_worker_runtime_dependencies_wires_port_groups() -> None:
+    deps = runtime.build_worker_runtime_dependencies(
+        resolve_current_project_with_repo_root=lambda: (
+            None,
+            None,
+            "",
+            None,
+        ),
+        confirm_fn=lambda _prompt, **_kwargs: True,
+        die_fn=lambda _message: None,
+        emit=lambda _message: None,
+    )
+
+    assert isinstance(deps, WorkerRuntimeDependencies)
+    assert deps.infra.resolve_current_project_with_repo_root is not None
+    assert deps.lifecycle.run_startup_contract is not None
+    assert deps.commands.ensure_exec_subcommand_flag is not None
+    assert deps.control.step is not None

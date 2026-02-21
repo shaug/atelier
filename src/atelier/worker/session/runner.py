@@ -2,117 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Protocol
 
-from ...agent_home import AgentHome
-from ...config import ProjectConfig
-from ...work_feedback import ReviewFeedbackSnapshot
 from ..context import ChangesetSelectionContext, WorkerRunContext
-from ..models import (
-    FinalizeResult,
-    ReconcileResult,
-    StartupContractResult,
-    WorkerRunSummary,
-)
-from ..ports import ChangesetSelectionPorts
-
-Issue = dict[str, object]
-StepTimings = list[tuple[str, float]]
-
-
-class StepFinish(Protocol):
-    def __call__(self, *, extra: str | None = None) -> None: ...
-
-
-class StepFactory(Protocol):
-    def __call__(
-        self, label: str, *, timings: StepTimings, trace: bool
-    ) -> StepFinish: ...
-
-
-class AgentHomeService(Protocol):
-    def preview_agent_home(
-        self,
-        project_dir: Path,
-        project_config: ProjectConfig,
-        *,
-        role: str,
-        session_key: str,
-    ) -> AgentHome: ...
-
-    def resolve_agent_home(
-        self,
-        project_dir: Path,
-        project_config: ProjectConfig,
-        *,
-        role: str,
-        session_key: str,
-    ) -> AgentHome: ...
-
-
-class AgentsService(Protocol):
-    def scoped_agent_env(self, agent_id: str) -> AbstractContextManager[object]: ...
+from ..models import WorkerRunSummary
+from ..ports import ChangesetSelectionPorts, WorkerRuntimeDependencies
 
 
 @dataclass(frozen=True)
 class ChangesetSelection:
     issue: dict[str, object] | None
     selected_override: str
-
-
-@dataclass(frozen=True)
-class RunnerDependencies:
-    capture_review_feedback_snapshot: Callable[..., ReviewFeedbackSnapshot]
-    changeset_parent_branch: Callable[..., str]
-    changeset_pr_url: Callable[[Issue], str | None]
-    changeset_work_branch: Callable[[Issue], str | None]
-    dry_run_log: Callable[[str], None]
-    ensure_exec_subcommand_flag: Callable[[list[str], str], list[str]]
-    extract_changeset_root_branch: Callable[[Issue], str | None]
-    extract_workspace_parent_branch: Callable[[Issue], str | None]
-    finalize_changeset: Callable[..., FinalizeResult]
-    find_invalid_changeset_labels: Callable[..., list[str]]
-    lookup_pr_payload: Callable[[str | None, str], Issue | None]
-    mark_changeset_blocked: Callable[..., None]
-    mark_changeset_in_progress: Callable[..., None]
-    next_changeset: Callable[..., Issue | None]
-    persist_review_feedback_cursor: Callable[..., None]
-    release_epic_assignment: Callable[..., None]
-    report_timings: Callable[..., None]
-    resolve_epic_id_for_changeset: Callable[..., str | None]
-    review_feedback_progressed: Callable[
-        [ReviewFeedbackSnapshot, ReviewFeedbackSnapshot], bool
-    ]
-    run_startup_contract: Callable[..., StartupContractResult]
-    send_invalid_changeset_labels_notification: Callable[..., str]
-    send_no_ready_changesets: Callable[..., None]
-    send_planner_notification: Callable[..., None]
-    step: StepFactory
-    strip_flag_with_value: Callable[[list[str], str], list[str]]
-    trace_enabled: Callable[[], bool]
-    with_codex_exec: Callable[[list[str], str], list[str]]
-    worker_opening_prompt: Callable[..., str]
-    agent_home: AgentHomeService
-    agents: AgentsService
-    beads: object
-    branching: object
-    config: object
-    confirm: Callable[..., bool]
-    die: Callable[[str], None]
-    git: object
-    prs: object
-    reconcile_blocked_merged_changesets: Callable[..., ReconcileResult]
-    resolve_current_project_with_repo_root: Callable[
-        [], tuple[Path, ProjectConfig, str, Path]
-    ]
-    root_branch: object
-    say: Callable[[str], None]
-    worker_session_agent: object
-    worker_session_worktree: object
 
 
 def select_changeset(
@@ -158,92 +58,55 @@ def run_worker_once(
     args: object,
     *,
     run_context: WorkerRunContext,
-    deps: RunnerDependencies,
+    deps: WorkerRuntimeDependencies,
 ) -> WorkerRunSummary:
-    capture_review_feedback_snapshot = deps.capture_review_feedback_snapshot
-    changeset_parent_branch = deps.changeset_parent_branch
-    changeset_pr_url = deps.changeset_pr_url
-    changeset_work_branch = deps.changeset_work_branch
-    dry_run_log = deps.dry_run_log
-    ensure_exec_subcommand_flag = deps.ensure_exec_subcommand_flag
-    extract_changeset_root_branch = deps.extract_changeset_root_branch
-    extract_workspace_parent_branch = deps.extract_workspace_parent_branch
-    finalize_changeset = deps.finalize_changeset
-    find_invalid_changeset_labels = deps.find_invalid_changeset_labels
-    lookup_pr_payload = deps.lookup_pr_payload
-    mark_changeset_blocked = deps.mark_changeset_blocked
-    mark_changeset_in_progress = deps.mark_changeset_in_progress
-    next_changeset = deps.next_changeset
-    persist_review_feedback_cursor = deps.persist_review_feedback_cursor
-    release_epic_assignment = deps.release_epic_assignment
-    report_timings = deps.report_timings
-    resolve_epic_id_for_changeset = deps.resolve_epic_id_for_changeset
-    review_feedback_progressed = deps.review_feedback_progressed
-    run_startup_contract = deps.run_startup_contract
-    send_invalid_changeset_labels_notification = (
-        deps.send_invalid_changeset_labels_notification
-    )
-    send_no_ready_changesets = deps.send_no_ready_changesets
-    send_planner_notification = deps.send_planner_notification
-    step = deps.step
-    strip_flag_with_value = deps.strip_flag_with_value
-    trace_enabled = deps.trace_enabled
-    with_codex_exec = deps.with_codex_exec
-    worker_opening_prompt = deps.worker_opening_prompt
-    agent_home = deps.agent_home
-    agents = deps.agents
-    beads = deps.beads
-    branching = deps.branching
-    config = deps.config
-    confirm = deps.confirm
-    die = deps.die
-    git = deps.git
-    prs = deps.prs
-    reconcile_blocked_merged_changesets = deps.reconcile_blocked_merged_changesets
-    resolve_current_project_with_repo_root = deps.resolve_current_project_with_repo_root
-    root_branch = deps.root_branch
-    say = deps.say
-    worker_session_agent = deps.worker_session_agent
-    worker_session_worktree = deps.worker_session_worktree
+    infra = deps.infra
+    lifecycle = deps.lifecycle
+    command_ports = deps.commands
+    control = deps.control
     """Start a single worker session by selecting an epic and changeset."""
     mode = run_context.mode
     dry_run = run_context.dry_run
     session_key = run_context.session_key
     timings: list[tuple[str, float]] = []
-    trace = trace_enabled()
-    prs.clear_runtime_cache()
+    trace = control.trace_enabled()
+    infra.prs.clear_runtime_cache()
 
     def finish(summary: WorkerRunSummary) -> WorkerRunSummary:
-        report_timings(timings, trace=trace)
+        control.report_timings(timings, trace=trace)
         return summary
 
     project_root, project_config, _enlistment, repo_root = (
-        resolve_current_project_with_repo_root()
+        infra.resolve_current_project_with_repo_root()
     )
-    project_data_dir = config.resolve_project_data_dir(project_root, project_config)
-    beads_root = config.resolve_beads_root(project_data_dir, repo_root)
-    git_path = config.resolve_git_path(project_config)
+    project_data_dir = infra.config.resolve_project_data_dir(
+        project_root, project_config
+    )
+    beads_root = infra.config.resolve_beads_root(project_data_dir, repo_root)
+    git_path = infra.config.resolve_git_path(project_config)
     if dry_run:
-        agent = agent_home.preview_agent_home(
+        agent = infra.agent_home.preview_agent_home(
             project_data_dir, project_config, role="worker", session_key=session_key
         )
     else:
-        agent = agent_home.resolve_agent_home(
+        agent = infra.agent_home.resolve_agent_home(
             project_data_dir, project_config, role="worker", session_key=session_key
         )
 
-    with agents.scoped_agent_env(agent.agent_id):
-        say("Worker session")
+    with infra.agents.scoped_agent_env(agent.agent_id):
+        control.say("Worker session")
         agent_bead_id: str | None = None
-        finishstep = step("Prime beads", timings=timings, trace=trace)
+        finishstep = control.step("Prime beads", timings=timings, trace=trace)
         if dry_run:
-            dry_run_log("Would run: bd prime")
+            control.dry_run_log("Would run: bd prime")
         else:
-            beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
+            infra.beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
         finishstep()
-        finishstep = step("Ensure worker agent bead", timings=timings, trace=trace)
+        finishstep = control.step(
+            "Ensure worker agent bead", timings=timings, trace=trace
+        )
         if dry_run:
-            agent_bead = beads.find_agent_bead(
+            agent_bead = infra.beads.find_agent_bead(
                 agent.agent_id, beads_root=beads_root, cwd=repo_root
             )
             if agent_bead:
@@ -251,10 +114,12 @@ def run_worker_once(
                     str(agent_bead.get("id")) if agent_bead.get("id") else None
                 )
             if not agent_bead_id:
-                dry_run_log(f"Would create agent bead for {agent.agent_id!r} (worker).")
-            dry_run_log("Would sync agent home policy.")
+                control.dry_run_log(
+                    f"Would create agent bead for {agent.agent_id!r} (worker)."
+                )
+            control.dry_run_log("Would sync agent home policy.")
         else:
-            agent_bead = beads.ensure_agent_bead(
+            agent_bead = infra.beads.ensure_agent_bead(
                 agent.agent_id, beads_root=beads_root, cwd=repo_root, role="worker"
             )
             agent_bead_id = agent_bead.get("id")
@@ -267,13 +132,13 @@ def run_worker_once(
 
         if not dry_run:
             if not isinstance(agent_bead_id, str) or not agent_bead_id:
-                die("failed to resolve agent bead id")
+                control.die("failed to resolve agent bead id")
 
         if should_reconcile:
-            finishstep = step(
+            finishstep = control.step(
                 "Reconcile blocked changesets", timings=timings, trace=trace
             )
-            reconcile_result = reconcile_blocked_merged_changesets(
+            reconcile_result = lifecycle.reconcile_blocked_merged_changesets(
                 agent_id=agent.agent_id,
                 agent_bead_id=agent_bead_id,
                 project_config=project_config,
@@ -282,7 +147,7 @@ def run_worker_once(
                 repo_root=repo_root,
                 git_path=git_path,
                 dry_run=dry_run,
-                log=say,
+                log=control.say,
             )
             finishstep(
                 extra=(
@@ -293,11 +158,11 @@ def run_worker_once(
                 )
             )
 
-        repo_slug = prs.github_repo_slug(
+        repo_slug = infra.prs.github_repo_slug(
             project_config.project.origin or project_config.project.repo_url
         )
-        finishstep = step("Select epic", timings=timings, trace=trace)
-        startup_result = run_startup_contract(
+        finishstep = control.step("Select epic", timings=timings, trace=trace)
+        startup_result = lifecycle.run_startup_contract(
             agent_id=agent.agent_id,
             agent_bead_id=agent_bead_id,
             beads_root=beads_root,
@@ -318,7 +183,9 @@ def run_worker_once(
         finishstep(extra=summary_note)
         if startup_result.should_exit:
             if dry_run:
-                dry_run_log("Startup contract would exit without starting a worker.")
+                control.dry_run_log(
+                    "Startup contract would exit without starting a worker."
+                )
             return finish(
                 WorkerRunSummary(
                     started=False,
@@ -328,23 +195,23 @@ def run_worker_once(
             )
         if not startup_result.epic_id:
             if dry_run:
-                dry_run_log("Startup contract did not select an epic.")
+                control.dry_run_log("Startup contract did not select an epic.")
                 return finish(
                     WorkerRunSummary(
                         started=False, reason="no_epic_selected", epic_id=None
                     )
                 )
-            die("startup contract did not select an epic")
+            control.die("startup contract did not select an epic")
         selected_epic = startup_result.epic_id
 
-        finishstep = step("Claim epic", timings=timings, trace=trace)
+        finishstep = control.step("Claim epic", timings=timings, trace=trace)
         if dry_run:
-            dry_run_log(f"Selected epic: {selected_epic}")
-            issues = beads.run_bd_json(
+            control.dry_run_log(f"Selected epic: {selected_epic}")
+            issues = infra.beads.run_bd_json(
                 ["show", selected_epic], beads_root=beads_root, cwd=repo_root
             )
             if not issues:
-                dry_run_log(f"Epic {selected_epic!r} not found.")
+                control.dry_run_log(f"Epic {selected_epic!r} not found.")
                 finishstep(extra="epic not found")
                 return finish(
                     WorkerRunSummary(
@@ -352,17 +219,17 @@ def run_worker_once(
                     )
                 )
             epic_issue = issues[0]
-            dry_run_log(
+            control.dry_run_log(
                 f"Would claim epic {selected_epic!r} for agent {agent.agent_id!r}."
             )
             if startup_result.reassign_from:
-                dry_run_log(
+                control.dry_run_log(
                     "Would reclaim stale epic assignment from "
                     f"{startup_result.reassign_from!r}."
                 )
         else:
-            say(f"Selected epic: {selected_epic}")
-            epic_issue = beads.claim_epic(
+            control.say(f"Selected epic: {selected_epic}")
+            epic_issue = infra.beads.claim_epic(
                 selected_epic,
                 agent.agent_id,
                 beads_root=beads_root,
@@ -370,7 +237,7 @@ def run_worker_once(
                 allow_takeover_from=startup_result.reassign_from,
             )
             if startup_result.reassign_from:
-                previous_agent = beads.find_agent_bead(
+                previous_agent = infra.beads.find_agent_bead(
                     startup_result.reassign_from,
                     beads_root=beads_root,
                     cwd=repo_root,
@@ -381,45 +248,49 @@ def run_worker_once(
                     else ""
                 )
                 if previous_agent_id:
-                    beads.clear_agent_hook(
+                    infra.beads.clear_agent_hook(
                         previous_agent_id, beads_root=beads_root, cwd=repo_root
                     )
         finishstep()
-        finishstep = step("Resolve root branch", timings=timings, trace=trace)
-        root_branch_value = beads.extract_workspace_root_branch(epic_issue)
+        finishstep = control.step("Resolve root branch", timings=timings, trace=trace)
+        root_branch_value = infra.beads.extract_workspace_root_branch(epic_issue)
         if not root_branch_value:
-            root_branch_value = extract_changeset_root_branch(epic_issue)
+            root_branch_value = lifecycle.extract_changeset_root_branch(epic_issue)
         suggested_root_branch = None
         if not root_branch_value:
-            suggested_root_branch = branching.suggest_root_branch(
+            suggested_root_branch = infra.branching.suggest_root_branch(
                 str(epic_issue.get("title") or selected_epic),
                 project_config.branch.prefix,
             )
             if dry_run:
-                dry_run_log(
+                control.dry_run_log(
                     "Root branch missing; would prompt for root branch selection."
                 )
                 if suggested_root_branch:
-                    dry_run_log(f"Suggested root branch: {suggested_root_branch!r}.")
+                    control.dry_run_log(
+                        f"Suggested root branch: {suggested_root_branch!r}."
+                    )
                 root_branch_value = suggested_root_branch
             else:
-                root_branch_value = root_branch.prompt_root_branch(
+                root_branch_value = infra.root_branch.prompt_root_branch(
                     title=str(epic_issue.get("title") or selected_epic),
                     branch_prefix=project_config.branch.prefix,
                     beads_root=beads_root,
                     repo_root=repo_root,
                     assume_yes=assume_yes,
                 )
-                beads.update_workspace_root_branch(
+                infra.beads.update_workspace_root_branch(
                     selected_epic,
                     root_branch_value,
                     beads_root=beads_root,
                     cwd=repo_root,
                 )
         finishstep(extra=root_branch_value or "unset")
-        finishstep = step("Set parent branch + hook", timings=timings, trace=trace)
-        parent_branch_value = extract_workspace_parent_branch(epic_issue)
-        default_branch = git.git_default_branch(repo_root, git_path=git_path)
+        finishstep = control.step(
+            "Set parent branch + hook", timings=timings, trace=trace
+        )
+        parent_branch_value = lifecycle.extract_workspace_parent_branch(epic_issue)
+        default_branch = infra.git.git_default_branch(repo_root, git_path=git_path)
         if not parent_branch_value:
             parent_branch_value = default_branch or root_branch_value
         allow_parent_override = False
@@ -434,28 +305,30 @@ def run_worker_once(
             parent_branch_value = default_branch
             allow_parent_override = True
         if dry_run:
-            dry_run_log(
+            control.dry_run_log(
                 f"Would set workspace parent branch to {parent_branch_value!r}."
             )
-            dry_run_log("Would set agent hook to selected epic.")
+            control.dry_run_log("Would set agent hook to selected epic.")
         else:
-            beads.update_workspace_parent_branch(
+            infra.beads.update_workspace_parent_branch(
                 selected_epic,
                 parent_branch_value,
                 beads_root=beads_root,
                 cwd=repo_root,
                 allow_override=allow_parent_override,
             )
-            beads.set_agent_hook(
+            infra.beads.set_agent_hook(
                 agent_bead_id, selected_epic, beads_root=beads_root, cwd=repo_root
             )
         finishstep()
-        finishstep = step("Validate changeset labels", timings=timings, trace=trace)
-        invalid_changesets = find_invalid_changeset_labels(
+        finishstep = control.step(
+            "Validate changeset labels", timings=timings, trace=trace
+        )
+        invalid_changesets = lifecycle.find_invalid_changeset_labels(
             selected_epic, beads_root=beads_root, repo_root=repo_root
         )
         if invalid_changesets:
-            detail = send_invalid_changeset_labels_notification(
+            detail = lifecycle.send_invalid_changeset_labels_notification(
                 epic_id=selected_epic,
                 invalid_changesets=invalid_changesets,
                 agent_id=agent.agent_id,
@@ -465,12 +338,14 @@ def run_worker_once(
             )
             finishstep(extra=f"invalid labels: {detail}")
             if dry_run:
-                dry_run_log("Would release epic assignment and clear agent hook.")
+                control.dry_run_log(
+                    "Would release epic assignment and clear agent hook."
+                )
             else:
-                release_epic_assignment(
+                lifecycle.release_epic_assignment(
                     selected_epic, beads_root=beads_root, repo_root=repo_root
                 )
-                beads.clear_agent_hook(
+                infra.beads.clear_agent_hook(
                     agent_bead_id, beads_root=beads_root, cwd=repo_root
                 )
             return finish(
@@ -481,7 +356,7 @@ def run_worker_once(
                 )
             )
         finishstep()
-        finishstep = step("Select changeset", timings=timings, trace=trace)
+        finishstep = control.step("Select changeset", timings=timings, trace=trace)
         selected = select_changeset(
             context=ChangesetSelectionContext(
                 selected_epic=selected_epic,
@@ -494,15 +369,15 @@ def run_worker_once(
                 git_path=git_path,
             ),
             ports=ChangesetSelectionPorts(
-                run_bd_json=beads.run_bd_json,
-                resolve_epic_id_for_changeset=resolve_epic_id_for_changeset,
-                next_changeset=next_changeset,
+                run_bd_json=infra.beads.run_bd_json,
+                resolve_epic_id_for_changeset=lifecycle.resolve_epic_id_for_changeset,
+                next_changeset=lifecycle.next_changeset,
             ),
         )
         changeset = selected.issue
         selected_changeset_override = selected.selected_override
         if changeset is None:
-            send_no_ready_changesets(
+            lifecycle.send_no_ready_changesets(
                 epic_id=selected_epic,
                 agent_id=agent.agent_id,
                 beads_root=beads_root,
@@ -511,7 +386,9 @@ def run_worker_once(
             )
             finishstep(extra="no ready changesets")
             if dry_run:
-                dry_run_log("Would release epic assignment and clear agent hook.")
+                control.dry_run_log(
+                    "Would release epic assignment and clear agent hook."
+                )
                 return finish(
                     WorkerRunSummary(
                         started=False,
@@ -519,10 +396,12 @@ def run_worker_once(
                         epic_id=selected_epic,
                     )
                 )
-            release_epic_assignment(
+            lifecycle.release_epic_assignment(
                 selected_epic, beads_root=beads_root, repo_root=repo_root
             )
-            beads.clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
+            infra.beads.clear_agent_hook(
+                agent_bead_id, beads_root=beads_root, cwd=repo_root
+            )
             return finish(
                 WorkerRunSummary(
                     started=False, reason="no_ready_changesets", epic_id=selected_epic
@@ -537,26 +416,26 @@ def run_worker_once(
         finishstep(extra=changeset_extra)
         changeset_id = changeset.get("id") or ""
         changeset_title = changeset.get("title") or ""
-        changeset_parent_branch = root_branch_value
-        if changeset_parent_branch and changeset_id:
+        parent_branch_for_changeset = root_branch_value
+        if parent_branch_for_changeset and changeset_id:
             if dry_run:
-                changeset_parent_branch = changeset_parent_branch(
-                    changeset, root_branch=changeset_parent_branch
+                parent_branch_for_changeset = lifecycle.changeset_parent_branch(
+                    changeset, root_branch=parent_branch_for_changeset
                 )
             else:
-                selected_changeset = beads.run_bd_json(
+                selected_changeset = infra.beads.run_bd_json(
                     ["show", str(changeset_id)], beads_root=beads_root, cwd=repo_root
                 )
                 if selected_changeset:
-                    changeset_parent_branch = changeset_parent_branch(
-                        selected_changeset[0], root_branch=changeset_parent_branch
+                    parent_branch_for_changeset = lifecycle.changeset_parent_branch(
+                        selected_changeset[0], root_branch=parent_branch_for_changeset
                     )
         if dry_run:
-            dry_run_log(f"Next changeset: {changeset_id} {changeset_title}")
+            control.dry_run_log(f"Next changeset: {changeset_id} {changeset_title}")
         else:
-            say(f"Next changeset: {changeset_id} {changeset_title}")
-        finishstep = step("Prepare worktrees", timings=timings, trace=trace)
-        worktree_prep = worker_session_worktree.prepare_worktrees(
+            control.say(f"Next changeset: {changeset_id} {changeset_title}")
+        finishstep = control.step("Prepare worktrees", timings=timings, trace=trace)
+        worktree_prep = infra.worker_session_worktree.prepare_worktrees(
             dry_run=dry_run,
             project_data_dir=project_data_dir,
             repo_root=repo_root,
@@ -564,26 +443,28 @@ def run_worker_once(
             selected_epic=selected_epic,
             changeset_id=str(changeset_id),
             root_branch_value=root_branch_value or "",
-            changeset_parent_branch=changeset_parent_branch or "",
+            changeset_parent_branch=parent_branch_for_changeset or "",
             git_path=git_path,
-            emit=say,
-            dry_run_log=dry_run_log,
+            emit=control.say,
+            dry_run_log=control.dry_run_log,
         )
         changeset_worktree_path = worktree_prep.changeset_worktree_path
         finishstep()
-        finishstep = step("Mark changeset in progress", timings=timings, trace=trace)
+        finishstep = control.step(
+            "Mark changeset in progress", timings=timings, trace=trace
+        )
         if changeset_id:
             if dry_run:
-                dry_run_log(f"Would mark changeset {changeset_id} in progress.")
+                control.dry_run_log(f"Would mark changeset {changeset_id} in progress.")
             else:
-                mark_changeset_in_progress(
+                lifecycle.mark_changeset_in_progress(
                     changeset_id, beads_root=beads_root, repo_root=repo_root
                 )
         finishstep()
 
-        finishstep = step("Prepare agent session", timings=timings, trace=trace)
+        finishstep = control.step("Prepare agent session", timings=timings, trace=trace)
         try:
-            agent_prep = worker_session_agent.prepare_agent_session(
+            agent_prep = infra.worker_session_agent.prepare_agent_session(
                 project_config=project_config,
                 project_data_dir=project_data_dir,
                 repo_root=repo_root,
@@ -596,13 +477,13 @@ def run_worker_once(
                 enlistment_path=_enlistment,
                 yes=bool(getattr(args, "yes", False)),
                 dry_run=dry_run,
-                strip_flag_with_value=strip_flag_with_value,
-                confirm_update=lambda message: confirm(message, default=False),
-                dry_run_log=dry_run_log,
-                emit=say,
+                strip_flag_with_value=command_ports.strip_flag_with_value,
+                confirm_update=lambda message: control.confirm(message, default=False),
+                dry_run_log=control.dry_run_log,
+                emit=control.say,
             )
         except RuntimeError as exc:
-            die(str(exc))
+            control.die(str(exc))
         agent_spec = agent_prep.agent_spec
         agent_options = agent_prep.agent_options
         project_enlistment = agent_prep.project_enlistment
@@ -613,16 +494,18 @@ def run_worker_once(
         review_feedback = startup_result.reason == "review_feedback"
         feedback_before = None
         if agent_spec.name == "codex":
-            review_pr_url = changeset_pr_url(changeset) if review_feedback else None
+            review_pr_url = (
+                lifecycle.changeset_pr_url(changeset) if review_feedback else None
+            )
             if review_feedback and not review_pr_url and repo_slug:
-                feedback_branch = changeset_work_branch(changeset)
+                feedback_branch = lifecycle.changeset_work_branch(changeset)
                 if feedback_branch:
-                    pr_payload = lookup_pr_payload(repo_slug, feedback_branch)
+                    pr_payload = lifecycle.lookup_pr_payload(repo_slug, feedback_branch)
                     if pr_payload:
                         payload_url = pr_payload.get("url")
                         if isinstance(payload_url, str) and payload_url.strip():
                             review_pr_url = payload_url.strip()
-            opening_prompt = worker_opening_prompt(
+            opening_prompt = command_ports.worker_opening_prompt(
                 project_enlistment=project_enlistment,
                 workspace_branch=workspace_branch,
                 epic_id=selected_epic,
@@ -632,43 +515,43 @@ def run_worker_once(
                 review_pr_url=review_pr_url,
             )
         if review_feedback:
-            feedback_before = capture_review_feedback_snapshot(
+            feedback_before = lifecycle.capture_review_feedback_snapshot(
                 issue=changeset,
                 repo_slug=repo_slug,
                 repo_root=repo_root,
                 git_path=git_path,
             )
-        finishstep = step("Install agent hooks", timings=timings, trace=trace)
-        worker_session_agent.install_agent_hooks(
+        finishstep = control.step("Install agent hooks", timings=timings, trace=trace)
+        infra.worker_session_agent.install_agent_hooks(
             dry_run=dry_run,
             agent=agent,
             agent_spec=agent_spec,
             env=env,
-            dry_run_log=dry_run_log,
+            dry_run_log=control.dry_run_log,
         )
         finishstep()
-        finishstep = step("Start agent session", timings=timings, trace=trace)
+        finishstep = control.step("Start agent session", timings=timings, trace=trace)
         if dry_run:
-            dry_run_log(f"Would start {agent_spec.display_name} session.")
-        session_result = worker_session_agent.start_agent_session(
+            control.dry_run_log(f"Would start {agent_spec.display_name} session.")
+        session_result = infra.worker_session_agent.start_agent_session(
             dry_run=dry_run,
             agent=agent,
             agent_spec=agent_spec,
             agent_options=agent_options,
             opening_prompt=opening_prompt,
             env=env,
-            with_codex_exec=with_codex_exec,
-            strip_flag_with_value=strip_flag_with_value,
-            ensure_exec_subcommand_flag=ensure_exec_subcommand_flag,
-            mark_changeset_blocked=lambda reason: mark_changeset_blocked(
+            with_codex_exec=command_ports.with_codex_exec,
+            strip_flag_with_value=command_ports.strip_flag_with_value,
+            ensure_exec_subcommand_flag=command_ports.ensure_exec_subcommand_flag,
+            mark_changeset_blocked=lambda reason: lifecycle.mark_changeset_blocked(
                 changeset_id,
                 beads_root=beads_root,
                 repo_root=repo_root,
                 reason=reason,
             ),
-            die_fn=die,
-            dry_run_log=dry_run_log,
-            emit=say,
+            die_fn=control.die,
+            dry_run_log=control.dry_run_log,
+            emit=control.say,
         )
         if session_result is None:
             finishstep(extra="dry run")
@@ -682,8 +565,8 @@ def run_worker_once(
             )
         started_at = session_result.started_at
         finishstep(extra=f"exit={session_result.returncode}")
-        finishstep = step("Finalize changeset", timings=timings, trace=trace)
-        finalize_result = finalize_changeset(
+        finishstep = control.step("Finalize changeset", timings=timings, trace=trace)
+        finalize_result = lifecycle.finalize_changeset(
             changeset_id=changeset_id,
             epic_id=selected_epic,
             agent_id=agent.agent_id,
@@ -704,19 +587,19 @@ def run_worker_once(
             git_path=git_path,
         )
         if review_feedback and finalize_result.continue_running:
-            feedback_after = capture_review_feedback_snapshot(
+            feedback_after = lifecycle.capture_review_feedback_snapshot(
                 issue=changeset,
                 repo_slug=repo_slug,
                 repo_root=repo_root,
                 git_path=git_path,
             )
-            if feedback_before is not None and not review_feedback_progressed(
+            if feedback_before is not None and not lifecycle.review_feedback_progressed(
                 feedback_before, feedback_after
             ):
-                mark_changeset_in_progress(
+                lifecycle.mark_changeset_in_progress(
                     changeset_id, beads_root=beads_root, repo_root=repo_root
                 )
-                send_planner_notification(
+                lifecycle.send_planner_notification(
                     subject=f"NEEDS-DECISION: Review feedback unchanged ({changeset_id})",
                     body=(
                         "Review-feedback run completed without detectable feedback "
@@ -747,7 +630,7 @@ def run_worker_once(
                         changeset_id=str(changeset_id) if changeset_id else None,
                     )
                 )
-            persist_review_feedback_cursor(
+            lifecycle.persist_review_feedback_cursor(
                 changeset_id=changeset_id,
                 issue=changeset,
                 repo_slug=repo_slug,

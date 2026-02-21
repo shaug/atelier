@@ -1,15 +1,293 @@
-"""Typed callable ports used by worker services."""
+"""Typed runtime ports used by worker orchestration services."""
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol
+
+from ..agent_home import AgentHome
+from ..config import ProjectConfig
+from ..work_feedback import ReviewFeedbackSnapshot
+from .models import FinalizeResult, ReconcileResult, StartupContractResult
+from .session.agent import AgentSessionPreparation, AgentSessionRunResult
+from .session.worktree import WorktreePreparation
+
+Issue = dict[str, object]
+StepTimings = list[tuple[str, float]]
+
+
+class StepFinish(Protocol):
+    """Step completion callback emitted by tracing helpers."""
+
+    def __call__(self, *, extra: str | None = None) -> None: ...
+
+
+class StepFactory(Protocol):
+    """Factory for timed step wrappers."""
+
+    def __call__(
+        self, label: str, *, timings: StepTimings, trace: bool
+    ) -> StepFinish: ...
+
+
+class AgentHomeService(Protocol):
+    """Agent home lifecycle operations used by worker runtime."""
+
+    def preview_agent_home(
+        self,
+        project_dir: Path,
+        project_config: ProjectConfig,
+        *,
+        role: str,
+        session_key: str,
+    ) -> AgentHome: ...
+
+    def resolve_agent_home(
+        self,
+        project_dir: Path,
+        project_config: ProjectConfig,
+        *,
+        role: str,
+        session_key: str,
+    ) -> AgentHome: ...
+
+
+class AgentsService(Protocol):
+    """Agent environment operations used by worker runtime."""
+
+    def scoped_agent_env(self, agent_id: str) -> AbstractContextManager[object]: ...
+
+
+class BeadsService(Protocol):
+    """Beads operations required by worker runtime orchestration."""
+
+    def run_bd_command(
+        self,
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+        daemon: bool = False,
+    ) -> subprocess.CompletedProcess[str]: ...
+
+    def run_bd_json(
+        self,
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[Issue]: ...
+
+    def ensure_agent_bead(
+        self,
+        agent_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        role: str,
+    ) -> Issue: ...
+
+    def find_agent_bead(
+        self,
+        agent_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> Issue | None: ...
+
+    def claim_epic(
+        self,
+        epic_id: str,
+        assignee: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_takeover_from: str | None = None,
+    ) -> Issue: ...
+
+    def clear_agent_hook(
+        self, agent_issue_id: str, *, beads_root: Path, cwd: Path
+    ) -> None: ...
+
+    def extract_workspace_root_branch(self, issue: Issue) -> str | None: ...
+
+    def update_workspace_root_branch(
+        self, issue_id: str, root_branch: str, *, beads_root: Path, cwd: Path
+    ) -> None: ...
+
+    def update_workspace_parent_branch(
+        self,
+        issue_id: str,
+        parent_branch: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_override: bool = False,
+    ) -> None: ...
+
+    def set_agent_hook(
+        self, agent_issue_id: str, epic_issue_id: str, *, beads_root: Path, cwd: Path
+    ) -> None: ...
+
+
+class BranchingService(Protocol):
+    """Branch naming and existence helpers."""
+
+    def suggest_root_branch(self, title: str, prefix: str) -> str: ...
+
+    def branch_exists(
+        self, branch: str, *, repo_root: Path, git_path: str | None = None
+    ) -> bool: ...
+
+
+class ConfigService(Protocol):
+    """Project config path resolution helpers."""
+
+    def resolve_project_data_dir(
+        self, project_root: Path, project_config: ProjectConfig
+    ) -> Path: ...
+
+    def resolve_beads_root(self, project_data_dir: Path, repo_root: Path) -> Path: ...
+
+    def resolve_git_path(self, project_config: ProjectConfig) -> str | None: ...
+
+
+class GitService(Protocol):
+    """Git metadata operations needed by worker runtime."""
+
+    def git_default_branch(
+        self, repo_root: Path, *, git_path: str | None = None
+    ) -> str | None: ...
+
+
+class PrsService(Protocol):
+    """PR metadata operations needed by worker runtime."""
+
+    def clear_runtime_cache(self) -> None: ...
+
+    def github_repo_slug(self, origin: str | None) -> str | None: ...
+
+
+class RootBranchService(Protocol):
+    """Interactive root-branch resolver."""
+
+    def prompt_root_branch(
+        self,
+        *,
+        title: str,
+        branch_prefix: str,
+        beads_root: Path,
+        repo_root: Path,
+        assume_yes: bool = False,
+    ) -> str: ...
+
+
+class WorkerSessionAgentService(Protocol):
+    """Agent session preparation and execution operations."""
+
+    def prepare_agent_session(self, **kwargs: object) -> AgentSessionPreparation: ...
+
+    def install_agent_hooks(self, **kwargs: object) -> None: ...
+
+    def start_agent_session(self, **kwargs: object) -> AgentSessionRunResult | None: ...
+
+
+class WorkerSessionWorktreeService(Protocol):
+    """Worktree preparation operations."""
+
+    def prepare_worktrees(self, **kwargs: object) -> WorktreePreparation: ...
+
+
+@dataclass(frozen=True)
+class WorkerInfrastructurePorts:
+    """External module integrations required by worker runtime."""
+
+    resolve_current_project_with_repo_root: Callable[
+        [], tuple[Path, ProjectConfig, str, Path]
+    ]
+    agent_home: AgentHomeService
+    agents: AgentsService
+    beads: BeadsService
+    branching: BranchingService
+    config: ConfigService
+    git: GitService
+    prs: PrsService
+    root_branch: RootBranchService
+    worker_session_agent: WorkerSessionAgentService
+    worker_session_worktree: WorkerSessionWorktreeService
+
+
+@dataclass(frozen=True)
+class WorkerLifecyclePorts:
+    """Worker lifecycle service entry points used by runner orchestration."""
+
+    capture_review_feedback_snapshot: Callable[..., ReviewFeedbackSnapshot]
+    changeset_parent_branch: Callable[..., str]
+    changeset_pr_url: Callable[[Issue], str | None]
+    changeset_work_branch: Callable[[Issue], str | None]
+    extract_changeset_root_branch: Callable[[Issue], str | None]
+    extract_workspace_parent_branch: Callable[[Issue], str | None]
+    finalize_changeset: Callable[..., FinalizeResult]
+    find_invalid_changeset_labels: Callable[..., list[str]]
+    lookup_pr_payload: Callable[[str | None, str], Issue | None]
+    mark_changeset_blocked: Callable[..., None]
+    mark_changeset_in_progress: Callable[..., None]
+    next_changeset: Callable[..., Issue | None]
+    persist_review_feedback_cursor: Callable[..., None]
+    release_epic_assignment: Callable[..., None]
+    reconcile_blocked_merged_changesets: Callable[..., ReconcileResult]
+    resolve_epic_id_for_changeset: Callable[..., str | None]
+    review_feedback_progressed: Callable[
+        [ReviewFeedbackSnapshot, ReviewFeedbackSnapshot], bool
+    ]
+    run_startup_contract: Callable[..., StartupContractResult]
+    send_invalid_changeset_labels_notification: Callable[..., str]
+    send_no_ready_changesets: Callable[..., None]
+    send_planner_notification: Callable[..., None]
+
+
+@dataclass(frozen=True)
+class WorkerCommandPorts:
+    """Agent command-line argument transformation hooks."""
+
+    ensure_exec_subcommand_flag: Callable[[list[str], str], list[str]]
+    strip_flag_with_value: Callable[[list[str], str], list[str]]
+    with_codex_exec: Callable[[list[str], str], list[str]]
+    worker_opening_prompt: Callable[..., str]
+
+
+@dataclass(frozen=True)
+class WorkerControlPorts:
+    """Logging, prompting, and tracing controls."""
+
+    dry_run_log: Callable[[str], None]
+    report_timings: Callable[..., None]
+    step: StepFactory
+    trace_enabled: Callable[[], bool]
+    confirm: Callable[..., bool]
+    die: Callable[[str], None]
+    say: Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class WorkerRuntimeDependencies:
+    """Compact runtime dependency graph for worker session runner."""
+
+    infra: WorkerInfrastructurePorts
+    lifecycle: WorkerLifecyclePorts
+    commands: WorkerCommandPorts
+    control: WorkerControlPorts
 
 
 @dataclass(frozen=True)
 class ChangesetSelectionPorts:
     """Dependency ports used by changeset selection."""
 
-    run_bd_json: Callable[..., list[dict[str, object]]]
+    run_bd_json: Callable[..., list[Issue]]
     resolve_epic_id_for_changeset: Callable[..., str | None]
-    next_changeset: Callable[..., dict[str, object] | None]
+    next_changeset: Callable[..., Issue | None]

@@ -60,7 +60,7 @@ def _run_worker_once(
     args: object, *, mode: str, dry_run: bool, session_key: str
 ) -> worker_work.WorkerRunSummary:
     """Start a single worker session by selecting an epic and changeset."""
-    runner_deps = worker_work.build_runner_dependencies(
+    runner_deps = worker_runtime.build_worker_runtime_dependencies(
         resolve_current_project_with_repo_root=resolve_current_project_with_repo_root,
         confirm_fn=confirm,
         die_fn=die,
