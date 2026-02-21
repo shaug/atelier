@@ -9,7 +9,6 @@ from __future__ import annotations
 import datetime as dt
 import os
 import re
-import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -62,7 +61,10 @@ from ..worker.models import (
     StartupContractResult,
     WorkerRunSummary,
 )
+from ..worker.session import agent as worker_session_agent
+from ..worker.session import runner as worker_session_runner
 from ..worker.session import startup as worker_startup
+from ..worker.session import worktree as worker_session_worktree
 from .resolve import resolve_current_project_with_repo_root
 
 _MODE_VALUES = {"prompt", "auto"}
@@ -79,6 +81,18 @@ _VALID_CHANGESET_STATE_LABELS = {
     "cs:abandoned",
 }
 _DEPENDENCY_ID_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\b")
+
+# Keep these module references available for command-level patch points while
+# business logic migrates into worker/session modules.
+_LEGACY_PATCH_EXPORTS = (
+    hooks,
+    paths,
+    policy,
+    prompting,
+    skills,
+    templates,
+    workspace,
+)
 
 
 ReviewFeedbackSnapshot = work_feedback.ReviewFeedbackSnapshot
@@ -3025,34 +3039,21 @@ def _run_worker_once(
             )
         finish_step()
         finish_step = _step("Select changeset", timings=timings, trace=trace)
-        changeset: dict[str, object] | None = None
-        selected_changeset_override = (
-            str(startup_result.changeset_id).strip()
-            if startup_result.changeset_id
-            else ""
+        selected = worker_session_runner.select_changeset(
+            selected_epic=selected_epic,
+            startup_changeset_id=startup_result.changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            repo_slug=repo_slug,
+            branch_pr=project_config.branch.pr,
+            branch_pr_strategy=project_config.branch.pr_strategy,
+            git_path=git_path,
+            run_bd_json=beads.run_bd_json,
+            resolve_epic_id_for_changeset=_resolve_epic_id_for_changeset,
+            next_changeset=_next_changeset,
         )
-        if selected_changeset_override:
-            override_issue = beads.run_bd_json(
-                ["show", selected_changeset_override],
-                beads_root=beads_root,
-                cwd=repo_root,
-            )
-            if override_issue:
-                resolved_epic = _resolve_epic_id_for_changeset(
-                    override_issue[0], beads_root=beads_root, repo_root=repo_root
-                )
-                if resolved_epic == selected_epic:
-                    changeset = override_issue[0]
-        if changeset is None:
-            changeset = _next_changeset(
-                epic_id=selected_epic,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                repo_slug=repo_slug,
-                branch_pr=project_config.branch.pr,
-                branch_pr_strategy=project_config.branch.pr_strategy,
-                git_path=git_path,
-            )
+        changeset = selected.issue
+        selected_changeset_override = selected.selected_override
         if changeset is None:
             _send_no_ready_changesets(
                 epic_id=selected_epic,
@@ -3108,118 +3109,20 @@ def _run_worker_once(
         else:
             say(f"Next changeset: {changeset_id} {changeset_title}")
         finish_step = _step("Prepare worktrees", timings=timings, trace=trace)
-        epic_worktree_path: Path | None = None
-        changeset_worktree_path: Path | None = None
-        branch: str | None = None
-        epic_is_changeset = bool(changeset_id) and str(changeset_id) == str(
-            selected_epic
+        worktree_prep = worker_session_worktree.prepare_worktrees(
+            dry_run=dry_run,
+            project_data_dir=project_data_dir,
+            repo_root=repo_root,
+            beads_root=beads_root,
+            selected_epic=selected_epic,
+            changeset_id=str(changeset_id),
+            root_branch_value=root_branch_value or "",
+            changeset_parent_branch=changeset_parent_branch or "",
+            git_path=git_path,
+            emit=say,
+            dry_run_log=_dry_run_log,
         )
-        if dry_run:
-            mapping = None
-            mapping_path = worktrees.mapping_path(project_data_dir, selected_epic)
-            if mapping_path.exists():
-                mapping = worktrees.load_mapping(mapping_path)
-            epic_worktree_path = (
-                project_data_dir / mapping.worktree_path
-                if mapping and mapping.worktree_path
-                else worktrees.worktree_dir(project_data_dir, selected_epic)
-            )
-            if epic_is_changeset and root_branch_value:
-                branch = root_branch_value
-            elif mapping and changeset_id in mapping.changesets:
-                branch = mapping.changesets[changeset_id]
-            elif root_branch_value:
-                branch = worktrees.derive_changeset_branch(
-                    root_branch_value, changeset_id
-                )
-            if epic_is_changeset:
-                changeset_worktree_path = epic_worktree_path
-            else:
-                changeset_relpath = None
-                if mapping and changeset_id in mapping.changeset_worktrees:
-                    changeset_relpath = mapping.changeset_worktrees[changeset_id]
-                elif changeset_id:
-                    changeset_relpath = worktrees.changeset_worktree_relpath(
-                        changeset_id
-                    )
-                if changeset_relpath:
-                    changeset_worktree_path = project_data_dir / changeset_relpath
-            _dry_run_log(f"Epic worktree: {epic_worktree_path}")
-            if changeset_worktree_path is not None:
-                _dry_run_log(f"Changeset worktree: {changeset_worktree_path}")
-            else:
-                _dry_run_log("Changeset worktree: <unknown>")
-            _dry_run_log(f"Changeset branch: {branch or '<unknown>'}")
-            if changeset_id:
-                _dry_run_log(
-                    "Would update changeset branch metadata "
-                    f"(root={root_branch_value!r}, "
-                    f"parent={changeset_parent_branch!r}, "
-                    f"work={branch!r})."
-                )
-            _dry_run_log("Would ensure git worktrees and checkout.")
-        else:
-            epic_worktree_path = worktrees.ensure_git_worktree(
-                project_data_dir,
-                repo_root,
-                selected_epic,
-                root_branch=root_branch_value,
-                git_path=git_path,
-            )
-            branch, mapping = worktrees.ensure_changeset_branch(
-                project_data_dir,
-                selected_epic,
-                changeset_id,
-                root_branch=root_branch_value,
-            )
-            beads.update_worktree_path(
-                selected_epic,
-                mapping.worktree_path,
-                beads_root=beads_root,
-                cwd=repo_root,
-            )
-            if epic_is_changeset:
-                changeset_worktree_path = epic_worktree_path
-            else:
-                changeset_worktree_path = worktrees.ensure_changeset_worktree(
-                    project_data_dir,
-                    repo_root,
-                    selected_epic,
-                    changeset_id,
-                    branch=branch,
-                    root_branch=root_branch_value,
-                    parent_branch=changeset_parent_branch,
-                    git_path=git_path,
-                )
-            worktrees.ensure_changeset_checkout(
-                changeset_worktree_path,
-                branch,
-                root_branch=root_branch_value,
-                parent_branch=changeset_parent_branch,
-                git_path=git_path,
-            )
-            if changeset_id:
-                root_base = git.git_rev_parse(
-                    changeset_worktree_path, root_branch_value, git_path=git_path
-                )
-                parent_base = git.git_rev_parse(
-                    changeset_worktree_path,
-                    changeset_parent_branch,
-                    git_path=git_path,
-                )
-                beads.update_changeset_branch_metadata(
-                    changeset_id,
-                    root_branch=root_branch_value,
-                    parent_branch=changeset_parent_branch,
-                    work_branch=branch,
-                    root_base=root_base,
-                    parent_base=parent_base,
-                    beads_root=beads_root,
-                    cwd=repo_root,
-                )
-            say(f"Epic worktree: {epic_worktree_path}")
-            say(f"Changeset worktree: {changeset_worktree_path}")
-            say(f"Changeset branch: {branch}")
+        changeset_worktree_path = worktree_prep.changeset_worktree_path
         finish_step()
         finish_step = _step("Mark changeset in progress", timings=timings, trace=trace)
         if changeset_id:
@@ -3232,120 +3135,32 @@ def _run_worker_once(
         finish_step()
 
         finish_step = _step("Prepare agent session", timings=timings, trace=trace)
-        agent_spec = agents.get_agent(project_config.agent.default)
-        if agent_spec is None:
-            die(f"unsupported agent {project_config.agent.default!r}")
-        agent_options = list(project_config.agent.options.get(agent_spec.name, []))
-        if agent_spec.name == "codex":
-            # Worker sessions are anchored in agent home; ignore user --cd overrides.
-            agent_options = _strip_flag_with_value(agent_options, "--cd")
-        project_enlistment = project_config.project.enlistment or _enlistment
-        workspace_branch = root_branch_value or ""
-        if dry_run:
-            worker_agents_path = (
-                agent.path / "AGENTS.md"
-                if changeset_worktree_path is not None
-                else None
+        try:
+            agent_prep = worker_session_agent.prepare_agent_session(
+                project_config=project_config,
+                project_data_dir=project_data_dir,
+                repo_root=repo_root,
+                beads_root=beads_root,
+                agent=agent,
+                changeset_worktree_path=changeset_worktree_path,
+                selected_epic=selected_epic,
+                changeset_id=str(changeset_id),
+                root_branch_value=root_branch_value or "",
+                enlistment_path=_enlistment,
+                yes=bool(getattr(args, "yes", False)),
+                dry_run=dry_run,
+                strip_flag_with_value=_strip_flag_with_value,
+                confirm_update=lambda message: confirm(message, default=False),
+                dry_run_log=_dry_run_log,
+                emit=say,
             )
-            if worker_agents_path is not None:
-                _dry_run_log(f"Would write worker AGENTS.md to {worker_agents_path}")
-                _dry_run_log("Would sync Beads addendum into worker AGENTS.md.")
-            if project_data_dir.exists():
-                try:
-                    sync_result = skills.sync_project_skills(
-                        project_data_dir,
-                        upgrade_policy=config.resolve_upgrade_policy(
-                            project_config.atelier.upgrade
-                        ),
-                        yes=bool(getattr(args, "yes", False)),
-                        interactive=False,
-                        dry_run=True,
-                    )
-                    _dry_run_log(
-                        f"Managed skills: {sync_result.action}"
-                        + (f" ({sync_result.detail})" if sync_result.detail else "")
-                    )
-                except OSError:
-                    pass
-            _dry_run_log("Would prepare workspace environment variables.")
-        else:
-            skills_dir: Path | None = None
-            if project_data_dir.exists():
-                try:
-                    sync_result = skills.sync_project_skills(
-                        project_data_dir,
-                        upgrade_policy=config.resolve_upgrade_policy(
-                            project_config.atelier.upgrade
-                        ),
-                        yes=bool(getattr(args, "yes", False)),
-                        interactive=(
-                            sys.stdin.isatty()
-                            and sys.stdout.isatty()
-                            and not bool(getattr(args, "yes", False))
-                        ),
-                        prompt_update=lambda message: confirm(message, default=False),
-                    )
-                    skills_dir = sync_result.skills_dir
-                    if sync_result.action in {"installed", "updated", "up_to_date"}:
-                        say(f"Managed skills: {sync_result.action}")
-                except OSError:
-                    skills_dir = None
-            if skills_dir is not None:
-                project_lookup_paths, _global_lookup_paths = agents.skill_lookup_paths(
-                    agent_spec.name
-                )
-                agent_home.ensure_agent_links(
-                    agent,
-                    worktree_path=changeset_worktree_path,
-                    beads_root=beads_root,
-                    skills_dir=skills_dir,
-                    project_skill_lookup_paths=project_lookup_paths,
-                )
-            worker_agents_path = agent.path / "AGENTS.md"
-            worker_template = templates.worker_template(
-                prefer_installed_if_modified=True
-            )
-            worker_content = prompting.render_template(
-                worker_template,
-                {
-                    "agent_id": agent.agent_id,
-                    "project_root": str(project_enlistment),
-                    "project_data_dir": str(project_data_dir),
-                    "beads_dir": str(beads_root),
-                    "beads_prefix": "at",
-                    "worker_worktree": str(changeset_worktree_path),
-                },
-            )
-            if agent.path.exists():
-                paths.ensure_dir(worker_agents_path.parent)
-                worker_agents_path.write_text(worker_content, encoding="utf-8")
-                policy.sync_agent_home_policy(
-                    agent,
-                    role=policy.ROLE_WORKER,
-                    beads_root=beads_root,
-                    cwd=repo_root,
-                )
-                prime_addendum = beads.prime_addendum(
-                    beads_root=beads_root, cwd=project_data_dir
-                )
-                updated_content = worker_agents_path.read_text(encoding="utf-8")
-                next_content = agent_home.apply_beads_prime_addendum(
-                    updated_content, prime_addendum
-                )
-                if next_content != updated_content:
-                    worker_agents_path.write_text(next_content, encoding="utf-8")
-                updated_content = worker_agents_path.read_text(encoding="utf-8")
-                agent_home.ensure_claude_compat(agent.path, updated_content)
-            env = workspace.workspace_environment(
-                project_enlistment,
-                workspace_branch,
-                changeset_worktree_path,
-                base_env=agents.agent_environment(agent.agent_id),
-            )
-            env["ATELIER_EPIC_ID"] = selected_epic
-            if changeset_id:
-                env["ATELIER_CHANGESET_ID"] = str(changeset_id)
-            env["BEADS_DIR"] = str(beads_root)
+        except RuntimeError as exc:
+            die(str(exc))
+        agent_spec = agent_prep.agent_spec
+        agent_options = agent_prep.agent_options
+        project_enlistment = agent_prep.project_enlistment
+        workspace_branch = agent_prep.workspace_branch
+        env = agent_prep.env
         finish_step()
         opening_prompt = ""
         review_feedback = startup_result.reason == "review_feedback"
@@ -3377,30 +3192,38 @@ def _run_worker_once(
                 git_path=git_path,
             )
         finish_step = _step("Install agent hooks", timings=timings, trace=trace)
-        if dry_run:
-            _dry_run_log("Would ensure agent hooks are installed.")
-        else:
-            hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
-            hooks.ensure_hooks_path(env, hook_path)
+        worker_session_agent.install_agent_hooks(
+            dry_run=dry_run,
+            agent=agent,
+            agent_spec=agent_spec,
+            env=env,
+            dry_run_log=_dry_run_log,
+        )
         finish_step()
         finish_step = _step("Start agent session", timings=timings, trace=trace)
         if dry_run:
             _dry_run_log(f"Would start {agent_spec.display_name} session.")
-        else:
-            say(f"Starting {agent_spec.display_name} session")
-        start_cmd, start_cwd = agent_spec.build_start_command(
-            agent.path,
-            agent_options,
-            opening_prompt,
+        session_result = worker_session_agent.start_agent_session(
+            dry_run=dry_run,
+            agent=agent,
+            agent_spec=agent_spec,
+            agent_options=agent_options,
+            opening_prompt=opening_prompt,
+            env=env,
+            with_codex_exec=_with_codex_exec,
+            strip_flag_with_value=_strip_flag_with_value,
+            ensure_exec_subcommand_flag=_ensure_exec_subcommand_flag,
+            mark_changeset_blocked=lambda reason: _mark_changeset_blocked(
+                changeset_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                reason=reason,
+            ),
+            die_fn=die,
+            dry_run_log=_dry_run_log,
+            emit=say,
         )
-        if agent_spec.name == "codex":
-            start_cmd = _with_codex_exec(start_cmd, opening_prompt)
-            start_cmd = _strip_flag_with_value(start_cmd, "--cd")
-            start_cmd = _ensure_exec_subcommand_flag(start_cmd, "--skip-git-repo-check")
-            start_cwd = agent.path
-        if dry_run:
-            _dry_run_log(f"Agent command: {' '.join(start_cmd)}")
-            _dry_run_log(f"Agent cwd: {start_cwd}")
+        if session_result is None:
             finish_step(extra="dry run")
             return finish(
                 WorkerRunSummary(
@@ -3410,47 +3233,8 @@ def _run_worker_once(
                     changeset_id=str(changeset_id) if changeset_id else None,
                 )
             )
-        started_at = dt.datetime.now(tz=dt.timezone.utc)
-        returncode = 0
-        if agent_spec.name == "codex":
-            result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
-            if result is None:
-                _mark_changeset_blocked(
-                    changeset_id,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                    reason=f"missing required command: {start_cmd[0]}",
-                )
-                die(f"missing required command: {start_cmd[0]}")
-            if result.returncode != 0:
-                returncode = result.returncode
-                _mark_changeset_blocked(
-                    changeset_id,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                    reason=f"command failed: {' '.join(start_cmd)}",
-                )
-                die(f"command failed: {' '.join(start_cmd)}")
-        else:
-            result = exec.run_command_status(start_cmd, cwd=start_cwd, env=env)
-            if result is None:
-                _mark_changeset_blocked(
-                    changeset_id,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                    reason=f"missing required command: {start_cmd[0]}",
-                )
-                die(f"missing required command: {start_cmd[0]}")
-            if result.returncode != 0:
-                returncode = result.returncode
-                _mark_changeset_blocked(
-                    changeset_id,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                    reason=f"command failed: {' '.join(start_cmd)}",
-                )
-                die(f"command failed: {' '.join(start_cmd)}")
-        finish_step(extra=f"exit={returncode}")
+        started_at = session_result.started_at
+        finish_step(extra=f"exit={session_result.returncode}")
         finish_step = _step("Finalize changeset", timings=timings, trace=trace)
         finalize_result = _finalize_changeset(
             changeset_id=changeset_id,
