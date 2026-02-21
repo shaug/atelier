@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import datetime as dt
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
 
 from ... import (
     agent_home,
@@ -27,7 +27,7 @@ from ... import (
 
 @dataclass(frozen=True)
 class AgentSessionPreparation:
-    agent_spec: Any
+    agent_spec: agents.AgentSpec
     agent_options: list[str]
     project_enlistment: Path
     workspace_branch: str
@@ -44,7 +44,7 @@ class AgentSessionRunResult:
 
 def prepare_agent_session(
     *,
-    project_config: Any,
+    project_config: config.ProjectConfig,
     project_data_dir: Path,
     repo_root: Path,
     beads_root: Path,
@@ -187,7 +187,7 @@ def install_agent_hooks(
     *,
     dry_run: bool,
     agent: agent_home.AgentHome,
-    agent_spec: Any,
+    agent_spec: agents.AgentSpec,
     env: dict[str, str],
     dry_run_log: Callable[[str], None],
 ) -> None:
@@ -203,7 +203,7 @@ def start_agent_session(
     *,
     dry_run: bool,
     agent: agent_home.AgentHome,
-    agent_spec: Any,
+    agent_spec: agents.AgentSpec,
     agent_options: list[str],
     opening_prompt: str,
     env: dict[str, str],

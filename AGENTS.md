@@ -96,6 +96,8 @@ ______________________________________________________________________
 - Use **uv** for dependency and packaging management
 - Produce an **installable CLI** (`atelier`)
 - Prefer standard library functionality where possible
+- In runtime orchestration code, avoid `Any` and `Callable[..., ...]`; prefer
+  explicit `Protocol`/typed call signatures and validated boundary models.
 
 ### CLI Behavior
 

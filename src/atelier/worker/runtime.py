@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 from .. import agent_home, agents, beads, branching, config, git, prs
 from .. import root_branch as root_branch_module
@@ -12,6 +13,7 @@ from ..config import ProjectConfig
 from . import work_command_helpers as worker_work
 from .models import WorkerRunSummary
 from .ports import (
+    ConfirmFn,
     WorkerCommandPorts,
     WorkerControlPorts,
     WorkerInfrastructurePorts,
@@ -22,6 +24,12 @@ from .session import agent as worker_session_agent
 from .session import worktree as worker_session_worktree
 
 
+class RunWorkerOnceFn(Protocol):
+    def __call__(
+        self, args: object, *, mode: str, dry_run: bool, session_key: str
+    ) -> WorkerRunSummary: ...
+
+
 def run_worker_sessions(
     *,
     args: object,
@@ -29,7 +37,7 @@ def run_worker_sessions(
     run_mode: str,
     dry_run: bool,
     session_key: str,
-    run_worker_once: Callable[..., WorkerRunSummary],
+    run_worker_once: RunWorkerOnceFn,
     report_worker_summary: Callable[[WorkerRunSummary, bool], None],
     watch_interval_seconds: Callable[[], int],
     dry_run_log: Callable[[str], None],
@@ -99,7 +107,7 @@ def build_worker_runtime_dependencies(
     resolve_current_project_with_repo_root: Callable[
         [], tuple[Path, ProjectConfig, str, Path]
     ],
-    confirm_fn: Callable[..., bool],
+    confirm_fn: ConfirmFn,
     die_fn: Callable[[str], None],
     emit: Callable[[str], None],
 ) -> WorkerRuntimeDependencies:

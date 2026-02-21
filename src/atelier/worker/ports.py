@@ -190,17 +190,275 @@ class RootBranchService(Protocol):
 class WorkerSessionAgentService(Protocol):
     """Agent session preparation and execution operations."""
 
-    def prepare_agent_session(self, **kwargs: object) -> AgentSessionPreparation: ...
+    def prepare_agent_session(
+        self,
+        *,
+        project_config: ProjectConfig,
+        project_data_dir: Path,
+        repo_root: Path,
+        beads_root: Path,
+        agent: AgentHome,
+        changeset_worktree_path: Path | None,
+        selected_epic: str,
+        changeset_id: str,
+        root_branch_value: str,
+        enlistment_path: Path,
+        yes: bool,
+        dry_run: bool,
+        strip_flag_with_value: Callable[[list[str], str], list[str]],
+        confirm_update: Callable[[str], bool],
+        dry_run_log: Callable[[str], None],
+        emit: Callable[[str], None],
+    ) -> AgentSessionPreparation: ...
 
-    def install_agent_hooks(self, **kwargs: object) -> None: ...
+    def install_agent_hooks(
+        self,
+        *,
+        dry_run: bool,
+        agent: AgentHome,
+        agent_spec: object,
+        env: dict[str, str],
+        dry_run_log: Callable[[str], None],
+    ) -> None: ...
 
-    def start_agent_session(self, **kwargs: object) -> AgentSessionRunResult | None: ...
+    def start_agent_session(
+        self,
+        *,
+        dry_run: bool,
+        agent: AgentHome,
+        agent_spec: object,
+        agent_options: list[str],
+        opening_prompt: str,
+        env: dict[str, str],
+        with_codex_exec: Callable[[list[str], str], list[str]],
+        strip_flag_with_value: Callable[[list[str], str], list[str]],
+        ensure_exec_subcommand_flag: Callable[[list[str], str], list[str]],
+        mark_changeset_blocked: Callable[[str], None],
+        die_fn: Callable[[str], None],
+        dry_run_log: Callable[[str], None],
+        emit: Callable[[str], None],
+    ) -> AgentSessionRunResult | None: ...
 
 
 class WorkerSessionWorktreeService(Protocol):
     """Worktree preparation operations."""
 
-    def prepare_worktrees(self, **kwargs: object) -> WorktreePreparation: ...
+    def prepare_worktrees(
+        self,
+        *,
+        dry_run: bool,
+        project_data_dir: Path,
+        repo_root: Path,
+        beads_root: Path,
+        selected_epic: str,
+        changeset_id: str,
+        root_branch_value: str,
+        changeset_parent_branch: str,
+        git_path: str | None,
+        emit: Callable[[str], None],
+        dry_run_log: Callable[[str], None],
+    ) -> WorktreePreparation: ...
+
+
+class CaptureReviewFeedbackSnapshotFn(Protocol):
+    def __call__(
+        self,
+        *,
+        issue: Issue,
+        repo_slug: str | None,
+        repo_root: Path,
+        git_path: str | None,
+    ) -> ReviewFeedbackSnapshot: ...
+
+
+class ChangesetParentBranchFn(Protocol):
+    def __call__(self, issue: Issue, *, root_branch: str) -> str: ...
+
+
+class FinalizeChangesetFn(Protocol):
+    def __call__(
+        self,
+        *,
+        changeset_id: str,
+        epic_id: str,
+        agent_id: str,
+        agent_bead_id: str,
+        started_at: object,
+        repo_slug: str | None,
+        beads_root: Path,
+        repo_root: Path,
+        branch_pr: bool,
+        branch_pr_strategy: object,
+        branch_history: str,
+        branch_squash_message: str,
+        project_data_dir: Path | None,
+        squash_message_agent_spec: object,
+        squash_message_agent_options: list[str],
+        squash_message_agent_home: Path,
+        squash_message_agent_env: dict[str, str],
+        git_path: str | None,
+    ) -> FinalizeResult: ...
+
+
+class FindInvalidChangesetLabelsFn(Protocol):
+    def __call__(
+        self, root_id: str, *, beads_root: Path, repo_root: Path
+    ) -> list[str]: ...
+
+
+class MarkChangesetBlockedFn(Protocol):
+    def __call__(
+        self, changeset_id: str, *, beads_root: Path, repo_root: Path, reason: str
+    ) -> None: ...
+
+
+class MarkChangesetInProgressFn(Protocol):
+    def __call__(
+        self, changeset_id: str, *, beads_root: Path, repo_root: Path
+    ) -> None: ...
+
+
+class NextChangesetFn(Protocol):
+    def __call__(
+        self,
+        *,
+        epic_id: str,
+        beads_root: Path,
+        repo_root: Path,
+        repo_slug: str | None,
+        branch_pr: bool,
+        branch_pr_strategy: object,
+        git_path: str | None,
+    ) -> Issue | None: ...
+
+
+class PersistReviewFeedbackCursorFn(Protocol):
+    def __call__(
+        self,
+        *,
+        changeset_id: str,
+        issue: Issue,
+        repo_slug: str | None,
+        beads_root: Path,
+        repo_root: Path,
+    ) -> None: ...
+
+
+class ReleaseEpicAssignmentFn(Protocol):
+    def __call__(self, epic_id: str, *, beads_root: Path, repo_root: Path) -> None: ...
+
+
+class ReconcileBlockedMergedChangesetsFn(Protocol):
+    def __call__(
+        self,
+        *,
+        agent_id: str,
+        agent_bead_id: str | None,
+        project_config: ProjectConfig,
+        project_data_dir: Path | None,
+        beads_root: Path,
+        repo_root: Path,
+        git_path: str | None,
+        dry_run: bool,
+        log: Callable[[str], None] | None,
+    ) -> ReconcileResult: ...
+
+
+class ResolveEpicIdForChangesetFn(Protocol):
+    def __call__(
+        self, issue: Issue, *, beads_root: Path, repo_root: Path
+    ) -> str | None: ...
+
+
+class RunStartupContractFn(Protocol):
+    def __call__(
+        self,
+        *,
+        agent_id: str,
+        agent_bead_id: str | None,
+        beads_root: Path,
+        repo_root: Path,
+        mode: str,
+        explicit_epic_id: str | None,
+        queue_only: bool,
+        dry_run: bool,
+        assume_yes: bool,
+        repo_slug: str | None,
+        branch_pr: bool,
+        branch_pr_strategy: object,
+        git_path: str | None,
+    ) -> StartupContractResult: ...
+
+
+class SendInvalidChangesetLabelsNotificationFn(Protocol):
+    def __call__(
+        self,
+        *,
+        epic_id: str,
+        invalid_changesets: list[str],
+        agent_id: str,
+        beads_root: Path,
+        repo_root: Path,
+        dry_run: bool,
+    ) -> str: ...
+
+
+class SendNoReadyChangesetsFn(Protocol):
+    def __call__(
+        self,
+        *,
+        epic_id: str,
+        agent_id: str,
+        beads_root: Path,
+        repo_root: Path,
+        dry_run: bool,
+    ) -> None: ...
+
+
+class SendPlannerNotificationFn(Protocol):
+    def __call__(
+        self,
+        *,
+        subject: str,
+        body: str,
+        agent_id: str,
+        thread_id: str | None,
+        beads_root: Path,
+        repo_root: Path,
+        dry_run: bool,
+    ) -> None: ...
+
+
+class WorkerOpeningPromptFn(Protocol):
+    def __call__(
+        self,
+        *,
+        project_enlistment: Path,
+        workspace_branch: str,
+        epic_id: str,
+        changeset_id: str,
+        changeset_title: str,
+        review_feedback: bool = False,
+        review_pr_url: str | None = None,
+    ) -> str: ...
+
+
+class ReportTimingsFn(Protocol):
+    def __call__(self, timings: StepTimings, *, trace: bool) -> None: ...
+
+
+class ConfirmFn(Protocol):
+    def __call__(self, prompt: str, *, default: bool = False) -> bool: ...
+
+
+class RunBdJsonFn(Protocol):
+    def __call__(
+        self,
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[Issue]: ...
 
 
 @dataclass(frozen=True)
@@ -226,29 +484,29 @@ class WorkerInfrastructurePorts:
 class WorkerLifecyclePorts:
     """Worker lifecycle service entry points used by runner orchestration."""
 
-    capture_review_feedback_snapshot: Callable[..., ReviewFeedbackSnapshot]
-    changeset_parent_branch: Callable[..., str]
+    capture_review_feedback_snapshot: CaptureReviewFeedbackSnapshotFn
+    changeset_parent_branch: ChangesetParentBranchFn
     changeset_pr_url: Callable[[Issue], str | None]
     changeset_work_branch: Callable[[Issue], str | None]
     extract_changeset_root_branch: Callable[[Issue], str | None]
     extract_workspace_parent_branch: Callable[[Issue], str | None]
-    finalize_changeset: Callable[..., FinalizeResult]
-    find_invalid_changeset_labels: Callable[..., list[str]]
+    finalize_changeset: FinalizeChangesetFn
+    find_invalid_changeset_labels: FindInvalidChangesetLabelsFn
     lookup_pr_payload: Callable[[str | None, str], Issue | None]
-    mark_changeset_blocked: Callable[..., None]
-    mark_changeset_in_progress: Callable[..., None]
-    next_changeset: Callable[..., Issue | None]
-    persist_review_feedback_cursor: Callable[..., None]
-    release_epic_assignment: Callable[..., None]
-    reconcile_blocked_merged_changesets: Callable[..., ReconcileResult]
-    resolve_epic_id_for_changeset: Callable[..., str | None]
+    mark_changeset_blocked: MarkChangesetBlockedFn
+    mark_changeset_in_progress: MarkChangesetInProgressFn
+    next_changeset: NextChangesetFn
+    persist_review_feedback_cursor: PersistReviewFeedbackCursorFn
+    release_epic_assignment: ReleaseEpicAssignmentFn
+    reconcile_blocked_merged_changesets: ReconcileBlockedMergedChangesetsFn
+    resolve_epic_id_for_changeset: ResolveEpicIdForChangesetFn
     review_feedback_progressed: Callable[
         [ReviewFeedbackSnapshot, ReviewFeedbackSnapshot], bool
     ]
-    run_startup_contract: Callable[..., StartupContractResult]
-    send_invalid_changeset_labels_notification: Callable[..., str]
-    send_no_ready_changesets: Callable[..., None]
-    send_planner_notification: Callable[..., None]
+    run_startup_contract: RunStartupContractFn
+    send_invalid_changeset_labels_notification: SendInvalidChangesetLabelsNotificationFn
+    send_no_ready_changesets: SendNoReadyChangesetsFn
+    send_planner_notification: SendPlannerNotificationFn
 
 
 @dataclass(frozen=True)
@@ -258,7 +516,7 @@ class WorkerCommandPorts:
     ensure_exec_subcommand_flag: Callable[[list[str], str], list[str]]
     strip_flag_with_value: Callable[[list[str], str], list[str]]
     with_codex_exec: Callable[[list[str], str], list[str]]
-    worker_opening_prompt: Callable[..., str]
+    worker_opening_prompt: WorkerOpeningPromptFn
 
 
 @dataclass(frozen=True)
@@ -266,10 +524,10 @@ class WorkerControlPorts:
     """Logging, prompting, and tracing controls."""
 
     dry_run_log: Callable[[str], None]
-    report_timings: Callable[..., None]
+    report_timings: ReportTimingsFn
     step: StepFactory
     trace_enabled: Callable[[], bool]
-    confirm: Callable[..., bool]
+    confirm: ConfirmFn
     die: Callable[[str], None]
     say: Callable[[str], None]
 
@@ -288,6 +546,6 @@ class WorkerRuntimeDependencies:
 class ChangesetSelectionPorts:
     """Dependency ports used by changeset selection."""
 
-    run_bd_json: Callable[..., list[Issue]]
-    resolve_epic_id_for_changeset: Callable[..., str | None]
-    next_changeset: Callable[..., Issue | None]
+    run_bd_json: RunBdJsonFn
+    resolve_epic_id_for_changeset: ResolveEpicIdForChangesetFn
+    next_changeset: NextChangesetFn
