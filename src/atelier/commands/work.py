@@ -62,6 +62,7 @@ from ..worker.models import (
     StartupContractResult,
     WorkerRunSummary,
 )
+from ..worker.session import startup as worker_startup
 from .resolve import resolve_current_project_with_repo_root
 
 _MODE_VALUES = {"prompt", "auto"}
@@ -515,103 +516,23 @@ def _next_changeset(
     branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     git_path: str | None = None,
 ) -> dict[str, object] | None:
-    target = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
-    if target:
-        issue = target[0]
-        issue_id = issue.get("id")
-        labels = _issue_labels(issue)
-        if "at:draft" in labels:
-            return None
-        if (
-            isinstance(issue_id, str)
-            and issue_id == epic_id
-            and "at:changeset" in labels
-            and "cs:merged" not in labels
-            and "cs:abandoned" not in labels
-            and (
-                (
-                    _is_changeset_ready(issue)
-                    and not _changeset_waiting_on_review_or_signals(
-                        issue,
-                        repo_slug=repo_slug,
-                        repo_root=repo_root,
-                        branch_pr=branch_pr,
-                        branch_pr_strategy=branch_pr_strategy,
-                        git_path=git_path,
-                    )
-                )
-                or _is_changeset_recovery_candidate(
-                    issue,
-                    repo_slug=repo_slug,
-                    repo_root=repo_root,
-                    branch_pr=branch_pr,
-                    git_path=git_path,
-                )
-            )
-        ):
-            if not _has_open_descendant_changesets(
-                epic_id, beads_root=beads_root, repo_root=repo_root
-            ):
-                return issue
-        status = str(issue.get("status") or "").strip().lower()
-        if (
-            isinstance(issue_id, str)
-            and issue_id == epic_id
-            and "at:epic" in labels
-            and "at:ready" in labels
-            and status not in {"closed", "done"}
-        ):
-            descendants = beads.list_descendant_changesets(
-                epic_id,
-                beads_root=beads_root,
-                cwd=repo_root,
-                include_closed=True,
-            )
-            if not descendants:
-                # Epics with no child changesets execute directly as a single changeset.
-                return issue
-
-    changesets = beads.run_bd_json(
-        [
-            "ready",
-            "--parent",
-            epic_id,
-            "--label",
-            "at:changeset",
-        ],
+    return worker_startup.next_changeset(
+        epic_id=epic_id,
         beads_root=beads_root,
-        cwd=repo_root,
+        repo_root=repo_root,
+        repo_slug=repo_slug,
+        branch_pr=branch_pr,
+        branch_pr_strategy=branch_pr_strategy,
+        git_path=git_path,
+        issue_labels=_issue_labels,
+        is_changeset_ready=_is_changeset_ready,
+        changeset_waiting_on_review_or_signals=_changeset_waiting_on_review_or_signals,
+        is_changeset_recovery_candidate=_is_changeset_recovery_candidate,
+        has_open_descendant_changesets=_has_open_descendant_changesets,
+        run_bd_json=beads.run_bd_json,
+        list_descendant_changesets=beads.list_descendant_changesets,
+        is_changeset_in_progress=_is_changeset_in_progress,
     )
-    if not changesets:
-        return None
-    actionable = [
-        issue
-        for issue in changesets
-        if _is_changeset_ready(issue)
-        and not _changeset_waiting_on_review_or_signals(
-            issue,
-            repo_slug=repo_slug,
-            repo_root=repo_root,
-            branch_pr=branch_pr,
-            branch_pr_strategy=branch_pr_strategy,
-            git_path=git_path,
-        )
-    ]
-    prioritized = sorted(
-        actionable,
-        key=lambda issue: (
-            0 if _is_changeset_in_progress(issue) else 1,
-            str(issue.get("id") or ""),
-        ),
-    )
-    for issue in prioritized:
-        issue_id = issue.get("id")
-        if isinstance(issue_id, str) and issue_id:
-            if not _has_open_descendant_changesets(
-                issue_id, beads_root=beads_root, repo_root=repo_root
-            ):
-                return issue
-    return None
 
 
 def _has_open_descendant_changesets(
@@ -2782,296 +2703,46 @@ def _run_startup_contract(
     branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     git_path: str | None = None,
 ) -> StartupContractResult:
-    """Apply startup_contract skill ordering to select the next epic."""
-    if explicit_epic_id is not None:
-        selected_epic = str(explicit_epic_id).strip()
-        if not selected_epic:
-            die("epic id must not be empty")
-        return StartupContractResult(
-            epic_id=selected_epic,
-            changeset_id=None,
-            should_exit=False,
-            reason="explicit_epic",
-        )
-
-    if queue_only:
-        _handle_queue_before_claim(
-            agent_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            queue_name=_WORKER_QUEUE_NAME,
-            force_prompt=True,
-            dry_run=dry_run,
-            assume_yes=assume_yes,
-        )
-        if dry_run:
-            _dry_run_log("Queue-only run would exit after handling queue.")
-        return StartupContractResult(
-            epic_id=None, changeset_id=None, should_exit=True, reason="queue_only"
-        )
-
-    issues = _list_epics(beads_root=beads_root, repo_root=repo_root)
-    actionable_cache: dict[str, bool] = {}
-
-    def epic_has_actionable_changeset(epic_id: str) -> bool:
-        cached = actionable_cache.get(epic_id)
-        if cached is not None:
-            return cached
-        actionable = (
-            _next_changeset(
-                epic_id=epic_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                repo_slug=repo_slug,
-                branch_pr=branch_pr,
-                branch_pr_strategy=branch_pr_strategy,
-                git_path=git_path,
-            )
-            is not None
-        )
-        actionable_cache[epic_id] = actionable
-        return actionable
-
-    hooked_epic = None
-    if agent_bead_id:
-        hooked_epic = _resolve_hooked_epic(
-            agent_bead_id, agent_id, beads_root=beads_root, repo_root=repo_root
-        )
-    elif dry_run:
-        _dry_run_log("Would create agent bead before checking for hooks.")
-    assigned = _filter_epics(issues, assignee=agent_id)
-    assigned = _sort_by_created_at(assigned)
-
-    stale_assigned = _stale_family_assigned_epics(issues, agent_id=agent_id)
-    stale_assignee_by_epic = {
-        str(issue.get("id")): str(issue.get("assignee"))
-        for issue in stale_assigned
-        if isinstance(issue.get("id"), str)
-        and issue.get("id")
-        and isinstance(issue.get("assignee"), str)
-        and issue.get("assignee")
-    }
-
-    def stale_reassign_for_epic(epic_id: str) -> str | None:
-        assignee = stale_assignee_by_epic.get(epic_id)
-        if assignee:
-            return assignee
-        loaded = beads.run_bd_json(
-            ["show", epic_id], beads_root=beads_root, cwd=repo_root
-        )
-        if not loaded:
-            return None
-        issue = loaded[0]
-        existing_assignee = issue.get("assignee")
-        if not isinstance(existing_assignee, str) or not existing_assignee:
-            return None
-        if existing_assignee == agent_id:
-            return None
-        if _agent_family_id(existing_assignee) != _agent_family_id(agent_id):
-            return None
-        if _is_agent_session_active(existing_assignee):
-            return None
-        return existing_assignee
-
-    def select_feedback_candidate(
-        epic_ids: list[str],
-    ) -> ReviewFeedbackSelection | None:
-        feedback_candidates: list[ReviewFeedbackSelection] = []
-        seen_epics: set[str] = set()
-        for epic_id in epic_ids:
-            if epic_id in seen_epics:
-                continue
-            seen_epics.add(epic_id)
-            feedback_selection = _select_review_feedback_changeset(
-                epic_id=epic_id,
-                repo_slug=repo_slug,
-                beads_root=beads_root,
-                repo_root=repo_root,
-            )
-            if feedback_selection is not None:
-                feedback_candidates.append(feedback_selection)
-        if not feedback_candidates:
-            return None
-        feedback_candidates.sort(
-            key=lambda item: (
-                _parse_issue_time(item.feedback_at)
-                or dt.datetime.max.replace(tzinfo=dt.timezone.utc)
-            )
-        )
-        return feedback_candidates[0]
-
-    def resume_feedback(selection: ReviewFeedbackSelection) -> StartupContractResult:
-        say(
-            "Prioritizing review feedback: "
-            f"{selection.changeset_id} ({selection.epic_id})"
-        )
-        _log_debug(
-            f"startup selected review-feedback changeset={selection.changeset_id} epic={selection.epic_id}"
-        )
-        if dry_run:
-            _dry_run_log(
-                f"Would select review-feedback changeset {selection.changeset_id}."
-            )
-        return StartupContractResult(
-            epic_id=selection.epic_id,
-            changeset_id=selection.changeset_id,
-            should_exit=False,
-            reason="review_feedback",
-            reassign_from=stale_reassign_for_epic(selection.epic_id),
-        )
-
-    if branch_pr and repo_slug and hooked_epic:
-        hooked_feedback = select_feedback_candidate([hooked_epic])
-        if hooked_feedback is not None:
-            return resume_feedback(hooked_feedback)
-
-    if hooked_epic and epic_has_actionable_changeset(hooked_epic):
-        say(f"Resuming hooked epic: {hooked_epic}")
-        _log_debug(f"startup resuming hooked epic={hooked_epic}")
-        return StartupContractResult(
-            epic_id=hooked_epic,
-            changeset_id=None,
-            should_exit=False,
-            reason="hooked_epic",
-        )
-    if hooked_epic:
-        say(f"Hooked epic has no ready changesets: {hooked_epic}")
-        _log_debug(
-            f"startup hooked epic has no actionable changesets epic={hooked_epic}"
-        )
-
-    if branch_pr and repo_slug:
-        unhooked_epics: list[str] = []
-        for issue in _sort_by_created_at(issues):
-            issue_id = issue.get("id")
-            if not isinstance(issue_id, str) or not issue_id:
-                continue
-            if issue_id == hooked_epic:
-                continue
-            status = str(issue.get("status") or "")
-            if not _is_feedback_eligible_epic_status(status):
-                continue
-            labels = _issue_labels(issue)
-            if "at:draft" in labels:
-                continue
-            unhooked_epics.append(issue_id)
-        feedback = select_feedback_candidate(unhooked_epics)
-        if feedback is not None:
-            return resume_feedback(feedback)
-        global_feedback = _select_global_review_feedback_changeset(
-            repo_slug=repo_slug,
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
-        if global_feedback is not None:
-            return resume_feedback(global_feedback)
-
-    for issue in assigned:
-        candidate = issue.get("id")
-        if candidate and epic_has_actionable_changeset(str(candidate)):
-            selected_epic = str(candidate)
-            say(f"Resuming assigned epic: {selected_epic}")
-            _log_debug(f"startup resuming assigned epic={selected_epic}")
-            return StartupContractResult(
-                epic_id=selected_epic,
-                changeset_id=None,
-                should_exit=False,
-                reason="assigned_epic",
-            )
-
-    for issue in stale_assigned:
-        candidate = issue.get("id")
-        previous_assignee = issue.get("assignee")
-        if (
-            candidate
-            and isinstance(previous_assignee, str)
-            and previous_assignee
-            and epic_has_actionable_changeset(str(candidate))
-        ):
-            selected_epic = str(candidate)
-            say(
-                "Reclaiming stale epic assignment: "
-                f"{selected_epic} (from {previous_assignee})"
-            )
-            _log_warning(
-                f"startup reclaiming stale assignment epic={selected_epic} previous_assignee={previous_assignee}"
-            )
-            return StartupContractResult(
-                epic_id=selected_epic,
-                changeset_id=None,
-                should_exit=False,
-                reason="stale_assignee_epic",
-                reassign_from=previous_assignee,
-            )
-
-    if _check_inbox_before_claim(agent_id, beads_root=beads_root, repo_root=repo_root):
-        if dry_run:
-            _dry_run_log("Inbox has unread messages; would exit before claiming work.")
-        return StartupContractResult(
-            epic_id=None, changeset_id=None, should_exit=True, reason="inbox_blocked"
-        )
-    if _handle_queue_before_claim(
-        agent_id,
+    return worker_startup.run_startup_contract(
+        agent_id=agent_id,
+        agent_bead_id=agent_bead_id,
         beads_root=beads_root,
         repo_root=repo_root,
-        queue_name=_WORKER_QUEUE_NAME,
+        mode=mode,
+        explicit_epic_id=explicit_epic_id,
+        queue_only=queue_only,
         dry_run=dry_run,
         assume_yes=assume_yes,
-    ):
-        if dry_run:
-            _dry_run_log("Queue messages available; would exit before claiming work.")
-        return StartupContractResult(
-            epic_id=None, changeset_id=None, should_exit=True, reason="queue_blocked"
-        )
-
-    if mode == "auto":
-        selected_epic = _select_epic_auto(
-            issues, agent_id=agent_id, is_actionable=epic_has_actionable_changeset
-        )
-    else:
-        selected_epic = _select_epic_prompt(
-            issues,
-            agent_id=agent_id,
-            is_actionable=epic_has_actionable_changeset,
-            assume_yes=assume_yes,
-        )
-    if selected_epic is None:
-        selected_epic = _select_epic_from_ready_changesets(
-            issues=issues,
-            is_actionable=epic_has_actionable_changeset,
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
-        if selected_epic:
-            return StartupContractResult(
-                epic_id=selected_epic,
-                changeset_id=None,
-                should_exit=False,
-                reason="selected_ready_changeset",
-            )
-
-    if selected_epic is None:
-        _log_warning("startup found no eligible epics")
-        _send_needs_decision(
-            agent_id=agent_id,
-            mode=mode,
-            issues=issues,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            dry_run=dry_run,
-        )
-        return StartupContractResult(
-            epic_id=None,
-            changeset_id=None,
-            should_exit=True,
-            reason="no_eligible_epics",
-        )
-
-    return StartupContractResult(
-        epic_id=selected_epic,
-        changeset_id=None,
-        should_exit=False,
-        reason="selected_auto" if mode == "auto" else "selected_prompt",
+        repo_slug=repo_slug,
+        branch_pr=branch_pr,
+        branch_pr_strategy=branch_pr_strategy,
+        git_path=git_path,
+        worker_queue_name=_WORKER_QUEUE_NAME,
+        handle_queue_before_claim=_handle_queue_before_claim,
+        list_epics=_list_epics,
+        next_changeset_fn=_next_changeset,
+        resolve_hooked_epic=_resolve_hooked_epic,
+        filter_epics=_filter_epics,
+        sort_by_created_at=_sort_by_created_at,
+        stale_family_assigned_epics=_stale_family_assigned_epics,
+        select_review_feedback_changeset=_select_review_feedback_changeset,
+        parse_issue_time=_parse_issue_time,
+        select_global_review_feedback_changeset=_select_global_review_feedback_changeset,
+        is_feedback_eligible_epic_status=_is_feedback_eligible_epic_status,
+        issue_labels=_issue_labels,
+        check_inbox_before_claim=_check_inbox_before_claim,
+        select_epic_auto=_select_epic_auto,
+        select_epic_prompt=_select_epic_prompt,
+        select_epic_from_ready_changesets=_select_epic_from_ready_changesets,
+        send_needs_decision=_send_needs_decision,
+        log_debug=_log_debug,
+        log_warning=_log_warning,
+        dry_run_log=_dry_run_log,
+        emit=say,
+        run_bd_json=beads.run_bd_json,
+        agent_family_id=_agent_family_id,
+        is_agent_session_active=_is_agent_session_active,
+        die_fn=die,
     )
 
 
