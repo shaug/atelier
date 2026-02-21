@@ -2,12 +2,60 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Protocol
 
+from ...agent_home import AgentHome
+from ...config import ProjectConfig
+from ...work_feedback import ReviewFeedbackSnapshot
 from ..context import ChangesetSelectionContext, WorkerRunContext
-from ..models import WorkerRunSummary
+from ..models import (
+    FinalizeResult,
+    ReconcileResult,
+    StartupContractResult,
+    WorkerRunSummary,
+)
 from ..ports import ChangesetSelectionPorts
+
+Issue = dict[str, object]
+StepTimings = list[tuple[str, float]]
+
+
+class StepFinish(Protocol):
+    def __call__(self, *, extra: str | None = None) -> None: ...
+
+
+class StepFactory(Protocol):
+    def __call__(
+        self, label: str, *, timings: StepTimings, trace: bool
+    ) -> StepFinish: ...
+
+
+class AgentHomeService(Protocol):
+    def preview_agent_home(
+        self,
+        project_dir: Path,
+        project_config: ProjectConfig,
+        *,
+        role: str,
+        session_key: str,
+    ) -> AgentHome: ...
+
+    def resolve_agent_home(
+        self,
+        project_dir: Path,
+        project_config: ProjectConfig,
+        *,
+        role: str,
+        session_key: str,
+    ) -> AgentHome: ...
+
+
+class AgentsService(Protocol):
+    def scoped_agent_env(self, agent_id: str) -> AbstractContextManager[object]: ...
 
 
 @dataclass(frozen=True)
@@ -18,49 +66,53 @@ class ChangesetSelection:
 
 @dataclass(frozen=True)
 class RunnerDependencies:
-    _capture_review_feedback_snapshot: Any
-    _changeset_parent_branch: Any
-    _changeset_pr_url: Any
-    _changeset_work_branch: Any
-    _dry_run_log: Any
-    _ensure_exec_subcommand_flag: Any
-    _extract_changeset_root_branch: Any
-    _extract_workspace_parent_branch: Any
-    _finalize_changeset: Any
-    _find_invalid_changeset_labels: Any
-    _lookup_pr_payload: Any
-    _mark_changeset_blocked: Any
-    _mark_changeset_in_progress: Any
-    _next_changeset: Any
-    _persist_review_feedback_cursor: Any
-    _release_epic_assignment: Any
-    _report_timings: Any
-    _resolve_epic_id_for_changeset: Any
-    _review_feedback_progressed: Any
-    _run_startup_contract: Any
-    _send_invalid_changeset_labels_notification: Any
-    _send_no_ready_changesets: Any
-    _send_planner_notification: Any
-    _step: Any
-    _strip_flag_with_value: Any
-    _trace_enabled: Any
-    _with_codex_exec: Any
-    _worker_opening_prompt: Any
-    agent_home: Any
-    agents: Any
-    beads: Any
-    branching: Any
-    config: Any
-    confirm: Any
-    die: Any
-    git: Any
-    prs: Any
-    reconcile_blocked_merged_changesets: Any
-    resolve_current_project_with_repo_root: Any
-    root_branch: Any
-    say: Any
-    worker_session_agent: Any
-    worker_session_worktree: Any
+    _capture_review_feedback_snapshot: Callable[..., ReviewFeedbackSnapshot]
+    _changeset_parent_branch: Callable[..., str]
+    _changeset_pr_url: Callable[[Issue], str | None]
+    _changeset_work_branch: Callable[[Issue], str | None]
+    _dry_run_log: Callable[[str], None]
+    _ensure_exec_subcommand_flag: Callable[[list[str], str], list[str]]
+    _extract_changeset_root_branch: Callable[[Issue], str | None]
+    _extract_workspace_parent_branch: Callable[[Issue], str | None]
+    _finalize_changeset: Callable[..., FinalizeResult]
+    _find_invalid_changeset_labels: Callable[..., list[str]]
+    _lookup_pr_payload: Callable[[str | None, str], Issue | None]
+    _mark_changeset_blocked: Callable[..., None]
+    _mark_changeset_in_progress: Callable[..., None]
+    _next_changeset: Callable[..., Issue | None]
+    _persist_review_feedback_cursor: Callable[..., None]
+    _release_epic_assignment: Callable[..., None]
+    _report_timings: Callable[..., None]
+    _resolve_epic_id_for_changeset: Callable[..., str | None]
+    _review_feedback_progressed: Callable[
+        [ReviewFeedbackSnapshot, ReviewFeedbackSnapshot], bool
+    ]
+    _run_startup_contract: Callable[..., StartupContractResult]
+    _send_invalid_changeset_labels_notification: Callable[..., str]
+    _send_no_ready_changesets: Callable[..., None]
+    _send_planner_notification: Callable[..., None]
+    _step: StepFactory
+    _strip_flag_with_value: Callable[[list[str], str], list[str]]
+    _trace_enabled: Callable[[], bool]
+    _with_codex_exec: Callable[[list[str], str], list[str]]
+    _worker_opening_prompt: Callable[..., str]
+    agent_home: AgentHomeService
+    agents: AgentsService
+    beads: object
+    branching: object
+    config: object
+    confirm: Callable[..., bool]
+    die: Callable[[str], None]
+    git: object
+    prs: object
+    reconcile_blocked_merged_changesets: Callable[..., ReconcileResult]
+    resolve_current_project_with_repo_root: Callable[
+        [], tuple[Path, ProjectConfig, str, Path]
+    ]
+    root_branch: object
+    say: Callable[[str], None]
+    worker_session_agent: object
+    worker_session_worktree: object
 
 
 def select_changeset(

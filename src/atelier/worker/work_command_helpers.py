@@ -15,6 +15,7 @@ from .. import (
     agent_home,
     agents,
     beads,
+    branching,
     changeset_fields,
     changesets,
     codex,
@@ -55,7 +56,10 @@ from ..worker.models import (
     StartupContractResult,
     WorkerRunSummary,
 )
+from ..worker.session import agent as worker_session_agent
+from ..worker.session import runner as worker_session_runner
 from ..worker.session import startup as worker_startup
+from ..worker.session import worktree as worker_session_worktree
 
 root_branch = root_branch_module
 
@@ -1968,3 +1972,62 @@ def _run_startup_contract(
         die_fn=die,
     )
     return worker_startup.run_startup_contract_service(context=context, ports=ports)
+
+
+def build_runner_dependencies(
+    *,
+    resolve_current_project_with_repo_root: Callable[
+        [], tuple[Path, config.ProjectConfig, str, Path]
+    ],
+    confirm_fn: Callable[..., bool],
+    die_fn: Callable[[str], None],
+    emit: Callable[[str], None],
+) -> worker_session_runner.RunnerDependencies:
+    """Build typed runner dependencies for the command controller."""
+    return worker_session_runner.RunnerDependencies(
+        _capture_review_feedback_snapshot=_capture_review_feedback_snapshot,
+        _changeset_parent_branch=_changeset_parent_branch,
+        _changeset_pr_url=_changeset_pr_url,
+        _changeset_work_branch=_changeset_work_branch,
+        _dry_run_log=_dry_run_log,
+        _ensure_exec_subcommand_flag=_ensure_exec_subcommand_flag,
+        _extract_changeset_root_branch=_extract_changeset_root_branch,
+        _extract_workspace_parent_branch=_extract_workspace_parent_branch,
+        _finalize_changeset=_finalize_changeset,
+        _find_invalid_changeset_labels=_find_invalid_changeset_labels,
+        _lookup_pr_payload=_lookup_pr_payload,
+        _mark_changeset_blocked=_mark_changeset_blocked,
+        _mark_changeset_in_progress=_mark_changeset_in_progress,
+        _next_changeset=_next_changeset,
+        _persist_review_feedback_cursor=_persist_review_feedback_cursor,
+        _release_epic_assignment=_release_epic_assignment,
+        _report_timings=_report_timings,
+        _resolve_epic_id_for_changeset=_resolve_epic_id_for_changeset,
+        _review_feedback_progressed=_review_feedback_progressed,
+        _run_startup_contract=_run_startup_contract,
+        _send_invalid_changeset_labels_notification=(
+            _send_invalid_changeset_labels_notification
+        ),
+        _send_no_ready_changesets=_send_no_ready_changesets,
+        _send_planner_notification=_send_planner_notification,
+        _step=_step,
+        _strip_flag_with_value=_strip_flag_with_value,
+        _trace_enabled=_trace_enabled,
+        _with_codex_exec=_with_codex_exec,
+        _worker_opening_prompt=_worker_opening_prompt,
+        agent_home=agent_home,
+        agents=agents,
+        beads=beads,
+        branching=branching,
+        config=config,
+        confirm=confirm_fn,
+        die=die_fn,
+        git=git,
+        prs=prs,
+        reconcile_blocked_merged_changesets=reconcile_blocked_merged_changesets,
+        resolve_current_project_with_repo_root=resolve_current_project_with_repo_root,
+        root_branch=root_branch,
+        say=emit,
+        worker_session_agent=worker_session_agent,
+        worker_session_worktree=worker_session_worktree,
+    )

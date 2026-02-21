@@ -120,6 +120,10 @@ Do not add hidden behavior or implicit defaults.
 - Prefer small, composable functions over monolithic command implementations.
 - Keep command tests thin and focused on wiring/CLI behavior; place business
   logic tests next to the extracted modules they exercise.
+- Prefer explicit typing over weak typing:
+  - avoid `Any` in new code and during refactors
+  - define `Protocol`/typed dataclasses for dependency boundaries
+  - pass grouped typed dependencies instead of long untyped parameter lists
 
 ______________________________________________________________________
 
