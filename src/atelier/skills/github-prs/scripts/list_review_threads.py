@@ -128,17 +128,15 @@ def normalize_threads(
                         latest = comment
         if latest is None:
             continue
+        author = latest.get("author")
+        author_login = author.get("login") if isinstance(author, dict) else None
         normalized.append(
             {
                 "thread_id": thread.get("id"),
                 "comment_id": latest.get("databaseId"),
                 "path": latest.get("path"),
                 "line": latest.get("line"),
-                "author": (
-                    latest.get("author", {}).get("login")
-                    if isinstance(latest.get("author"), dict)
-                    else None
-                ),
+                "author": author_login,
                 "body": latest.get("body"),
                 "created_at": latest.get("createdAt"),
                 "updated_at": latest.get("updatedAt"),

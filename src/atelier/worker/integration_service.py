@@ -260,7 +260,7 @@ def first_external_ticket_id(issue: dict[str, object]) -> str | None:
     return None
 
 
-def squash_subject(issue: dict[str, object], *, epic_id: str) -> str:
+def squash_subject(issue: dict[str, object], epic_id: str) -> str:
     ticket_id = first_external_ticket_id(issue)
     title = str(issue.get("title") or "").strip()
     if ticket_id and title:

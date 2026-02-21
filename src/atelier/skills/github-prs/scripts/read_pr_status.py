@@ -49,11 +49,9 @@ def find_latest_pr_number(repo: str, head: str) -> int | None:
     if not isinstance(payload, list):
         raise RuntimeError("Unexpected gh output for PR list")
     numbers = sorted(
-        {
-            entry.get("number")
-            for entry in payload
-            if isinstance(entry, dict) and isinstance(entry.get("number"), int)
-        }
+        entry["number"]
+        for entry in payload
+        if isinstance(entry, dict) and isinstance(entry.get("number"), int)
     )
     return numbers[-1] if numbers else None
 

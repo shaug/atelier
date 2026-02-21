@@ -6,6 +6,7 @@ import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import Callable
 
 from .. import agent_home, beads, changesets, config, git, messages, worktrees
 from .. import exec as exec_util
@@ -18,7 +19,7 @@ from .resolve import resolve_current_project_with_repo_root
 @dataclass(frozen=True)
 class GcAction:
     description: str
-    apply: callable
+    apply: Callable[[], None]
     details: tuple[str, ...] = ()
 
 
@@ -205,9 +206,9 @@ def _reconcile_preview_lines(
             )
     epic_issue = _try_show_issue(epic_id, beads_root=beads_root, cwd=repo_root)
     if epic_issue:
-        fields = beads.parse_description_fields(
-            epic_issue.get("description") if isinstance(epic_issue.get("description"), str) else ""
-        )
+        description_raw = epic_issue.get("description")
+        description = description_raw if isinstance(description_raw, str) else None
+        fields = beads.parse_description_fields(description)
         root_branch = _normalize_branch(fields.get("workspace.root_branch"))
         if not root_branch:
             root_branch = _normalize_branch(fields.get("changeset.root_branch"))

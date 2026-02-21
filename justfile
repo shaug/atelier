@@ -39,6 +39,10 @@ lint:
   uv run --extra dev mdformat --check --wrap 80 .
   uv run --extra dev shellcheck -x src/atelier/skills/publish/scripts/*.sh
 
+# Run static type checks
+typecheck:
+  uv run --extra dev pyright
+
 # Auto-format code
 format:
   uv run ruff check --select I,RUF022 --fix .

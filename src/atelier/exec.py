@@ -48,20 +48,17 @@ class SubprocessCommandRunner:
     """Default command-runner adapter backed by subprocess."""
 
     def run(self, request: CommandRequest) -> CommandResult | None:
-        run_kwargs: dict[str, object] = {
-            "cwd": request.cwd,
-            "env": request.env,
-            "check": False,
-        }
-        if request.capture_output:
-            run_kwargs["capture_output"] = True
-            run_kwargs["text"] = request.text
-        if request.timeout_seconds is not None:
-            run_kwargs["timeout"] = request.timeout_seconds
-        if request.stdin is not None:
-            run_kwargs["stdin"] = request.stdin
         try:
-            completed = subprocess.run(list(request.argv), **run_kwargs)
+            completed = subprocess.run(
+                list(request.argv),
+                cwd=request.cwd,
+                env=request.env,
+                check=False,
+                capture_output=request.capture_output,
+                text=request.text,
+                timeout=request.timeout_seconds,
+                stdin=request.stdin,
+            )
         except FileNotFoundError:
             return None
         except subprocess.TimeoutExpired as exc:

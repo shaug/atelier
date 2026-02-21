@@ -108,7 +108,7 @@ def attempt_create_draft_pr(
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
-    changeset_base_branch: Callable[..., str],
+    changeset_base_branch: Callable[..., str | None],
     render_changeset_pr_body: Callable[[dict[str, object]], str],
 ) -> tuple[bool, str]:
     base_branch = changeset_base_branch(
@@ -156,8 +156,8 @@ def handle_pushed_without_pr(
     branch_pr_strategy: object,
     git_path: str | None,
     create_detail_prefix: str | None = None,
-    changeset_base_branch: Callable[..., str],
-    changeset_work_branch: Callable[[dict[str, object]], str],
+    changeset_base_branch: Callable[..., str | None],
+    changeset_work_branch: Callable[[dict[str, object]], str | None],
     render_changeset_pr_body: Callable[[dict[str, object]], str],
     lookup_pr_payload: Callable[..., dict[str, object] | None],
     lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]],

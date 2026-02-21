@@ -8,7 +8,7 @@ import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal, Mapping
+from typing import Iterable, Iterator, Literal, Mapping
 
 WorkingDirMode = Literal["cwd", "flag"]
 
@@ -218,7 +218,7 @@ def agent_environment(
 
 
 @contextmanager
-def scoped_agent_env(agent_id: str) -> Iterable[None]:
+def scoped_agent_env(agent_id: str) -> Iterator[None]:
     """Temporarily set agent identity environment variables."""
     keys = ("ATELIER_AGENT_ID", "BD_ACTOR", "BEADS_AGENT_NAME")
     previous = {key: os.environ.get(key) for key in keys}

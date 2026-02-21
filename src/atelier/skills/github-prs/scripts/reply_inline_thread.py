@@ -83,26 +83,20 @@ def main(argv: Iterable[str]) -> int:
         resolved = None
         if args.thread_id:
             resolved = resolve_review_thread(args.thread_id)
+        resolved_data = resolved.get("data") if isinstance(resolved, dict) else None
+        resolved_payload = (
+            resolved_data.get("resolveReviewThread") if isinstance(resolved_data, dict) else None
+        )
+        resolved_thread = (
+            resolved_payload.get("thread") if isinstance(resolved_payload, dict) else None
+        )
+        is_resolved = bool(isinstance(resolved_thread, dict) and resolved_thread.get("isResolved"))
         print(
             json.dumps(
                 {
                     "reply_id": reply.get("id"),
                     "reply_url": reply.get("html_url"),
-                    "thread_resolved": bool(
-                        isinstance(resolved, dict)
-                        and isinstance(resolved.get("data"), dict)
-                        and isinstance(resolved.get("data", {}).get("resolveReviewThread"), dict)
-                        and isinstance(
-                            resolved.get("data", {}).get("resolveReviewThread", {}).get("thread"),
-                            dict,
-                        )
-                        and bool(
-                            resolved.get("data", {})
-                            .get("resolveReviewThread", {})
-                            .get("thread", {})
-                            .get("isResolved")
-                        )
-                    ),
+                    "thread_resolved": is_resolved,
                 },
                 indent=2,
                 sort_keys=True,

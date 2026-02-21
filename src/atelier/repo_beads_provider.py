@@ -172,19 +172,21 @@ def _issue_payload_to_record(
     ref = _issue_payload_to_ref(payload, sync_options=sync_options)
     if not ref:
         return None
-    title = payload.get("title") if isinstance(payload.get("title"), str) else None
-    description = (
-        payload.get("description") if isinstance(payload.get("description"), str) else None
-    )
-    acceptance = (
-        payload.get("acceptance_criteria")
-        if isinstance(payload.get("acceptance_criteria"), str)
-        else None
-    )
+    raw_title = payload.get("title")
+    raw_description = payload.get("description")
+    raw_acceptance = payload.get("acceptance_criteria")
+    title = raw_title if isinstance(raw_title, str) else None
+    description = raw_description if isinstance(raw_description, str) else None
+    acceptance = raw_acceptance if isinstance(raw_acceptance, str) else None
     body = None
     if sync_options.include_body:
         body = _format_body(description, acceptance)
-    labels = tuple(label for label in payload.get("labels", []) if isinstance(label, str) and label)
+    raw_labels = payload.get("labels")
+    labels = (
+        tuple(label for label in raw_labels if isinstance(label, str) and label)
+        if isinstance(raw_labels, list)
+        else ()
+    )
     return ExternalTicketRecord(
         ref=ref,
         title=title,

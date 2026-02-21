@@ -83,8 +83,9 @@ def parse_codex_resume_line(line: str) -> tuple[str | None, str | None]:
     resume_command: str | None = None
     match = _RESUME_COMMAND_RE.search(cleaned)
     if match:
-        resume_command = match.group(1).strip().rstrip(").,;:")
-        session_id = extract_session_id_from_command(resume_command)
+        command = match.group(1).strip().rstrip(").,;:")
+        resume_command = command
+        session_id = extract_session_id_from_command(command)
         if session_id:
             return session_id, resume_command
     match = _SESSION_ID_RE.search(cleaned)

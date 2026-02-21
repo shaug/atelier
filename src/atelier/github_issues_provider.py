@@ -167,10 +167,12 @@ def issue_payload_to_record(
     ref = issue_payload_to_ref(payload, sync_options=options)
     if not ref:
         return None
-    title = payload.get("title") if isinstance(payload.get("title"), str) else None
+    raw_title = payload.get("title")
+    title = raw_title if isinstance(raw_title, str) else None
     body = None
     if options.include_body:
-        body = payload.get("body") if isinstance(payload.get("body"), str) else None
+        raw_body = payload.get("body")
+        body = raw_body if isinstance(raw_body, str) else None
     labels = tuple(_label_names(payload.get("labels")))
     summary = payload.get("stateReason")
     if not options.include_notes or not isinstance(summary, str):

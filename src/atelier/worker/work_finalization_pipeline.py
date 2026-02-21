@@ -323,7 +323,7 @@ def finalize_changeset(
     beads_root: Path,
     repo_root: Path,
     branch_pr: bool = True,
-    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
+    branch_pr_strategy: pr_strategy.PrStrategy = pr_strategy.PR_STRATEGY_DEFAULT,
     branch_history: str = "manual",
     branch_squash_message: str = "deterministic",
     project_data_dir: Path | None = None,

@@ -85,8 +85,9 @@ def main() -> None:
 
     output = run_gh(cmd)
     issue_ref = last_non_empty_line(output.splitlines())
-    if not issue_ref:
+    if issue_ref is None or not issue_ref:
         die("gh issue create returned no issue reference", 2)
+        return
 
     payload = issue_view(args.repo, issue_ref)
     json.loads(payload)

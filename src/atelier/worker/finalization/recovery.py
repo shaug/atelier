@@ -7,6 +7,8 @@ from pathlib import Path
 
 from ... import git, prs
 from ... import log as atelier_log
+from ...agents import AgentSpec
+from ...pr_strategy import PrStrategy
 from ..models import FinalizeResult
 
 
@@ -20,17 +22,17 @@ def recover_premature_merged_changeset(
     branch_pr: bool,
     branch_history: str,
     branch_squash_message: str,
-    branch_pr_strategy: object,
+    branch_pr_strategy: PrStrategy,
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
     project_data_dir: Path,
-    squash_message_agent_spec: str | None,
+    squash_message_agent_spec: AgentSpec | None,
     squash_message_agent_options: list[str],
     squash_message_agent_home: Path | None,
     squash_message_agent_env: dict[str, str] | None,
     git_path: str | None,
-    changeset_work_branch: Callable[[dict[str, object]], str],
+    changeset_work_branch: Callable[[dict[str, object]], str | None],
     lookup_pr_payload: Callable[..., dict[str, object] | None],
     lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]],
     changeset_integration_signal: Callable[..., tuple[bool, str | None]],

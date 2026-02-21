@@ -61,11 +61,9 @@ def find_pr_number(repo: str, head: str) -> int | None:
     if not isinstance(payload, list):
         raise RuntimeError("Unexpected gh output for PR list")
     numbers = sorted(
-        {
-            entry.get("number")
-            for entry in payload
-            if isinstance(entry, dict) and isinstance(entry.get("number"), int)
-        }
+        entry["number"]
+        for entry in payload
+        if isinstance(entry, dict) and isinstance(entry.get("number"), int)
     )
     return numbers[0] if numbers else None
 
@@ -87,7 +85,9 @@ def edit_labels(repo: str, number: int, desired: list[str]) -> None:
         raise RuntimeError("Unexpected gh output for PR view")
     labels = payload.get("labels") or []
     current = {
-        entry.get("name") for entry in labels if isinstance(entry, dict) and entry.get("name")
+        entry["name"]
+        for entry in labels
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str)
     }
     desired_set = set(desired)
     to_add = sorted(desired_set - current)

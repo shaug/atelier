@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Mapping
 
 from rich import box
 from rich.console import Console
@@ -55,8 +56,14 @@ def status(args: object) -> None:
         repo_root=repo_root,
     )
 
-    epics = sorted(epics, key=lambda item: (item.get("root_branch") or "", item["id"]))
-    agents = sorted(agents, key=lambda item: item.get("agent_id") or "")
+    epics = sorted(
+        epics,
+        key=lambda item: (
+            str(item.get("root_branch") or ""),
+            str(item.get("id") or ""),
+        ),
+    )
+    agents = sorted(agents, key=lambda item: str(item.get("agent_id") or ""))
 
     counts = _status_counts(epics, agents, queues)
     project_info = {
@@ -387,6 +394,18 @@ def _status_counts(
     agents: list[dict[str, object]],
     queues: list[dict[str, object]],
 ) -> dict[str, object]:
+    def _to_int(value: object) -> int:
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            try:
+                return int(value)
+            except ValueError:
+                return 0
+        return 0
+
     status_counts: dict[str, int] = {}
     total_changesets = 0
     ready_changesets = 0
@@ -395,10 +414,10 @@ def _status_counts(
         status_counts[status] = status_counts.get(status, 0) + 1
         changesets = epic.get("changesets")
         if isinstance(changesets, dict):
-            total_changesets += int(changesets.get("total", 0))
-            ready_changesets += int(changesets.get("ready", 0))
-    queue_total = sum(int(queue.get("total", 0)) for queue in queues)
-    queue_claimed = sum(int(queue.get("claimed", 0)) for queue in queues)
+            total_changesets += _to_int(changesets.get("total"))
+            ready_changesets += _to_int(changesets.get("ready"))
+    queue_total = sum(_to_int(queue.get("total")) for queue in queues)
+    queue_claimed = sum(_to_int(queue.get("claimed")) for queue in queues)
     stale_agents = sum(1 for agent in agents if str(agent.get("session_state") or "") == "stale")
     reclaimable_epics = sum(1 for epic in epics if bool(epic.get("reclaimable")))
     return {
@@ -440,7 +459,7 @@ def _build_queue_payloads(*, beads_root: Path, repo_root: Path) -> list[dict[str
 
 
 def _render_status(
-    project_info: dict[str, object],
+    project_info: Mapping[str, str],
     counts: dict[str, object],
     epics: list[dict[str, object]],
     agents: list[dict[str, object]],
@@ -477,7 +496,8 @@ def _render_status(
         table.add_column("Changesets", justify="right")
         table.add_column("Worktree", overflow="fold")
         for epic in epics:
-            changesets = epic.get("changesets") or {}
+            raw_changesets = epic.get("changesets")
+            changesets = raw_changesets if isinstance(raw_changesets, dict) else {}
             ready = changesets.get("ready")
             total = changesets.get("total")
             ready_display = f"{ready}/{total}" if ready is not None and total is not None else "0/0"

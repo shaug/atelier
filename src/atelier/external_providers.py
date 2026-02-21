@@ -104,23 +104,38 @@ class ExternalTicketLinkRequest:
 class ExternalProvider(Protocol):
     """Required provider operations for external tickets."""
 
-    slug: str
-    display_name: str
-    capabilities: ExternalProviderCapabilities
+    @property
+    def slug(self) -> str:
+        """Stable provider slug."""
+        ...
+
+    @property
+    def display_name(self) -> str:
+        """Human-facing provider name."""
+        ...
+
+    @property
+    def capabilities(self) -> ExternalProviderCapabilities:
+        """Capability flags for the provider."""
+        ...
 
     def import_tickets(
         self, request: ExternalTicketImportRequest
     ) -> Sequence[ExternalTicketRecord]:
         """Return external tickets for planner import."""
+        ...
 
     def create_ticket(self, request: ExternalTicketCreateRequest) -> ExternalTicketRecord:
         """Create a new external ticket from a local bead."""
+        ...
 
     def link_ticket(self, request: ExternalTicketLinkRequest) -> ExternalTicketRecord:
         """Associate a local bead with an existing external ticket."""
+        ...
 
     def set_in_progress(self, ref: ExternalTicketRef) -> ExternalTicketRef:
         """Set the remote ticket to in-progress when supported."""
+        ...
 
     def update_ticket(
         self,
@@ -130,11 +145,14 @@ class ExternalProvider(Protocol):
         body: str | None = None,
     ) -> ExternalTicketRef:
         """Optional: push local updates to the external ticket."""
+        ...
 
     def create_child_ticket(
         self, ref: ExternalTicketRef, *, title: str, body: str | None = None
     ) -> ExternalTicketRef:
         """Optional: create a child/split ticket for review-sized work."""
+        ...
 
     def sync_state(self, ref: ExternalTicketRef) -> ExternalTicketRef:
         """Optional: refresh cached state for the external ticket."""
+        ...

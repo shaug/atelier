@@ -15,6 +15,7 @@ import json
 import shlex
 import shutil
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -35,6 +36,7 @@ from .models import (
     ProjectSection,
     ProjectSystemConfig,
     ProjectUserConfig,
+    UpgradePolicy,
 )
 
 
@@ -1015,6 +1017,16 @@ def build_project_config(
     beads_location = "project"
     beads_section = existing_config.beads.model_copy(update={"location": beads_location})
 
+    branch_config = BranchConfig.model_validate(
+        {
+            "prefix": branch_prefix,
+            "pr": branch_pr,
+            "history": branch_history,
+            "squash_message": branch_squash_message,
+            "pr_strategy": branch_pr_strategy,
+        }
+    )
+    upgrade_policy = cast(UpgradePolicy, resolve_upgrade_policy(atelier_upgrade))
     return ProjectConfig(
         project=ProjectSection(
             enlistment=enlistment_path,
@@ -1026,13 +1038,7 @@ def build_project_config(
             owner=project_owner,
         ),
         git=existing_config.git,
-        branch=BranchConfig(
-            prefix=branch_prefix,
-            pr=branch_pr,
-            history=branch_history,
-            squash_message=branch_squash_message,
-            pr_strategy=branch_pr_strategy,
-        ),
+        branch=branch_config,
         agent=AgentConfig(default=agent_default, options=agent_options),
         editor=EditorConfig(edit=editor_edit, work=editor_work),
         beads=beads_section,
@@ -1040,7 +1046,7 @@ def build_project_config(
             version=atelier_version,
             created_at=atelier_created_at,
             data_dir=atelier_data_dir,
-            upgrade=atelier_upgrade,
+            upgrade=upgrade_policy,
             managed_files=atelier_managed_files,
         ),
     )

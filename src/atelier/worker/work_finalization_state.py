@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import beads, changeset_fields, changesets, git, lifecycle, pr_strategy, prs
+from .. import agents, beads, changeset_fields, changesets, git, lifecycle, pr_strategy, prs
 from ..io import say
 from ..worker import finalization_service as worker_finalization_service
 from ..worker import integration_service as worker_integration_service
@@ -606,12 +606,12 @@ def recover_premature_merged_changeset(
     branch_pr: bool,
     branch_history: str,
     branch_squash_message: str,
-    branch_pr_strategy: object,
+    branch_pr_strategy: pr_strategy.PrStrategy,
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
     project_data_dir: Path,
-    squash_message_agent_spec: str | None,
+    squash_message_agent_spec: agents.AgentSpec | None,
     squash_message_agent_options: list[str],
     squash_message_agent_home: Path | None,
     squash_message_agent_env: dict[str, str] | None,

@@ -95,7 +95,8 @@ def prepare_agent_session(
     if agent_spec.name == "codex":
         agent_options = command_ops.strip_flag_with_value(agent_options, "--cd")
 
-    project_enlistment = project_config.project.enlistment or enlistment_path
+    project_enlistment_raw = project_config.project.enlistment or str(enlistment_path)
+    project_enlistment = Path(project_enlistment_raw)
     workspace_branch = root_branch_value or ""
     if dry_run:
         worker_agents_path = (
@@ -138,6 +139,8 @@ def prepare_agent_session(
                 skills_dir = None
         if skills_dir is not None:
             project_lookup_paths, _global_lookup_paths = agents.skill_lookup_paths(agent_spec.name)
+            if changeset_worktree_path is None:
+                raise RuntimeError("missing changeset worktree path for agent link setup")
             agent_home.ensure_agent_links(
                 agent,
                 worktree_path=changeset_worktree_path,
@@ -177,7 +180,7 @@ def prepare_agent_session(
 
     env_workspace_path = changeset_worktree_path or (project_data_dir / "worktrees" / "unknown")
     env = workspace.workspace_environment(
-        project_enlistment,
+        str(project_enlistment),
         workspace_branch,
         env_workspace_path,
         base_env=agents.agent_environment(agent.agent_id),
@@ -247,10 +250,12 @@ def start_agent_session(
         if result is None:
             blocked_handler.mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
             session_control.die(f"missing required command: {start_cmd[0]}")
+            return None
         if result.returncode != 0:
             returncode = result.returncode
             blocked_handler.mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
             session_control.die(f"command failed: {' '.join(start_cmd)}")
+            return None
     else:
         result = exec.run_with_runner(
             exec.CommandRequest(
@@ -264,14 +269,18 @@ def start_agent_session(
         if result is None:
             blocked_handler.mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
             session_control.die(f"missing required command: {start_cmd[0]}")
+            return None
         if result.returncode != 0:
             returncode = result.returncode
             blocked_handler.mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
             session_control.die(f"command failed: {' '.join(start_cmd)}")
+            return None
+
+    effective_start_cwd = start_cwd or agent.path
 
     return AgentSessionRunResult(
         started_at=started_at,
         returncode=returncode,
         start_cmd=start_cmd,
-        start_cwd=start_cwd,
+        start_cwd=effective_start_cwd,
     )

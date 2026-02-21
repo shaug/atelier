@@ -758,8 +758,7 @@ def update_workspace_root_branch(
         value=root_branch,
     )
     label = workspace_label(root_branch)
-    labels = issue.get("labels") if isinstance(issue.get("labels"), list) else []
-    labels = [label for label in labels if isinstance(label, str)]
+    labels = sorted(_issue_labels(issue))
     remove_labels = [
         existing for existing in labels if existing.startswith("workspace:") and existing != label
     ]
@@ -920,8 +919,7 @@ def update_external_tickets(
     )
 
     desired_labels = {external_label(ticket.provider) for ticket in tickets}
-    labels = issue.get("labels") if isinstance(issue.get("labels"), list) else []
-    labels = [label for label in labels if isinstance(label, str)]
+    labels = sorted(_issue_labels(issue))
     remove_labels = [
         label for label in labels if label.startswith("ext:") and label not in desired_labels
     ]
@@ -1154,7 +1152,7 @@ def claim_epic(
     if not issues:
         die(f"epic not found: {epic_id}")
     issue = issues[0]
-    labels = issue.get("labels") if isinstance(issue.get("labels"), list) else []
+    labels = _issue_labels(issue)
     if "at:draft" in labels:
         die(f"epic {epic_id} is marked as draft")
     existing_assignee = issue.get("assignee")

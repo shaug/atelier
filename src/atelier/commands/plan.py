@@ -6,6 +6,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Protocol
 
 from .. import (
     agent_home,
@@ -302,7 +303,11 @@ def _sync_planner_branch(
     )
 
 
-def _step(label: str, *, timings: list[tuple[str, float]], trace: bool) -> callable:
+class _StepFinish(Protocol):
+    def __call__(self, extra: str | None = None) -> None: ...
+
+
+def _step(label: str, *, timings: list[tuple[str, float]], trace: bool) -> _StepFinish:
     say(f"-> {label}")
     start = time.perf_counter()
 

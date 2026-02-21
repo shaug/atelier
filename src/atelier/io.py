@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import NoReturn, Sequence
 
 from . import log
 
@@ -67,7 +67,7 @@ def warn(message: str) -> None:
     log.warning(f"warning: {message}")
 
 
-def die(message: str, code: int = 1) -> None:
+def die(message: str, code: int = 1) -> NoReturn:
     """Print an error message and exit.
 
     Args:
@@ -104,7 +104,7 @@ def prompt(
         Branch prefix (optional) [scott/]:
     """
     while True:
-        if _use_questionary():
+        if questionary is not None and _use_questionary():
             question = questionary.text(text, default=default or "")
             value = question.ask()
             if value is None:
@@ -144,7 +144,7 @@ def select(
         default = None
 
     while True:
-        if _use_questionary():
+        if questionary is not None and _use_questionary():
             question = questionary.select(text, choices=choices_list, default=default)
             value = question.ask()
             if value is None:
@@ -164,21 +164,21 @@ def select(
         warn(f"please choose one of: {', '.join(choices_list)}")
 
 
-def confirm(text: str, default: bool = False) -> bool:
+def confirm(prompt: str, default: bool = False) -> bool:
     """Prompt for a yes/no confirmation.
 
     Args:
-        text: Prompt label shown to the user.
+        prompt: Prompt label shown to the user.
         default: Default answer when the user presses enter.
 
     Returns:
         ``True`` when the user confirms.
     """
-    if _use_questionary():
-        response = questionary.confirm(text, default=default).ask()
+    if questionary is not None and _use_questionary():
+        response = questionary.confirm(prompt, default=default).ask()
         return bool(response)
     suffix = "[Y/n]" if default else "[y/N]"
-    response = input(f"{text} {suffix}: ").strip().lower()
+    response = input(f"{prompt} {suffix}: ").strip().lower()
     if response == "":
         return default
     return response in {"y", "yes"}

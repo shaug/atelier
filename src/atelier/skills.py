@@ -6,6 +6,7 @@ import hashlib
 import shutil
 from dataclasses import dataclass
 from importlib import resources
+from importlib.abc import Traversable
 from pathlib import Path
 from typing import Callable
 
@@ -36,7 +37,7 @@ class ProjectSkillsSyncResult:
     detail: str | None = None
 
 
-def _skills_root() -> resources.abc.Traversable:
+def _skills_root() -> Traversable:
     return resources.files("atelier").joinpath("skills")
 
 
@@ -54,7 +55,7 @@ def list_packaged_skills() -> list[str]:
     return sorted(names)
 
 
-def _collect_files(root: resources.abc.Traversable, prefix: Path) -> dict[str, bytes]:
+def _collect_files(root: Traversable, prefix: Path) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     for entry in root.iterdir():
         name = entry.name
@@ -117,9 +118,13 @@ def workspace_skill_state(
         payload: dict[str, object] = {}
         if isinstance(entry, dict):
             payload = entry
-        elif hasattr(entry, "model_dump"):
-            payload = entry.model_dump()
-        elif hasattr(entry, "version") or hasattr(entry, "hash"):
+        else:
+            model_dump = getattr(entry, "model_dump", None)
+            if callable(model_dump):
+                dumped = model_dump()
+                if isinstance(dumped, dict):
+                    payload = dumped
+        if not payload and (hasattr(entry, "version") or hasattr(entry, "hash")):
             payload = {
                 "version": getattr(entry, "version", None),
                 "hash": getattr(entry, "hash", None),

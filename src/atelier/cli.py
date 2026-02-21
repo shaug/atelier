@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Annotated
+from typing import Annotated, Callable, cast
 
 import click
 import typer
@@ -38,6 +38,8 @@ from .commands import remove as remove_cmd
 from .commands import status as status_cmd
 from .commands import work as work_cmd
 from .exec import try_run_command
+
+_split_arg_string = cast(Callable[[str], list[str]], split_arg_string)
 
 app = typer.Typer(
     add_completion=True,
@@ -69,7 +71,7 @@ def _ensure_completion_env() -> None:
         except ValueError:
             point = len(comp_line)
         line = comp_line[:point]
-        words = split_arg_string(line)
+        words = _split_arg_string(line)
         if not words:
             prog = os.path.basename(sys.argv[0]) if sys.argv else "atelier"
             line = prog

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
 from .. import agent_home, agents, beads, branching, config, git, prs
 from .. import root_branch as root_branch_module
 from ..config import ProjectConfig
+from ..models import BranchHistory, BranchSquashMessage
+from ..pr_strategy import PrStrategy
 from ..work_feedback import ReviewFeedbackSnapshot
 from . import work_command_helpers as worker_work
 from .models import (
@@ -81,16 +84,16 @@ class WorkerLifecycleAdapter:
         epic_id: str,
         agent_id: str,
         agent_bead_id: str,
-        started_at: object,
+        started_at: datetime,
         repo_slug: str | None,
         beads_root: Path,
         repo_root: Path,
         branch_pr: bool,
-        branch_pr_strategy: object,
-        branch_history: str,
-        branch_squash_message: str,
+        branch_pr_strategy: PrStrategy,
+        branch_history: BranchHistory,
+        branch_squash_message: BranchSquashMessage,
         project_data_dir: Path | None,
-        squash_message_agent_spec: object,
+        squash_message_agent_spec: agents.AgentSpec | None,
         squash_message_agent_options: list[str],
         squash_message_agent_home: Path,
         squash_message_agent_env: dict[str, str],
@@ -149,7 +152,7 @@ class WorkerLifecycleAdapter:
         repo_root: Path,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: object,
+        branch_pr_strategy: PrStrategy,
         git_path: str | None,
     ) -> Issue | None:
         return worker_work.next_changeset(

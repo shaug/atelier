@@ -43,9 +43,9 @@ def finalize_epic_if_complete(
         if not issues:
             return FinalizeResult(continue_running=False, reason="epic_blocked_missing_metadata")
         issue = issues[0]
-        fields = beads.parse_description_fields(
-            issue.get("description") if isinstance(issue.get("description"), str) else ""
-        )
+        raw_description = issue.get("description")
+        description = raw_description if isinstance(raw_description, str) else None
+        fields = beads.parse_description_fields(description)
         root_branch = normalize_branch_value(fields.get("workspace.root_branch"))
         if not root_branch:
             root_branch = normalize_branch_value(fields.get("changeset.root_branch"))

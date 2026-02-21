@@ -61,13 +61,15 @@ def format_workspace_title(state: WorkspaceState) -> str:
 
 def emit_title_escape(title: str, *, stream: TextIO | None = None) -> bool:
     """Emit a terminal title escape sequence when possible."""
-    stream = stream or sys.stdout
-    if not getattr(stream, "isatty", lambda: False)():
+    active_stream = stream if stream is not None else sys.stdout
+    if active_stream is None:
+        return False
+    if not getattr(active_stream, "isatty", lambda: False)():
         return False
     safe_title = title.replace("\033", "")
     try:
-        stream.write(f"\033]0;{safe_title}\007")
-        stream.flush()
+        active_stream.write(f"\033]0;{safe_title}\007")
+        active_stream.flush()
     except Exception:
         return False
     return True
