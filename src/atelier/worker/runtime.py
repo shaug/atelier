@@ -14,10 +14,10 @@ from . import work_command_helpers as worker_work
 from .models import WorkerRunSummary
 from .ports import (
     ConfirmFn,
-    WorkerCommandPorts,
+    WorkerCommandService,
     WorkerControlPorts,
     WorkerInfrastructurePorts,
-    WorkerLifecyclePorts,
+    WorkerLifecycleService,
     WorkerRuntimeDependencies,
 )
 from .session import agent as worker_session_agent
@@ -28,6 +28,53 @@ class RunWorkerOnceFn(Protocol):
     def __call__(
         self, args: object, *, mode: str, dry_run: bool, session_key: str
     ) -> WorkerRunSummary: ...
+
+
+class WorkerLifecycleAdapter:
+    """Concrete lifecycle service object backed by worker helper functions."""
+
+    def __init__(self) -> None:
+        self.capture_review_feedback_snapshot = (
+            worker_work._capture_review_feedback_snapshot
+        )
+        self.changeset_parent_branch = worker_work._changeset_parent_branch
+        self.changeset_pr_url = worker_work._changeset_pr_url
+        self.changeset_work_branch = worker_work._changeset_work_branch
+        self.extract_changeset_root_branch = worker_work._extract_changeset_root_branch
+        self.extract_workspace_parent_branch = (
+            worker_work._extract_workspace_parent_branch
+        )
+        self.finalize_changeset = worker_work._finalize_changeset
+        self.find_invalid_changeset_labels = worker_work._find_invalid_changeset_labels
+        self.lookup_pr_payload = worker_work._lookup_pr_payload
+        self.mark_changeset_blocked = worker_work._mark_changeset_blocked
+        self.mark_changeset_in_progress = worker_work._mark_changeset_in_progress
+        self.next_changeset = worker_work._next_changeset
+        self.persist_review_feedback_cursor = (
+            worker_work._persist_review_feedback_cursor
+        )
+        self.release_epic_assignment = worker_work._release_epic_assignment
+        self.reconcile_blocked_merged_changesets = (
+            worker_work.reconcile_blocked_merged_changesets
+        )
+        self.resolve_epic_id_for_changeset = worker_work._resolve_epic_id_for_changeset
+        self.review_feedback_progressed = worker_work._review_feedback_progressed
+        self.run_startup_contract = worker_work._run_startup_contract
+        self.send_invalid_changeset_labels_notification = (
+            worker_work._send_invalid_changeset_labels_notification
+        )
+        self.send_no_ready_changesets = worker_work._send_no_ready_changesets
+        self.send_planner_notification = worker_work._send_planner_notification
+
+
+class WorkerCommandAdapter:
+    """Concrete command service object backed by worker helper functions."""
+
+    def __init__(self) -> None:
+        self.ensure_exec_subcommand_flag = worker_work._ensure_exec_subcommand_flag
+        self.strip_flag_with_value = worker_work._strip_flag_with_value
+        self.with_codex_exec = worker_work._with_codex_exec
+        self.worker_opening_prompt = worker_work._worker_opening_prompt
 
 
 def run_worker_sessions(
@@ -112,6 +159,8 @@ def build_worker_runtime_dependencies(
     emit: Callable[[str], None],
 ) -> WorkerRuntimeDependencies:
     """Build worker runtime service ports for runner orchestration."""
+    lifecycle: WorkerLifecycleService = WorkerLifecycleAdapter()
+    commands: WorkerCommandService = WorkerCommandAdapter()
     return WorkerRuntimeDependencies(
         infra=WorkerInfrastructurePorts(
             resolve_current_project_with_repo_root=resolve_current_project_with_repo_root,
@@ -126,37 +175,8 @@ def build_worker_runtime_dependencies(
             worker_session_agent=worker_session_agent,
             worker_session_worktree=worker_session_worktree,
         ),
-        lifecycle=WorkerLifecyclePorts(
-            capture_review_feedback_snapshot=worker_work._capture_review_feedback_snapshot,
-            changeset_parent_branch=worker_work._changeset_parent_branch,
-            changeset_pr_url=worker_work._changeset_pr_url,
-            changeset_work_branch=worker_work._changeset_work_branch,
-            extract_changeset_root_branch=worker_work._extract_changeset_root_branch,
-            extract_workspace_parent_branch=worker_work._extract_workspace_parent_branch,
-            finalize_changeset=worker_work._finalize_changeset,
-            find_invalid_changeset_labels=worker_work._find_invalid_changeset_labels,
-            lookup_pr_payload=worker_work._lookup_pr_payload,
-            mark_changeset_blocked=worker_work._mark_changeset_blocked,
-            mark_changeset_in_progress=worker_work._mark_changeset_in_progress,
-            next_changeset=worker_work._next_changeset,
-            persist_review_feedback_cursor=worker_work._persist_review_feedback_cursor,
-            release_epic_assignment=worker_work._release_epic_assignment,
-            reconcile_blocked_merged_changesets=worker_work.reconcile_blocked_merged_changesets,
-            resolve_epic_id_for_changeset=worker_work._resolve_epic_id_for_changeset,
-            review_feedback_progressed=worker_work._review_feedback_progressed,
-            run_startup_contract=worker_work._run_startup_contract,
-            send_invalid_changeset_labels_notification=(
-                worker_work._send_invalid_changeset_labels_notification
-            ),
-            send_no_ready_changesets=worker_work._send_no_ready_changesets,
-            send_planner_notification=worker_work._send_planner_notification,
-        ),
-        commands=WorkerCommandPorts(
-            ensure_exec_subcommand_flag=worker_work._ensure_exec_subcommand_flag,
-            strip_flag_with_value=worker_work._strip_flag_with_value,
-            with_codex_exec=worker_work._with_codex_exec,
-            worker_opening_prompt=worker_work._worker_opening_prompt,
-        ),
+        lifecycle=lifecycle,
+        commands=commands,
         control=WorkerControlPorts(
             dry_run_log=worker_work._dry_run_log,
             report_timings=worker_work._report_timings,

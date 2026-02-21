@@ -10,10 +10,8 @@ from atelier.agent_home import AgentHome
 from atelier.worker.context import WorkerRunContext
 from atelier.worker.models import FinalizeResult, StartupContractResult
 from atelier.worker.ports import (
-    WorkerCommandPorts,
     WorkerControlPorts,
     WorkerInfrastructurePorts,
-    WorkerLifecyclePorts,
     WorkerRuntimeDependencies,
 )
 from atelier.worker.session import runner
@@ -86,7 +84,7 @@ def _build_runner_deps(
             ),
             worker_session_worktree=SimpleNamespace(prepare_worktrees=Mock()),
         ),
-        lifecycle=WorkerLifecyclePorts(
+        lifecycle=SimpleNamespace(
             capture_review_feedback_snapshot=Mock(side_effect=AssertionError),
             changeset_parent_branch=lambda _issue, **_kwargs: "feat/root",
             changeset_pr_url=lambda _issue: None,
@@ -112,7 +110,7 @@ def _build_runner_deps(
             send_no_ready_changesets=_noop,
             send_planner_notification=_noop,
         ),
-        commands=WorkerCommandPorts(
+        commands=SimpleNamespace(
             ensure_exec_subcommand_flag=lambda args, _flag: args,
             strip_flag_with_value=lambda args, _flag: args,
             with_codex_exec=lambda cmd, _prompt: cmd,

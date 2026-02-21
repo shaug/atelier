@@ -480,9 +480,8 @@ class WorkerInfrastructurePorts:
     worker_session_worktree: WorkerSessionWorktreeService
 
 
-@dataclass(frozen=True)
-class WorkerLifecyclePorts:
-    """Worker lifecycle service entry points used by runner orchestration."""
+class WorkerLifecycleService(Protocol):
+    """Worker lifecycle service contract used by runner orchestration."""
 
     capture_review_feedback_snapshot: CaptureReviewFeedbackSnapshotFn
     changeset_parent_branch: ChangesetParentBranchFn
@@ -509,9 +508,8 @@ class WorkerLifecyclePorts:
     send_planner_notification: SendPlannerNotificationFn
 
 
-@dataclass(frozen=True)
-class WorkerCommandPorts:
-    """Agent command-line argument transformation hooks."""
+class WorkerCommandService(Protocol):
+    """Agent command-line argument transformation contract."""
 
     ensure_exec_subcommand_flag: Callable[[list[str], str], list[str]]
     strip_flag_with_value: Callable[[list[str], str], list[str]]
@@ -537,8 +535,8 @@ class WorkerRuntimeDependencies:
     """Compact runtime dependency graph for worker session runner."""
 
     infra: WorkerInfrastructurePorts
-    lifecycle: WorkerLifecyclePorts
-    commands: WorkerCommandPorts
+    lifecycle: WorkerLifecycleService
+    commands: WorkerCommandService
     control: WorkerControlPorts
 
 
