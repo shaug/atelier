@@ -1,4 +1,4 @@
-from atelier.worker import runtime
+from atelier.worker import runtime, work_command_helpers, work_startup_runtime
 from atelier.worker.models import WorkerRunSummary
 from atelier.worker.ports import WorkerRuntimeDependencies
 
@@ -144,3 +144,13 @@ def test_build_worker_runtime_dependencies_wires_port_groups() -> None:
     assert deps.lifecycle.run_startup_contract is not None
     assert deps.commands.ensure_exec_subcommand_flag is not None
     assert deps.control.step is not None
+
+
+def test_work_command_helpers_exposes_split_private_helpers() -> None:
+    helper = getattr(work_command_helpers, "_find_invalid_changeset_labels")
+    assert callable(helper)
+
+
+def test_work_startup_runtime_fallback_exposes_finalize_helper() -> None:
+    helper = getattr(work_startup_runtime, "_find_invalid_changeset_labels")
+    assert callable(helper)

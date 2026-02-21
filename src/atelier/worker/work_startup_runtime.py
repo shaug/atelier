@@ -14,6 +14,8 @@ from ..worker import review as worker_review
 from ..worker import selection as worker_selection
 from ..worker.models import StartupContractResult
 from ..worker.session import startup as worker_startup
+from . import work_finalization_runtime as _work_finalization_runtime
+from . import work_runtime_common as _work_runtime_common
 from .work_finalization_runtime import (
     _changeset_waiting_on_review_or_signals,
     _has_open_descendant_changesets,
@@ -31,6 +33,19 @@ from .work_runtime_common import (
 ReviewFeedbackSelection = worker_review.ReviewFeedbackSelection
 
 _WORKER_QUEUE_NAME = "worker"
+
+
+def __getattr__(name: str) -> object:
+    """Compatibility fallback for legacy callers importing this module directly.
+
+    Worker runtime internals were split across startup/finalization/common modules.
+    Some installed clients still resolve helpers from `work_startup_runtime`; forward
+    unknown attributes to the newer modules to prevent runtime AttributeError.
+    """
+    for module in (_work_finalization_runtime, _work_runtime_common):
+        if hasattr(module, name):
+            return getattr(module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class _NextChangesetService(worker_startup.NextChangesetService):
