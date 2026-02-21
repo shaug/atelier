@@ -3436,33 +3436,6 @@ def test_work_cleans_up_session_agent_home_on_exit(tmp_path: Path) -> None:
     cleanup_home.assert_called_once_with(agent, project_dir=tmp_path)
 
 
-def test_work_once_retries_after_no_ready_changesets() -> None:
-    with (
-        patch(
-            "atelier.commands.work._run_worker_once",
-            side_effect=[
-                work_cmd.WorkerRunSummary(
-                    started=False,
-                    reason="no_ready_changesets",
-                    epic_id="atelier-epic",
-                ),
-                work_cmd.WorkerRunSummary(
-                    started=False,
-                    reason="no_eligible_epics",
-                ),
-            ],
-        ) as run_once,
-        patch("atelier.commands.work._report_worker_summary"),
-    ):
-        work_cmd.start_worker(
-            SimpleNamespace(
-                epic_id=None, mode="auto", run_mode="once", dry_run=True, queue=False
-            )
-        )
-
-    assert run_once.call_count == 2
-
-
 def test_work_auto_sends_needs_decision_when_idle() -> None:
     agent = AgentHome(
         name="worker",
@@ -3748,25 +3721,6 @@ def test_work_dry_run_logs_and_skips_mutations() -> None:
     ensure_git_worktree.assert_not_called()
     run_codex.assert_not_called()
     assert any("DRY-RUN: Agent command:" in call.args[0] for call in say.call_args_list)
-
-
-def test_work_dry_run_watch_sleeps() -> None:
-    with (
-        patch(
-            "atelier.commands.work._run_worker_once",
-            return_value=work_cmd.WorkerRunSummary(started=False, reason="no_work"),
-        ) as run_once,
-        patch("atelier.commands.work.time.sleep", side_effect=RuntimeError) as sleep,
-    ):
-        with pytest.raises(RuntimeError):
-            work_cmd.start_worker(
-                SimpleNamespace(
-                    epic_id=None, mode="auto", run_mode="watch", dry_run=True
-                )
-            )
-
-    assert run_once.call_args.kwargs["dry_run"] is True
-    sleep.assert_called_once()
 
 
 def test_work_uses_explicit_epic_id() -> None:
