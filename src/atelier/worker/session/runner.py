@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..context import ChangesetSelectionContext
+from ..context import ChangesetSelectionContext, WorkerRunContext
 from ..models import WorkerRunSummary
 from ..ports import ChangesetSelectionPorts
 
@@ -14,6 +14,53 @@ from ..ports import ChangesetSelectionPorts
 class ChangesetSelection:
     issue: dict[str, object] | None
     selected_override: str
+
+
+@dataclass(frozen=True)
+class RunnerDependencies:
+    _capture_review_feedback_snapshot: Any
+    _changeset_parent_branch: Any
+    _changeset_pr_url: Any
+    _changeset_work_branch: Any
+    _dry_run_log: Any
+    _ensure_exec_subcommand_flag: Any
+    _extract_changeset_root_branch: Any
+    _extract_workspace_parent_branch: Any
+    _finalize_changeset: Any
+    _find_invalid_changeset_labels: Any
+    _lookup_pr_payload: Any
+    _mark_changeset_blocked: Any
+    _mark_changeset_in_progress: Any
+    _next_changeset: Any
+    _persist_review_feedback_cursor: Any
+    _release_epic_assignment: Any
+    _report_timings: Any
+    _resolve_epic_id_for_changeset: Any
+    _review_feedback_progressed: Any
+    _run_startup_contract: Any
+    _send_invalid_changeset_labels_notification: Any
+    _send_no_ready_changesets: Any
+    _send_planner_notification: Any
+    _step: Any
+    _strip_flag_with_value: Any
+    _trace_enabled: Any
+    _with_codex_exec: Any
+    _worker_opening_prompt: Any
+    agent_home: Any
+    agents: Any
+    beads: Any
+    branching: Any
+    config: Any
+    confirm: Any
+    die: Any
+    git: Any
+    prs: Any
+    reconcile_blocked_merged_changesets: Any
+    resolve_current_project_with_repo_root: Any
+    root_branch: Any
+    say: Any
+    worker_session_agent: Any
+    worker_session_worktree: Any
 
 
 def select_changeset(
@@ -56,10 +103,11 @@ def select_changeset(
 
 
 def run_worker_once(
-    args: object, *, mode: str, dry_run: bool, session_key: str, deps: Any
+    args: object,
+    *,
+    run_context: WorkerRunContext,
+    deps: RunnerDependencies,
 ) -> WorkerRunSummary:
-    ReviewFeedbackSnapshot = deps.ReviewFeedbackSnapshot
-    WorkerRunSummary = deps.WorkerRunSummary
     _capture_review_feedback_snapshot = deps._capture_review_feedback_snapshot
     _changeset_parent_branch = deps._changeset_parent_branch
     _changeset_pr_url = deps._changeset_pr_url
@@ -104,9 +152,11 @@ def run_worker_once(
     root_branch = deps.root_branch
     say = deps.say
     worker_session_agent = deps.worker_session_agent
-    worker_session_runner = deps.worker_session_runner
     worker_session_worktree = deps.worker_session_worktree
     """Start a single worker session by selecting an epic and changeset."""
+    mode = run_context.mode
+    dry_run = run_context.dry_run
+    session_key = run_context.session_key
     timings: list[tuple[str, float]] = []
     trace = _trace_enabled()
     prs.clear_runtime_cache()
@@ -382,7 +432,7 @@ def run_worker_once(
             )
         finish_step()
         finish_step = _step("Select changeset", timings=timings, trace=trace)
-        selected = worker_session_runner.select_changeset(
+        selected = select_changeset(
             context=ChangesetSelectionContext(
                 selected_epic=selected_epic,
                 startup_changeset_id=startup_result.changeset_id,
@@ -511,7 +561,7 @@ def run_worker_once(
         finish_step()
         opening_prompt = ""
         review_feedback = startup_result.reason == "review_feedback"
-        feedback_before: ReviewFeedbackSnapshot | None = None
+        feedback_before = None
         if agent_spec.name == "codex":
             review_pr_url = _changeset_pr_url(changeset) if review_feedback else None
             if review_feedback and not review_pr_url and repo_slug:
