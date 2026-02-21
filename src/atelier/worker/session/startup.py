@@ -8,10 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ... import changeset_fields
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
+from ..models_boundary import parse_issue_boundary
 from ..review import ReviewFeedbackSelection
+
+_TERMINAL_STATUSES = {"closed", "done"}
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,15 @@ class NextChangesetService(Protocol):
         git_path: str | None,
     ) -> bool: ...
 
+    def changeset_has_review_handoff_signal(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        branch_pr: bool,
+        git_path: str | None,
+    ) -> bool: ...
+
     def has_open_descendant_changesets(self, changeset_id: str) -> bool: ...
 
     def list_descendant_changesets(
@@ -63,6 +76,75 @@ class NextChangesetService(Protocol):
     ) -> list[dict[str, object]]: ...
 
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool: ...
+
+
+def _issue_id(issue: dict[str, object]) -> str | None:
+    issue_id = issue.get("id")
+    if not isinstance(issue_id, str):
+        return None
+    cleaned = issue_id.strip()
+    return cleaned or None
+
+
+def _is_terminal(issue: dict[str, object]) -> bool:
+    status = str(issue.get("status") or "").strip().lower()
+    return status in _TERMINAL_STATUSES
+
+
+def _dependency_ids(issue: dict[str, object]) -> tuple[str, ...] | None:
+    try:
+        boundary = parse_issue_boundary(issue, source="next_changeset_service:dependency_ids")
+    except ValueError:
+        return None
+    return boundary.dependency_ids
+
+
+def _stacked_lineage_matches(
+    *, dependent_issue: dict[str, object], blocker_issue: dict[str, object]
+) -> bool:
+    dependent_parent = changeset_fields.parent_branch(dependent_issue)
+    blocker_work = changeset_fields.work_branch(blocker_issue)
+    return (
+        isinstance(dependent_parent, str)
+        and isinstance(blocker_work, str)
+        and dependent_parent == blocker_work
+    )
+
+
+def _dependencies_satisfied(
+    *,
+    issue: dict[str, object],
+    epic_changesets_by_id: dict[str, dict[str, object]],
+    dependency_cache: dict[str, dict[str, object] | None],
+    context: NextChangesetContext,
+    service: NextChangesetService,
+) -> bool:
+    dependency_ids = _dependency_ids(issue)
+    if dependency_ids is None:
+        return False
+    for dependency_id in dependency_ids:
+        blocker_issue = epic_changesets_by_id.get(dependency_id)
+        if blocker_issue is None:
+            blocker_issue = dependency_cache.get(dependency_id)
+            if blocker_issue is None and dependency_id not in dependency_cache:
+                blocker_issue = service.show_issue(dependency_id)
+                dependency_cache[dependency_id] = blocker_issue
+        if blocker_issue is None:
+            return False
+        if _is_terminal(blocker_issue):
+            continue
+        if dependency_id not in epic_changesets_by_id:
+            return False
+        if not _stacked_lineage_matches(dependent_issue=issue, blocker_issue=blocker_issue):
+            return False
+        if not service.changeset_has_review_handoff_signal(
+            blocker_issue,
+            repo_slug=context.repo_slug,
+            branch_pr=context.branch_pr,
+            git_path=context.git_path,
+        ):
+            return False
+    return True
 
 
 def next_changeset_service(
@@ -118,6 +200,28 @@ def next_changeset_service(
                 return issue
 
     changesets = service.ready_changesets(epic_id=context.epic_id)
+    changeset_ids = {issue_id for issue in changesets if (issue_id := _issue_id(issue)) is not None}
+    descendants = service.list_descendant_changesets(context.epic_id, include_closed=False)
+    descendants_by_id = {
+        issue_id: issue for issue in descendants if (issue_id := _issue_id(issue)) is not None
+    }
+    dependency_cache: dict[str, dict[str, object] | None] = {}
+    for issue in descendants:
+        issue_id = _issue_id(issue)
+        if issue_id is None or issue_id in changeset_ids:
+            continue
+        if not service.is_changeset_ready(issue):
+            continue
+        if not _dependencies_satisfied(
+            issue=issue,
+            epic_changesets_by_id=descendants_by_id,
+            dependency_cache=dependency_cache,
+            context=context,
+            service=service,
+        ):
+            continue
+        changesets.append(issue)
+        changeset_ids.add(issue_id)
     if not changesets:
         return None
     actionable = [
