@@ -7,6 +7,7 @@ import pytest
 import atelier.codex as codex
 import atelier.commands.plan as plan_cmd
 import atelier.external_registry as external_registry
+import atelier.planner_sync as planner_sync
 import atelier.worktrees as worktrees
 from atelier.agent_home import AgentHome
 from atelier.config import ProjectConfig
@@ -14,6 +15,26 @@ from atelier.config import ProjectConfig
 
 def _fake_project_payload() -> ProjectConfig:
     return ProjectConfig()
+
+
+class _DummyPlannerSyncService:
+    def __init__(self, *_args, **_kwargs) -> None:
+        self.settings = planner_sync.PlannerSyncSettings(interval_seconds=600)
+
+    def sync_startup(self) -> planner_sync.PlannerSyncOutcome:
+        return planner_sync.PlannerSyncOutcome(attempted=True, result="ok", synced_sha="abc123")
+
+
+class _DummyPlannerSyncMonitor:
+    def __init__(self, _service: _DummyPlannerSyncService) -> None:
+        self.started = False
+        self.stopped = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
 
 
 def test_plan_starts_agent_session(tmp_path: Path) -> None:
@@ -83,6 +104,14 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         patch("atelier.commands.plan.policy.sync_agent_home_policy"),
         patch("atelier.commands.plan.config.write_project_config"),
         patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
         patch(
             "atelier.commands.plan.worktrees.ensure_git_worktree",
             return_value=worktree_path,
@@ -169,6 +198,14 @@ def test_plan_does_not_query_or_prompt_draft_epics_on_startup(tmp_path: Path) ->
         patch("atelier.commands.plan.config.write_project_config"),
         patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
         patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
+        patch(
             "atelier.commands.plan.worktrees.ensure_git_worktree",
             return_value=worktree_path,
         ),
@@ -235,6 +272,14 @@ def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
         patch("atelier.commands.plan.policy.sync_agent_home_policy"),
         patch("atelier.commands.plan.config.write_project_config"),
         patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
         patch(
             "atelier.commands.plan.worktrees.ensure_git_worktree",
             return_value=worktree_path,
@@ -314,6 +359,14 @@ def test_plan_does_not_persist_selected_provider(tmp_path: Path) -> None:
         patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
         patch("atelier.commands.plan.policy.sync_agent_home_policy"),
         patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
         patch(
             "atelier.commands.plan.worktrees.ensure_git_worktree",
             return_value=worktree_path,

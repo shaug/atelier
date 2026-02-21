@@ -19,6 +19,7 @@ from .. import (
     git,
     hooks,
     paths,
+    planner_sync,
     policy,
     prompting,
     skills,
@@ -262,47 +263,6 @@ def _maybe_migrate_planner_mapping(
     worktrees.write_mapping(worktrees.mapping_path(project_data_dir, planner_key), updated)
 
 
-def _sync_planner_branch(
-    *,
-    worktree_path: Path,
-    planner_branch: str,
-    default_branch: str,
-    git_path: str | None,
-) -> None:
-    if not (worktree_path / ".git").exists():
-        return
-    if not _is_worktree_clean(worktree_path, git_path=git_path):
-        say("Planner worktree has local changes; skipping planner branch sync.")
-        return
-    fetch_result = exec.try_run_command(
-        git.git_command(
-            ["-C", str(worktree_path), "fetch", "origin", default_branch],
-            git_path=git_path,
-        )
-    )
-    if fetch_result is None:
-        die("missing required command: git")
-    if fetch_result.returncode != 0:
-        say(f"Warning: failed to fetch origin/{default_branch}; skipping planner sync.")
-        return
-    sync_ref = _resolve_default_sync_ref(worktree_path, default_branch, git_path=git_path)
-    if sync_ref is None:
-        say(f"Warning: default branch {default_branch!r} not found; skipping planner sync.")
-        return
-    exec.run_command(
-        git.git_command(
-            ["-C", str(worktree_path), "checkout", planner_branch],
-            git_path=git_path,
-        )
-    )
-    exec.run_command(
-        git.git_command(
-            ["-C", str(worktree_path), "reset", "--hard", sync_ref],
-            git_path=git_path,
-        )
-    )
-
-
 class _StepFinish(Protocol):
     def __call__(self, extra: str | None = None) -> None: ...
 
@@ -362,12 +322,15 @@ def run_planner(args: object) -> None:
             agent_bead = beads.ensure_agent_bead(
                 agent.agent_id, beads_root=beads_root, cwd=repo_root, role="planner"
             )
+            agent_bead_id = str(agent_bead.get("id") or "").strip()
+            if not agent_bead_id:
+                die("failed to determine planner agent bead id")
             finish()
             if bool(getattr(args, "reconcile", False)):
                 finish = _step("Reconcile blocked changesets", timings=timings, trace=trace)
                 reconcile_result = work_cmd.reconcile_blocked_merged_changesets(
                     agent_id=agent.agent_id,
-                    agent_bead_id=str(agent_bead.get("id") or ""),
+                    agent_bead_id=agent_bead_id,
                     project_config=project_config,
                     project_data_dir=project_data_dir,
                     beads_root=beads_root,
@@ -423,14 +386,26 @@ def run_planner(args: object) -> None:
                 git_path=git_path,
             )
             finish(str(worktree_path))
-            finish = _step("Sync planner worktree", timings=timings, trace=trace)
-            _sync_planner_branch(
-                worktree_path=worktree_path,
-                planner_branch=planner_branch,
-                default_branch=default_branch,
-                git_path=git_path,
+            sync_service = planner_sync.PlannerSyncService(
+                planner_sync.PlannerSyncContext(
+                    agent_id=agent.agent_id,
+                    agent_bead_id=agent_bead_id,
+                    project_data_dir=project_data_dir,
+                    repo_root=repo_root,
+                    beads_root=beads_root,
+                    worktree_path=worktree_path,
+                    planner_branch=planner_branch,
+                    default_branch=default_branch,
+                    git_path=git_path,
+                ),
+                emit=say,
             )
-            finish()
+            finish = _step("Sync planner worktree", timings=timings, trace=trace)
+            startup_sync = sync_service.sync_startup()
+            sync_detail = startup_sync.result or "skipped"
+            if startup_sync.synced_sha:
+                sync_detail = f"{sync_detail} ({startup_sync.synced_sha[:12]})"
+            finish(sync_detail)
             skills_dir: Path | None = None
             if project_data_dir.exists():
                 try:
@@ -543,6 +518,14 @@ def run_planner(args: object) -> None:
                     github_repo=provider_resolution.github_repo,
                 )
             )
+            env.update(
+                planner_sync.runtime_environment(
+                    agent_bead_id=agent_bead_id,
+                    worktree_path=worktree_path,
+                    planner_branch=planner_branch,
+                    default_branch=default_branch,
+                )
+            )
             epic_id = getattr(args, "epic_id", None)
             if epic_id:
                 env["ATELIER_PLAN_EPIC"] = str(epic_id)
@@ -553,6 +536,10 @@ def run_planner(args: object) -> None:
             agent_options = list(project_config.agent.options.get(agent_spec.name, []))
             hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
             hooks.ensure_hooks_path(env, hook_path)
+            sync_monitor = planner_sync.PlannerSyncMonitor(sync_service)
+            finish = _step("Start planner sync monitor", timings=timings, trace=trace)
+            sync_monitor.start()
+            finish(f"every {sync_service.settings.interval_seconds}s")
             _report_timings(timings, trace=trace)
             opening_prompt = ""
             if agent_spec.name == "codex":
@@ -561,17 +548,20 @@ def run_planner(args: object) -> None:
                     planner_branch,
                     f"planner-{agent.name}",
                 )
-            say(f"Starting {agent_spec.display_name} session")
-            start_cmd, start_cwd = agent_spec.build_start_command(
-                agent.path, agent_options, opening_prompt
-            )
-            if agent_spec.name == "codex":
-                result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
-                if result is None:
-                    die(f"missing required command: {start_cmd[0]}")
-                if result.returncode != 0:
-                    die(f"command failed: {' '.join(start_cmd)}")
-            else:
-                exec.run_command(start_cmd, cwd=start_cwd, env=env)
+            try:
+                say(f"Starting {agent_spec.display_name} session")
+                start_cmd, start_cwd = agent_spec.build_start_command(
+                    agent.path, agent_options, opening_prompt
+                )
+                if agent_spec.name == "codex":
+                    result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
+                    if result is None:
+                        die(f"missing required command: {start_cmd[0]}")
+                    if result.returncode != 0:
+                        die(f"command failed: {' '.join(start_cmd)}")
+                else:
+                    exec.run_command(start_cmd, cwd=start_cwd, env=env)
+            finally:
+                sync_monitor.stop()
     finally:
         agent_home.cleanup_agent_home(agent, project_dir=project_data_dir)
