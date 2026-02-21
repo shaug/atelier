@@ -31,34 +31,34 @@ def _build_runner_deps(
     resolve_beads_root = Mock(return_value=Path("/project/.atelier/.beads"))
 
     return runner.RunnerDependencies(
-        _capture_review_feedback_snapshot=_noop,
-        _changeset_parent_branch=lambda _issue, **_kwargs: "feat/root",
-        _changeset_pr_url=lambda _issue: None,
-        _changeset_work_branch=lambda _issue: None,
-        _dry_run_log=_noop,
-        _ensure_exec_subcommand_flag=lambda args, _flag: args,
-        _extract_changeset_root_branch=lambda _issue: "feat/root",
-        _extract_workspace_parent_branch=lambda _issue: "main",
-        _finalize_changeset=lambda **_kwargs: None,
-        _find_invalid_changeset_labels=lambda **_kwargs: [],
-        _lookup_pr_payload=lambda _repo_slug, _branch: None,
-        _mark_changeset_blocked=_noop,
-        _mark_changeset_in_progress=_noop,
-        _next_changeset=lambda **_kwargs: None,
-        _persist_review_feedback_cursor=_noop,
-        _release_epic_assignment=_noop,
-        _report_timings=_noop,
-        _resolve_epic_id_for_changeset=lambda _issue, **_kwargs: None,
-        _review_feedback_progressed=lambda _before, _after: False,
-        _run_startup_contract=Mock(return_value=startup_result),
-        _send_invalid_changeset_labels_notification=lambda **_kwargs: "sent",
-        _send_no_ready_changesets=_noop,
-        _send_planner_notification=_noop,
-        _step=lambda _label, *, timings, trace: lambda **_kwargs: None,
-        _strip_flag_with_value=lambda args, _flag: args,
-        _trace_enabled=lambda: False,
-        _with_codex_exec=lambda cmd, _prompt: cmd,
-        _worker_opening_prompt=lambda **_kwargs: "open",
+        capture_review_feedback_snapshot=_noop,
+        changeset_parent_branch=lambda _issue, **_kwargs: "feat/root",
+        changeset_pr_url=lambda _issue: None,
+        changeset_work_branch=lambda _issue: None,
+        dry_run_log=_noop,
+        ensure_exec_subcommand_flag=lambda args, _flag: args,
+        extract_changeset_root_branch=lambda _issue: "feat/root",
+        extract_workspace_parent_branch=lambda _issue: "main",
+        finalize_changeset=lambda **_kwargs: None,
+        find_invalid_changeset_labels=lambda **_kwargs: [],
+        lookup_pr_payload=lambda _repo_slug, _branch: None,
+        mark_changeset_blocked=_noop,
+        mark_changeset_in_progress=_noop,
+        next_changeset=lambda **_kwargs: None,
+        persist_review_feedback_cursor=_noop,
+        release_epic_assignment=_noop,
+        report_timings=_noop,
+        resolve_epic_id_for_changeset=lambda _issue, **_kwargs: None,
+        review_feedback_progressed=lambda _before, _after: False,
+        run_startup_contract=Mock(return_value=startup_result),
+        send_invalid_changeset_labels_notification=lambda **_kwargs: "sent",
+        send_no_ready_changesets=_noop,
+        send_planner_notification=_noop,
+        step=lambda _label, *, timings, trace: lambda **_kwargs: None,
+        strip_flag_with_value=lambda args, _flag: args,
+        trace_enabled=lambda: False,
+        with_codex_exec=lambda cmd, _prompt: cmd,
+        worker_opening_prompt=lambda **_kwargs: "open",
         agent_home=SimpleNamespace(
             preview_agent_home=Mock(return_value=preview_agent),
             resolve_agent_home=Mock(return_value=preview_agent),
@@ -118,7 +118,7 @@ def test_run_worker_once_returns_startup_exit_summary() -> None:
     assert summary.started is False
     assert summary.reason == "no_eligible_epics"
     deps.beads.run_bd_command.assert_called_once()
-    deps._run_startup_contract.assert_called_once()
+    deps.run_startup_contract.assert_called_once()
 
 
 def test_run_worker_once_dry_run_without_epic_stops_cleanly() -> None:
