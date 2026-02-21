@@ -3,63 +3,151 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Protocol
 
 from .. import beads, git, prs
 from .. import log as atelier_log
-from .models import FinalizeResult
+from ..agents import AgentSpec
+from .models import FinalizeResult, PublishSignalDiagnostics
+
+Issue = dict[str, object]
+
+
+@dataclass(frozen=True)
+class FinalizePipelineContext:
+    changeset_id: str
+    epic_id: str
+    agent_id: str
+    agent_bead_id: str
+    started_at: dt.datetime
+    repo_slug: str | None
+    beads_root: Path
+    repo_root: Path
+    branch_pr: bool
+    branch_pr_strategy: object
+    branch_history: str
+    branch_squash_message: str
+    project_data_dir: Path | None
+    squash_message_agent_spec: AgentSpec | None
+    squash_message_agent_options: list[str] | None
+    squash_message_agent_home: Path | None
+    squash_message_agent_env: dict[str, str] | None
+    git_path: str | None
+
+
+class FinalizePipelineService(Protocol):
+    def issue_labels(self, issue: Issue) -> set[str]: ...
+
+    def find_invalid_changeset_labels(self, epic_id: str) -> list[str]: ...
+
+    def send_invalid_changeset_labels_notification(
+        self, *, epic_id: str, invalid_changesets: list[str], agent_id: str
+    ) -> str: ...
+
+    def has_open_descendant_changesets(self, changeset_id: str) -> bool: ...
+
+    def has_blocking_messages(
+        self, *, thread_ids: set[str], started_at: dt.datetime
+    ) -> bool: ...
+
+    def mark_changeset_children_in_progress(self, changeset_id: str) -> None: ...
+
+    def close_completed_container_changesets(self, epic_id: str) -> list[str]: ...
+
+    def promote_planned_descendant_changesets(self, changeset_id: str) -> None: ...
+
+    def changeset_integration_signal(
+        self, issue: Issue, *, repo_slug: str | None, git_path: str | None
+    ) -> tuple[bool, str | None]: ...
+
+    def recover_premature_merged_changeset(
+        self, *, issue: Issue, context: FinalizePipelineContext
+    ) -> FinalizeResult | None: ...
+
+    def mark_changeset_blocked(self, changeset_id: str, *, reason: str) -> None: ...
+
+    def send_planner_notification(
+        self, *, subject: str, body: str, agent_id: str, thread_id: str | None
+    ) -> None: ...
+
+    def mark_changeset_closed(self, changeset_id: str) -> None: ...
+
+    def finalize_epic_if_complete(
+        self, *, context: FinalizePipelineContext
+    ) -> FinalizeResult: ...
+
+    def mark_changeset_in_progress(self, changeset_id: str) -> None: ...
+
+    def changeset_waiting_on_review_or_signals(
+        self, issue: Issue, *, context: FinalizePipelineContext
+    ) -> bool: ...
+
+    def lookup_pr_payload(self, repo_slug: str | None, branch: str) -> Issue | None: ...
+
+    def lookup_pr_payload_diagnostic(
+        self, repo_slug: str | None, branch: str
+    ) -> tuple[Issue | None, str | None]: ...
+
+    def update_changeset_review_from_pr(
+        self,
+        changeset_id: str,
+        *,
+        pr_payload: Issue | None,
+        pushed: bool,
+    ) -> None: ...
+
+    def finalize_terminal_changeset(
+        self,
+        *,
+        context: FinalizePipelineContext,
+        terminal_state: str,
+        integrated_sha: str | None,
+    ) -> FinalizeResult: ...
+
+    def handle_pushed_without_pr(
+        self,
+        *,
+        issue: Issue,
+        context: FinalizePipelineContext,
+        create_detail_prefix: str | None = None,
+    ) -> FinalizeResult: ...
+
+    def attempt_push_work_branch(self, work_branch: str) -> tuple[bool, str | None]: ...
+
+    def collect_publish_signal_diagnostics(
+        self, *, work_branch: str, context: FinalizePipelineContext
+    ) -> PublishSignalDiagnostics: ...
+
+    def format_publish_diagnostics(
+        self, diagnostics: PublishSignalDiagnostics, *, push_detail: str | None = None
+    ) -> str: ...
+
+    def set_changeset_review_pending_state(
+        self,
+        *,
+        changeset_id: str,
+        pr_payload: Issue | None,
+        pushed: bool,
+        fallback_pr_state: str | None,
+    ) -> None: ...
 
 
 def run_finalize_pipeline(
     *,
-    changeset_id: str,
-    epic_id: str,
-    agent_id: str,
-    agent_bead_id: str,
-    started_at: dt.datetime,
-    repo_slug: str | None,
-    beads_root: Path,
-    repo_root: Path,
-    branch_pr: bool,
-    branch_pr_strategy: object,
-    branch_history: str,
-    branch_squash_message: str,
-    project_data_dir: Path | None,
-    squash_message_agent_spec: Any,
-    squash_message_agent_options: list[str] | None,
-    squash_message_agent_home: Path | None,
-    squash_message_agent_env: dict[str, str] | None,
-    git_path: str | None,
-    issue_labels: Callable[[dict[str, object]], set[str]],
-    find_invalid_changeset_labels: Callable[..., list[str]],
-    send_invalid_changeset_labels_notification: Callable[..., str],
-    has_open_descendant_changesets: Callable[..., bool],
-    has_blocking_messages: Callable[..., bool],
-    mark_changeset_children_in_progress: Callable[..., None],
-    close_completed_container_changesets: Callable[..., list[str]],
-    promote_planned_descendant_changesets: Callable[..., None],
-    changeset_integration_signal: Callable[..., tuple[bool, str | None]],
-    recover_premature_merged_changeset: Callable[..., FinalizeResult | None],
-    mark_changeset_blocked: Callable[..., None],
-    send_planner_notification: Callable[..., None],
-    mark_changeset_closed: Callable[..., None],
-    finalize_epic_if_complete: Callable[..., FinalizeResult],
-    mark_changeset_in_progress: Callable[..., None],
-    changeset_waiting_on_review_or_signals: Callable[..., bool],
-    lookup_pr_payload: Callable[..., dict[str, object] | None],
-    lookup_pr_payload_diagnostic: Callable[
-        ..., tuple[dict[str, object] | None, str | None]
-    ],
-    update_changeset_review_from_pr: Callable[..., None],
-    finalize_terminal_changeset: Callable[..., FinalizeResult],
-    handle_pushed_without_pr: Callable[..., FinalizeResult],
-    attempt_push_work_branch: Callable[..., tuple[bool, str | None]],
-    collect_publish_signal_diagnostics: Callable[..., Any],
-    format_publish_diagnostics: Callable[..., str],
-    set_changeset_review_pending_state: Callable[..., None],
+    context: FinalizePipelineContext,
+    service: FinalizePipelineService,
 ) -> FinalizeResult:
+    changeset_id = context.changeset_id
+    epic_id = context.epic_id
+    agent_id = context.agent_id
+    started_at = context.started_at
+    repo_slug = context.repo_slug
+    beads_root = context.beads_root
+    repo_root = context.repo_root
+    branch_pr = context.branch_pr
+    git_path = context.git_path
     if not changeset_id:
         return FinalizeResult(continue_running=False, reason="changeset_missing")
     issues = beads.run_bd_json(
@@ -68,26 +156,19 @@ def run_finalize_pipeline(
     if not issues:
         return FinalizeResult(continue_running=False, reason="changeset_not_found")
     issue = issues[0]
-    labels = issue_labels(issue)
-    invalid_changesets = find_invalid_changeset_labels(
-        epic_id, beads_root=beads_root, repo_root=repo_root
-    )
+    labels = service.issue_labels(issue)
+    invalid_changesets = service.find_invalid_changeset_labels(epic_id)
     if invalid_changesets:
-        send_invalid_changeset_labels_notification(
+        service.send_invalid_changeset_labels_notification(
             epic_id=epic_id,
             invalid_changesets=invalid_changesets,
             agent_id=agent_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            dry_run=False,
         )
         return FinalizeResult(
             continue_running=False, reason="changeset_label_violation"
         )
     if "cs:merged" in labels or "cs:abandoned" in labels:
-        if has_open_descendant_changesets(
-            changeset_id, beads_root=beads_root, repo_root=repo_root
-        ):
+        if service.has_open_descendant_changesets(changeset_id):
             descendants = beads.list_descendant_changesets(
                 changeset_id,
                 beads_root=beads_root,
@@ -99,69 +180,38 @@ def run_finalize_pipeline(
                 for descendant in descendants
                 if isinstance((issue_id := descendant.get("id")), str)
                 and issue_id
-                and "cs:planned" in issue_labels(descendant)
+                and "cs:planned" in service.issue_labels(descendant)
             }
-            if planned_ids and has_blocking_messages(
+            if planned_ids and service.has_blocking_messages(
                 thread_ids={changeset_id, epic_id, *planned_ids},
                 started_at=started_at,
-                beads_root=beads_root,
-                repo_root=repo_root,
             ):
-                mark_changeset_children_in_progress(
-                    changeset_id, beads_root=beads_root, repo_root=repo_root
-                )
-                close_completed_container_changesets(
-                    epic_id, beads_root=beads_root, repo_root=repo_root
-                )
+                service.mark_changeset_children_in_progress(changeset_id)
+                service.close_completed_container_changesets(epic_id)
                 return FinalizeResult(
                     continue_running=False, reason="changeset_children_planning_blocked"
                 )
-            promote_planned_descendant_changesets(
-                changeset_id, beads_root=beads_root, repo_root=repo_root
-            )
-            mark_changeset_children_in_progress(
-                changeset_id, beads_root=beads_root, repo_root=repo_root
-            )
-            close_completed_container_changesets(
-                epic_id, beads_root=beads_root, repo_root=repo_root
-            )
+            service.promote_planned_descendant_changesets(changeset_id)
+            service.mark_changeset_children_in_progress(changeset_id)
+            service.close_completed_container_changesets(epic_id)
             return FinalizeResult(
                 continue_running=True, reason="changeset_children_pending"
             )
         if "cs:merged" in labels:
-            integration_proven, integrated_sha = changeset_integration_signal(
-                issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
+            integration_proven, integrated_sha = service.changeset_integration_signal(
+                issue, repo_slug=repo_slug, git_path=git_path
             )
             if not integration_proven:
-                recovered = recover_premature_merged_changeset(
+                recovered = service.recover_premature_merged_changeset(
                     issue=issue,
-                    changeset_id=changeset_id,
-                    epic_id=epic_id,
-                    agent_id=agent_id,
-                    agent_bead_id=agent_bead_id,
-                    branch_pr=branch_pr,
-                    branch_history=branch_history,
-                    branch_squash_message=branch_squash_message,
-                    branch_pr_strategy=branch_pr_strategy,
-                    repo_slug=repo_slug,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                    project_data_dir=project_data_dir,
-                    squash_message_agent_spec=squash_message_agent_spec,
-                    squash_message_agent_options=squash_message_agent_options,
-                    squash_message_agent_home=squash_message_agent_home,
-                    squash_message_agent_env=squash_message_agent_env,
-                    git_path=git_path,
+                    context=context,
                 )
                 if recovered is not None:
                     return recovered
-                mark_changeset_blocked(
-                    changeset_id,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                    reason="missing integration signal for cs:merged",
+                service.mark_changeset_blocked(
+                    changeset_id, reason="missing integration signal for cs:merged"
                 )
-                send_planner_notification(
+                service.send_planner_notification(
                     subject=(
                         f"NEEDS-DECISION: Missing integration signal ({changeset_id})"
                     ),
@@ -169,9 +219,6 @@ def run_finalize_pipeline(
                     "(changeset.integrated_sha or merged PR) was found.",
                     agent_id=agent_id,
                     thread_id=changeset_id,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                    dry_run=False,
                 )
                 return FinalizeResult(
                     continue_running=False,
@@ -184,50 +231,21 @@ def run_finalize_pipeline(
                     beads_root=beads_root,
                     cwd=repo_root,
                 )
-        mark_changeset_closed(changeset_id, beads_root=beads_root, repo_root=repo_root)
-        close_completed_container_changesets(
-            epic_id, beads_root=beads_root, repo_root=repo_root
-        )
-        return finalize_epic_if_complete(
-            epic_id=epic_id,
-            agent_id=agent_id,
-            agent_bead_id=agent_bead_id,
-            branch_pr=branch_pr,
-            branch_history=branch_history,
-            branch_squash_message=branch_squash_message,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            project_data_dir=project_data_dir,
-            squash_message_agent_spec=squash_message_agent_spec,
-            squash_message_agent_options=squash_message_agent_options,
-            squash_message_agent_home=squash_message_agent_home,
-            squash_message_agent_env=squash_message_agent_env,
-            git_path=git_path,
-        )
-    if has_blocking_messages(
+        service.mark_changeset_closed(changeset_id)
+        service.close_completed_container_changesets(epic_id)
+        return service.finalize_epic_if_complete(context=context)
+    if service.has_blocking_messages(
         thread_ids={changeset_id, epic_id},
         started_at=started_at,
-        beads_root=beads_root,
-        repo_root=repo_root,
     ):
-        mark_changeset_blocked(
-            changeset_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            reason="message requires planner decision",
+        service.mark_changeset_blocked(
+            changeset_id, reason="message requires planner decision"
         )
         return FinalizeResult(
             continue_running=False, reason="changeset_blocked_message"
         )
     if "cs:in_progress" in labels:
-        if changeset_waiting_on_review_or_signals(
-            issue,
-            repo_slug=repo_slug,
-            repo_root=repo_root,
-            branch_pr=branch_pr,
-            branch_pr_strategy=branch_pr_strategy,
-            git_path=git_path,
-        ):
+        if service.changeset_waiting_on_review_or_signals(issue, context=context):
             return FinalizeResult(
                 continue_running=True, reason="changeset_review_pending"
             )
@@ -238,20 +256,14 @@ def run_finalize_pipeline(
     )
     work_branch = fields.get("changeset.work_branch")
     if not work_branch or work_branch.strip().lower() == "null":
-        mark_changeset_blocked(
-            changeset_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            reason="missing changeset.work_branch metadata",
+        service.mark_changeset_blocked(
+            changeset_id, reason="missing changeset.work_branch metadata"
         )
-        send_planner_notification(
+        service.send_planner_notification(
             subject=f"NEEDS-DECISION: Missing changeset metadata ({changeset_id})",
             body="Missing changeset.work_branch metadata needed to validate publish.",
             agent_id=agent_id,
             thread_id=changeset_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            dry_run=False,
         )
         return FinalizeResult(
             continue_running=False, reason="changeset_blocked_missing_metadata"
@@ -263,9 +275,9 @@ def run_finalize_pipeline(
     pr_payload = None
     pr_lookup_error: str | None = None
     if repo_slug:
-        pr_payload = lookup_pr_payload(repo_slug, work_branch)
+        pr_payload = service.lookup_pr_payload(repo_slug, work_branch)
         if pr_payload is None:
-            _payload_check, pr_lookup_error = lookup_pr_payload_diagnostic(
+            _payload_check, pr_lookup_error = service.lookup_pr_payload_diagnostic(
                 repo_slug, work_branch
             )
     if branch_pr and pr_lookup_error:
@@ -274,10 +286,8 @@ def run_finalize_pipeline(
             f"{changeset_id} finalize PR status lookup failed branch={work_branch}: "
             f"{pr_lookup_error}"
         )
-        mark_changeset_in_progress(
-            changeset_id, beads_root=beads_root, repo_root=repo_root
-        )
-        send_planner_notification(
+        service.mark_changeset_in_progress(changeset_id)
+        service.send_planner_notification(
             subject=f"NEEDS-DECISION: PR status query failed ({changeset_id})",
             body=(
                 "Unable to evaluate PR lifecycle during finalize because GitHub "
@@ -287,9 +297,6 @@ def run_finalize_pipeline(
             ),
             agent_id=agent_id,
             thread_id=changeset_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            dry_run=False,
         )
         return FinalizeResult(
             continue_running=False, reason="changeset_pr_status_query_failed"
@@ -302,113 +309,59 @@ def run_finalize_pipeline(
         )
     if lifecycle == "merged":
         atelier_log.debug(f"changeset={changeset_id} finalize lifecycle=merged")
-        update_changeset_review_from_pr(
+        service.update_changeset_review_from_pr(
             changeset_id,
             pr_payload=pr_payload,
             pushed=pushed,
-            beads_root=beads_root,
-            repo_root=repo_root,
         )
-        _integration_ok, integrated_sha = changeset_integration_signal(
-            issue, repo_slug=None, repo_root=repo_root, git_path=git_path
+        _integration_ok, integrated_sha = service.changeset_integration_signal(
+            issue, repo_slug=None, git_path=git_path
         )
-        return finalize_terminal_changeset(
-            changeset_id=changeset_id,
-            epic_id=epic_id,
-            agent_id=agent_id,
-            agent_bead_id=agent_bead_id,
+        return service.finalize_terminal_changeset(
+            context=context,
             terminal_state="merged",
             integrated_sha=integrated_sha,
-            branch_pr=branch_pr,
-            branch_history=branch_history,
-            branch_squash_message=branch_squash_message,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            project_data_dir=project_data_dir,
-            squash_message_agent_spec=squash_message_agent_spec,
-            squash_message_agent_options=squash_message_agent_options,
-            squash_message_agent_home=squash_message_agent_home,
-            squash_message_agent_env=squash_message_agent_env,
-            git_path=git_path,
         )
     if lifecycle == "closed":
         atelier_log.debug(f"changeset={changeset_id} finalize lifecycle=closed")
-        update_changeset_review_from_pr(
+        service.update_changeset_review_from_pr(
             changeset_id,
             pr_payload=pr_payload,
             pushed=pushed,
-            beads_root=beads_root,
-            repo_root=repo_root,
         )
-        integration_ok, integrated_sha = changeset_integration_signal(
-            issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
+        integration_ok, integrated_sha = service.changeset_integration_signal(
+            issue, repo_slug=repo_slug, git_path=git_path
         )
-        return finalize_terminal_changeset(
-            changeset_id=changeset_id,
-            epic_id=epic_id,
-            agent_id=agent_id,
-            agent_bead_id=agent_bead_id,
+        return service.finalize_terminal_changeset(
+            context=context,
             terminal_state="merged" if integration_ok else "abandoned",
             integrated_sha=integrated_sha if integration_ok else None,
-            branch_pr=branch_pr,
-            branch_history=branch_history,
-            branch_squash_message=branch_squash_message,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            project_data_dir=project_data_dir,
-            squash_message_agent_spec=squash_message_agent_spec,
-            squash_message_agent_options=squash_message_agent_options,
-            squash_message_agent_home=squash_message_agent_home,
-            squash_message_agent_env=squash_message_agent_env,
-            git_path=git_path,
         )
     if branch_pr and pushed and not pr_payload:
-        integration_ok, integrated_sha = changeset_integration_signal(
-            issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
+        integration_ok, integrated_sha = service.changeset_integration_signal(
+            issue, repo_slug=repo_slug, git_path=git_path
         )
         if integration_ok:
-            return finalize_terminal_changeset(
-                changeset_id=changeset_id,
-                epic_id=epic_id,
-                agent_id=agent_id,
-                agent_bead_id=agent_bead_id,
+            return service.finalize_terminal_changeset(
+                context=context,
                 terminal_state="merged",
                 integrated_sha=integrated_sha,
-                branch_pr=branch_pr,
-                branch_history=branch_history,
-                branch_squash_message=branch_squash_message,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                project_data_dir=project_data_dir,
-                squash_message_agent_spec=squash_message_agent_spec,
-                squash_message_agent_options=squash_message_agent_options,
-                squash_message_agent_home=squash_message_agent_home,
-                squash_message_agent_env=squash_message_agent_env,
-                git_path=git_path,
             )
     if branch_pr and pushed and not pr_payload:
-        return handle_pushed_without_pr(
+        return service.handle_pushed_without_pr(
             issue=issue,
-            changeset_id=changeset_id,
-            agent_id=agent_id,
-            repo_slug=repo_slug,
-            repo_root=repo_root,
-            beads_root=beads_root,
-            branch_pr_strategy=branch_pr_strategy,
-            git_path=git_path,
+            context=context,
         )
     if not pushed and not pr_payload:
         push_detail: str | None = None
         if branch_pr:
-            pushed, push_detail = attempt_push_work_branch(
-                work_branch, repo_root=repo_root, git_path=git_path
-            )
+            pushed, push_detail = service.attempt_push_work_branch(work_branch)
             if pushed:
                 if repo_slug:
-                    pr_payload = lookup_pr_payload(repo_slug, work_branch)
+                    pr_payload = service.lookup_pr_payload(repo_slug, work_branch)
                     if pr_payload is None:
-                        _payload_check, pr_lookup_error = lookup_pr_payload_diagnostic(
-                            repo_slug, work_branch
+                        _payload_check, pr_lookup_error = (
+                            service.lookup_pr_payload_diagnostic(repo_slug, work_branch)
                         )
                     if pr_lookup_error:
                         atelier_log.warning(
@@ -416,10 +369,8 @@ def run_finalize_pipeline(
                             f"{changeset_id} push succeeded but PR status lookup "
                             f"failed branch={work_branch}: {pr_lookup_error}"
                         )
-                        mark_changeset_in_progress(
-                            changeset_id, beads_root=beads_root, repo_root=repo_root
-                        )
-                        send_planner_notification(
+                        service.mark_changeset_in_progress(changeset_id)
+                        service.send_planner_notification(
                             subject=(
                                 "NEEDS-DECISION: PR status query failed "
                                 f"({changeset_id})"
@@ -433,53 +384,36 @@ def run_finalize_pipeline(
                             ),
                             agent_id=agent_id,
                             thread_id=changeset_id,
-                            beads_root=beads_root,
-                            repo_root=repo_root,
-                            dry_run=False,
                         )
                         return FinalizeResult(
                             continue_running=False,
                             reason="changeset_pr_status_query_failed",
                         )
                 if branch_pr and not pr_payload:
-                    return handle_pushed_without_pr(
+                    return service.handle_pushed_without_pr(
                         issue=issue,
-                        changeset_id=changeset_id,
-                        agent_id=agent_id,
-                        repo_slug=repo_slug,
-                        repo_root=repo_root,
-                        beads_root=beads_root,
-                        branch_pr_strategy=branch_pr_strategy,
-                        git_path=git_path,
+                        context=context,
                         create_detail_prefix=push_detail,
                     )
-                set_changeset_review_pending_state(
+                service.set_changeset_review_pending_state(
                     changeset_id=changeset_id,
                     pr_payload=pr_payload,
                     pushed=True,
                     fallback_pr_state=None,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
                 )
                 return FinalizeResult(
                     continue_running=True, reason="changeset_review_pending"
                 )
 
-        diagnostics = collect_publish_signal_diagnostics(
+        diagnostics = service.collect_publish_signal_diagnostics(
             work_branch=work_branch,
-            epic_id=epic_id,
-            changeset_id=changeset_id,
-            project_data_dir=project_data_dir,
-            repo_root=repo_root,
-            git_path=git_path,
+            context=context,
         )
-        diagnostics_text = format_publish_diagnostics(
+        diagnostics_text = service.format_publish_diagnostics(
             diagnostics, push_detail=push_detail
         )
         if diagnostics.has_recoverable_local_state:
-            mark_changeset_in_progress(
-                changeset_id, beads_root=beads_root, repo_root=repo_root
-            )
+            service.mark_changeset_in_progress(changeset_id)
             beads.run_bd_command(
                 [
                     "update",
@@ -492,7 +426,7 @@ def run_finalize_pipeline(
                 cwd=repo_root,
                 allow_failure=True,
             )
-            send_planner_notification(
+            service.send_planner_notification(
                 subject=f"NEEDS-DECISION: Publish incomplete ({changeset_id})",
                 body=(
                     "No push or PR detected after worker completion. "
@@ -501,21 +435,15 @@ def run_finalize_pipeline(
                 ),
                 agent_id=agent_id,
                 thread_id=changeset_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                dry_run=False,
             )
             return FinalizeResult(
                 continue_running=False, reason="changeset_publish_pending"
             )
 
-        mark_changeset_blocked(
-            changeset_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            reason="publish/checks signals missing",
+        service.mark_changeset_blocked(
+            changeset_id, reason="publish/checks signals missing"
         )
-        send_planner_notification(
+        service.send_planner_notification(
             subject=f"NEEDS-DECISION: Publish/checks missing ({changeset_id})",
             body=(
                 "No push or PR detected after worker completion and no local "
@@ -524,21 +452,16 @@ def run_finalize_pipeline(
             ),
             agent_id=agent_id,
             thread_id=changeset_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            dry_run=False,
         )
         return FinalizeResult(
             continue_running=False, reason="changeset_blocked_publish_missing"
         )
     if branch_pr and pr_payload:
-        set_changeset_review_pending_state(
+        service.set_changeset_review_pending_state(
             changeset_id=changeset_id,
             pr_payload=pr_payload,
             pushed=pushed,
             fallback_pr_state=None,
-            beads_root=beads_root,
-            repo_root=repo_root,
         )
         return FinalizeResult(continue_running=True, reason="changeset_review_pending")
     return FinalizeResult(continue_running=True, reason="changeset_published")

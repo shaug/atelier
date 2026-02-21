@@ -5,10 +5,242 @@ from pathlib import Path
 from typing import Any
 
 from atelier.worker import finalize_pipeline
+from atelier.worker.models import FinalizeResult, PublishSignalDiagnostics
 
 
-def _pipeline_kwargs(**overrides: Any) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {
+class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
+    def __init__(self) -> None:
+        self.issue_labels_fn = lambda issue: set(issue.get("labels") or [])
+        self.find_invalid_changeset_labels_fn = lambda _epic_id: []
+        self.send_invalid_changeset_labels_notification_fn = (
+            lambda *, epic_id, invalid_changesets, agent_id: ""
+        )
+        self.has_open_descendant_changesets_fn = lambda _changeset_id: False
+        self.has_blocking_messages_fn = lambda *, thread_ids, started_at: False
+        self.mark_changeset_children_in_progress_fn = lambda _changeset_id: None
+        self.close_completed_container_changesets_fn = lambda _epic_id: []
+        self.promote_planned_descendant_changesets_fn = lambda _changeset_id: None
+        self.changeset_integration_signal_fn = lambda issue, *, repo_slug, git_path: (
+            False,
+            None,
+        )
+        self.recover_premature_merged_changeset_fn = lambda *, issue, context: None
+        self.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: None
+        self.send_planner_notification_fn = (
+            lambda *, subject, body, agent_id, thread_id: None
+        )
+        self.mark_changeset_closed_fn = lambda _changeset_id: None
+        self.finalize_epic_if_complete_fn = lambda *, context: FinalizeResult(
+            continue_running=True, reason="changeset_complete"
+        )
+        self.mark_changeset_in_progress_fn = lambda _changeset_id: None
+        self.changeset_waiting_on_review_or_signals_fn = lambda issue, *, context: False
+        self.lookup_pr_payload_fn = lambda repo_slug, branch: None
+        self.lookup_pr_payload_diagnostic_fn = lambda repo_slug, branch: (None, None)
+        self.update_changeset_review_from_pr_fn = (
+            lambda changeset_id, *, pr_payload, pushed: None
+        )
+        self.finalize_terminal_changeset_fn = (
+            lambda *, context, terminal_state, integrated_sha: FinalizeResult(
+                continue_running=True,
+                reason="changeset_terminal",
+            )
+        )
+        self.handle_pushed_without_pr_fn = (
+            lambda *, issue, context, create_detail_prefix=None: FinalizeResult(
+                continue_running=True,
+                reason="changeset_review_pending",
+            )
+        )
+        self.attempt_push_work_branch_fn = lambda work_branch: (False, None)
+        self.collect_publish_signal_diagnostics_fn = lambda *, work_branch, context: (
+            PublishSignalDiagnostics(
+                local_branch_exists=False,
+                remote_branch_exists=False,
+                worktree_path=None,
+                dirty_entries=(),
+            )
+        )
+        self.format_publish_diagnostics_fn = lambda diagnostics, *, push_detail=None: (
+            "diag"
+        )
+        self.set_changeset_review_pending_state_fn = (
+            lambda *, changeset_id, pr_payload, pushed, fallback_pr_state: None
+        )
+
+    def issue_labels(self, issue: dict[str, object]) -> set[str]:
+        return self.issue_labels_fn(issue)
+
+    def find_invalid_changeset_labels(self, epic_id: str) -> list[str]:
+        return self.find_invalid_changeset_labels_fn(epic_id)
+
+    def send_invalid_changeset_labels_notification(
+        self, *, epic_id: str, invalid_changesets: list[str], agent_id: str
+    ) -> str:
+        return self.send_invalid_changeset_labels_notification_fn(
+            epic_id=epic_id,
+            invalid_changesets=invalid_changesets,
+            agent_id=agent_id,
+        )
+
+    def has_open_descendant_changesets(self, changeset_id: str) -> bool:
+        return self.has_open_descendant_changesets_fn(changeset_id)
+
+    def has_blocking_messages(
+        self, *, thread_ids: set[str], started_at: dt.datetime
+    ) -> bool:
+        return self.has_blocking_messages_fn(
+            thread_ids=thread_ids, started_at=started_at
+        )
+
+    def mark_changeset_children_in_progress(self, changeset_id: str) -> None:
+        self.mark_changeset_children_in_progress_fn(changeset_id)
+
+    def close_completed_container_changesets(self, epic_id: str) -> list[str]:
+        return self.close_completed_container_changesets_fn(epic_id)
+
+    def promote_planned_descendant_changesets(self, changeset_id: str) -> None:
+        self.promote_planned_descendant_changesets_fn(changeset_id)
+
+    def changeset_integration_signal(
+        self, issue: dict[str, object], *, repo_slug: str | None, git_path: str | None
+    ) -> tuple[bool, str | None]:
+        return self.changeset_integration_signal_fn(
+            issue, repo_slug=repo_slug, git_path=git_path
+        )
+
+    def recover_premature_merged_changeset(
+        self,
+        *,
+        issue: dict[str, object],
+        context: finalize_pipeline.FinalizePipelineContext,
+    ) -> FinalizeResult | None:
+        return self.recover_premature_merged_changeset_fn(issue=issue, context=context)
+
+    def mark_changeset_blocked(self, changeset_id: str, *, reason: str) -> None:
+        self.mark_changeset_blocked_fn(changeset_id, reason=reason)
+
+    def send_planner_notification(
+        self, *, subject: str, body: str, agent_id: str, thread_id: str | None
+    ) -> None:
+        self.send_planner_notification_fn(
+            subject=subject,
+            body=body,
+            agent_id=agent_id,
+            thread_id=thread_id,
+        )
+
+    def mark_changeset_closed(self, changeset_id: str) -> None:
+        self.mark_changeset_closed_fn(changeset_id)
+
+    def finalize_epic_if_complete(
+        self, *, context: finalize_pipeline.FinalizePipelineContext
+    ) -> FinalizeResult:
+        return self.finalize_epic_if_complete_fn(context=context)
+
+    def mark_changeset_in_progress(self, changeset_id: str) -> None:
+        self.mark_changeset_in_progress_fn(changeset_id)
+
+    def changeset_waiting_on_review_or_signals(
+        self,
+        issue: dict[str, object],
+        *,
+        context: finalize_pipeline.FinalizePipelineContext,
+    ) -> bool:
+        return self.changeset_waiting_on_review_or_signals_fn(issue, context=context)
+
+    def lookup_pr_payload(
+        self, repo_slug: str | None, branch: str
+    ) -> dict[str, object] | None:
+        return self.lookup_pr_payload_fn(repo_slug, branch)
+
+    def lookup_pr_payload_diagnostic(
+        self, repo_slug: str | None, branch: str
+    ) -> tuple[dict[str, object] | None, str | None]:
+        return self.lookup_pr_payload_diagnostic_fn(repo_slug, branch)
+
+    def update_changeset_review_from_pr(
+        self,
+        changeset_id: str,
+        *,
+        pr_payload: dict[str, object] | None,
+        pushed: bool,
+    ) -> None:
+        self.update_changeset_review_from_pr_fn(
+            changeset_id,
+            pr_payload=pr_payload,
+            pushed=pushed,
+        )
+
+    def finalize_terminal_changeset(
+        self,
+        *,
+        context: finalize_pipeline.FinalizePipelineContext,
+        terminal_state: str,
+        integrated_sha: str | None,
+    ) -> FinalizeResult:
+        return self.finalize_terminal_changeset_fn(
+            context=context,
+            terminal_state=terminal_state,
+            integrated_sha=integrated_sha,
+        )
+
+    def handle_pushed_without_pr(
+        self,
+        *,
+        issue: dict[str, object],
+        context: finalize_pipeline.FinalizePipelineContext,
+        create_detail_prefix: str | None = None,
+    ) -> FinalizeResult:
+        return self.handle_pushed_without_pr_fn(
+            issue=issue,
+            context=context,
+            create_detail_prefix=create_detail_prefix,
+        )
+
+    def attempt_push_work_branch(self, work_branch: str) -> tuple[bool, str | None]:
+        return self.attempt_push_work_branch_fn(work_branch)
+
+    def collect_publish_signal_diagnostics(
+        self,
+        *,
+        work_branch: str,
+        context: finalize_pipeline.FinalizePipelineContext,
+    ) -> PublishSignalDiagnostics:
+        return self.collect_publish_signal_diagnostics_fn(
+            work_branch=work_branch,
+            context=context,
+        )
+
+    def format_publish_diagnostics(
+        self,
+        diagnostics: PublishSignalDiagnostics,
+        *,
+        push_detail: str | None = None,
+    ) -> str:
+        return self.format_publish_diagnostics_fn(
+            diagnostics,
+            push_detail=push_detail,
+        )
+
+    def set_changeset_review_pending_state(
+        self,
+        *,
+        changeset_id: str,
+        pr_payload: dict[str, object] | None,
+        pushed: bool,
+        fallback_pr_state: str | None,
+    ) -> None:
+        self.set_changeset_review_pending_state_fn(
+            changeset_id=changeset_id,
+            pr_payload=pr_payload,
+            pushed=pushed,
+            fallback_pr_state=fallback_pr_state,
+        )
+
+
+def _pipeline_context(**overrides: Any) -> finalize_pipeline.FinalizePipelineContext:
+    payload: dict[str, Any] = {
         "changeset_id": "at-epic.1",
         "epic_id": "at-epic",
         "agent_id": "atelier/worker/codex/p100",
@@ -27,41 +259,16 @@ def _pipeline_kwargs(**overrides: Any) -> dict[str, Any]:
         "squash_message_agent_home": None,
         "squash_message_agent_env": None,
         "git_path": "git",
-        "issue_labels": lambda issue: set(issue.get("labels") or []),
-        "find_invalid_changeset_labels": lambda *_args, **_kwargs: [],
-        "send_invalid_changeset_labels_notification": lambda **_kwargs: "",
-        "has_open_descendant_changesets": lambda *_args, **_kwargs: False,
-        "has_blocking_messages": lambda **_kwargs: False,
-        "mark_changeset_children_in_progress": lambda *_args, **_kwargs: None,
-        "close_completed_container_changesets": lambda *_args, **_kwargs: [],
-        "promote_planned_descendant_changesets": lambda *_args, **_kwargs: None,
-        "changeset_integration_signal": lambda *_args, **_kwargs: (False, None),
-        "recover_premature_merged_changeset": lambda **_kwargs: None,
-        "mark_changeset_blocked": lambda *_args, **_kwargs: None,
-        "send_planner_notification": lambda **_kwargs: None,
-        "mark_changeset_closed": lambda *_args, **_kwargs: None,
-        "finalize_epic_if_complete": lambda **_kwargs: None,
-        "mark_changeset_in_progress": lambda *_args, **_kwargs: None,
-        "changeset_waiting_on_review_or_signals": lambda *_args, **_kwargs: False,
-        "lookup_pr_payload": lambda *_args, **_kwargs: None,
-        "lookup_pr_payload_diagnostic": lambda *_args, **_kwargs: (None, None),
-        "update_changeset_review_from_pr": lambda *_args, **_kwargs: None,
-        "finalize_terminal_changeset": lambda **_kwargs: None,
-        "handle_pushed_without_pr": lambda **_kwargs: None,
-        "attempt_push_work_branch": lambda *_args, **_kwargs: (False, None),
-        "collect_publish_signal_diagnostics": lambda **_kwargs: type(
-            "Diag", (), {"has_recoverable_local_state": False}
-        )(),
-        "format_publish_diagnostics": lambda *_args, **_kwargs: "diag",
-        "set_changeset_review_pending_state": lambda **_kwargs: None,
     }
-    kwargs.update(overrides)
-    return kwargs
+    payload.update(overrides)
+    return finalize_pipeline.FinalizePipelineContext(**payload)
 
 
 def test_run_finalize_pipeline_missing_changeset_id() -> None:
+    service = _FinalizeServiceStub()
     result = finalize_pipeline.run_finalize_pipeline(
-        **_pipeline_kwargs(changeset_id="")
+        context=_pipeline_context(changeset_id=""),
+        service=service,
     )
 
     assert result.reason == "changeset_missing"
@@ -74,15 +281,25 @@ def test_run_finalize_pipeline_blocks_on_invalid_labels(monkeypatch) -> None:
         "run_bd_json",
         lambda *_args, **_kwargs: [{"id": "at-epic.1", "labels": ["at:changeset"]}],
     )
+    service = _FinalizeServiceStub()
     notified: list[dict[str, Any]] = []
+    service.find_invalid_changeset_labels_fn = lambda _epic_id: ["at-epic.2"]
+    service.send_invalid_changeset_labels_notification_fn = (
+        lambda *, epic_id, invalid_changesets, agent_id: (
+            notified.append(
+                {
+                    "epic_id": epic_id,
+                    "invalid_changesets": invalid_changesets,
+                    "agent_id": agent_id,
+                }
+            )
+            or "sent"
+        )
+    )
 
     result = finalize_pipeline.run_finalize_pipeline(
-        **_pipeline_kwargs(
-            find_invalid_changeset_labels=lambda *_args, **_kwargs: ["at-epic.2"],
-            send_invalid_changeset_labels_notification=lambda **kwargs: (
-                notified.append(kwargs) or "sent"
-            ),
-        )
+        context=_pipeline_context(),
+        service=service,
     )
 
     assert result.reason == "changeset_label_violation"
@@ -102,10 +319,12 @@ def test_run_finalize_pipeline_waiting_on_review_returns_pending(monkeypatch) ->
         lambda *_args, **_kwargs: [issue],
     )
 
+    service = _FinalizeServiceStub()
+    service.changeset_waiting_on_review_or_signals_fn = lambda _issue, *, context: True
+
     result = finalize_pipeline.run_finalize_pipeline(
-        **_pipeline_kwargs(
-            changeset_waiting_on_review_or_signals=lambda *_args, **_kwargs: True
-        )
+        context=_pipeline_context(),
+        service=service,
     )
 
     assert result.reason == "changeset_review_pending"
