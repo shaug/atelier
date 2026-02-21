@@ -1,3 +1,6 @@
+from pathlib import Path
+from unittest.mock import patch
+
 from atelier.worker import runtime, work_command_helpers, work_startup_runtime
 from atelier.worker.models import WorkerRunSummary
 from atelier.worker.ports import WorkerRuntimeDependencies
@@ -145,3 +148,26 @@ def test_work_command_helpers_exposes_public_finalize_helpers() -> None:
 
 def test_work_startup_runtime_does_not_expose_finalize_private_helpers() -> None:
     assert not hasattr(work_startup_runtime, "_find_invalid_changeset_labels")
+
+
+def test_startup_service_no_eligible_summary_does_not_queue_message() -> None:
+    emitted: list[str] = []
+    issues = [{"id": "at-1", "status": "open", "labels": ["at:epic", "at:ready"]}]
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    with (
+        patch("atelier.worker.work_startup_runtime.say", side_effect=emitted.append),
+        patch("atelier.worker.work_startup_runtime.beads.create_message_bead") as create_message,
+    ):
+        service.send_needs_decision(
+            agent_id="atelier/worker/codex/p1",
+            mode="auto",
+            issues=issues,
+            dry_run=False,
+        )
+
+    assert create_message.call_count == 0
+    assert emitted[0] == "No eligible epics available."

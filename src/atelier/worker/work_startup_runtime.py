@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
@@ -113,6 +114,36 @@ class _NextChangesetService(worker_startup.NextChangesetService):
 
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool:
         return is_changeset_in_progress(issue)
+
+
+def _no_eligible_epics_summary(
+    *,
+    agent_id: str,
+    mode: str,
+    issues: list[dict[str, object]],
+) -> list[str]:
+    """Build a concise no-eligible-epics startup summary.
+
+    Args:
+        agent_id: Active worker agent identifier.
+        mode: Worker selection mode.
+        issues: Candidate epic issues.
+
+    Returns:
+        Summary lines for operator output.
+    """
+    ready = filter_epics(issues, require_unassigned=True)
+    assigned = filter_epics(issues, assignee=agent_id)
+    timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+    return [
+        "No eligible epics available.",
+        f"- Agent: {agent_id}",
+        f"- Mode: {mode}",
+        f"- Total epics: {len(issues)}",
+        f"- Ready epics: {len(ready)}",
+        f"- Assigned epics: {len(assigned)}",
+        f"- Timestamp: {timestamp}",
+    ]
 
 
 def next_changeset(
@@ -530,16 +561,13 @@ class _StartupContractService(worker_startup.StartupContractService):
         issues: list[dict[str, object]],
         dry_run: bool,
     ) -> None:
-        worker_queueing.send_needs_decision(
-            agent_id=agent_id,
-            mode=mode,
-            issues=issues,
-            beads_root=self._beads_root,
-            repo_root=self._repo_root,
-            dry_run=dry_run,
-            filter_epics=filter_epics,
-            dry_run_log=dry_run_log,
-        )
+        lines = _no_eligible_epics_summary(agent_id=agent_id, mode=mode, issues=issues)
+        if dry_run:
+            for line in lines:
+                dry_run_log(line)
+            return
+        for line in lines:
+            say(line)
 
     def dry_run_log(self, message: str) -> None:
         dry_run_log(message)
