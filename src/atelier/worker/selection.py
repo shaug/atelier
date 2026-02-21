@@ -5,12 +5,42 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Callable
 
+_EXECUTABLE_LABELS = {"at:epic", "at:changeset"}
+
 
 def issue_labels(issue: dict[str, object]) -> set[str]:
     labels = issue.get("labels")
     if not isinstance(labels, list):
         return set()
     return {str(label) for label in labels if label is not None}
+
+
+def agent_role(agent_id: object) -> str | None:
+    if not isinstance(agent_id, str):
+        return None
+    parts = [part for part in agent_id.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "atelier":
+        return parts[1].strip().lower() or None
+    if parts:
+        value = parts[0].strip().lower()
+        return value or None
+    return None
+
+
+def is_planner_agent_id(agent_id: object) -> bool:
+    return agent_role(agent_id) == "planner"
+
+
+def has_planner_executable_assignee(issue: dict[str, object]) -> bool:
+    labels = issue_labels(issue)
+    if not labels.intersection(_EXECUTABLE_LABELS):
+        return False
+    assignee = issue.get("assignee")
+    return is_planner_agent_id(assignee)
+
+
+def planner_owned_executable_issues(issues: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [issue for issue in issues if has_planner_executable_assignee(issue)]
 
 
 def is_eligible_status(status: str, *, allow_hooked: bool) -> bool:
@@ -35,6 +65,8 @@ def filter_epics(
     for issue in issues:
         status = str(issue.get("status") or "")
         if not is_eligible_status(status, allow_hooked=allow_hooked):
+            continue
+        if has_planner_executable_assignee(issue):
             continue
         if skip_draft:
             if "at:draft" in issue_labels(issue):
@@ -106,6 +138,8 @@ def stale_family_assigned_epics(
         status = str(issue.get("status") or "")
         if not is_eligible_status(status, allow_hooked=True):
             continue
+        if has_planner_executable_assignee(issue):
+            continue
         if "at:draft" in issue_labels(issue):
             continue
         assignee = issue.get("assignee")
@@ -141,6 +175,8 @@ def select_epic_from_ready_changesets(
         candidate_issue = known_epics.get(candidate)
         source_issue = candidate_issue if candidate_issue is not None else changeset
         if "at:draft" in issue_labels(source_issue):
+            continue
+        if has_planner_executable_assignee(source_issue):
             continue
         assignee = source_issue.get("assignee")
         if isinstance(assignee, str) and assignee.strip():

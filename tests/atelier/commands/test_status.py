@@ -122,6 +122,7 @@ def test_status_json_summary() -> None:
         payload = json.loads(buffer.getvalue())
         assert payload["counts"]["epics"] == 2
         assert payload["counts"]["agents"] == 1
+        assert payload["counts"]["ownership_policy_violations"] == 0
         assert payload["counts"]["queues"] == 0
         epic_payloads = {item["id"]: item for item in payload["epics"]}
         epic = epic_payloads["epic-1"]
@@ -133,6 +134,7 @@ def test_status_json_summary() -> None:
         assert epic["changesets"]["merged"] == 1
         assert epic["changesets"]["abandoned"] == 1
         assert epic["worktree_relpath"] == "worktrees/epic-1"
+        assert epic["ownership_policy_violation"] is False
 
 
 def test_status_includes_changeset_signals() -> None:
@@ -309,3 +311,60 @@ def test_status_marks_stale_sessions_and_reclaimable_epics() -> None:
         epic_payload = payload["epics"][0]
         assert epic_payload["assignee_session_state"] == "stale"
         assert epic_payload["reclaimable"] is True
+
+
+def test_status_flags_planner_owned_executable_epic() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        project_config = config.ProjectConfig.model_validate(
+            {"project": {"enlistment": str(repo_root), "origin": NORMALIZED_ORIGIN}}
+        )
+        epic = {
+            "id": "epic-violation",
+            "title": "Planner-owned",
+            "status": "in_progress",
+            "assignee": "atelier/planner/codex/p8",
+            "labels": ["at:epic", "at:changeset"],
+        }
+
+        def fake_run_bd_json(
+            args: list[str], *, beads_root: Path, cwd: Path
+        ) -> list[dict[str, object]]:
+            if args[:3] == ["list", "--label", "at:epic"]:
+                return [epic]
+            if args[:3] == ["list", "--label", "at:agent"]:
+                return []
+            if args[:3] == ["list", "--label", "at:message"]:
+                return []
+            if args and args[0] in {"list", "ready"} and "--parent" in args:
+                return []
+            return []
+
+        with (
+            patch(
+                "atelier.commands.status.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, str(repo_root), repo_root),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_command",
+                return_value=DummyResult(),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_json",
+                side_effect=fake_run_bd_json,
+            ),
+        ):
+            buffer = io.StringIO()
+            with patch("sys.stdout", buffer):
+                status_cmd(SimpleNamespace(format="json"))
+
+        payload = json.loads(buffer.getvalue())
+        assert payload["counts"]["ownership_policy_violations"] == 1
+        epic_payload = payload["epics"][0]
+        assert epic_payload["ownership_policy_violation"] is True
+        assert epic_payload["ownership_policy_reason"] == "planner-owned executable work"

@@ -446,6 +446,22 @@ def _issue_labels(issue: dict[str, object]) -> set[str]:
     return {str(label) for label in labels if label}
 
 
+def _agent_role(agent_id: object) -> str | None:
+    if not isinstance(agent_id, str):
+        return None
+    parts = [part for part in agent_id.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "atelier":
+        return parts[1].strip().lower() or None
+    if parts:
+        value = parts[0].strip().lower()
+        return value or None
+    return None
+
+
+def _is_planner_assignee(agent_id: object) -> bool:
+    return _agent_role(agent_id) == "planner"
+
+
 def summarize_changesets(
     changesets: list[dict[str, object]],
     *,
@@ -1217,6 +1233,11 @@ def claim_epic(
     if "at:draft" in labels:
         die(f"epic {epic_id} is marked as draft")
     existing_assignee = issue.get("assignee")
+    if _is_planner_assignee(existing_assignee) and {"at:epic", "at:changeset"} & labels:
+        die(
+            f"epic {epic_id} is assigned to planner {existing_assignee}; "
+            "planner agents cannot own executable work"
+        )
     if (
         existing_assignee
         and existing_assignee != agent_id

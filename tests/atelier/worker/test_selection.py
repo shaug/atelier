@@ -163,3 +163,58 @@ def test_select_epic_from_ready_changesets_uses_epic_for_child_issue() -> None:
     )
 
     assert selected == "at-epic"
+
+
+def test_filter_epics_skips_planner_owned_executable_issue() -> None:
+    issues = [
+        {
+            "id": "at-planner",
+            "status": "open",
+            "labels": ["at:epic"],
+            "assignee": "atelier/planner/codex/p333",
+        },
+        {
+            "id": "at-worker",
+            "status": "open",
+            "labels": ["at:epic"],
+            "assignee": None,
+        },
+    ]
+
+    ready = selection.filter_epics(
+        issues,
+        require_unassigned=True,
+        allow_hooked=False,
+        skip_draft=True,
+    )
+
+    assert [item["id"] for item in ready] == ["at-worker"]
+
+
+def test_select_epic_from_ready_changesets_skips_planner_owned_epic() -> None:
+    issues = [
+        {
+            "id": "at-epic",
+            "labels": ["at:epic"],
+            "assignee": "atelier/planner/codex/p333",
+        },
+    ]
+    ready_changesets = [{"id": "at-epic.1"}]
+
+    selected = selection.select_epic_from_ready_changesets(
+        issues=issues,
+        ready_changesets=ready_changesets,
+        is_actionable=lambda issue_id: issue_id == "at-epic",
+    )
+
+    assert selected is None
+
+
+def test_has_planner_executable_assignee_ignores_message_bead() -> None:
+    issue = {
+        "id": "at-msg-1",
+        "labels": ["at:message"],
+        "assignee": "atelier/planner/codex/p333",
+    }
+
+    assert selection.has_planner_executable_assignee(issue) is False
