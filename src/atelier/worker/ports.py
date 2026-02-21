@@ -13,7 +13,13 @@ from ..agent_home import AgentHome
 from ..config import ProjectConfig
 from ..work_feedback import ReviewFeedbackSnapshot
 from .models import FinalizeResult, ReconcileResult, StartupContractResult
-from .session.agent import AgentSessionPreparation, AgentSessionRunResult
+from .session.agent import (
+    AgentSessionBlockedHandler,
+    AgentSessionCommandOps,
+    AgentSessionControl,
+    AgentSessionPreparation,
+    AgentSessionRunResult,
+)
 from .session.startup import StartupContractContext
 from .session.worktree import WorktreePreparation
 
@@ -206,10 +212,8 @@ class WorkerSessionAgentService(Protocol):
         enlistment_path: Path,
         yes: bool,
         dry_run: bool,
-        strip_flag_with_value: Callable[[list[str], str], list[str]],
-        confirm_update: Callable[[str], bool],
-        dry_run_log: Callable[[str], None],
-        emit: Callable[[str], None],
+        session_control: AgentSessionControl,
+        command_ops: AgentSessionCommandOps,
     ) -> AgentSessionPreparation: ...
 
     def install_agent_hooks(
@@ -219,7 +223,7 @@ class WorkerSessionAgentService(Protocol):
         agent: AgentHome,
         agent_spec: object,
         env: dict[str, str],
-        dry_run_log: Callable[[str], None],
+        session_control: AgentSessionControl,
     ) -> None: ...
 
     def start_agent_session(
@@ -231,13 +235,9 @@ class WorkerSessionAgentService(Protocol):
         agent_options: list[str],
         opening_prompt: str,
         env: dict[str, str],
-        with_codex_exec: Callable[[list[str], str], list[str]],
-        strip_flag_with_value: Callable[[list[str], str], list[str]],
-        ensure_exec_subcommand_flag: Callable[[list[str], str], list[str]],
-        mark_changeset_blocked: Callable[[str], None],
-        die_fn: Callable[[str], None],
-        dry_run_log: Callable[[str], None],
-        emit: Callable[[str], None],
+        command_ops: AgentSessionCommandOps,
+        session_control: AgentSessionControl,
+        blocked_handler: AgentSessionBlockedHandler,
     ) -> AgentSessionRunResult | None: ...
 
 

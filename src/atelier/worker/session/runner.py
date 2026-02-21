@@ -95,6 +95,22 @@ class _BoundChangesetSelectionService:
         )
 
 
+@dataclass(frozen=True)
+class _ChangesetBlockHandler:
+    lifecycle: WorkerLifecycleService
+    changeset_id: str
+    beads_root: Path
+    repo_root: Path
+
+    def mark_changeset_blocked(self, reason: str) -> None:
+        self.lifecycle.mark_changeset_blocked(
+            self.changeset_id,
+            beads_root=self.beads_root,
+            repo_root=self.repo_root,
+            reason=reason,
+        )
+
+
 def run_worker_once(
     args: object,
     *,
@@ -520,10 +536,8 @@ def run_worker_once(
                 enlistment_path=_enlistment,
                 yes=bool(getattr(args, "yes", False)),
                 dry_run=dry_run,
-                strip_flag_with_value=command_ports.strip_flag_with_value,
-                confirm_update=lambda message: control.confirm(message, default=False),
-                dry_run_log=control.dry_run_log,
-                emit=control.say,
+                session_control=control,
+                command_ops=command_ports,
             )
         except RuntimeError as exc:
             control.die(str(exc))
@@ -570,7 +584,7 @@ def run_worker_once(
             agent=agent,
             agent_spec=agent_spec,
             env=env,
-            dry_run_log=control.dry_run_log,
+            session_control=control,
         )
         finishstep()
         finishstep = control.step("Start agent session", timings=timings, trace=trace)
@@ -583,18 +597,14 @@ def run_worker_once(
             agent_options=agent_options,
             opening_prompt=opening_prompt,
             env=env,
-            with_codex_exec=command_ports.with_codex_exec,
-            strip_flag_with_value=command_ports.strip_flag_with_value,
-            ensure_exec_subcommand_flag=command_ports.ensure_exec_subcommand_flag,
-            mark_changeset_blocked=lambda reason: lifecycle.mark_changeset_blocked(
-                changeset_id,
+            command_ops=command_ports,
+            session_control=control,
+            blocked_handler=_ChangesetBlockHandler(
+                lifecycle=lifecycle,
+                changeset_id=str(changeset_id),
                 beads_root=beads_root,
                 repo_root=repo_root,
-                reason=reason,
             ),
-            die_fn=control.die,
-            dry_run_log=control.dry_run_log,
-            emit=control.say,
         )
         if session_result is None:
             finishstep(extra="dry run")

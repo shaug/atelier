@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import datetime as dt
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from ... import (
     agent_home,
@@ -42,6 +42,34 @@ class AgentSessionRunResult:
     start_cwd: Path
 
 
+class AgentSessionControl(Protocol):
+    """Worker control hooks required by agent session helpers."""
+
+    def confirm(self, prompt: str, *, default: bool = False) -> bool: ...
+
+    def dry_run_log(self, message: str) -> None: ...
+
+    def die(self, message: str) -> None: ...
+
+    def say(self, message: str) -> None: ...
+
+
+class AgentSessionCommandOps(Protocol):
+    """Command rewriting hooks used by agent session launch."""
+
+    def strip_flag_with_value(self, args: list[str], flag: str) -> list[str]: ...
+
+    def with_codex_exec(self, cmd: list[str], prompt: str) -> list[str]: ...
+
+    def ensure_exec_subcommand_flag(self, args: list[str], flag: str) -> list[str]: ...
+
+
+class AgentSessionBlockedHandler(Protocol):
+    """Changeset-state hooks used when session startup fails."""
+
+    def mark_changeset_blocked(self, reason: str) -> None: ...
+
+
 def prepare_agent_session(
     *,
     project_config: config.ProjectConfig,
@@ -56,10 +84,8 @@ def prepare_agent_session(
     enlistment_path: Path,
     yes: bool,
     dry_run: bool,
-    strip_flag_with_value: Callable[[list[str], str], list[str]],
-    confirm_update: Callable[[str], bool],
-    dry_run_log: Callable[[str], None],
-    emit: Callable[[str], None],
+    session_control: AgentSessionControl,
+    command_ops: AgentSessionCommandOps,
 ) -> AgentSessionPreparation:
     """Prepare agent home, AGENTS template, and runtime env."""
     agent_spec = agents.get_agent(project_config.agent.default)
@@ -67,7 +93,7 @@ def prepare_agent_session(
         raise RuntimeError(f"unsupported agent {project_config.agent.default!r}")
     agent_options = list(project_config.agent.options.get(agent_spec.name, []))
     if agent_spec.name == "codex":
-        agent_options = strip_flag_with_value(agent_options, "--cd")
+        agent_options = command_ops.strip_flag_with_value(agent_options, "--cd")
 
     project_enlistment = project_config.project.enlistment or enlistment_path
     workspace_branch = root_branch_value or ""
@@ -76,8 +102,12 @@ def prepare_agent_session(
             agent.path / "AGENTS.md" if changeset_worktree_path is not None else None
         )
         if worker_agents_path is not None:
-            dry_run_log(f"Would write worker AGENTS.md to {worker_agents_path}")
-            dry_run_log("Would sync Beads addendum into worker AGENTS.md.")
+            session_control.dry_run_log(
+                f"Would write worker AGENTS.md to {worker_agents_path}"
+            )
+            session_control.dry_run_log(
+                "Would sync Beads addendum into worker AGENTS.md."
+            )
         if project_data_dir.exists():
             try:
                 sync_result = skills.sync_project_skills(
@@ -89,13 +119,13 @@ def prepare_agent_session(
                     interactive=False,
                     dry_run=True,
                 )
-                dry_run_log(
+                session_control.dry_run_log(
                     f"Managed skills: {sync_result.action}"
                     + (f" ({sync_result.detail})" if sync_result.detail else "")
                 )
             except OSError:
                 pass
-        dry_run_log("Would prepare workspace environment variables.")
+        session_control.dry_run_log("Would prepare workspace environment variables.")
     else:
         skills_dir: Path | None = None
         if project_data_dir.exists():
@@ -109,11 +139,13 @@ def prepare_agent_session(
                     interactive=(
                         sys.stdin.isatty() and sys.stdout.isatty() and not yes
                     ),
-                    prompt_update=lambda message: confirm_update(message),
+                    prompt_update=lambda message: session_control.confirm(
+                        message, default=False
+                    ),
                 )
                 skills_dir = sync_result.skills_dir
                 if sync_result.action in {"installed", "updated", "up_to_date"}:
-                    emit(f"Managed skills: {sync_result.action}")
+                    session_control.say(f"Managed skills: {sync_result.action}")
             except OSError:
                 skills_dir = None
         if skills_dir is not None:
@@ -189,11 +221,11 @@ def install_agent_hooks(
     agent: agent_home.AgentHome,
     agent_spec: agents.AgentSpec,
     env: dict[str, str],
-    dry_run_log: Callable[[str], None],
+    session_control: AgentSessionControl,
 ) -> None:
     """Install/attach runtime hooks for the session agent."""
     if dry_run:
-        dry_run_log("Would ensure agent hooks are installed.")
+        session_control.dry_run_log("Would ensure agent hooks are installed.")
         return
     hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
     hooks.ensure_hooks_path(env, hook_path)
@@ -207,13 +239,9 @@ def start_agent_session(
     agent_options: list[str],
     opening_prompt: str,
     env: dict[str, str],
-    with_codex_exec: Callable[[list[str], str], list[str]],
-    strip_flag_with_value: Callable[[list[str], str], list[str]],
-    ensure_exec_subcommand_flag: Callable[[list[str], str], list[str]],
-    mark_changeset_blocked: Callable[[str], None],
-    die_fn: Callable[[str], None],
-    dry_run_log: Callable[[str], None],
-    emit: Callable[[str], None],
+    command_ops: AgentSessionCommandOps,
+    session_control: AgentSessionControl,
+    blocked_handler: AgentSessionBlockedHandler,
 ) -> AgentSessionRunResult | None:
     """Run the configured agent and return runtime details."""
     start_cmd, start_cwd = agent_spec.build_start_command(
@@ -222,27 +250,33 @@ def start_agent_session(
         opening_prompt,
     )
     if agent_spec.name == "codex":
-        start_cmd = with_codex_exec(start_cmd, opening_prompt)
-        start_cmd = strip_flag_with_value(start_cmd, "--cd")
-        start_cmd = ensure_exec_subcommand_flag(start_cmd, "--skip-git-repo-check")
+        start_cmd = command_ops.with_codex_exec(start_cmd, opening_prompt)
+        start_cmd = command_ops.strip_flag_with_value(start_cmd, "--cd")
+        start_cmd = command_ops.ensure_exec_subcommand_flag(
+            start_cmd, "--skip-git-repo-check"
+        )
         start_cwd = agent.path
     if dry_run:
-        dry_run_log(f"Agent command: {' '.join(start_cmd)}")
-        dry_run_log(f"Agent cwd: {start_cwd}")
+        session_control.dry_run_log(f"Agent command: {' '.join(start_cmd)}")
+        session_control.dry_run_log(f"Agent cwd: {start_cwd}")
         return None
 
-    emit(f"Starting {agent_spec.display_name} session")
+    session_control.say(f"Starting {agent_spec.display_name} session")
     started_at = dt.datetime.now(tz=dt.timezone.utc)
     returncode = 0
     if agent_spec.name == "codex":
         result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
         if result is None:
-            mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
-            die_fn(f"missing required command: {start_cmd[0]}")
+            blocked_handler.mark_changeset_blocked(
+                f"missing required command: {start_cmd[0]}"
+            )
+            session_control.die(f"missing required command: {start_cmd[0]}")
         if result.returncode != 0:
             returncode = result.returncode
-            mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
-            die_fn(f"command failed: {' '.join(start_cmd)}")
+            blocked_handler.mark_changeset_blocked(
+                f"command failed: {' '.join(start_cmd)}"
+            )
+            session_control.die(f"command failed: {' '.join(start_cmd)}")
     else:
         result = exec.run_with_runner(
             exec.CommandRequest(
@@ -254,12 +288,16 @@ def start_agent_session(
             )
         )
         if result is None:
-            mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
-            die_fn(f"missing required command: {start_cmd[0]}")
+            blocked_handler.mark_changeset_blocked(
+                f"missing required command: {start_cmd[0]}"
+            )
+            session_control.die(f"missing required command: {start_cmd[0]}")
         if result.returncode != 0:
             returncode = result.returncode
-            mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
-            die_fn(f"command failed: {' '.join(start_cmd)}")
+            blocked_handler.mark_changeset_blocked(
+                f"command failed: {' '.join(start_cmd)}"
+            )
+            session_control.die(f"command failed: {' '.join(start_cmd)}")
 
     return AgentSessionRunResult(
         started_at=started_at,
