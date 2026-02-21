@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Literal
 
+from . import exec as exec_util
 from . import git
 from .worker.models_boundary import parse_pr_boundary
 
@@ -34,6 +34,51 @@ _GH_RETRY_ERROR_MARKERS = (
 _PR_LOOKUP_CACHE: dict[tuple[str, str], GithubPrLookup] = {}
 _INLINE_FEEDBACK_CACHE: dict[tuple[str, int], str | None] = {}
 _UNRESOLVED_THREADS_CACHE: dict[tuple[str, int], int | None] = {}
+
+
+@dataclass(frozen=True)
+class GithubClient:
+    """Typed command-boundary adapter for GitHub CLI queries."""
+
+    timeout_seconds: float = _GH_TIMEOUT_SECONDS
+    retry_attempts: int = _GH_RETRY_ATTEMPTS
+    retry_backoff_seconds: float = _GH_RETRY_BACKOFF_SECONDS
+
+    def available(self) -> bool:
+        return shutil.which("gh") is not None
+
+    def run(self, cmd: list[str]) -> str:
+        attempts = max(int(self.retry_attempts), 1)
+        last_error: str | None = None
+        for attempt in range(1, attempts + 1):
+            result = exec_util.run_with_runner(
+                exec_util.CommandRequest(
+                    argv=tuple(cmd),
+                    capture_output=True,
+                    text=True,
+                    timeout_seconds=self.timeout_seconds,
+                )
+            )
+            if result is None:
+                raise RuntimeError("missing required command: gh")
+            if result.returncode == 0:
+                return result.stdout
+            message = (result.stderr or result.stdout or "").strip()
+            last_error = message or f"Command failed: {' '.join(cmd)}"
+            if attempt < attempts and _is_retryable_message(last_error):
+                time.sleep(self.retry_backoff_seconds * attempt)
+                continue
+            raise RuntimeError(last_error)
+        raise RuntimeError(last_error or f"Command failed: {' '.join(cmd)}")
+
+    def run_json(self, cmd: list[str]) -> object:
+        output = self.run(cmd)
+        if not output.strip():
+            return None
+        return json.loads(output)
+
+
+_DEFAULT_GITHUB_CLIENT = GithubClient()
 
 
 @dataclass(frozen=True)
@@ -101,48 +146,15 @@ def _is_retryable_message(message: str) -> bool:
 
 
 def _run(cmd: list[str]) -> str:
-    attempts = max(int(_GH_RETRY_ATTEMPTS), 1)
-    last_error: str | None = None
-    for attempt in range(1, attempts + 1):
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=_GH_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            last_error = (
-                f"Command timed out after {_GH_TIMEOUT_SECONDS:.0f}s: {' '.join(cmd)}"
-            )
-            if attempt < attempts:
-                time.sleep(_GH_RETRY_BACKOFF_SECONDS * attempt)
-                continue
-            raise RuntimeError(last_error) from None
-
-        if result.returncode == 0:
-            return result.stdout
-
-        message = result.stderr.strip() or result.stdout.strip()
-        last_error = message or f"Command failed: {' '.join(cmd)}"
-        if attempt < attempts and _is_retryable_message(last_error):
-            time.sleep(_GH_RETRY_BACKOFF_SECONDS * attempt)
-            continue
-        raise RuntimeError(last_error)
-
-    raise RuntimeError(last_error or f"Command failed: {' '.join(cmd)}")
+    return _DEFAULT_GITHUB_CLIENT.run(cmd)
 
 
 def _run_json(cmd: list[str]) -> object:
-    output = _run(cmd)
-    if not output.strip():
-        return None
-    return json.loads(output)
+    return _DEFAULT_GITHUB_CLIENT.run_json(cmd)
 
 
 def _gh_available() -> bool:
-    return shutil.which("gh") is not None
+    return _DEFAULT_GITHUB_CLIENT.available()
 
 
 def _split_repo_slug(repo: str) -> tuple[str, str]:

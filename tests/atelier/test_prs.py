@@ -1,8 +1,8 @@
-import subprocess
 from unittest.mock import patch
 
 import pytest
 
+from atelier import exec as exec_util
 from atelier import prs
 
 
@@ -86,15 +86,16 @@ def test_lookup_github_pr_status_reports_query_errors() -> None:
 
 
 def test_run_retries_retryable_errors_before_success() -> None:
-    transient = subprocess.CompletedProcess(
-        args=["gh"], returncode=1, stdout="", stderr="TLS timeout"
+    transient = exec_util.CommandResult(
+        argv=("gh",), returncode=1, stdout="", stderr="TLS timeout"
     )
-    success = subprocess.CompletedProcess(
-        args=["gh"], returncode=0, stdout="ok", stderr=""
+    success = exec_util.CommandResult(
+        argv=("gh",), returncode=0, stdout="ok", stderr=""
     )
     with (
         patch(
-            "atelier.prs.subprocess.run", side_effect=[transient, success]
+            "atelier.prs.exec_util.run_with_runner",
+            side_effect=[transient, success],
         ) as run_cmd,
         patch("atelier.prs.time.sleep") as sleep,
     ):
