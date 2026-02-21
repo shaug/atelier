@@ -77,6 +77,17 @@ def _selection_candidates(
         status = str(issue.status or "").strip().lower()
         if status != "blocked" and cursor is not None and feedback_time <= cursor:
             continue
+        if isinstance(pr_payload, dict):
+            pr_boundary = prs.parse_pr_boundary(
+                pr_payload, source="_selection_candidates:pr"
+            )
+            pr_number = pr_boundary.number if pr_boundary is not None else None
+            if pr_number is not None:
+                unresolved_threads = prs.unresolved_review_thread_count(
+                    repo_slug, pr_number
+                )
+                if unresolved_threads == 0:
+                    continue
         epic_id = resolve_epic_id(raw_issue)
         if not epic_id:
             continue

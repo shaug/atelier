@@ -68,3 +68,18 @@ def test_capture_review_feedback_snapshot_rejects_negative_thread_count() -> Non
                 repo_root=Path("/repo"),
                 git_path="git",
             )
+
+
+def test_review_feedback_progressed_when_threads_fully_resolved() -> None:
+    before = work_feedback.ReviewFeedbackSnapshot(
+        feedback_at="2026-02-20T12:00:00Z",
+        unresolved_threads=0,
+        branch_head="abc123",
+    )
+    after = work_feedback.ReviewFeedbackSnapshot(
+        feedback_at="2026-02-20T12:00:00Z",
+        unresolved_threads=0,
+        branch_head="abc123",
+    )
+
+    assert work_feedback.review_feedback_progressed(before, after) is True

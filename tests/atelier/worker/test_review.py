@@ -74,6 +74,10 @@ def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
             "atelier.worker.review.prs.latest_feedback_timestamp_with_inline_comments",
             side_effect=fake_feedback,
         ),
+        patch(
+            "atelier.worker.review.prs.unresolved_review_thread_count",
+            return_value=1,
+        ),
     ):
         selection = review.select_review_feedback_changeset(
             epic_id="at-1",
@@ -127,6 +131,10 @@ def test_select_global_review_feedback_changeset_uses_resolver() -> None:
             "atelier.worker.review.prs.latest_feedback_timestamp_with_inline_comments",
             return_value="2026-02-20T12:00:00Z",
         ),
+        patch(
+            "atelier.worker.review.prs.unresolved_review_thread_count",
+            return_value=1,
+        ),
     ):
         selection = review.select_global_review_feedback_changeset(
             repo_slug="org/repo",
@@ -157,3 +165,58 @@ def test_select_review_feedback_changeset_invalid_issue_payload_fails() -> None:
                 beads_root=Path("/beads"),
                 repo_root=Path("/repo"),
             )
+
+
+def test_select_review_feedback_changeset_skips_when_no_unresolved_threads() -> None:
+    issues = [
+        {
+            "id": "at-1.1",
+            "labels": ["at:changeset"],
+            "status": "in_progress",
+            "description": "changeset.work_branch: feat/a\npr_state: in-review\n",
+        }
+    ]
+    record_by_id = {
+        record.issue.id: record
+        for record in beads.parse_issue_records(issues, source="review_test")
+    }
+
+    with (
+        patch(
+            "atelier.worker.review.beads.list_descendant_changesets",
+            return_value=issues,
+        ),
+        patch(
+            "atelier.worker.review.beads.BeadsClient.show_issue",
+            side_effect=lambda issue_id, *, source: record_by_id.get(issue_id),
+        ),
+        patch(
+            "atelier.worker.review.prs.lookup_github_pr_status",
+            return_value=prs.GithubPrLookup(
+                outcome="found",
+                payload={
+                    "number": 11,
+                    "state": "OPEN",
+                    "isDraft": False,
+                    "reviewDecision": None,
+                    "reviewRequests": [{"requestedReviewer": {"login": "alice"}}],
+                },
+            ),
+        ),
+        patch(
+            "atelier.worker.review.prs.latest_feedback_timestamp_with_inline_comments",
+            return_value="2026-02-20T12:00:00Z",
+        ),
+        patch(
+            "atelier.worker.review.prs.unresolved_review_thread_count",
+            return_value=0,
+        ),
+    ):
+        selection = review.select_review_feedback_changeset(
+            epic_id="at-1",
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selection is None

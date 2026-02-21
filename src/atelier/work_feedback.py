@@ -117,6 +117,10 @@ def capture_review_feedback_snapshot(
 def review_feedback_progressed(
     before: ReviewFeedbackSnapshot, after: ReviewFeedbackSnapshot
 ) -> bool:
+    # When there are no unresolved inline threads left, consider feedback handled
+    # even when no new commits/timestamps were introduced in this pass.
+    if after.unresolved_threads is not None and after.unresolved_threads == 0:
+        return True
     if (
         before.unresolved_threads is not None
         and after.unresolved_threads is not None
