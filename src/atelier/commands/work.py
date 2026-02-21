@@ -59,6 +59,7 @@ from ..worker import selection as worker_selection
 from ..worker import telemetry as worker_telemetry
 from ..worker.context import WorkerRunContext
 from ..worker.finalization import pr_gate as worker_pr_gate
+from ..worker.finalization import recovery as worker_recovery
 from ..worker.models import (
     FinalizeResult,
     PublishSignalDiagnostics,
@@ -768,106 +769,35 @@ def _recover_premature_merged_changeset(
     squash_message_agent_env: dict[str, str] | None,
     git_path: str | None,
 ) -> FinalizeResult | None:
-    """Recover when an agent marks cs:merged before PR/integration signals exist."""
-    if not branch_pr:
-        return None
-    work_branch = _changeset_work_branch(issue)
-    if not work_branch:
-        return None
-    pushed = git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
+    return worker_recovery.recover_premature_merged_changeset(
+        issue=issue,
+        changeset_id=changeset_id,
+        epic_id=epic_id,
+        agent_id=agent_id,
+        agent_bead_id=agent_bead_id,
+        branch_pr=branch_pr,
+        branch_history=branch_history,
+        branch_squash_message=branch_squash_message,
+        branch_pr_strategy=branch_pr_strategy,
+        repo_slug=repo_slug,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        project_data_dir=project_data_dir,
+        squash_message_agent_spec=squash_message_agent_spec,
+        squash_message_agent_options=squash_message_agent_options,
+        squash_message_agent_home=squash_message_agent_home,
+        squash_message_agent_env=squash_message_agent_env,
+        git_path=git_path,
+        changeset_work_branch=_changeset_work_branch,
+        lookup_pr_payload=_lookup_pr_payload,
+        lookup_pr_payload_diagnostic=_lookup_pr_payload_diagnostic,
+        changeset_integration_signal=_changeset_integration_signal,
+        finalize_terminal_changeset=_finalize_terminal_changeset,
+        mark_changeset_in_progress=_mark_changeset_in_progress,
+        update_changeset_review_from_pr=_update_changeset_review_from_pr,
+        handle_pushed_without_pr=_handle_pushed_without_pr,
+        log_warning=_log_warning,
     )
-    pr_payload = _lookup_pr_payload(repo_slug, work_branch)
-    lookup_error = None
-    if pr_payload is None:
-        _payload_check, lookup_error = _lookup_pr_payload_diagnostic(
-            repo_slug, work_branch
-        )
-    if lookup_error:
-        _log_warning(
-            f"changeset={changeset_id} premature-merged recovery failed PR lookup for branch={work_branch}: {lookup_error}"
-        )
-        return FinalizeResult(
-            continue_running=False, reason="changeset_pr_status_query_failed"
-        )
-    review_requested = prs.has_review_requests(pr_payload)
-    lifecycle = prs.lifecycle_state(
-        pr_payload, pushed=pushed, review_requested=review_requested
-    )
-
-    if lifecycle in {"draft-pr", "pr-open", "in-review", "approved"}:
-        _mark_changeset_in_progress(
-            changeset_id, beads_root=beads_root, repo_root=repo_root
-        )
-        _update_changeset_review_from_pr(
-            changeset_id,
-            pr_payload=pr_payload,
-            pushed=pushed,
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
-        return FinalizeResult(continue_running=True, reason="changeset_review_pending")
-    if lifecycle == "merged":
-        _integration_ok, integrated_sha = _changeset_integration_signal(
-            issue, repo_slug=None, repo_root=repo_root, git_path=git_path
-        )
-        return _finalize_terminal_changeset(
-            changeset_id=changeset_id,
-            epic_id=epic_id,
-            agent_id=agent_id,
-            agent_bead_id=agent_bead_id,
-            terminal_state="merged",
-            integrated_sha=integrated_sha,
-            branch_pr=branch_pr,
-            branch_history=branch_history,
-            branch_squash_message=branch_squash_message,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            project_data_dir=project_data_dir,
-            squash_message_agent_spec=squash_message_agent_spec,
-            squash_message_agent_options=squash_message_agent_options,
-            squash_message_agent_home=squash_message_agent_home,
-            squash_message_agent_env=squash_message_agent_env,
-            git_path=git_path,
-        )
-    if lifecycle == "closed":
-        integration_ok, integrated_sha = _changeset_integration_signal(
-            issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
-        )
-        return _finalize_terminal_changeset(
-            changeset_id=changeset_id,
-            epic_id=epic_id,
-            agent_id=agent_id,
-            agent_bead_id=agent_bead_id,
-            terminal_state="merged" if integration_ok else "abandoned",
-            integrated_sha=integrated_sha if integration_ok else None,
-            branch_pr=branch_pr,
-            branch_history=branch_history,
-            branch_squash_message=branch_squash_message,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            project_data_dir=project_data_dir,
-            squash_message_agent_spec=squash_message_agent_spec,
-            squash_message_agent_options=squash_message_agent_options,
-            squash_message_agent_home=squash_message_agent_home,
-            squash_message_agent_env=squash_message_agent_env,
-            git_path=git_path,
-        )
-    if pushed and not pr_payload:
-        _mark_changeset_in_progress(
-            changeset_id, beads_root=beads_root, repo_root=repo_root
-        )
-        return _handle_pushed_without_pr(
-            issue=issue,
-            changeset_id=changeset_id,
-            agent_id=agent_id,
-            repo_slug=repo_slug,
-            repo_root=repo_root,
-            beads_root=beads_root,
-            branch_pr_strategy=branch_pr_strategy,
-            git_path=git_path,
-        )
-    return None
 
 
 def _changeset_waiting_on_review_or_signals(
