@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from ..context import ChangesetSelectionContext, WorkerRunContext
 from ..models import WorkerRunSummary
+from ..models_boundary import parse_issue_boundary
 from ..ports import ChangesetSelectionPorts, WorkerRuntimeDependencies
 
 
@@ -34,6 +35,7 @@ def select_changeset(
             cwd=context.repo_root,
         )
         if override_issue:
+            parse_issue_boundary(override_issue[0], source="select_changeset:override")
             resolved_epic = ports.resolve_epic_id_for_changeset(
                 override_issue[0],
                 beads_root=context.beads_root,
@@ -51,6 +53,8 @@ def select_changeset(
             branch_pr_strategy=context.branch_pr_strategy,
             git_path=context.git_path,
         )
+        if changeset is not None:
+            parse_issue_boundary(changeset, source="select_changeset:next")
     return ChangesetSelection(issue=changeset, selected_override=selected_override)
 
 

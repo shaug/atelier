@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import beads, changeset_fields, lifecycle, prs
+from .models_boundary import BeadsIssueBoundary, parse_issue_boundary
 
 
 @dataclass(frozen=True)
@@ -17,26 +18,22 @@ class ReviewFeedbackSelection:
     feedback_at: str
 
 
-def _issue_labels(issue: dict[str, object]) -> set[str]:
-    labels = issue.get("labels")
-    if not isinstance(labels, list):
-        return set()
-    return {str(label) for label in labels if label}
-
-
 def _feedback_cursor(issue: dict[str, object]):
     fields = changeset_fields.issue_fields(issue)
     return prs.parse_timestamp(fields.get("review.last_feedback_seen_at"))
 
 
 def _is_in_review_candidate(
-    issue: dict[str, object], *, live_state: str | None = None
+    issue: BeadsIssueBoundary,
+    *,
+    raw_issue: dict[str, object],
+    live_state: str | None = None,
 ) -> bool:
     return lifecycle.is_changeset_in_review_candidate(
-        labels=_issue_labels(issue),
-        status=issue.get("status"),
+        labels=set(issue.labels),
+        status=issue.status,
         live_state=live_state,
-        stored_review_state=changeset_fields.review_state(issue),
+        stored_review_state=changeset_fields.review_state(raw_issue),
     )
 
 
@@ -47,11 +44,13 @@ def _selection_candidates(
     resolve_epic_id: Callable[[dict[str, object]], str | None],
 ) -> list[ReviewFeedbackSelection]:
     candidates: list[ReviewFeedbackSelection] = []
-    for issue in issues:
-        changeset_id = issue.get("id")
-        if not isinstance(changeset_id, str) or not changeset_id:
-            continue
-        work_branch = changeset_fields.work_branch(issue)
+    for raw_issue in issues:
+        try:
+            issue = parse_issue_boundary(raw_issue, source="_selection_candidates")
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        changeset_id = issue.id
+        work_branch = changeset_fields.work_branch(raw_issue)
         if not work_branch:
             continue
         pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
@@ -62,7 +61,9 @@ def _selection_candidates(
                 pushed=False,
                 review_requested=prs.has_review_requests(pr_payload),
             )
-        if not _is_in_review_candidate(issue, live_state=live_state):
+        if not _is_in_review_candidate(
+            issue, raw_issue=raw_issue, live_state=live_state
+        ):
             continue
         feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
             pr_payload, repo=repo_slug
@@ -72,11 +73,11 @@ def _selection_candidates(
         feedback_time = prs.parse_timestamp(feedback_at)
         if feedback_time is None:
             continue
-        cursor = _feedback_cursor(issue)
-        status = str(issue.get("status") or "").strip().lower()
+        cursor = _feedback_cursor(raw_issue)
+        status = str(issue.status or "").strip().lower()
         if status != "blocked" and cursor is not None and feedback_time <= cursor:
             continue
-        epic_id = resolve_epic_id(issue)
+        epic_id = resolve_epic_id(raw_issue)
         if not epic_id:
             continue
         candidates.append(

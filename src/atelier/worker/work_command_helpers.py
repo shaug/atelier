@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import datetime as dt
 import os
-import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -55,6 +54,7 @@ from ..worker.models import (
     StartupContractResult,
     WorkerRunSummary,
 )
+from ..worker.models_boundary import parse_issue_boundary
 from ..worker.session import startup as worker_startup
 
 root_branch = root_branch_module
@@ -72,7 +72,6 @@ _VALID_CHANGESET_STATE_LABELS = {
     "cs:merged",
     "cs:abandoned",
 }
-_DEPENDENCY_ID_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\b")
 
 
 ReviewFeedbackSnapshot = work_feedback.ReviewFeedbackSnapshot
@@ -108,61 +107,13 @@ def _extract_workspace_parent_branch(issue: dict[str, object]) -> str | None:
 
 
 def _issue_parent_id(issue: dict[str, object]) -> str | None:
-    parent = issue.get("parent")
-    if isinstance(parent, str):
-        cleaned = parent.strip()
-        return cleaned or None
-    if isinstance(parent, dict):
-        parent_id = parent.get("id")
-        if isinstance(parent_id, str):
-            cleaned = parent_id.strip()
-            return cleaned or None
-    return None
-
-
-def _parse_dependency_issue_id(value: object) -> str | None:
-    if isinstance(value, dict):
-        relation = value.get("relation")
-        if isinstance(relation, str) and relation.strip().lower() == "parent-child":
-            return None
-        issue_id = value.get("id")
-        if isinstance(issue_id, str):
-            cleaned = issue_id.strip()
-            return cleaned or None
-        nested_issue = value.get("issue")
-        if isinstance(nested_issue, dict):
-            nested_id = nested_issue.get("id")
-            if isinstance(nested_id, str):
-                cleaned = nested_id.strip()
-                return cleaned or None
-        return None
-
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    if "parent-child" in text.lower():
-        return None
-    match = _DEPENDENCY_ID_PATTERN.match(text)
-    if not match:
-        return None
-    return match.group(1).strip() or None
+    boundary = parse_issue_boundary(issue, source="_issue_parent_id")
+    return boundary.parent_id
 
 
 def _issue_dependency_ids(issue: dict[str, object]) -> tuple[str, ...]:
-    dependencies = issue.get("dependencies")
-    if not isinstance(dependencies, list):
-        return ()
-    ids: list[str] = []
-    seen: set[str] = set()
-    for dependency in dependencies:
-        dependency_id = _parse_dependency_issue_id(dependency)
-        if not dependency_id or dependency_id in seen:
-            continue
-        seen.add(dependency_id)
-        ids.append(dependency_id)
-    return tuple(ids)
+    boundary = parse_issue_boundary(issue, source="_issue_dependency_ids")
+    return boundary.dependency_ids
 
 
 def _dry_run_log(message: str) -> None:
@@ -278,10 +229,8 @@ def _watch_interval_seconds() -> int:
 
 
 def _issue_labels(issue: dict[str, object]) -> set[str]:
-    labels = issue.get("labels")
-    if not isinstance(labels, list):
-        return set()
-    return {str(label) for label in labels if label is not None}
+    boundary = parse_issue_boundary(issue, source="_issue_labels")
+    return set(boundary.labels)
 
 
 def _filter_epics(

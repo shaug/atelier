@@ -6,6 +6,10 @@ import dataclasses
 from pathlib import Path
 
 from . import beads, changeset_fields, git, prs
+from .worker.models_boundary import (
+    parse_issue_boundary,
+    parse_review_feedback_boundary,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -23,6 +27,7 @@ def persist_review_feedback_cursor(
     beads_root: Path,
     repo_root: Path,
 ) -> None:
+    parse_issue_boundary(issue, source="persist_review_feedback_cursor")
     if not repo_slug:
         return
     work_branch = changeset_fields.work_branch(issue)
@@ -50,15 +55,32 @@ def capture_review_feedback_snapshot(
     repo_root: Path,
     git_path: str | None,
 ) -> ReviewFeedbackSnapshot:
+    parse_issue_boundary(issue, source="capture_review_feedback_snapshot")
     work_branch = changeset_fields.work_branch(issue)
     if not work_branch:
+        snapshot = parse_review_feedback_boundary(
+            feedback_at=None,
+            unresolved_threads=None,
+            branch_head=None,
+            source="capture_review_feedback_snapshot:no_work_branch",
+        )
         return ReviewFeedbackSnapshot(
-            feedback_at=None, unresolved_threads=None, branch_head=None
+            feedback_at=snapshot.feedback_at,
+            unresolved_threads=snapshot.unresolved_threads,
+            branch_head=snapshot.branch_head,
         )
     branch_head = git.git_rev_parse(repo_root, work_branch, git_path=git_path)
     if not repo_slug:
+        snapshot = parse_review_feedback_boundary(
+            feedback_at=None,
+            unresolved_threads=None,
+            branch_head=branch_head,
+            source="capture_review_feedback_snapshot:no_repo_slug",
+        )
         return ReviewFeedbackSnapshot(
-            feedback_at=None, unresolved_threads=None, branch_head=branch_head
+            feedback_at=snapshot.feedback_at,
+            unresolved_threads=snapshot.unresolved_threads,
+            branch_head=snapshot.branch_head,
         )
     lookup = prs.lookup_github_pr_status(repo_slug, work_branch)
     pr_payload = lookup.payload if lookup.found else None
@@ -79,10 +101,16 @@ def capture_review_feedback_snapshot(
             unresolved_threads = prs.unresolved_review_thread_count(
                 repo_slug, pr_number
             )
-    return ReviewFeedbackSnapshot(
+    snapshot = parse_review_feedback_boundary(
         feedback_at=feedback_at,
         unresolved_threads=unresolved_threads,
         branch_head=branch_head,
+        source="capture_review_feedback_snapshot",
+    )
+    return ReviewFeedbackSnapshot(
+        feedback_at=snapshot.feedback_at,
+        unresolved_threads=snapshot.unresolved_threads,
+        branch_head=snapshot.branch_head,
     )
 
 

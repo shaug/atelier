@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from atelier import prs
 from atelier.worker import review
 
@@ -116,3 +118,19 @@ def test_select_global_review_feedback_changeset_uses_resolver() -> None:
     assert selection is not None
     assert selection.epic_id == "at-2"
     assert selection.changeset_id == "at-2.1"
+
+
+def test_select_review_feedback_changeset_invalid_issue_payload_fails() -> None:
+    issues = [{"status": "in_progress", "labels": ["at:changeset"]}]
+
+    with patch(
+        "atelier.worker.review.beads.list_descendant_changesets",
+        return_value=issues,
+    ):
+        with pytest.raises(RuntimeError, match="invalid beads issue payload"):
+            review.select_review_feedback_changeset(
+                epic_id="at-1",
+                repo_slug="org/repo",
+                beads_root=Path("/beads"),
+                repo_root=Path("/repo"),
+            )

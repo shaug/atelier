@@ -36,6 +36,15 @@ def test_lifecycle_state_falls_back_to_pushed() -> None:
     assert prs.lifecycle_state(None, pushed=True, review_requested=False) == "pushed"
 
 
+def test_lifecycle_state_invalid_payload_fails_deterministically() -> None:
+    with pytest.raises(ValueError, match="invalid github PR payload"):
+        prs.lifecycle_state(
+            {"number": "not-a-number"},
+            pushed=True,
+            review_requested=False,
+        )
+
+
 def test_lookup_github_pr_status_reports_not_found() -> None:
     with (
         patch("atelier.prs._gh_available", return_value=True),

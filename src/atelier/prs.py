@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from . import git
+from .worker.models_boundary import parse_pr_boundary
 
 _GH_TIMEOUT_SECONDS = 20.0
 _GH_RETRY_ATTEMPTS = 2
@@ -226,6 +227,12 @@ def lookup_github_pr_status(repo: str, head: str) -> GithubPrLookup:
         )
         _PR_LOOKUP_CACHE[cache_key] = result
         return result
+    try:
+        parse_pr_boundary(payload, source=f"{repo}:{head}")
+    except ValueError as exc:
+        result = GithubPrLookup(outcome="error", error=str(exc))
+        _PR_LOOKUP_CACHE[cache_key] = result
+        return result
     result = GithubPrLookup(outcome="found", payload=payload)
     _PR_LOOKUP_CACHE[cache_key] = result
     return result
@@ -241,23 +248,16 @@ def read_github_pr_status(repo: str, head: str) -> dict[str, object] | None:
 
 def has_review_requests(payload: dict[str, object] | None) -> bool:
     """Return True if the PR has any review requests."""
-    if not payload:
+    boundary = parse_pr_boundary(payload, source="has_review_requests")
+    if boundary is None:
         return False
-    requests = payload.get("reviewRequests")
-    if not isinstance(requests, list):
-        return False
-    for entry in requests:
-        if not isinstance(entry, dict):
+    for entry in boundary.review_requests:
+        requested = entry.requested_reviewer
+        if requested is None:
             continue
-        requested = entry.get("requestedReviewer")
-        if isinstance(requested, dict):
-            is_bot = requested.get("isBot")
-            if isinstance(is_bot, bool) and is_bot:
-                continue
-            login = requested.get("login")
-            if isinstance(login, str) and login:
-                return True
-        elif requested:
+        if requested.is_bot:
+            continue
+        if requested.login:
             return True
     return False
 
@@ -279,7 +279,8 @@ def _is_bot_author(author: object) -> bool:
 
 def latest_feedback_timestamp(payload: dict[str, object] | None) -> str | None:
     """Return the latest reviewer feedback timestamp from a PR payload only."""
-    if not payload:
+    boundary = parse_pr_boundary(payload, source="latest_feedback_timestamp")
+    if boundary is None:
         return None
     latest: datetime | None = None
 
@@ -291,31 +292,21 @@ def latest_feedback_timestamp(payload: dict[str, object] | None) -> str | None:
         if latest is None or parsed > latest:
             latest = parsed
 
-    comments = payload.get("comments")
-    if isinstance(comments, list):
-        for comment in comments:
-            if not isinstance(comment, dict):
-                continue
-            author = comment.get("author")
-            if _is_bot_author(author):
-                continue
-            include(comment.get("updatedAt"))
-            include(comment.get("createdAt"))
+    for comment in boundary.comments:
+        if _is_bot_author(comment.author.model_dump() if comment.author else None):
+            continue
+        include(comment.updated_at)
+        include(comment.created_at)
 
-    reviews = payload.get("reviews")
-    if isinstance(reviews, list):
-        for review in reviews:
-            if not isinstance(review, dict):
-                continue
-            state = str(review.get("state") or "").upper()
-            if state not in {"COMMENTED", "CHANGES_REQUESTED"}:
-                continue
-            author = review.get("author")
-            if _is_bot_author(author):
-                continue
-            include(review.get("updatedAt"))
-            include(review.get("submittedAt"))
-            include(review.get("createdAt"))
+    for review in boundary.reviews:
+        state = str(review.state or "").upper()
+        if state not in {"COMMENTED", "CHANGES_REQUESTED"}:
+            continue
+        if _is_bot_author(review.author.model_dump() if review.author else None):
+            continue
+        include(review.updated_at)
+        include(review.submitted_at)
+        include(review.created_at)
 
     if latest is None:
         return None
@@ -366,15 +357,11 @@ def latest_feedback_timestamp_with_inline_comments(
     payload: dict[str, object] | None, *, repo: str | None
 ) -> str | None:
     """Return latest feedback timestamp including inline review comments."""
+    boundary = parse_pr_boundary(payload, source="latest_feedback_with_inline")
     latest = latest_feedback_timestamp(payload)
-    if not payload or not repo:
+    if boundary is None or not repo:
         return latest
-    pr_number_raw = payload.get("number")
-    pr_number = None
-    if isinstance(pr_number_raw, int):
-        pr_number = pr_number_raw
-    elif isinstance(pr_number_raw, str) and pr_number_raw.strip().isdigit():
-        pr_number = int(pr_number_raw.strip())
+    pr_number = boundary.number
     if pr_number is None:
         return latest
     inline_latest = _latest_inline_review_comment_timestamp(repo, pr_number)
@@ -482,14 +469,15 @@ def lifecycle_state(
     review_requested: bool,
 ) -> str | None:
     """Compute a lifecycle state from PR payload and push status."""
-    if payload:
-        if payload.get("mergedAt"):
+    boundary = parse_pr_boundary(payload, source="lifecycle_state")
+    if boundary is not None:
+        if boundary.merged_at:
             return "merged"
-        if payload.get("closedAt") or str(payload.get("state")).upper() == "CLOSED":
+        if boundary.closed_at or str(boundary.state).upper() == "CLOSED":
             return "closed"
-        if bool(payload.get("isDraft")):
+        if bool(boundary.is_draft):
             return "draft-pr"
-        review_decision = str(payload.get("reviewDecision") or "").upper()
+        review_decision = str(boundary.review_decision or "").upper()
         if review_decision == "APPROVED":
             return "approved"
         if review_requested:
