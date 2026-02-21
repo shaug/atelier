@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from atelier import exec as exec_util
 
@@ -258,3 +259,87 @@ def test_run_typed_raises_parse_error_with_context() -> None:
         exec_util.run_typed(spec, runner=GoodRunner())
 
     assert "failed to parse command output (parse-int)" in str(exc.value)
+
+
+class _SampleModel(BaseModel):
+    id: str
+    count: int
+
+
+def test_parse_json_model_validates_payload() -> None:
+    result = exec_util.CommandResult(
+        argv=("bd", "show"),
+        returncode=0,
+        stdout='{"id":"at-1","count":2}',
+        stderr="",
+    )
+    parsed = exec_util.parse_json_model(
+        result, model_type=_SampleModel, context="sample"
+    )
+    assert parsed.id == "at-1"
+    assert parsed.count == 2
+
+
+def test_parse_json_model_raises_on_malformed_json() -> None:
+    result = exec_util.CommandResult(
+        argv=("bd", "show"),
+        returncode=0,
+        stdout='{"id":"at-1",',
+        stderr="",
+    )
+    with pytest.raises(exec_util.CommandParseError) as exc:
+        exec_util.parse_json_model(result, model_type=_SampleModel, context="sample")
+    assert "failed to parse command output (sample)" in str(exc.value)
+
+
+def test_parse_json_model_raises_on_invalid_model_shape() -> None:
+    result = exec_util.CommandResult(
+        argv=("bd", "show"),
+        returncode=0,
+        stdout='{"id":"at-1"}',
+        stderr="",
+    )
+    with pytest.raises(exec_util.CommandParseError) as exc:
+        exec_util.parse_json_model(result, model_type=_SampleModel, context="sample")
+    assert "failed to validate command output (sample)" in str(exc.value)
+
+
+def test_parse_json_model_optional_returns_none_for_empty_output() -> None:
+    result = exec_util.CommandResult(
+        argv=("bd", "show"),
+        returncode=0,
+        stdout="   ",
+        stderr="",
+    )
+    parsed = exec_util.parse_json_model_optional(
+        result, model_type=_SampleModel, context="sample"
+    )
+    assert parsed is None
+
+
+def test_parse_json_model_list_parses_and_validates() -> None:
+    result = exec_util.CommandResult(
+        argv=("bd", "list"),
+        returncode=0,
+        stdout='[{"id":"at-1","count":1},{"id":"at-2","count":3}]',
+        stderr="",
+    )
+    parsed = exec_util.parse_json_model_list(
+        result, model_type=_SampleModel, context="sample-list"
+    )
+    assert [item.id for item in parsed] == ["at-1", "at-2"]
+    assert [item.count for item in parsed] == [1, 3]
+
+
+def test_parse_json_model_list_rejects_non_list_payload() -> None:
+    result = exec_util.CommandResult(
+        argv=("bd", "list"),
+        returncode=0,
+        stdout='{"id":"at-1","count":1}',
+        stderr="",
+    )
+    with pytest.raises(exec_util.CommandParseError) as exc:
+        exec_util.parse_json_model_list(
+            result, model_type=_SampleModel, context="sample-list"
+        )
+    assert "expected a JSON list" in str(exc.value)

@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from . import changesets, exec, messages
 from .external_tickets import (
     ExternalTicketRef,
@@ -28,6 +30,42 @@ ATELIER_ISSUE_PREFIX = "at"
 _AGENT_ISSUE_TYPE = "agent"
 _FALLBACK_ISSUE_TYPE = "task"
 _ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
+
+
+class _IssueTypeModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name: str | None = None
+
+
+class _IssueTypesPayloadModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    core_types: list[_IssueTypeModel | str] = Field(default_factory=list)
+    custom_types: list[_IssueTypeModel | str] = Field(default_factory=list)
+    types: list[_IssueTypeModel | str] = Field(default_factory=list)
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "core_types": [
+                entry.model_dump(exclude_none=True)
+                if isinstance(entry, _IssueTypeModel)
+                else entry
+                for entry in self.core_types
+            ],
+            "custom_types": [
+                entry.model_dump(exclude_none=True)
+                if isinstance(entry, _IssueTypeModel)
+                else entry
+                for entry in self.custom_types
+            ],
+            "types": [
+                entry.model_dump(exclude_none=True)
+                if isinstance(entry, _IssueTypeModel)
+                else entry
+                for entry in self.types
+            ],
+        }
 
 
 @dataclass(frozen=True)
@@ -206,7 +244,14 @@ def _list_issue_types(*, beads_root: Path, cwd: Path) -> set[str]:
         types = {_FALLBACK_ISSUE_TYPE}
         _ISSUE_TYPE_CACHE[beads_root] = types
         return types
-    payload = _parse_types_payload(result.stdout or "")
+    payload: dict[str, object] | None = None
+    try:
+        parsed = exec.parse_json_model_optional(
+            result, model_type=_IssueTypesPayloadModel, context="bd types"
+        )
+        payload = parsed.as_payload() if parsed is not None else None
+    except exec.CommandParseError:
+        payload = _parse_types_payload(result.stdout or "")
     types = _extract_issue_types(payload)
     if not types:
         types = {_FALLBACK_ISSUE_TYPE}

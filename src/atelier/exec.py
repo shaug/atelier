@@ -1,13 +1,17 @@
 """Subprocess helpers for running external commands."""
 
+import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Generic, Mapping, Protocol, TypeVar
 
+from pydantic import BaseModel, ValidationError
+
 from .io import die
 
 ParsedT = TypeVar("ParsedT")
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 @dataclass(frozen=True)
@@ -167,6 +171,86 @@ def run_typed(
             detail=f"failed to parse command output{context}: {exc}",
             context=spec.context,
         ) from exc
+
+
+def _parse_json_payload(result: CommandResult, *, context: str | None = None) -> object:
+    raw = (result.stdout or "").strip()
+    if not raw:
+        raise CommandParseError(
+            request=CommandRequest(argv=result.argv),
+            detail=(
+                f"failed to parse command output ({context}): empty output"
+                if context
+                else "failed to parse command output: empty output"
+            ),
+            context=context,
+        )
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        context_suffix = f" ({context})" if context else ""
+        raise CommandParseError(
+            request=CommandRequest(argv=result.argv),
+            detail=f"failed to parse command output{context_suffix}: {exc}",
+            context=context,
+        ) from exc
+
+
+def parse_json_model(
+    result: CommandResult, *, model_type: type[ModelT], context: str | None = None
+) -> ModelT:
+    """Parse command stdout JSON into a validated Pydantic model."""
+    payload = _parse_json_payload(result, context=context)
+    try:
+        return model_type.model_validate(payload)
+    except ValidationError as exc:
+        context_suffix = f" ({context})" if context else ""
+        raise CommandParseError(
+            request=CommandRequest(argv=result.argv),
+            detail=f"failed to validate command output{context_suffix}: {exc}",
+            context=context,
+        ) from exc
+
+
+def parse_json_model_optional(
+    result: CommandResult, *, model_type: type[ModelT], context: str | None = None
+) -> ModelT | None:
+    """Parse optional JSON output into a validated Pydantic model."""
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return None
+    return parse_json_model(result, model_type=model_type, context=context)
+
+
+def parse_json_model_list(
+    result: CommandResult, *, model_type: type[ModelT], context: str | None = None
+) -> list[ModelT]:
+    """Parse command stdout JSON array into validated Pydantic models."""
+    payload = _parse_json_payload(result, context=context)
+    if not isinstance(payload, list):
+        context_suffix = f" ({context})" if context else ""
+        raise CommandParseError(
+            request=CommandRequest(argv=result.argv),
+            detail=(
+                f"failed to parse command output{context_suffix}: expected a JSON list"
+            ),
+            context=context,
+        )
+    models: list[ModelT] = []
+    for index, item in enumerate(payload):
+        try:
+            models.append(model_type.model_validate(item))
+        except ValidationError as exc:
+            context_suffix = f" ({context})" if context else ""
+            raise CommandParseError(
+                request=CommandRequest(argv=result.argv),
+                detail=(
+                    f"failed to validate command output{context_suffix}"
+                    f" at index {index}: {exc}"
+                ),
+                context=context,
+            ) from exc
+    return models
 
 
 def run_command(
