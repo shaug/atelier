@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -153,22 +152,14 @@ def _workspace_branch_from_labels(labels: set[str]) -> str | None:
 def _try_show_issue(
     issue_id: str, *, beads_root: Path, cwd: Path
 ) -> dict[str, object] | None:
-    result = beads.run_bd_command(
-        ["show", issue_id, "--json"], beads_root=beads_root, cwd=cwd, allow_failure=True
-    )
-    if result.returncode != 0:
-        return None
-    raw = result.stdout.strip() if result.stdout else ""
-    if not raw:
-        return None
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
+        records = beads.run_bd_issue_records(
+            ["show", issue_id], beads_root=beads_root, cwd=cwd, source="_try_show_issue"
+        )
+    except ValueError:
         return None
-    if isinstance(payload, list) and payload:
-        return payload[0] if isinstance(payload[0], dict) else None
-    if isinstance(payload, dict):
-        return payload
+    if records:
+        return records[0].raw
     return None
 
 

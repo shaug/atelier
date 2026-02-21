@@ -3,7 +3,33 @@ from subprocess import CompletedProcess
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import pytest
+
 import atelier.beads as beads
+
+
+def test_run_bd_issue_records_validates_issues() -> None:
+    with patch(
+        "atelier.beads.run_bd_json",
+        return_value=[{"id": "at-1", "labels": ["at:changeset"], "status": "open"}],
+    ):
+        records = beads.run_bd_issue_records(
+            ["list"], beads_root=Path("/beads"), cwd=Path("/repo"), source="test"
+        )
+    assert len(records) == 1
+    assert records[0].issue.id == "at-1"
+    assert records[0].raw["id"] == "at-1"
+
+
+def test_run_bd_issue_records_rejects_invalid_payload() -> None:
+    with patch(
+        "atelier.beads.run_bd_json",
+        return_value=[{"labels": ["at:changeset"], "status": "open"}],
+    ):
+        with pytest.raises(ValueError, match="invalid beads issue payload"):
+            beads.run_bd_issue_records(
+                ["list"], beads_root=Path("/beads"), cwd=Path("/repo"), source="test"
+            )
 
 
 def test_ensure_agent_bead_returns_existing() -> None:

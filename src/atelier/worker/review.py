@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import beads, changeset_fields, lifecycle, prs
-from .models_boundary import BeadsIssueBoundary, parse_issue_boundary
+from .models_boundary import BeadsIssueBoundary
 
 
 @dataclass(frozen=True)
@@ -39,16 +39,14 @@ def _is_in_review_candidate(
 
 def _selection_candidates(
     *,
-    issues: list[dict[str, object]],
+    records: list[beads.BeadsIssueRecord],
     repo_slug: str,
     resolve_epic_id: Callable[[dict[str, object]], str | None],
 ) -> list[ReviewFeedbackSelection]:
     candidates: list[ReviewFeedbackSelection] = []
-    for raw_issue in issues:
-        try:
-            issue = parse_issue_boundary(raw_issue, source="_selection_candidates")
-        except ValueError as exc:
-            raise RuntimeError(str(exc)) from exc
+    for record in records:
+        raw_issue = record.raw
+        issue = record.issue
         changeset_id = issue.id
         work_branch = changeset_fields.work_branch(raw_issue)
         if not work_branch:
@@ -108,8 +106,11 @@ def select_review_feedback_changeset(
         cwd=repo_root,
         include_closed=False,
     )
+    records = beads.parse_issue_records(
+        descendants, source="select_review_feedback_changeset:descendants"
+    )
     candidates = _selection_candidates(
-        issues=descendants,
+        records=records,
         repo_slug=repo_slug,
         resolve_epic_id=lambda _issue: epic_id,
     )
@@ -126,11 +127,13 @@ def select_global_review_feedback_changeset(
     """Select the oldest unresolved review-feedback candidate globally."""
     if not repo_slug:
         return None
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:changeset"], beads_root=beads_root, cwd=repo_root
+    client = beads.create_client(beads_root=beads_root, cwd=repo_root)
+    records = client.issue_records(
+        ["list", "--label", "at:changeset"],
+        source="select_global_review_feedback_changeset:list_changesets",
     )
     candidates = _selection_candidates(
-        issues=issues,
+        records=records,
         repo_slug=repo_slug,
         resolve_epic_id=resolve_epic_id_for_changeset,
     )

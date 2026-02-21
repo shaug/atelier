@@ -36,11 +36,14 @@ def resolve_epic_id_for_changeset(
         parent_id = issue_parent_id(current)
         if not parent_id:
             if current is issue:
-                loaded = beads.run_bd_json(
-                    ["show", issue_id], beads_root=beads_root, cwd=repo_root
+                loaded = beads.run_bd_issue_records(
+                    ["show", issue_id],
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                    source="resolve_epic_id_for_changeset:refresh_current",
                 )
                 if loaded:
-                    refreshed = loaded[0]
+                    refreshed = loaded[0].raw
                     refreshed_parent = issue_parent_id(refreshed)
                     if refreshed_parent:
                         current = refreshed
@@ -48,12 +51,15 @@ def resolve_epic_id_for_changeset(
                         current_id = issue_id
             if not parent_id:
                 return issue_id
-        parent_issues = beads.run_bd_json(
-            ["show", parent_id], beads_root=beads_root, cwd=repo_root
+        parent_issues = beads.run_bd_issue_records(
+            ["show", parent_id],
+            beads_root=beads_root,
+            cwd=repo_root,
+            source="resolve_epic_id_for_changeset:parent",
         )
         if not parent_issues:
             return parent_id
-        current = parent_issues[0]
+        current = parent_issues[0].raw
         current_id = parent_id
 
 

@@ -20,6 +20,7 @@ from .external_tickets import (
     normalize_external_ticket_entry,
 )
 from .io import die
+from .worker.models_boundary import BeadsIssueBoundary, parse_issue_boundary
 
 POLICY_LABEL = "at:policy"
 POLICY_SCOPE_LABEL = "scope:project"
@@ -66,6 +67,59 @@ class _IssueTypesPayloadModel(BaseModel):
                 for entry in self.types
             ],
         }
+
+
+@dataclass(frozen=True)
+class BeadsIssueRecord:
+    """Validated Beads issue payload with both raw and normalized views."""
+
+    raw: dict[str, object]
+    issue: BeadsIssueBoundary
+
+
+@dataclass(frozen=True)
+class BeadsClient:
+    """Typed Beads command boundary for issue-centric queries."""
+
+    beads_root: Path
+    cwd: Path
+
+    def run_command(
+        self,
+        args: list[str],
+        *,
+        allow_failure: bool = False,
+        daemon: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        return run_bd_command(
+            args,
+            beads_root=self.beads_root,
+            cwd=self.cwd,
+            allow_failure=allow_failure,
+            daemon=daemon,
+        )
+
+    def run_json(self, args: list[str]) -> list[dict[str, object]]:
+        return run_bd_json(args, beads_root=self.beads_root, cwd=self.cwd)
+
+    def issue_records(self, args: list[str], *, source: str) -> list[BeadsIssueRecord]:
+        return run_bd_issue_records(
+            args, beads_root=self.beads_root, cwd=self.cwd, source=source
+        )
+
+    def issues(self, args: list[str], *, source: str) -> list[BeadsIssueBoundary]:
+        return run_bd_issues(
+            args, beads_root=self.beads_root, cwd=self.cwd, source=source
+        )
+
+    def show_issue(self, issue_id: str, *, source: str) -> BeadsIssueRecord | None:
+        records = self.issue_records(["show", issue_id], source=source)
+        return records[0] if records else None
+
+
+def create_client(*, beads_root: Path, cwd: Path) -> BeadsClient:
+    """Create a typed Beads client for a specific store and working directory."""
+    return BeadsClient(beads_root=beads_root, cwd=cwd)
 
 
 @dataclass(frozen=True)
@@ -163,6 +217,38 @@ def run_bd_json(
     if isinstance(payload, dict):
         return [payload]
     return []
+
+
+def parse_issue_records(
+    issues: list[dict[str, object]], *, source: str
+) -> list[BeadsIssueRecord]:
+    """Validate Beads issue payloads while preserving raw issue mappings."""
+    records: list[BeadsIssueRecord] = []
+    for index, raw in enumerate(issues):
+        issue = parse_issue_boundary(raw, source=f"{source}[{index}]")
+        records.append(BeadsIssueRecord(raw=raw, issue=issue))
+    return records
+
+
+def run_bd_issue_records(
+    args: list[str], *, beads_root: Path, cwd: Path, source: str
+) -> list[BeadsIssueRecord]:
+    """Run a Beads query and return validated issue records."""
+    return parse_issue_records(
+        run_bd_json(args, beads_root=beads_root, cwd=cwd), source=source
+    )
+
+
+def run_bd_issues(
+    args: list[str], *, beads_root: Path, cwd: Path, source: str
+) -> list[BeadsIssueBoundary]:
+    """Run a Beads query and return validated issue boundary models."""
+    return [
+        record.issue
+        for record in run_bd_issue_records(
+            args, beads_root=beads_root, cwd=cwd, source=source
+        )
+    ]
 
 
 def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:

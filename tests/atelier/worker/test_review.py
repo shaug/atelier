@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from atelier import prs
+from atelier import beads, prs
 from atelier.worker import review
 
 
@@ -87,9 +87,15 @@ def test_select_global_review_feedback_changeset_uses_resolver() -> None:
             "description": "changeset.work_branch: feat/c\npr_state: in-review\n",
         }
     ]
+    issue_records = beads.parse_issue_records(
+        issues, source="test_select_global_review_feedback_changeset_uses_resolver"
+    )
 
     with (
-        patch("atelier.worker.review.beads.run_bd_json", return_value=issues),
+        patch(
+            "atelier.worker.review.beads.BeadsClient.issue_records",
+            return_value=issue_records,
+        ),
         patch(
             "atelier.worker.review.prs.lookup_github_pr_status",
             return_value=prs.GithubPrLookup(
@@ -127,7 +133,7 @@ def test_select_review_feedback_changeset_invalid_issue_payload_fails() -> None:
         "atelier.worker.review.beads.list_descendant_changesets",
         return_value=issues,
     ):
-        with pytest.raises(RuntimeError, match="invalid beads issue payload"):
+        with pytest.raises(ValueError, match="invalid beads issue payload"):
             review.select_review_feedback_changeset(
                 epic_id="at-1",
                 repo_slug="org/repo",
