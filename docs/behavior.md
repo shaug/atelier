@@ -20,8 +20,9 @@ side effects inside the user's repo.
 - **Project**: Identified by the absolute path to a local enlistment. Project
   state lives under the Atelier data directory.
 - **Epic**: Top-level unit of intent that owns a workspace root branch.
-- **Changeset**: Child unit under an epic; each changeset is a branch derived
-  from the root branch.
+- **Changeset**: Executable unit under an epic. It is usually a child bead, but
+  guardrail-sized single-unit work may execute directly on the epic labeled
+  `at:changeset`.
 - **Workspace root branch**: User-facing branch name for the epic. Stored as
   `workspace.root_branch` in epic metadata and labeled
   `workspace:<root_branch>`.

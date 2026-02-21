@@ -22,3 +22,5 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "plan_promote_epic" in content
     assert "planner_startup_check" in content
     assert "epic_list" in content
+    assert "one child changeset" in content
+    assert "decomposition rationale" in content

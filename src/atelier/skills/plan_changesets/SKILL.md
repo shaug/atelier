@@ -22,6 +22,9 @@ children.
 - Separate renames from behavioral changes.
 - Prefer additive-first changesets.
 - Keep changesets reviewable (~200–400 LOC; split when >800 LOC).
+- Avoid one-child decomposition by default. If a split would produce exactly one
+  child changeset, keep the epic as the executable changeset unless you record
+  explicit decomposition rationale.
 - Keep tests with the nearest production change.
 - Ask for an estimated LOC range per changeset and confirm approval when a
   changeset exceeds ~800 LOC (unless purely mechanical).
@@ -33,6 +36,10 @@ children.
 
 1. For each changeset, create a bead:
    - `bd create --parent <epic_id> --type task --label at:changeset --label cs:ready --title <title> --acceptance <acceptance>`
+1. If decomposition would produce exactly one child changeset, stop and either:
+   - keep the epic as the executable changeset, or
+   - record explicit decomposition rationale in epic/changeset notes before
+     creating the child.
 1. If the changeset is not ready, use `cs:planned` instead of `cs:ready`.
 1. Capture an estimated LOC range and record it in notes.
 1. If a changeset violates guardrails (especially >800 LOC), pause and request
@@ -43,3 +50,5 @@ children.
 
 - Changeset beads exist under the epic with `at:changeset` labels.
 - Decomposition happened only when needed for scope/dependency/reviewability.
+- Any one-child decomposition has explicit rationale recorded in notes or
+  description.

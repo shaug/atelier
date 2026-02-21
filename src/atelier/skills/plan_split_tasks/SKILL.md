@@ -19,6 +19,11 @@ review-sized unit, keep it as the executable changeset.
 
 ## Steps
 
+1. Confirm decomposition is necessary for scope, dependency sequencing, or
+   reviewability.
+1. If decomposition would create exactly one child changeset, keep the epic as
+   the executable changeset unless explicit decomposition rationale is recorded
+   in notes/description.
 1. Create changeset beads under the epic:
    - `bd create --parent <epic_id> --type task --label at:changeset --label cs:planned --title <title> --acceptance <acceptance>`
 1. Create nested changesets under a parent changeset when needed:
@@ -28,3 +33,4 @@ review-sized unit, keep it as the executable changeset.
 ## Verification
 
 - All executable work items are labeled `at:changeset` (never `at:subtask`).
+- One-child decompositions include explicit rationale.
