@@ -58,6 +58,7 @@ from ..worker import runtime as worker_runtime
 from ..worker import selection as worker_selection
 from ..worker import telemetry as worker_telemetry
 from ..worker.context import WorkerRunContext
+from ..worker.finalization import pr_gate as worker_pr_gate
 from ..worker.models import (
     FinalizeResult,
     PublishSignalDiagnostics,
@@ -596,6 +597,14 @@ def _changeset_base_branch(
     return git.git_default_branch(repo_root, git_path=git_path)
 
 
+def _render_changeset_pr_body(issue: dict[str, object]) -> str:
+    description = issue.get("description")
+    fields = beads.parse_description_fields(
+        description if isinstance(description, str) else ""
+    )
+    return worker_publish.render_changeset_pr_body(issue, fields=fields)
+
+
 def _attempt_create_draft_pr(
     *,
     repo_slug: str,
@@ -604,51 +613,19 @@ def _attempt_create_draft_pr(
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
+    changeset_base_branch: Callable[..., str] | None = None,
+    render_changeset_pr_body: Callable[[dict[str, object]], str] | None = None,
 ) -> tuple[bool, str]:
-    base_branch = _changeset_base_branch(
-        issue, beads_root=beads_root, repo_root=repo_root, git_path=git_path
+    return worker_pr_gate.attempt_create_draft_pr(
+        repo_slug=repo_slug,
+        issue=issue,
+        work_branch=work_branch,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        git_path=git_path,
+        changeset_base_branch=changeset_base_branch or _changeset_base_branch,
+        render_changeset_pr_body=render_changeset_pr_body or _render_changeset_pr_body,
     )
-    if not base_branch:
-        return False, "missing PR base branch metadata"
-    title = str(issue.get("title") or "").strip() or work_branch
-    body = _render_changeset_pr_body(issue)
-    result = exec.try_run_command(
-        [
-            "gh",
-            "pr",
-            "create",
-            "--repo",
-            repo_slug,
-            "--base",
-            base_branch,
-            "--head",
-            work_branch,
-            "--title",
-            title,
-            "--body",
-            body,
-            "--draft",
-        ]
-    )
-    if result is None:
-        return False, "missing required command: gh"
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        return False, detail or "gh pr create failed"
-    detail = (result.stdout or "").strip()
-    return True, detail or "created draft PR"
-
-
-def _normalized_markdown_bullets(value: str) -> list[str]:
-    return worker_publish.normalized_markdown_bullets(value)
-
-
-def _render_changeset_pr_body(issue: dict[str, object]) -> str:
-    description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
-    return worker_publish.render_changeset_pr_body(issue, fields=fields)
 
 
 def _set_changeset_review_pending_state(
@@ -660,25 +637,16 @@ def _set_changeset_review_pending_state(
     beads_root: Path,
     repo_root: Path,
 ) -> None:
-    _mark_changeset_in_progress(
-        changeset_id, beads_root=beads_root, repo_root=repo_root
+    worker_pr_gate.set_changeset_review_pending_state(
+        changeset_id=changeset_id,
+        pr_payload=pr_payload,
+        pushed=pushed,
+        fallback_pr_state=fallback_pr_state,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        mark_changeset_in_progress=_mark_changeset_in_progress,
+        update_changeset_review_from_pr=_update_changeset_review_from_pr,
     )
-    if pr_payload:
-        _update_changeset_review_from_pr(
-            changeset_id,
-            pr_payload=pr_payload,
-            pushed=pushed,
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
-        return
-    if fallback_pr_state:
-        beads.update_changeset_review(
-            changeset_id,
-            changesets.ReviewMetadata(pr_state=fallback_pr_state),
-            beads_root=beads_root,
-            cwd=repo_root,
-        )
 
 
 def _update_changeset_review_from_pr(
@@ -720,155 +688,29 @@ def _handle_pushed_without_pr(
     git_path: str | None,
     create_detail_prefix: str | None = None,
 ) -> FinalizeResult:
-    decision = _changeset_pr_creation_decision(
-        issue,
+    gate_result = worker_pr_gate.handle_pushed_without_pr(
+        issue=issue,
+        changeset_id=changeset_id,
+        agent_id=agent_id,
         repo_slug=repo_slug,
         repo_root=repo_root,
-        git_path=git_path,
+        beads_root=beads_root,
         branch_pr_strategy=branch_pr_strategy,
+        git_path=git_path,
+        create_detail_prefix=create_detail_prefix,
+        changeset_base_branch=_changeset_base_branch,
+        changeset_work_branch=_changeset_work_branch,
+        render_changeset_pr_body=_render_changeset_pr_body,
+        lookup_pr_payload=_lookup_pr_payload,
+        lookup_pr_payload_diagnostic=_lookup_pr_payload_diagnostic,
+        mark_changeset_in_progress=_mark_changeset_in_progress,
+        send_planner_notification=_send_planner_notification,
+        update_changeset_review_from_pr=_update_changeset_review_from_pr,
+        emit=say,
+        log_warning=_log_warning,
+        attempt_create_draft_pr_fn=_attempt_create_draft_pr,
     )
-    if not decision.allow_pr:
-        _set_changeset_review_pending_state(
-            changeset_id=changeset_id,
-            pr_payload=None,
-            pushed=True,
-            fallback_pr_state="pushed",
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
-        return FinalizeResult(continue_running=True, reason="changeset_review_pending")
-
-    failure_reason = "changeset_pr_create_failed"
-    failure_subject = "NEEDS-DECISION: PR creation failed"
-    create_detail = create_detail_prefix or ""
-    if not repo_slug:
-        failure_reason = "changeset_pr_missing_repo_slug"
-        failure_subject = "NEEDS-DECISION: PR provider config missing"
-        create_detail = "missing GitHub repo slug for PR creation"
-    else:
-        work_branch = _changeset_work_branch(issue)
-        if not work_branch:
-            create_detail = "missing changeset.work_branch metadata for PR creation"
-        else:
-            created, detail = _attempt_create_draft_pr(
-                repo_slug=repo_slug,
-                issue=issue,
-                work_branch=work_branch,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                git_path=git_path,
-            )
-            create_detail = detail
-            if created:
-                pr_payload = _lookup_pr_payload(repo_slug, work_branch)
-                lookup_error = None
-                if pr_payload is None:
-                    _payload_check, lookup_error = _lookup_pr_payload_diagnostic(
-                        repo_slug, work_branch
-                    )
-                if pr_payload:
-                    _set_changeset_review_pending_state(
-                        changeset_id=changeset_id,
-                        pr_payload=pr_payload,
-                        pushed=True,
-                        fallback_pr_state=None,
-                        beads_root=beads_root,
-                        repo_root=repo_root,
-                    )
-                else:
-                    _set_changeset_review_pending_state(
-                        changeset_id=changeset_id,
-                        pr_payload=None,
-                        pushed=True,
-                        fallback_pr_state="draft-pr",
-                        beads_root=beads_root,
-                        repo_root=repo_root,
-                    )
-                if lookup_error:
-                    create_detail = (
-                        f"{create_detail}; unable to verify created PR: {lookup_error}"
-                    )
-                return FinalizeResult(
-                    continue_running=True, reason="changeset_review_pending"
-                )
-            # Recover from duplicate/race failures by checking live PR state.
-            pr_payload = _lookup_pr_payload(repo_slug, work_branch)
-            lookup_error = None
-            if pr_payload is None:
-                _payload_check, lookup_error = _lookup_pr_payload_diagnostic(
-                    repo_slug, work_branch
-                )
-            if pr_payload:
-                _set_changeset_review_pending_state(
-                    changeset_id=changeset_id,
-                    pr_payload=pr_payload,
-                    pushed=True,
-                    fallback_pr_state=None,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                )
-                return FinalizeResult(
-                    continue_running=True, reason="changeset_review_pending"
-                )
-            if lookup_error:
-                failure_reason = "changeset_pr_status_query_failed"
-                failure_subject = "NEEDS-DECISION: PR status query failed"
-                create_detail = (
-                    f"{create_detail}; unable to verify existing PR: {lookup_error}"
-                )
-                _log_warning(
-                    f"changeset={changeset_id} PR status lookup failed after create attempt: {lookup_error}"
-                )
-
-    _mark_changeset_in_progress(
-        changeset_id, beads_root=beads_root, repo_root=repo_root
-    )
-    note = (
-        "publish_pending: branch pushed but PR missing where "
-        f"strategy allows PR ({decision.reason})"
-    )
-    if create_detail:
-        note = f"{note}; PR creation attempt failed: {create_detail}"
-    beads.run_bd_command(
-        [
-            "update",
-            changeset_id,
-            "--append-notes",
-            note,
-        ],
-        beads_root=beads_root,
-        cwd=repo_root,
-        allow_failure=True,
-    )
-    body = (
-        "Changeset branch is pushed but no PR exists where policy allows PR "
-        f"creation (strategy={decision.strategy}, reason={decision.reason})."
-    )
-    if create_detail:
-        body = f"{body}\nPR creation attempt failed: {create_detail}"
-        say(f"PR creation failed for {changeset_id}: {create_detail}")
-    if failure_reason == "changeset_pr_missing_repo_slug":
-        body = (
-            f"{body}\nAction: configure GitHub provider metadata so finalize can "
-            "create PRs automatically."
-        )
-    else:
-        body = (
-            f"{body}\nAction: resolve `gh pr create` failure and rerun worker finalize."
-        )
-    _send_planner_notification(
-        subject=f"{failure_subject} ({changeset_id})",
-        body=body,
-        agent_id=agent_id,
-        thread_id=changeset_id,
-        beads_root=beads_root,
-        repo_root=repo_root,
-        dry_run=False,
-    )
-    _log_warning(
-        f"changeset={changeset_id} finalize stopped reason={failure_reason} strategy={decision.strategy} detail={create_detail or 'n/a'}"
-    )
-    return FinalizeResult(continue_running=False, reason=failure_reason)
+    return gate_result.finalize_result
 
 
 def _changeset_parent_lifecycle_state(
@@ -878,33 +720,12 @@ def _changeset_parent_lifecycle_state(
     repo_root: Path,
     git_path: str | None,
 ) -> str | None:
-    if not repo_slug:
-        return None
-    description = issue.get("description")
-    fields = beads.parse_description_fields(
-        description if isinstance(description, str) else ""
-    )
-    parent_branch = fields.get("changeset.parent_branch")
-    root_branch = fields.get("changeset.root_branch")
-    if not isinstance(parent_branch, str):
-        return None
-    normalized = parent_branch.strip()
-    if not normalized or normalized.lower() == "null":
-        return None
-    if isinstance(root_branch, str):
-        normalized_root = root_branch.strip()
-        if normalized_root and normalized_root.lower() != "null":
-            # Top-level changesets commonly use root==parent; treat as no-parent
-            # for PR strategy gating to avoid self-deadlocking PR creation.
-            if normalized_root == normalized:
-                return None
-    pushed = git.git_ref_exists(
-        repo_root, f"refs/remotes/origin/{normalized}", git_path=git_path
-    )
-    payload = _lookup_pr_payload(repo_slug, normalized)
-    review_requested = prs.has_review_requests(payload)
-    return prs.lifecycle_state(
-        payload, pushed=pushed, review_requested=review_requested
+    return worker_pr_gate.changeset_parent_lifecycle_state(
+        issue,
+        repo_slug=repo_slug,
+        repo_root=repo_root,
+        git_path=git_path,
+        lookup_pr_payload=_lookup_pr_payload,
     )
 
 
@@ -916,11 +737,13 @@ def _changeset_pr_creation_decision(
     git_path: str | None,
     branch_pr_strategy: object,
 ) -> pr_strategy.PrStrategyDecision:
-    parent_state = _changeset_parent_lifecycle_state(
-        issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
-    )
-    return pr_strategy.pr_strategy_decision(
-        branch_pr_strategy, parent_state=parent_state
+    return worker_pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug=repo_slug,
+        repo_root=repo_root,
+        git_path=git_path,
+        branch_pr_strategy=branch_pr_strategy,
+        lookup_pr_payload=_lookup_pr_payload,
     )
 
 
