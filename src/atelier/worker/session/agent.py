@@ -244,7 +244,15 @@ def start_agent_session(
             mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
             die_fn(f"command failed: {' '.join(start_cmd)}")
     else:
-        result = exec.run_command_status(start_cmd, cwd=start_cwd, env=env)
+        result = exec.run_with_runner(
+            exec.CommandRequest(
+                argv=tuple(start_cmd),
+                cwd=start_cwd,
+                env=env,
+                capture_output=False,
+                text=False,
+            )
+        )
         if result is None:
             mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
             die_fn(f"missing required command: {start_cmd[0]}")

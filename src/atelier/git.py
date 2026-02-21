@@ -41,18 +41,6 @@ def _run_git_or_die(
     return result
 
 
-def run_git_command(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    """Compatibility wrapper for internal tests and callsites."""
-    return _run_git_or_die(cmd)
-
-
-def try_run_command(
-    cmd: list[str], *, cwd: Path | None = None
-) -> subprocess.CompletedProcess[str] | None:
-    """Compatibility wrapper returning None when command is missing."""
-    return _run_git_capture(cmd, cwd=cwd)
-
-
 def strip_git_suffix(path: str) -> str:
     """Remove a trailing ``.git`` suffix from a path string.
 
@@ -180,7 +168,7 @@ def git_repo_root(start: Path, *, git_path: str | None = None) -> Path | None:
         >>> git_repo_root(Path(".")) is None or True
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(start), "rev-parse", "--show-toplevel"], git_path=git_path
         )
@@ -206,7 +194,7 @@ def git_origin_url(repo_dir: Path, *, git_path: str | None = None) -> str | None
         >>> git_origin_url(Path(".")) is None or True
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "remote", "get-url", "origin"], git_path=git_path
         )
@@ -297,7 +285,7 @@ def git_current_branch(repo_dir: Path, *, git_path: str | None = None) -> str | 
         >>> git_current_branch(Path(".")) is None or True
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"],
             git_path=git_path,
@@ -321,7 +309,7 @@ def git_default_branch(repo_dir: Path, *, git_path: str | None = None) -> str | 
         >>> git_default_branch(Path(".")) is None or True
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "symbolic-ref", "refs/remotes/origin/HEAD"],
             git_path=git_path,
@@ -335,7 +323,7 @@ def git_default_branch(repo_dir: Path, *, git_path: str | None = None) -> str | 
             if branch:
                 return branch
 
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "remote", "show", "-n", "origin"],
             git_path=git_path,
@@ -371,7 +359,7 @@ def git_is_clean(repo_dir: Path, *, git_path: str | None = None) -> bool | None:
         >>> git_is_clean(Path(".")) in {True, False, None}
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(["-C", str(repo_dir), "status", "--porcelain"], git_path=git_path)
     )
     if result.returncode != 0:
@@ -392,7 +380,7 @@ def git_status_porcelain(repo_dir: Path, *, git_path: str | None = None) -> list
         >>> isinstance(git_status_porcelain(Path(".")), list)
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(["-C", str(repo_dir), "status", "--porcelain"], git_path=git_path)
     )
     if result.returncode != 0:
@@ -413,7 +401,7 @@ def git_upstream_branch(repo_dir: Path, *, git_path: str | None = None) -> str |
         >>> git_upstream_branch(Path(".")) is None or True
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             [
                 "-C",
@@ -473,7 +461,7 @@ def git_has_remote_branch(
         True
     """
     ref = f"refs/heads/{branch}"
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "ls-remote", "--heads", "origin", ref],
             git_path=git_path,
@@ -502,7 +490,7 @@ def git_ref_exists(repo_dir: Path, ref: str, *, git_path: str | None = None) -> 
         >>> git_ref_exists(Path("."), "refs/heads/main") in {True, False}
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "show-ref", "--verify", "--quiet", ref],
             git_path=git_path,
@@ -546,7 +534,7 @@ def git_rev_parse(
         >>> git_rev_parse(Path("."), "HEAD") is None or True
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(["-C", str(repo_dir), "rev-parse", ref], git_path=git_path)
     )
     if result.returncode != 0:
@@ -567,7 +555,7 @@ def git_is_repo(repo_dir: Path, *, git_path: str | None = None) -> bool:
         >>> git_is_repo(Path(".")) in {True, False}
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "rev-parse", "--is-inside-work-tree"],
             git_path=git_path,
@@ -593,7 +581,7 @@ def git_commits_ahead(
         >>> git_commits_ahead(Path("."), "main", "HEAD") is None or True
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "rev-list", "--count", f"{base}..{branch}"],
             git_path=git_path,
@@ -624,7 +612,7 @@ def git_commit_messages(
         >>> isinstance(git_commit_messages(Path("."), "main", "HEAD"), list)
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "log", "--format=%B%x1f", f"{base}..{branch}"],
             git_path=git_path,
@@ -654,7 +642,7 @@ def git_last_commit(
         >>> isinstance(git_last_commit(Path(".")), dict) or True
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             [
                 "-C",
@@ -706,7 +694,7 @@ def git_diff_name_status(
         >>> isinstance(git_diff_name_status(Path("."), "main", "HEAD"), list)
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "diff", "--name-status", f"{base}..{branch}"],
             git_path=git_path,
@@ -734,7 +722,7 @@ def git_diff_stat(
         >>> isinstance(git_diff_stat(Path("."), "main", "HEAD"), list)
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "diff", "--stat", f"{base}..{branch}"],
             git_path=git_path,
@@ -758,7 +746,7 @@ def git_ls_files(repo_dir: Path, *, git_path: str | None = None) -> list[str]:
         >>> isinstance(git_ls_files(Path(".")), list)
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(["-C", str(repo_dir), "ls-files"], git_path=git_path)
     )
     if result.returncode != 0:
@@ -783,7 +771,7 @@ def git_merge_base(
         >>> git_merge_base(Path("."), "main", "HEAD") is None or True
         True
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "merge-base", base, branch], git_path=git_path
         )
@@ -805,7 +793,7 @@ def git_is_ancestor(
     Returns ``True``/``False`` for git's explicit status codes, or ``None`` when
     git fails for another reason (missing ref, invalid repo, etc.).
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             [
                 "-C",
@@ -837,7 +825,7 @@ def git_branch_fully_applied(
     Uses `git cherry upstream head`: any `+` line means a commit from ``head`` is
     not yet applied to ``upstream``; `-` lines are equivalent/applied commits.
     """
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             ["-C", str(repo_dir), "cherry", upstream, head],
             git_path=git_path,
@@ -878,7 +866,7 @@ def git_commit_subjects_since_merge_base(
     merge_base = git_merge_base(repo_dir, base, branch, git_path=git_path)
     if not merge_base:
         return []
-    result = run_git_command(
+    result = _run_git_or_die(
         git_command(
             [
                 "-C",

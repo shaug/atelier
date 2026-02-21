@@ -39,6 +39,7 @@ This document describes the worker runtime contracts used by `atelier work`.
 1. **External boundaries**
 
    - `src/atelier/exec.py` typed command runner seam.
+   - use `CommandSpec[T]` + `run_typed(...)` for command + parser coupling.
    - `src/atelier/worker/models_boundary.py` validates Beads/PR/review payloads
      before lifecycle decisions.
 
@@ -59,3 +60,5 @@ This document describes the worker runtime contracts used by `atelier work`.
 - Boundary model tests validate malformed payload failures deterministically.
 - Command-runner tests cover success/failure/timeout/missing executable and
   request propagation.
+- Avoid legacy ad-hoc subprocess helpers in new code; use typed command specs
+  and edge validation at adapter boundaries.

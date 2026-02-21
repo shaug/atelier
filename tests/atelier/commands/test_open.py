@@ -37,13 +37,15 @@ def test_open_runs_command_in_worktree() -> None:
         issue = _make_issue("feat/root", "worktrees/epic-1")
         captured: dict[str, object] = {}
 
-        def fake_run(
-            cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None
-        ) -> SimpleNamespace:
-            captured["cmd"] = cmd
-            captured["cwd"] = cwd
-            captured["env"] = env
-            return SimpleNamespace(returncode=7)
+        def fake_run(request: object, *, runner: object | None = None) -> object:
+            del runner
+            assert isinstance(request, open_cmd.exec.CommandRequest)
+            captured["cmd"] = list(request.argv)
+            captured["cwd"] = request.cwd
+            captured["env"] = request.env
+            return open_cmd.exec.CommandResult(
+                argv=request.argv, returncode=7, stdout="", stderr=""
+            )
 
         with (
             patch(
@@ -63,7 +65,7 @@ def test_open_runs_command_in_worktree() -> None:
                 "atelier.commands.open.beads.find_epics_by_root_branch",
                 return_value=[issue],
             ),
-            patch("atelier.commands.open.exec.run_command_status", fake_run),
+            patch("atelier.commands.open.exec.run_with_runner", fake_run),
         ):
             with pytest.raises(SystemExit) as raised:
                 open_cmd.open_worktree(
@@ -102,12 +104,14 @@ def test_open_uses_shell_override() -> None:
         issue = _make_issue("feat/root", "worktrees/epic-1")
         captured: dict[str, object] = {}
 
-        def fake_run(
-            cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None
-        ) -> SimpleNamespace:
-            captured["cmd"] = cmd
-            captured["cwd"] = cwd
-            return SimpleNamespace(returncode=0)
+        def fake_run(request: object, *, runner: object | None = None) -> object:
+            del runner
+            assert isinstance(request, open_cmd.exec.CommandRequest)
+            captured["cmd"] = list(request.argv)
+            captured["cwd"] = request.cwd
+            return open_cmd.exec.CommandResult(
+                argv=request.argv, returncode=0, stdout="", stderr=""
+            )
 
         with (
             patch(
@@ -127,7 +131,7 @@ def test_open_uses_shell_override() -> None:
                 "atelier.commands.open.beads.find_epics_by_root_branch",
                 return_value=[issue],
             ),
-            patch("atelier.commands.open.exec.run_command_status", fake_run),
+            patch("atelier.commands.open.exec.run_with_runner", fake_run),
         ):
             with pytest.raises(SystemExit) as raised:
                 open_cmd.open_worktree(
@@ -162,10 +166,12 @@ def test_open_prompts_for_workspace() -> None:
         issue = _make_issue("feat/root", "worktrees/epic-1")
         choices = ["feat/root [open] Epic (epic-1)"]
 
-        def fake_run(
-            cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None
-        ) -> SimpleNamespace:
-            return SimpleNamespace(returncode=0)
+        def fake_run(request: object, *, runner: object | None = None) -> object:
+            del runner
+            assert isinstance(request, open_cmd.exec.CommandRequest)
+            return open_cmd.exec.CommandResult(
+                argv=request.argv, returncode=0, stdout="", stderr=""
+            )
 
         with (
             patch(
@@ -186,7 +192,7 @@ def test_open_prompts_for_workspace() -> None:
                 return_value=[issue],
             ),
             patch("atelier.commands.open.select", return_value=choices[0]),
-            patch("atelier.commands.open.exec.run_command_status", fake_run),
+            patch("atelier.commands.open.exec.run_with_runner", fake_run),
         ):
             with pytest.raises(SystemExit):
                 open_cmd.open_worktree(

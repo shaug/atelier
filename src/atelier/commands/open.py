@@ -160,7 +160,15 @@ def _resolve_shell_command(shell_override: str | None) -> list[str]:
 
 
 def _run_and_exit(cmd: list[str], cwd: Path, env: dict[str, str]) -> None:
-    result = exec.run_command_status(cmd, cwd=cwd, env=env)
+    result = exec.run_with_runner(
+        exec.CommandRequest(
+            argv=tuple(cmd),
+            cwd=cwd,
+            env=env,
+            capture_output=False,
+            text=False,
+        )
+    )
     if result is None:
         die(f"missing required command: {cmd[0]}")
     raise SystemExit(result.returncode)
