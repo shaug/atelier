@@ -340,68 +340,8 @@ def _is_feedback_eligible_epic_status(status: object) -> bool:
     return not _is_closed_status(status)
 
 
-def _sort_by_created_at(
-    issues: list[dict[str, object]], *, newest: bool = False
-) -> list[dict[str, object]]:
-    return worker_selection.sort_by_created_at(issues, newest=newest)
-
-
-def _sort_by_recency(issues: list[dict[str, object]]) -> list[dict[str, object]]:
-    return worker_selection.sort_by_recency(issues)
-
-
-def _agent_family_id(agent_id: str) -> str:
-    return worker_selection.agent_family_id(agent_id)
-
-
 def _is_agent_session_active(agent_id: str) -> bool:
     return agent_home.is_session_agent_active(agent_id)
-
-
-def _stale_family_assigned_epics(
-    issues: list[dict[str, object]], *, agent_id: str
-) -> list[dict[str, object]]:
-    return worker_selection.stale_family_assigned_epics(
-        issues,
-        agent_id=agent_id,
-        is_session_active=_is_agent_session_active,
-    )
-
-
-def _list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
-    return beads.run_bd_json(
-        ["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root
-    )
-
-
-def _select_epic_prompt(
-    issues: list[dict[str, object]],
-    *,
-    agent_id: str,
-    is_actionable: Callable[[str], bool],
-    assume_yes: bool = False,
-) -> str | None:
-    return worker_selection.select_epic_prompt(
-        issues,
-        agent_id=agent_id,
-        is_actionable=is_actionable,
-        extract_root_branch=beads.extract_workspace_root_branch,
-        select_fn=lambda title, options: select(title, options),
-        assume_yes=assume_yes,
-    )
-
-
-def _select_epic_auto(
-    issues: list[dict[str, object]],
-    *,
-    agent_id: str,
-    is_actionable: Callable[[str], bool],
-) -> str | None:
-    return worker_selection.select_epic_auto(
-        issues,
-        agent_id=agent_id,
-        is_actionable=is_actionable,
-    )
 
 
 def _select_epic_from_ready_changesets(
@@ -414,33 +354,10 @@ def _select_epic_from_ready_changesets(
     ready_changesets = beads.run_bd_json(
         ["ready", "--label", "at:changeset"], beads_root=beads_root, cwd=repo_root
     )
-    if not ready_changesets:
-        return None
     return worker_selection.select_epic_from_ready_changesets(
         issues=issues,
         ready_changesets=ready_changesets,
         is_actionable=is_actionable,
-    )
-
-
-def _send_needs_decision(
-    *,
-    agent_id: str,
-    mode: str,
-    issues: list[dict[str, object]],
-    beads_root: Path,
-    repo_root: Path,
-    dry_run: bool,
-) -> None:
-    worker_queueing.send_needs_decision(
-        agent_id=agent_id,
-        mode=mode,
-        issues=issues,
-        beads_root=beads_root,
-        repo_root=repo_root,
-        dry_run=dry_run,
-        filter_epics=_filter_epics,
-        dry_run_log=_dry_run_log,
     )
 
 
@@ -1560,21 +1477,6 @@ def list_reconcile_epic_candidates(
     )
 
 
-def _resolve_hook_agent_bead_for_epic(
-    epic_id: str,
-    *,
-    fallback_agent_bead_id: str | None,
-    beads_root: Path,
-    repo_root: Path,
-) -> str | None:
-    return worker_reconcile.resolve_hook_agent_bead_for_epic(
-        epic_id,
-        fallback_agent_bead_id=fallback_agent_bead_id,
-        beads_root=beads_root,
-        repo_root=repo_root,
-    )
-
-
 def reconcile_blocked_merged_changesets(
     *,
     agent_id: str,
@@ -2227,26 +2129,6 @@ def _check_inbox_before_claim(
     )
 
 
-def _prompt_queue_claim(
-    queued: list[dict[str, object]],
-    *,
-    agent_id: str,
-    beads_root: Path,
-    repo_root: Path,
-    assume_yes: bool = False,
-) -> bool:
-    return worker_queueing.prompt_queue_claim(
-        queued,
-        agent_id=agent_id,
-        beads_root=beads_root,
-        repo_root=repo_root,
-        assume_yes=assume_yes,
-        emit=say,
-        prompt_fn=prompt,
-        die_fn=die,
-    )
-
-
 def _handle_queue_before_claim(
     agent_id: str,
     *,
@@ -2304,28 +2186,66 @@ def _run_startup_contract(
         git_path=git_path,
         worker_queue_name=_WORKER_QUEUE_NAME,
         handle_queue_before_claim=_handle_queue_before_claim,
-        list_epics=_list_epics,
+        list_epics=lambda *, beads_root, repo_root: beads.run_bd_json(
+            ["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root
+        ),
         next_changeset_fn=_next_changeset,
         resolve_hooked_epic=_resolve_hooked_epic,
         filter_epics=_filter_epics,
-        sort_by_created_at=_sort_by_created_at,
-        stale_family_assigned_epics=_stale_family_assigned_epics,
+        sort_by_created_at=worker_selection.sort_by_created_at,
+        stale_family_assigned_epics=lambda issues, agent_id: (
+            worker_selection.stale_family_assigned_epics(
+                issues,
+                agent_id=agent_id,
+                is_session_active=agent_home.is_session_agent_active,
+            )
+        ),
         select_review_feedback_changeset=_select_review_feedback_changeset,
-        parse_issue_time=_parse_issue_time,
+        parse_issue_time=worker_selection.parse_issue_time,
         select_global_review_feedback_changeset=_select_global_review_feedback_changeset,
         is_feedback_eligible_epic_status=_is_feedback_eligible_epic_status,
         issue_labels=_issue_labels,
         check_inbox_before_claim=_check_inbox_before_claim,
-        select_epic_auto=_select_epic_auto,
-        select_epic_prompt=_select_epic_prompt,
-        select_epic_from_ready_changesets=_select_epic_from_ready_changesets,
-        send_needs_decision=_send_needs_decision,
+        select_epic_auto=worker_selection.select_epic_auto,
+        select_epic_prompt=lambda issues, agent_id, is_actionable, assume_yes: (
+            worker_selection.select_epic_prompt(
+                issues,
+                agent_id=agent_id,
+                is_actionable=is_actionable,
+                extract_root_branch=beads.extract_workspace_root_branch,
+                select_fn=lambda title, options: select(title, options),
+                assume_yes=assume_yes,
+            )
+        ),
+        select_epic_from_ready_changesets=lambda *, issues, is_actionable, beads_root, repo_root: (
+            worker_selection.select_epic_from_ready_changesets(
+                issues=issues,
+                ready_changesets=beads.run_bd_json(
+                    ["ready", "--label", "at:changeset"],
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                ),
+                is_actionable=is_actionable,
+            )
+        ),
+        send_needs_decision=lambda *, agent_id, mode, issues, beads_root, repo_root, dry_run: (
+            worker_queueing.send_needs_decision(
+                agent_id=agent_id,
+                mode=mode,
+                issues=issues,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                dry_run=dry_run,
+                filter_epics=_filter_epics,
+                dry_run_log=_dry_run_log,
+            )
+        ),
         log_debug=_log_debug,
         log_warning=_log_warning,
         dry_run_log=_dry_run_log,
         emit=say,
         run_bd_json=beads.run_bd_json,
-        agent_family_id=_agent_family_id,
+        agent_family_id=worker_selection.agent_family_id,
         is_agent_session_active=_is_agent_session_active,
         die_fn=die,
     )
