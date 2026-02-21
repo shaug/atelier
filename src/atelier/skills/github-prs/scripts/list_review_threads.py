@@ -35,7 +35,7 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
               line
               createdAt
               updatedAt
-              author { login isBot }
+              author { login }
             }
           }
         }
