@@ -25,6 +25,17 @@ def list_reconcile_epic_candidates(
     repo_root: Path,
     git_path: str | None = None,
 ) -> dict[str, list[str]]:
+    """List reconcile epic candidates.
+
+    Args:
+        project_config: Value for `project_config`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        git_path: Value for `git_path`.
+
+    Returns:
+        Function result.
+    """
     return worker_reconcile_service.list_reconcile_epic_candidates(
         project_config=project_config,
         beads_root=beads_root,
@@ -51,6 +62,24 @@ def reconcile_blocked_merged_changesets(
     dry_run: bool = False,
     log: Callable[[str], None] | None = None,
 ) -> ReconcileResult:
+    """Reconcile blocked merged changesets.
+
+    Args:
+        agent_id: Value for `agent_id`.
+        agent_bead_id: Value for `agent_bead_id`.
+        project_config: Value for `project_config`.
+        project_data_dir: Value for `project_data_dir`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        git_path: Value for `git_path`.
+        epic_filter: Value for `epic_filter`.
+        changeset_filter: Value for `changeset_filter`.
+        dry_run: Value for `dry_run`.
+        log: Value for `log`.
+
+    Returns:
+        Function result.
+    """
     return worker_reconcile_service.reconcile_blocked_merged_changesets(
         agent_id=agent_id,
         agent_bead_id=agent_bead_id,

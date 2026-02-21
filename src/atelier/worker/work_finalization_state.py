@@ -34,7 +34,7 @@ _VALID_CHANGESET_STATE_LABELS = {
 }
 
 
-def _send_planner_notification(
+def send_planner_notification(
     *,
     subject: str,
     body: str,
@@ -44,6 +44,20 @@ def _send_planner_notification(
     repo_root: Path,
     dry_run: bool,
 ) -> None:
+    """Send planner notification.
+
+    Args:
+        subject: Value for `subject`.
+        body: Value for `body`.
+        agent_id: Value for `agent_id`.
+        thread_id: Value for `thread_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        dry_run: Value for `dry_run`.
+
+    Returns:
+        Function result.
+    """
     worker_queueing.send_planner_notification(
         subject=subject,
         body=body,
@@ -56,7 +70,7 @@ def _send_planner_notification(
     )
 
 
-def _send_invalid_changeset_labels_notification(
+def send_invalid_changeset_labels_notification(
     *,
     epic_id: str,
     invalid_changesets: list[str],
@@ -65,6 +79,19 @@ def _send_invalid_changeset_labels_notification(
     repo_root: Path,
     dry_run: bool,
 ) -> str:
+    """Send invalid changeset labels notification.
+
+    Args:
+        epic_id: Value for `epic_id`.
+        invalid_changesets: Value for `invalid_changesets`.
+        agent_id: Value for `agent_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        dry_run: Value for `dry_run`.
+
+    Returns:
+        Function result.
+    """
     return worker_queueing.send_invalid_changeset_labels_notification(
         epic_id=epic_id,
         invalid_changesets=invalid_changesets,
@@ -76,7 +103,7 @@ def _send_invalid_changeset_labels_notification(
     )
 
 
-def _send_no_ready_changesets(
+def send_no_ready_changesets(
     *,
     epic_id: str,
     agent_id: str,
@@ -84,6 +111,18 @@ def _send_no_ready_changesets(
     repo_root: Path,
     dry_run: bool,
 ) -> None:
+    """Send no ready changesets.
+
+    Args:
+        epic_id: Value for `epic_id`.
+        agent_id: Value for `agent_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        dry_run: Value for `dry_run`.
+
+    Returns:
+        Function result.
+    """
     worker_queueing.send_no_ready_changesets(
         epic_id=epic_id,
         agent_id=agent_id,
@@ -94,7 +133,17 @@ def _send_no_ready_changesets(
     )
 
 
-def _release_epic_assignment(epic_id: str, *, beads_root: Path, repo_root: Path) -> None:
+def release_epic_assignment(epic_id: str, *, beads_root: Path, repo_root: Path) -> None:
+    """Release epic assignment.
+
+    Args:
+        epic_id: Value for `epic_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
     if not issues:
         return
@@ -109,9 +158,17 @@ def _release_epic_assignment(epic_id: str, *, beads_root: Path, repo_root: Path)
     beads.run_bd_command(args, beads_root=beads_root, cwd=repo_root, allow_failure=True)
 
 
-def _has_open_descendant_changesets(
-    changeset_id: str, *, beads_root: Path, repo_root: Path
-) -> bool:
+def has_open_descendant_changesets(changeset_id: str, *, beads_root: Path, repo_root: Path) -> bool:
+    """Has open descendant changesets.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     descendants = beads.list_descendant_changesets(
         changeset_id,
         beads_root=beads_root,
@@ -121,44 +178,108 @@ def _has_open_descendant_changesets(
     return bool(descendants)
 
 
-def _is_changeset_in_progress(issue: dict[str, object]) -> bool:
+def is_changeset_in_progress(issue: dict[str, object]) -> bool:
+    """Is changeset in progress.
+
+    Args:
+        issue: Value for `issue`.
+
+    Returns:
+        Function result.
+    """
     return lifecycle.is_changeset_in_progress(issue.get("status"), issue_labels(issue))
 
 
-def _is_changeset_ready(issue: dict[str, object]) -> bool:
+def is_changeset_ready(issue: dict[str, object]) -> bool:
+    """Is changeset ready.
+
+    Args:
+        issue: Value for `issue`.
+
+    Returns:
+        Function result.
+    """
     return lifecycle.is_changeset_ready(issue.get("status"), issue_labels(issue))
 
 
-def _changeset_review_state(issue: dict[str, object]) -> str | None:
+def changeset_review_state(issue: dict[str, object]) -> str | None:
+    """Changeset review state.
+
+    Args:
+        issue: Value for `issue`.
+
+    Returns:
+        Function result.
+    """
     return changeset_fields.review_state(issue)
 
 
-def _changeset_waiting_on_review(issue: dict[str, object]) -> bool:
-    state = _changeset_review_state(issue)
+def changeset_waiting_on_review(issue: dict[str, object]) -> bool:
+    """Changeset waiting on review.
+
+    Args:
+        issue: Value for `issue`.
+
+    Returns:
+        Function result.
+    """
+    state = changeset_review_state(issue)
     if state is None:
         return False
     return state in {"pushed", "draft-pr", "pr-open", "in-review", "approved"}
 
 
-def _changeset_work_branch(issue: dict[str, object]) -> str | None:
+def changeset_work_branch(issue: dict[str, object]) -> str | None:
+    """Changeset work branch.
+
+    Args:
+        issue: Value for `issue`.
+
+    Returns:
+        Function result.
+    """
     return changeset_fields.work_branch(issue)
 
 
-def _changeset_pr_url(issue: dict[str, object]) -> str | None:
+def changeset_pr_url(issue: dict[str, object]) -> str | None:
+    """Changeset pr url.
+
+    Args:
+        issue: Value for `issue`.
+
+    Returns:
+        Function result.
+    """
     return changeset_fields.pr_url(issue)
 
 
-def _lookup_pr_payload(repo_slug: str | None, branch: str) -> dict[str, object] | None:
-    """Lookup PR payload for a branch."""
+def lookup_pr_payload(repo_slug: str | None, branch: str) -> dict[str, object] | None:
+    """Lookup PR payload for a branch.
+
+    Args:
+        repo_slug: GitHub owner/repo slug.
+        branch: Branch name used for PR lookup.
+
+    Returns:
+        PR payload when found, otherwise ``None``.
+    """
     if not repo_slug:
         return None
     return prs.read_github_pr_status(repo_slug, branch)
 
 
-def _lookup_pr_payload_diagnostic(
+def lookup_pr_payload_diagnostic(
     repo_slug: str | None, branch: str
 ) -> tuple[dict[str, object] | None, str | None]:
-    """Lookup PR payload with explicit query-failure diagnostics."""
+    """Lookup PR payload with explicit query-failure diagnostics.
+
+    Args:
+        repo_slug: GitHub owner/repo slug.
+        branch: Branch name used for PR lookup.
+
+    Returns:
+        Tuple containing payload and optional diagnostic message.
+    """
     if not repo_slug:
         return None, None
     lookup = prs.lookup_github_pr_status(repo_slug, branch)
@@ -172,21 +293,40 @@ def _lookup_pr_payload_diagnostic(
     return None, None
 
 
-def _changeset_root_branch(issue: dict[str, object]) -> str | None:
+def changeset_root_branch(issue: dict[str, object]) -> str | None:
+    """Changeset root branch.
+
+    Args:
+        issue: Value for `issue`.
+
+    Returns:
+        Function result.
+    """
     return changeset_fields.root_branch(issue)
 
 
-def _changeset_base_branch(
+def changeset_base_branch(
     issue: dict[str, object],
     *,
     beads_root: Path | None = None,
     repo_root: Path,
     git_path: str | None,
 ) -> str | None:
+    """Changeset base branch.
+
+    Args:
+        issue: Value for `issue`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        git_path: Value for `git_path`.
+
+    Returns:
+        Function result.
+    """
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    root_branch = _changeset_root_branch(issue)
-    parent_branch = _changeset_parent_branch(issue, root_branch=root_branch or "")
+    root_branch = changeset_root_branch(issue)
+    parent_branch = changeset_parent_branch(issue, root_branch=root_branch or "")
     workspace_parent_branch = fields.get("workspace.parent_branch")
     normalized_parent = parent_branch.strip() if isinstance(parent_branch, str) else ""
     normalized_root = root_branch.strip() if isinstance(root_branch, str) else ""
@@ -200,7 +340,7 @@ def _changeset_base_branch(
         and normalized_parent
         and normalized_parent == normalized_root
     ):
-        epic_id = _resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
+        epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
         if epic_id:
             epic_issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
             if epic_issues:
@@ -224,13 +364,21 @@ def _changeset_base_branch(
     return git.git_default_branch(repo_root, git_path=git_path)
 
 
-def _render_changeset_pr_body(issue: dict[str, object]) -> str:
+def render_changeset_pr_body(issue: dict[str, object]) -> str:
+    """Render changeset pr body.
+
+    Args:
+        issue: Value for `issue`.
+
+    Returns:
+        Function result.
+    """
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     return worker_publish.render_changeset_pr_body(issue, fields=fields)
 
 
-def _attempt_create_draft_pr(
+def attempt_create_draft_pr(
     *,
     repo_slug: str,
     issue: dict[str, object],
@@ -238,9 +386,24 @@ def _attempt_create_draft_pr(
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
-    changeset_base_branch: Callable[..., str] | None = None,
-    render_changeset_pr_body: Callable[[dict[str, object]], str] | None = None,
+    changeset_base_branch_fn: Callable[..., str] | None = None,
+    render_changeset_pr_body_fn: Callable[[dict[str, object]], str] | None = None,
 ) -> tuple[bool, str]:
+    """Attempt create draft pr.
+
+    Args:
+        repo_slug: Value for `repo_slug`.
+        issue: Value for `issue`.
+        work_branch: Value for `work_branch`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        git_path: Value for `git_path`.
+        changeset_base_branch_fn: Value for `changeset_base_branch_fn`.
+        render_changeset_pr_body_fn: Value for `render_changeset_pr_body_fn`.
+
+    Returns:
+        Function result.
+    """
     return worker_pr_gate.attempt_create_draft_pr(
         repo_slug=repo_slug,
         issue=issue,
@@ -248,12 +411,12 @@ def _attempt_create_draft_pr(
         beads_root=beads_root,
         repo_root=repo_root,
         git_path=git_path,
-        changeset_base_branch=changeset_base_branch or _changeset_base_branch,
-        render_changeset_pr_body=render_changeset_pr_body or _render_changeset_pr_body,
+        changeset_base_branch=changeset_base_branch_fn or changeset_base_branch,
+        render_changeset_pr_body=render_changeset_pr_body_fn or render_changeset_pr_body,
     )
 
 
-def _set_changeset_review_pending_state(
+def set_changeset_review_pending_state(
     *,
     changeset_id: str,
     pr_payload: dict[str, object] | None,
@@ -262,6 +425,19 @@ def _set_changeset_review_pending_state(
     beads_root: Path,
     repo_root: Path,
 ) -> None:
+    """Set changeset review pending state.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        pr_payload: Value for `pr_payload`.
+        pushed: Value for `pushed`.
+        fallback_pr_state: Value for `fallback_pr_state`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     worker_pr_gate.set_changeset_review_pending_state(
         changeset_id=changeset_id,
         pr_payload=pr_payload,
@@ -269,12 +445,12 @@ def _set_changeset_review_pending_state(
         fallback_pr_state=fallback_pr_state,
         beads_root=beads_root,
         repo_root=repo_root,
-        mark_changeset_in_progress=_mark_changeset_in_progress,
-        update_changeset_review_from_pr=_update_changeset_review_from_pr,
+        mark_changeset_in_progress=mark_changeset_in_progress,
+        update_changeset_review_from_pr=update_changeset_review_from_pr,
     )
 
 
-def _update_changeset_review_from_pr(
+def update_changeset_review_from_pr(
     changeset_id: str,
     *,
     pr_payload: dict[str, object] | None,
@@ -282,6 +458,18 @@ def _update_changeset_review_from_pr(
     beads_root: Path,
     repo_root: Path,
 ) -> None:
+    """Update changeset review from pr.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        pr_payload: Value for `pr_payload`.
+        pushed: Value for `pushed`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     if not pr_payload:
         return
     review_requested = prs.has_review_requests(pr_payload)
@@ -299,7 +487,7 @@ def _update_changeset_review_from_pr(
     )
 
 
-def _handle_pushed_without_pr(
+def handle_pushed_without_pr(
     *,
     issue: dict[str, object],
     changeset_id: str,
@@ -311,6 +499,22 @@ def _handle_pushed_without_pr(
     git_path: str | None,
     create_detail_prefix: str | None = None,
 ) -> FinalizeResult:
+    """Handle pushed without pr.
+
+    Args:
+        issue: Value for `issue`.
+        changeset_id: Value for `changeset_id`.
+        agent_id: Value for `agent_id`.
+        repo_slug: Value for `repo_slug`.
+        repo_root: Value for `repo_root`.
+        beads_root: Value for `beads_root`.
+        branch_pr_strategy: Value for `branch_pr_strategy`.
+        git_path: Value for `git_path`.
+        create_detail_prefix: Value for `create_detail_prefix`.
+
+    Returns:
+        Function result.
+    """
     gate_result = worker_pr_gate.handle_pushed_without_pr(
         issue=issue,
         changeset_id=changeset_id,
@@ -321,37 +525,48 @@ def _handle_pushed_without_pr(
         branch_pr_strategy=branch_pr_strategy,
         git_path=git_path,
         create_detail_prefix=create_detail_prefix,
-        changeset_base_branch=_changeset_base_branch,
-        changeset_work_branch=_changeset_work_branch,
-        render_changeset_pr_body=_render_changeset_pr_body,
-        lookup_pr_payload=_lookup_pr_payload,
-        lookup_pr_payload_diagnostic=_lookup_pr_payload_diagnostic,
-        mark_changeset_in_progress=_mark_changeset_in_progress,
-        send_planner_notification=_send_planner_notification,
-        update_changeset_review_from_pr=_update_changeset_review_from_pr,
+        changeset_base_branch=changeset_base_branch,
+        changeset_work_branch=changeset_work_branch,
+        render_changeset_pr_body=render_changeset_pr_body,
+        lookup_pr_payload=lookup_pr_payload,
+        lookup_pr_payload_diagnostic=lookup_pr_payload_diagnostic,
+        mark_changeset_in_progress=mark_changeset_in_progress,
+        send_planner_notification=send_planner_notification,
+        update_changeset_review_from_pr=update_changeset_review_from_pr,
         emit=say,
-        attempt_create_draft_pr_fn=_attempt_create_draft_pr,
+        attempt_create_draft_pr_fn=attempt_create_draft_pr,
     )
     return gate_result.finalize_result
 
 
-def _changeset_parent_lifecycle_state(
+def changeset_parent_lifecycle_state(
     issue: dict[str, object],
     *,
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
 ) -> str | None:
+    """Changeset parent lifecycle state.
+
+    Args:
+        issue: Value for `issue`.
+        repo_slug: Value for `repo_slug`.
+        repo_root: Value for `repo_root`.
+        git_path: Value for `git_path`.
+
+    Returns:
+        Function result.
+    """
     return worker_pr_gate.changeset_parent_lifecycle_state(
         issue,
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
-        lookup_pr_payload=_lookup_pr_payload,
+        lookup_pr_payload=lookup_pr_payload,
     )
 
 
-def _changeset_pr_creation_decision(
+def changeset_pr_creation_decision(
     issue: dict[str, object],
     *,
     repo_slug: str | None,
@@ -359,17 +574,29 @@ def _changeset_pr_creation_decision(
     git_path: str | None,
     branch_pr_strategy: object,
 ) -> pr_strategy.PrStrategyDecision:
+    """Changeset pr creation decision.
+
+    Args:
+        issue: Value for `issue`.
+        repo_slug: Value for `repo_slug`.
+        repo_root: Value for `repo_root`.
+        git_path: Value for `git_path`.
+        branch_pr_strategy: Value for `branch_pr_strategy`.
+
+    Returns:
+        Function result.
+    """
     return worker_pr_gate.changeset_pr_creation_decision(
         issue,
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
         branch_pr_strategy=branch_pr_strategy,
-        lookup_pr_payload=_lookup_pr_payload,
+        lookup_pr_payload=lookup_pr_payload,
     )
 
 
-def _recover_premature_merged_changeset(
+def recover_premature_merged_changeset(
     *,
     issue: dict[str, object],
     changeset_id: str,
@@ -390,6 +617,31 @@ def _recover_premature_merged_changeset(
     squash_message_agent_env: dict[str, str] | None,
     git_path: str | None,
 ) -> FinalizeResult | None:
+    """Recover premature merged changeset.
+
+    Args:
+        issue: Value for `issue`.
+        changeset_id: Value for `changeset_id`.
+        epic_id: Value for `epic_id`.
+        agent_id: Value for `agent_id`.
+        agent_bead_id: Value for `agent_bead_id`.
+        branch_pr: Value for `branch_pr`.
+        branch_history: Value for `branch_history`.
+        branch_squash_message: Value for `branch_squash_message`.
+        branch_pr_strategy: Value for `branch_pr_strategy`.
+        repo_slug: Value for `repo_slug`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        project_data_dir: Value for `project_data_dir`.
+        squash_message_agent_spec: Value for `squash_message_agent_spec`.
+        squash_message_agent_options: Value for `squash_message_agent_options`.
+        squash_message_agent_home: Value for `squash_message_agent_home`.
+        squash_message_agent_env: Value for `squash_message_agent_env`.
+        git_path: Value for `git_path`.
+
+    Returns:
+        Function result.
+    """
     from .work_finalization_integration import finalize_terminal_changeset
 
     return worker_recovery.recover_premature_merged_changeset(
@@ -411,18 +663,18 @@ def _recover_premature_merged_changeset(
         squash_message_agent_home=squash_message_agent_home,
         squash_message_agent_env=squash_message_agent_env,
         git_path=git_path,
-        changeset_work_branch=_changeset_work_branch,
-        lookup_pr_payload=_lookup_pr_payload,
-        lookup_pr_payload_diagnostic=_lookup_pr_payload_diagnostic,
-        changeset_integration_signal=_changeset_integration_signal,
+        changeset_work_branch=changeset_work_branch,
+        lookup_pr_payload=lookup_pr_payload,
+        lookup_pr_payload_diagnostic=lookup_pr_payload_diagnostic,
+        changeset_integration_signal=changeset_integration_signal,
         finalize_terminal_changeset=finalize_terminal_changeset,
-        mark_changeset_in_progress=_mark_changeset_in_progress,
-        update_changeset_review_from_pr=_update_changeset_review_from_pr,
-        handle_pushed_without_pr=_handle_pushed_without_pr,
+        mark_changeset_in_progress=mark_changeset_in_progress,
+        update_changeset_review_from_pr=update_changeset_review_from_pr,
+        handle_pushed_without_pr=handle_pushed_without_pr,
     )
 
 
-def _changeset_waiting_on_review_or_signals(
+def changeset_waiting_on_review_or_signals(
     issue: dict[str, object],
     *,
     repo_slug: str | None,
@@ -431,14 +683,27 @@ def _changeset_waiting_on_review_or_signals(
     branch_pr_strategy: object,
     git_path: str | None,
 ) -> bool:
+    """Changeset waiting on review or signals.
+
+    Args:
+        issue: Value for `issue`.
+        repo_slug: Value for `repo_slug`.
+        repo_root: Value for `repo_root`.
+        branch_pr: Value for `branch_pr`.
+        branch_pr_strategy: Value for `branch_pr_strategy`.
+        git_path: Value for `git_path`.
+
+    Returns:
+        Function result.
+    """
     if not branch_pr:
         return False
-    work_branch = _changeset_work_branch(issue)
+    work_branch = changeset_work_branch(issue)
     if work_branch:
         pushed = git.git_ref_exists(
             repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
         )
-        pr_payload = _lookup_pr_payload(repo_slug, work_branch)
+        pr_payload = lookup_pr_payload(repo_slug, work_branch)
         review_requested = prs.has_review_requests(pr_payload)
         state = prs.lifecycle_state(pr_payload, pushed=pushed, review_requested=review_requested)
         if state in {"merged", "closed"}:
@@ -446,7 +711,7 @@ def _changeset_waiting_on_review_or_signals(
         if state in {"draft-pr", "pr-open", "in-review", "approved"}:
             return True
         if state == "pushed":
-            decision = _changeset_pr_creation_decision(
+            decision = changeset_pr_creation_decision(
                 issue,
                 repo_slug=repo_slug,
                 repo_root=repo_root,
@@ -454,12 +719,12 @@ def _changeset_waiting_on_review_or_signals(
                 branch_pr_strategy=branch_pr_strategy,
             )
             return not decision.allow_pr
-    review_state = _changeset_review_state(issue)
+    review_state = changeset_review_state(issue)
     if review_state:
         if review_state in {"draft-pr", "pr-open", "in-review", "approved"}:
             return True
         if review_state == "pushed":
-            decision = _changeset_pr_creation_decision(
+            decision = changeset_pr_creation_decision(
                 issue,
                 repo_slug=repo_slug,
                 repo_root=repo_root,
@@ -470,7 +735,7 @@ def _changeset_waiting_on_review_or_signals(
     return False
 
 
-def _is_changeset_recovery_candidate(
+def is_changeset_recovery_candidate(
     issue: dict[str, object],
     *,
     repo_slug: str | None,
@@ -478,7 +743,18 @@ def _is_changeset_recovery_candidate(
     branch_pr: bool,
     git_path: str | None,
 ) -> bool:
-    """Return True when blocked changeset has enough signals to retry."""
+    """Return whether a blocked changeset has enough signals to recover.
+
+    Args:
+        issue: Changeset issue payload.
+        repo_slug: Optional GitHub owner/repo slug.
+        repo_root: Repository checkout path.
+        branch_pr: Whether PR mode is enabled.
+        git_path: Optional git binary path override.
+
+    Returns:
+        ``True`` when recovery should re-run finalize logic.
+    """
     labels = issue_labels(issue)
     status = str(issue.get("status") or "").strip().lower()
     if "cs:blocked" not in labels and status != "blocked":
@@ -487,19 +763,19 @@ def _is_changeset_recovery_candidate(
         return False
     if status in {"closed", "done"}:
         return False
-    work_branch = _changeset_work_branch(issue)
+    work_branch = changeset_work_branch(issue)
     if not work_branch:
         return False
     pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path)
     if branch_pr:
-        pr_payload = _lookup_pr_payload(repo_slug, work_branch)
+        pr_payload = lookup_pr_payload(repo_slug, work_branch)
         review_requested = prs.has_review_requests(pr_payload)
         lifecycle = prs.lifecycle_state(
             pr_payload, pushed=pushed, review_requested=review_requested
         )
         if lifecycle in {"pushed", "draft-pr", "pr-open", "in-review", "approved"}:
             return True
-        review_state = _changeset_review_state(issue)
+        review_state = changeset_review_state(issue)
         return review_state in {
             "pushed",
             "draft-pr",
@@ -510,9 +786,20 @@ def _is_changeset_recovery_candidate(
     return pushed
 
 
-def _list_child_issues(
+def list_child_issues(
     parent_id: str, *, beads_root: Path, repo_root: Path, include_closed: bool = False
 ) -> list[dict[str, object]]:
+    """List child issues.
+
+    Args:
+        parent_id: Value for `parent_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        include_closed: Value for `include_closed`.
+
+    Returns:
+        Function result.
+    """
     return worker_finalization_service.list_child_issues(
         parent_id,
         beads_root=beads_root,
@@ -521,7 +808,17 @@ def _list_child_issues(
     )
 
 
-def _find_invalid_changeset_labels(root_id: str, *, beads_root: Path, repo_root: Path) -> list[str]:
+def find_invalid_changeset_labels(root_id: str, *, beads_root: Path, repo_root: Path) -> list[str]:
+    """Find invalid changeset labels.
+
+    Args:
+        root_id: Value for `root_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     return worker_finalization_service.find_invalid_changeset_labels(
         root_id,
         beads_root=beads_root,
@@ -530,7 +827,16 @@ def _find_invalid_changeset_labels(root_id: str, *, beads_root: Path, repo_root:
     )
 
 
-def _changeset_parent_branch(issue: dict[str, object], *, root_branch: str) -> str:
+def changeset_parent_branch(issue: dict[str, object], *, root_branch: str) -> str:
+    """Changeset parent branch.
+
+    Args:
+        issue: Value for `issue`.
+        root_branch: Value for `root_branch`.
+
+    Returns:
+        Function result.
+    """
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     parent_branch = fields.get("changeset.parent_branch")
@@ -542,7 +848,17 @@ def _changeset_parent_branch(issue: dict[str, object], *, root_branch: str) -> s
     return normalized
 
 
-def _mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+    """Mark changeset in progress.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     worker_finalization_service.mark_changeset_in_progress(
         changeset_id,
         beads_root=beads_root,
@@ -550,7 +866,17 @@ def _mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_roo
     )
 
 
-def _mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+    """Mark changeset closed.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     worker_finalization_service.mark_changeset_closed(
         changeset_id,
         beads_root=beads_root,
@@ -558,7 +884,17 @@ def _mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Pa
     )
 
 
-def _mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+    """Mark changeset merged.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     worker_finalization_service.mark_changeset_merged(
         changeset_id,
         beads_root=beads_root,
@@ -566,7 +902,17 @@ def _mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Pa
     )
 
 
-def _mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+def mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+    """Mark changeset abandoned.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     worker_finalization_service.mark_changeset_abandoned(
         changeset_id,
         beads_root=beads_root,
@@ -574,9 +920,20 @@ def _mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root:
     )
 
 
-def _mark_changeset_blocked(
+def mark_changeset_blocked(
     changeset_id: str, *, beads_root: Path, repo_root: Path, reason: str
 ) -> None:
+    """Mark changeset blocked.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        reason: Value for `reason`.
+
+    Returns:
+        Function result.
+    """
     worker_finalization_service.mark_changeset_blocked(
         changeset_id,
         beads_root=beads_root,
@@ -585,9 +942,19 @@ def _mark_changeset_blocked(
     )
 
 
-def _mark_changeset_children_in_progress(
+def mark_changeset_children_in_progress(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> None:
+    """Mark changeset children in progress.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     worker_finalization_service.mark_changeset_children_in_progress(
         changeset_id,
         beads_root=beads_root,
@@ -595,34 +962,65 @@ def _mark_changeset_children_in_progress(
     )
 
 
-def _close_completed_container_changesets(
+def close_completed_container_changesets(
     epic_id: str, *, beads_root: Path, repo_root: Path
 ) -> list[str]:
+    """Close completed container changesets.
+
+    Args:
+        epic_id: Value for `epic_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     return worker_finalization_service.close_completed_container_changesets(
         epic_id,
         beads_root=beads_root,
         repo_root=repo_root,
-        has_open_descendant_changesets=lambda issue_id: _has_open_descendant_changesets(
+        has_open_descendant_changesets=lambda issue_id: has_open_descendant_changesets(
             issue_id, beads_root=beads_root, repo_root=repo_root
         ),
     )
 
 
-def _promote_planned_descendant_changesets(
+def promote_planned_descendant_changesets(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> list[str]:
+    """Promote planned descendant changesets.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     return worker_finalization_service.promote_planned_descendant_changesets(
         changeset_id, beads_root=beads_root, repo_root=repo_root
     )
 
 
-def _has_blocking_messages(
+def has_blocking_messages(
     *,
     thread_ids: set[str],
     started_at: dt.datetime,
     beads_root: Path,
     repo_root: Path,
 ) -> bool:
+    """Has blocking messages.
+
+    Args:
+        thread_ids: Value for `thread_ids`.
+        started_at: Value for `started_at`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     return worker_finalization_service.has_blocking_messages(
         thread_ids=thread_ids,
         started_at=started_at,
@@ -632,18 +1030,38 @@ def _has_blocking_messages(
     )
 
 
-def _branch_ref_for_lookup(
+def branch_ref_for_lookup(
     repo_root: Path, branch: str, *, git_path: str | None = None
 ) -> str | None:
+    """Branch ref for lookup.
+
+    Args:
+        repo_root: Value for `repo_root`.
+        branch: Value for `branch`.
+        git_path: Value for `git_path`.
+
+    Returns:
+        Function result.
+    """
     return worker_integration_service.branch_ref_for_lookup(repo_root, branch, git_path=git_path)
 
 
-def _epic_root_integrated_into_parent(
+def epic_root_integrated_into_parent(
     epic_issue: dict[str, object],
     *,
     repo_root: Path,
     git_path: str | None = None,
 ) -> bool:
+    """Epic root integrated into parent.
+
+    Args:
+        epic_issue: Value for `epic_issue`.
+        repo_root: Value for `repo_root`.
+        git_path: Value for `git_path`.
+
+    Returns:
+        Function result.
+    """
     return worker_integration_service.epic_root_integrated_into_parent(
         epic_issue,
         repo_root=repo_root,
@@ -651,25 +1069,46 @@ def _epic_root_integrated_into_parent(
     )
 
 
-def _changeset_integration_signal(
+def changeset_integration_signal(
     issue: dict[str, object],
     *,
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None = None,
 ) -> tuple[bool, str | None]:
+    """Changeset integration signal.
+
+    Args:
+        issue: Value for `issue`.
+        repo_slug: Value for `repo_slug`.
+        repo_root: Value for `repo_root`.
+        git_path: Value for `git_path`.
+
+    Returns:
+        Function result.
+    """
     return worker_integration_service.changeset_integration_signal(
         issue,
         repo_slug=repo_slug,
         repo_root=repo_root,
-        lookup_pr_payload=_lookup_pr_payload,
+        lookup_pr_payload=lookup_pr_payload,
         git_path=git_path,
     )
 
 
-def _resolve_epic_id_for_changeset(
+def resolve_epic_id_for_changeset(
     issue: dict[str, object], *, beads_root: Path, repo_root: Path
 ) -> str | None:
+    """Resolve epic id for changeset.
+
+    Args:
+        issue: Value for `issue`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     return worker_reconcile_service.resolve_epic_id_for_changeset(
         issue,
         beads_root=beads_root,
@@ -678,48 +1117,6 @@ def _resolve_epic_id_for_changeset(
         issue_parent_id=issue_parent_id,
     )
 
-
-send_planner_notification = _send_planner_notification
-send_invalid_changeset_labels_notification = _send_invalid_changeset_labels_notification
-send_no_ready_changesets = _send_no_ready_changesets
-release_epic_assignment = _release_epic_assignment
-has_open_descendant_changesets = _has_open_descendant_changesets
-is_changeset_in_progress = _is_changeset_in_progress
-is_changeset_ready = _is_changeset_ready
-changeset_review_state = _changeset_review_state
-changeset_waiting_on_review = _changeset_waiting_on_review
-changeset_work_branch = _changeset_work_branch
-changeset_pr_url = _changeset_pr_url
-lookup_pr_payload = _lookup_pr_payload
-lookup_pr_payload_diagnostic = _lookup_pr_payload_diagnostic
-changeset_root_branch = _changeset_root_branch
-changeset_base_branch = _changeset_base_branch
-render_changeset_pr_body = _render_changeset_pr_body
-attempt_create_draft_pr = _attempt_create_draft_pr
-set_changeset_review_pending_state = _set_changeset_review_pending_state
-update_changeset_review_from_pr = _update_changeset_review_from_pr
-handle_pushed_without_pr = _handle_pushed_without_pr
-changeset_parent_lifecycle_state = _changeset_parent_lifecycle_state
-changeset_pr_creation_decision = _changeset_pr_creation_decision
-recover_premature_merged_changeset = _recover_premature_merged_changeset
-changeset_waiting_on_review_or_signals = _changeset_waiting_on_review_or_signals
-is_changeset_recovery_candidate = _is_changeset_recovery_candidate
-list_child_issues = _list_child_issues
-find_invalid_changeset_labels = _find_invalid_changeset_labels
-changeset_parent_branch = _changeset_parent_branch
-mark_changeset_in_progress = _mark_changeset_in_progress
-mark_changeset_closed = _mark_changeset_closed
-mark_changeset_merged = _mark_changeset_merged
-mark_changeset_abandoned = _mark_changeset_abandoned
-mark_changeset_blocked = _mark_changeset_blocked
-mark_changeset_children_in_progress = _mark_changeset_children_in_progress
-close_completed_container_changesets = _close_completed_container_changesets
-promote_planned_descendant_changesets = _promote_planned_descendant_changesets
-has_blocking_messages = _has_blocking_messages
-branch_ref_for_lookup = _branch_ref_for_lookup
-epic_root_integrated_into_parent = _epic_root_integrated_into_parent
-changeset_integration_signal = _changeset_integration_signal
-resolve_epic_id_for_changeset = _resolve_epic_id_for_changeset
 
 __all__ = [
     "attempt_create_draft_pr",

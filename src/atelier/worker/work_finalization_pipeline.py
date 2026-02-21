@@ -333,6 +333,31 @@ def finalize_changeset(
     squash_message_agent_env: dict[str, str] | None = None,
     git_path: str | None = None,
 ) -> FinalizeResult:
+    """Finalize changeset.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        epic_id: Value for `epic_id`.
+        agent_id: Value for `agent_id`.
+        agent_bead_id: Value for `agent_bead_id`.
+        started_at: Value for `started_at`.
+        repo_slug: Value for `repo_slug`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        branch_pr: Value for `branch_pr`.
+        branch_pr_strategy: Value for `branch_pr_strategy`.
+        branch_history: Value for `branch_history`.
+        branch_squash_message: Value for `branch_squash_message`.
+        project_data_dir: Value for `project_data_dir`.
+        squash_message_agent_spec: Value for `squash_message_agent_spec`.
+        squash_message_agent_options: Value for `squash_message_agent_options`.
+        squash_message_agent_home: Value for `squash_message_agent_home`.
+        squash_message_agent_env: Value for `squash_message_agent_env`.
+        git_path: Value for `git_path`.
+
+    Returns:
+        Function result.
+    """
     context = worker_finalize_pipeline.FinalizePipelineContext(
         changeset_id=changeset_id,
         epic_id=epic_id,

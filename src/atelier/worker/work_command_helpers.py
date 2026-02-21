@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from .. import root_branch as root_branch_module
-from .models import PublishSignalDiagnostics
-from .review import ReviewFeedbackSelection
 from .work_finalization_runtime import (
     changeset_parent_branch,
     changeset_pr_url,
@@ -47,10 +45,6 @@ from .work_startup_runtime import (
 )
 
 root_branch = root_branch_module
-
-# Compatibility aliases for existing tests/callers.
-_ReviewFeedbackSelection = ReviewFeedbackSelection
-_PublishSignalDiagnostics = PublishSignalDiagnostics
 
 __all__ = [
     "capture_review_feedback_snapshot",

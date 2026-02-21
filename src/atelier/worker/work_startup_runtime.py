@@ -125,6 +125,20 @@ def next_changeset(
     branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     git_path: str | None = None,
 ) -> dict[str, object] | None:
+    """Next changeset.
+
+    Args:
+        epic_id: Value for `epic_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        repo_slug: Value for `repo_slug`.
+        branch_pr: Value for `branch_pr`.
+        branch_pr_strategy: Value for `branch_pr_strategy`.
+        git_path: Value for `git_path`.
+
+    Returns:
+        Function result.
+    """
     context = worker_startup.NextChangesetContext(
         epic_id=epic_id,
         repo_slug=repo_slug,
@@ -144,6 +158,18 @@ def persist_review_feedback_cursor(
     beads_root: Path,
     repo_root: Path,
 ) -> None:
+    """Persist review feedback cursor.
+
+    Args:
+        changeset_id: Value for `changeset_id`.
+        issue: Value for `issue`.
+        repo_slug: Value for `repo_slug`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     work_feedback.persist_review_feedback_cursor(
         changeset_id=changeset_id,
         issue=issue,
@@ -160,6 +186,17 @@ def capture_review_feedback_snapshot(
     repo_root: Path,
     git_path: str | None,
 ) -> ReviewFeedbackSnapshot:
+    """Capture review feedback snapshot.
+
+    Args:
+        issue: Value for `issue`.
+        repo_slug: Value for `repo_slug`.
+        repo_root: Value for `repo_root`.
+        git_path: Value for `git_path`.
+
+    Returns:
+        Function result.
+    """
     return work_feedback.capture_review_feedback_snapshot(
         issue=issue,
         repo_slug=repo_slug,
@@ -171,6 +208,15 @@ def capture_review_feedback_snapshot(
 def review_feedback_progressed(
     before: ReviewFeedbackSnapshot, after: ReviewFeedbackSnapshot
 ) -> bool:
+    """Review feedback progressed.
+
+    Args:
+        before: Value for `before`.
+        after: Value for `after`.
+
+    Returns:
+        Function result.
+    """
     return work_feedback.review_feedback_progressed(before, after)
 
 
@@ -181,6 +227,17 @@ def select_review_feedback_changeset(
     beads_root: Path,
     repo_root: Path,
 ) -> ReviewFeedbackSelection | None:
+    """Select review feedback changeset.
+
+    Args:
+        epic_id: Value for `epic_id`.
+        repo_slug: Value for `repo_slug`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     return worker_review.select_review_feedback_changeset(
         epic_id=epic_id,
         repo_slug=repo_slug,
@@ -195,6 +252,16 @@ def select_global_review_feedback_changeset(
     beads_root: Path,
     repo_root: Path,
 ) -> ReviewFeedbackSelection | None:
+    """Select global review feedback changeset.
+
+    Args:
+        repo_slug: Value for `repo_slug`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     return worker_review.select_global_review_feedback_changeset(
         repo_slug=repo_slug,
         beads_root=beads_root,
@@ -216,6 +283,17 @@ def resolve_hooked_epic(
     beads_root: Path,
     repo_root: Path,
 ) -> str | None:
+    """Resolve hooked epic.
+
+    Args:
+        agent_bead_id: Value for `agent_bead_id`.
+        agent_id: Value for `agent_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     hook_id = beads.get_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
     if not hook_id:
         return None
@@ -244,6 +322,20 @@ def worker_opening_prompt(
     review_feedback: bool = False,
     review_pr_url: str | None = None,
 ) -> str:
+    """Worker opening prompt.
+
+    Args:
+        project_enlistment: Value for `project_enlistment`.
+        workspace_branch: Value for `workspace_branch`.
+        epic_id: Value for `epic_id`.
+        changeset_id: Value for `changeset_id`.
+        changeset_title: Value for `changeset_title`.
+        review_feedback: Value for `review_feedback`.
+        review_pr_url: Value for `review_pr_url`.
+
+    Returns:
+        Function result.
+    """
     return worker_prompts.worker_opening_prompt(
         project_enlistment=project_enlistment,
         workspace_branch=workspace_branch,
@@ -256,6 +348,16 @@ def worker_opening_prompt(
 
 
 def check_inbox_before_claim(agent_id: str, *, beads_root: Path, repo_root: Path) -> bool:
+    """Check inbox before claim.
+
+    Args:
+        agent_id: Value for `agent_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
     return worker_queueing.check_inbox_before_claim(
         agent_id,
         beads_root=beads_root,
@@ -274,6 +376,20 @@ def handle_queue_before_claim(
     dry_run: bool = False,
     assume_yes: bool = False,
 ) -> bool:
+    """Handle queue before claim.
+
+    Args:
+        agent_id: Value for `agent_id`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        queue_name: Value for `queue_name`.
+        force_prompt: Value for `force_prompt`.
+        dry_run: Value for `dry_run`.
+        assume_yes: Value for `assume_yes`.
+
+    Returns:
+        Function result.
+    """
     return worker_queueing.handle_queue_before_claim(
         agent_id,
         beads_root=beads_root,
@@ -439,6 +555,14 @@ def run_startup_contract(
     *,
     context: worker_startup.StartupContractContext,
 ) -> StartupContractResult:
+    """Run startup contract.
+
+    Args:
+        context: Value for `context`.
+
+    Returns:
+        Function result.
+    """
     service = _StartupContractService(beads_root=context.beads_root, repo_root=context.repo_root)
     return worker_startup.run_startup_contract_service(context=context, service=service)
 

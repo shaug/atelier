@@ -21,7 +21,15 @@ _RUN_MODE_VALUES = {"once", "default", "watch"}
 _WATCH_INTERVAL_SECONDS = 60
 
 
-def _normalize_branch_value(value: object) -> str | None:
+def normalize_branch_value(value: object) -> str | None:
+    """Normalize a branch metadata value.
+
+    Args:
+        value: Raw branch metadata value from a bead field.
+
+    Returns:
+        A trimmed branch string, or ``None`` when empty/``null``.
+    """
     if not isinstance(value, str):
         return None
     cleaned = value.strip()
@@ -30,54 +38,143 @@ def _normalize_branch_value(value: object) -> str | None:
     return cleaned
 
 
-def _extract_changeset_root_branch(issue: dict[str, object]) -> str | None:
+def extract_changeset_root_branch(issue: dict[str, object]) -> str | None:
+    """Extract changeset root branch metadata from an issue payload.
+
+    Args:
+        issue: Bead issue payload.
+
+    Returns:
+        Normalized ``changeset.root_branch`` value, or ``None``.
+    """
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    return _normalize_branch_value(fields.get("changeset.root_branch"))
+    return normalize_branch_value(fields.get("changeset.root_branch"))
 
 
-def _extract_workspace_parent_branch(issue: dict[str, object]) -> str | None:
+def extract_workspace_parent_branch(issue: dict[str, object]) -> str | None:
+    """Extract workspace parent branch metadata from an issue payload.
+
+    Args:
+        issue: Bead issue payload.
+
+    Returns:
+        Normalized ``workspace.parent_branch`` value, or ``None``.
+    """
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    return _normalize_branch_value(fields.get("workspace.parent_branch"))
+    return normalize_branch_value(fields.get("workspace.parent_branch"))
 
 
-def _issue_parent_id(issue: dict[str, object]) -> str | None:
-    boundary = parse_issue_boundary(issue, source="_issue_parent_id")
+def issue_parent_id(issue: dict[str, object]) -> str | None:
+    """Return parent issue identifier for a bead payload.
+
+    Args:
+        issue: Bead issue payload.
+
+    Returns:
+        Parent issue id when present, else ``None``.
+    """
+    boundary = parse_issue_boundary(issue, source="issue_parent_id")
     return boundary.parent_id
 
 
-def _issue_dependency_ids(issue: dict[str, object]) -> tuple[str, ...]:
-    boundary = parse_issue_boundary(issue, source="_issue_dependency_ids")
+def issue_dependency_ids(issue: dict[str, object]) -> tuple[str, ...]:
+    """Return dependency ids declared by an issue payload.
+
+    Args:
+        issue: Bead issue payload.
+
+    Returns:
+        Tuple of dependency issue ids.
+    """
+    boundary = parse_issue_boundary(issue, source="issue_dependency_ids")
     return boundary.dependency_ids
 
 
-def _dry_run_log(message: str) -> None:
+def dry_run_log(message: str) -> None:
+    """Emit a dry-run log line.
+
+    Args:
+        message: Message body to print.
+
+    Returns:
+        None.
+    """
     say(f"DRY-RUN: {message}")
 
 
-def _log_debug(message: str) -> None:
+def log_debug(message: str) -> None:
+    """Emit worker-scoped debug logging.
+
+    Args:
+        message: Debug message payload.
+
+    Returns:
+        None.
+    """
     atelier_log.debug(f"[work] {message}")
 
 
-def _trace_enabled() -> bool:
+def trace_enabled() -> bool:
+    """Return whether worker trace logging is enabled.
+
+    Returns:
+        ``True`` when worker tracing should emit step timings.
+    """
     return worker_telemetry.trace_enabled("ATELIER_WORK_TRACE")
 
 
-def _step(label: str, *, timings: list[tuple[str, float]], trace: bool) -> Callable:
-    return worker_telemetry.step(label, timings=timings, trace=trace, say=say, log_debug=_log_debug)
+def step(label: str, *, timings: list[tuple[str, float]], trace: bool) -> Callable:
+    """Create a telemetry step finalizer.
+
+    Args:
+        label: Human-readable step label.
+        timings: Accumulator list for timing samples.
+        trace: Whether trace mode is enabled.
+
+    Returns:
+        Callable that records step completion metadata.
+    """
+    return worker_telemetry.step(label, timings=timings, trace=trace, say=say, log_debug=log_debug)
 
 
-def _report_timings(timings: list[tuple[str, float]], *, trace: bool) -> None:
+def report_timings(timings: list[tuple[str, float]], *, trace: bool) -> None:
+    """Emit timing summary for worker steps.
+
+    Args:
+        timings: Collected step timings.
+        trace: Whether trace output is enabled.
+
+    Returns:
+        None.
+    """
     worker_telemetry.report_timings(timings, trace=trace, say=say)
 
 
-def _report_worker_summary(summary: WorkerRunSummary, *, dry_run: bool) -> None:
-    worker_telemetry.report_worker_summary(summary, dry_run=dry_run, say=say, log_debug=_log_debug)
+def report_worker_summary(summary: WorkerRunSummary, *, dry_run: bool) -> None:
+    """Emit final worker session summary.
+
+    Args:
+        summary: Worker run summary payload.
+        dry_run: Whether the run executed in dry-run mode.
+
+    Returns:
+        None.
+    """
+    worker_telemetry.report_worker_summary(summary, dry_run=dry_run, say=say, log_debug=log_debug)
 
 
-def _with_codex_exec(cmd: list[str], opening_prompt: str) -> list[str]:
-    """Return a codex command rewritten to run non-interactively via `exec`."""
+def with_codex_exec(cmd: list[str], opening_prompt: str) -> list[str]:
+    """Return codex args rewritten to run non-interactively via ``exec``.
+
+    Args:
+        cmd: Original command argument list.
+        opening_prompt: Prompt payload passed to the agent process.
+
+    Returns:
+        Rewritten codex argument list using the ``exec`` subcommand.
+    """
     if not cmd:
         return cmd
     rewritten = list(cmd)
@@ -89,8 +186,16 @@ def _with_codex_exec(cmd: list[str], opening_prompt: str) -> list[str]:
     return rewritten
 
 
-def _strip_flag_with_value(args: list[str], flag: str) -> list[str]:
-    """Return args without instances of `flag` and its value."""
+def strip_flag_with_value(args: list[str], flag: str) -> list[str]:
+    """Remove all occurrences of a flag and its value from argument tokens.
+
+    Args:
+        args: Raw command argument list.
+        flag: Flag name to remove, such as ``--model``.
+
+    Returns:
+        Argument list with the requested flag removed.
+    """
     cleaned: list[str] = []
     skip_next = False
     for token in args:
@@ -106,8 +211,16 @@ def _strip_flag_with_value(args: list[str], flag: str) -> list[str]:
     return cleaned
 
 
-def _ensure_exec_subcommand_flag(args: list[str], flag: str) -> list[str]:
-    """Ensure a flag is present on the codex `exec` subcommand."""
+def ensure_exec_subcommand_flag(args: list[str], flag: str) -> list[str]:
+    """Ensure a flag is present on the codex ``exec`` subcommand.
+
+    Args:
+        args: Raw codex command argument list.
+        flag: Flag to inject into the ``exec`` flag section.
+
+    Returns:
+        Argument list with the requested exec-level flag included.
+    """
     rewritten = list(args)
     try:
         exec_index = rewritten.index("exec")
@@ -129,7 +242,15 @@ def _ensure_exec_subcommand_flag(args: list[str], flag: str) -> list[str]:
     return rewritten
 
 
-def _normalize_mode(value: str | None) -> str:
+def normalize_mode(value: str | None) -> str:
+    """Normalize worker selection mode.
+
+    Args:
+        value: Optional explicit mode value.
+
+    Returns:
+        Normalized mode string.
+    """
     if value is None:
         value = os.environ.get("ATELIER_MODE", "prompt")
     normalized = value.strip().lower()
@@ -138,7 +259,15 @@ def _normalize_mode(value: str | None) -> str:
     return normalized
 
 
-def _normalize_run_mode(value: str | None) -> str:
+def normalize_run_mode(value: str | None) -> str:
+    """Normalize worker run mode.
+
+    Args:
+        value: Optional explicit run mode value.
+
+    Returns:
+        Normalized run mode string.
+    """
     if value is None:
         value = os.environ.get("ATELIER_RUN_MODE", "default")
     normalized = value.strip().lower()
@@ -147,7 +276,12 @@ def _normalize_run_mode(value: str | None) -> str:
     return normalized
 
 
-def _watch_interval_seconds() -> int:
+def watch_interval_seconds() -> int:
+    """Return watch-loop sleep interval in seconds.
+
+    Returns:
+        Positive watch interval in seconds.
+    """
     raw = os.environ.get("ATELIER_WATCH_INTERVAL", "").strip()
     if not raw:
         return _WATCH_INTERVAL_SECONDS
@@ -160,17 +294,35 @@ def _watch_interval_seconds() -> int:
     return value
 
 
-def _issue_labels(issue: dict[str, object]) -> set[str]:
-    boundary = parse_issue_boundary(issue, source="_issue_labels")
+def issue_labels(issue: dict[str, object]) -> set[str]:
+    """Return normalized label set for a bead issue.
+
+    Args:
+        issue: Bead issue payload.
+
+    Returns:
+        Set of label strings.
+    """
+    boundary = parse_issue_boundary(issue, source="issue_labels")
     return set(boundary.labels)
 
 
-def _filter_epics(
+def filter_epics(
     issues: list[dict[str, object]],
     *,
     assignee: str | None = None,
     require_unassigned: bool = False,
 ) -> list[dict[str, object]]:
+    """Filter epics according to assignment and draft status.
+
+    Args:
+        issues: Candidate issue payloads.
+        assignee: Optional assignee filter.
+        require_unassigned: Whether only unassigned epics are allowed.
+
+    Returns:
+        Filtered epic payload list.
+    """
     return worker_selection.filter_epics(
         issues,
         assignee=assignee,
@@ -180,40 +332,41 @@ def _filter_epics(
     )
 
 
-def _parse_issue_time(value: object) -> dt.datetime | None:
+def parse_issue_time(value: object) -> dt.datetime | None:
+    """Parse issue timestamp values.
+
+    Args:
+        value: Raw timestamp object.
+
+    Returns:
+        Parsed UTC datetime when valid, else ``None``.
+    """
     return worker_selection.parse_issue_time(value)
 
 
-def _is_closed_status(status: object) -> bool:
+def is_closed_status(status: object) -> bool:
+    """Return whether an issue status represents a closed state.
+
+    Args:
+        status: Raw status value.
+
+    Returns:
+        ``True`` when status is closed/done.
+    """
     return lifecycle.is_closed_status(status)
 
 
-def _is_feedback_eligible_epic_status(status: object) -> bool:
-    return not _is_closed_status(status)
+def is_feedback_eligible_epic_status(status: object) -> bool:
+    """Return whether an epic status can be considered for review feedback.
 
+    Args:
+        status: Raw status value.
 
-normalize_branch_value = _normalize_branch_value
-extract_changeset_root_branch = _extract_changeset_root_branch
-extract_workspace_parent_branch = _extract_workspace_parent_branch
-issue_parent_id = _issue_parent_id
-issue_dependency_ids = _issue_dependency_ids
-dry_run_log = _dry_run_log
-log_debug = _log_debug
-trace_enabled = _trace_enabled
-step = _step
-report_timings = _report_timings
-report_worker_summary = _report_worker_summary
-with_codex_exec = _with_codex_exec
-strip_flag_with_value = _strip_flag_with_value
-ensure_exec_subcommand_flag = _ensure_exec_subcommand_flag
-normalize_mode = _normalize_mode
-normalize_run_mode = _normalize_run_mode
-watch_interval_seconds = _watch_interval_seconds
-issue_labels = _issue_labels
-filter_epics = _filter_epics
-parse_issue_time = _parse_issue_time
-is_closed_status = _is_closed_status
-is_feedback_eligible_epic_status = _is_feedback_eligible_epic_status
+    Returns:
+        ``True`` when status is not closed.
+    """
+    return not is_closed_status(status)
+
 
 __all__ = [
     "dry_run_log",
