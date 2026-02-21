@@ -1011,6 +1011,7 @@ def build_project_config(
     project_repo_url = origin_raw or existing_config.project.repo_url
     project_allow_mainline = existing_config.project.allow_mainline_workspace
     project_provider = existing_config.project.provider
+    project_auto_export_new = existing_config.project.auto_export_new
     project_provider_url = existing_config.project.provider_url
     project_owner = existing_config.project.owner
 
@@ -1034,6 +1035,7 @@ def build_project_config(
             repo_url=project_repo_url,
             allow_mainline_workspace=project_allow_mainline,
             provider=project_provider,
+            auto_export_new=project_auto_export_new,
             provider_url=project_provider_url,
             owner=project_owner,
         ),

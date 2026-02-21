@@ -325,6 +325,9 @@ def planner_provider_environment(
             active_provider = sorted(set(resolved_providers))[0]
     if active_provider:
         env["ATELIER_EXTERNAL_PROVIDER"] = active_provider
+    env["ATELIER_EXTERNAL_AUTO_EXPORT"] = (
+        "1" if bool(project_config.project.auto_export_new) else "0"
+    )
     if github_repo is None:
         github_repo = _github_repo_from_config(project_config)
         if github_repo is None:

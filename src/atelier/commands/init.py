@@ -77,6 +77,7 @@ def init_project(args: object) -> None:
     )
     selected_provider = provider_resolution.selected_provider
     current_provider = (payload.project.provider or "").strip().lower() or None
+    current_auto_export = bool(payload.project.auto_export_new)
     interactive = sys.stdin.isatty() and sys.stdout.isatty() and not yes
     if interactive:
         available = list(provider_resolution.available_providers)
@@ -104,6 +105,22 @@ def init_project(args: object) -> None:
         say(f"Selected external provider: {selected_provider}")
     else:
         say("Selected external provider: none")
+    next_auto_export = current_auto_export
+    if selected_provider:
+        if interactive:
+            next_auto_export = confirm(
+                f"Export all new epics/changesets to {selected_provider} by default?",
+                default=current_auto_export,
+            )
+    else:
+        next_auto_export = False
+    if next_auto_export != current_auto_export:
+        payload = payload.model_copy(deep=True)
+        payload.project.auto_export_new = next_auto_export
+    say(
+        "Default auto-export for new epics/changesets: "
+        + ("enabled" if bool(payload.project.auto_export_new) else "disabled")
+    )
     say("Writing project configuration...")
     config.write_project_config(config_path, payload)
     project.ensure_project_scaffold(project_dir)

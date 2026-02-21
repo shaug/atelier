@@ -370,6 +370,10 @@ def run_planner(args: object) -> None:
                 available_providers=tuple(),
                 github_repo=None,
             )
+            external_auto_export_guidance = (
+                "Auto-export for new epics/changesets is disabled; "
+                "import/export only when explicitly requested."
+            )
             planner_key = f"planner-{agent.name}"
             planner_branch = _planner_branch_name(
                 default_branch=default_branch, agent_name=agent.name
@@ -461,6 +465,12 @@ def run_planner(args: object) -> None:
             provider_slugs = list(provider_resolution.available_providers)
             external_providers = ", ".join(provider_slugs) if provider_slugs else "none"
             selected_provider = provider_resolution.selected_provider
+            if bool(project_config.project.auto_export_new) and selected_provider:
+                external_auto_export_guidance = (
+                    f"Auto-export new epics/changesets by default to "
+                    f"{selected_provider}; use per-bead opt-out "
+                    f"(`ext:no-export`) to skip."
+                )
             finish(selected_provider or "none")
             hooks_dir = _planner_hooks_dir(agent.path)
             finish = _step("Install read-only guardrails", timings=timings, trace=trace)
@@ -482,6 +492,7 @@ def run_planner(args: object) -> None:
                     "planner_branch": planner_branch,
                     "default_branch": default_branch,
                     "external_providers": external_providers,
+                    "external_auto_export_guidance": external_auto_export_guidance,
                 },
             )
             finish()
