@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..models import StartupContractResult
@@ -118,6 +119,104 @@ def next_changeset(
             ):
                 return issue
     return None
+
+
+@dataclass(frozen=True)
+class StartupContractContext:
+    agent_id: str
+    agent_bead_id: str | None
+    beads_root: Path
+    repo_root: Path
+    mode: str
+    explicit_epic_id: str | None
+    queue_only: bool
+    dry_run: bool
+    assume_yes: bool
+    repo_slug: str | None
+    branch_pr: bool
+    branch_pr_strategy: object
+    git_path: str | None
+    worker_queue_name: str
+
+
+@dataclass(frozen=True)
+class StartupContractPorts:
+    handle_queue_before_claim: Callable[..., bool]
+    list_epics: Callable[..., list[dict[str, object]]]
+    next_changeset_fn: Callable[..., dict[str, object] | None]
+    resolve_hooked_epic: Callable[..., str | None]
+    filter_epics: Callable[..., list[dict[str, object]]]
+    sort_by_created_at: Callable[..., list[dict[str, object]]]
+    stale_family_assigned_epics: Callable[..., list[dict[str, object]]]
+    select_review_feedback_changeset: Callable[..., ReviewFeedbackSelection | None]
+    parse_issue_time: Callable[[object], dt.datetime | None]
+    select_global_review_feedback_changeset: Callable[
+        ..., ReviewFeedbackSelection | None
+    ]
+    is_feedback_eligible_epic_status: Callable[[object], bool]
+    issue_labels: Callable[[dict[str, object]], set[str]]
+    check_inbox_before_claim: Callable[..., bool]
+    select_epic_auto: Callable[..., str | None]
+    select_epic_prompt: Callable[..., str | None]
+    select_epic_from_ready_changesets: Callable[..., str | None]
+    send_needs_decision: Callable[..., None]
+    log_debug: Callable[[str], None]
+    log_warning: Callable[[str], None]
+    dry_run_log: Callable[[str], None]
+    emit: Callable[[str], None]
+    run_bd_json: Callable[..., list[dict[str, object]]]
+    agent_family_id: Callable[[str], str]
+    is_agent_session_active: Callable[[str], bool]
+    die_fn: Callable[[str], None]
+
+
+def run_startup_contract_service(
+    *, context: StartupContractContext, ports: StartupContractPorts
+) -> StartupContractResult:
+    """Typed startup contract service entrypoint."""
+    return run_startup_contract(
+        agent_id=context.agent_id,
+        agent_bead_id=context.agent_bead_id,
+        beads_root=context.beads_root,
+        repo_root=context.repo_root,
+        mode=context.mode,
+        explicit_epic_id=context.explicit_epic_id,
+        queue_only=context.queue_only,
+        dry_run=context.dry_run,
+        assume_yes=context.assume_yes,
+        repo_slug=context.repo_slug,
+        branch_pr=context.branch_pr,
+        branch_pr_strategy=context.branch_pr_strategy,
+        git_path=context.git_path,
+        worker_queue_name=context.worker_queue_name,
+        handle_queue_before_claim=ports.handle_queue_before_claim,
+        list_epics=ports.list_epics,
+        next_changeset_fn=ports.next_changeset_fn,
+        resolve_hooked_epic=ports.resolve_hooked_epic,
+        filter_epics=ports.filter_epics,
+        sort_by_created_at=ports.sort_by_created_at,
+        stale_family_assigned_epics=ports.stale_family_assigned_epics,
+        select_review_feedback_changeset=ports.select_review_feedback_changeset,
+        parse_issue_time=ports.parse_issue_time,
+        select_global_review_feedback_changeset=(
+            ports.select_global_review_feedback_changeset
+        ),
+        is_feedback_eligible_epic_status=ports.is_feedback_eligible_epic_status,
+        issue_labels=ports.issue_labels,
+        check_inbox_before_claim=ports.check_inbox_before_claim,
+        select_epic_auto=ports.select_epic_auto,
+        select_epic_prompt=ports.select_epic_prompt,
+        select_epic_from_ready_changesets=ports.select_epic_from_ready_changesets,
+        send_needs_decision=ports.send_needs_decision,
+        log_debug=ports.log_debug,
+        log_warning=ports.log_warning,
+        dry_run_log=ports.dry_run_log,
+        emit=ports.emit,
+        run_bd_json=ports.run_bd_json,
+        agent_family_id=ports.agent_family_id,
+        is_agent_session_active=ports.is_agent_session_active,
+        die_fn=ports.die_fn,
+    )
 
 
 def run_startup_contract(

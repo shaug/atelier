@@ -1929,7 +1929,7 @@ def _run_startup_contract(
     branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     git_path: str | None = None,
 ) -> StartupContractResult:
-    return worker_startup.run_startup_contract(
+    context = worker_startup.StartupContractContext(
         agent_id=agent_id,
         agent_bead_id=agent_bead_id,
         beads_root=beads_root,
@@ -1944,6 +1944,8 @@ def _run_startup_contract(
         branch_pr_strategy=branch_pr_strategy,
         git_path=git_path,
         worker_queue_name=_WORKER_QUEUE_NAME,
+    )
+    ports = worker_startup.StartupContractPorts(
         handle_queue_before_claim=_handle_queue_before_claim,
         list_epics=lambda *, beads_root, repo_root: beads.run_bd_json(
             ["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root
@@ -2008,6 +2010,7 @@ def _run_startup_contract(
         is_agent_session_active=_is_agent_session_active,
         die_fn=die,
     )
+    return worker_startup.run_startup_contract_service(context=context, ports=ports)
 
 
 def _run_worker_once(

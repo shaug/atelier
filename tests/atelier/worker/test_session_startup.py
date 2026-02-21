@@ -56,6 +56,68 @@ def _startup_kwargs(**overrides: Any) -> dict[str, Any]:
     return kwargs
 
 
+def _startup_context_ports(
+    **overrides: Any,
+) -> tuple[startup.StartupContractContext, startup.StartupContractPorts]:
+    kwargs = _startup_kwargs(**overrides)
+    context = startup.StartupContractContext(
+        agent_id=kwargs["agent_id"],
+        agent_bead_id=kwargs["agent_bead_id"],
+        beads_root=kwargs["beads_root"],
+        repo_root=kwargs["repo_root"],
+        mode=kwargs["mode"],
+        explicit_epic_id=kwargs["explicit_epic_id"],
+        queue_only=kwargs["queue_only"],
+        dry_run=kwargs["dry_run"],
+        assume_yes=kwargs["assume_yes"],
+        repo_slug=kwargs["repo_slug"],
+        branch_pr=kwargs["branch_pr"],
+        branch_pr_strategy=kwargs["branch_pr_strategy"],
+        git_path=kwargs["git_path"],
+        worker_queue_name=kwargs["worker_queue_name"],
+    )
+    ports = startup.StartupContractPorts(
+        handle_queue_before_claim=kwargs["handle_queue_before_claim"],
+        list_epics=kwargs["list_epics"],
+        next_changeset_fn=kwargs["next_changeset_fn"],
+        resolve_hooked_epic=kwargs["resolve_hooked_epic"],
+        filter_epics=kwargs["filter_epics"],
+        sort_by_created_at=kwargs["sort_by_created_at"],
+        stale_family_assigned_epics=kwargs["stale_family_assigned_epics"],
+        select_review_feedback_changeset=kwargs["select_review_feedback_changeset"],
+        parse_issue_time=kwargs["parse_issue_time"],
+        select_global_review_feedback_changeset=kwargs[
+            "select_global_review_feedback_changeset"
+        ],
+        is_feedback_eligible_epic_status=kwargs["is_feedback_eligible_epic_status"],
+        issue_labels=kwargs["issue_labels"],
+        check_inbox_before_claim=kwargs["check_inbox_before_claim"],
+        select_epic_auto=kwargs["select_epic_auto"],
+        select_epic_prompt=kwargs["select_epic_prompt"],
+        select_epic_from_ready_changesets=kwargs["select_epic_from_ready_changesets"],
+        send_needs_decision=kwargs["send_needs_decision"],
+        log_debug=kwargs["log_debug"],
+        log_warning=kwargs["log_warning"],
+        dry_run_log=kwargs["dry_run_log"],
+        emit=kwargs["emit"],
+        run_bd_json=kwargs["run_bd_json"],
+        agent_family_id=kwargs["agent_family_id"],
+        is_agent_session_active=kwargs["is_agent_session_active"],
+        die_fn=kwargs["die_fn"],
+    )
+    return context, ports
+
+
+def test_run_startup_contract_service_supports_typed_context() -> None:
+    context, ports = _startup_context_ports(explicit_epic_id="at-explicit")
+
+    result = startup.run_startup_contract_service(context=context, ports=ports)
+
+    assert result.epic_id == "at-explicit"
+    assert result.should_exit is False
+    assert result.reason == "explicit_epic"
+
+
 def test_run_startup_contract_supports_explicit_epic() -> None:
     result = startup.run_startup_contract(
         **_startup_kwargs(explicit_epic_id="at-explicit")
