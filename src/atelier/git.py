@@ -3,11 +3,54 @@
 import json
 import re
 import shutil
+import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .exec import run_git_command, try_run_command
+from . import exec as exec_util
 from .io import die
+
+
+def _run_git_capture(
+    cmd: list[str], *, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str] | None:
+    result = exec_util.run_with_runner(
+        exec_util.CommandRequest(
+            argv=tuple(cmd),
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+    )
+    if result is None:
+        return None
+    return subprocess.CompletedProcess(
+        args=list(result.argv),
+        returncode=result.returncode,
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
+
+
+def _run_git_or_die(
+    cmd: list[str], *, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    result = _run_git_capture(cmd, cwd=cwd)
+    if result is None:
+        die("missing required command: git")
+    return result
+
+
+def run_git_command(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    """Compatibility wrapper for internal tests and callsites."""
+    return _run_git_or_die(cmd)
+
+
+def try_run_command(
+    cmd: list[str], *, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str] | None:
+    """Compatibility wrapper returning None when command is missing."""
+    return _run_git_capture(cmd, cwd=cwd)
 
 
 def strip_git_suffix(path: str) -> str:
@@ -897,7 +940,7 @@ def gh_pr_message(repo_dir: Path) -> dict | None:
         >>> gh_pr_message(Path(".")) is None or True
         True
     """
-    result = try_run_command(
+    result = _run_git_capture(
         ["gh", "pr", "view", "--json", "title,body,number"], cwd=repo_dir
     )
     if result is None or result.returncode != 0:
