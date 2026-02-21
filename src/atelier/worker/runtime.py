@@ -21,8 +21,11 @@ from .models import (
 from .ports import (
     ConfirmFn,
     Issue,
+    ReportTimingsFn,
+    StepFactory,
+    StepFinish,
     WorkerCommandService,
-    WorkerControlPorts,
+    WorkerControlService,
     WorkerInfrastructurePorts,
     WorkerLifecycleService,
     WorkerRuntimeDependencies,
@@ -317,6 +320,52 @@ class WorkerCommandAdapter:
         )
 
 
+class WorkerControlAdapter:
+    """Concrete control service backed by injected IO/tracing callables."""
+
+    def __init__(
+        self,
+        *,
+        dry_run_log_fn: Callable[[str], None],
+        report_timings_fn: ReportTimingsFn,
+        step_fn: StepFactory,
+        trace_enabled_fn: Callable[[], bool],
+        confirm_fn: ConfirmFn,
+        die_fn: Callable[[str], None],
+        say_fn: Callable[[str], None],
+    ) -> None:
+        self._dry_run_log_fn = dry_run_log_fn
+        self._report_timings_fn = report_timings_fn
+        self._step_fn = step_fn
+        self._trace_enabled_fn = trace_enabled_fn
+        self._confirm_fn = confirm_fn
+        self._die_fn = die_fn
+        self._say_fn = say_fn
+
+    def dry_run_log(self, message: str) -> None:
+        self._dry_run_log_fn(message)
+
+    def report_timings(self, timings: list[tuple[str, float]], *, trace: bool) -> None:
+        self._report_timings_fn(timings, trace=trace)
+
+    def step(
+        self, label: str, *, timings: list[tuple[str, float]], trace: bool
+    ) -> StepFinish:
+        return self._step_fn(label, timings=timings, trace=trace)
+
+    def trace_enabled(self) -> bool:
+        return self._trace_enabled_fn()
+
+    def confirm(self, prompt: str, *, default: bool = False) -> bool:
+        return self._confirm_fn(prompt, default=default)
+
+    def die(self, message: str) -> None:
+        self._die_fn(message)
+
+    def say(self, message: str) -> None:
+        self._say_fn(message)
+
+
 def run_worker_sessions(
     *,
     args: object,
@@ -401,6 +450,15 @@ def build_worker_runtime_dependencies(
     """Build worker runtime service ports for runner orchestration."""
     lifecycle: WorkerLifecycleService = WorkerLifecycleAdapter()
     commands: WorkerCommandService = WorkerCommandAdapter()
+    control: WorkerControlService = WorkerControlAdapter(
+        dry_run_log_fn=worker_work._dry_run_log,
+        report_timings_fn=worker_work._report_timings,
+        step_fn=worker_work._step,
+        trace_enabled_fn=worker_work._trace_enabled,
+        confirm_fn=confirm_fn,
+        die_fn=die_fn,
+        say_fn=emit,
+    )
     return WorkerRuntimeDependencies(
         infra=WorkerInfrastructurePorts(
             resolve_current_project_with_repo_root=resolve_current_project_with_repo_root,
@@ -417,13 +475,5 @@ def build_worker_runtime_dependencies(
         ),
         lifecycle=lifecycle,
         commands=commands,
-        control=WorkerControlPorts(
-            dry_run_log=worker_work._dry_run_log,
-            report_timings=worker_work._report_timings,
-            step=worker_work._step,
-            trace_enabled=worker_work._trace_enabled,
-            confirm=confirm_fn,
-            die=die_fn,
-            say=emit,
-        ),
+        control=control,
     )

@@ -455,17 +455,22 @@ class WorkerCommandService(Protocol):
     ) -> str: ...
 
 
-@dataclass(frozen=True)
-class WorkerControlPorts:
+class WorkerControlService(Protocol):
     """Logging, prompting, and tracing controls."""
 
-    dry_run_log: Callable[[str], None]
-    report_timings: ReportTimingsFn
-    step: StepFactory
-    trace_enabled: Callable[[], bool]
-    confirm: ConfirmFn
-    die: Callable[[str], None]
-    say: Callable[[str], None]
+    def dry_run_log(self, message: str) -> None: ...
+
+    def report_timings(self, timings: StepTimings, *, trace: bool) -> None: ...
+
+    def step(self, label: str, *, timings: StepTimings, trace: bool) -> StepFinish: ...
+
+    def trace_enabled(self) -> bool: ...
+
+    def confirm(self, prompt: str, *, default: bool = False) -> bool: ...
+
+    def die(self, message: str) -> None: ...
+
+    def say(self, message: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -475,4 +480,4 @@ class WorkerRuntimeDependencies:
     infra: WorkerInfrastructurePorts
     lifecycle: WorkerLifecycleService
     commands: WorkerCommandService
-    control: WorkerControlPorts
+    control: WorkerControlService

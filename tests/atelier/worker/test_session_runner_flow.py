@@ -10,7 +10,6 @@ from atelier.agent_home import AgentHome
 from atelier.worker.context import WorkerRunContext
 from atelier.worker.models import FinalizeResult, StartupContractResult
 from atelier.worker.ports import (
-    WorkerControlPorts,
     WorkerInfrastructurePorts,
     WorkerRuntimeDependencies,
 )
@@ -19,6 +18,34 @@ from atelier.worker.session import runner
 
 def _noop(*_args: object, **_kwargs: object) -> None:
     return None
+
+
+class _TestControl:
+    def __init__(self) -> None:
+        self._die = Mock(side_effect=RuntimeError("die called"))
+        self._say = Mock()
+
+    def dry_run_log(self, message: str) -> None:
+        _noop(message)
+
+    def report_timings(self, timings: list[tuple[str, float]], *, trace: bool) -> None:
+        _noop(timings, trace)
+
+    def step(self, _label: str, *, timings, trace):  # type: ignore[no-untyped-def]
+        _noop(timings, trace)
+        return lambda **_kwargs: None
+
+    def trace_enabled(self) -> bool:
+        return False
+
+    def confirm(self, _prompt: str, *, default: bool = False) -> bool:
+        return default
+
+    def die(self, message: str) -> None:
+        self._die(message)
+
+    def say(self, message: str) -> None:
+        self._say(message)
 
 
 def _build_runner_deps(
@@ -116,15 +143,7 @@ def _build_runner_deps(
             with_codex_exec=lambda cmd, _prompt: cmd,
             worker_opening_prompt=lambda **_kwargs: "open",
         ),
-        control=WorkerControlPorts(
-            dry_run_log=_noop,
-            report_timings=_noop,
-            step=lambda _label, *, timings, trace: lambda **_kwargs: None,
-            trace_enabled=lambda: False,
-            confirm=lambda _prompt, *, default=False: default,
-            die=Mock(side_effect=RuntimeError("die called")),
-            say=Mock(),
-        ),
+        control=_TestControl(),
     )
 
 
