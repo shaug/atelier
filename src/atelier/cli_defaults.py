@@ -8,7 +8,7 @@ from typing import Generic, Literal, TypeVar
 
 from .io import die
 
-T = TypeVar("T")
+T = TypeVar("T", covariant=True)
 
 DefaultSource = Literal["cli", "env", "built-in"]
 
