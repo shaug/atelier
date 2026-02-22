@@ -208,9 +208,7 @@ def test_attempt_create_draft_pr_accepts_pr_gate_keyword_contract(monkeypatch) -
     assert created is True
     assert detail == "created"
     assert calls
-    assert (
-        calls[0]["changeset_base_branch"]("ignored", beads_root=None, repo_root=None) == "main"
-    )
+    assert calls[0]["changeset_base_branch"]("ignored", beads_root=None, repo_root=None) == "main"
     assert calls[0]["render_changeset_pr_body"]({"title": "Example"}) == "summary"
 
 
