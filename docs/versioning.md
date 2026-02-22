@@ -9,12 +9,6 @@ Atelier uses Conventional Commits and Release Please to drive SemVer releases.
 - No squash-merge required. Release notes can be edited in the Release PR before
   merging.
 
-Bootstrap or repair the hook path for existing clones and linked worktrees:
-
-```sh
-bash .githooks/worktree-bootstrap.sh
-```
-
 ## Release flow
 
 1. Release Please runs on pushes to `main` and opens/updates a Release PR.
