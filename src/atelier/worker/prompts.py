@@ -12,6 +12,7 @@ def worker_opening_prompt(
     epic_id: str,
     changeset_id: str,
     changeset_title: str,
+    merge_conflict: bool = False,
     review_feedback: bool = False,
     review_pr_url: str | None = None,
 ) -> str:
@@ -39,6 +40,25 @@ def worker_opening_prompt(
             " send NEEDS-DECISION with details and exit."
         ),
     ]
+    if merge_conflict:
+        lines.extend(
+            [
+                "",
+                "Priority mode: merge-conflict",
+                (
+                    "This run is for default-branch merge conflict resolution on "
+                    "the assigned changeset PR."
+                ),
+                (
+                    "Rebase onto the default branch (or merge default branch), "
+                    "resolve conflicts, push the updated branch, then re-run review checks."
+                ),
+                (
+                    "If mergeability signals remain UNKNOWN/transient, report the "
+                    "exact signal values and retry guidance."
+                ),
+            ]
+        )
     if review_feedback:
         lines.extend(
             [

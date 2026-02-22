@@ -11,7 +11,7 @@ from typing import Protocol
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
-from ..review import ReviewFeedbackSelection
+from ..review import MergeConflictSelection, ReviewFeedbackSelection
 
 
 @dataclass(frozen=True)
@@ -199,6 +199,19 @@ class StartupContractService(Protocol):
         agent_id: str,
     ) -> list[dict[str, object]]: ...
 
+    def select_conflicted_changeset(
+        self,
+        *,
+        epic_id: str,
+        repo_slug: str | None,
+    ) -> MergeConflictSelection | None: ...
+
+    def select_global_conflicted_changeset(
+        self,
+        *,
+        repo_slug: str | None,
+    ) -> MergeConflictSelection | None: ...
+
     def select_review_feedback_changeset(
         self,
         *,
@@ -327,6 +340,49 @@ def run_startup_contract_service(
     def stale_reassign_for_epic(epic_id: str) -> str | None:
         return stale_assignee_by_epic.get(epic_id)
 
+    def select_conflict_candidate(
+        epic_ids: list[str],
+    ) -> MergeConflictSelection | None:
+        conflict_candidates: list[MergeConflictSelection] = []
+        seen_epics: set[str] = set()
+        for epic_id in epic_ids:
+            if epic_id in seen_epics:
+                continue
+            seen_epics.add(epic_id)
+            selection = service.select_conflicted_changeset(
+                epic_id=epic_id,
+                repo_slug=repo_slug,
+            )
+            if selection is not None:
+                conflict_candidates.append(selection)
+        if not conflict_candidates:
+            return None
+        conflict_candidates.sort(
+            key=lambda item: (
+                worker_selection.parse_issue_time(item.observed_at)
+                or dt.datetime.max.replace(tzinfo=dt.timezone.utc)
+            )
+        )
+        return conflict_candidates[0]
+
+    def resume_conflict(selection: MergeConflictSelection) -> StartupContractResult:
+        service.emit(
+            f"Prioritizing merge-conflict resolution: {selection.changeset_id} ({selection.epic_id})"
+        )
+        atelier_log.debug(
+            "startup selected merge-conflict "
+            f"changeset={selection.changeset_id} epic={selection.epic_id}"
+        )
+        if dry_run:
+            service.dry_run_log(f"Would select merge-conflict changeset {selection.changeset_id}.")
+        return StartupContractResult(
+            epic_id=selection.epic_id,
+            changeset_id=selection.changeset_id,
+            should_exit=False,
+            reason="merge_conflict",
+            reassign_from=stale_reassign_for_epic(selection.epic_id),
+        )
+
     def select_feedback_candidate(
         epic_ids: list[str],
     ) -> ReviewFeedbackSelection | None:
@@ -371,6 +427,9 @@ def run_startup_contract_service(
         )
 
     if branch_pr and repo_slug and hooked_epic:
+        hooked_conflict = select_conflict_candidate([hooked_epic])
+        if hooked_conflict is not None:
+            return resume_conflict(hooked_conflict)
         hooked_feedback = select_feedback_candidate([hooked_epic])
         if hooked_feedback is not None:
             return resume_feedback(hooked_feedback)
@@ -403,6 +462,12 @@ def run_startup_contract_service(
             if "at:draft" in labels:
                 continue
             unhooked_epics.append(issue_id)
+        conflict = select_conflict_candidate(unhooked_epics)
+        if conflict is not None:
+            return resume_conflict(conflict)
+        global_conflict = service.select_global_conflicted_changeset(repo_slug=repo_slug)
+        if global_conflict is not None:
+            return resume_conflict(global_conflict)
         feedback = select_feedback_candidate(unhooked_epics)
         if feedback is not None:
             return resume_feedback(feedback)

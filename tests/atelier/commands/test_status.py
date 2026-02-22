@@ -185,7 +185,7 @@ def test_status_includes_changeset_signals() -> None:
                 )
             return None
 
-        pr_payload = {"state": "OPEN", "isDraft": True}
+        pr_payload = {"state": "OPEN", "isDraft": True, "mergeStateStatus": "DIRTY"}
 
         with (
             patch(
@@ -222,8 +222,10 @@ def test_status_includes_changeset_signals() -> None:
         details = epic_payload["changeset_details"]
         assert details[0]["branch"] == "alpha-cs-1"
         assert details[0]["lifecycle_state"] == "draft-pr"
+        assert details[0]["merge_conflict"] is True
         assert details[0]["pr_allowed"] is True
         assert details[0]["pr_gate_reason"] == "no-parent"
+        assert details[0]["pr"]["merge_state_status"] == "DIRTY"
 
 
 def test_status_marks_stale_sessions_and_reclaimable_epics() -> None:

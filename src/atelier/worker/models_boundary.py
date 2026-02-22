@@ -182,6 +182,8 @@ class GithubPullRequestBoundary(BaseModel):
     closed_at: str | None = Field(default=None, alias="closedAt")
     updated_at: str | None = Field(default=None, alias="updatedAt")
     review_decision: str | None = Field(default=None, alias="reviewDecision")
+    mergeable: str | None = None
+    merge_state_status: str | None = Field(default=None, alias="mergeStateStatus")
     review_requests: tuple[GithubReviewRequestBoundary, ...] = Field(
         default=(), alias="reviewRequests"
     )
@@ -197,6 +199,8 @@ class GithubPullRequestBoundary(BaseModel):
         "closed_at",
         "updated_at",
         "review_decision",
+        "mergeable",
+        "merge_state_status",
         mode="before",
     )
     @classmethod

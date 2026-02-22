@@ -40,6 +40,8 @@ def test_parse_pr_boundary_normalizes_numeric_string_number() -> None:
     payload = {
         "number": "204",
         "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "DIRTY",
         "reviewRequests": [{"requestedReviewer": {"login": "reviewer", "isBot": False}}],
     }
 
@@ -51,6 +53,8 @@ def test_parse_pr_boundary_normalizes_numeric_string_number() -> None:
     reviewer = boundary.review_requests[0].requested_reviewer
     assert reviewer is not None
     assert reviewer.login == "reviewer"
+    assert boundary.mergeable == "MERGEABLE"
+    assert boundary.merge_state_status == "DIRTY"
 
 
 def test_parse_pr_boundary_rejects_invalid_number() -> None:

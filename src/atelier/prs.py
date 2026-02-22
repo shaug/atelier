@@ -30,6 +30,10 @@ _GH_RETRY_ERROR_MARKERS = (
     "503",
     "504",
 )
+_MERGE_STATE_CONFLICT = {"DIRTY"}
+_MERGEABLE_CONFLICT = {"CONFLICTING"}
+_MERGE_STATE_UNKNOWN = {"UNKNOWN"}
+_MERGEABLE_UNKNOWN = {"UNKNOWN"}
 
 _PR_LOOKUP_CACHE: dict[tuple[str, str], GithubPrLookup] = {}
 _INLINE_FEEDBACK_CACHE: dict[tuple[str, int], str | None] = {}
@@ -224,7 +228,9 @@ def lookup_github_pr_status(repo: str, head: str) -> GithubPrLookup:
                 "--repo",
                 repo,
                 "--json",
-                "number,url,state,baseRefName,headRefName,title,body,labels,isDraft,mergedAt,closedAt,updatedAt,reviewDecision,mergeable,reviewRequests,comments,reviews",
+                "number,url,state,baseRefName,headRefName,title,body,labels,isDraft,"
+                "mergedAt,closedAt,updatedAt,reviewDecision,mergeable,mergeStateStatus,"
+                "reviewRequests,comments,reviews",
             ]
         )
     except (RuntimeError, json.JSONDecodeError) as exc:
@@ -493,4 +499,38 @@ def lifecycle_state(
         return "pr-open"
     if pushed:
         return "pushed"
+    return None
+
+
+def _normalize_pr_signal(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().upper()
+    return normalized or None
+
+
+def default_branch_has_merge_conflict(payload: dict[str, object] | None) -> bool | None:
+    """Return merge-conflict state for a PR against the default branch.
+
+    Returns ``True`` when deterministic GitHub signals indicate a merge
+    conflict, ``False`` when deterministic non-conflict signals are present,
+    and ``None`` for missing/transient states.
+    """
+    boundary = parse_pr_boundary(payload, source="default_branch_has_merge_conflict")
+    if boundary is None:
+        return None
+    merge_state = _normalize_pr_signal(boundary.merge_state_status)
+    if merge_state is not None:
+        if merge_state in _MERGE_STATE_CONFLICT:
+            return True
+        if merge_state in _MERGE_STATE_UNKNOWN:
+            return None
+        return False
+    mergeable = _normalize_pr_signal(boundary.mergeable)
+    if mergeable is not None:
+        if mergeable in _MERGEABLE_CONFLICT:
+            return True
+        if mergeable in _MERGEABLE_UNKNOWN:
+            return None
+        return False
     return None

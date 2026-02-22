@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from atelier.worker.review import ReviewFeedbackSelection
+from atelier.worker.review import MergeConflictSelection, ReviewFeedbackSelection
 from atelier.worker.session import startup
 
 
@@ -18,6 +18,12 @@ class FakeStartupService:
         self._resolve_hooked_epic = overrides.pop("resolve_hooked_epic", lambda *_args: None)
         self._stale_family_assigned_epics = overrides.pop(
             "stale_family_assigned_epics", lambda issues, agent_id: []
+        )
+        self._select_conflicted_changeset = overrides.pop(
+            "select_conflicted_changeset", lambda **_kwargs: None
+        )
+        self._select_global_conflicted_changeset = overrides.pop(
+            "select_global_conflicted_changeset", lambda **_kwargs: None
         )
         self._select_review_feedback_changeset = overrides.pop(
             "select_review_feedback_changeset", lambda **_kwargs: None
@@ -84,6 +90,24 @@ class FakeStartupService:
         self, issues: list[dict[str, object]], *, agent_id: str
     ) -> list[dict[str, object]]:
         return self._stale_family_assigned_epics(issues, agent_id=agent_id)
+
+    def select_conflicted_changeset(
+        self,
+        *,
+        epic_id: str,
+        repo_slug: str | None,
+    ) -> MergeConflictSelection | None:
+        return self._select_conflicted_changeset(
+            epic_id=epic_id,
+            repo_slug=repo_slug,
+        )
+
+    def select_global_conflicted_changeset(
+        self,
+        *,
+        repo_slug: str | None,
+    ) -> MergeConflictSelection | None:
+        return self._select_global_conflicted_changeset(repo_slug=repo_slug)
 
     def select_review_feedback_changeset(
         self,
@@ -240,6 +264,35 @@ def test_run_startup_contract_prioritizes_review_feedback() -> None:
     assert result.reason == "review_feedback"
     assert result.epic_id == "at-epic"
     assert result.changeset_id == "at-epic.1"
+    assert next_changeset_calls == 0
+
+
+def test_run_startup_contract_prioritizes_merge_conflict() -> None:
+    conflict = MergeConflictSelection(
+        epic_id="at-epic",
+        changeset_id="at-epic.3",
+        observed_at="2026-02-20T00:00:00Z",
+        pr_url="https://github.com/org/repo/pull/103",
+    )
+    next_changeset_calls = 0
+
+    def next_changeset(**_kwargs: Any) -> dict[str, object] | None:
+        nonlocal next_changeset_calls
+        next_changeset_calls += 1
+        return {"id": "at-epic.2"}
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        resolve_hooked_epic=lambda *_args: "at-epic",
+        select_conflicted_changeset=lambda **_kwargs: conflict,
+        next_changeset=next_changeset,
+        list_epics=lambda: [{"id": "at-epic", "assignee": "atelier/worker/codex/p010"}],
+    )
+
+    assert result.reason == "merge_conflict"
+    assert result.epic_id == "at-epic"
+    assert result.changeset_id == "at-epic.3"
     assert next_changeset_calls == 0
 
 

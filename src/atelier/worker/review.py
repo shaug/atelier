@@ -18,6 +18,14 @@ class ReviewFeedbackSelection:
     feedback_at: str
 
 
+@dataclass(frozen=True)
+class MergeConflictSelection:
+    epic_id: str
+    changeset_id: str
+    observed_at: str | None
+    pr_url: str | None
+
+
 def _feedback_cursor(issue: dict[str, object]):
     fields = changeset_fields.issue_fields(issue)
     return prs.parse_timestamp(fields.get("review.last_feedback_seen_at"))
@@ -95,6 +103,61 @@ def _selection_candidates(
     return candidates
 
 
+def _conflict_selection_candidates(
+    *,
+    records: list[beads.BeadsIssueRecord],
+    load_record: Callable[[str], beads.BeadsIssueRecord | None],
+    repo_slug: str,
+    resolve_epic_id: Callable[[dict[str, object]], str | None],
+) -> list[MergeConflictSelection]:
+    candidates: list[MergeConflictSelection] = []
+    for record in records:
+        hydrated = load_record(record.issue.id) or record
+        raw_issue = hydrated.raw
+        issue = hydrated.issue
+        work_branch = changeset_fields.work_branch(raw_issue)
+        if not work_branch:
+            continue
+        pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+        review_requested = prs.has_review_requests(pr_payload)
+        live_state = prs.lifecycle_state(
+            pr_payload,
+            pushed=False,
+            review_requested=review_requested,
+        )
+        if not _is_in_review_candidate(issue, raw_issue=raw_issue, live_state=live_state):
+            continue
+        if prs.default_branch_has_merge_conflict(pr_payload) is not True:
+            continue
+        epic_id = resolve_epic_id(raw_issue)
+        if not epic_id:
+            continue
+        observed_at = None
+        pr_url = None
+        if isinstance(pr_payload, dict):
+            raw_updated = pr_payload.get("updatedAt")
+            if isinstance(raw_updated, str) and raw_updated.strip():
+                observed_at = raw_updated.strip()
+            raw_url = pr_payload.get("url")
+            if isinstance(raw_url, str) and raw_url.strip():
+                pr_url = raw_url.strip()
+        if observed_at is None:
+            issue_updated = raw_issue.get("updated_at")
+            if isinstance(issue_updated, str) and issue_updated.strip():
+                observed_at = issue_updated.strip()
+        candidates.append(
+            MergeConflictSelection(
+                epic_id=epic_id,
+                changeset_id=issue.id,
+                observed_at=observed_at,
+                pr_url=pr_url,
+            )
+        )
+    sentinel = datetime.max.replace(tzinfo=timezone.utc)
+    candidates.sort(key=lambda item: prs.parse_timestamp(item.observed_at) or sentinel)
+    return candidates
+
+
 def select_review_feedback_changeset(
     *,
     epic_id: str,
@@ -145,6 +208,63 @@ def select_global_review_feedback_changeset(
         records=records,
         load_record=lambda issue_id: client.show_issue(
             issue_id, source="select_global_review_feedback_changeset:show"
+        ),
+        repo_slug=repo_slug,
+        resolve_epic_id=resolve_epic_id_for_changeset,
+    )
+    return candidates[0] if candidates else None
+
+
+def select_conflicted_changeset(
+    *,
+    epic_id: str,
+    repo_slug: str | None,
+    beads_root: Path,
+    repo_root: Path,
+) -> MergeConflictSelection | None:
+    """Select the oldest merge-conflicted changeset under one epic."""
+    if not repo_slug:
+        return None
+    descendants = beads.list_descendant_changesets(
+        epic_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+        include_closed=False,
+    )
+    client = beads.create_client(beads_root=beads_root, cwd=repo_root)
+    records = beads.parse_issue_records(
+        descendants, source="select_conflicted_changeset:descendants"
+    )
+    candidates = _conflict_selection_candidates(
+        records=records,
+        load_record=lambda issue_id: client.show_issue(
+            issue_id, source="select_conflicted_changeset:show"
+        ),
+        repo_slug=repo_slug,
+        resolve_epic_id=lambda _issue: epic_id,
+    )
+    return candidates[0] if candidates else None
+
+
+def select_global_conflicted_changeset(
+    *,
+    repo_slug: str | None,
+    beads_root: Path,
+    repo_root: Path,
+    resolve_epic_id_for_changeset: Callable[[dict[str, object]], str | None],
+) -> MergeConflictSelection | None:
+    """Select the oldest merge-conflicted changeset globally."""
+    if not repo_slug:
+        return None
+    client = beads.create_client(beads_root=beads_root, cwd=repo_root)
+    records = client.issue_records(
+        ["list", "--label", "at:changeset"],
+        source="select_global_conflicted_changeset:list_changesets",
+    )
+    candidates = _conflict_selection_candidates(
+        records=records,
+        load_record=lambda issue_id: client.show_issue(
+            issue_id, source="select_global_conflicted_changeset:show"
         ),
         repo_slug=repo_slug,
         resolve_epic_id=resolve_epic_id_for_changeset,

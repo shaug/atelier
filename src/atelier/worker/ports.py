@@ -437,6 +437,7 @@ class WorkerCommandService(Protocol):
         epic_id: str,
         changeset_id: str,
         changeset_title: str,
+        merge_conflict: bool = False,
         review_feedback: bool = False,
         review_pr_url: str | None = None,
     ) -> str: ...

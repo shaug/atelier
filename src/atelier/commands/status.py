@@ -246,6 +246,7 @@ def _build_changeset_details(
         lifecycle = prs.lifecycle_state(
             pr_payload, pushed=pushed, review_requested=review_requested
         )
+        merge_conflict = prs.default_branch_has_merge_conflict(pr_payload)
         if branch:
             branch_states[branch] = lifecycle
         details.append(
@@ -257,6 +258,7 @@ def _build_changeset_details(
                 "pushed": pushed,
                 "review_requested": review_requested,
                 "lifecycle_state": lifecycle,
+                "merge_conflict": merge_conflict,
                 "pr": _summarize_pr(pr_payload),
                 "parent_branch": parent_branch,
             }
@@ -282,6 +284,7 @@ def _summarize_pr(payload: dict[str, object] | None) -> dict[str, object] | None
         "is_draft": payload.get("isDraft"),
         "review_decision": payload.get("reviewDecision"),
         "mergeable": payload.get("mergeable"),
+        "merge_state_status": payload.get("mergeStateStatus"),
         "updated_at": payload.get("updatedAt"),
     }
 

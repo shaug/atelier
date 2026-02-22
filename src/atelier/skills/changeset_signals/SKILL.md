@@ -24,13 +24,16 @@ description: >-
      `approved`, `merged`, `closed`)
    - `review_requested` (boolean)
    - `pushed` (boolean)
-   - `pr` metadata (number, url, state, is_draft, review_decision, mergeable)
+   - `pr` metadata (number, url, state, is_draft, review_decision, mergeable,
+     merge_state_status)
 1. Provide next-step guidance:
    - `pushed`: open a PR.
    - `draft-pr`: move to ready-for-review and request reviewer.
    - `pr-open` with no reviewer: request a reviewer.
    - `in-review`: address comments and update the branch.
    - `approved`: confirm with overseer before merge.
+   - `merge_state_status=DIRTY` (or equivalent conflict signal): rebase/merge
+     default branch, resolve conflicts, push, then refresh signals.
    - `merged`: close the changeset bead.
    - `closed`: mark the changeset as `cs:abandoned`.
 
