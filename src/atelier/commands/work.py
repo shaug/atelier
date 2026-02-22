@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from .. import agent_home, config
+from .. import agent_home, cli_defaults, config
 from ..io import confirm, die, say
 from ..worker import models as worker_models
 from ..worker import runtime as worker_runtime
@@ -16,6 +16,7 @@ from ..worker.work_command_helpers import (
     normalize_mode,
     normalize_run_mode,
     reconcile_blocked_merged_changesets,
+    report_translated_cli_default,
     report_worker_summary,
     root_branch,
     watch_interval_seconds,
@@ -52,6 +53,9 @@ def _run_worker_once(
 
 def start_worker(args: object) -> None:
     """Start worker sessions based on the configured run mode."""
+    yes_default = cli_defaults.resolve_work_yes_default(bool(getattr(args, "yes", False)))
+    report_translated_cli_default(yes_default)
+    setattr(args, "yes", yes_default.value)
     mode = normalize_mode(getattr(args, "mode", None))
     run_mode = normalize_run_mode(getattr(args, "run_mode", None))
     dry_run = bool(getattr(args, "dry_run", False))

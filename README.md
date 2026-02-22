@@ -196,6 +196,26 @@ atelier work --run-mode watch
 - ensure the worktree and changeset branch mapping exist
 - repeat or watch depending on `--run-mode` / `ATELIER_RUN_MODE`
 
+Supported `ATELIER_*` -> CLI-default translations for `atelier work`:
+
+```text
+| CLI default                | Env var                  | Built-in default | Accepted env values            |
+| -------------------------- | ------------------------ | ---------------- | ------------------------------ |
+| --mode                     | ATELIER_MODE             | prompt           | prompt, auto                   |
+| --run-mode                 | ATELIER_RUN_MODE         | default          | once, default, watch           |
+| --watch-interval-seconds   | ATELIER_WATCH_INTERVAL   | 60               | positive integer               |
+| --yes                      | ATELIER_WORK_YES         | false            | 1/true/yes/on, 0/false/no/off |
+```
+
+Example:
+
+```sh
+ATELIER_WORK_YES=1 atelier work
+```
+
+Unsupported keys for this CLI-default translation layer: `ATELIER_PLAN_TRACE`,
+`ATELIER_WORK_TRACE`, `ATELIER_LOG_LEVEL`, `ATELIER_NO_COLOR`.
+
 Run the optional daemon (full-stack mode):
 
 ```sh
@@ -390,6 +410,9 @@ atelier work --mode auto
 Options:
 
 - `--mode`: Worker selection mode (`prompt` or `auto`).
+- `--run-mode`: Worker loop mode (`once`, `default`, or `watch`).
+- `--yes`: Accept defaults for interactive choices (`ATELIER_WORK_YES`).
+- Watch polling defaults to `ATELIER_WATCH_INTERVAL` (seconds) in watch mode.
 
 ### `atelier plan`
 

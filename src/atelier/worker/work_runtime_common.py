@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import datetime as dt
-import os
 from collections.abc import Callable
 
-from .. import beads, lifecycle
+from .. import beads, cli_defaults, lifecycle
 from .. import log as atelier_log
 from ..io import die, say
 from ..worker import selection as worker_selection
@@ -18,7 +17,7 @@ _MODE_VALUES = {"prompt", "auto"}
 
 _RUN_MODE_VALUES = {"once", "default", "watch"}
 
-_WATCH_INTERVAL_SECONDS = 60
+_TRANSLATED_DEFAULT_MESSAGES_EMITTED: set[str] = set()
 
 
 def normalize_branch_value(value: object) -> str | None:
@@ -114,6 +113,26 @@ def log_debug(message: str) -> None:
         None.
     """
     atelier_log.debug(f"[work] {message}")
+
+
+def report_translated_cli_default(value: cli_defaults.ResolvedCliDefault[object]) -> None:
+    """Emit diagnostics when an env var translated a CLI default.
+
+    Args:
+        value: Resolved CLI default metadata.
+
+    Returns:
+        None.
+    """
+    if value.source != "env":
+        return
+    message = cli_defaults.describe_translated_default(value)
+    if message in _TRANSLATED_DEFAULT_MESSAGES_EMITTED:
+        return
+    _TRANSLATED_DEFAULT_MESSAGES_EMITTED.add(message)
+    log_debug(message)
+    if trace_enabled():
+        say(f"TRACE: {message}")
 
 
 def trace_enabled() -> bool:
@@ -251,9 +270,9 @@ def normalize_mode(value: str | None) -> str:
     Returns:
         Normalized mode string.
     """
-    if value is None:
-        value = os.environ.get("ATELIER_MODE", "prompt")
-    normalized = value.strip().lower()
+    resolved = cli_defaults.resolve_work_mode_default(value)
+    report_translated_cli_default(resolved)
+    normalized = resolved.value
     if normalized not in _MODE_VALUES:
         die("mode must be one of: prompt, auto")
     return normalized
@@ -268,9 +287,9 @@ def normalize_run_mode(value: str | None) -> str:
     Returns:
         Normalized run mode string.
     """
-    if value is None:
-        value = os.environ.get("ATELIER_RUN_MODE", "default")
-    normalized = value.strip().lower()
+    resolved = cli_defaults.resolve_work_run_mode_default(value)
+    report_translated_cli_default(resolved)
+    normalized = resolved.value
     if normalized not in _RUN_MODE_VALUES:
         die("run mode must be one of: once, default, watch")
     return normalized
@@ -282,13 +301,9 @@ def watch_interval_seconds() -> int:
     Returns:
         Positive watch interval in seconds.
     """
-    raw = os.environ.get("ATELIER_WATCH_INTERVAL", "").strip()
-    if not raw:
-        return _WATCH_INTERVAL_SECONDS
-    try:
-        value = int(raw)
-    except ValueError:
-        die("ATELIER_WATCH_INTERVAL must be an integer number of seconds")
+    resolved = cli_defaults.resolve_work_watch_interval_default()
+    report_translated_cli_default(resolved)
+    value = resolved.value
     if value <= 0:
         die("ATELIER_WATCH_INTERVAL must be a positive number of seconds")
     return value
@@ -385,6 +400,7 @@ __all__ = [
     "normalize_run_mode",
     "parse_issue_time",
     "report_timings",
+    "report_translated_cli_default",
     "report_worker_summary",
     "step",
     "strip_flag_with_value",
