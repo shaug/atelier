@@ -16,6 +16,7 @@ from ..worker.models_boundary import parse_issue_boundary
 _MODE_VALUES = {"prompt", "auto"}
 
 _RUN_MODE_VALUES = {"once", "default", "watch"}
+_WATCH_INTERVAL_SECONDS = 60
 
 _TRANSLATED_DEFAULT_MESSAGES_EMITTED: set[str] = set()
 
