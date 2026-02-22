@@ -19,13 +19,16 @@ description: >-
 
 ## Steps
 
-1. Render the message description with YAML frontmatter (use
-   `atelier.messages.render_message`).
-1. Create the message bead:
-   - `bd create --type task --label at:message --label at:unread --title <subject> --assignee <to> --body-file <path>`
+1. Use the dispatch script:
+   - `python skills/mail-send/scripts/send_message.py --subject "<subject>" --body "<body>" --to "<to>" --from "<from>" [--thread "<thread>"] [--reply-to "<reply_to>"] [--beads-dir "<beads_dir>"]`
+1. Do not create planner-to-worker message beads directly with `bd create`.
+1. The script enforces worker liveness checks:
+   - active worker recipient: create an `at:message` bead assigned to `to`
+   - inactive worker recipient: create an unassigned executable reroute epic
+     (`at:epic` + `at:changeset` + `cs:ready`) with routing diagnostics
 
 ## Verification
 
-- Message bead exists and is assigned to the recipient.
-- Description includes YAML frontmatter with `from`, `thread`, and `reply_to`
-  when provided.
+- Active recipient path: message bead exists and is assigned to the recipient.
+- Inactive worker path: no worker-targeted message bead is created; reroute epic
+  exists with `routing.inactive_worker` and `routing.decision`.
