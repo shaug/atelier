@@ -15,10 +15,10 @@ create_temp_repo() {
 
   cp "${ROOT_DIR}/commitlint.config.cjs" "${repo}/commitlint.config.cjs"
   mkdir -p "${repo}/.githooks"
-  cp "${ROOT_DIR}/.githooks/bootstrap.sh" "${repo}/.githooks/bootstrap.sh"
+  cp "${ROOT_DIR}/.githooks/worktree-bootstrap.sh" "${repo}/.githooks/worktree-bootstrap.sh"
   cp "${ROOT_DIR}/.githooks/commit-msg" "${repo}/.githooks/commit-msg"
   cp "${ROOT_DIR}/.githooks/post-checkout" "${repo}/.githooks/post-checkout"
-  chmod +x "${repo}/.githooks/bootstrap.sh" \
+  chmod +x "${repo}/.githooks/worktree-bootstrap.sh" \
     "${repo}/.githooks/commit-msg" \
     "${repo}/.githooks/post-checkout"
   git -C "$repo" add commitlint.config.cjs .githooks
@@ -43,7 +43,7 @@ test_bootstrap_sets_hookspath_and_exec_bits() {
   chmod -x "${TMP_REPO}/.githooks/commit-msg" "${TMP_REPO}/.githooks/post-checkout"
   git -C "${TMP_REPO}" config --unset-all core.hooksPath || true
 
-  "${TMP_REPO}/.githooks/bootstrap.sh" >/dev/null 2>&1
+  "${TMP_REPO}/.githooks/worktree-bootstrap.sh" >/dev/null 2>&1
   assert_equals 0 "$?"
 
   local hooks_path
@@ -91,7 +91,7 @@ SCRIPT
 
 test_post_checkout_repairs_hookspath_from_worktree() {
   TMP_REPO="$(create_temp_repo)"
-  "${TMP_REPO}/.githooks/bootstrap.sh" >/dev/null 2>&1
+  "${TMP_REPO}/.githooks/worktree-bootstrap.sh" >/dev/null 2>&1
 
   TMP_WORKTREE="${TMP_REPO}-wt"
   git -C "${TMP_REPO}" worktree add -q -b test/worktree-bootstrap "${TMP_WORKTREE}" HEAD

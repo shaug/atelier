@@ -85,7 +85,7 @@ repo-local hook path (`.githooks/`) and `commitlint.config.cjs`.
 Bootstrap or repair hooks for an existing clone:
 
 ```sh
-just hooks
+bash .githooks/worktree-bootstrap.sh
 ```
 
 The bootstrap step is idempotent and does the following:

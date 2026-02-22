@@ -9,19 +9,19 @@ main() {
   repo_root="$(cd "${script_dir}/.." && pwd)"
 
   if ! git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "bootstrap-hooks: ${repo_root} is not a git work tree" >&2
+    echo "worktree-bootstrap: ${repo_root} is not a git work tree" >&2
     return 1
   fi
 
   local required_hooks=(
-    "${HOOKS_PATH}/bootstrap.sh"
+    "${HOOKS_PATH}/worktree-bootstrap.sh"
     "${HOOKS_PATH}/commit-msg"
     "${HOOKS_PATH}/post-checkout"
   )
   local hook_path
   for hook_path in "${required_hooks[@]}"; do
     if [[ ! -f "${repo_root}/${hook_path}" ]]; then
-      echo "bootstrap-hooks: missing required hook file ${hook_path}" >&2
+      echo "worktree-bootstrap: missing required hook file ${hook_path}" >&2
       return 1
     fi
     chmod +x "${repo_root}/${hook_path}"
@@ -44,10 +44,10 @@ main() {
   if [[ "${current}" != "${HOOKS_PATH}" ]]; then
     git config --file "${git_common_dir}/config" core.hooksPath "${HOOKS_PATH}"
     if [[ "${ATELIER_HOOK_BOOTSTRAP_QUIET:-0}" != "1" ]]; then
-      printf 'bootstrap-hooks: set core.hooksPath=%s (%s)\n' "${HOOKS_PATH}" "${context}"
+      printf 'worktree-bootstrap: set core.hooksPath=%s (%s)\n' "${HOOKS_PATH}" "${context}"
     fi
   elif [[ "${ATELIER_HOOK_BOOTSTRAP_QUIET:-0}" != "1" ]]; then
-    printf 'bootstrap-hooks: core.hooksPath already %s (%s)\n' "${HOOKS_PATH}" "${context}"
+    printf 'worktree-bootstrap: core.hooksPath already %s (%s)\n' "${HOOKS_PATH}" "${context}"
   fi
 }
 

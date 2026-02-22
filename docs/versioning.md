@@ -12,7 +12,7 @@ Atelier uses Conventional Commits and Release Please to drive SemVer releases.
 Bootstrap or repair the hook path for existing clones and linked worktrees:
 
 ```sh
-just hooks
+bash .githooks/worktree-bootstrap.sh
 ```
 
 ## Release flow
