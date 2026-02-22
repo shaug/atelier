@@ -410,6 +410,9 @@ atelier plan
 Options:
 
 - `--epic-id`: Plan against an existing epic id.
+- In an active planner session, run
+  `python3 skills/planner_startup_check/scripts/refresh_overview.py` to refresh
+  the same read-only startup overview on demand.
 
 ### `atelier open [workspace-branch] [--] [command ...]`
 

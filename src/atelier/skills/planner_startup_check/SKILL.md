@@ -31,3 +31,12 @@ description: >-
 - Messages are summarized with explicit decisions or follow-up beads.
 - Active epic listing (draft/open/in-progress/blocked as available) is included
   in stable `epic_list` format.
+
+## On-demand refresh
+
+- During an active planner session, re-run the same read-only overview with:
+  `python3 skills/planner_startup_check/scripts/refresh_overview.py --agent-id "$ATELIER_AGENT_ID"`
+- This refresh is read-only and includes:
+  - unread planner inbox messages
+  - queued messages with queue name and claim state
+  - active epics in stable `epic_list --show-drafts` format
