@@ -37,15 +37,6 @@ changeset.parent_branch: <dependency-work-branch>
 ..."
 ```
 
-1. If needed, refresh lineage bases from git refs:
-
-```bash
-bd update <changeset-id> --description "
-...
-changeset.parent_base: <sha-for-dependency-work-branch>
-..."
-```
-
 1. Rerun finalize for the changeset so PR base/gate state is recalculated.
 
 ## Ambiguous lineage
