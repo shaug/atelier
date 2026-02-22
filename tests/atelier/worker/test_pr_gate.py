@@ -120,3 +120,66 @@ def test_handle_pushed_without_pr_reports_failure_when_pr_create_fails(
     assert result.finalize_result.reason == "changeset_pr_create_failed"
     assert notes and "update" in notes[0]
     assert planner_messages and "NEEDS-DECISION: PR creation failed" in planner_messages[0]
+
+
+def test_changeset_pr_creation_decision_resolves_collapsed_dependency_parent(monkeypatch) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-root\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": ["at-epic.1"],
+    }
+
+    def _show_issue(args: list[str], **_kwargs) -> list[dict[str, object]]:
+        if args == ["show", "at-epic.1"]:
+            return [{"description": "changeset.work_branch: feature-parent\n"}]
+        return []
+
+    monkeypatch.setattr(pr_gate.beads, "run_bd_json", _show_issue)
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda *_args, **_kwargs: {"state": "OPEN", "isDraft": False},
+    )
+
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:pr-open"
+
+
+def test_changeset_pr_creation_decision_blocks_on_ambiguous_dependency_lineage(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-root\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": ["at-epic.1", "at-epic.2"],
+    }
+
+    def _show_issue(args: list[str], **_kwargs) -> list[dict[str, object]]:
+        if args == ["show", "at-epic.1"]:
+            return [{"description": "changeset.work_branch: feature-parent-1\n"}]
+        if args == ["show", "at-epic.2"]:
+            return [{"description": "changeset.work_branch: feature-parent-2\n"}]
+        return []
+
+    monkeypatch.setattr(pr_gate.beads, "run_bd_json", _show_issue)
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda *_args, **_kwargs: None,
+    )
+
+    assert decision.allow_pr is False
+    assert decision.reason.startswith("blocked:dependency-lineage-ambiguous")

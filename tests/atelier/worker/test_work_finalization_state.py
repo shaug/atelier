@@ -37,6 +37,62 @@ def test_changeset_base_branch_prefers_workspace_parent_for_first_reviewable(mon
     assert base == "main"
 
 
+def test_changeset_parent_branch_resolves_dependency_parent_lineage(monkeypatch) -> None:
+    issue = {
+        "description": ("changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root\n"),
+        "dependencies": ["at-epic.1"],
+    }
+
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "changeset.work_branch: feat/at-epic.1\n"}]
+            if args == ["show", "at-epic.1"]
+            else []
+        ),
+    )
+
+    parent_branch = work_finalization_state.changeset_parent_branch(
+        issue,
+        root_branch="feat/root",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert parent_branch == "feat/at-epic.1"
+
+
+def test_changeset_base_branch_fails_closed_on_ambiguous_dependency_lineage(monkeypatch) -> None:
+    issue = {
+        "description": ("changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root\n"),
+        "dependencies": ["at-epic.1", "at-epic.2"],
+    }
+
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "changeset.work_branch: feat/at-epic.1\n"}]
+            if args == ["show", "at-epic.1"]
+            else (
+                [{"description": "changeset.work_branch: feat/at-epic.2\n"}]
+                if args == ["show", "at-epic.2"]
+                else []
+            )
+        ),
+    )
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert base is None
+
+
 def test_changeset_base_branch_keeps_stacked_parent_before_integration(monkeypatch) -> None:
     issue = {
         "description": (

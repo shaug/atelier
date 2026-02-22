@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ... import changeset_fields
 from ...pr_strategy import PrStrategy
 from ..context import ChangesetSelectionContext, WorkerRunContext
 from ..models import StartupContractResult, WorkerRunSummary
@@ -522,19 +523,30 @@ def run_worker_once(
         raw_changeset_title = changeset.get("title")
         changeset_title = raw_changeset_title if isinstance(raw_changeset_title, str) else ""
         parent_branch_for_changeset = root_branch_value
+        allow_parent_branch_override = False
         if parent_branch_for_changeset and changeset_id:
             if dry_run:
                 parent_branch_for_changeset = lifecycle.changeset_parent_branch(
-                    changeset, root_branch=parent_branch_for_changeset
+                    changeset,
+                    root_branch=parent_branch_for_changeset,
                 )
             else:
                 selected_changeset = infra.beads.run_bd_json(
                     ["show", str(changeset_id)], beads_root=beads_root, cwd=repo_root
                 )
                 if selected_changeset:
+                    current_parent_branch = changeset_fields.parent_branch(selected_changeset[0])
                     parent_branch_for_changeset = lifecycle.changeset_parent_branch(
-                        selected_changeset[0], root_branch=parent_branch_for_changeset
+                        selected_changeset[0],
+                        root_branch=parent_branch_for_changeset,
+                        beads_root=beads_root,
+                        repo_root=repo_root,
                     )
+                    if (
+                        current_parent_branch
+                        and current_parent_branch != parent_branch_for_changeset
+                    ):
+                        allow_parent_branch_override = True
         if dry_run:
             control.dry_run_log(f"Next changeset: {changeset_id} {changeset_title}")
         else:
@@ -550,6 +562,7 @@ def run_worker_once(
                 changeset_id=str(changeset_id),
                 root_branch_value=root_branch_value or "",
                 changeset_parent_branch=parent_branch_for_changeset or "",
+                allow_parent_branch_override=allow_parent_branch_override,
                 git_path=git_path,
             ),
             control=control,

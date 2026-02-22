@@ -32,6 +32,7 @@ side effects inside the user's repo.
     integration.
   - After predecessor integration, Atelier restacks descendants onto updated
     lineage and retargets PR base as needed.
+  - Repair collapsed lineage metadata with `docs/dependency-lineage-repair.md`.
 - **Terminology**: Use `integrate` for getting changes into the main code line.
   Use `merge` only for merge-specific states/actions (for example `git merge` or
   PR merged state).

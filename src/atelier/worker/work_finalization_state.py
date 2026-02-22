@@ -6,7 +6,18 @@ import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import agents, beads, changeset_fields, changesets, exec, git, lifecycle, pr_strategy, prs
+from .. import (
+    agents,
+    beads,
+    changeset_fields,
+    changesets,
+    dependency_lineage,
+    exec,
+    git,
+    lifecycle,
+    pr_strategy,
+    prs,
+)
 from ..io import say
 from ..worker import finalization_service as worker_finalization_service
 from ..worker import integration_service as worker_integration_service
@@ -347,6 +358,31 @@ def _normalize_branch(value: object) -> str:
     return normalized
 
 
+def _resolve_parent_lineage(
+    issue: dict[str, object],
+    *,
+    root_branch: str,
+    beads_root: Path | None,
+    repo_root: Path,
+) -> dependency_lineage.ParentLineageResolution:
+    issue_cache: dict[str, dict[str, object] | None] = {}
+
+    def lookup_dependency_issue(issue_id: str) -> dict[str, object] | None:
+        if beads_root is None:
+            return None
+        if issue_id in issue_cache:
+            return issue_cache[issue_id]
+        issues = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
+        issue_cache[issue_id] = issues[0] if issues else None
+        return issue_cache[issue_id]
+
+    return dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch=root_branch,
+        lookup_issue=lookup_dependency_issue,
+    )
+
+
 def _resolve_workspace_parent_branch(
     issue: dict[str, object],
     *,
@@ -412,7 +448,15 @@ def changeset_base_branch(
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     root_branch = _normalize_branch(changeset_root_branch(issue))
-    parent_branch = _normalize_branch(changeset_parent_branch(issue, root_branch=root_branch))
+    lineage = _resolve_parent_lineage(
+        issue,
+        root_branch=root_branch,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+    parent_branch = _normalize_branch(lineage.effective_parent_branch)
+    if lineage.blocked:
+        return None
     workspace_parent_branch = _resolve_workspace_parent_branch(
         issue,
         root_branch=root_branch,
@@ -421,6 +465,32 @@ def changeset_base_branch(
         beads_root=beads_root,
         repo_root=repo_root,
     )
+    if (
+        beads_root is not None
+        and lineage.used_dependency_parent
+        and lineage.dependency_parent_branch
+    ):
+        changeset_id = issue.get("id")
+        if isinstance(changeset_id, str) and changeset_id:
+            root_base = (
+                git.git_rev_parse(repo_root, root_branch, git_path=git_path)
+                if root_branch
+                else None
+            )
+            parent_base = git.git_rev_parse(
+                repo_root, lineage.dependency_parent_branch, git_path=git_path
+            )
+            beads.update_changeset_branch_metadata(
+                changeset_id,
+                root_branch=root_branch,
+                parent_branch=lineage.dependency_parent_branch,
+                work_branch=changeset_work_branch(issue),
+                root_base=root_base,
+                parent_base=parent_base,
+                beads_root=beads_root,
+                cwd=repo_root,
+                allow_override=True,
+            )
     if parent_branch and workspace_parent_branch and parent_branch == root_branch:
         # First reviewable changeset in a stack should target integration
         # branch, not the epic root branch.
@@ -810,6 +880,7 @@ def changeset_parent_lifecycle_state(
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
+        beads_root=None,
         lookup_pr_payload=lookup_pr_payload,
     )
 
@@ -840,6 +911,7 @@ def changeset_pr_creation_decision(
         repo_root=repo_root,
         git_path=git_path,
         branch_pr_strategy=branch_pr_strategy,
+        beads_root=None,
         lookup_pr_payload=lookup_pr_payload,
     )
 
@@ -1075,7 +1147,13 @@ def find_invalid_changeset_labels(root_id: str, *, beads_root: Path, repo_root: 
     )
 
 
-def changeset_parent_branch(issue: dict[str, object], *, root_branch: str) -> str:
+def changeset_parent_branch(
+    issue: dict[str, object],
+    *,
+    root_branch: str,
+    beads_root: Path | None = None,
+    repo_root: Path | None = None,
+) -> str:
     """Changeset parent branch.
 
     Args:
@@ -1085,15 +1163,15 @@ def changeset_parent_branch(issue: dict[str, object], *, root_branch: str) -> st
     Returns:
         Function result.
     """
-    description = issue.get("description")
-    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    parent_branch = fields.get("changeset.parent_branch")
-    if not parent_branch:
-        return root_branch
-    normalized = parent_branch.strip()
-    if not normalized or normalized.lower() == "null":
-        return root_branch
-    return normalized
+    lineage = _resolve_parent_lineage(
+        issue,
+        root_branch=root_branch,
+        beads_root=beads_root,
+        repo_root=repo_root or Path("."),
+    )
+    if lineage.effective_parent_branch:
+        return lineage.effective_parent_branch
+    return root_branch
 
 
 def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
