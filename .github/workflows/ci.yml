@@ -30,5 +30,6 @@ jobs:
 
       - name: Test
         run: |
+          uv run python -m atelier.skill_frontmatter_validation
           uv run pytest
           bash tests/shell/run.sh
