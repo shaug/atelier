@@ -118,7 +118,7 @@ Atelier planning state. They are treated as external ticket sources.
   - Installs a read-only guardrail hook for planner worktrees and warns on dirty
     working trees.
   - Planner sessions can refresh the same read-only startup overview on demand
-    via the `planner_startup_check` skill script.
+    via the `planner-startup-check` skill script.
 
 - `atelier policy`
 
