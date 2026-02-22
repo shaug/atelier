@@ -30,6 +30,7 @@ _LEVEL_BY_NAME = {
 }
 _DEFAULT_LEVEL = LogLevel.INFO
 _configured_level = None
+_configured_no_color: bool | None = None
 
 
 def _normalize_level(value: str | None) -> LogLevel:
@@ -58,12 +59,25 @@ def is_enabled(level: LogLevel) -> bool:
     return level >= configured_level()
 
 
+def configured_no_color() -> bool:
+    """Return whether colored terminal output is disabled."""
+    if _configured_no_color is None:
+        return bool(os.environ.get("NO_COLOR"))
+    return _configured_no_color
+
+
+def set_no_color(value: bool | None) -> None:
+    """Set or clear the explicit color-output override."""
+    global _configured_no_color
+    _configured_no_color = value
+
+
 def _console(*, stderr: bool) -> Console:
     return Console(
         file=sys.stderr if stderr else sys.stdout,
         soft_wrap=True,
         highlight=False,
-        no_color=bool(os.environ.get("NO_COLOR")),
+        no_color=configured_no_color(),
     )
 
 
