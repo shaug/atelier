@@ -47,6 +47,8 @@ description: >-
    - `external_tickets` includes provider/id/url plus
      relation/direction/sync_mode.
    - Provider labels (e.g., `ext:github`) match attached refs.
+1. For retrying non-fatal auto-export errors from planning scripts, use:
+   - `python skills/tickets/scripts/auto_export_issue.py --issue-id <issue_id>`
 
 ## Verification
 

@@ -14,12 +14,15 @@ description: >-
 - acceptance: Acceptance criteria.
 - changeset_strategy: Guardrails or decomposition rules.
 - design: Optional design notes or links.
+- no_export: Optional per-bead opt-out from default auto-export.
 - beads_dir: Optional Beads store path.
 
 ## Steps
 
-1. Create the epic bead:
-   - `bd create --type epic --label at:epic --title <title> --acceptance <acceptance> --description "<scope/changeset_strategy>" [--design <design>]`
+1. Create the epic with the script:
+   - `python skills/plan_create_epic/scripts/create_epic.py --title "<title>" --scope "<scope>" --acceptance "<acceptance>" [--changeset-strategy "<changeset_strategy>"] [--design "<design>"] [--beads-dir "<beads_dir>"] [--no-export]`
+1. The script creates the bead, applies auto-export when enabled by project
+   config, and prints non-fatal retry instructions if export fails.
 1. Use `--notes` or `--append-notes` for addendums instead of rewriting the
    description.
 
@@ -27,3 +30,5 @@ description: >-
 
 - Epic is created with `at:epic` label.
 - Acceptance criteria stored in the acceptance field.
+- When auto-export is enabled and not opted out, `external_tickets` is updated
+  with `direction=exported` and `sync_mode=export`.

@@ -15,6 +15,7 @@ def test_planner_provider_environment_includes_github_repo() -> None:
     env = planner_provider_environment(config_payload, Path("/repo"))
     assert env["ATELIER_EXTERNAL_PROVIDERS"] == "github"
     assert env["ATELIER_EXTERNAL_PROVIDER"] == "github"
+    assert env["ATELIER_EXTERNAL_AUTO_EXPORT"] == "0"
     assert env["ATELIER_GITHUB_REPO"] == "acme/widgets"
 
 
@@ -26,7 +27,20 @@ def test_planner_provider_environment_includes_repo_beads(
     env = planner_provider_environment(config_payload, tmp_path)
     assert env["ATELIER_EXTERNAL_PROVIDERS"] == "beads,github"
     assert env["ATELIER_EXTERNAL_PROVIDER"] == "github"
+    assert env["ATELIER_EXTERNAL_AUTO_EXPORT"] == "0"
     assert env["ATELIER_GITHUB_REPO"] == "acme/widgets"
+
+
+def test_planner_provider_environment_sets_auto_export_when_enabled() -> None:
+    config_payload = ProjectConfig(
+        project=ProjectSection(
+            origin="github.com/acme/widgets",
+            provider="github",
+            auto_export_new=True,
+        )
+    )
+    env = planner_provider_environment(config_payload, Path("/repo"))
+    assert env["ATELIER_EXTERNAL_AUTO_EXPORT"] == "1"
 
 
 def test_discover_ticket_provider_manifests_from_project_skills(

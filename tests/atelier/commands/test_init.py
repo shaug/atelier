@@ -143,6 +143,7 @@ class TestInitProject:
                 assert config_payload.project.origin == NORMALIZED_ORIGIN
                 assert config_payload.project.repo_url == RAW_ORIGIN
                 assert config_payload.project.provider == "github"
+                assert config_payload.project.auto_export_new is False
                 assert config_payload.branch.pr is True
                 assert config_payload.branch.history == "manual"
                 assert config_payload.editor.edit == ["cursor", "-w"]
@@ -271,6 +272,74 @@ class TestInitProject:
                 config_payload = config.load_project_config(config_path)
                 assert config_payload is not None
                 assert config_payload.project.provider == "linear"
+                assert config_payload.project.auto_export_new is False
+            finally:
+                os.chdir(original_cwd)
+
+    def test_init_persists_auto_export_choice_when_provider_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            enlistment_path = enlistment_path_for(root)
+            data_dir = root / "data"
+            original_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                args = make_init_args(
+                    branch_prefix="",
+                    branch_pr="true",
+                    branch_history="manual",
+                    branch_pr_strategy="parallel",
+                    agent="codex",
+                    editor_edit="cursor -w",
+                    editor_work="cursor",
+                )
+                with (
+                    patch(
+                        "atelier.commands.init.beads.run_bd_command",
+                        return_value=CompletedProcess(
+                            args=["bd"], returncode=0, stdout="", stderr=""
+                        ),
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_types",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_store",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        return_value=False,
+                    ),
+                    patch(
+                        "atelier.commands.init.external_registry.resolve_planner_provider",
+                        return_value=external_registry.PlannerProviderResolution(
+                            selected_provider="github",
+                            available_providers=("github", "linear"),
+                            github_repo="acme/widgets",
+                        ),
+                    ),
+                    patch("atelier.commands.init.select", return_value="github"),
+                    patch(
+                        "atelier.commands.init.confirm",
+                        side_effect=[True, False],
+                    ),
+                    patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                    patch("atelier.git.git_repo_root", return_value=root),
+                    patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
+                    patch("sys.stdin.isatty", return_value=True),
+                    patch("sys.stdout.isatty", return_value=True),
+                ):
+                    init_cmd.init_project(args)
+                    project_dir = paths.project_dir_for_enlistment(
+                        enlistment_path, NORMALIZED_ORIGIN
+                    )
+
+                config_payload = config.load_project_config(paths.project_config_path(project_dir))
+                assert config_payload is not None
+                assert config_payload.project.provider == "github"
+                assert config_payload.project.auto_export_new is True
             finally:
                 os.chdir(original_cwd)
 
@@ -357,6 +426,7 @@ class TestInitProject:
                 config_payload = config.load_project_config(paths.project_config_path(project_dir))
                 assert config_payload is not None
                 assert config_payload.project.provider is None
+                assert config_payload.project.auto_export_new is False
             finally:
                 os.chdir(original_cwd)
 

@@ -312,6 +312,7 @@ def test_plan_template_variables_include_provider_info(tmp_path: Path) -> None:
     assert captured["default_branch"] == "main"
     assert captured["planner_branch"] == "main-planner-planner"
     assert captured["external_providers"] == "github"
+    assert "disabled" in captured["external_auto_export_guidance"]
 
 
 def test_plan_does_not_persist_selected_provider(tmp_path: Path) -> None:

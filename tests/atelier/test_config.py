@@ -100,3 +100,33 @@ def test_build_project_config_accepts_branch_squash_message_override() -> None:
                     allow_editor_empty=True,
                 )
     assert payload.branch.squash_message == "agent"
+
+
+def test_build_project_config_preserves_project_auto_export_setting() -> None:
+    args = SimpleNamespace(
+        branch_prefix="",
+        branch_pr="true",
+        branch_history="merge",
+        branch_pr_strategy="sequential",
+        agent="codex",
+        editor_edit="cat",
+        editor_work="cat",
+    )
+    existing = {
+        "project": {
+            "auto_export_new": True,
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = Path(tmp) / "data"
+        with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+            with patch("atelier.agents.available_agent_names", return_value=("codex",)):
+                payload = config.build_project_config(
+                    existing,
+                    "/repo",
+                    "github.com/org/repo",
+                    "https://github.com/org/repo",
+                    args,
+                    allow_editor_empty=True,
+                )
+    assert payload.project.auto_export_new is True

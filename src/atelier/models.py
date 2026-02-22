@@ -123,6 +123,7 @@ class ProjectSection(BaseModel):
         repo_url: Raw origin URL.
         allow_mainline_workspace: Allow a workspace on the default branch.
         provider: Provider slug (e.g. ``github``) when set.
+        auto_export_new: Export newly created epics/changesets by default.
         provider_url: Provider base URL (self-hosted).
         owner: Provider owner/org when set.
 
@@ -138,6 +139,7 @@ class ProjectSection(BaseModel):
     repo_url: str | None = None
     allow_mainline_workspace: bool = False
     provider: str | None = None
+    auto_export_new: bool = False
     provider_url: str | None = None
     owner: str | None = None
 
