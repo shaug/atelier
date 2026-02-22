@@ -115,6 +115,8 @@ def prepare_worktrees(
         selected_epic,
         changeset_id,
         root_branch=root_branch_value,
+        repo_root=repo_root,
+        git_path=git_path,
     )
     beads.update_worktree_path(
         selected_epic,
