@@ -163,6 +163,7 @@ class StartupContractContext:
     branch_pr_strategy: object
     git_path: str | None
     worker_queue_name: str
+    excluded_epic_ids: tuple[str, ...] = ()
 
 
 class StartupContractService(Protocol):
@@ -257,6 +258,9 @@ def run_startup_contract_service(
     branch_pr_strategy = context.branch_pr_strategy
     git_path = context.git_path
     worker_queue_name = context.worker_queue_name
+    excluded_epics = {
+        str(epic_id).strip() for epic_id in context.excluded_epic_ids if str(epic_id).strip()
+    }
 
     """Apply startup_contract skill ordering to select the next epic."""
     if explicit_epic_id is not None:
@@ -327,6 +331,48 @@ def run_startup_contract_service(
     def stale_reassign_for_epic(epic_id: str) -> str | None:
         return stale_assignee_by_epic.get(epic_id)
 
+    issues_by_id = {
+        str(issue.get("id")): issue
+        for issue in issues
+        if isinstance(issue.get("id"), str) and issue.get("id")
+    }
+
+    def is_excluded(epic_id: str, *, stage: str) -> bool:
+        if epic_id in excluded_epics:
+            atelier_log.debug(
+                f"startup skipping {stage} epic={epic_id} reason=claim_conflict_excluded"
+            )
+            return True
+        return False
+
+    def is_claimable(epic_id: str, *, stage: str) -> bool:
+        issue = issues_by_id.get(epic_id)
+        if issue is None:
+            atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=unknown_epic")
+            return False
+        labels = worker_selection.issue_labels(issue)
+        if "at:draft" in labels:
+            atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=draft")
+            return False
+        status = str(issue.get("status") or "")
+        if status and not worker_selection.is_eligible_status(status, allow_hooked=True):
+            atelier_log.debug(
+                f"startup skipping {stage} epic={epic_id} reason=ineligible_status status={status}"
+            )
+            return False
+        assignee = issue.get("assignee")
+        if isinstance(assignee, str) and assignee.strip():
+            if assignee == agent_id:
+                return True
+            if stale_reassign_for_epic(epic_id):
+                return True
+            atelier_log.debug(
+                "startup skipping "
+                f"{stage} epic={epic_id} reason=active_assignee assignee={assignee}"
+            )
+            return False
+        return True
+
     def select_feedback_candidate(
         epic_ids: list[str],
     ) -> ReviewFeedbackSelection | None:
@@ -336,6 +382,10 @@ def run_startup_contract_service(
             if epic_id in seen_epics:
                 continue
             seen_epics.add(epic_id)
+            if is_excluded(epic_id, stage="review-feedback"):
+                continue
+            if not is_claimable(epic_id, stage="review-feedback"):
+                continue
             feedback_selection = service.select_review_feedback_changeset(
                 epic_id=epic_id,
                 repo_slug=repo_slug,
@@ -371,11 +421,18 @@ def run_startup_contract_service(
         )
 
     if branch_pr and repo_slug and hooked_epic:
-        hooked_feedback = select_feedback_candidate([hooked_epic])
-        if hooked_feedback is not None:
-            return resume_feedback(hooked_feedback)
+        if is_excluded(hooked_epic, stage="hooked"):
+            hooked_epic = None
+        if hooked_epic:
+            hooked_feedback = select_feedback_candidate([hooked_epic])
+            if hooked_feedback is not None:
+                return resume_feedback(hooked_feedback)
 
-    if hooked_epic and epic_has_actionable_changeset(hooked_epic):
+    if (
+        hooked_epic
+        and not is_excluded(hooked_epic, stage="hooked")
+        and epic_has_actionable_changeset(hooked_epic)
+    ):
         service.emit(f"Resuming hooked epic: {hooked_epic}")
         atelier_log.debug(f"startup resuming hooked epic={hooked_epic}")
         return StartupContractResult(
@@ -396,23 +453,36 @@ def run_startup_contract_service(
                 continue
             if issue_id == hooked_epic:
                 continue
+            if is_excluded(issue_id, stage="review-feedback"):
+                continue
             status = str(issue.get("status") or "")
             if str(status).strip().lower() not in {"open", "ready", "in_progress"}:
                 continue
             labels = worker_selection.issue_labels(issue)
             if "at:draft" in labels:
                 continue
+            if not is_claimable(issue_id, stage="review-feedback"):
+                continue
             unhooked_epics.append(issue_id)
         feedback = select_feedback_candidate(unhooked_epics)
         if feedback is not None:
             return resume_feedback(feedback)
         global_feedback = service.select_global_review_feedback_changeset(repo_slug=repo_slug)
+        if global_feedback is not None and not is_excluded(
+            global_feedback.epic_id, stage="global-review-feedback"
+        ):
+            if not is_claimable(global_feedback.epic_id, stage="global-review-feedback"):
+                global_feedback = None
         if global_feedback is not None:
             return resume_feedback(global_feedback)
 
     for issue in assigned:
         candidate = issue.get("id")
-        if candidate and epic_has_actionable_changeset(str(candidate)):
+        if (
+            candidate
+            and not is_excluded(str(candidate), stage="assigned")
+            and epic_has_actionable_changeset(str(candidate))
+        ):
             selected_epic = str(candidate)
             service.emit(f"Resuming assigned epic: {selected_epic}")
             atelier_log.debug(f"startup resuming assigned epic={selected_epic}")
@@ -430,6 +500,7 @@ def run_startup_contract_service(
             candidate
             and isinstance(previous_assignee, str)
             and previous_assignee
+            and not is_excluded(str(candidate), stage="stale")
             and epic_has_actionable_changeset(str(candidate))
         ):
             selected_epic = str(candidate)
@@ -468,13 +539,21 @@ def run_startup_contract_service(
 
     if mode == "auto":
         selected_epic = worker_selection.select_epic_auto(
-            issues,
+            [
+                issue
+                for issue in issues
+                if not is_excluded(str(issue.get("id") or ""), stage="auto")
+            ],
             agent_id=agent_id,
             is_actionable=epic_has_actionable_changeset,
         )
     else:
         selected_epic = service.select_epic_prompt(
-            issues,
+            [
+                issue
+                for issue in issues
+                if not is_excluded(str(issue.get("id") or ""), stage="prompt")
+            ],
             agent_id=agent_id,
             is_actionable=epic_has_actionable_changeset,
             assume_yes=assume_yes,
