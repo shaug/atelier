@@ -270,9 +270,9 @@ def normalize_mode(value: str | None) -> str:
     Returns:
         Normalized mode string.
     """
-    resolved = cli_defaults.resolve_work_mode_default(value)
-    report_translated_cli_default(resolved)
-    normalized = resolved.value
+    if value is None:
+        value = "prompt"
+    normalized = value.strip().lower()
     if normalized not in _MODE_VALUES:
         die("mode must be one of: prompt, auto")
     return normalized
@@ -287,25 +287,27 @@ def normalize_run_mode(value: str | None) -> str:
     Returns:
         Normalized run mode string.
     """
-    resolved = cli_defaults.resolve_work_run_mode_default(value)
-    report_translated_cli_default(resolved)
-    normalized = resolved.value
+    if value is None:
+        value = "default"
+    normalized = value.strip().lower()
     if normalized not in _RUN_MODE_VALUES:
         die("run mode must be one of: once, default, watch")
     return normalized
 
 
-def watch_interval_seconds() -> int:
+def watch_interval_seconds(value: int | None) -> int:
     """Return watch-loop sleep interval in seconds.
+
+    Args:
+        value: Optional explicit watch interval from CLI args.
 
     Returns:
         Positive watch interval in seconds.
     """
-    resolved = cli_defaults.resolve_work_watch_interval_default()
-    report_translated_cli_default(resolved)
-    value = resolved.value
+    if value is None:
+        return _WATCH_INTERVAL_SECONDS
     if value <= 0:
-        die("ATELIER_WATCH_INTERVAL must be a positive number of seconds")
+        die("watch interval must be a positive number of seconds")
     return value
 
 

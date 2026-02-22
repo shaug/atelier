@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 from pathlib import Path
@@ -163,13 +162,8 @@ def _ensure_planner_read_only_guardrails(
     _warn_planner_dirty(worktree_path, git_path=git_path)
 
 
-def _trace_enabled() -> bool:
-    return os.environ.get("ATELIER_PLAN_TRACE", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+def _trace_enabled(trace_flag: object) -> bool:
+    return bool(trace_flag)
 
 
 def _planner_branch_name(*, default_branch: str, agent_name: str) -> str:
@@ -305,7 +299,7 @@ def _report_timings(timings: list[tuple[str, float]], *, trace: bool) -> None:
 def run_planner(args: object) -> None:
     """Start a planning session for Beads epics and changesets."""
     timings: list[tuple[str, float]] = []
-    trace = _trace_enabled()
+    trace = _trace_enabled(getattr(args, "trace", False))
     project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
