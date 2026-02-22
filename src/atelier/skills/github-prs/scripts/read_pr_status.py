@@ -66,7 +66,8 @@ def read_pr(repo: str, number: int) -> dict[str, object]:
             "--repo",
             repo,
             "--json",
-            "number,url,state,baseRefName,headRefName,title,body,labels,isDraft,mergedAt,closedAt,updatedAt,reviewDecision,mergeable",
+            "number,url,state,baseRefName,headRefName,title,body,labels,isDraft,"
+            "mergedAt,closedAt,updatedAt,reviewDecision,mergeable,mergeStateStatus",
         ]
     )
     if not isinstance(payload, dict):

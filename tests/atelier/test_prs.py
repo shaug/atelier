@@ -34,6 +34,21 @@ def test_lifecycle_state_falls_back_to_pushed() -> None:
     assert prs.lifecycle_state(None, pushed=True, review_requested=False) == "pushed"
 
 
+def test_default_branch_has_merge_conflict_detects_dirty_merge_state() -> None:
+    payload = {"mergeStateStatus": "DIRTY"}
+    assert prs.default_branch_has_merge_conflict(payload) is True
+
+
+def test_default_branch_has_merge_conflict_detects_clean_mergeability() -> None:
+    payload = {"mergeable": "MERGEABLE"}
+    assert prs.default_branch_has_merge_conflict(payload) is False
+
+
+def test_default_branch_has_merge_conflict_handles_unknown_state() -> None:
+    payload = {"mergeStateStatus": "UNKNOWN"}
+    assert prs.default_branch_has_merge_conflict(payload) is None
+
+
 def test_lifecycle_state_invalid_payload_fails_deterministically() -> None:
     with pytest.raises(ValueError, match="invalid github PR payload"):
         prs.lifecycle_state(

@@ -513,7 +513,9 @@ def run_worker_once(
             )
         changeset_extra = str(changeset.get("id") or "unknown")
         if selected_changeset_override and changeset_extra == selected_changeset_override:
-            changeset_extra = f"{changeset_extra} (review_feedback)"
+            selection_mode = startup_result.reason
+            if selection_mode in {"review_feedback", "merge_conflict"}:
+                changeset_extra = f"{changeset_extra} ({selection_mode})"
         finishstep(extra=changeset_extra)
         changeset_boundary = parse_issue_boundary(changeset, source="run_worker_once:changeset")
         changeset_id = changeset_boundary.id
@@ -610,11 +612,13 @@ def run_worker_once(
         env = agent_prep.env
         finishstep()
         opening_prompt = ""
+        merge_conflict = startup_result.reason == "merge_conflict"
         review_feedback = startup_result.reason == "review_feedback"
         feedback_before = None
         if agent_spec.name == "codex":
-            review_pr_url = lifecycle.changeset_pr_url(changeset) if review_feedback else None
-            if review_feedback and not review_pr_url and repo_slug:
+            followup_mode = merge_conflict or review_feedback
+            review_pr_url = lifecycle.changeset_pr_url(changeset) if followup_mode else None
+            if followup_mode and not review_pr_url and repo_slug:
                 feedback_branch = lifecycle.changeset_work_branch(changeset)
                 if feedback_branch:
                     pr_payload = lifecycle.lookup_pr_payload(repo_slug, feedback_branch)
@@ -628,6 +632,7 @@ def run_worker_once(
                 epic_id=selected_epic,
                 changeset_id=str(changeset_id),
                 changeset_title=str(changeset_title),
+                merge_conflict=merge_conflict,
                 review_feedback=review_feedback,
                 review_pr_url=review_pr_url,
             )

@@ -13,7 +13,7 @@ scripts.
 - List PRs by head branch:
   `gh pr list --repo <repo> --head <head> --state <open|all> --json number,baseRefName,headRefName,state`
 - View a PR:
-  `gh pr view <number|branch> --repo <repo> --json number,url,state,baseRefName,headRefName,title,body,labels,isDraft,mergedAt,closedAt,updatedAt,reviewDecision,mergeable`
+  `gh pr view <number|branch> --repo <repo> --json number,url,state,baseRefName,headRefName,title,body,labels,isDraft,mergedAt,closedAt,updatedAt,reviewDecision,mergeable,mergeStateStatus`
 - Create a PR:
   `gh pr create --repo <repo> --base <base> --head <head> --title <title> --body <body> --label <labels>`
 - Edit a PR:
@@ -26,3 +26,4 @@ scripts.
 - `mergedAt`, `closedAt`, and `updatedAt` are ISO-8601 timestamps when present.
 - `reviewDecision` reflects the overall review state when available.
 - `mergeable` is a string status from GitHub (for example `MERGEABLE`).
+- `mergeStateStatus` is the merge queue/status summary (for example `DIRTY`).

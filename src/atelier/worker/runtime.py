@@ -303,6 +303,7 @@ class WorkerCommandAdapter:
         epic_id: str,
         changeset_id: str,
         changeset_title: str,
+        merge_conflict: bool = False,
         review_feedback: bool = False,
         review_pr_url: str | None = None,
     ) -> str:
@@ -312,6 +313,7 @@ class WorkerCommandAdapter:
             epic_id=epic_id,
             changeset_id=changeset_id,
             changeset_title=changeset_title,
+            merge_conflict=merge_conflict,
             review_feedback=review_feedback,
             review_pr_url=review_pr_url,
         )

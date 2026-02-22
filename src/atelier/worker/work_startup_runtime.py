@@ -31,6 +31,7 @@ from .work_runtime_common import (
 )
 
 ReviewFeedbackSelection = worker_review.ReviewFeedbackSelection
+MergeConflictSelection = worker_review.MergeConflictSelection
 
 _WORKER_QUEUE_NAME = "worker"
 
@@ -294,6 +295,32 @@ def select_review_feedback_changeset(
     )
 
 
+def select_conflicted_changeset(
+    *,
+    epic_id: str,
+    repo_slug: str | None,
+    beads_root: Path,
+    repo_root: Path,
+) -> MergeConflictSelection | None:
+    """Select merge-conflicted changeset.
+
+    Args:
+        epic_id: Value for `epic_id`.
+        repo_slug: Value for `repo_slug`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
+    return worker_review.select_conflicted_changeset(
+        epic_id=epic_id,
+        repo_slug=repo_slug,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+
+
 def select_global_review_feedback_changeset(
     *,
     repo_slug: str | None,
@@ -311,6 +338,36 @@ def select_global_review_feedback_changeset(
         Function result.
     """
     return worker_review.select_global_review_feedback_changeset(
+        repo_slug=repo_slug,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        resolve_epic_id_for_changeset=(
+            lambda issue: (
+                resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
+                or str(issue.get("id") or "")
+                or None
+            )
+        ),
+    )
+
+
+def select_global_conflicted_changeset(
+    *,
+    repo_slug: str | None,
+    beads_root: Path,
+    repo_root: Path,
+) -> MergeConflictSelection | None:
+    """Select global merge-conflicted changeset.
+
+    Args:
+        repo_slug: Value for `repo_slug`.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+
+    Returns:
+        Function result.
+    """
+    return worker_review.select_global_conflicted_changeset(
         repo_slug=repo_slug,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -367,6 +424,7 @@ def worker_opening_prompt(
     epic_id: str,
     changeset_id: str,
     changeset_title: str,
+    merge_conflict: bool = False,
     review_feedback: bool = False,
     review_pr_url: str | None = None,
 ) -> str:
@@ -378,6 +436,7 @@ def worker_opening_prompt(
         epic_id: Value for `epic_id`.
         changeset_id: Value for `changeset_id`.
         changeset_title: Value for `changeset_title`.
+        merge_conflict: Value for `merge_conflict`.
         review_feedback: Value for `review_feedback`.
         review_pr_url: Value for `review_pr_url`.
 
@@ -390,6 +449,7 @@ def worker_opening_prompt(
         epic_id=epic_id,
         changeset_id=changeset_id,
         changeset_title=changeset_title,
+        merge_conflict=merge_conflict,
         review_feedback=review_feedback,
         review_pr_url=review_pr_url,
     )
@@ -522,6 +582,25 @@ class _StartupContractService(worker_startup.StartupContractService):
             is_session_active=agent_home.is_session_agent_active,
         )
 
+    def select_conflicted_changeset(
+        self, *, epic_id: str, repo_slug: str | None
+    ) -> MergeConflictSelection | None:
+        return select_conflicted_changeset(
+            epic_id=epic_id,
+            repo_slug=repo_slug,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
+        )
+
+    def select_global_conflicted_changeset(
+        self, *, repo_slug: str | None
+    ) -> MergeConflictSelection | None:
+        return select_global_conflicted_changeset(
+            repo_slug=repo_slug,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
+        )
+
     def select_review_feedback_changeset(
         self, *, epic_id: str, repo_slug: str | None
     ) -> ReviewFeedbackSelection | None:
@@ -621,6 +700,8 @@ __all__ = [
     "resolve_hooked_epic",
     "review_feedback_progressed",
     "run_startup_contract",
+    "select_conflicted_changeset",
+    "select_global_conflicted_changeset",
     "select_global_review_feedback_changeset",
     "select_review_feedback_changeset",
     "worker_opening_prompt",
