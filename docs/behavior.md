@@ -23,6 +23,18 @@ side effects inside the user's repo.
 - **Changeset**: Executable unit under an epic. It is usually a child bead, but
   guardrail-sized single-unit work may execute directly on the epic labeled
   `at:changeset`.
+- **PR base alignment**: Atelier resolves review PR bases from integration
+  lineage rather than raw branch-cut ancestry.
+  - First reviewable changesets target `workspace.parent_branch` (for example
+    `main`) even when branch metadata stores `changeset.parent_branch` equal to
+    the root branch.
+  - Stacked descendants may target predecessor work branches before predecessor
+    integration.
+  - After predecessor integration, Atelier restacks descendants onto updated
+    lineage and retargets PR base as needed.
+- **Terminology**: Use `integrate` for getting changes into the main code line.
+  Use `merge` only for merge-specific states/actions (for example `git merge` or
+  PR merged state).
 - **Workspace root branch**: User-facing branch name for the epic. Stored as
   `workspace.root_branch` in epic metadata and labeled
   `workspace:<root_branch>`.

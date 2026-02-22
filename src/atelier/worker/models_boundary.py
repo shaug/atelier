@@ -50,6 +50,24 @@ def _extract_dependency_id(value: object) -> str | None:
     return match.group(1).strip() or None
 
 
+def _extract_parent_dependency_id(value: object) -> str | None:
+    if not isinstance(value, list):
+        return None
+    for entry in value:
+        if not _is_parent_child_relation(entry):
+            continue
+        if isinstance(entry, dict):
+            parent_id = _clean_str(entry.get("id"))
+            if parent_id:
+                return parent_id
+            nested_issue = entry.get("issue")
+            if isinstance(nested_issue, dict):
+                nested_id = _clean_str(nested_issue.get("id"))
+                if nested_id:
+                    return nested_id
+    return None
+
+
 class BeadsIssueBoundary(BaseModel):
     """Validated issue payload used by worker selection/finalization logic."""
 
@@ -244,6 +262,16 @@ def parse_issue_boundary(raw_issue: dict[str, object], *, source: str) -> BeadsI
     payload = dict(raw_issue)
     if "parent_id" not in payload:
         payload["parent_id"] = raw_issue.get("parent")
+    parent_from_payload = payload.get("parent_id")
+    normalized_parent = (
+        _clean_str(parent_from_payload.get("id"))
+        if isinstance(parent_from_payload, dict)
+        else _clean_str(parent_from_payload)
+    )
+    if normalized_parent is None:
+        parent_from_dependencies = _extract_parent_dependency_id(raw_issue.get("dependencies"))
+        if parent_from_dependencies:
+            payload["parent_id"] = parent_from_dependencies
     if "dependency_ids" not in payload:
         payload["dependency_ids"] = raw_issue.get("dependencies")
     try:

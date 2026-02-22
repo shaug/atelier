@@ -35,6 +35,7 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
         self.changeset_waiting_on_review_or_signals_fn = lambda issue, *, context: False
         self.lookup_pr_payload_fn = lambda repo_slug, branch: None
         self.lookup_pr_payload_diagnostic_fn = lambda repo_slug, branch: (None, None)
+        self.align_existing_pr_base_fn = lambda *, issue, pr_payload, context: (True, None)
         self.update_changeset_review_from_pr_fn = lambda changeset_id, *, pr_payload, pushed: None
         self.finalize_terminal_changeset_fn = lambda *, context, terminal_state, integrated_sha: (
             FinalizeResult(
@@ -156,6 +157,19 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
             changeset_id,
             pr_payload=pr_payload,
             pushed=pushed,
+        )
+
+    def align_existing_pr_base(
+        self,
+        *,
+        issue: dict[str, object],
+        pr_payload: dict[str, object],
+        context: finalize_pipeline.FinalizePipelineContext,
+    ) -> tuple[bool, str | None]:
+        return self.align_existing_pr_base_fn(
+            issue=issue,
+            pr_payload=pr_payload,
+            context=context,
         )
 
     def finalize_terminal_changeset(
@@ -315,3 +329,80 @@ def test_run_finalize_pipeline_waiting_on_review_returns_pending(monkeypatch) ->
 
     assert result.reason == "changeset_review_pending"
     assert result.continue_running is True
+
+
+def test_run_finalize_pipeline_blocks_when_pr_base_alignment_fails(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "labels": ["at:changeset", "cs:in_progress"],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+
+    service = _FinalizeServiceStub()
+    service.lookup_pr_payload_fn = lambda _repo_slug, _branch: {
+        "number": 101,
+        "baseRefName": "feat",
+    }
+    service.align_existing_pr_base_fn = lambda *, issue, pr_payload, context: (
+        False,
+        "expected=main actual=feat; failed to restack work branch",
+    )
+    marked: list[str] = []
+    notifications: list[str] = []
+    service.mark_changeset_in_progress_fn = lambda _changeset_id: marked.append("in_progress")
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("subject"))
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(repo_slug="org/repo"),
+        service=service,
+    )
+
+    assert result.reason == "changeset_pr_base_alignment_failed"
+    assert result.continue_running is False
+    assert marked == ["in_progress"]
+    assert notifications == ["NEEDS-DECISION: PR base mismatch (at-epic.1)"]
+
+
+def test_run_finalize_pipeline_aligns_pr_base_before_pending(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "labels": ["at:changeset", "cs:in_progress"],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+
+    service = _FinalizeServiceStub()
+    service.lookup_pr_payload_fn = lambda _repo_slug, _branch: {
+        "number": 101,
+        "baseRefName": "main",
+    }
+    aligned: list[str] = []
+    pending: list[str] = []
+    service.align_existing_pr_base_fn = lambda *, issue, pr_payload, context: (
+        aligned.append(str(pr_payload.get("baseRefName"))) or True,
+        "retargeted",
+    )
+    service.set_changeset_review_pending_state_fn = (
+        lambda *, changeset_id, pr_payload, pushed, fallback_pr_state: pending.append(changeset_id)
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(repo_slug="org/repo"),
+        service=service,
+    )
+
+    assert result.reason == "changeset_review_pending"
+    assert result.continue_running is True
+    assert aligned == ["main"]
+    assert pending == ["at-epic.1"]
