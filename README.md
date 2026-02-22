@@ -516,9 +516,14 @@ uv run atelier --help
 Run tests:
 
 ```sh
+uv run python -m atelier.skill_frontmatter_validation --check-baseline
 pytest
 bash tests/shell/run.sh
 ```
+
+`atelier.skill_frontmatter_validation` enforces required AgentSkills frontmatter
+rules (`name`, `description`, format/length, and name-directory match). Use
+`--check-baseline` during migration to fail only on new violations.
 
 ## License
 
