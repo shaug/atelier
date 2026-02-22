@@ -13,6 +13,7 @@ from rich.table import Table
 
 from .. import beads, config, git, messages, pr_strategy, prs, worktrees
 from ..io import die, say
+from ..worker import selection as worker_selection
 from .resolve import resolve_current_project_with_repo_root
 
 _FORMATS = {"table", "json"}
@@ -190,6 +191,10 @@ def _build_epic_payloads(
             assignee, agent_index=agent_index
         )
         reclaimable = assignee_session_state == "stale"
+        ownership_policy_violation = worker_selection.has_planner_executable_assignee(issue)
+        ownership_policy_reason = None
+        if ownership_policy_violation:
+            ownership_policy_reason = "planner-owned executable work"
         payloads.append(
             {
                 "id": epic_id,
@@ -210,6 +215,8 @@ def _build_epic_payloads(
                 "changesets": changeset_counts,
                 "changeset_details": changeset_details,
                 "ready_to_close": summary.ready_to_close,
+                "ownership_policy_violation": ownership_policy_violation,
+                "ownership_policy_reason": ownership_policy_reason,
             }
         )
     return payloads
@@ -423,6 +430,9 @@ def _status_counts(
     queue_claimed = sum(_to_int(queue.get("claimed")) for queue in queues)
     stale_agents = sum(1 for agent in agents if str(agent.get("session_state") or "") == "stale")
     reclaimable_epics = sum(1 for epic in epics if bool(epic.get("reclaimable")))
+    ownership_policy_violations = sum(
+        1 for epic in epics if bool(epic.get("ownership_policy_violation"))
+    )
     return {
         "epics": len(epics),
         "agents": len(agents),
@@ -430,6 +440,7 @@ def _status_counts(
         "changesets": total_changesets,
         "changesets_ready": ready_changesets,
         "epics_reclaimable": reclaimable_epics,
+        "ownership_policy_violations": ownership_policy_violations,
         "queues": len(queues),
         "queue_messages": queue_total,
         "queue_claimed": queue_claimed,
@@ -481,6 +492,10 @@ def _render_status(
     overview.add_row("Changesets", _display_value(counts.get("changesets")))
     overview.add_row("Ready changesets", _display_value(counts.get("changesets_ready")))
     overview.add_row("Reclaimable epics", _display_value(counts.get("epics_reclaimable")))
+    overview.add_row(
+        "Ownership violations",
+        _display_value(counts.get("ownership_policy_violations")),
+    )
     overview.add_row("Queues", _display_value(counts.get("queues")))
     overview.add_row("Queued messages", _display_value(counts.get("queue_messages")))
     overview.add_row("Claimed messages", _display_value(counts.get("queue_claimed")))
@@ -496,6 +511,7 @@ def _render_status(
         table.add_column("Root", no_wrap=True)
         table.add_column("PR Strategy", no_wrap=True)
         table.add_column("Hooked by", no_wrap=True)
+        table.add_column("Policy", no_wrap=True)
         table.add_column("Changesets", justify="right")
         table.add_column("Worktree", overflow="fold")
         for epic in epics:
@@ -518,6 +534,7 @@ def _render_status(
                 _display_value(epic.get("root_branch")),
                 _display_value(epic.get("pr_strategy")),
                 hooked_by_display or "-",
+                _display_value(epic.get("ownership_policy_reason") or "ok"),
                 ready_display,
                 _display_value(epic.get("worktree_relpath")),
             )

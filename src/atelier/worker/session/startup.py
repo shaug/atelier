@@ -618,6 +618,8 @@ def run_startup_contract_service(
                 continue
             if issue_id == hooked_epic:
                 continue
+            if worker_selection.has_planner_executable_assignee(issue):
+                continue
             if is_excluded(issue_id, stage="review-feedback"):
                 continue
             status = str(issue.get("status") or "")

@@ -24,3 +24,4 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "epic_list" in content
     assert "one child changeset" in content
     assert "decomposition rationale" in content
+    assert "Do not claim or keep assignee ownership" in content

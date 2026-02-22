@@ -152,7 +152,15 @@ def _no_eligible_epics_summary(
     """
     ready = filter_epics(issues, require_unassigned=True)
     assigned = filter_epics(issues, assignee=agent_id)
+    planner_owned = worker_selection.planner_owned_executable_issues(issues)
     timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+    ownership_detail = ", ".join(
+        sorted(
+            str(issue.get("id") or "")
+            for issue in planner_owned
+            if isinstance(issue.get("id"), str) and issue.get("id")
+        )[:5]
+    )
     return [
         "No eligible epics available.",
         f"- Agent: {agent_id}",
@@ -160,6 +168,12 @@ def _no_eligible_epics_summary(
         f"- Total epics: {len(issues)}",
         f"- Ready epics: {len(ready)}",
         f"- Assigned epics: {len(assigned)}",
+        f"- Planner-owned executable epics: {len(planner_owned)}",
+        (
+            f"- Ownership violations: {ownership_detail}"
+            if ownership_detail
+            else "- Ownership violations: none"
+        ),
         f"- Timestamp: {timestamp}",
     ]
 
