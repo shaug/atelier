@@ -6,45 +6,53 @@ and downstream PRs are opening against the wrong base.
 
 ## Inspect
 
-Run the repair tool in report mode first:
+1. Identify affected epics and changesets:
 
 ```bash
-python src/atelier/skills/publish/scripts/repair_dependency_lineage.py \
-  --repo-root . \
-  --beads-root "$BEADS_DIR"
+bd list --label at:epic --status open
+bd list --parent <epic-id> --label at:changeset --status open
 ```
 
-The report shows two states:
-
-- `FIX`: deterministic dependency parent branch was resolved.
-- `BLOCKED`: lineage is ambiguous or dependency metadata is incomplete.
-
-## Apply deterministic fixes
-
-When report output looks correct, apply repairs:
+1. For each dependency-linked changeset, inspect lineage fields:
 
 ```bash
-python src/atelier/skills/publish/scripts/repair_dependency_lineage.py \
-  --repo-root . \
-  --beads-root "$BEADS_DIR" \
-  --apply
+bd show <changeset-id>
 ```
 
-You can scope to one epic:
+Look for this corruption pattern:
+
+- `changeset.parent_branch` equals the epic root branch.
+- The changeset has dependency ids that point to another changeset.
+- The dependency's `changeset.work_branch` does not match
+  `changeset.parent_branch`.
+
+## Repair
+
+1. Set parent lineage to the dependency parent work branch:
 
 ```bash
-python src/atelier/skills/publish/scripts/repair_dependency_lineage.py \
-  --repo-root . \
-  --beads-root "$BEADS_DIR" \
-  --epic at-epic \
-  --apply
+bd update <changeset-id> --description "
+...
+changeset.parent_branch: <dependency-work-branch>
+..."
 ```
 
-## Follow-up for blocked rows
+1. If needed, refresh lineage bases from git refs:
 
-For `BLOCKED` rows, fix metadata manually before rerunning:
+```bash
+bd update <changeset-id> --description "
+...
+changeset.parent_base: <sha-for-dependency-work-branch>
+..."
+```
+
+1. Rerun finalize for the changeset so PR base/gate state is recalculated.
+
+## Ambiguous lineage
+
+When multiple dependency parents are possible:
 
 1. Ensure each dependency changeset has `changeset.work_branch`.
-1. Remove ambiguous dependency-parent candidates or set an explicit
-   `changeset.parent_branch`.
-1. Rerun the repair tool and then rerun worker finalize.
+1. Pick one deterministic parent and set `changeset.parent_branch` explicitly.
+1. Keep remaining dependencies as non-lineage blockers.
+1. Rerun worker finalize.

@@ -70,9 +70,8 @@ and exit without opening a PR.
 
 If dependency lineage metadata is collapsed (for example
 `changeset.parent_branch` points to the root branch for downstream changesets),
-use `src/atelier/skills/publish/scripts/repair_dependency_lineage.py` and the
-runbook in `docs/dependency-lineage-repair.md` before retrying publish/finalize
-flows.
+follow the runbook in `docs/dependency-lineage-repair.md` before retrying
+publish/finalize flows.
 
 When PR creation is allowed, draft the PR title/body with the `pr-draft` skill
 and hand the result to `github-prs`. When PR creation is gated, report the
