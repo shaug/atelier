@@ -76,3 +76,53 @@ def test_edit_opens_workspace_repo_in_editor(tmp_path: Path) -> None:
         )
 
     run_detached.assert_called_once_with(["code", str(worktree_path)], cwd=worktree_path, env=env)
+
+
+def test_resolve_worktree_path_reconciles_stale_mapping_root(tmp_path: Path) -> None:
+    project_data_dir = tmp_path / "data"
+    project_data_dir.mkdir(parents=True)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    worktree_path = project_data_dir / "worktrees" / "epic-1"
+    worktree_path.mkdir(parents=True)
+    (worktree_path / ".git").write_text("gitdir: /tmp\n", encoding="utf-8")
+
+    stale_mapping = worktrees.WorktreeMapping(
+        epic_id="epic-1",
+        worktree_path="worktrees/epic-1",
+        root_branch="feat/old",
+        changesets={},
+        changeset_worktrees={},
+    )
+    reconciled_mapping = worktrees.WorktreeMapping(
+        epic_id="epic-1",
+        worktree_path="worktrees/epic-1",
+        root_branch="feat/new",
+        changesets={"epic-1": "feat/new"},
+        changeset_worktrees={},
+    )
+
+    with (
+        patch("atelier.commands.edit.worktrees.load_mapping", return_value=stale_mapping),
+        patch(
+            "atelier.commands.edit.worktrees.ensure_worktree_mapping",
+            return_value=reconciled_mapping,
+        ) as ensure_mapping,
+    ):
+        resolved = edit_cmd._resolve_worktree_path(
+            project_data_dir,
+            repo_root,
+            "epic-1",
+            "feat/new",
+            None,
+            git_path="git",
+        )
+
+    assert resolved == worktree_path
+    ensure_mapping.assert_called_once_with(
+        project_data_dir,
+        "epic-1",
+        "feat/new",
+        repo_root=repo_root,
+        git_path="git",
+    )

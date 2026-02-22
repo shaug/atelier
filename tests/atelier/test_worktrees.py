@@ -4,6 +4,8 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
+import pytest
+
 import atelier.worktrees as worktrees
 
 
@@ -163,6 +165,174 @@ def test_ensure_git_worktree_existing_path_still_materializes_root_branch() -> N
         command = run_command.call_args.args[0]
         assert "branch" in command
         assert "feat/root" in command
+
+
+def test_ensure_worktree_mapping_reconciles_stale_root_branch_for_epic_changeset() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        repo_root = Path(tmp) / "repo"
+        project_dir.mkdir(parents=True)
+        repo_root.mkdir(parents=True)
+        mapped_path = project_dir / "worktrees" / "epic"
+        mapped_path.mkdir(parents=True)
+        (mapped_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+
+        mapping_file = worktrees.mapping_path(project_dir, "epic")
+        mapping_file.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_file,
+            worktrees.WorktreeMapping(
+                epic_id="epic",
+                worktree_path="worktrees/epic",
+                root_branch="feat/old",
+                changesets={"epic": "feat/old", "epic.1": "feat/old-epic.1"},
+                changeset_worktrees={},
+            ),
+        )
+
+        def fake_ref_exists(_repo: Path, ref: str, *, git_path: str | None = None) -> bool:
+            return ref in {"refs/heads/feat/new"}
+
+        with (
+            patch("atelier.worktrees.git.git_current_branch", return_value="feat/old"),
+            patch("atelier.worktrees.git.git_status_porcelain", return_value=[]),
+            patch("atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists),
+            patch("atelier.worktrees.exec_util.run_command") as run_command,
+        ):
+            mapping = worktrees.ensure_worktree_mapping(
+                project_dir,
+                "epic",
+                "feat/new",
+                repo_root=repo_root,
+                git_path="git",
+            )
+
+        assert mapping.root_branch == "feat/new"
+        assert mapping.changesets["epic"] == "feat/new"
+        assert mapping.changesets["epic.1"] == "feat/old-epic.1"
+        payload = json.loads(mapping_file.read_text(encoding="utf-8"))
+        assert payload["root_branch"] == "feat/new"
+        assert payload["changesets"]["epic"] == "feat/new"
+        command = run_command.call_args.args[0]
+        assert "checkout" in command
+        assert "feat/new" in command
+
+
+def test_ensure_worktree_mapping_reconcile_blocks_non_git_path() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        repo_root = Path(tmp) / "repo"
+        repo_root.mkdir(parents=True)
+        mapped_path = project_dir / "worktrees" / "epic"
+        mapped_path.mkdir(parents=True)
+
+        mapping_file = worktrees.mapping_path(project_dir, "epic")
+        mapping_file.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_file,
+            worktrees.WorktreeMapping(
+                epic_id="epic",
+                worktree_path="worktrees/epic",
+                root_branch="feat/old",
+                changesets={"epic": "feat/old"},
+                changeset_worktrees={},
+            ),
+        )
+
+        def fake_die(message: str, code: int = 1) -> None:
+            del code
+            raise RuntimeError(message)
+
+        with patch("atelier.worktrees.die", side_effect=fake_die):
+            with pytest.raises(RuntimeError, match="exists but is not a git worktree"):
+                worktrees.ensure_worktree_mapping(
+                    project_dir,
+                    "epic",
+                    "feat/new",
+                    repo_root=repo_root,
+                    git_path="git",
+                )
+
+
+def test_ensure_worktree_mapping_reconcile_blocks_dirty_migration() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        repo_root = Path(tmp) / "repo"
+        repo_root.mkdir(parents=True)
+        mapped_path = project_dir / "worktrees" / "epic"
+        mapped_path.mkdir(parents=True)
+        (mapped_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+
+        mapping_file = worktrees.mapping_path(project_dir, "epic")
+        mapping_file.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_file,
+            worktrees.WorktreeMapping(
+                epic_id="epic",
+                worktree_path="worktrees/epic",
+                root_branch="feat/old",
+                changesets={"epic": "feat/old"},
+                changeset_worktrees={},
+            ),
+        )
+
+        def fake_die(message: str, code: int = 1) -> None:
+            del code
+            raise RuntimeError(message)
+
+        with (
+            patch("atelier.worktrees.git.git_current_branch", return_value="feat/old"),
+            patch("atelier.worktrees.git.git_status_porcelain", return_value=[" M src/x.py"]),
+            patch("atelier.worktrees.die", side_effect=fake_die),
+        ):
+            with pytest.raises(RuntimeError, match="has local changes"):
+                worktrees.ensure_worktree_mapping(
+                    project_dir,
+                    "epic",
+                    "feat/new",
+                    repo_root=repo_root,
+                    git_path="git",
+                )
+
+
+def test_ensure_worktree_mapping_reconcile_blocks_ambiguous_branch_state() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        repo_root = Path(tmp) / "repo"
+        repo_root.mkdir(parents=True)
+        mapped_path = project_dir / "worktrees" / "epic"
+        mapped_path.mkdir(parents=True)
+        (mapped_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+
+        mapping_file = worktrees.mapping_path(project_dir, "epic")
+        mapping_file.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_file,
+            worktrees.WorktreeMapping(
+                epic_id="epic",
+                worktree_path="worktrees/epic",
+                root_branch="feat/old",
+                changesets={"epic": "feat/old"},
+                changeset_worktrees={},
+            ),
+        )
+
+        def fake_die(message: str, code: int = 1) -> None:
+            del code
+            raise RuntimeError(message)
+
+        with (
+            patch("atelier.worktrees.git.git_current_branch", return_value="topic/side"),
+            patch("atelier.worktrees.die", side_effect=fake_die),
+        ):
+            with pytest.raises(RuntimeError, match="expected 'feat/old' or 'feat/new'"):
+                worktrees.ensure_worktree_mapping(
+                    project_dir,
+                    "epic",
+                    "feat/new",
+                    repo_root=repo_root,
+                    git_path="git",
+                )
 
 
 def test_remove_git_worktree_noop_when_missing() -> None:

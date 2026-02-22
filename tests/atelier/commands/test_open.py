@@ -7,6 +7,7 @@ import pytest
 
 import atelier.commands.open as open_cmd
 import atelier.config as config
+import atelier.worktrees as worktrees
 
 
 def _make_issue(root_branch: str, worktree_relpath: str) -> dict[str, object]:
@@ -205,3 +206,55 @@ def test_open_prompts_for_workspace() -> None:
                         set_title=False,
                     )
                 )
+
+
+def test_resolve_worktree_path_reconciles_stale_mapping_root() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_data_dir = root / "data"
+        project_data_dir.mkdir(parents=True)
+        repo_root = root / "repo"
+        repo_root.mkdir(parents=True)
+        worktree_path = project_data_dir / "worktrees" / "epic-1"
+        worktree_path.mkdir(parents=True)
+        (worktree_path / ".git").write_text("gitdir: /tmp\n", encoding="utf-8")
+
+        stale_mapping = worktrees.WorktreeMapping(
+            epic_id="epic-1",
+            worktree_path="worktrees/epic-1",
+            root_branch="feat/old",
+            changesets={},
+            changeset_worktrees={},
+        )
+        reconciled_mapping = worktrees.WorktreeMapping(
+            epic_id="epic-1",
+            worktree_path="worktrees/epic-1",
+            root_branch="feat/new",
+            changesets={"epic-1": "feat/new"},
+            changeset_worktrees={},
+        )
+
+        with (
+            patch("atelier.commands.open.worktrees.load_mapping", return_value=stale_mapping),
+            patch(
+                "atelier.commands.open.worktrees.ensure_worktree_mapping",
+                return_value=reconciled_mapping,
+            ) as ensure_mapping,
+        ):
+            resolved = open_cmd._resolve_worktree_path(
+                project_data_dir,
+                repo_root,
+                "epic-1",
+                "feat/new",
+                None,
+                git_path="git",
+            )
+
+    assert resolved == worktree_path
+    ensure_mapping.assert_called_once_with(
+        project_data_dir,
+        "epic-1",
+        "feat/new",
+        repo_root=repo_root,
+        git_path="git",
+    )

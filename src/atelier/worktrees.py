@@ -170,7 +170,138 @@ def _ensure_root_branch_exists(
     die(f"default branch {default_branch!r} not found for worktree")
 
 
-def ensure_worktree_mapping(project_dir: Path, epic_id: str, root_branch: str) -> WorktreeMapping:
+def _resolve_mapping_worktree_path(project_dir: Path, mapping: WorktreeMapping) -> Path:
+    mapped = Path(mapping.worktree_path)
+    if mapped.is_absolute():
+        return mapped
+    return project_dir / mapped
+
+
+def _branch_exists(repo_root: Path, branch: str, *, git_path: str | None = None) -> bool:
+    local_ref = f"refs/heads/{branch}"
+    if git.git_ref_exists(repo_root, local_ref, git_path=git_path):
+        return True
+    remote_ref = f"refs/remotes/origin/{branch}"
+    return git.git_ref_exists(repo_root, remote_ref, git_path=git_path)
+
+
+def _checkout_branch_for_mapping_migration(
+    worktree_path: Path,
+    root_branch: str,
+    *,
+    repo_root: Path,
+    git_path: str | None = None,
+) -> None:
+    local_ref = f"refs/heads/{root_branch}"
+    remote_ref = f"refs/remotes/origin/{root_branch}"
+    if git.git_ref_exists(repo_root, local_ref, git_path=git_path):
+        exec_util.run_command(
+            git.git_command(
+                ["-C", str(worktree_path), "checkout", root_branch],
+                git_path=git_path,
+            )
+        )
+        return
+    if git.git_ref_exists(repo_root, remote_ref, git_path=git_path):
+        exec_util.run_command(
+            git.git_command(
+                [
+                    "-C",
+                    str(worktree_path),
+                    "checkout",
+                    "-B",
+                    root_branch,
+                    f"origin/{root_branch}",
+                ],
+                git_path=git_path,
+            )
+        )
+        return
+    die(
+        "worktree mapping migration blocked: "
+        f"target root branch {root_branch!r} not found locally or on origin."
+    )
+
+
+def reconcile_worktree_mapping_root_branch(
+    project_dir: Path,
+    epic_id: str,
+    *,
+    current_mapping: WorktreeMapping,
+    expected_root_branch: str,
+    repo_root: Path,
+    git_path: str | None = None,
+) -> WorktreeMapping:
+    """Reconcile a stale mapping root branch when migration is deterministic."""
+    old_root = current_mapping.root_branch.strip()
+    new_root = expected_root_branch.strip()
+    if not old_root or old_root == new_root:
+        return current_mapping
+
+    mapped_path = _resolve_mapping_worktree_path(project_dir, current_mapping)
+    if mapped_path.exists():
+        if not (mapped_path / ".git").exists():
+            die(
+                "worktree mapping migration blocked: "
+                f"{mapped_path} exists but is not a git worktree. "
+                "Fix the path or remove stale mapping metadata before retrying."
+            )
+        current_branch = git.git_current_branch(mapped_path, git_path=git_path)
+        if not current_branch or current_branch == "HEAD":
+            die(
+                "worktree mapping migration blocked: "
+                f"unable to resolve current branch for {mapped_path}. "
+                "Checkout a branch manually, then rerun."
+            )
+        if current_branch == old_root:
+            status = git.git_status_porcelain(mapped_path, git_path=git_path)
+            if status:
+                die(
+                    "worktree mapping migration blocked: "
+                    f"{mapped_path} has local changes on {old_root!r}. "
+                    "Commit/stash/discard changes, then rerun."
+                )
+            if not _branch_exists(repo_root, new_root, git_path=git_path):
+                die(
+                    "worktree mapping migration blocked: "
+                    f"target root branch {new_root!r} does not exist "
+                    f"(current mapping root is {old_root!r})."
+                )
+            _checkout_branch_for_mapping_migration(
+                mapped_path,
+                new_root,
+                repo_root=repo_root,
+                git_path=git_path,
+            )
+        elif current_branch != new_root:
+            die(
+                "worktree mapping migration blocked: "
+                f"{mapped_path} is on {current_branch!r}, expected {old_root!r} "
+                f"or {new_root!r}. Resolve branch state manually, then rerun."
+            )
+
+    updated_changesets = dict(current_mapping.changesets)
+    if updated_changesets.get(epic_id) == old_root:
+        updated_changesets[epic_id] = new_root
+    updated = WorktreeMapping(
+        epic_id=current_mapping.epic_id,
+        worktree_path=current_mapping.worktree_path,
+        root_branch=new_root,
+        changesets=updated_changesets,
+        changeset_worktrees=current_mapping.changeset_worktrees,
+    )
+    write_mapping(mapping_path(project_dir, epic_id), updated)
+    return updated
+
+
+def ensure_worktree_mapping(
+    project_dir: Path,
+    epic_id: str,
+    root_branch: str,
+    *,
+    repo_root: Path | None = None,
+    git_path: str | None = None,
+) -> WorktreeMapping:
     """Ensure a worktree mapping exists and return it."""
     if not epic_id:
         die("epic id must not be empty")
@@ -183,7 +314,20 @@ def ensure_worktree_mapping(project_dir: Path, epic_id: str, root_branch: str) -
     mapping = load_mapping(path)
     if mapping is not None:
         if mapping.root_branch and mapping.root_branch != root_branch:
-            die("root branch does not match existing worktree mapping")
+            if repo_root is None:
+                die(
+                    "root branch does not match existing worktree mapping "
+                    f"({mapping.root_branch!r} != {root_branch!r}) and no "
+                    "repository context is available for reconciliation"
+                )
+            mapping = reconcile_worktree_mapping_root_branch(
+                project_dir,
+                epic_id,
+                current_mapping=mapping,
+                expected_root_branch=root_branch,
+                repo_root=repo_root,
+                git_path=git_path,
+            )
         if not mapping.root_branch:
             updated = WorktreeMapping(
                 epic_id=mapping.epic_id,
@@ -215,10 +359,22 @@ def derive_changeset_branch(root_branch: str, changeset_id: str) -> str:
 
 
 def ensure_changeset_branch(
-    project_dir: Path, epic_id: str, changeset_id: str, *, root_branch: str
+    project_dir: Path,
+    epic_id: str,
+    changeset_id: str,
+    *,
+    root_branch: str,
+    repo_root: Path | None = None,
+    git_path: str | None = None,
 ) -> tuple[str, WorktreeMapping]:
     """Ensure a changeset branch mapping exists and return it."""
-    mapping = ensure_worktree_mapping(project_dir, epic_id, root_branch)
+    mapping = ensure_worktree_mapping(
+        project_dir,
+        epic_id,
+        root_branch,
+        repo_root=repo_root,
+        git_path=git_path,
+    )
     branch = mapping.changesets.get(changeset_id)
     if branch:
         return branch, mapping
@@ -259,7 +415,13 @@ def ensure_changeset_worktree(
     """Ensure a git worktree exists for a changeset and return its path."""
     if not branch or not root_branch:
         die("changeset branch and root branch must not be empty")
-    mapping = ensure_worktree_mapping(project_dir, epic_id, root_branch)
+    mapping = ensure_worktree_mapping(
+        project_dir,
+        epic_id,
+        root_branch,
+        repo_root=repo_root,
+        git_path=git_path,
+    )
     relpath = mapping.changeset_worktrees.get(changeset_id)
     if not relpath:
         relpath = changeset_worktree_relpath(changeset_id)
@@ -467,7 +629,13 @@ def ensure_git_worktree(
     git_path: str | None = None,
 ) -> Path:
     """Ensure a git worktree exists for the epic and return its path."""
-    mapping = ensure_worktree_mapping(project_dir, epic_id, root_branch)
+    mapping = ensure_worktree_mapping(
+        project_dir,
+        epic_id,
+        root_branch,
+        repo_root=repo_root,
+        git_path=git_path,
+    )
     _ensure_root_branch_exists(repo_root, root_branch, git_path=git_path)
     worktree_path = project_dir / mapping.worktree_path
     if worktree_path.exists():

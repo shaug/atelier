@@ -81,9 +81,12 @@ def _select_epic_by_workspace(
 
 def _resolve_worktree_path(
     project_dir: Path,
+    repo_root: Path,
     epic_id: str,
     root_branch: str,
     worktree_relpath: str | None,
+    *,
+    git_path: str | None = None,
 ) -> Path:
     mapping = worktrees.load_mapping(worktrees.mapping_path(project_dir, epic_id))
     if mapping is None:
@@ -92,10 +95,13 @@ def _resolve_worktree_path(
         candidate = Path(worktree_relpath)
         worktree_path = candidate if candidate.is_absolute() else project_dir / candidate
     else:
-        if mapping.root_branch and mapping.root_branch != root_branch:
-            die("workspace root branch does not match worktree mapping")
-        if not mapping.root_branch:
-            die("worktree mapping missing root branch")
+        mapping = worktrees.ensure_worktree_mapping(
+            project_dir,
+            epic_id,
+            root_branch,
+            repo_root=repo_root,
+            git_path=git_path,
+        )
         worktree_path = project_dir / mapping.worktree_path
     if not worktree_path.exists():
         die("worktree missing; run 'atelier work' first")
@@ -180,6 +186,7 @@ def open_worktree(args: object) -> None:
         resolve_current_project_with_repo_root()
     )
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
+    git_path = config.resolve_git_path(project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
 
@@ -195,9 +202,11 @@ def open_worktree(args: object) -> None:
 
     worktree_path = _resolve_worktree_path(
         project_data_dir,
+        repo_root,
         str(issue.get("id") or ""),
         root_branch,
         beads.extract_worktree_path(issue),
+        git_path=git_path,
     )
     project_enlistment = project_config.project.enlistment or enlistment_path
     env = workspace.workspace_environment(project_enlistment, root_branch, worktree_path)
