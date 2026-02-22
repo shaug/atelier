@@ -26,7 +26,7 @@ install-dev:
 # Run the test suite
 test:
   uv pip install -e .[dev]
-  uv run python -m atelier.skill_frontmatter_validation --check-baseline
+  uv run python -m atelier.skill_frontmatter_validation
   uv run pytest
   bash tests/shell/run.sh
 

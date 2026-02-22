@@ -85,35 +85,8 @@ def test_validate_skill_frontmatter_reports_length_violations(tmp_path: Path) ->
     assert _rules(violations) == {"description.length", "name.length"}
 
 
-def test_compare_to_baseline_flags_unexpected_and_tracks_resolved() -> None:
-    violations = (
-        validator.SkillFrontmatterViolation(
-            path="src/atelier/skills/new-skill/SKILL.md",
-            rule="name.format",
-            message="bad format",
-        ),
-        validator.SkillFrontmatterViolation(
-            path="src/atelier/skills/old-skill/SKILL.md",
-            rule="description.required",
-            message="missing description",
-        ),
-    )
-    allowed = {
-        ("src/atelier/skills/old-skill/SKILL.md", "description.required"),
-        ("src/atelier/skills/resolved/SKILL.md", "name.format"),
-    }
-    unexpected, resolved = validator.compare_to_baseline(violations, allowed)
-    assert len(unexpected) == 1
-    assert unexpected[0].path == "src/atelier/skills/new-skill/SKILL.md"
-    assert unexpected[0].rule == "name.format"
-    assert resolved == (("src/atelier/skills/resolved/SKILL.md", "name.format"),)
-
-
-def test_packaged_skills_have_no_unexpected_baseline_violations() -> None:
+def test_packaged_skills_have_no_frontmatter_violations() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     skills_root = repo_root / "src/atelier/skills"
-    baseline_path = skills_root / "validation-baseline.json"
     violations = validator.validate_skills_tree(skills_root, project_root=repo_root)
-    allowed = validator.load_validation_baseline(baseline_path)
-    unexpected, _resolved = validator.compare_to_baseline(violations, allowed)
-    assert not unexpected
+    assert not violations

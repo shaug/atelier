@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +11,6 @@ NAME_MAX_LENGTH = 64
 DESCRIPTION_MAX_LENGTH = 1024
 NAME_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 DEFAULT_SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
-DEFAULT_BASELINE_PATH = DEFAULT_SKILLS_ROOT / "validation-baseline.json"
 
 
 @dataclass(frozen=True)
@@ -246,62 +244,6 @@ def validate_skills_tree(
     return tuple(sorted(violations, key=lambda item: (item.path, item.rule)))
 
 
-def load_validation_baseline(path: Path) -> set[tuple[str, str]]:
-    """Load allowed frontmatter violations used for incremental migration gates.
-
-    Args:
-        path: JSON file path with `allowed_violations` entries.
-
-    Returns:
-        A set of `(path, rule)` tuples that are currently tolerated.
-
-    Raises:
-        ValueError: If the baseline file is malformed.
-    """
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    raw_allowed = payload.get("allowed_violations")
-    if not isinstance(raw_allowed, list):
-        raise ValueError("validation baseline must contain list 'allowed_violations'")
-    allowed: set[tuple[str, str]] = set()
-    for item in raw_allowed:
-        if not isinstance(item, dict):
-            raise ValueError("validation baseline entries must be objects")
-        raw_path = item.get("path")
-        raw_rule = item.get("rule")
-        if not isinstance(raw_path, str) or not raw_path:
-            raise ValueError("validation baseline entry missing string 'path'")
-        if not isinstance(raw_rule, str) or not raw_rule:
-            raise ValueError("validation baseline entry missing string 'rule'")
-        allowed.add((raw_path, raw_rule))
-    return allowed
-
-
-def compare_to_baseline(
-    violations: tuple[SkillFrontmatterViolation, ...],
-    allowed_violations: set[tuple[str, str]],
-) -> tuple[tuple[SkillFrontmatterViolation, ...], tuple[tuple[str, str], ...]]:
-    """Compare current violations with baseline allowances.
-
-    Args:
-        violations: Current validation violations.
-        allowed_violations: Allowed `(path, rule)` tuples from baseline.
-
-    Returns:
-        A tuple containing:
-        1) unexpected violations (not in baseline),
-        2) resolved baseline entries not currently observed.
-    """
-    actual = {(item.path, item.rule) for item in violations}
-    unexpected = tuple(
-        sorted(
-            (item for item in violations if (item.path, item.rule) not in allowed_violations),
-            key=lambda item: (item.path, item.rule),
-        )
-    )
-    resolved = tuple(sorted(allowed_violations - actual))
-    return unexpected, resolved
-
-
 def _print_violations(header: str, violations: tuple[SkillFrontmatterViolation, ...]) -> None:
     print(header)
     for violation in violations:
@@ -332,39 +274,10 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_SKILLS_ROOT,
         help="Skills directory to validate (default: packaged src/atelier/skills).",
     )
-    parser.add_argument(
-        "--check-baseline",
-        action="store_true",
-        help="Fail only on violations not listed in the baseline file.",
-    )
-    parser.add_argument(
-        "--baseline",
-        type=Path,
-        default=DEFAULT_BASELINE_PATH,
-        help="Baseline JSON path used with --check-baseline.",
-    )
     args = parser.parse_args(argv)
 
     project_root = _default_project_root(args.skills_root.resolve())
     violations = validate_skills_tree(args.skills_root.resolve(), project_root=project_root)
-    if args.check_baseline:
-        allowed = load_validation_baseline(args.baseline.resolve())
-        unexpected, resolved = compare_to_baseline(violations, allowed)
-        if unexpected:
-            _print_violations(
-                "Unexpected AgentSkills frontmatter violations detected:",
-                unexpected,
-            )
-            return 1
-        print(
-            "AgentSkills frontmatter baseline gate passed "
-            f"({len(violations)} observed, {len(allowed)} allowed)."
-        )
-        if resolved:
-            print("Resolved baseline entries detected:")
-            for path, rule in resolved:
-                print(f"- {path}: [{rule}]")
-        return 0
 
     if violations:
         _print_violations("AgentSkills frontmatter violations detected:", violations)
