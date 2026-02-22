@@ -26,6 +26,7 @@ class WorktreePreparationContext:
     changeset_id: str
     root_branch_value: str
     changeset_parent_branch: str
+    allow_parent_branch_override: bool
     git_path: str | None
 
 
@@ -51,6 +52,7 @@ def prepare_worktrees(
     changeset_id = context.changeset_id
     root_branch_value = context.root_branch_value
     changeset_parent_branch = context.changeset_parent_branch
+    allow_parent_branch_override = context.allow_parent_branch_override
     git_path = context.git_path
     epic_worktree_path: Path | None = None
     changeset_worktree_path: Path | None = None
@@ -94,7 +96,8 @@ def prepare_worktrees(
                 "Would update changeset branch metadata "
                 f"(root={root_branch_value!r}, "
                 f"parent={changeset_parent_branch!r}, "
-                f"work={branch!r})."
+                f"work={branch!r}, "
+                f"allow_override={allow_parent_branch_override!r})."
             )
         control.dry_run_log("Would ensure git worktrees and checkout.")
         return WorktreePreparation(
@@ -154,10 +157,11 @@ def prepare_worktrees(
             root_branch=root_branch_value,
             parent_branch=changeset_parent_branch,
             work_branch=branch,
-            root_base=root_base,
+            root_base=None if allow_parent_branch_override else root_base,
             parent_base=parent_base,
             beads_root=beads_root,
             cwd=repo_root,
+            allow_override=allow_parent_branch_override,
         )
     control.say(f"Epic worktree: {epic_worktree_path}")
     control.say(f"Changeset worktree: {changeset_worktree_path}")

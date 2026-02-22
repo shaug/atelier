@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ... import beads, changesets, exec, git, pr_strategy, prs
+from ... import beads, changesets, dependency_lineage, exec, git, pr_strategy, prs
 from ... import log as atelier_log
 from ..models import FinalizeResult
 
@@ -25,26 +25,37 @@ def changeset_parent_lifecycle_state(
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
+    beads_root: Path | None = None,
     lookup_pr_payload: Callable[..., dict[str, object] | None],
 ) -> str | None:
-    if not repo_slug:
-        return None
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    parent_branch = fields.get("changeset.parent_branch")
-    root_branch = fields.get("changeset.root_branch")
-    if not isinstance(parent_branch, str):
+    issue_cache: dict[str, dict[str, object] | None] = {}
+
+    def lookup_dependency_issue(issue_id: str) -> dict[str, object] | None:
+        if beads_root is None:
+            return None
+        if issue_id in issue_cache:
+            return issue_cache[issue_id]
+        issues = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
+        issue_cache[issue_id] = issues[0] if issues else None
+        return issue_cache[issue_id]
+
+    lineage = dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch=fields.get("changeset.root_branch"),
+        lookup_issue=lookup_dependency_issue,
+    )
+    normalized = lineage.effective_parent_branch
+    if normalized is None:
         return None
-    normalized = parent_branch.strip()
-    if not normalized or normalized.lower() == "null":
+    normalized_root = lineage.root_branch
+    if normalized_root and normalized == normalized_root and not lineage.used_dependency_parent:
+        # True top-level changesets use root==parent; treat as no-parent so
+        # strategies do not self-deadlock.
         return None
-    if isinstance(root_branch, str):
-        normalized_root = root_branch.strip()
-        if normalized_root and normalized_root.lower() != "null":
-            # Top-level changesets commonly use root==parent; treat as no-parent
-            # for PR strategy gating to avoid self-deadlocking PR creation.
-            if normalized_root == normalized:
-                return None
+    if not repo_slug:
+        return None
     pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{normalized}", git_path=git_path)
     payload = lookup_pr_payload(repo_slug, normalized)
     review_requested = prs.has_review_requests(payload)
@@ -58,16 +69,59 @@ def changeset_pr_creation_decision(
     repo_root: Path,
     git_path: str | None,
     branch_pr_strategy: object,
+    beads_root: Path | None = None,
     lookup_pr_payload: Callable[..., dict[str, object] | None],
 ) -> pr_strategy.PrStrategyDecision:
+    normalized_strategy = pr_strategy.normalize_pr_strategy(branch_pr_strategy)
+    description = issue.get("description")
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
+    issue_cache: dict[str, dict[str, object] | None] = {}
+
+    def lookup_dependency_issue(issue_id: str) -> dict[str, object] | None:
+        if beads_root is None:
+            return None
+        if issue_id in issue_cache:
+            return issue_cache[issue_id]
+        issues = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
+        issue_cache[issue_id] = issues[0] if issues else None
+        return issue_cache[issue_id]
+
+    lineage = dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch=fields.get("changeset.root_branch"),
+        lookup_issue=lookup_dependency_issue,
+    )
+    if normalized_strategy == "sequential" and lineage.blocked:
+        reason_suffix = lineage.blocker_reason or "dependency-parent-unresolved"
+        if lineage.diagnostics:
+            reason_suffix = f"{reason_suffix} ({lineage.diagnostics[0]})"
+        return pr_strategy.PrStrategyDecision(
+            strategy=normalized_strategy,
+            parent_state=None,
+            allow_pr=False,
+            reason=f"blocked:{reason_suffix}",
+        )
+
     parent_state = changeset_parent_lifecycle_state(
         issue,
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
+        beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
     )
-    return pr_strategy.pr_strategy_decision(branch_pr_strategy, parent_state=parent_state)
+    if (
+        normalized_strategy == "sequential"
+        and lineage.used_dependency_parent
+        and parent_state is None
+    ):
+        return pr_strategy.PrStrategyDecision(
+            strategy=normalized_strategy,
+            parent_state=None,
+            allow_pr=False,
+            reason="blocked:dependency-parent-state-unavailable",
+        )
+    return pr_strategy.pr_strategy_decision(normalized_strategy, parent_state=parent_state)
 
 
 def set_changeset_review_pending_state(
@@ -173,6 +227,7 @@ def handle_pushed_without_pr(
         repo_root=repo_root,
         git_path=git_path,
         branch_pr_strategy=branch_pr_strategy,
+        beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
     )
     if not decision.allow_pr:

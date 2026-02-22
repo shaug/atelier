@@ -11,7 +11,7 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .. import beads, config, git, messages, pr_strategy, prs, worktrees
+from .. import beads, config, dependency_lineage, git, messages, pr_strategy, prs, worktrees
 from ..io import die, say
 from ..worker import selection as worker_selection
 from .resolve import resolve_current_project_with_repo_root
@@ -231,7 +231,13 @@ def _build_changeset_details(
     pr_strategy_value: object,
 ) -> list[dict[str, object]]:
     details: list[dict[str, object]] = []
+    strategy = pr_strategy.normalize_pr_strategy(pr_strategy_value)
     branch_states: dict[str, str | None] = {}
+    changesets_by_id: dict[str, dict[str, object]] = {}
+    for issue in changesets:
+        issue_id = issue.get("id")
+        if isinstance(issue_id, str) and issue_id:
+            changesets_by_id[issue_id] = issue
     for issue in changesets:
         changeset_id = issue.get("id")
         if not isinstance(changeset_id, str) or not changeset_id:
@@ -239,7 +245,15 @@ def _build_changeset_details(
         labels = _issue_labels(issue)
         description = issue.get("description")
         fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-        parent_branch = fields.get("changeset.parent_branch")
+        root_branch = fields.get("changeset.root_branch")
+        normalized_root = root_branch if isinstance(root_branch, str) else None
+        if normalized_root is None and mapping is not None:
+            normalized_root = mapping.root_branch
+        lineage = dependency_lineage.resolve_parent_lineage(
+            issue,
+            root_branch=normalized_root,
+            lookup_issue=changesets_by_id.get,
+        )
         branch = None
         if mapping is not None:
             branch = mapping.changesets.get(changeset_id)
@@ -267,15 +281,46 @@ def _build_changeset_details(
                 "lifecycle_state": lifecycle,
                 "merge_conflict": merge_conflict,
                 "pr": _summarize_pr(pr_payload),
-                "parent_branch": parent_branch,
+                "_lineage_parent_branch": lineage.effective_parent_branch,
+                "_lineage_root_branch": lineage.root_branch,
+                "_lineage_used_dependency_parent": lineage.used_dependency_parent,
+                "_lineage_blocked": lineage.blocked,
+                "_lineage_blocker_reason": lineage.blocker_reason,
+                "_lineage_diagnostic": lineage.diagnostics[0] if lineage.diagnostics else None,
             }
         )
     for detail in details:
-        parent_branch = detail.pop("parent_branch", None)
+        parent_branch = detail.pop("_lineage_parent_branch", None)
+        root_branch = detail.pop("_lineage_root_branch", None)
+        used_dependency_parent = bool(detail.pop("_lineage_used_dependency_parent", False))
+        blocked_lineage = bool(detail.pop("_lineage_blocked", False))
+        blocker_reason = detail.pop("_lineage_blocker_reason", None)
+        lineage_diagnostic = detail.pop("_lineage_diagnostic", None)
+
+        if strategy == "sequential" and blocked_lineage:
+            suffix = str(blocker_reason or "dependency-parent-unresolved")
+            if isinstance(lineage_diagnostic, str) and lineage_diagnostic:
+                suffix = f"{suffix} ({lineage_diagnostic})"
+            detail["pr_allowed"] = False
+            detail["pr_gate_reason"] = f"blocked:{suffix}"
+            continue
+
         parent_state = None
         if isinstance(parent_branch, str):
-            parent_state = branch_states.get(parent_branch)
-        decision = pr_strategy.pr_strategy_decision(pr_strategy_value, parent_state=parent_state)
+            is_top_level_parent = (
+                isinstance(root_branch, str)
+                and parent_branch == root_branch
+                and not used_dependency_parent
+            )
+            if not is_top_level_parent:
+                parent_state = branch_states.get(parent_branch)
+
+        if strategy == "sequential" and used_dependency_parent and parent_state is None:
+            detail["pr_allowed"] = False
+            detail["pr_gate_reason"] = "blocked:dependency-parent-state-unavailable"
+            continue
+
+        decision = pr_strategy.pr_strategy_decision(strategy, parent_state=parent_state)
         detail["pr_allowed"] = decision.allow_pr
         detail["pr_gate_reason"] = decision.reason
     return details

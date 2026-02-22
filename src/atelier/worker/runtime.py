@@ -62,8 +62,20 @@ class WorkerLifecycleAdapter:
             git_path=git_path,
         )
 
-    def changeset_parent_branch(self, issue: Issue, *, root_branch: str) -> str:
-        return worker_work.changeset_parent_branch(issue, root_branch=root_branch)
+    def changeset_parent_branch(
+        self,
+        issue: Issue,
+        *,
+        root_branch: str,
+        beads_root: Path | None = None,
+        repo_root: Path | None = None,
+    ) -> str:
+        return worker_work.changeset_parent_branch(
+            issue,
+            root_branch=root_branch,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
 
     def changeset_pr_url(self, issue: Issue) -> str | None:
         return worker_work.changeset_pr_url(issue)

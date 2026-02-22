@@ -289,7 +289,14 @@ class WorkerLifecycleService(Protocol):
         git_path: str | None,
     ) -> ReviewFeedbackSnapshot: ...
 
-    def changeset_parent_branch(self, issue: Issue, *, root_branch: str) -> str: ...
+    def changeset_parent_branch(
+        self,
+        issue: Issue,
+        *,
+        root_branch: str,
+        beads_root: Path | None = None,
+        repo_root: Path | None = None,
+    ) -> str: ...
 
     def changeset_pr_url(self, issue: Issue) -> str | None: ...
 
