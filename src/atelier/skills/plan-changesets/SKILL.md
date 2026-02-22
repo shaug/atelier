@@ -36,7 +36,7 @@ children.
 ## Steps
 
 1. For each changeset, create a bead with the script:
-   - `python skills/plan_changesets/scripts/create_changeset.py --epic-id <epic_id> --title "<title>" --acceptance "<acceptance>" [--status-label cs:ready|cs:planned] [--description "<scope/guardrails>"] [--notes "<notes>"] [--beads-dir "<beads_dir>"] [--no-export]`
+   - `python skills/plan-changesets/scripts/create_changeset.py --epic-id <epic_id> --title "<title>" --acceptance "<acceptance>" [--status-label cs:ready|cs:planned] [--description "<scope/guardrails>"] [--notes "<notes>"] [--beads-dir "<beads_dir>"] [--no-export]`
 1. If decomposition would produce exactly one child changeset, stop and either:
    - keep the epic as the executable changeset, or
    - record explicit decomposition rationale in epic/changeset notes before

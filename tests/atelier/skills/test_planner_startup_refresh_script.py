@@ -6,7 +6,7 @@ from pathlib import Path
 
 def _load_script():
     scripts_dir = (
-        Path(__file__).resolve().parents[3] / "src/atelier/skills/planner_startup_check/scripts"
+        Path(__file__).resolve().parents[3] / "src/atelier/skills/planner-startup-check/scripts"
     )
     path = scripts_dir / "refresh_overview.py"
     spec = importlib.util.spec_from_file_location("test_planner_startup_refresh_script", path)
