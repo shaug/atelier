@@ -96,6 +96,7 @@ def test_packaged_planning_skills_include_scripts() -> None:
     assert "scripts/create_changeset.py" in definitions["plan-changesets"].files
     assert "scripts/create_epic.py" in definitions["plan-create-epic"].files
     assert "scripts/refresh_overview.py" in definitions["planner-startup-check"].files
+    assert "scripts/send_message.py" in definitions["mail-send"].files
 
 
 def test_publish_skill_mentions_pr_draft_and_github_prs() -> None:

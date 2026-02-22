@@ -20,6 +20,8 @@ The CLI does not enforce planning correctness. You do, via skills.
 - Run `planner-startup-check` before any planning work.
 - Run `plan-changeset-guardrails` after creating or updating changesets.
 - Use `plan-promote-epic` to promote epics, with explicit user confirmation.
+- Use `mail-send` script for planner-to-worker dispatch; if a worker is inactive,
+  reroute by creating new executable work instead of sending direct messages.
 
 ## No Approval Step (Except Promotion)
 
