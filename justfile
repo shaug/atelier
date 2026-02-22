@@ -23,6 +23,10 @@ install-dev:
   uv venv
   uv pip install -e .[dev]
 
+# Bootstrap repo-local hooks used for conventional-commit validation.
+hooks:
+  bash .githooks/bootstrap.sh
+
 # Run the test suite
 test:
   uv pip install -e .[dev]

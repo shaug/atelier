@@ -4,9 +4,16 @@ Atelier uses Conventional Commits and Release Please to drive SemVer releases.
 
 ## Commit requirements
 
-- Commit messages must follow Conventional Commits (enforced in CI).
+- Commit messages must follow Conventional Commits (enforced by local
+  `commit-msg` hook using `commitlint.config.cjs`).
 - No squash-merge required. Release notes can be edited in the Release PR before
   merging.
+
+Bootstrap or repair the hook path for existing clones and linked worktrees:
+
+```sh
+just hooks
+```
 
 ## Release flow
 

@@ -77,6 +77,26 @@ Command-specific details live in module docstrings under `src/atelier/commands`.
 - Git (for worktrees and branch operations)
 - `bd` on your PATH (Atelier's local planning store)
 
+## Conventional Commit Hooks
+
+This repository enforces Conventional Commits at local commit time with a
+repo-local hook path (`.githooks/`) and `commitlint.config.cjs`.
+
+Bootstrap or repair hooks for an existing clone:
+
+```sh
+just hooks
+```
+
+The bootstrap step is idempotent and does the following:
+
+- sets `core.hooksPath=.githooks` in the repository's common Git config
+- ensures tracked hook scripts are executable
+- keeps linked worktrees aligned through `.githooks/post-checkout`
+
+If your environment does not expose `commitlint`, the commit hook falls back to
+`npx`. If you use a custom binary path, set `ATELIER_COMMITLINT_BIN`.
+
 ## Agent Setup
 
 Atelier launches the agent CLI configured in `agent.default`. Install and

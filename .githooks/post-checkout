@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+bootstrap_script="${repo_root}/.githooks/bootstrap.sh"
+if [[ ! -x "${bootstrap_script}" ]]; then
+  chmod +x "${bootstrap_script}" 2>/dev/null || true
+fi
+
+ATELIER_HOOK_BOOTSTRAP_QUIET=1 "${bootstrap_script}" >/dev/null 2>&1 || true
