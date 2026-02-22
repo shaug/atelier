@@ -172,16 +172,17 @@ Changeset description fields include:
 
 Worker modes:
 
-`atelier work` supports deterministic env-to-CLI default translation:
+- `atelier work --mode prompt|auto` controls epic selection.
+- `atelier work --run-mode once|default|watch` controls session looping.
+- `atelier work --watch-interval <seconds>` controls watch polling cadence.
 
-```text
-| CLI default                | Env var                  | Built-in default | Accepted env values            |
-| -------------------------- | ------------------------ | ---------------- | ------------------------------ |
-| --mode                     | ATELIER_MODE             | prompt           | prompt, auto                   |
-| --run-mode                 | ATELIER_RUN_MODE         | default          | once, default, watch           |
-| --watch-interval-seconds   | ATELIER_WATCH_INTERVAL   | 60               | positive integer               |
-| --yes                      | ATELIER_WORK_YES         | false            | 1/true/yes/on, 0/false/no/off |
-```
+Internal runtime env variables (set by Atelier, not user config):
 
-Unsupported keys for this translation layer: `ATELIER_PLAN_TRACE`,
-`ATELIER_WORK_TRACE`, `ATELIER_LOG_LEVEL`, `ATELIER_NO_COLOR`.
+- Agent/session identity: `ATELIER_AGENT_ID`, `ATELIER_AGENT_SESSION`
+- Workspace context: `ATELIER_PROJECT`, `ATELIER_WORKSPACE`,
+  `ATELIER_WORKSPACE_DIR`
+- Hook handoff: `ATELIER_HOOKS_PATH`, `ATELIER_EPIC_ID`, `ATELIER_CHANGESET_ID`,
+  `ATELIER_PLAN_EPIC`
+- Planner hook sync context: `ATELIER_PLANNER_SYNC_ENABLED`,
+  `ATELIER_AGENT_BEAD_ID`, `ATELIER_PLANNER_WORKTREE`, `ATELIER_PLANNER_BRANCH`,
+  `ATELIER_DEFAULT_BRANCH`

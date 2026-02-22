@@ -23,6 +23,7 @@ except ImportError:  # pragma: no cover - legacy Click fallback
     from click.parser import split_arg_string
 
 from . import __version__, beads, config, git, paths
+from . import log as atelier_log
 from .commands import config as config_cmd
 from .commands import daemon as daemon_cmd
 from .commands import edit as edit_cmd
@@ -54,6 +55,7 @@ daemon_app = typer.Typer(help="Manage the Atelier daemon.")
 app.add_typer(daemon_app, name="daemon")
 _COMPLETE_ENV = "_ATELIER_COMPLETE"
 _DEFAULT_BRANCH_EXCLUDES = {"main", "master"}
+_LOG_LEVEL_CHOICES = ("trace", "debug", "info", "success", "warning", "error")
 
 
 def _ensure_completion_env() -> None:
@@ -195,11 +197,27 @@ def app_callback(
             is_eager=True,
         ),
     ] = False,
+    log_level: Annotated[
+        str | None,
+        typer.Option(
+            "--log-level",
+            help="set terminal log level (trace|debug|info|success|warning|error)",
+        ),
+    ] = None,
+    color: Annotated[
+        bool | None,
+        typer.Option(
+            "--color/--no-color",
+            help="enable or disable colorized terminal output",
+        ),
+    ] = None,
 ) -> None:
     """Workspace-first CLI for managing isolated, agent-assisted work.
 
     Args:
         version: When true, prints the CLI version and exits.
+        log_level: Optional log level override for this CLI invocation.
+        color: Optional color output override for this CLI invocation.
 
     Returns:
         None.
@@ -207,6 +225,17 @@ def app_callback(
     Example:
         $ atelier init
     """
+    if log_level is not None:
+        normalized = log_level.strip().lower()
+        if normalized not in _LOG_LEVEL_CHOICES:
+            choices = ", ".join(_LOG_LEVEL_CHOICES)
+            raise typer.BadParameter(
+                f"expected one of: {choices}",
+                param_hint="--log-level",
+            )
+        atelier_log.set_level(normalized)
+    if color is not None:
+        atelier_log.set_no_color(not color)
 
 
 @app.command(
@@ -465,9 +494,18 @@ def plan_command(
             help="accept defaults for interactive choices",
         ),
     ] = False,
+    trace: Annotated[
+        bool,
+        typer.Option(
+            "--trace",
+            help="show planner step timing details",
+        ),
+    ] = False,
 ) -> None:
     """Start a planner session."""
-    plan_cmd.run_planner(SimpleNamespace(epic_id=epic_id, reconcile=reconcile, yes=yes))
+    plan_cmd.run_planner(
+        SimpleNamespace(epic_id=epic_id, reconcile=reconcile, yes=yes, trace=trace)
+    )
 
 
 @app.command("hook", help="Run an agent hook event handler.")
@@ -516,14 +554,21 @@ def work_command(
         str | None,
         typer.Option(
             "--mode",
-            help="worker selection mode: prompt or auto (default from ATELIER_MODE)",
+            help="worker selection mode: prompt or auto (default: prompt)",
         ),
     ] = None,
     run_mode: Annotated[
         str | None,
         typer.Option(
             "--run-mode",
-            help="worker run mode: once, default, watch (default from ATELIER_RUN_MODE)",
+            help="worker run mode: once, default, watch (default: default)",
+        ),
+    ] = None,
+    watch_interval: Annotated[
+        int | None,
+        typer.Option(
+            "--watch-interval",
+            help="watch polling interval in seconds (default: 60)",
         ),
     ] = None,
     queue: Annotated[
@@ -562,6 +607,7 @@ def work_command(
             epic_id=epic_id,
             mode=mode,
             run_mode=run_mode,
+            watch_interval=watch_interval,
             queue=queue,
             dry_run=dry_run,
             yes=yes,

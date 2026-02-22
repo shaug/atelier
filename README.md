@@ -207,6 +207,7 @@ atelier work at-epic123
 atelier work --mode auto
 atelier work --run-mode once
 atelier work --run-mode watch
+atelier work --run-mode watch --watch-interval 30
 ```
 
 `atelier work` will:
@@ -214,7 +215,8 @@ atelier work --run-mode watch
 - claim or select the epic to work on
 - pick the next ready changeset
 - ensure the worktree and changeset branch mapping exist
-- repeat or watch depending on `--run-mode` / `ATELIER_RUN_MODE`
+- repeat or watch depending on `--run-mode` (`--watch-interval` for watch
+  cadence)
 
 Supported `ATELIER_*` -> CLI-default translations for `atelier work`:
 
@@ -234,7 +236,8 @@ ATELIER_WORK_YES=1 atelier work
 ```
 
 Unsupported keys for this CLI-default translation layer: `ATELIER_PLAN_TRACE`,
-`ATELIER_WORK_TRACE`, `ATELIER_LOG_LEVEL`, `ATELIER_NO_COLOR`.
+`ATELIER_WORK_TRACE`, `ATELIER_LOG_LEVEL`, `ATELIER_NO_COLOR`. Use global CLI
+flags instead: `--log-level` and `--color/--no-color`.
 
 Run the optional daemon (full-stack mode):
 
