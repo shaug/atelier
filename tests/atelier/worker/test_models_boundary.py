@@ -31,6 +31,24 @@ def test_parse_issue_boundary_normalizes_dependency_and_parent_fields() -> None:
     assert boundary.labels == ("at:changeset", "cs:ready")
 
 
+def test_parse_issue_boundary_derives_parent_from_parent_child_dependency() -> None:
+    issue = {
+        "id": "at-123",
+        "status": "open",
+        "labels": ["at:changeset"],
+        "parent": None,
+        "dependencies": [
+            {"relation": "parent-child", "id": "at-1"},
+            {"id": "at-2"},
+        ],
+    }
+
+    boundary = parse_issue_boundary(issue, source="test")
+
+    assert boundary.parent_id == "at-1"
+    assert boundary.dependency_ids == ("at-2",)
+
+
 def test_parse_issue_boundary_rejects_missing_issue_id() -> None:
     with pytest.raises(ValueError, match="invalid beads issue payload"):
         parse_issue_boundary({"status": "open"}, source="test")

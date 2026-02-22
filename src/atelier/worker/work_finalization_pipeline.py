@@ -16,6 +16,7 @@ from .work_finalization_integration import (
     format_publish_diagnostics,
 )
 from .work_finalization_state import (
+    align_existing_pr_base,
     changeset_integration_signal,
     changeset_waiting_on_review_or_signals,
     close_completed_container_changesets,
@@ -207,6 +208,25 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         self, repo_slug: str | None, branch: str
     ) -> tuple[dict[str, object] | None, str | None]:
         return lookup_pr_payload_diagnostic(repo_slug, branch)
+
+    def align_existing_pr_base(
+        self,
+        *,
+        issue: dict[str, object],
+        pr_payload: dict[str, object],
+        context: worker_finalize_pipeline.FinalizePipelineContext,
+    ) -> tuple[bool, str | None]:
+        if not context.repo_slug:
+            return False, "missing repo slug for PR base alignment"
+        return align_existing_pr_base(
+            issue=issue,
+            changeset_id=context.changeset_id,
+            pr_payload=pr_payload,
+            repo_slug=context.repo_slug,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
+            git_path=context.git_path,
+        )
 
     def update_changeset_review_from_pr(
         self,

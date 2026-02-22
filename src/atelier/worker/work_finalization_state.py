@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import agents, beads, changeset_fields, changesets, git, lifecycle, pr_strategy, prs
+from .. import agents, beads, changeset_fields, changesets, exec, git, lifecycle, pr_strategy, prs
 from ..io import say
 from ..worker import finalization_service as worker_finalization_service
 from ..worker import integration_service as worker_integration_service
@@ -338,6 +338,59 @@ def changeset_root_branch(issue: dict[str, object]) -> str | None:
     return changeset_fields.root_branch(issue)
 
 
+def _normalize_branch(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip()
+    if not normalized or normalized.lower() == "null":
+        return ""
+    return normalized
+
+
+def _resolve_workspace_parent_branch(
+    issue: dict[str, object],
+    *,
+    root_branch: str,
+    parent_branch: str,
+    workspace_parent_branch: str,
+    beads_root: Path | None,
+    repo_root: Path,
+) -> str:
+    resolved_workspace_parent = _normalize_branch(workspace_parent_branch)
+    if resolved_workspace_parent:
+        return resolved_workspace_parent
+    if beads_root is None:
+        return ""
+    if not root_branch or not parent_branch:
+        return ""
+    if root_branch != parent_branch:
+        return ""
+    epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
+    if not epic_id:
+        return ""
+    epic_issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
+    if not epic_issues:
+        return ""
+    return _normalize_branch(extract_workspace_parent_branch(epic_issues[0]))
+
+
+def _branch_integrated_into(
+    branch: str, target_branch: str, *, repo_root: Path, git_path: str | None
+) -> bool:
+    branch_ref = branch_ref_for_lookup(repo_root, branch, git_path=git_path)
+    target_ref = branch_ref_for_lookup(repo_root, target_branch, git_path=git_path)
+    if not target_ref:
+        return False
+    if not branch_ref:
+        # Branch is already gone; treat this as integrated lineage.
+        return True
+    if git.git_is_ancestor(repo_root, branch_ref, target_ref, git_path=git_path) is True:
+        return True
+    return (
+        git.git_branch_fully_applied(repo_root, target_ref, branch_ref, git_path=git_path) is True
+    )
+
+
 def changeset_base_branch(
     issue: dict[str, object],
     *,
@@ -358,43 +411,191 @@ def changeset_base_branch(
     """
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    root_branch = changeset_root_branch(issue)
-    parent_branch = changeset_parent_branch(issue, root_branch=root_branch or "")
-    workspace_parent_branch = fields.get("workspace.parent_branch")
-    normalized_parent = parent_branch.strip() if isinstance(parent_branch, str) else ""
-    normalized_root = root_branch.strip() if isinstance(root_branch, str) else ""
-    normalized_workspace_parent = (
-        workspace_parent_branch.strip() if isinstance(workspace_parent_branch, str) else ""
+    root_branch = _normalize_branch(changeset_root_branch(issue))
+    parent_branch = _normalize_branch(changeset_parent_branch(issue, root_branch=root_branch))
+    workspace_parent_branch = _resolve_workspace_parent_branch(
+        issue,
+        root_branch=root_branch,
+        parent_branch=parent_branch,
+        workspace_parent_branch=str(fields.get("workspace.parent_branch") or ""),
+        beads_root=beads_root,
+        repo_root=repo_root,
     )
-    if (
-        not normalized_workspace_parent
-        and beads_root is not None
-        and normalized_root
-        and normalized_parent
-        and normalized_parent == normalized_root
-    ):
-        epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
-        if epic_id:
-            epic_issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
-            if epic_issues:
-                resolved_parent = extract_workspace_parent_branch(epic_issues[0])
-                if resolved_parent:
-                    normalized_workspace_parent = resolved_parent
-    # Top-level changesets often persisted parent=root; use workspace parent
-    # for PR base when available so PR creation targets mainline.
-    if (
-        normalized_workspace_parent
-        and normalized_workspace_parent.lower() != "null"
-        and normalized_root
-        and normalized_parent
-        and normalized_parent == normalized_root
-    ):
-        return normalized_workspace_parent
-    if normalized_parent and normalized_parent.lower() != "null":
-        return normalized_parent
+    if parent_branch and workspace_parent_branch and parent_branch == root_branch:
+        # First reviewable changeset in a stack should target integration
+        # branch, not the epic root branch.
+        return workspace_parent_branch
+    if parent_branch and workspace_parent_branch and parent_branch != workspace_parent_branch:
+        if _branch_integrated_into(
+            parent_branch,
+            workspace_parent_branch,
+            repo_root=repo_root,
+            git_path=git_path,
+        ):
+            return workspace_parent_branch
+    if parent_branch:
+        return parent_branch
+    if workspace_parent_branch:
+        return workspace_parent_branch
     if root_branch:
         return root_branch
     return git.git_default_branch(repo_root, git_path=git_path)
+
+
+def align_existing_pr_base(
+    *,
+    issue: dict[str, object],
+    changeset_id: str,
+    pr_payload: dict[str, object],
+    repo_slug: str,
+    beads_root: Path,
+    repo_root: Path,
+    git_path: str | None,
+) -> tuple[bool, str | None]:
+    """Align an existing PR base to the expected changeset parent lineage.
+
+    Args:
+        issue: Value for ``issue``.
+        changeset_id: Value for ``changeset_id``.
+        pr_payload: Value for ``pr_payload``.
+        repo_slug: Value for ``repo_slug``.
+        beads_root: Value for ``beads_root``.
+        repo_root: Value for ``repo_root``.
+        git_path: Value for ``git_path``.
+
+    Returns:
+        Tuple of ``(ok, detail)``. ``detail`` contains remediation or update
+        notes when present.
+    """
+
+    def run_git(args: list[str]) -> tuple[bool, str]:
+        result = exec.try_run_command(
+            git.git_command(["-C", str(repo_root), *args], git_path=git_path)
+        )
+        if result is None:
+            return False, "missing required command: git"
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            return False, detail or f"command failed: git {' '.join(args)}"
+        return True, (result.stdout or "").strip()
+
+    def ensure_local_branch(branch: str) -> tuple[bool, str | None]:
+        local_ref = f"refs/heads/{branch}"
+        if git.git_ref_exists(repo_root, local_ref, git_path=git_path):
+            return True, None
+        remote_ref = f"refs/remotes/origin/{branch}"
+        if not git.git_ref_exists(repo_root, remote_ref, git_path=git_path):
+            return False, f"missing local/remote branch ref for {branch!r}"
+        ok, detail = run_git(["branch", branch, f"origin/{branch}"])
+        if not ok:
+            return False, detail
+        return True, None
+
+    expected_base = changeset_base_branch(
+        issue,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        git_path=git_path,
+    )
+    expected_branch = _normalize_branch(expected_base)
+    if not expected_branch:
+        return False, "unable to resolve expected PR base branch"
+
+    boundary = prs.parse_pr_boundary(pr_payload, source=f"align_existing_pr_base:{changeset_id}")
+    if boundary is None:
+        return False, "missing PR payload"
+    actual_branch = _normalize_branch(boundary.base_ref_name)
+    if not actual_branch:
+        return False, "PR payload missing baseRefName"
+    if actual_branch == expected_branch:
+        return True, None
+
+    work_branch = _normalize_branch(changeset_work_branch(issue))
+    if not work_branch:
+        return False, "missing changeset.work_branch metadata for PR base alignment"
+
+    clean = git.git_is_clean(repo_root, git_path=git_path)
+    if clean is False:
+        return False, "repository must be clean before PR base alignment"
+    if clean is None:
+        return False, "unable to determine repository clean status before base alignment"
+
+    ok, detail = ensure_local_branch(work_branch)
+    if not ok:
+        return False, detail
+    ok, detail = ensure_local_branch(expected_branch)
+    if not ok:
+        return False, detail
+
+    rebased = False
+    rebase_source_ref = branch_ref_for_lookup(repo_root, actual_branch, git_path=git_path)
+    current_branch = git.git_current_branch(repo_root, git_path=git_path)
+    if rebase_source_ref:
+        ok, detail = run_git(["checkout", work_branch])
+        if not ok:
+            return False, detail
+        ok, detail = run_git(["rebase", "--onto", expected_branch, rebase_source_ref, work_branch])
+        if not ok:
+            run_git(["rebase", "--abort"])
+            if current_branch and current_branch != work_branch:
+                run_git(["checkout", current_branch])
+            return False, f"failed to restack {work_branch} onto {expected_branch}: {detail}"
+        rebased = True
+        if current_branch and current_branch != work_branch:
+            run_git(["checkout", current_branch])
+        ok, detail = run_git(["push", "--force-with-lease", "origin", work_branch])
+        if not ok:
+            return False, f"failed to force-push restacked branch {work_branch}: {detail}"
+
+    pr_number = boundary.number
+    if pr_number is None:
+        return False, "PR payload missing number for base retarget"
+    edit_result = exec.try_run_command(
+        [
+            "gh",
+            "pr",
+            "edit",
+            str(pr_number),
+            "--repo",
+            repo_slug,
+            "--base",
+            expected_branch,
+        ]
+    )
+    if edit_result is None:
+        return False, "missing required command: gh"
+    if edit_result.returncode != 0:
+        detail = (edit_result.stderr or edit_result.stdout or "").strip()
+        return False, detail or "gh pr edit failed"
+
+    root_branch = changeset_root_branch(issue)
+    parent_base = git.git_rev_parse(repo_root, expected_branch, git_path=git_path)
+    root_base = (
+        git.git_rev_parse(repo_root, root_branch, git_path=git_path) if root_branch else None
+    )
+    beads.update_changeset_branch_metadata(
+        changeset_id,
+        root_branch=root_branch,
+        parent_branch=expected_branch,
+        work_branch=work_branch,
+        root_base=root_base,
+        parent_base=parent_base,
+        beads_root=beads_root,
+        cwd=repo_root,
+        allow_override=True,
+    )
+    detail_message = (
+        f"PR base mismatch corrected for {changeset_id}: "
+        f"expected={expected_branch}, actual={actual_branch}; "
+        f"{'restacked and retargeted' if rebased else 'retargeted'}."
+    )
+    beads.run_bd_command(
+        ["update", changeset_id, "--append-notes", f"publish_info: {detail_message}"],
+        beads_root=beads_root,
+        cwd=repo_root,
+        allow_failure=True,
+    )
+    return True, detail_message
 
 
 def render_changeset_pr_body(issue: dict[str, object]) -> str:
@@ -1152,6 +1353,7 @@ def resolve_epic_id_for_changeset(
 
 
 __all__ = [
+    "align_existing_pr_base",
     "attempt_create_draft_pr",
     "branch_ref_for_lookup",
     "changeset_base_branch",

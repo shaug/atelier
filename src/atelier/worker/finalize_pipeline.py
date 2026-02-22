@@ -87,6 +87,14 @@ class FinalizePipelineService(Protocol):
         self, repo_slug: str | None, branch: str
     ) -> tuple[Issue | None, str | None]: ...
 
+    def align_existing_pr_base(
+        self,
+        *,
+        issue: Issue,
+        pr_payload: Issue,
+        context: FinalizePipelineContext,
+    ) -> tuple[bool, str | None]: ...
+
     def update_changeset_review_from_pr(
         self,
         changeset_id: str,
@@ -419,6 +427,40 @@ def run_finalize_pipeline(
         )
         return FinalizeResult(continue_running=False, reason="changeset_blocked_publish_missing")
     if branch_pr and pr_payload:
+        aligned, alignment_detail = service.align_existing_pr_base(
+            issue=issue,
+            pr_payload=pr_payload,
+            context=context,
+        )
+        if not aligned:
+            service.mark_changeset_in_progress(changeset_id)
+            body = (
+                "Detected a PR base mismatch but automatic base correction "
+                "failed during finalize.\n"
+            )
+            if alignment_detail:
+                body = f"{body}Detail: {alignment_detail}\n"
+            body = (
+                f"{body}Action: resolve PR base mismatch (expected base for "
+                f"`{work_branch}`) and rerun worker finalize."
+            )
+            service.send_planner_notification(
+                subject=f"NEEDS-DECISION: PR base mismatch ({changeset_id})",
+                body=body,
+                agent_id=agent_id,
+                thread_id=changeset_id,
+            )
+            return FinalizeResult(
+                continue_running=False,
+                reason="changeset_pr_base_alignment_failed",
+            )
+        if alignment_detail:
+            atelier_log.info(
+                f"changeset={changeset_id} PR base alignment applied: {alignment_detail}"
+            )
+            refreshed_payload = service.lookup_pr_payload(repo_slug, work_branch)
+            if refreshed_payload is not None:
+                pr_payload = refreshed_payload
         service.set_changeset_review_pending_state(
             changeset_id=changeset_id,
             pr_payload=pr_payload,
