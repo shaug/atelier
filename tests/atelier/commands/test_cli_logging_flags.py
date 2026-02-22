@@ -19,10 +19,11 @@ def test_global_log_level_flag_sets_runtime_level() -> None:
 
 def test_global_log_level_rejects_unknown_values() -> None:
     runner = CliRunner()
-    result = runner.invoke(cli.app, ["--log-level", "loud", "status"])
+    result = runner.invoke(cli.app, ["--log-level", "loud", "status"], color=False)
 
     assert result.exit_code != 0
-    assert "Invalid value for --log-level" in result.output
+    assert "--log-level" in result.output
+    assert "expected one of" in result.output
 
 
 def test_no_color_flag_disables_colorized_output() -> None:
