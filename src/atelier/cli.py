@@ -475,12 +475,16 @@ def hook_command(
     event: Annotated[
         str | None,
         typer.Argument(
-            help="hook event name (session-start|pre-compact|stop)",
+            help="hook event name (session-start|pre-compact|stop|commit-msg)",
         ),
+    ] = None,
+    message_file: Annotated[
+        Path | None,
+        typer.Option("--message-file", help="commit message path for commit-msg validation"),
     ] = None,
 ) -> None:
     """Run a hook command for agent integrations."""
-    hook_cmd.run_hook(SimpleNamespace(event=event))
+    hook_cmd.run_hook(SimpleNamespace(event=event, message_file=message_file))
 
 
 @daemon_app.command("start", help="Start the Atelier daemon.")

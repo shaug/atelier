@@ -68,7 +68,7 @@ def parse_hook_event(value: str | None) -> str:
     if not value:
         return "session-start"
     normalized = value.strip().lower().replace("_", "-")
-    allowed = {"session-start", "pre-compact", "stop"}
+    allowed = {"session-start", "pre-compact", "stop", "commit-msg"}
     if normalized not in allowed:
         die(f"unsupported hook event: {value}")
     return normalized

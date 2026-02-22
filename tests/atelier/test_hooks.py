@@ -44,3 +44,7 @@ def test_ensure_hooks_path_sets_env() -> None:
     env: dict[str, str] = {}
     hooks.ensure_hooks_path(env, Path("/tmp/hooks.json"))
     assert env["ATELIER_HOOKS_PATH"] == "/tmp/hooks.json"
+
+
+def test_parse_hook_event_accepts_commit_msg() -> None:
+    assert hooks.parse_hook_event("commit-msg") == "commit-msg"

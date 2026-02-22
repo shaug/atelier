@@ -147,6 +147,10 @@ Atelier planning state. They are treated as external ticket sources.
     - `ATELIER_RUN_MODE` -> `--run-mode`
     - `ATELIER_WATCH_INTERVAL` -> watch interval default
     - `ATELIER_WORK_YES` -> `--yes`
+  - Bootstraps conventional-commit `commit-msg` validation when the repository
+    has commitlint config.
+  - Uses run mode (`ATELIER_RUN_MODE`) to decide whether to run once, loop while
+    work is ready, or watch for new work.
 
 - `atelier daemon`
 

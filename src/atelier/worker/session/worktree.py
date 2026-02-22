@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ... import beads, git, worktrees
+from ... import beads, git, worktree_hooks, worktrees
 
 
 @dataclass(frozen=True)
@@ -97,6 +97,7 @@ def prepare_worktrees(
                 f"work={branch!r})."
             )
         control.dry_run_log("Would ensure git worktrees and checkout.")
+        control.dry_run_log("Would bootstrap conventional-commit git hooks.")
         return WorktreePreparation(
             epic_worktree_path=epic_worktree_path,
             changeset_worktree_path=changeset_worktree_path,
@@ -142,6 +143,14 @@ def prepare_worktrees(
         parent_branch=changeset_parent_branch,
         git_path=git_path,
     )
+    hook_targets = {epic_worktree_path}
+    if changeset_worktree_path is not None:
+        hook_targets.add(changeset_worktree_path)
+    for hook_target in sorted(hook_targets, key=lambda path: str(path)):
+        worktree_hooks.bootstrap_conventional_commit_hook(
+            hook_target,
+            git_path=git_path,
+        )
     if changeset_id:
         root_base = git.git_rev_parse(changeset_worktree_path, root_branch_value, git_path=git_path)
         parent_base = git.git_rev_parse(

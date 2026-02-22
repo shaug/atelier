@@ -39,3 +39,16 @@ def test_hook_precompact_runs_prime_and_planner_sync(tmp_path: Path) -> None:
         git_path="git",
         emit=hook_cmd.say,
     )
+
+
+def test_hook_commit_msg_validates_without_project_context(tmp_path: Path) -> None:
+    message_file = tmp_path / "COMMIT_EDITMSG"
+    message_file.write_text("feat(worker): bootstrap hooks\n", encoding="utf-8")
+
+    with (
+        patch("atelier.commands.hook.hooks.parse_hook_event", return_value="commit-msg"),
+        patch("atelier.commands.hook.resolve_current_project_with_repo_root") as resolve_project,
+    ):
+        hook_cmd.run_hook(SimpleNamespace(event="commit-msg", message_file=message_file))
+
+    resolve_project.assert_not_called()

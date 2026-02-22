@@ -194,6 +194,7 @@ atelier work --run-mode watch
 - claim or select the epic to work on
 - pick the next ready changeset
 - ensure the worktree and changeset branch mapping exist
+- bootstrap a managed `commit-msg` hook when the repo has commitlint config
 - repeat or watch depending on `--run-mode` / `ATELIER_RUN_MODE`
 
 Supported `ATELIER_*` -> CLI-default translations for `atelier work`:
@@ -275,6 +276,23 @@ atelier gc
 - Configuration lives in `config.sys.json`/`config.user.json` under the Atelier
   data directory.
 - Worktrees live under the data directory and are keyed by epic id.
+
+## Git Hook Bootstrap
+
+When a repo includes commitlint config (for example `commitlint.config.cjs`),
+`atelier work` bootstraps a managed `commit-msg` hook in the repository hooks
+directory. The hook runs any existing `commit-msg` implementation first, then
+validates conventional commit headers via `atelier hook commit-msg`.
+
+Recovery commands:
+
+```sh
+# Reinstall the managed commit-msg hook (non-destructive to existing hooks)
+atelier work <epic-id> --run-mode once
+
+# Manually validate a draft message file
+atelier hook commit-msg --message-file .git/COMMIT_EDITMSG
+```
 
 ## CLI Reference
 
