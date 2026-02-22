@@ -113,18 +113,11 @@ class PlannerSyncSettings:
 
     @classmethod
     def from_environment(cls) -> PlannerSyncSettings:
-        """Resolve planner sync settings from environment variables."""
-        raw_interval = _parse_int(
-            os.environ.get("ATELIER_PLANNER_SYNC_INTERVAL_SECONDS"),
-            default=DEFAULT_INTERVAL_SECONDS,
+        """Resolve planner sync settings using built-in defaults."""
+        return cls(
+            interval_seconds=max(DEFAULT_INTERVAL_SECONDS, MIN_INTERVAL_SECONDS),
+            poll_seconds=max(5, DEFAULT_POLL_SECONDS),
         )
-        interval = max(raw_interval, MIN_INTERVAL_SECONDS)
-        raw_poll = _parse_int(
-            os.environ.get("ATELIER_PLANNER_SYNC_POLL_SECONDS"),
-            default=DEFAULT_POLL_SECONDS,
-        )
-        poll_seconds = max(5, raw_poll)
-        return cls(interval_seconds=interval, poll_seconds=poll_seconds)
 
 
 @dataclass(frozen=True)

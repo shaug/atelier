@@ -37,6 +37,18 @@ class _DummyPlannerSyncMonitor:
         self.stopped = True
 
 
+def test_trace_flag_defaults_to_disabled_even_when_legacy_env_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ATELIER_PLAN_TRACE", "1")
+
+    assert plan_cmd._trace_enabled(False) is False
+
+
+def test_trace_flag_enables_timing_output() -> None:
+    assert plan_cmd._trace_enabled(True) is True
+
+
 def test_plan_starts_agent_session(tmp_path: Path) -> None:
     worktree_path = tmp_path / "worktrees" / "planner"
     agent = AgentHome(

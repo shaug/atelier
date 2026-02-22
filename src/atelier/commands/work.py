@@ -58,6 +58,7 @@ def start_worker(args: object) -> None:
     setattr(args, "yes", yes_default.value)
     mode = normalize_mode(getattr(args, "mode", None))
     run_mode = normalize_run_mode(getattr(args, "run_mode", None))
+    watch_interval = watch_interval_seconds(getattr(args, "watch_interval", None))
     dry_run = bool(getattr(args, "dry_run", False))
     session_key = agent_home.generate_session_key()
     cleanup_agent: agent_home.AgentHome | None = None
@@ -89,7 +90,7 @@ def start_worker(args: object) -> None:
             report_worker_summary=lambda summary, is_dry_run: report_worker_summary(
                 summary, dry_run=is_dry_run
             ),
-            watch_interval_seconds=watch_interval_seconds,
+            watch_interval_seconds=lambda: watch_interval,
             dry_run_log=dry_run_log,
             emit=say,
             sleep_fn=time.sleep,

@@ -465,9 +465,18 @@ def plan_command(
             help="accept defaults for interactive choices",
         ),
     ] = False,
+    trace: Annotated[
+        bool,
+        typer.Option(
+            "--trace",
+            help="show planner step timing details",
+        ),
+    ] = False,
 ) -> None:
     """Start a planner session."""
-    plan_cmd.run_planner(SimpleNamespace(epic_id=epic_id, reconcile=reconcile, yes=yes))
+    plan_cmd.run_planner(
+        SimpleNamespace(epic_id=epic_id, reconcile=reconcile, yes=yes, trace=trace)
+    )
 
 
 @app.command("hook", help="Run an agent hook event handler.")
@@ -516,14 +525,21 @@ def work_command(
         str | None,
         typer.Option(
             "--mode",
-            help="worker selection mode: prompt or auto (default from ATELIER_MODE)",
+            help="worker selection mode: prompt or auto (default: prompt)",
         ),
     ] = None,
     run_mode: Annotated[
         str | None,
         typer.Option(
             "--run-mode",
-            help="worker run mode: once, default, watch (default from ATELIER_RUN_MODE)",
+            help="worker run mode: once, default, watch (default: default)",
+        ),
+    ] = None,
+    watch_interval: Annotated[
+        int | None,
+        typer.Option(
+            "--watch-interval",
+            help="watch polling interval in seconds (default: 60)",
         ),
     ] = None,
     queue: Annotated[
@@ -562,6 +578,7 @@ def work_command(
             epic_id=epic_id,
             mode=mode,
             run_mode=run_mode,
+            watch_interval=watch_interval,
             queue=queue,
             dry_run=dry_run,
             yes=yes,

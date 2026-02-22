@@ -229,8 +229,7 @@ def _resolve_provider(
     )
     requested = (provider_slug or "").strip().lower() or None
     if requested is None:
-        env_provider = os.environ.get("ATELIER_EXTERNAL_PROVIDER", "").strip().lower()
-        requested = env_provider or (context.project_config.project.provider or "").strip().lower()
+        requested = (context.project_config.project.provider or "").strip().lower()
         if not requested:
             if len(contexts) == 1:
                 return contexts[0].provider
