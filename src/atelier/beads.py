@@ -543,6 +543,67 @@ def parse_description_fields(description: str | None) -> dict[str, str]:
     return _parse_description_fields(description)
 
 
+def issue_description_fields(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> dict[str, str]:
+    """Read parsed description fields for a bead.
+
+    Args:
+        issue_id: Bead identifier to inspect.
+        beads_root: Path to the Beads store.
+        cwd: Repository working directory for `bd`.
+
+    Returns:
+        Parsed description key/value fields, or an empty dict when the issue is
+        missing.
+    """
+    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        return {}
+    description = issues[0].get("description")
+    text = description if isinstance(description, str) else ""
+    return _parse_description_fields(text)
+
+
+def update_issue_description_fields(
+    issue_id: str,
+    fields: dict[str, str | None],
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> dict[str, object]:
+    """Upsert multiple description fields on a bead.
+
+    Args:
+        issue_id: Bead identifier to update.
+        fields: Mapping of description keys to values. `None` stores `null`.
+        beads_root: Path to the Beads store.
+        cwd: Repository working directory for `bd`.
+
+    Returns:
+        Refreshed issue payload when available, otherwise the pre-update issue.
+    """
+    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        die(f"issue not found: {issue_id}")
+    issue = issues[0]
+    description = issue.get("description")
+    updated = description if isinstance(description, str) else ""
+    changed = False
+    for key, value in fields.items():
+        next_value = _update_description_field(updated, key=key, value=value)
+        if next_value != updated:
+            changed = True
+            updated = next_value
+    if changed:
+        _update_issue_description(issue_id, updated, beads_root=beads_root, cwd=cwd)
+    refreshed = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+    return refreshed[0] if refreshed else issue
+
+
 def _normalize_hook_value(value: object) -> str | None:
     if value is None:
         return None

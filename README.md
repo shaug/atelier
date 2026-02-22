@@ -396,6 +396,11 @@ Options:
 Start a planner session for epics. Planner sessions run in a dedicated worktree
 and use the agent runtime for interactive planning.
 
+Planner sessions automatically sync their planner worktree to the configured
+default branch at startup, then continue periodic freshness checks while the
+session is active. Sync metadata is recorded on the planner agent bead under
+`planner_sync.*` fields (last synced sha/time, last attempt/result).
+
 Usage:
 
 ```sh

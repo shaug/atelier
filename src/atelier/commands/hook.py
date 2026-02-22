@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .. import beads, config, hooks
+from .. import beads, config, hooks, planner_sync
 from ..io import say
 from .resolve import resolve_current_project_with_repo_root
 
@@ -23,9 +23,18 @@ def run_hook(args: object) -> None:
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
     event = hooks.parse_hook_event(getattr(args, "event", None))
+    git_path = config.resolve_git_path(project_config)
 
     if event in {"session-start", "pre-compact"}:
         beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
+        planner_sync.maybe_sync_from_hook(
+            event=event,
+            project_data_dir=project_data_dir,
+            repo_root=repo_root,
+            beads_root=beads_root,
+            git_path=git_path,
+            emit=say,
+        )
 
     if event != "session-start":
         return
