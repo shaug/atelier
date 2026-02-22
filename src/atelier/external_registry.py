@@ -78,9 +78,14 @@ class PlannerProviderResolution:
     github_repo: str | None
 
 
+def _normalize_skill_key(value: str) -> str:
+    """Normalize skill names for deterministic provider alias lookups."""
+    return value.strip().lower().replace("_", "-")
+
+
 def _provider_for_skill(skill_dir: Path) -> str | None:
     """Best-effort provider inference for known ticketing skill names."""
-    mapped = _SKILL_PROVIDER_MAP.get(skill_dir.name.strip().lower())
+    mapped = _SKILL_PROVIDER_MAP.get(_normalize_skill_key(skill_dir.name))
     if mapped:
         return mapped
     skill_doc = skill_dir / "SKILL.md"
@@ -99,8 +104,8 @@ def _provider_for_skill(skill_dir: Path) -> str | None:
             break
         if not line.lower().startswith("name:"):
             continue
-        value = line.split(":", 1)[1].strip().strip("'\"").lower()
-        return _SKILL_PROVIDER_MAP.get(value)
+        value = line.split(":", 1)[1].strip().strip("'\"")
+        return _SKILL_PROVIDER_MAP.get(_normalize_skill_key(value))
     return None
 
 

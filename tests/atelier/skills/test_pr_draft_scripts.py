@@ -11,7 +11,7 @@ def _load_script_module():
         / "src"
         / "atelier"
         / "skills"
-        / "pr_draft"
+        / "pr-draft"
         / "scripts"
         / "render_tickets_section.py"
     )

@@ -275,7 +275,7 @@ ticket records in return.
 
 Planner should use the `tickets` skill as the orchestration layer. It delegates
 provider-specific API calls to provider skills (for example `github-issues`) and
-uses `external_import`/`external_sync` to update Beads metadata.
+uses `external-import`/`external-sync` to update Beads metadata.
 
 ### Provider skill discovery
 

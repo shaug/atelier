@@ -37,6 +37,11 @@ class ProjectSkillsSyncResult:
     detail: str | None = None
 
 
+def _normalize_skill_name(value: str) -> str:
+    """Return a canonical skill-name key for metadata lookups."""
+    return value.strip().lower().replace("_", "-")
+
+
 def _skills_root() -> Traversable:
     return resources.files("atelier").joinpath("skills")
 
@@ -115,6 +120,7 @@ def workspace_skill_state(
     raw_stored = stored_metadata or {}
     stored: dict[str, dict[str, str | None]] = {}
     for name, entry in raw_stored.items():
+        canonical_name = _normalize_skill_name(str(name))
         payload: dict[str, object] = {}
         if isinstance(entry, dict):
             payload = entry
@@ -133,7 +139,7 @@ def workspace_skill_state(
         digest = payload.get("hash")
         if version is None and digest is None:
             continue
-        stored[name] = {
+        stored[canonical_name] = {
             "version": str(version) if version is not None else None,
             "hash": str(digest) if digest is not None else None,
         }

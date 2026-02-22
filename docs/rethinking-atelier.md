@@ -71,7 +71,7 @@ Epic completion rule:
   evaluate whether any additional work needs to be defined. If not, close the
   epic. If more work is required, create new changesets before closing. Status
   output reports `ready_to_close` when no remaining changesets exist; use
-  `work_done` to close the epic and clear the hook.
+  `work-done` to close the epic and clear the hook.
 
 ### Worker Selection Modes
 
@@ -482,7 +482,7 @@ permitted so work is backed up without creating reviewer noise.
 
 ### PR Drafting (Agent Assist)
 
-PR creation is mechanical except for the summary text. Use the `pr_draft` skill
+PR creation is mechanical except for the summary text. Use the `pr-draft` skill
 to generate the PR title/body from the changeset bead and diff, then open the PR
 via `github-prs` when the strategy allows it.
 
@@ -548,8 +548,8 @@ Recommended labels:
 - ext:github / ext:linear / ext:jira
 - ext:beads (for source-repo Beads issues)
 
-Integration should be handled by skills (e.g., `external_import`,
-`external_sync`, `external_close`), with optional molecules for multi-step
+Integration should be handled by skills (e.g., `external-import`,
+`external-sync`, `external-close`), with optional molecules for multi-step
 sync/approval workflows.
 
 Out-of-the-box provider support should include GitHub Issues. Additional
@@ -568,7 +568,7 @@ inbox/queue”) should be enforced via:
 - An initial bootstrap message only if the runtime requires it.
 
 AGENTS.md is the primary source of behavior; skills are the execution mechanism.
-Use the `startup_contract` skill to sequence hook checks, inbox/queue handling,
+Use the `startup-contract` skill to sequence hook checks, inbox/queue handling,
 and claiming new epics. The fallback ordering is: resume hooked epic, then stop
 if there are unread message beads, then prompt to claim/process any unclaimed
 queue items, then choose a new epic (auto = oldest ready, else oldest assigned;
@@ -634,44 +634,44 @@ Ask the overseer before falling back to a global skill.
 
 Core skills:
 
-- `claim_epic` -> atomically claim the next epic, update hook
-- `release_epic` -> clear claim + hook
-- `hook_status` -> show current hook + epic status
-- `work_done` -> close epic and clear hook
+- `claim-epic` -> atomically claim the next epic, update hook
+- `release-epic` -> clear claim + hook
+- `hook-status` -> show current hook + epic status
+- `work-done` -> close epic and clear hook
 - `heartbeat` -> update agent heartbeat (for gc)
 
 Selection skills (prompt mode):
 
-- `epic_list` -> list available epics with summary fields
-- `epic_claim` -> claim a specified epic ID
+- `epic-list` -> list available epics with summary fields
+- `epic-claim` -> claim a specified epic ID
 
 Planner extension:
 
-- `epic_list --show-drafts` -> include draft epics for review/iteration
+- `epic-list --show-drafts` -> include draft epics for review/iteration
 
 Planner skills:
 
-- `plan_create_epic`
-- `plan_split_tasks`
-- `plan_changesets` (enforce guardrails)
-- `plan_changeset_guardrails` (validate guardrails)
-- `plan_promote_epic` (explicit promotion)
-- `planner_startup_check` (message loop)
+- `plan-create-epic`
+- `plan-split-tasks`
+- `plan-changesets` (enforce guardrails)
+- `plan-changeset-guardrails` (validate guardrails)
+- `plan-promote-epic` (explicit promotion)
+- `planner-startup-check` (message loop)
 
 Ticket skills:
 
 - `tickets` (orchestrate import/export/link/sync)
-- `external_import` (attach external_tickets metadata)
-- `external_sync` (refresh cached state)
+- `external-import` (attach external_tickets metadata)
+- `external-sync` (refresh cached state)
 - `github-issues` (provider API calls)
 
 Messaging skills:
 
-- `mail_send`
-- `mail_inbox`
-- `mail_mark_read`
-- `mail_queue_claim` (if queues are enabled)
-- `mail_channel_post` (if channels are enabled)
+- `mail-send`
+- `mail-inbox`
+- `mail-mark-read`
+- `mail-queue-claim` (if queues are enabled)
+- `mail-channel-post` (if channels are enabled)
 
 ## Messaging Policy (When to Send Mail)
 
@@ -712,13 +712,13 @@ Overseer and planner may message workers for meta-coordination:
 
 ### Skill Trigger Rules (Recommended Defaults)
 
-- **Blocked > 15 minutes** -> `mail_send` to overseer with `BLOCKED:` subject.
-- **Changeset guardrail violation** -> `mail_send` to overseer with
+- **Blocked > 15 minutes** -> `mail-send` to overseer with `BLOCKED:` subject.
+- **Changeset guardrail violation** -> `mail-send` to overseer with
   `NEEDS-DECISION:`.
-- **No eligible epics** -> `mail_send` to overseer with
+- **No eligible epics** -> `mail-send` to overseer with
   `NEEDS-DECISION: No eligible epics`.
-- **Scope split required** -> `mail_send` to planner with `SCOPE-CHANGE:`.
-- **Session ending mid-work** -> `mail_send` with `HANDOFF:` summary.
+- **Scope split required** -> `mail-send` to planner with `SCOPE-CHANGE:`.
+- **Session ending mid-work** -> `mail-send` with `HANDOFF:` summary.
 
 ## AGENTS.md (Worker Instructions)
 

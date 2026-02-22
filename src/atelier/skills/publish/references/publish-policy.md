@@ -68,7 +68,7 @@ PR strategy default: sequential (one PR at a time, defer PR creation until the
 epic is ready for review). When the strategy blocks PR creation, push the branch
 and exit without opening a PR.
 
-When PR creation is allowed, draft the PR title/body with the `pr_draft` skill
+When PR creation is allowed, draft the PR title/body with the `pr-draft` skill
 and hand the result to `github-prs`. When PR creation is gated, report the
 reason and skip PR creation after pushing the branch.
 
