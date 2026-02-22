@@ -184,3 +184,92 @@ def test_align_existing_pr_base_rebases_and_retargets(monkeypatch) -> None:
         and command[-1] == "main"
         for command in commands
     )
+
+
+def test_attempt_create_draft_pr_accepts_pr_gate_keyword_contract(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        work_finalization_state.worker_pr_gate,
+        "attempt_create_draft_pr",
+        lambda **kwargs: (calls.append(kwargs) or True, "created"),
+    )
+
+    created, detail = work_finalization_state.attempt_create_draft_pr(
+        repo_slug="org/repo",
+        issue={"title": "Example"},
+        work_branch="feature-work",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+        changeset_base_branch=lambda *_args, **_kwargs: "main",
+        render_changeset_pr_body=lambda _issue: "summary",
+    )
+
+    assert created is True
+    assert detail == "created"
+    assert calls
+    assert (
+        calls[0]["changeset_base_branch"]("ignored", beads_root=None, repo_root=None) == "main"
+    )
+    assert calls[0]["render_changeset_pr_body"]({"title": "Example"}) == "summary"
+
+
+def test_handle_pushed_without_pr_uses_injected_create_callback_contract(monkeypatch) -> None:
+    issue = {
+        "title": "Example",
+        "description": (
+            "changeset.parent_branch: feature-parent\n"
+            "changeset.root_branch: feature-root\n"
+            "changeset.work_branch: feature-work\n"
+        ),
+    }
+    review_states: list[str] = []
+
+    monkeypatch.setattr(
+        work_finalization_state.worker_pr_gate.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.worker_pr_gate,
+        "attempt_create_draft_pr",
+        lambda **_kwargs: (True, "created"),
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "lookup_pr_payload",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "lookup_pr_payload_diagnostic",
+        lambda *_args, **_kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "mark_changeset_in_progress",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_review",
+        lambda _changeset_id, metadata, **_kwargs: review_states.append(
+            str(metadata.pr_state or "")
+        ),
+    )
+    monkeypatch.setattr(work_finalization_state, "say", lambda _message: None)
+
+    result = work_finalization_state.handle_pushed_without_pr(
+        issue=issue,
+        changeset_id="at-123.1",
+        agent_id="atelier/worker/codex/p1",
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        beads_root=Path("/beads"),
+        branch_pr_strategy="parallel",
+        git_path="git",
+    )
+
+    assert result.continue_running is True
+    assert result.reason == "changeset_review_pending"
+    assert review_states == ["draft-pr"]
