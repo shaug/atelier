@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "commit-msg: expected commit message file path" >&2
+  exit 64
+fi
+
+commit_msg_file="$1"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+if ! git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "commit-msg: ${repo_root} is not a git work tree" >&2
+  exit 1
+fi
+
+config_path="${repo_root}/commitlint.config.cjs"
+if [[ ! -f "${config_path}" ]]; then
+  echo "commit-msg: missing config at ${config_path}" >&2
+  exit 1
+fi
+
+if [[ -n "${ATELIER_COMMITLINT_BIN:-}" ]]; then
+  "${ATELIER_COMMITLINT_BIN}" --config "${config_path}" --edit "${commit_msg_file}"
+  exit $?
+fi
+
+if command -v commitlint >/dev/null 2>&1; then
+  commitlint --config "${config_path}" --edit "${commit_msg_file}"
+  exit $?
+fi
+
+if command -v npx >/dev/null 2>&1; then
+  npx --yes --package @commitlint/cli commitlint \
+    --config "${config_path}" \
+    --edit "${commit_msg_file}"
+  exit $?
+fi
+
+echo "commit-msg: install commitlint or npx, or set ATELIER_COMMITLINT_BIN" >&2
+exit 1
