@@ -470,23 +470,6 @@ def plan_command(
     plan_cmd.run_planner(SimpleNamespace(epic_id=epic_id, reconcile=reconcile, yes=yes))
 
 
-@app.command(
-    "plan-overview",
-    help="Print the planner startup overview (inbox, queue, and active epics).",
-)
-def plan_overview_command(
-    agent_id: Annotated[
-        str | None,
-        typer.Option(
-            "--agent-id",
-            help="planner agent id (defaults to ATELIER_AGENT_ID)",
-        ),
-    ] = None,
-) -> None:
-    """Show a read-only startup overview for the current planner session."""
-    plan_cmd.run_planner_overview(SimpleNamespace(agent_id=agent_id))
-
-
 @app.command("hook", help="Run an agent hook event handler.")
 def hook_command(
     event: Annotated[

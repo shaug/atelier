@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+
+def _load_script():
+    scripts_dir = (
+        Path(__file__).resolve().parents[3] / "src/atelier/skills/planner_startup_check/scripts"
+    )
+    path = scripts_dir / "refresh_overview.py"
+    spec = importlib.util.spec_from_file_location("test_planner_startup_refresh_script", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_render_startup_overview_reports_empty_sections(monkeypatch) -> None:
+    module = _load_script()
+    monkeypatch.setattr(module.beads, "list_inbox_messages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(module.beads, "list_queue_messages", lambda **_kwargs: [])
+    monkeypatch.setattr(module.planner_overview, "list_epics", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        module.planner_overview,
+        "render_epics",
+        lambda issues, *, show_drafts: "Epics by state:\n- (none)",
+    )
+
+    rendered = module._render_startup_overview(
+        "atelier/planner/example",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert rendered.splitlines() == [
+        "Planner startup overview",
+        "No unread messages.",
+        "No queued messages.",
+        "Epics by state:",
+        "- (none)",
+    ]
+
+
+def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatch) -> None:
+    module = _load_script()
+    inbox = [
+        {"id": "at-msg-2", "title": "Beta"},
+        {"id": "at-msg-1", "title": "Alpha"},
+    ]
+    queued = [
+        {
+            "id": "at-q-2",
+            "queue": "planner",
+            "title": "Second",
+            "claimed_by": "atelier/worker/agent",
+        },
+        {
+            "id": "at-q-1",
+            "queue": "planner",
+            "title": "First",
+            "claimed_by": "",
+        },
+    ]
+    calls: dict[str, object] = {}
+
+    def _fake_list_inbox_messages(*_args, **_kwargs):
+        return inbox
+
+    def _fake_list_queue_messages(**kwargs):
+        calls["queue_kwargs"] = kwargs
+        return queued
+
+    monkeypatch.setattr(module.beads, "list_inbox_messages", _fake_list_inbox_messages)
+    monkeypatch.setattr(module.beads, "list_queue_messages", _fake_list_queue_messages)
+    monkeypatch.setattr(module.planner_overview, "list_epics", lambda **_kwargs: [{"id": "at-1"}])
+    monkeypatch.setattr(
+        module.planner_overview,
+        "render_epics",
+        lambda issues, *, show_drafts: "Epics by state:\nOpen epics:\n- at-1 [open] Example",
+    )
+
+    rendered = module._render_startup_overview(
+        "atelier/planner/example",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert rendered.splitlines() == [
+        "Planner startup overview",
+        "Unread messages:",
+        "- at-msg-1 Alpha",
+        "- at-msg-2 Beta",
+        "Queued messages:",
+        "- at-q-1 [planner] First | claim: unclaimed",
+        "- at-q-2 [planner] Second | claim: claimed by atelier/worker/agent",
+        "Epics by state:",
+        "Open epics:",
+        "- at-1 [open] Example",
+    ]
+    assert calls["queue_kwargs"] == {
+        "beads_root": Path("/beads"),
+        "cwd": Path("/repo"),
+        "unread_only": True,
+        "unclaimed_only": False,
+    }

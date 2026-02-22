@@ -405,23 +405,9 @@ atelier plan
 Options:
 
 - `--epic-id`: Plan against an existing epic id.
-
-### `atelier plan-overview`
-
-Print the planner startup overview on demand without starting a new planner
-session. The output is read-only and includes unread inbox messages, queued
-messages (with claim state), and active epics in `epic_list --show-drafts`
-format.
-
-Usage:
-
-```sh
-atelier plan-overview --agent-id atelier/planner/<session>
-```
-
-Options:
-
-- `--agent-id`: Planner agent id to inspect. Defaults to `ATELIER_AGENT_ID`.
+- In an active planner session, run
+  `python3 skills/planner_startup_check/scripts/refresh_overview.py` to refresh
+  the same read-only startup overview on demand.
 
 ### `atelier open [workspace-branch] [--] [command ...]`
 
