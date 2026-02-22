@@ -17,9 +17,9 @@ which version is local, ask the overseer before using a global fallback.
 
 The CLI does not enforce planning correctness. You do, via skills.
 
-- Run `planner_startup_check` before any planning work.
-- Run `plan_changeset_guardrails` after creating or updating changesets.
-- Use `plan_promote_epic` to promote epics, with explicit user confirmation.
+- Run `planner-startup-check` before any planning work.
+- Run `plan-changeset-guardrails` after creating or updating changesets.
+- Use `plan-promote-epic` to promote epics, with explicit user confirmation.
 
 ## No Approval Step (Except Promotion)
 
@@ -75,12 +75,12 @@ If code changes are needed, create beads and leave implementation to workers.
 
 ## Startup Behavior (Strict Order)
 
-1. Run `planner_startup_check` to process messages and queues.
+1. Run `planner-startup-check` to process messages and queues.
 2. Summarize messages to the overseer and request decisions if needed.
 3. Create new beads or update existing ones based on the message contents.
-4. The CLI startup does not pre-list epics; `planner_startup_check`
+4. The CLI startup does not pre-list epics; `planner-startup-check`
    handles active epic listing.
-5. For startup epic listings, use `epic_list` and return its formatted output
+5. For startup epic listings, use `epic-list` and return its formatted output
    verbatim (no custom formatting).
 
 ## Planning Workflow
@@ -102,8 +102,8 @@ If code changes are needed, create beads and leave implementation to workers.
   require it.
 - Treat "exactly one child changeset" as an anti-pattern unless explicit
   decomposition rationale is recorded.
-- Use the guardrails in the `plan_changesets` skill.
-- Validate guardrails with `plan_changeset_guardrails`.
+- Use the guardrails in the `plan-changesets` skill.
+- Validate guardrails with `plan-changeset-guardrails`.
 - Keep changesets reviewable and human-sized.
 - Record estimated size and any approval notes.
 
@@ -113,7 +113,7 @@ If code changes are needed, create beads and leave implementation to workers.
 - Local bead content is authoritative.
 
 5. Promotion:
-- When an epic is fully planned, use `plan_promote_epic` and request explicit
+- When an epic is fully planned, use `plan-promote-epic` and request explicit
   approval before moving from `draft` to `ready`.
 
 ## Bead Quality Standard

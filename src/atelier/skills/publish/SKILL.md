@@ -54,7 +54,7 @@ description: >-
    - Rebase the work branch onto `root_branch` before any integration or PR.
    - If `branch_pr` is true:
      - Push the work branch.
-     - If PR creation is allowed, run `pr_draft` to generate the title/body,
+     - If PR creation is allowed, run `pr-draft` to generate the title/body,
        then use the `github-prs` skill to create/update the PR in this run.
      - If PR creation is gated, report the reason and exit after pushing.
    - If `branch_pr` is false:

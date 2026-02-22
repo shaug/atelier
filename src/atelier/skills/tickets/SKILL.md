@@ -33,12 +33,12 @@ description: >-
 1. Route based on `operation`:
    - `import`: use the provider skill to list or read candidate tickets. Create
      local beads as needed (epics or context) and attach refs via
-     `external_import` with `direction=imported`.
+     `external-import` with `direction=imported`.
    - `export`: use the provider skill to create tickets from the bead content.
-     Attach refs via `external_import` with `direction=exported`.
-   - `link`: attach existing tickets via `external_import` with
+     Attach refs via `external-import` with `direction=exported`.
+   - `link`: attach existing tickets via `external-import` with
      `direction=linked` (and optional `relation`/`sync_mode`).
-   - `sync_state`: refresh cached state via `external_sync` (pass optional
+   - `sync_state`: refresh cached state via `external-sync` (pass optional
      include_state/include_body/include_notes toggles).
 1. When provider operations are required:
    - GitHub Issues: use `github` → `github-issues` for create/read/update.

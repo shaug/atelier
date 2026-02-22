@@ -81,6 +81,42 @@ def test_discover_ticket_provider_from_legacy_skill_name(tmp_path: Path) -> None
     assert [item.provider for item in manifests] == ["linear"]
 
 
+def test_discover_ticket_provider_from_legacy_snake_case_directory(tmp_path: Path) -> None:
+    project_data_dir = tmp_path / "project-data"
+    github_dir = project_data_dir / "skills" / "github_issues"
+    github_dir.mkdir(parents=True)
+    (github_dir / "SKILL.md").write_text(
+        "---\nname: github-issues\ndescription: test\n---\n\n# GitHub Issues\n",
+        encoding="utf-8",
+    )
+
+    manifests = discover_ticket_provider_manifests(
+        agent_name="aider",
+        project_data_dir=project_data_dir,
+    )
+
+    assert [item.provider for item in manifests] == ["github"]
+
+
+def test_discover_ticket_provider_from_legacy_snake_case_frontmatter_name(
+    tmp_path: Path,
+) -> None:
+    project_data_dir = tmp_path / "project-data"
+    github_dir = project_data_dir / "skills" / "github-issues"
+    github_dir.mkdir(parents=True)
+    (github_dir / "SKILL.md").write_text(
+        "---\nname: github_issues\ndescription: test\n---\n\n# GitHub Issues\n",
+        encoding="utf-8",
+    )
+
+    manifests = discover_ticket_provider_manifests(
+        agent_name="aider",
+        project_data_dir=project_data_dir,
+    )
+
+    assert [item.provider for item in manifests] == ["github"]
+
+
 def test_resolve_planner_provider_prefers_configured_provider(tmp_path: Path) -> None:
     project_data_dir = tmp_path / "project-data"
     skills_dir = project_data_dir / "skills" / "github-issues"

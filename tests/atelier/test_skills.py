@@ -13,33 +13,34 @@ def test_packaged_skills_include_core_set() -> None:
         "github-issues",
         "github-prs",
         "tickets",
-        "external_import",
-        "external_sync",
-        "external_close",
+        "external-import",
+        "external-sync",
+        "external-close",
         "beads",
-        "claim_epic",
-        "epic_claim",
-        "epic_list",
-        "release_epic",
-        "hook_status",
+        "claim-epic",
+        "epic-claim",
+        "epic-list",
+        "release-epic",
+        "hook-status",
         "heartbeat",
-        "work_done",
-        "mail_send",
-        "mail_inbox",
-        "mail_mark_read",
-        "mail_queue_claim",
-        "mail_channel_post",
-        "changeset_review",
-        "changeset_signals",
-        "pr_draft",
-        "startup_contract",
-        "plan_create_epic",
-        "plan_split_tasks",
-        "plan_changesets",
-        "plan_changeset_guardrails",
-        "plan_promote_epic",
-        "planner_startup_check",
+        "work-done",
+        "mail-send",
+        "mail-inbox",
+        "mail-mark-read",
+        "mail-queue-claim",
+        "mail-channel-post",
+        "changeset-review",
+        "changeset-signals",
+        "pr-draft",
+        "startup-contract",
+        "plan-create-epic",
+        "plan-split-tasks",
+        "plan-changesets",
+        "plan-changeset-guardrails",
+        "plan-promote-epic",
+        "planner-startup-check",
     }.issubset(names)
+    assert all("_" not in name for name in names)
 
 
 def test_install_workspace_skills_writes_skill_docs() -> None:
@@ -53,32 +54,32 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "github-issues",
             "github-prs",
             "tickets",
-            "external_import",
-            "external_sync",
-            "external_close",
+            "external-import",
+            "external-sync",
+            "external-close",
             "beads",
-            "claim_epic",
-            "epic_claim",
-            "epic_list",
-            "release_epic",
-            "hook_status",
+            "claim-epic",
+            "epic-claim",
+            "epic-list",
+            "release-epic",
+            "hook-status",
             "heartbeat",
-            "work_done",
-            "mail_send",
-            "mail_inbox",
-            "mail_mark_read",
-            "mail_queue_claim",
-            "mail_channel_post",
-            "changeset_review",
-            "changeset_signals",
-            "pr_draft",
-            "startup_contract",
-            "plan_create_epic",
-            "plan_split_tasks",
-            "plan_changesets",
-            "plan_changeset_guardrails",
-            "plan_promote_epic",
-            "planner_startup_check",
+            "work-done",
+            "mail-send",
+            "mail-inbox",
+            "mail-mark-read",
+            "mail-queue-claim",
+            "mail-channel-post",
+            "changeset-review",
+            "changeset-signals",
+            "pr-draft",
+            "startup-contract",
+            "plan-create-epic",
+            "plan-split-tasks",
+            "plan-changesets",
+            "plan-changeset-guardrails",
+            "plan-promote-epic",
+            "planner-startup-check",
         ):
             assert (workspace_dir / "skills" / name / "SKILL.md").exists()
 
@@ -86,7 +87,7 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
 def test_publish_skill_mentions_pr_draft_and_github_prs() -> None:
     skill = skills.load_packaged_skills()["publish"]
     text = skill.files["SKILL.md"].decode("utf-8")
-    assert "pr_draft" in text
+    assert "pr-draft" in text
     assert "github-prs" in text
 
 
@@ -96,8 +97,8 @@ def test_tickets_skill_mentions_import_export_and_sync() -> None:
     assert "import" in text
     assert "export" in text
     assert "sync_state" in text
-    assert "external_import" in text
-    assert "external_sync" in text
+    assert "external-import" in text
+    assert "external-sync" in text
 
 
 def test_github_issues_skill_mentions_list_script() -> None:
@@ -111,7 +112,7 @@ def test_ensure_project_skills_installs_if_missing() -> None:
         project_dir = Path(tmp)
         skills_dir = skills.ensure_project_skills(project_dir)
         assert skills_dir == project_dir / "skills"
-        assert (skills_dir / "planner_startup_check" / "SKILL.md").exists()
+        assert (skills_dir / "planner-startup-check" / "SKILL.md").exists()
 
 
 def test_sync_project_skills_installs_when_missing() -> None:
@@ -120,14 +121,14 @@ def test_sync_project_skills_installs_when_missing() -> None:
         result = skills.sync_project_skills(project_dir)
         assert result.action == "installed"
         assert result.skills_dir == project_dir / "skills"
-        assert (project_dir / "skills" / "planner_startup_check" / "SKILL.md").exists()
+        assert (project_dir / "skills" / "planner-startup-check" / "SKILL.md").exists()
 
 
 def test_sync_project_skills_updates_when_packaged_skill_missing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)
         skills.install_workspace_skills(project_dir)
-        stale_skill = project_dir / "skills" / "planner_startup_check"
+        stale_skill = project_dir / "skills" / "planner-startup-check"
         assert stale_skill.exists()
         shutil.rmtree(stale_skill)
 
@@ -140,12 +141,12 @@ def test_sync_project_skills_applies_upgrade_with_yes() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)
         skills.install_workspace_skills(project_dir)
-        stale_skill = project_dir / "skills" / "planner_startup_check"
+        stale_skill = project_dir / "skills" / "planner-startup-check"
         shutil.rmtree(stale_skill)
 
         result = skills.sync_project_skills(project_dir, yes=True)
         assert result.action == "updated"
-        assert (project_dir / "skills" / "planner_startup_check" / "SKILL.md").exists()
+        assert (project_dir / "skills" / "planner-startup-check" / "SKILL.md").exists()
 
 
 def test_sync_project_skills_overwrites_when_locally_modified() -> None:
@@ -181,14 +182,14 @@ def test_packaged_skill_docs_include_yaml_frontmatter() -> None:
 
 
 def test_plan_changesets_skill_requires_rationale_for_one_child_split() -> None:
-    skill = skills.load_packaged_skills()["plan_changesets"]
+    skill = skills.load_packaged_skills()["plan-changesets"]
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "one child changeset" in text
     assert "decomposition rationale" in text
 
 
 def test_plan_changeset_guardrails_skill_mentions_checker_script() -> None:
-    skill = skills.load_packaged_skills()["plan_changeset_guardrails"]
+    skill = skills.load_packaged_skills()["plan-changeset-guardrails"]
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "scripts/check_guardrails.py" in text
     assert "one child changeset" in text
@@ -196,7 +197,19 @@ def test_plan_changeset_guardrails_skill_mentions_checker_script() -> None:
 
 
 def test_plan_promote_epic_skill_requires_one_child_rationale() -> None:
-    skill = skills.load_packaged_skills()["plan_promote_epic"]
+    skill = skills.load_packaged_skills()["plan-promote-epic"]
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "exactly one child changeset" in text
     assert "decomposition rationale" in text
+
+
+def test_workspace_skill_state_accepts_legacy_underscore_metadata_keys() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        canonical = skills.install_workspace_skills(project_dir)
+        legacy = {name.replace("-", "_"): payload for name, payload in canonical.items()}
+
+        state = skills.workspace_skill_state(project_dir, legacy)
+
+        assert state.needs_install is False
+        assert state.needs_metadata is False

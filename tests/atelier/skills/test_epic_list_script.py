@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def _load_script():
-    scripts_dir = Path(__file__).resolve().parents[3] / "src/atelier/skills/epic_list/scripts"
+    scripts_dir = Path(__file__).resolve().parents[3] / "src/atelier/skills/epic-list/scripts"
     path = scripts_dir / "list_epics.py"
     spec = importlib.util.spec_from_file_location("test_list_epics_script", path)
     assert spec and spec.loader

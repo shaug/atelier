@@ -18,10 +18,10 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "Bead Quality Standard" in content
     assert "Promotion" in content
     assert "External providers" in content
-    assert "plan_changeset_guardrails" in content
-    assert "plan_promote_epic" in content
-    assert "planner_startup_check" in content
-    assert "epic_list" in content
+    assert "plan-changeset-guardrails" in content
+    assert "plan-promote-epic" in content
+    assert "planner-startup-check" in content
+    assert "epic-list" in content
     assert "one child changeset" in content
     assert "decomposition rationale" in content
     assert "Do not claim or keep assignee ownership" in content

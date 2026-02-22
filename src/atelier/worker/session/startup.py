@@ -379,7 +379,7 @@ def run_startup_contract_service(
         str(epic_id).strip() for epic_id in context.excluded_epic_ids if str(epic_id).strip()
     }
 
-    """Apply startup_contract skill ordering to select the next epic."""
+    """Apply startup-contract skill ordering to select the next epic."""
     if explicit_epic_id is not None:
         selected_epic = str(explicit_epic_id).strip()
         if not selected_epic:

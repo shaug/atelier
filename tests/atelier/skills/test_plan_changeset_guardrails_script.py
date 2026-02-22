@@ -11,7 +11,7 @@ def _load_script_module():
         / "src"
         / "atelier"
         / "skills"
-        / "plan_changeset_guardrails"
+        / "plan-changeset-guardrails"
         / "scripts"
         / "check_guardrails.py"
     )
