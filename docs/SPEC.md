@@ -172,6 +172,17 @@ Changeset description fields include:
 
 Worker modes:
 
-- `ATELIER_MODE=prompt|auto` controls epic selection.
-- `ATELIER_RUN_MODE=once|default|watch` controls session looping.
-- `ATELIER_WATCH_INTERVAL=<seconds>` controls watch polling cadence.
+- `atelier work --mode prompt|auto` controls epic selection.
+- `atelier work --run-mode once|default|watch` controls session looping.
+- `atelier work --watch-interval <seconds>` controls watch polling cadence.
+
+Internal runtime env variables (set by Atelier, not user config):
+
+- Agent/session identity: `ATELIER_AGENT_ID`, `ATELIER_AGENT_SESSION`
+- Workspace context: `ATELIER_PROJECT`, `ATELIER_WORKSPACE`,
+  `ATELIER_WORKSPACE_DIR`
+- Hook handoff: `ATELIER_HOOKS_PATH`, `ATELIER_EPIC_ID`, `ATELIER_CHANGESET_ID`,
+  `ATELIER_PLAN_EPIC`
+- Planner hook sync context: `ATELIER_PLANNER_SYNC_ENABLED`,
+  `ATELIER_AGENT_BEAD_ID`, `ATELIER_PLANNER_WORKTREE`, `ATELIER_PLANNER_BRANCH`,
+  `ATELIER_DEFAULT_BRANCH`

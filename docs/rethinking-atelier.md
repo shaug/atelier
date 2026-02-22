@@ -43,7 +43,7 @@ Responsibilities:
 - Create task + subtask beads under epics.
 - Create required changeset beads (PR-sized units).
 - Encode changeset guardrails in bead descriptions.
-- Use `ATELIER_PLAN_TRACE=1` to show detailed timing output during startup.
+- Use `atelier plan --trace` to show detailed timing output during startup.
 
 Planner worktree:
 
@@ -80,9 +80,9 @@ Workers can run in one of two modes:
 - **prompt**: list available epics and ask the user which epic to claim next.
 - **auto**: claim the next eligible epic automatically when idle.
 
-Mode should be set via environment variable or runtime config:
+Mode should be set via CLI flag:
 
-- `ATELIER_MODE=prompt|auto`
+- `atelier work --mode prompt|auto`
 
 Prompt mode flow:
 
@@ -118,10 +118,10 @@ Run modes:
 - **watch**: keep checking for new ready work and restart sessions when work
   becomes available.
 
-Configure the run mode via:
+Configure the run mode via CLI flags:
 
-- `ATELIER_RUN_MODE=once|default|watch`
-- `ATELIER_WATCH_INTERVAL=<seconds>` (watch only)
+- `atelier work --run-mode once|default|watch`
+- `atelier work --watch-interval <seconds>` (watch only)
 
 ## Atelier Data Directory
 

@@ -142,8 +142,8 @@ Atelier planning state. They are treated as external ticket sources.
   - Selects or claims an epic and its next ready changeset.
   - Ensures the epic worktree exists.
   - Creates/records the changeset branch mapping.
-  - Uses run mode (`ATELIER_RUN_MODE`) to decide whether to run once, loop while
-    work is ready, or watch for new work.
+  - Uses `--run-mode` to decide whether to run once, loop while work is ready,
+    or watch for new work.
 
 - `atelier daemon`
 

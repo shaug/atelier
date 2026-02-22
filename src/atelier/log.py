@@ -44,7 +44,7 @@ def _normalize_level(value: str | None) -> LogLevel:
 def configured_level() -> LogLevel:
     global _configured_level
     if _configured_level is None:
-        _configured_level = _normalize_level(os.environ.get("ATELIER_LOG_LEVEL"))
+        _configured_level = _normalize_level(os.environ.get("LOG_LEVEL"))
     return _configured_level
 
 
@@ -63,7 +63,7 @@ def _console(*, stderr: bool) -> Console:
         file=sys.stderr if stderr else sys.stdout,
         soft_wrap=True,
         highlight=False,
-        no_color=bool(os.environ.get("NO_COLOR") or os.environ.get("ATELIER_NO_COLOR")),
+        no_color=bool(os.environ.get("NO_COLOR")),
     )
 
 

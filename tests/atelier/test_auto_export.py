@@ -212,3 +212,20 @@ def test_auto_export_failure_is_non_fatal_and_returns_retry(monkeypatch) -> None
     assert result.status == "failed"
     assert "boom" in result.message
     assert result.retry_command is not None
+
+
+def test_auto_export_ignores_legacy_provider_env_override(
+    monkeypatch,
+) -> None:
+    provider = FakeProvider()
+    context = _context(auto_enabled=True)
+    monkeypatch.setenv("ATELIER_EXTERNAL_PROVIDER", "beads")
+    monkeypatch.setattr(
+        auto_export.external_registry,
+        "resolve_external_providers",
+        lambda *_args, **_kwargs: [
+            auto_export.external_registry.ExternalProviderContext(provider=provider)
+        ],
+    )
+
+    assert auto_export._resolve_provider(context, provider_slug=None) is provider

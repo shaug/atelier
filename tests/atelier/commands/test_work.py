@@ -81,16 +81,67 @@ def test_start_worker_invalid_mode_exits() -> None:
         )
 
 
-def test_start_worker_invalid_watch_interval_exits(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ATELIER_WATCH_INTERVAL", "0")
+def test_start_worker_invalid_watch_interval_exits() -> None:
     with pytest.raises(SystemExit):
         work_cmd.start_worker(
-            SimpleNamespace(epic_id=None, mode="auto", run_mode="watch", dry_run=True)
+            SimpleNamespace(
+                epic_id=None,
+                mode="auto",
+                run_mode="watch",
+                watch_interval=0,
+                dry_run=True,
+            )
         )
 
 
 def test_command_reexports_worker_reconcile_functions() -> None:
     assert callable(work_cmd.list_reconcile_epic_candidates)
     assert callable(work_cmd.reconcile_blocked_merged_changesets)
+
+
+def test_start_worker_ignores_legacy_mode_env_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ATELIER_MODE", "invalid")
+    monkeypatch.setenv("ATELIER_RUN_MODE", "invalid")
+    captured: dict[str, object] = {}
+
+    def fake_run_worker_sessions(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    with patch(
+        "atelier.commands.work.worker_runtime.run_worker_sessions",
+        side_effect=fake_run_worker_sessions,
+    ):
+        work_cmd.start_worker(SimpleNamespace(epic_id=None, mode=None, run_mode=None, dry_run=True))
+
+    assert captured["mode"] == "prompt"
+    assert captured["run_mode"] == "default"
+
+
+def test_start_worker_ignores_legacy_watch_interval_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ATELIER_WATCH_INTERVAL", "7")
+    captured: dict[str, object] = {}
+
+    def fake_run_worker_sessions(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    with patch(
+        "atelier.commands.work.worker_runtime.run_worker_sessions",
+        side_effect=fake_run_worker_sessions,
+    ):
+        work_cmd.start_worker(
+            SimpleNamespace(
+                epic_id=None,
+                mode="auto",
+                run_mode="watch",
+                watch_interval=None,
+                dry_run=True,
+            )
+        )
+
+    interval_fn = captured["watch_interval_seconds"]
+    assert callable(interval_fn)
+    assert interval_fn() == 60

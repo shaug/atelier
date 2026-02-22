@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import os
 from collections.abc import Callable
 
 from .. import beads, lifecycle
@@ -252,7 +251,7 @@ def normalize_mode(value: str | None) -> str:
         Normalized mode string.
     """
     if value is None:
-        value = os.environ.get("ATELIER_MODE", "prompt")
+        value = "prompt"
     normalized = value.strip().lower()
     if normalized not in _MODE_VALUES:
         die("mode must be one of: prompt, auto")
@@ -269,28 +268,26 @@ def normalize_run_mode(value: str | None) -> str:
         Normalized run mode string.
     """
     if value is None:
-        value = os.environ.get("ATELIER_RUN_MODE", "default")
+        value = "default"
     normalized = value.strip().lower()
     if normalized not in _RUN_MODE_VALUES:
         die("run mode must be one of: once, default, watch")
     return normalized
 
 
-def watch_interval_seconds() -> int:
+def watch_interval_seconds(value: int | None) -> int:
     """Return watch-loop sleep interval in seconds.
+
+    Args:
+        value: Optional explicit watch interval from CLI args.
 
     Returns:
         Positive watch interval in seconds.
     """
-    raw = os.environ.get("ATELIER_WATCH_INTERVAL", "").strip()
-    if not raw:
+    if value is None:
         return _WATCH_INTERVAL_SECONDS
-    try:
-        value = int(raw)
-    except ValueError:
-        die("ATELIER_WATCH_INTERVAL must be an integer number of seconds")
     if value <= 0:
-        die("ATELIER_WATCH_INTERVAL must be a positive number of seconds")
+        die("watch interval must be a positive number of seconds")
     return value
 
 
