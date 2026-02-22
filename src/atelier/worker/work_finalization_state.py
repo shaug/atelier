@@ -612,6 +612,10 @@ def render_changeset_pr_body(issue: dict[str, object]) -> str:
     return worker_publish.render_changeset_pr_body(issue, fields=fields)
 
 
+_DEFAULT_CHANGESET_BASE_BRANCH = changeset_base_branch
+_DEFAULT_RENDER_CHANGESET_PR_BODY = render_changeset_pr_body
+
+
 def attempt_create_draft_pr(
     *,
     repo_slug: str,
@@ -620,7 +624,9 @@ def attempt_create_draft_pr(
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
-    changeset_base_branch_fn: Callable[..., str] | None = None,
+    changeset_base_branch: Callable[..., str | None] | None = None,
+    render_changeset_pr_body: Callable[[dict[str, object]], str] | None = None,
+    changeset_base_branch_fn: Callable[..., str | None] | None = None,
     render_changeset_pr_body_fn: Callable[[dict[str, object]], str] | None = None,
 ) -> tuple[bool, str]:
     """Attempt create draft pr.
@@ -632,6 +638,8 @@ def attempt_create_draft_pr(
         beads_root: Value for `beads_root`.
         repo_root: Value for `repo_root`.
         git_path: Value for `git_path`.
+        changeset_base_branch: Value for `changeset_base_branch`.
+        render_changeset_pr_body: Value for `render_changeset_pr_body`.
         changeset_base_branch_fn: Value for `changeset_base_branch_fn`.
         render_changeset_pr_body_fn: Value for `render_changeset_pr_body_fn`.
 
@@ -645,8 +653,14 @@ def attempt_create_draft_pr(
         beads_root=beads_root,
         repo_root=repo_root,
         git_path=git_path,
-        changeset_base_branch=changeset_base_branch_fn or changeset_base_branch,
-        render_changeset_pr_body=render_changeset_pr_body_fn or render_changeset_pr_body,
+        changeset_base_branch=(
+            changeset_base_branch or changeset_base_branch_fn or _DEFAULT_CHANGESET_BASE_BRANCH
+        ),
+        render_changeset_pr_body=(
+            render_changeset_pr_body
+            or render_changeset_pr_body_fn
+            or _DEFAULT_RENDER_CHANGESET_PR_BODY
+        ),
     )
 
 
