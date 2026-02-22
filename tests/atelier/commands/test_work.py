@@ -74,10 +74,62 @@ def test_start_worker_non_dry_run_previews_and_cleans_agent_home(
     cleanup_agent_home.assert_called_once_with(session_agent, project_dir=tmp_path)
 
 
+def test_start_worker_applies_env_translated_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ATELIER_MODE", "AUTO")
+    monkeypatch.setenv("ATELIER_RUN_MODE", "WATCH")
+    monkeypatch.setenv("ATELIER_WORK_YES", "1")
+    args = SimpleNamespace(epic_id=None, mode=None, run_mode=None, dry_run=True, yes=False)
+    with patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions:
+        work_cmd.start_worker(args)
+
+    kwargs = run_sessions.call_args.kwargs
+    assert kwargs["mode"] == "auto"
+    assert kwargs["run_mode"] == "watch"
+    assert kwargs["args"].yes is True
+
+
+def test_start_worker_cli_values_override_env_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ATELIER_MODE", "prompt")
+    monkeypatch.setenv("ATELIER_RUN_MODE", "once")
+    monkeypatch.setenv("ATELIER_WORK_YES", "0")
+    args = SimpleNamespace(epic_id=None, mode="auto", run_mode="watch", dry_run=True, yes=True)
+    with patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions:
+        work_cmd.start_worker(args)
+
+    kwargs = run_sessions.call_args.kwargs
+    assert kwargs["mode"] == "auto"
+    assert kwargs["run_mode"] == "watch"
+    assert kwargs["args"].yes is True
+
+
 def test_start_worker_invalid_mode_exits() -> None:
     with pytest.raises(SystemExit):
         work_cmd.start_worker(
             SimpleNamespace(epic_id=None, mode="invalid", run_mode="once", dry_run=True)
+        )
+
+
+def test_start_worker_invalid_env_mode_exits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ATELIER_MODE", "wrong")
+    with pytest.raises(SystemExit):
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode=None, run_mode="once", dry_run=True, yes=False)
+        )
+
+
+def test_start_worker_invalid_work_yes_env_exits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ATELIER_WORK_YES", "maybe")
+    with pytest.raises(SystemExit):
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once", dry_run=True, yes=False)
         )
 
 

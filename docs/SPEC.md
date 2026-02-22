@@ -172,6 +172,16 @@ Changeset description fields include:
 
 Worker modes:
 
-- `ATELIER_MODE=prompt|auto` controls epic selection.
-- `ATELIER_RUN_MODE=once|default|watch` controls session looping.
-- `ATELIER_WATCH_INTERVAL=<seconds>` controls watch polling cadence.
+`atelier work` supports deterministic env-to-CLI default translation:
+
+```text
+| CLI default                | Env var                  | Built-in default | Accepted env values            |
+| -------------------------- | ------------------------ | ---------------- | ------------------------------ |
+| --mode                     | ATELIER_MODE             | prompt           | prompt, auto                   |
+| --run-mode                 | ATELIER_RUN_MODE         | default          | once, default, watch           |
+| --watch-interval-seconds   | ATELIER_WATCH_INTERVAL   | 60               | positive integer               |
+| --yes                      | ATELIER_WORK_YES         | false            | 1/true/yes/on, 0/false/no/off |
+```
+
+Unsupported keys for this translation layer: `ATELIER_PLAN_TRACE`,
+`ATELIER_WORK_TRACE`, `ATELIER_LOG_LEVEL`, `ATELIER_NO_COLOR`.

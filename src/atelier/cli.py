@@ -516,14 +516,14 @@ def work_command(
         str | None,
         typer.Option(
             "--mode",
-            help="worker selection mode: prompt or auto (defaults to ATELIER_MODE)",
+            help="worker selection mode: prompt or auto (default from ATELIER_MODE)",
         ),
     ] = None,
     run_mode: Annotated[
         str | None,
         typer.Option(
             "--run-mode",
-            help="worker run mode: once, default, watch (defaults to ATELIER_RUN_MODE)",
+            help="worker run mode: once, default, watch (default from ATELIER_RUN_MODE)",
         ),
     ] = None,
     queue: Annotated[
@@ -545,7 +545,7 @@ def work_command(
         typer.Option(
             "--yes",
             "-y",
-            help="accept defaults for interactive choices",
+            help="accept defaults for interactive choices (default from ATELIER_WORK_YES)",
         ),
     ] = False,
     reconcile: Annotated[
