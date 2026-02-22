@@ -28,6 +28,10 @@ def root_branch(issue: dict[str, object]) -> str | None:
     return normalized_field(issue_fields(issue), "changeset.root_branch")
 
 
+def parent_branch(issue: dict[str, object]) -> str | None:
+    return normalized_field(issue_fields(issue), "changeset.parent_branch")
+
+
 def pr_url(issue: dict[str, object]) -> str | None:
     return normalized_field(issue_fields(issue), "pr_url")
 

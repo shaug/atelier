@@ -229,6 +229,39 @@ def changeset_waiting_on_review(issue: dict[str, object]) -> bool:
     return state in {"pushed", "draft-pr", "pr-open", "in-review", "approved"}
 
 
+def changeset_has_review_handoff_signal(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    branch_pr: bool,
+    git_path: str | None,
+) -> bool:
+    """Return whether a changeset has deterministic review handoff evidence.
+
+    Args:
+        issue: Changeset issue payload.
+        repo_slug: Optional GitHub owner/repo slug.
+        repo_root: Repository checkout path.
+        branch_pr: Whether PR mode is enabled for the project.
+        git_path: Optional git binary path override.
+
+    Returns:
+        ``True`` when the changeset has a pushed remote branch and/or open PR
+        lifecycle signal that indicates review handoff.
+    """
+    if not branch_pr:
+        return False
+    work_branch = changeset_work_branch(issue)
+    if not work_branch:
+        return False
+    pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path)
+    pr_payload = lookup_pr_payload(repo_slug, work_branch)
+    review_requested = prs.has_review_requests(pr_payload)
+    state = prs.lifecycle_state(pr_payload, pushed=pushed, review_requested=review_requested)
+    return state in {"pushed", "draft-pr", "pr-open", "in-review", "approved"}
+
+
 def changeset_work_branch(issue: dict[str, object]) -> str | None:
     """Changeset work branch.
 
@@ -1122,6 +1155,7 @@ __all__ = [
     "attempt_create_draft_pr",
     "branch_ref_for_lookup",
     "changeset_base_branch",
+    "changeset_has_review_handoff_signal",
     "changeset_integration_signal",
     "changeset_parent_branch",
     "changeset_parent_lifecycle_state",

@@ -258,7 +258,7 @@ def test_run_startup_contract_prioritizes_review_feedback() -> None:
         resolve_hooked_epic=lambda *_args: "at-epic",
         select_review_feedback_changeset=lambda **_kwargs: feedback,
         next_changeset=next_changeset,
-        list_epics=lambda: [{"id": "at-epic", "assignee": "atelier/worker/codex/p010"}],
+        list_epics=lambda: [{"id": "at-epic", "assignee": "atelier/worker/codex/p100"}],
     )
 
     assert result.reason == "review_feedback"
@@ -294,6 +294,117 @@ def test_run_startup_contract_prioritizes_merge_conflict() -> None:
     assert result.epic_id == "at-epic"
     assert result.changeset_id == "at-epic.3"
     assert next_changeset_calls == 0
+
+
+def test_run_startup_contract_skips_non_claimable_review_feedback_epic() -> None:
+    seen_epics: list[str] = []
+    claimable_feedback = ReviewFeedbackSelection(
+        epic_id="at-claimable",
+        changeset_id="at-claimable.1",
+        feedback_at="2026-02-20T00:00:00Z",
+    )
+    blocked_feedback = ReviewFeedbackSelection(
+        epic_id="at-blocked",
+        changeset_id="at-blocked.1",
+        feedback_at="2026-02-19T00:00:00Z",
+    )
+
+    def select_feedback(*, epic_id: str, repo_slug: str | None) -> ReviewFeedbackSelection | None:
+        _ = repo_slug
+        seen_epics.append(epic_id)
+        if epic_id == "at-claimable":
+            return claimable_feedback
+        if epic_id == "at-blocked":
+            return blocked_feedback
+        return None
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [
+            {
+                "id": "at-blocked",
+                "status": "open",
+                "assignee": "atelier/planner/codex/p001",
+                "created_at": "2026-02-20T00:00:00Z",
+            },
+            {
+                "id": "at-claimable",
+                "status": "open",
+                "assignee": None,
+                "created_at": "2026-02-21T00:00:00Z",
+            },
+        ],
+        next_changeset=lambda **_kwargs: {"id": "at-next.1"},
+        select_review_feedback_changeset=select_feedback,
+        select_global_review_feedback_changeset=lambda **_kwargs: None,
+    )
+
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "at-claimable"
+    assert result.changeset_id == "at-claimable.1"
+    assert seen_epics == ["at-claimable"]
+
+
+def test_run_startup_contract_selects_stale_reclaimable_review_feedback() -> None:
+    stale_issue = {
+        "id": "at-stale",
+        "status": "open",
+        "assignee": "atelier/worker/codex/p099",
+        "created_at": "2026-02-20T00:00:00Z",
+    }
+    feedback = ReviewFeedbackSelection(
+        epic_id="at-stale",
+        changeset_id="at-stale.1",
+        feedback_at="2026-02-20T00:00:00Z",
+    )
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [stale_issue],
+        stale_family_assigned_epics=lambda _issues, agent_id: [stale_issue],
+        next_changeset=lambda **_kwargs: {"id": "at-stale.2"},
+        select_review_feedback_changeset=lambda **_kwargs: feedback,
+    )
+
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "at-stale"
+    assert result.changeset_id == "at-stale.1"
+    assert result.reassign_from == "atelier/worker/codex/p099"
+
+
+def test_run_startup_contract_skips_unclaimable_global_review_feedback() -> None:
+    blocked_feedback = ReviewFeedbackSelection(
+        epic_id="at-blocked",
+        changeset_id="at-blocked.1",
+        feedback_at="2026-02-19T00:00:00Z",
+    )
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [
+            {
+                "id": "at-blocked",
+                "status": "open",
+                "assignee": "atelier/planner/codex/p001",
+                "created_at": "2026-02-20T00:00:00Z",
+            },
+            {
+                "id": "at-claimable",
+                "status": "open",
+                "assignee": None,
+                "created_at": "2026-02-21T00:00:00Z",
+            },
+        ],
+        next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.1"},
+        select_review_feedback_changeset=lambda **_kwargs: None,
+        select_global_review_feedback_changeset=lambda **_kwargs: blocked_feedback,
+    )
+
+    assert result.reason == "selected_auto"
+    assert result.epic_id == "at-claimable"
 
 
 def test_run_startup_contract_reclaims_stale_family_assignment() -> None:

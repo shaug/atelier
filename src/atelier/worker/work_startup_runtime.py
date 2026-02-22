@@ -16,6 +16,7 @@ from ..worker import selection as worker_selection
 from ..worker.models import StartupContractResult
 from ..worker.session import startup as worker_startup
 from .work_finalization_runtime import (
+    changeset_has_review_handoff_signal,
     changeset_waiting_on_review_or_signals,
     has_open_descendant_changesets,
     is_changeset_in_progress,
@@ -76,6 +77,22 @@ class _NextChangesetService(worker_startup.NextChangesetService):
             repo_root=self._repo_root,
             branch_pr=branch_pr,
             branch_pr_strategy=branch_pr_strategy,
+            git_path=git_path,
+        )
+
+    def changeset_has_review_handoff_signal(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        branch_pr: bool,
+        git_path: str | None,
+    ) -> bool:
+        return changeset_has_review_handoff_signal(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=self._repo_root,
+            branch_pr=branch_pr,
             git_path=git_path,
         )
 

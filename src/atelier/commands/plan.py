@@ -32,6 +32,12 @@ from . import work as work_cmd
 from .resolve import resolve_current_project_with_repo_root
 
 
+def _issue_sort_key(issue: dict[str, object]) -> tuple[str, str]:
+    issue_id = str(issue.get("id") or "").strip()
+    title = str(issue.get("title") or "").strip()
+    return (issue_id, title)
+
+
 def _list_inbox_messages(
     agent_id: str,
     *,
@@ -43,7 +49,7 @@ def _list_inbox_messages(
     )
     if inbox:
         say("Unread messages:")
-        for issue in inbox:
+        for issue in sorted(inbox, key=_issue_sort_key):
             issue_id = issue.get("id") or ""
             title = issue.get("title") or ""
             say(f"- {issue_id} {title}")
@@ -55,7 +61,7 @@ def _list_queue_messages(*, beads_root: Path, repo_root: Path) -> None:
     queued = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root, unread_only=True)
     if queued:
         say("Queued messages:")
-        for issue in queued:
+        for issue in sorted(queued, key=_issue_sort_key):
             issue_id = issue.get("id") or ""
             queue_name = issue.get("queue") or "queue"
             title = issue.get("title") or ""

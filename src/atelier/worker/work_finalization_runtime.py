@@ -12,6 +12,7 @@ from .work_finalization_reconcile import (
     reconcile_blocked_merged_changesets,
 )
 from .work_finalization_state import (
+    changeset_has_review_handoff_signal,
     changeset_integration_signal,
     changeset_parent_branch,
     changeset_pr_url,
@@ -34,6 +35,7 @@ from .work_finalization_state import (
 )
 
 __all__ = [
+    "changeset_has_review_handoff_signal",
     "changeset_integration_signal",
     "changeset_parent_branch",
     "changeset_pr_url",

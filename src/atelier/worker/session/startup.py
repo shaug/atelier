@@ -8,10 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ... import changeset_fields
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
+from ..models_boundary import parse_issue_boundary
 from ..review import MergeConflictSelection, ReviewFeedbackSelection
+
+_TERMINAL_STATUSES = {"closed", "done"}
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,15 @@ class NextChangesetService(Protocol):
         git_path: str | None,
     ) -> bool: ...
 
+    def changeset_has_review_handoff_signal(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        branch_pr: bool,
+        git_path: str | None,
+    ) -> bool: ...
+
     def has_open_descendant_changesets(self, changeset_id: str) -> bool: ...
 
     def list_descendant_changesets(
@@ -63,6 +76,75 @@ class NextChangesetService(Protocol):
     ) -> list[dict[str, object]]: ...
 
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool: ...
+
+
+def _issue_id(issue: dict[str, object]) -> str | None:
+    issue_id = issue.get("id")
+    if not isinstance(issue_id, str):
+        return None
+    cleaned = issue_id.strip()
+    return cleaned or None
+
+
+def _is_terminal(issue: dict[str, object]) -> bool:
+    status = str(issue.get("status") or "").strip().lower()
+    return status in _TERMINAL_STATUSES
+
+
+def _dependency_ids(issue: dict[str, object]) -> tuple[str, ...] | None:
+    try:
+        boundary = parse_issue_boundary(issue, source="next_changeset_service:dependency_ids")
+    except ValueError:
+        return None
+    return boundary.dependency_ids
+
+
+def _stacked_lineage_matches(
+    *, dependent_issue: dict[str, object], blocker_issue: dict[str, object]
+) -> bool:
+    dependent_parent = changeset_fields.parent_branch(dependent_issue)
+    blocker_work = changeset_fields.work_branch(blocker_issue)
+    return (
+        isinstance(dependent_parent, str)
+        and isinstance(blocker_work, str)
+        and dependent_parent == blocker_work
+    )
+
+
+def _dependencies_satisfied(
+    *,
+    issue: dict[str, object],
+    epic_changesets_by_id: dict[str, dict[str, object]],
+    dependency_cache: dict[str, dict[str, object] | None],
+    context: NextChangesetContext,
+    service: NextChangesetService,
+) -> bool:
+    dependency_ids = _dependency_ids(issue)
+    if dependency_ids is None:
+        return False
+    for dependency_id in dependency_ids:
+        blocker_issue = epic_changesets_by_id.get(dependency_id)
+        if blocker_issue is None:
+            blocker_issue = dependency_cache.get(dependency_id)
+            if blocker_issue is None and dependency_id not in dependency_cache:
+                blocker_issue = service.show_issue(dependency_id)
+                dependency_cache[dependency_id] = blocker_issue
+        if blocker_issue is None:
+            return False
+        if _is_terminal(blocker_issue):
+            continue
+        if dependency_id not in epic_changesets_by_id:
+            return False
+        if not _stacked_lineage_matches(dependent_issue=issue, blocker_issue=blocker_issue):
+            return False
+        if not service.changeset_has_review_handoff_signal(
+            blocker_issue,
+            repo_slug=context.repo_slug,
+            branch_pr=context.branch_pr,
+            git_path=context.git_path,
+        ):
+            return False
+    return True
 
 
 def next_changeset_service(
@@ -118,6 +200,28 @@ def next_changeset_service(
                 return issue
 
     changesets = service.ready_changesets(epic_id=context.epic_id)
+    changeset_ids = {issue_id for issue in changesets if (issue_id := _issue_id(issue)) is not None}
+    descendants = service.list_descendant_changesets(context.epic_id, include_closed=False)
+    descendants_by_id = {
+        issue_id: issue for issue in descendants if (issue_id := _issue_id(issue)) is not None
+    }
+    dependency_cache: dict[str, dict[str, object] | None] = {}
+    for issue in descendants:
+        issue_id = _issue_id(issue)
+        if issue_id is None or issue_id in changeset_ids:
+            continue
+        if not service.is_changeset_ready(issue):
+            continue
+        if not _dependencies_satisfied(
+            issue=issue,
+            epic_changesets_by_id=descendants_by_id,
+            dependency_cache=dependency_cache,
+            context=context,
+            service=service,
+        ):
+            continue
+        changesets.append(issue)
+        changeset_ids.add(issue_id)
     if not changesets:
         return None
     actionable = [
@@ -163,6 +267,7 @@ class StartupContractContext:
     branch_pr_strategy: object
     git_path: str | None
     worker_queue_name: str
+    excluded_epic_ids: tuple[str, ...] = ()
 
 
 class StartupContractService(Protocol):
@@ -270,6 +375,9 @@ def run_startup_contract_service(
     branch_pr_strategy = context.branch_pr_strategy
     git_path = context.git_path
     worker_queue_name = context.worker_queue_name
+    excluded_epics = {
+        str(epic_id).strip() for epic_id in context.excluded_epic_ids if str(epic_id).strip()
+    }
 
     """Apply startup_contract skill ordering to select the next epic."""
     if explicit_epic_id is not None:
@@ -340,6 +448,48 @@ def run_startup_contract_service(
     def stale_reassign_for_epic(epic_id: str) -> str | None:
         return stale_assignee_by_epic.get(epic_id)
 
+    issues_by_id = {
+        str(issue.get("id")): issue
+        for issue in issues
+        if isinstance(issue.get("id"), str) and issue.get("id")
+    }
+
+    def is_excluded(epic_id: str, *, stage: str) -> bool:
+        if epic_id in excluded_epics:
+            atelier_log.debug(
+                f"startup skipping {stage} epic={epic_id} reason=claim_conflict_excluded"
+            )
+            return True
+        return False
+
+    def is_claimable(epic_id: str, *, stage: str) -> bool:
+        issue = issues_by_id.get(epic_id)
+        if issue is None:
+            atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=unknown_epic")
+            return False
+        labels = worker_selection.issue_labels(issue)
+        if "at:draft" in labels:
+            atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=draft")
+            return False
+        status = str(issue.get("status") or "")
+        if status and not worker_selection.is_eligible_status(status, allow_hooked=True):
+            atelier_log.debug(
+                f"startup skipping {stage} epic={epic_id} reason=ineligible_status status={status}"
+            )
+            return False
+        assignee = issue.get("assignee")
+        if isinstance(assignee, str) and assignee.strip():
+            if assignee == agent_id:
+                return True
+            if stale_reassign_for_epic(epic_id):
+                return True
+            atelier_log.debug(
+                "startup skipping "
+                f"{stage} epic={epic_id} reason=active_assignee assignee={assignee}"
+            )
+            return False
+        return True
+
     def select_conflict_candidate(
         epic_ids: list[str],
     ) -> MergeConflictSelection | None:
@@ -349,6 +499,8 @@ def run_startup_contract_service(
             if epic_id in seen_epics:
                 continue
             seen_epics.add(epic_id)
+            if is_excluded(epic_id, stage="merge-conflict"):
+                continue
             selection = service.select_conflicted_changeset(
                 epic_id=epic_id,
                 repo_slug=repo_slug,
@@ -392,6 +544,10 @@ def run_startup_contract_service(
             if epic_id in seen_epics:
                 continue
             seen_epics.add(epic_id)
+            if is_excluded(epic_id, stage="review-feedback"):
+                continue
+            if not is_claimable(epic_id, stage="review-feedback"):
+                continue
             feedback_selection = service.select_review_feedback_changeset(
                 epic_id=epic_id,
                 repo_slug=repo_slug,
@@ -427,14 +583,21 @@ def run_startup_contract_service(
         )
 
     if branch_pr and repo_slug and hooked_epic:
-        hooked_conflict = select_conflict_candidate([hooked_epic])
-        if hooked_conflict is not None:
-            return resume_conflict(hooked_conflict)
-        hooked_feedback = select_feedback_candidate([hooked_epic])
-        if hooked_feedback is not None:
-            return resume_feedback(hooked_feedback)
+        if is_excluded(hooked_epic, stage="hooked"):
+            hooked_epic = None
+        if hooked_epic:
+            hooked_conflict = select_conflict_candidate([hooked_epic])
+            if hooked_conflict is not None:
+                return resume_conflict(hooked_conflict)
+            hooked_feedback = select_feedback_candidate([hooked_epic])
+            if hooked_feedback is not None:
+                return resume_feedback(hooked_feedback)
 
-    if hooked_epic and epic_has_actionable_changeset(hooked_epic):
+    if (
+        hooked_epic
+        and not is_excluded(hooked_epic, stage="hooked")
+        and epic_has_actionable_changeset(hooked_epic)
+    ):
         service.emit(f"Resuming hooked epic: {hooked_epic}")
         atelier_log.debug(f"startup resuming hooked epic={hooked_epic}")
         return StartupContractResult(
@@ -455,29 +618,46 @@ def run_startup_contract_service(
                 continue
             if issue_id == hooked_epic:
                 continue
+            if is_excluded(issue_id, stage="review-feedback"):
+                continue
             status = str(issue.get("status") or "")
             if str(status).strip().lower() not in {"open", "ready", "in_progress"}:
                 continue
             labels = worker_selection.issue_labels(issue)
             if "at:draft" in labels:
                 continue
+            if not is_claimable(issue_id, stage="review-feedback"):
+                continue
             unhooked_epics.append(issue_id)
         conflict = select_conflict_candidate(unhooked_epics)
         if conflict is not None:
             return resume_conflict(conflict)
         global_conflict = service.select_global_conflicted_changeset(repo_slug=repo_slug)
+        if global_conflict is not None and is_excluded(
+            global_conflict.epic_id, stage="global-merge-conflict"
+        ):
+            global_conflict = None
         if global_conflict is not None:
             return resume_conflict(global_conflict)
         feedback = select_feedback_candidate(unhooked_epics)
         if feedback is not None:
             return resume_feedback(feedback)
         global_feedback = service.select_global_review_feedback_changeset(repo_slug=repo_slug)
+        if global_feedback is not None and not is_excluded(
+            global_feedback.epic_id, stage="global-review-feedback"
+        ):
+            if not is_claimable(global_feedback.epic_id, stage="global-review-feedback"):
+                global_feedback = None
         if global_feedback is not None:
             return resume_feedback(global_feedback)
 
     for issue in assigned:
         candidate = issue.get("id")
-        if candidate and epic_has_actionable_changeset(str(candidate)):
+        if (
+            candidate
+            and not is_excluded(str(candidate), stage="assigned")
+            and epic_has_actionable_changeset(str(candidate))
+        ):
             selected_epic = str(candidate)
             service.emit(f"Resuming assigned epic: {selected_epic}")
             atelier_log.debug(f"startup resuming assigned epic={selected_epic}")
@@ -495,6 +675,7 @@ def run_startup_contract_service(
             candidate
             and isinstance(previous_assignee, str)
             and previous_assignee
+            and not is_excluded(str(candidate), stage="stale")
             and epic_has_actionable_changeset(str(candidate))
         ):
             selected_epic = str(candidate)
@@ -533,13 +714,21 @@ def run_startup_contract_service(
 
     if mode == "auto":
         selected_epic = worker_selection.select_epic_auto(
-            issues,
+            [
+                issue
+                for issue in issues
+                if not is_excluded(str(issue.get("id") or ""), stage="auto")
+            ],
             agent_id=agent_id,
             is_actionable=epic_has_actionable_changeset,
         )
     else:
         selected_epic = service.select_epic_prompt(
-            issues,
+            [
+                issue
+                for issue in issues
+                if not is_excluded(str(issue.get("id") or ""), stage="prompt")
+            ],
             agent_id=agent_id,
             is_actionable=epic_has_actionable_changeset,
             assume_yes=assume_yes,

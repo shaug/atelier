@@ -8,13 +8,36 @@ from typing import Protocol
 
 from ...pr_strategy import PrStrategy
 from ..context import ChangesetSelectionContext, WorkerRunContext
-from ..models import WorkerRunSummary
+from ..models import StartupContractResult, WorkerRunSummary
 from ..models_boundary import parse_issue_boundary
 from ..ports import BeadsService, WorkerLifecycleService, WorkerRuntimeDependencies
 from .startup import StartupContractContext
 from .worktree import WorktreePreparationContext
 
 _WORKER_QUEUE_NAME = "worker"
+
+
+def _claim_conflict_assignee(
+    *,
+    beads: BeadsService,
+    epic_id: str,
+    agent_id: str,
+    allow_takeover_from: str | None,
+    beads_root: Path,
+    repo_root: Path,
+) -> str | None:
+    """Return conflicting assignee when an epic claim failed due assignment."""
+    issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
+    if not issues:
+        return None
+    assignee = issues[0].get("assignee")
+    if not isinstance(assignee, str) or not assignee:
+        return None
+    if assignee == agent_id:
+        return None
+    if allow_takeover_from and assignee == allow_takeover_from:
+        return None
+    return assignee
 
 
 @dataclass(frozen=True)
@@ -205,48 +228,6 @@ def run_worker_once(
         repo_slug = infra.prs.github_repo_slug(
             project_config.project.origin or project_config.project.repo_url
         )
-        finishstep = control.step("Select epic", timings=timings, trace=trace)
-        startup_result = lifecycle.run_startup_contract(
-            context=StartupContractContext(
-                agent_id=agent.agent_id,
-                agent_bead_id=agent_bead_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                mode=mode,
-                explicit_epic_id=epic_id,
-                queue_only=queue_only,
-                dry_run=dry_run,
-                assume_yes=assume_yes,
-                repo_slug=repo_slug,
-                branch_pr=project_config.branch.pr,
-                branch_pr_strategy=project_config.branch.pr_strategy,
-                git_path=git_path,
-                worker_queue_name=_WORKER_QUEUE_NAME,
-            )
-        )
-        summary_note = startup_result.reason
-        if startup_result.epic_id:
-            summary_note = f"{summary_note} ({startup_result.epic_id})"
-        finishstep(extra=summary_note)
-        if startup_result.should_exit:
-            if dry_run:
-                control.dry_run_log("Startup contract would exit without starting a worker.")
-            return finish(
-                WorkerRunSummary(
-                    started=False,
-                    reason=startup_result.reason,
-                    epic_id=startup_result.epic_id,
-                )
-            )
-        if not isinstance(startup_result.epic_id, str) or not startup_result.epic_id:
-            if dry_run:
-                control.dry_run_log("Startup contract did not select an epic.")
-                return finish(
-                    WorkerRunSummary(started=False, reason="no_epic_selected", epic_id=None)
-                )
-            control.die("startup contract did not select an epic")
-            return finish(WorkerRunSummary(started=False, reason="no_epic_selected", epic_id=None))
-        selected_epic = startup_result.epic_id
         agent_bead_id_required = ""
         if not dry_run:
             if not isinstance(agent_bead_id, str) or not agent_bead_id:
@@ -255,34 +236,117 @@ def run_worker_once(
                     WorkerRunSummary(started=False, reason="missing_agent_bead", epic_id=None)
                 )
             agent_bead_id_required = agent_bead_id
-
-        finishstep = control.step("Claim epic", timings=timings, trace=trace)
-        if dry_run:
-            control.dry_run_log(f"Selected epic: {selected_epic}")
-            issues = infra.beads.run_bd_json(
-                ["show", selected_epic], beads_root=beads_root, cwd=repo_root
+        claim_conflict_excluded_epics: set[str] = set()
+        startup_result: StartupContractResult
+        selected_epic: str
+        epic_issue: dict[str, object]
+        while True:
+            finishstep = control.step("Select epic", timings=timings, trace=trace)
+            startup_result = lifecycle.run_startup_contract(
+                context=StartupContractContext(
+                    agent_id=agent.agent_id,
+                    agent_bead_id=agent_bead_id,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    mode=mode,
+                    explicit_epic_id=epic_id,
+                    queue_only=queue_only,
+                    dry_run=dry_run,
+                    assume_yes=assume_yes,
+                    repo_slug=repo_slug,
+                    branch_pr=project_config.branch.pr,
+                    branch_pr_strategy=project_config.branch.pr_strategy,
+                    git_path=git_path,
+                    worker_queue_name=_WORKER_QUEUE_NAME,
+                    excluded_epic_ids=tuple(sorted(claim_conflict_excluded_epics)),
+                )
             )
-            if not issues:
-                control.dry_run_log(f"Epic {selected_epic!r} not found.")
-                finishstep(extra="epic not found")
+            summary_note = startup_result.reason
+            if startup_result.epic_id:
+                summary_note = f"{summary_note} ({startup_result.epic_id})"
+            finishstep(extra=summary_note)
+            if startup_result.should_exit:
+                if dry_run:
+                    control.dry_run_log("Startup contract would exit without starting a worker.")
                 return finish(
-                    WorkerRunSummary(started=False, reason="epic_not_found", epic_id=selected_epic)
+                    WorkerRunSummary(
+                        started=False,
+                        reason=startup_result.reason,
+                        epic_id=startup_result.epic_id,
+                    )
                 )
-            epic_issue = issues[0]
-            control.dry_run_log(f"Would claim epic {selected_epic!r} for agent {agent.agent_id!r}.")
-            if startup_result.reassign_from:
+            if not isinstance(startup_result.epic_id, str) or not startup_result.epic_id:
+                if dry_run:
+                    control.dry_run_log("Startup contract did not select an epic.")
+                    return finish(
+                        WorkerRunSummary(started=False, reason="no_epic_selected", epic_id=None)
+                    )
+                control.die("startup contract did not select an epic")
+                return finish(
+                    WorkerRunSummary(started=False, reason="no_epic_selected", epic_id=None)
+                )
+            selected_epic = startup_result.epic_id
+            finishstep = control.step("Claim epic", timings=timings, trace=trace)
+            if dry_run:
+                control.dry_run_log(f"Selected epic: {selected_epic}")
+                issues = infra.beads.run_bd_json(
+                    ["show", selected_epic], beads_root=beads_root, cwd=repo_root
+                )
+                if not issues:
+                    control.dry_run_log(f"Epic {selected_epic!r} not found.")
+                    finishstep(extra="epic not found")
+                    return finish(
+                        WorkerRunSummary(
+                            started=False,
+                            reason="epic_not_found",
+                            epic_id=selected_epic,
+                        )
+                    )
+                epic_issue = issues[0]
                 control.dry_run_log(
-                    f"Would reclaim stale epic assignment from {startup_result.reassign_from!r}."
+                    f"Would claim epic {selected_epic!r} for agent {agent.agent_id!r}."
                 )
-        else:
+                if startup_result.reassign_from:
+                    control.dry_run_log(
+                        f"Would reclaim stale epic assignment from {startup_result.reassign_from!r}."
+                    )
+                finishstep()
+                break
+
             control.say(f"Selected epic: {selected_epic}")
-            epic_issue = infra.beads.claim_epic(
-                selected_epic,
-                agent.agent_id,
-                beads_root=beads_root,
-                cwd=repo_root,
-                allow_takeover_from=startup_result.reassign_from,
-            )
+            try:
+                epic_issue = infra.beads.claim_epic(
+                    selected_epic,
+                    agent.agent_id,
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                    allow_takeover_from=startup_result.reassign_from,
+                )
+            except SystemExit:
+                conflicting_assignee = _claim_conflict_assignee(
+                    beads=infra.beads,
+                    epic_id=selected_epic,
+                    agent_id=agent.agent_id,
+                    allow_takeover_from=startup_result.reassign_from,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                )
+                can_retry = (
+                    not dry_run
+                    and epic_id is None
+                    and bool(conflicting_assignee)
+                    and selected_epic not in claim_conflict_excluded_epics
+                )
+                if can_retry and conflicting_assignee is not None:
+                    claim_conflict_excluded_epics.add(selected_epic)
+                    control.say(
+                        "Skipping conflicted epic and retrying selection: "
+                        f"{selected_epic} (assigned to {conflicting_assignee})"
+                    )
+                    finishstep(extra=f"retry after conflict ({selected_epic})")
+                    continue
+                raise
+
             if startup_result.reassign_from:
                 previous_agent = infra.beads.find_agent_bead(
                     startup_result.reassign_from,
@@ -298,7 +362,8 @@ def run_worker_once(
                     infra.beads.clear_agent_hook(
                         previous_agent_id, beads_root=beads_root, cwd=repo_root
                     )
-        finishstep()
+            finishstep()
+            break
         finishstep = control.step("Resolve root branch", timings=timings, trace=trace)
         root_branch_value = infra.beads.extract_workspace_root_branch(epic_issue)
         if not root_branch_value:
