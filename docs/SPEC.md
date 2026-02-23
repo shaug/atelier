@@ -145,7 +145,8 @@ Epic description fields include:
 Changeset description fields include:
 
 - `changeset.root_branch` (epic root branch)
-- `changeset.parent_branch` (branch this changeset was cut from)
+- `changeset.parent_branch` (effective review lineage parent; must not equal
+  `changeset.root_branch` for PR workflows)
 - `changeset.work_branch` (active work branch)
 - `changeset.root_base` (root SHA at claim time, optional)
 - `changeset.parent_base` (parent SHA at claim time, optional)

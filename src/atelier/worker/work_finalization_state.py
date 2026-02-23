@@ -411,6 +411,17 @@ def _resolve_workspace_parent_branch(
     return _normalize_branch(extract_workspace_parent_branch(epic_issues[0]))
 
 
+def _resolve_non_root_default_branch(
+    *, root_branch: str, repo_root: Path, git_path: str | None
+) -> str:
+    default_branch = _normalize_branch(git.git_default_branch(repo_root, git_path=git_path))
+    if not default_branch:
+        return ""
+    if root_branch and default_branch == root_branch:
+        return ""
+    return default_branch
+
+
 def _branch_integrated_into(
     branch: str, target_branch: str, *, repo_root: Path, git_path: str | None
 ) -> bool:
@@ -458,6 +469,7 @@ def changeset_base_branch(
     parent_branch = _normalize_branch(lineage.effective_parent_branch)
     if lineage.blocked:
         return None
+    raw_parent_branch = parent_branch
     workspace_parent_branch = _resolve_workspace_parent_branch(
         issue,
         root_branch=root_branch,
@@ -466,6 +478,18 @@ def changeset_base_branch(
         beads_root=beads_root,
         repo_root=repo_root,
     )
+    if workspace_parent_branch and root_branch and workspace_parent_branch == root_branch:
+        workspace_parent_branch = ""
+    default_parent_branch = ""
+    if not workspace_parent_branch and (
+        not parent_branch or (root_branch and parent_branch == root_branch)
+    ):
+        default_parent_branch = _resolve_non_root_default_branch(
+            root_branch=root_branch,
+            repo_root=repo_root,
+            git_path=git_path,
+        )
+    integration_parent_branch = workspace_parent_branch or default_parent_branch
     if (
         beads_root is not None
         and lineage.used_dependency_parent
@@ -492,25 +516,55 @@ def changeset_base_branch(
                 cwd=repo_root,
                 allow_override=True,
             )
-    if parent_branch and workspace_parent_branch and parent_branch == root_branch:
-        # First reviewable changeset in a stack should target integration
-        # branch, not the epic root branch.
-        return workspace_parent_branch
-    if parent_branch and workspace_parent_branch and parent_branch != workspace_parent_branch:
+    collapsed_parent_normalized = bool(
+        raw_parent_branch
+        and root_branch
+        and raw_parent_branch == root_branch
+        and integration_parent_branch
+    )
+    if collapsed_parent_normalized and integration_parent_branch:
+        parent_branch = integration_parent_branch
+        changeset_id = issue.get("id")
+        if beads_root is not None and isinstance(changeset_id, str) and changeset_id:
+            root_base = (
+                git.git_rev_parse(repo_root, root_branch, git_path=git_path)
+                if root_branch
+                else None
+            )
+            parent_base = git.git_rev_parse(
+                repo_root,
+                integration_parent_branch,
+                git_path=git_path,
+            )
+            beads.update_changeset_branch_metadata(
+                changeset_id,
+                root_branch=root_branch,
+                parent_branch=integration_parent_branch,
+                work_branch=changeset_work_branch(issue),
+                root_base=root_base,
+                parent_base=parent_base,
+                beads_root=beads_root,
+                cwd=repo_root,
+                allow_override=True,
+            )
+
+    if parent_branch and integration_parent_branch and parent_branch != integration_parent_branch:
         if _branch_integrated_into(
             parent_branch,
-            workspace_parent_branch,
+            integration_parent_branch,
             repo_root=repo_root,
             git_path=git_path,
         ):
-            return workspace_parent_branch
+            return integration_parent_branch
     if parent_branch:
+        if root_branch and parent_branch == root_branch:
+            return None
         return parent_branch
-    if workspace_parent_branch:
-        return workspace_parent_branch
+    if integration_parent_branch:
+        return integration_parent_branch
     if root_branch:
-        return root_branch
-    return git.git_default_branch(repo_root, git_path=git_path)
+        return None
+    return _resolve_non_root_default_branch(root_branch="", repo_root=repo_root, git_path=git_path)
 
 
 def align_existing_pr_base(
@@ -1224,8 +1278,33 @@ def changeset_parent_branch(
         beads_root=beads_root,
         repo_root=repo_root or Path("."),
     )
-    if lineage.effective_parent_branch:
-        return lineage.effective_parent_branch
+    parent_branch = _normalize_branch(lineage.effective_parent_branch)
+    if parent_branch and (not root_branch or parent_branch != root_branch):
+        return parent_branch
+
+    resolved_repo_root = repo_root or Path(".")
+    description = issue.get("description")
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
+    workspace_parent_branch = _resolve_workspace_parent_branch(
+        issue,
+        root_branch=root_branch,
+        parent_branch=parent_branch,
+        workspace_parent_branch=str(fields.get("workspace.parent_branch") or ""),
+        beads_root=beads_root,
+        repo_root=resolved_repo_root,
+    )
+    if workspace_parent_branch and workspace_parent_branch != root_branch:
+        return workspace_parent_branch
+    if not workspace_parent_branch and (not parent_branch or parent_branch == root_branch):
+        default_parent_branch = _resolve_non_root_default_branch(
+            root_branch=root_branch,
+            repo_root=resolved_repo_root,
+            git_path=None,
+        )
+        if default_parent_branch:
+            return default_parent_branch
+    if parent_branch:
+        return parent_branch
     return root_branch
 
 
