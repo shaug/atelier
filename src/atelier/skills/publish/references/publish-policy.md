@@ -45,8 +45,6 @@ branch and re-apply the workspace changes according to the history policy
 
 - Run required checks from `repo/AGENTS.md` before publish/persist unless the
   user explicitly says to ignore failures.
-- Use the repository's canonical lint gate command for PR-facing checks when
-  defined (for this repo: `bash scripts/lint-gate.sh` / `just lint`).
 - Keep the working tree clean before and after publish operations.
 - The skill owns mutation; `atelier` may only be used for read-only
   verification.

@@ -13,6 +13,9 @@ from ... import beads, changesets, dependency_lineage, exec, git, pr_strategy, p
 from ... import log as atelier_log
 from ..models import FinalizeResult
 
+PR_LINT_GATE_COMMAND = ["just", "lint"]
+PR_LINT_GATE_COMMAND_TEXT = "just lint"
+
 
 @dataclass(frozen=True)
 class PrGateResult:
@@ -24,15 +27,15 @@ class PrGateResult:
 
 def run_pr_lint_gate(*, repo_root: Path) -> tuple[bool, str]:
     """Run the canonical lint gate command prior to PR creation."""
-    result = exec.try_run_command(["bash", "scripts/lint-gate.sh"], cwd=repo_root)
+    result = exec.try_run_command(PR_LINT_GATE_COMMAND, cwd=repo_root)
     if result is None:
-        return False, "missing required command: bash"
+        return False, f"missing required command: {PR_LINT_GATE_COMMAND[0]}"
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         if detail:
             return False, detail
-        return False, "command failed: bash scripts/lint-gate.sh"
-    return True, "passed: bash scripts/lint-gate.sh"
+        return False, f"command failed: {PR_LINT_GATE_COMMAND_TEXT}"
+    return True, f"passed: {PR_LINT_GATE_COMMAND_TEXT}"
 
 
 def changeset_parent_lifecycle_state(
@@ -330,7 +333,7 @@ def handle_pushed_without_pr(
         body = (
             "Changeset branch is pushed but PR creation was stopped because the "
             "canonical lint gate failed.\n"
-            "Command: `bash scripts/lint-gate.sh`."
+            f"Command: `{PR_LINT_GATE_COMMAND_TEXT}`."
         )
         if lint_detail:
             body = f"{body}\nDetail: {lint_detail}"

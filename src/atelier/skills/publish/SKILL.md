@@ -49,8 +49,6 @@ description: >-
      `NEEDS-DECISION:` message to the overseer.
 1. Run required checks unless explicitly told to skip failures:
    - Run `scripts/run_required_checks.sh <repo_path> <command> [<command> ...]`.
-   - Prefer the repository's canonical lint gate command when defined in
-     `AGENTS.md` (for this repo: `bash scripts/lint-gate.sh`, also `just lint`).
 1. Prepare commits with git as needed. Do not mutate state with `atelier`.
 1. Execute the operation per the resolved plan:
    - Rebase the work branch onto `root_branch` before any integration or PR.
