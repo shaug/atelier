@@ -183,3 +183,42 @@ def test_changeset_pr_creation_decision_blocks_on_ambiguous_dependency_lineage(
 
     assert decision.allow_pr is False
     assert decision.reason.startswith("blocked:dependency-lineage-ambiguous")
+
+
+def test_attempt_create_draft_pr_uses_body_file_for_markdown(monkeypatch) -> None:
+    commands: list[list[str]] = []
+    observed: dict[str, object] = {}
+
+    def fake_try_run_command(cmd: list[str], **_kwargs) -> SimpleNamespace:
+        commands.append(list(cmd))
+        body_path = Path(cmd[cmd.index("--body-file") + 1])
+        observed["body_path"] = body_path
+        observed["body_exists_during_call"] = body_path.exists()
+        observed["body"] = body_path.read_text(encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="created", stderr="")
+
+    monkeypatch.setattr(pr_gate.exec, "try_run_command", fake_try_run_command)
+
+    created, detail = pr_gate.attempt_create_draft_pr(
+        repo_slug="org/repo",
+        issue={"title": "Title with `ticks` and $(echo safe)"},
+        work_branch="feature/work",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+        changeset_base_branch=lambda *_args, **_kwargs: "main",
+        render_changeset_pr_body=lambda _issue: "Body with `code`\n$(echo safe)",
+    )
+
+    assert created is True
+    assert detail == "created"
+    assert commands
+    command = commands[0]
+    assert "--body-file" in command
+    assert "--body" not in command
+    assert "Title with `ticks` and $(echo safe)" in command
+    assert observed["body_exists_during_call"] is True
+    assert observed["body"] == "Body with `code`\n$(echo safe)"
+    body_path = observed["body_path"]
+    assert isinstance(body_path, Path)
+    assert not body_path.exists()

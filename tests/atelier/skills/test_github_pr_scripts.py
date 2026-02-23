@@ -145,3 +145,97 @@ def test_reply_inline_thread_main_rejects_empty_body(capsys) -> None:
     )
     assert rc == 1
     assert "reply body must not be empty" in capsys.readouterr().err
+
+
+def test_create_or_update_pr_create_uses_body_file(capsys) -> None:
+    module = _load_script("create_or_update_pr.py")
+    observed: dict[str, object] = {}
+
+    def fake_run(cmd: list[str]) -> str:
+        if cmd[:3] != ["gh", "pr", "create"]:
+            raise AssertionError(f"unexpected command: {cmd}")
+        body_index = cmd.index("--body-file")
+        body_path = Path(cmd[body_index + 1])
+        observed["body"] = body_path.read_text(encoding="utf-8")
+        observed["body_path"] = body_path
+        observed["body_exists_during_call"] = body_path.exists()
+        return "https://github.com/org/repo/pull/77\n"
+
+    with (
+        patch.object(module, "find_pr_number", return_value=None),
+        patch.object(module, "edit_labels", return_value=None),
+        patch.object(module, "read_pr", return_value={"number": 77, "title": "Draft"}),
+        patch.object(module, "run", side_effect=fake_run),
+    ):
+        rc = module.main(
+            [
+                "--repo",
+                "org/repo",
+                "--base",
+                "main",
+                "--head",
+                "feature/work",
+                "--title",
+                "Title with `ticks` and $(echo safe)",
+                "--body",
+                "Body with `code` and $(echo safe)",
+                "--labels",
+                "",
+            ]
+        )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["number"] == 77
+    assert observed["body_exists_during_call"] is True
+    assert observed["body"] == "Body with `code` and $(echo safe)"
+    body_path = observed["body_path"]
+    assert isinstance(body_path, Path)
+    assert not body_path.exists()
+
+
+def test_create_or_update_pr_edit_uses_body_file(capsys) -> None:
+    module = _load_script("create_or_update_pr.py")
+    observed: dict[str, object] = {}
+
+    def fake_run(cmd: list[str]) -> str:
+        if cmd[:3] != ["gh", "pr", "edit"]:
+            raise AssertionError(f"unexpected command: {cmd}")
+        body_index = cmd.index("--body-file")
+        body_path = Path(cmd[body_index + 1])
+        observed["body"] = body_path.read_text(encoding="utf-8")
+        observed["body_path"] = body_path
+        observed["body_exists_during_call"] = body_path.exists()
+        return ""
+
+    with (
+        patch.object(module, "find_pr_number", return_value=41),
+        patch.object(module, "edit_labels", return_value=None),
+        patch.object(module, "read_pr", return_value={"number": 41, "title": "Draft"}),
+        patch.object(module, "run", side_effect=fake_run),
+    ):
+        rc = module.main(
+            [
+                "--repo",
+                "org/repo",
+                "--base",
+                "main",
+                "--head",
+                "feature/work",
+                "--title",
+                "Title with `ticks` and $(echo safe)",
+                "--body",
+                "Body with `code` and $(echo safe)",
+                "--labels",
+                "bug",
+            ]
+        )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["number"] == 41
+    assert observed["body_exists_during_call"] is True
+    assert observed["body"] == "Body with `code` and $(echo safe)"
+    body_path = observed["body_path"]
+    assert isinstance(body_path, Path)
+    assert not body_path.exists()

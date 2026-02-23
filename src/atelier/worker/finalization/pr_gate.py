@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Iterator
 
 from ... import beads, changesets, dependency_lineage, exec, git, pr_strategy, prs
 from ... import log as atelier_log
@@ -172,24 +175,25 @@ def attempt_create_draft_pr(
         return False, "missing PR base branch metadata"
     title = str(issue.get("title") or "").strip() or work_branch
     body = render_changeset_pr_body(issue)
-    result = exec.try_run_command(
-        [
-            "gh",
-            "pr",
-            "create",
-            "--repo",
-            repo_slug,
-            "--base",
-            base_branch,
-            "--head",
-            work_branch,
-            "--title",
-            title,
-            "--body",
-            body,
-            "--draft",
-        ]
-    )
+    with _temporary_text_file(body) as body_file:
+        result = exec.try_run_command(
+            [
+                "gh",
+                "pr",
+                "create",
+                "--repo",
+                repo_slug,
+                "--base",
+                base_branch,
+                "--head",
+                work_branch,
+                "--title",
+                title,
+                "--body-file",
+                str(body_file),
+                "--draft",
+            ]
+        )
     if result is None:
         return False, "missing required command: gh"
     if result.returncode != 0:
@@ -197,6 +201,17 @@ def attempt_create_draft_pr(
         return False, detail or "gh pr create failed"
     detail = (result.stdout or "").strip()
     return True, detail or "created draft PR"
+
+
+@contextmanager
+def _temporary_text_file(content: str) -> Iterator[Path]:
+    with NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+        handle.write(content)
+        temp_path = Path(handle.name)
+    try:
+        yield temp_path
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def handle_pushed_without_pr(

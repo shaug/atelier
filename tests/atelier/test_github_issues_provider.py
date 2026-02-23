@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from atelier.external_providers import (
+    ExternalTicketCreateRequest,
     ExternalTicketImportRequest,
     ExternalTicketSyncOptions,
 )
+from atelier.external_tickets import ExternalTicketRef
 from atelier.github_issues_provider import (
     GithubIssuesProvider,
     issue_payload_to_record,
@@ -97,3 +102,66 @@ def test_import_tickets_parses_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     records = provider.import_tickets(request=ExternalTicketImportRequest(include_closed=True))
     assert len(records) == 2
     assert records[0].ref.ticket_id == "1"
+
+
+def test_create_ticket_uses_input_file_for_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = GithubIssuesProvider(repo="org/repo")
+    captured_payload: dict[str, object] = {}
+
+    def fake_run_json(cmd: list[str]) -> object:
+        input_index = cmd.index("--input")
+        payload_path = Path(cmd[input_index + 1])
+        captured_payload.update(json.loads(payload_path.read_text(encoding="utf-8")))
+        return {
+            "number": 21,
+            "title": "Danger `title` $(whoami)",
+            "body": "Body with `ticks` and $(printf no-op)",
+            "state": "OPEN",
+            "labels": [],
+        }
+
+    monkeypatch.setattr("atelier.github_issues_provider._run_json", fake_run_json)
+    monkeypatch.setattr("atelier.github_issues_provider._require_gh", lambda: None)
+
+    record = provider.create_ticket(
+        ExternalTicketCreateRequest(
+            bead_id="at-1",
+            title="Danger `title` $(whoami)",
+            body="Body with `ticks` and $(printf no-op)",
+            labels=("triage",),
+        )
+    )
+
+    assert captured_payload["title"] == "Danger `title` $(whoami)"
+    assert captured_payload["body"] == "Body with `ticks` and $(printf no-op)"
+    assert captured_payload["labels"] == ["triage"]
+    assert record.ref.ticket_id == "21"
+
+
+def test_update_ticket_uses_body_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = GithubIssuesProvider(repo="org/repo")
+    captured_commands: list[list[str]] = []
+    captured_body: dict[str, str] = {}
+
+    def fake_run(cmd: list[str]) -> str:
+        captured_commands.append(cmd)
+        if "--body-file" in cmd:
+            body_path = Path(cmd[cmd.index("--body-file") + 1])
+            captured_body["text"] = body_path.read_text(encoding="utf-8")
+        return ""
+
+    monkeypatch.setattr("atelier.github_issues_provider._run", fake_run)
+    monkeypatch.setattr("atelier.github_issues_provider._require_gh", lambda: None)
+    monkeypatch.setattr(GithubIssuesProvider, "sync_state", lambda self, ref: ref)
+
+    ref = ExternalTicketRef(provider="github", ticket_id="44")
+    updated = provider.update_ticket(
+        ref,
+        title="Title with `ticks` and $(echo safe)",
+        body="Body with markdown `code`\n$(echo safe)",
+    )
+
+    assert updated == ref
+    assert captured_body["text"] == "Body with markdown `code`\n$(echo safe)"
+    assert any("--body-file" in command for command in captured_commands)
+    assert not any(token == "--body" for command in captured_commands for token in command)

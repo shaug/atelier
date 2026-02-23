@@ -15,7 +15,7 @@ description: >-
 - base: base branch name for the PR (target branch).
 - head: head branch name for the PR (source branch).
 - title: PR title string.
-- body: PR body string.
+- body_file: path to a UTF-8 PR body file.
 - labels: comma-separated label list (use an empty string to clear labels).
 - pr_number: PR number for review-thread operations.
 
@@ -24,7 +24,7 @@ description: >-
 1. Read [references/github-cli.md](references/github-cli.md) for GitHub CLI
    behavior and JSON field notes.
 1. Create or update a PR with:
-   `scripts/create_or_update_pr.py --repo <repo> --base <base> --head <head> --title <title> --body <body> --labels <labels>`
+   `scripts/create_or_update_pr.py --repo <repo> --base <base> --head <head> --title <title> --body-file <path> --labels <labels>`
 1. Retarget the PR base branch with:
    `scripts/retarget_pr_base.py --repo <repo> --head <head> --base <base>`
 1. Read PR status/metadata with:
@@ -39,6 +39,7 @@ description: >-
 ## Invariants
 
 - Provide all parameters explicitly; do not infer repo, base, or head.
+- Pass markdown bodies via file (`--body-file`) rather than inline shell text.
 - Keep label updates deterministic by matching the exact label set provided.
 - Fail fast when no matching PR exists for an update or status read.
 - When feedback comes from inline review comments, reply inline to that comment

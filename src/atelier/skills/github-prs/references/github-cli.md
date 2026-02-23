@@ -15,9 +15,9 @@ scripts.
 - View a PR:
   `gh pr view <number|branch> --repo <repo> --json number,url,state,baseRefName,headRefName,title,body,labels,isDraft,mergedAt,closedAt,updatedAt,reviewDecision,mergeable,mergeStateStatus`
 - Create a PR:
-  `gh pr create --repo <repo> --base <base> --head <head> --title <title> --body <body> --label <labels>`
+  `gh pr create --repo <repo> --base <base> --head <head> --title <title> --body-file <path> --label <labels>`
 - Edit a PR:
-  `gh pr edit <number> --repo <repo> --title <title> --body <body> --base <base> --add-label <label> --remove-label <label>`
+  `gh pr edit <number> --repo <repo> --title <title> --body-file <path> --base <base> --add-label <label> --remove-label <label>`
 
 ## JSON field notes
 

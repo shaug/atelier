@@ -99,3 +99,66 @@ def test_cleanup_epic_branches_and_worktrees_invokes_git_actions() -> None:
 
     assert ["push", "origin", "--delete", "feat/root"] in calls
     assert ["branch", "-D", "feat/root-at-1"] in calls
+
+
+def test_integrate_epic_root_to_parent_uses_file_backed_squash_commit_message() -> None:
+    commands: list[list[str]] = []
+    observed: dict[str, object] = {}
+
+    def fake_run_git_status(
+        args: list[str],
+        *,
+        repo_root: Path,
+        git_path: str | None = None,
+        cwd: Path | None = None,
+    ) -> tuple[bool, str | None]:
+        commands.append(list(args))
+        if args[:2] == ["commit", "-F"]:
+            message_path = Path(args[2])
+            observed["message_path"] = message_path
+            observed["message_exists_during_call"] = message_path.exists()
+            observed["message_text"] = message_path.read_text(encoding="utf-8")
+        return True, None
+
+    with (
+        patch("atelier.worker.integration.git.git_is_clean", return_value=True),
+        patch(
+            "atelier.worker.integration.git.git_rev_parse",
+            side_effect=lambda _repo, ref, **_kwargs: f"{ref}-sha",
+        ),
+        patch("atelier.worker.integration.git.git_is_ancestor", return_value=False),
+        patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.worker.integration.git.git_current_branch", return_value="feature/current"),
+    ):
+        ok, integrated_sha, detail = integration.integrate_epic_root_to_parent(
+            epic_issue={"title": "Example"},
+            epic_id="at-1",
+            root_branch="feature/root",
+            parent_branch="main",
+            history="squash",
+            squash_message_mode="deterministic",
+            squash_message_agent_spec=None,
+            squash_message_agent_options=None,
+            squash_message_agent_home=None,
+            squash_message_agent_env=None,
+            integration_cwd=None,
+            repo_root=Path("/repo"),
+            git_path="git",
+            ensure_local_branch=lambda *_args, **_kwargs: True,
+            run_git_status=fake_run_git_status,
+            sync_local_branch_from_remote=lambda *_args, **_kwargs: False,
+            normalize_squash_message_mode=lambda _value: "deterministic",
+            agent_generated_squash_subject=lambda **_kwargs: None,
+            squash_subject=lambda _issue, _epic_id: "feat: `safe` $(printf noop)",
+        )
+
+    assert ok is True
+    assert integrated_sha == "main-sha"
+    assert detail is None
+    assert any(command[:2] == ["commit", "-F"] for command in commands)
+    assert not any(command[:2] == ["commit", "-m"] for command in commands)
+    assert observed["message_exists_during_call"] is True
+    assert observed["message_text"] == "feat: `safe` $(printf noop)"
+    message_path = observed["message_path"]
+    assert isinstance(message_path, Path)
+    assert not message_path.exists()

@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Sequence
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Iterator, Sequence
 
 from .external_providers import (
     ExternalProviderCapabilities,
@@ -74,20 +77,23 @@ class GithubIssuesProvider:
 
     def create_ticket(self, request: ExternalTicketCreateRequest) -> ExternalTicketRecord:
         _require_gh()
-        cmd = [
-            "gh",
-            "api",
-            "-X",
-            "POST",
-            f"repos/{self.repo}/issues",
-            "-f",
-            f"title={request.title}",
-        ]
+        create_payload: dict[str, object] = {"title": request.title}
         if request.body:
-            cmd.extend(["-f", f"body={request.body}"])
-        for label in request.labels:
-            cmd.extend(["-f", f"labels[]={label}"])
-        payload = _run_json(cmd)
+            create_payload["body"] = request.body
+        if request.labels:
+            create_payload["labels"] = list(request.labels)
+        with _temporary_text_file(json.dumps(create_payload)) as payload_file:
+            payload = _run_json(
+                [
+                    "gh",
+                    "api",
+                    "-X",
+                    "POST",
+                    f"repos/{self.repo}/issues",
+                    "--input",
+                    str(payload_file),
+                ]
+            )
         if not isinstance(payload, dict):
             raise RuntimeError("Unexpected gh issue create output")
         record = issue_payload_to_record(payload)
@@ -136,8 +142,10 @@ class GithubIssuesProvider:
         if title:
             cmd.extend(["--title", title])
         if body is not None:
-            cmd.extend(["--body", body])
-        _run(cmd)
+            with _temporary_text_file(body) as body_file:
+                _run([*cmd, "--body-file", str(body_file)])
+        else:
+            _run(cmd)
         return self.sync_state(ref)
 
     def create_child_ticket(
@@ -255,3 +263,14 @@ def _run_json(cmd: list[str]) -> object:
     if not output.strip():
         return None
     return json.loads(output)
+
+
+@contextmanager
+def _temporary_text_file(content: str) -> Iterator[Path]:
+    with NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+        handle.write(content)
+        temp_path = Path(handle.name)
+    try:
+        yield temp_path
+    finally:
+        temp_path.unlink(missing_ok=True)
