@@ -25,9 +25,13 @@ side effects inside the user's repo.
   `at:changeset`.
 - **PR base alignment**: Atelier resolves review PR bases from integration
   lineage rather than raw branch-cut ancestry.
-  - First reviewable changesets target `workspace.parent_branch` (for example
-    `main`) even when branch metadata stores `changeset.parent_branch` equal to
-    the root branch.
+  - Epic-integration PR workflows are unsupported. PR bases must not target
+    `changeset.root_branch`.
+  - Legacy `changeset.parent_branch == changeset.root_branch` metadata is
+    normalized to a non-root integration branch (`workspace.parent_branch` when
+    valid, otherwise the project default branch).
+  - First reviewable changesets target the integration branch (for example
+    `main`).
   - Stacked descendants may target predecessor work branches before predecessor
     integration.
   - After predecessor integration, Atelier restacks descendants onto updated

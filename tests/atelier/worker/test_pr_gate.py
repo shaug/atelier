@@ -187,6 +187,42 @@ def test_changeset_pr_creation_decision_blocks_on_ambiguous_dependency_lineage(
     assert decision.reason.startswith("blocked:dependency-lineage-ambiguous")
 
 
+def test_changeset_pr_creation_decision_treats_integration_parent_as_top_level(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: main\n"
+            "changeset.root_branch: feature-root\n"
+            "workspace.parent_branch: main\n"
+        ),
+    }
+    ref_lookups: list[str] = []
+    monkeypatch.setattr(
+        pr_gate.git,
+        "git_default_branch",
+        lambda *_args, **_kwargs: "main",
+    )
+    monkeypatch.setattr(
+        pr_gate.git,
+        "git_ref_exists",
+        lambda _repo_root, ref, **_kwargs: (ref_lookups.append(ref), True)[1],
+    )
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        lookup_pr_payload=lambda *_args, **_kwargs: None,
+    )
+
+    assert decision.allow_pr is True
+    assert decision.reason == "no-parent"
+    assert ref_lookups == []
+
+
 def test_attempt_create_pr_uses_body_file_for_markdown(monkeypatch) -> None:
     commands: list[list[str]] = []
     observed: dict[str, object] = {}

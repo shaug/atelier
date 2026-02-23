@@ -26,6 +26,11 @@ def test_changeset_base_branch_prefers_workspace_parent_for_first_reviewable(mon
             else []
         ),
     )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_branch_metadata",
+        lambda *_args, **_kwargs: {},
+    )
 
     base = work_finalization_state.changeset_base_branch(
         issue,
@@ -35,6 +40,87 @@ def test_changeset_base_branch_prefers_workspace_parent_for_first_reviewable(mon
     )
 
     assert base == "main"
+
+
+def test_changeset_parent_branch_normalizes_collapsed_root_to_default(monkeypatch) -> None:
+    issue = {
+        "description": ("changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root\n"),
+    }
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_default_branch",
+        lambda *_args, **_kwargs: "main",
+    )
+
+    parent_branch = work_finalization_state.changeset_parent_branch(
+        issue,
+        root_branch="feat/root",
+        repo_root=Path("/repo"),
+    )
+
+    assert parent_branch == "main"
+
+
+def test_changeset_base_branch_normalizes_collapsed_parent_to_default(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: feat/root\n"
+            "changeset.work_branch: feat/work\n"
+        ),
+    }
+    updates: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        work_finalization_state,
+        "resolve_epic_id_for_changeset",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_default_branch",
+        lambda *_args, **_kwargs: "main",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_rev_parse",
+        lambda *_args, **_kwargs: "abc1234",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_branch_metadata",
+        lambda *args, **kwargs: updates.append(kwargs),
+    )
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert base == "main"
+    assert updates
+    assert updates[0]["parent_branch"] == "main"
+
+
+def test_changeset_base_branch_rejects_root_base_without_non_root_fallback(monkeypatch) -> None:
+    issue = {
+        "description": ("changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root\n"),
+    }
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_default_branch",
+        lambda *_args, **_kwargs: "feat/root",
+    )
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert base is None
 
 
 def test_changeset_parent_branch_resolves_dependency_parent_lineage(monkeypatch) -> None:

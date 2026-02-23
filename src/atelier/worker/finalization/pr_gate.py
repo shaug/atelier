@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +20,31 @@ class PrGateResult:
 
     finalize_result: FinalizeResult
     detail: str | None = None
+
+
+def _normalize_branch(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or cleaned.lower() == "null":
+        return None
+    return cleaned
+
+
+def _top_level_integration_parent(
+    *,
+    fields: Mapping[str, object],
+    root_branch: str | None,
+    repo_root: Path,
+    git_path: str | None,
+) -> str | None:
+    workspace_parent = _normalize_branch(fields.get("workspace.parent_branch"))
+    if workspace_parent and workspace_parent != root_branch:
+        return workspace_parent
+    default_branch = _normalize_branch(git.git_default_branch(repo_root, git_path=git_path))
+    if default_branch and default_branch != root_branch:
+        return default_branch
+    return None
 
 
 def changeset_parent_lifecycle_state(
@@ -56,6 +81,21 @@ def changeset_parent_lifecycle_state(
     if normalized_root and normalized == normalized_root and not lineage.used_dependency_parent:
         # True top-level changesets use root==parent; treat as no-parent so
         # strategies do not self-deadlock.
+        return None
+    integration_parent = _top_level_integration_parent(
+        fields=fields,
+        root_branch=normalized_root,
+        repo_root=repo_root,
+        git_path=git_path,
+    )
+    if (
+        integration_parent
+        and normalized == integration_parent
+        and not lineage.used_dependency_parent
+        and not lineage.dependency_ids
+    ):
+        # Legacy root-collapsed parent metadata may normalize to integration
+        # branch; treat these top-level changesets as no-parent.
         return None
     if not repo_slug:
         return None
