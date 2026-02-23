@@ -36,9 +36,7 @@ test-integration:
 
 # Run lint checks
 lint:
-  uv run ruff check .
-  uv run --extra dev mdformat --check --wrap 80 .
-  uv run --extra dev shellcheck -x src/atelier/skills/publish/scripts/*.sh
+  bash scripts/lint-gate.sh
 
 # Run static type checks
 typecheck:

@@ -19,11 +19,14 @@ create_temp_repo() {
   cp "${ROOT_DIR}/.githooks/pre-commit" "${repo}/.githooks/pre-commit"
   cp "${ROOT_DIR}/.githooks/commit-msg" "${repo}/.githooks/commit-msg"
   cp "${ROOT_DIR}/.githooks/post-checkout" "${repo}/.githooks/post-checkout"
+  mkdir -p "${repo}/scripts"
+  cp "${ROOT_DIR}/scripts/lint-gate.sh" "${repo}/scripts/lint-gate.sh"
   chmod +x "${repo}/.githooks/worktree-bootstrap.sh" \
     "${repo}/.githooks/pre-commit" \
     "${repo}/.githooks/commit-msg" \
-    "${repo}/.githooks/post-checkout"
-  git -C "$repo" add commitlint.config.cjs .githooks
+    "${repo}/.githooks/post-checkout" \
+    "${repo}/scripts/lint-gate.sh"
+  git -C "$repo" add commitlint.config.cjs .githooks scripts/lint-gate.sh
   git -C "$repo" commit -m "chore(repo): add hooks" -q
 
   echo "$repo"

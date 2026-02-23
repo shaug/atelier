@@ -23,10 +23,7 @@ jobs:
 
       - name: Lint
         run: |
-          uv run ruff check --select I,RUF022 .
-          uv run ruff format --check .
-          uv run --extra dev shellcheck -x src/atelier/skills/publish/scripts/*.sh
-          uv run --extra dev pyright
+          bash scripts/lint-gate.sh
 
       - name: Test
         run: |
