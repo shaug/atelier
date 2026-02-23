@@ -2,6 +2,9 @@
 
 This document describes the worker runtime contracts used by `atelier work`.
 
+For service/use-case tier boundaries and migration sequencing, see
+`docs/service-tier-proposal.md`.
+
 ## Goals
 
 - Keep `src/atelier/commands/work.py` as a thin command controller.
