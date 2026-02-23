@@ -380,10 +380,34 @@ def run_startup_contract_service(
     }
 
     """Apply startup-contract skill ordering to select the next epic."""
+    selected_epic: str | None = None
     if explicit_epic_id is not None:
         selected_epic = str(explicit_epic_id).strip()
         if not selected_epic:
             service.die("epic id must not be empty")
+        if branch_pr and repo_slug:
+            explicit_conflict = service.select_conflicted_changeset(
+                epic_id=selected_epic,
+                repo_slug=repo_slug,
+            )
+            if explicit_conflict is not None:
+                return StartupContractResult(
+                    epic_id=explicit_conflict.epic_id,
+                    changeset_id=explicit_conflict.changeset_id,
+                    should_exit=False,
+                    reason="merge_conflict",
+                )
+            explicit_feedback = service.select_review_feedback_changeset(
+                epic_id=selected_epic,
+                repo_slug=repo_slug,
+            )
+            if explicit_feedback is not None:
+                return StartupContractResult(
+                    epic_id=explicit_feedback.epic_id,
+                    changeset_id=explicit_feedback.changeset_id,
+                    should_exit=False,
+                    reason="review_feedback",
+                )
         return StartupContractResult(
             epic_id=selected_epic,
             changeset_id=None,
