@@ -142,6 +142,7 @@ def test_update_ticket_uses_body_file(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = GithubIssuesProvider(repo="org/repo")
     captured_commands: list[list[str]] = []
     captured_body: dict[str, str] = {}
+    title_text = "Title with `ticks` and $(echo safe)"
 
     def fake_run(cmd: list[str]) -> str:
         captured_commands.append(cmd)
@@ -157,11 +158,14 @@ def test_update_ticket_uses_body_file(monkeypatch: pytest.MonkeyPatch) -> None:
     ref = ExternalTicketRef(provider="github", ticket_id="44")
     updated = provider.update_ticket(
         ref,
-        title="Title with `ticks` and $(echo safe)",
+        title=title_text,
         body="Body with markdown `code`\n$(echo safe)",
     )
 
     assert updated == ref
     assert captured_body["text"] == "Body with markdown `code`\n$(echo safe)"
     assert any("--body-file" in command for command in captured_commands)
+    edit_command = next(command for command in captured_commands if "--body-file" in command)
+    title_index = edit_command.index("--title")
+    assert edit_command[title_index + 1] == title_text
     assert not any(token == "--body" for command in captured_commands for token in command)

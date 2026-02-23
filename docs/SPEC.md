@@ -170,6 +170,19 @@ Changeset description fields include:
 - `atelier list`: list available workspaces (root branches).
 - `atelier gc`: clean up stale hooks and orphaned worktrees.
 
+### Command transport safety
+
+When Atelier drafts and submits user-authored text to external tools, command
+construction must avoid shell interpolation.
+
+- Commit messages: write content to a temporary file and use `git commit -F`.
+- Issue/PR bodies: write markdown to a temporary file and pass via body-file
+  flags (`--body-file` or provider-equivalent input-file options).
+- Titles: pass as argv values (for example `["--title", title]`) rather than
+  interpolating into shell command strings.
+
+This applies to both create and update flows.
+
 Worker modes:
 
 - `atelier work --mode prompt|auto` controls epic selection.
