@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,7 +32,11 @@ def _normalize_branch(value: object) -> str | None:
 
 
 def _top_level_integration_parent(
-    *, fields: dict[str, object], root_branch: str | None, repo_root: Path, git_path: str | None
+    *,
+    fields: Mapping[str, object],
+    root_branch: str | None,
+    repo_root: Path,
+    git_path: str | None,
 ) -> str | None:
     workspace_parent = _normalize_branch(fields.get("workspace.parent_branch"))
     if workspace_parent and workspace_parent != root_branch:
