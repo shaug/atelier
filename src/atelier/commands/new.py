@@ -59,7 +59,7 @@ def new_project(args: object) -> None:
 
     Args:
         args: CLI argument object with optional fields such as ``path``,
-            ``branch_prefix``, ``branch_pr``, ``branch_history``,
+            ``branch_prefix``, ``branch_pr_mode``, ``branch_history``,
             ``branch_pr_strategy``, ``agent``, ``editor_edit``, and
             ``editor_work``.
 
@@ -96,7 +96,9 @@ def new_project(args: object) -> None:
         init_cmd.init_project(
             SimpleNamespace(
                 branch_prefix=getattr(args, "branch_prefix", None),
-                branch_pr=getattr(args, "branch_pr", None),
+                branch_pr_mode=(
+                    getattr(args, "branch_pr_mode", None) or getattr(args, "branch_pr", None)
+                ),
                 branch_history=getattr(args, "branch_history", None),
                 branch_pr_strategy=getattr(args, "branch_pr_strategy", None),
                 agent=getattr(args, "agent", None),

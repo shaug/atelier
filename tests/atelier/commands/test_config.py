@@ -29,7 +29,7 @@ class TestConfigCommand:
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(["team/", "false", "rebase", "", "codex", "vim -w", "vim", ""])
+                responses = iter(["team/", "none", "rebase", "", "codex", "vim -w", "vim", ""])
                 with (
                     patch("builtins.input", lambda _: next(responses)),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -67,7 +67,7 @@ class TestConfigCommand:
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(["team/", "false", "rebase", "", "vim -w", "vim", ""])
+                responses = iter(["team/", "none", "rebase", "", "vim -w", "vim", ""])
                 call_count = {"count": 0}
 
                 def fake_input(_: str) -> str:
@@ -116,7 +116,7 @@ class TestConfigCommand:
                     [
                         "team/",
                         "maybe",
-                        "false",
+                        "none",
                         "sideways",
                         "merge",
                         "",
@@ -165,7 +165,7 @@ class TestConfigCommand:
             write_open_config(project_dir, enlistment_path)
 
             defaults = {
-                "branch": {"prefix": "installed/", "pr": False, "history": "squash"},
+                "branch": {"prefix": "installed/", "pr_mode": "none", "history": "squash"},
                 "agent": {"default": "codex", "options": {"codex": []}},
                 "editor": {"edit": ["nano", "-w"], "work": ["nano"]},
             }
@@ -213,7 +213,7 @@ class TestConfigCommand:
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(["prefs/", "true", "merge", "", "codex", "code -w", "code", ""])
+                responses = iter(["prefs/", "draft", "merge", "", "codex", "code -w", "code", ""])
                 with (
                     patch("builtins.input", lambda _: next(responses)),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -232,7 +232,7 @@ class TestConfigCommand:
                     installed_path = paths.installed_config_path()
                 stored = json.loads(installed_path.read_text(encoding="utf-8"))
                 assert stored["branch"]["prefix"] == "prefs/"
-                assert stored["branch"]["pr"] is True
+                assert stored["branch"]["pr_mode"] == "draft"
                 assert stored["branch"]["history"] == "merge"
                 assert stored["editor"]["edit"] == ["code", "-w"]
                 assert stored["editor"]["work"] == ["code"]
@@ -261,7 +261,7 @@ class TestConfigCommand:
                     payload = {
                         "branch": {
                             "prefix": "edited/",
-                            "pr": False,
+                            "pr_mode": "none",
                             "history": "merge",
                         },
                         "agent": {"default": "codex", "options": {"codex": []}},

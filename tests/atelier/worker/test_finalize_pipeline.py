@@ -43,8 +43,8 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
                 reason="changeset_terminal",
             )
         )
-        self.handle_pushed_without_pr_fn = lambda *, issue, context, create_detail_prefix=None: (
-            FinalizeResult(
+        self.handle_pushed_without_pr_fn = (
+            lambda *, issue, context, create_as_draft, create_detail_prefix=None: FinalizeResult(
                 continue_running=True,
                 reason="changeset_review_pending",
             )
@@ -190,11 +190,13 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
         *,
         issue: dict[str, object],
         context: finalize_pipeline.FinalizePipelineContext,
+        create_as_draft: bool,
         create_detail_prefix: str | None = None,
     ) -> FinalizeResult:
         return self.handle_pushed_without_pr_fn(
             issue=issue,
             context=context,
+            create_as_draft=create_as_draft,
             create_detail_prefix=create_detail_prefix,
         )
 
@@ -250,6 +252,7 @@ def _pipeline_context(**overrides: Any) -> finalize_pipeline.FinalizePipelineCon
         "beads_root": Path("/beads"),
         "repo_root": Path("/repo"),
         "branch_pr": True,
+        "branch_pr_mode": "draft",
         "branch_pr_strategy": "on-ready",
         "branch_history": "manual",
         "branch_squash_message": "deterministic",
@@ -329,6 +332,42 @@ def test_run_finalize_pipeline_waiting_on_review_returns_pending(monkeypatch) ->
 
     assert result.reason == "changeset_review_pending"
     assert result.continue_running is True
+
+
+def test_run_finalize_pipeline_passes_ready_mode_to_pr_gate(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "labels": ["at:changeset", "cs:in_progress"],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+
+    service = _FinalizeServiceStub()
+    observed: list[bool] = []
+    service.handle_pushed_without_pr_fn = (
+        lambda *, issue, context, create_as_draft, create_detail_prefix=None: (
+            observed.append(create_as_draft)
+            or FinalizeResult(continue_running=True, reason="changeset_review_pending")
+        )
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(branch_pr_mode="ready"),
+        service=service,
+    )
+
+    assert result.reason == "changeset_review_pending"
+    assert result.continue_running is True
+    assert observed == [False]
 
 
 def test_run_finalize_pipeline_blocks_when_pr_base_alignment_fails(monkeypatch) -> None:

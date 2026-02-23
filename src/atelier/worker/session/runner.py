@@ -707,6 +707,7 @@ def run_worker_once(
             beads_root=beads_root,
             repo_root=repo_root,
             branch_pr=project_config.branch.pr,
+            branch_pr_mode=project_config.branch.pr_mode,
             branch_pr_strategy=project_config.branch.pr_strategy,
             branch_history=project_config.branch.history,
             branch_squash_message=project_config.branch.squash_message,

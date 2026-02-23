@@ -6,6 +6,7 @@ import datetime as dt
 from pathlib import Path
 
 from .. import agents, pr_strategy
+from ..models import BranchPrMode
 from ..worker import finalize_pipeline as worker_finalize_pipeline
 from ..worker.models import FinalizeResult, PublishSignalDiagnostics
 from .work_finalization_integration import (
@@ -123,6 +124,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
             agent_id=context.agent_id,
             agent_bead_id=context.agent_bead_id,
             branch_pr=context.branch_pr,
+            branch_pr_mode=context.branch_pr_mode,
             branch_history=context.branch_history,
             branch_squash_message=context.branch_squash_message,
             branch_pr_strategy=context.branch_pr_strategy,
@@ -275,6 +277,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         *,
         issue: dict[str, object],
         context: worker_finalize_pipeline.FinalizePipelineContext,
+        create_as_draft: bool,
         create_detail_prefix: str | None = None,
     ) -> FinalizeResult:
         return handle_pushed_without_pr(
@@ -286,6 +289,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
             beads_root=self._beads_root,
             branch_pr_strategy=context.branch_pr_strategy,
             git_path=context.git_path,
+            create_as_draft=create_as_draft,
             create_detail_prefix=create_detail_prefix,
         )
 
@@ -343,6 +347,7 @@ def finalize_changeset(
     beads_root: Path,
     repo_root: Path,
     branch_pr: bool = True,
+    branch_pr_mode: BranchPrMode = "draft",
     branch_pr_strategy: pr_strategy.PrStrategy = pr_strategy.PR_STRATEGY_DEFAULT,
     branch_history: str = "manual",
     branch_squash_message: str = "deterministic",
@@ -365,6 +370,7 @@ def finalize_changeset(
         beads_root: Value for `beads_root`.
         repo_root: Value for `repo_root`.
         branch_pr: Value for `branch_pr`.
+        branch_pr_mode: Value for `branch_pr_mode`.
         branch_pr_strategy: Value for `branch_pr_strategy`.
         branch_history: Value for `branch_history`.
         branch_squash_message: Value for `branch_squash_message`.
@@ -388,6 +394,7 @@ def finalize_changeset(
         beads_root=beads_root,
         repo_root=repo_root,
         branch_pr=branch_pr,
+        branch_pr_mode=branch_pr_mode,
         branch_pr_strategy=branch_pr_strategy,
         branch_history=branch_history,
         branch_squash_message=branch_squash_message,

@@ -66,7 +66,7 @@ Skills link: ./skills
 7. If implementation is complete:
    - Update changeset metadata and labels.
    - Publish/persist via the `publish` skill.
-   - In PR projects (`branch.pr=true`), treat completion as:
+   - In PR projects (`branch.pr_mode != none`), treat completion as:
      - PR created when policy allows PR creation, OR
      - branch pushed with an explicit policy gate that defers PR creation.
    - Ensure publish records `changeset.integrated_sha` when integration/merge

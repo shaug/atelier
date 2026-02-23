@@ -11,7 +11,7 @@ from atelier.models import AtelierSection, ProjectConfig
 def test_build_project_config_sets_data_dir() -> None:
     args = SimpleNamespace(
         branch_prefix="",
-        branch_pr="true",
+        branch_pr_mode="draft",
         branch_history="merge",
         branch_pr_strategy="sequential",
         agent="codex",
@@ -51,7 +51,7 @@ def test_resolve_beads_root_is_project_scoped() -> None:
 def test_build_project_config_forces_project_beads_location() -> None:
     args = SimpleNamespace(
         branch_prefix="",
-        branch_pr="true",
+        branch_pr_mode="draft",
         branch_history="merge",
         branch_pr_strategy="sequential",
         agent="codex",
@@ -79,7 +79,7 @@ def test_build_project_config_forces_project_beads_location() -> None:
 def test_build_project_config_accepts_branch_squash_message_override() -> None:
     args = SimpleNamespace(
         branch_prefix="",
-        branch_pr="true",
+        branch_pr_mode="draft",
         branch_history="squash",
         branch_squash_message="agent",
         branch_pr_strategy="sequential",
@@ -105,7 +105,7 @@ def test_build_project_config_accepts_branch_squash_message_override() -> None:
 def test_build_project_config_preserves_project_auto_export_setting() -> None:
     args = SimpleNamespace(
         branch_prefix="",
-        branch_pr="true",
+        branch_pr_mode="draft",
         branch_history="merge",
         branch_pr_strategy="sequential",
         agent="codex",
@@ -130,3 +130,28 @@ def test_build_project_config_preserves_project_auto_export_setting() -> None:
                     allow_editor_empty=True,
                 )
     assert payload.project.auto_export_new is True
+
+
+def test_build_project_config_accepts_explicit_none_pr_mode() -> None:
+    args = SimpleNamespace(
+        branch_prefix="",
+        branch_pr_mode="none",
+        branch_history="merge",
+        branch_pr_strategy="sequential",
+        agent="codex",
+        editor_edit="cat",
+        editor_work="cat",
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = Path(tmp) / "data"
+        with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+            with patch("atelier.agents.available_agent_names", return_value=("codex",)):
+                payload = config.build_project_config(
+                    {},
+                    "/repo",
+                    "github.com/org/repo",
+                    "https://github.com/org/repo",
+                    args,
+                    allow_editor_empty=True,
+                )
+    assert payload.branch.pr_mode == "none"

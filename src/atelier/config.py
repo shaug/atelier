@@ -25,6 +25,7 @@ from .editor import system_editor_default
 from .io import die, prompt, select
 from .models import (
     BRANCH_HISTORY_VALUES,
+    BRANCH_PR_MODE_VALUES,
     BRANCH_SQUASH_MESSAGE_VALUES,
     UPGRADE_POLICY_VALUES,
     AgentConfig,
@@ -356,9 +357,21 @@ def resolve_branch_pr(branch_config: BranchConfig) -> bool:
 
     Example:
         >>> resolve_branch_pr(BranchConfig())
-        True
+        False
     """
-    return branch_config.pr
+    return branch_config.pr_mode != "none"
+
+
+def resolve_branch_pr_mode(branch_config: BranchConfig) -> str:
+    """Return pull-request mode for the branch config.
+
+    Args:
+        branch_config: Branch configuration to read from.
+
+    Returns:
+        One of ``none``, ``draft``, or ``ready``.
+    """
+    return branch_config.pr_mode
 
 
 def normalize_branch_history(value: object, source: str) -> str:
@@ -390,6 +403,21 @@ def normalize_pr_strategy(value: object, source: str) -> str:
         return pr_strategy.normalize_pr_strategy(value)
     except ValueError:
         die(f"{source} must be one of: " + ", ".join(pr_strategy.PR_STRATEGY_VALUES))
+
+
+def normalize_pr_mode(value: object, source: str) -> str:
+    """Normalize a PR mode string or fail with a helpful error."""
+    if isinstance(value, bool):
+        return "draft" if value else "none"
+    if isinstance(value, str):
+        normalized = value.strip().lower().replace("_", "-")
+        if normalized in {"true", "yes", "1"}:
+            return "draft"
+        if normalized in {"false", "no", "0"}:
+            return "none"
+        if normalized in BRANCH_PR_MODE_VALUES:
+            return normalized
+    die(f"{source} must be one of: " + ", ".join(BRANCH_PR_MODE_VALUES))
 
 
 def resolve_branch_history(branch_config: BranchConfig) -> str:
@@ -496,27 +524,33 @@ def parse_branch_pr_override(value: object) -> bool:
         >>> parse_branch_pr_override("true")
         True
     """
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "yes", "1"}:
-            return True
-        if normalized in {"false", "no", "0"}:
-            return False
-    die("--branch-pr must be true or false")
+    return parse_branch_pr_mode_override(value) != "none"
+
+
+def parse_branch_pr_mode_override(value: object) -> str:
+    """Parse ``--branch-pr-mode`` and legacy ``--branch-pr`` values.
+
+    Args:
+        value: Raw override (mode string, bool, or legacy bool string).
+
+    Returns:
+        Parsed mode string (``none``, ``draft``, ``ready``).
+    """
+    return normalize_pr_mode(value, "--branch-pr-mode")
 
 
 def resolve_branch_overrides(
     args: object,
-) -> tuple[bool | None, str | None]:
+) -> tuple[str | None, str | None]:
     """Resolve CLI overrides for branch settings.
 
     Args:
-        args: CLI argument object with ``branch_pr`` and ``branch_history``.
+        args: CLI argument object with ``branch_pr_mode`` and
+            ``branch_history``.
 
     Returns:
-        Tuple of ``(branch_pr_override, branch_history_override)`` where each
+        Tuple of ``(branch_pr_mode_override, branch_history_override)`` where
+        each
         value is ``None`` when unset.
 
     Example:
@@ -524,17 +558,23 @@ def resolve_branch_overrides(
         ...     type(
         ...         "Args",
         ...         (),
-        ...         {"branch_pr": None, "branch_history": None},
+        ...         {
+        ...             "branch_pr_mode": None,
+        ...             "branch_pr": None,
+        ...             "branch_history": None,
+        ...         },
         ...     )()
         ... )
         (None, None)
     """
-    branch_pr_override = getattr(args, "branch_pr", None)
+    branch_pr_override = getattr(args, "branch_pr_mode", None)
+    if branch_pr_override is None:
+        branch_pr_override = getattr(args, "branch_pr", None)
     branch_history_override = getattr(args, "branch_history", None)
     resolved_pr = None
     resolved_history = None
     if branch_pr_override is not None:
-        resolved_pr = parse_branch_pr_override(branch_pr_override)
+        resolved_pr = parse_branch_pr_mode_override(branch_pr_override)
     if branch_history_override is not None:
         resolved_history = normalize_branch_history(branch_history_override, "--branch-history")
     return resolved_pr, resolved_history
@@ -575,7 +615,7 @@ def user_config_missing_fields(payload: dict | None) -> list[str]:
     missing: list[str] = []
     fields = [
         ("branch", "prefix"),
-        ("branch", "pr"),
+        ("branch", "pr_mode"),
         ("branch", "history"),
         ("branch", "squash_message"),
         ("branch", "pr_strategy"),
@@ -584,6 +624,8 @@ def user_config_missing_fields(payload: dict | None) -> list[str]:
         ("editor", "work"),
     ]
     for path in fields:
+        if path == ("branch", "pr_mode") and _path_has_value(payload, "branch", "pr"):
+            continue
         if not _path_has_value(payload, *path):
             missing.append(".".join(path))
     return missing
@@ -754,8 +796,10 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
     branch = parsed.branch
     if not _path_has_value(payload, "branch", "prefix"):
         branch = branch.model_copy(update={"prefix": default_config.branch.prefix})
-    if not _path_has_value(payload, "branch", "pr"):
-        branch = branch.model_copy(update={"pr": default_config.branch.pr})
+    if not _path_has_value(payload, "branch", "pr_mode") and not _path_has_value(
+        payload, "branch", "pr"
+    ):
+        branch = branch.model_copy(update={"pr_mode": default_config.branch.pr_mode})
     if not _path_has_value(payload, "branch", "history"):
         branch = branch.model_copy(update={"history": default_config.branch.history})
     if not _path_has_value(payload, "branch", "squash_message"):
@@ -856,6 +900,8 @@ def build_project_config(
     def should_prompt(*path: str) -> bool:
         if not prompt_missing_only:
             return True
+        if path == ("branch", "pr_mode") and _path_has_value(raw_payload, "branch", "pr"):
+            return False
         return not _path_has_value(raw_payload, *path)
 
     branch_config = existing_config.branch
@@ -868,23 +914,24 @@ def build_project_config(
     else:
         branch_prefix = branch_config.prefix
 
-    branch_pr_default = branch_config.pr
+    branch_pr_mode_default = branch_config.pr_mode
     branch_history_default = branch_config.history
     branch_squash_message_default = branch_config.squash_message
 
-    branch_pr_arg = read_arg(args, "branch_pr")
-    if branch_pr_arg is not None:
-        branch_pr = parse_branch_pr_override(branch_pr_arg)
-    elif should_prompt("branch", "pr"):
-        branch_pr_prompt_default = "true" if branch_pr_default else "false"
-        branch_pr_input = select(
-            "Expect pull requests for workspace branches",
-            ("true", "false"),
-            branch_pr_prompt_default,
+    branch_pr_mode_arg = read_arg(args, "branch_pr_mode")
+    if branch_pr_mode_arg is None:
+        branch_pr_mode_arg = read_arg(args, "branch_pr")
+    if branch_pr_mode_arg is not None:
+        branch_pr_mode = parse_branch_pr_mode_override(branch_pr_mode_arg)
+    elif should_prompt("branch", "pr_mode"):
+        branch_pr_mode_input = select(
+            "Workspace pull request mode",
+            BRANCH_PR_MODE_VALUES,
+            branch_pr_mode_default,
         )
-        branch_pr = parse_branch_pr_override(branch_pr_input)
+        branch_pr_mode = normalize_pr_mode(branch_pr_mode_input, "branch.pr_mode")
     else:
-        branch_pr = branch_pr_default
+        branch_pr_mode = branch_pr_mode_default
 
     branch_history_arg = read_arg(args, "branch_history")
     if branch_history_arg is not None:
@@ -1021,7 +1068,7 @@ def build_project_config(
     branch_config = BranchConfig.model_validate(
         {
             "prefix": branch_prefix,
-            "pr": branch_pr,
+            "pr_mode": branch_pr_mode,
             "history": branch_history,
             "squash_message": branch_squash_message,
             "pr_strategy": branch_pr_strategy,

@@ -247,11 +247,12 @@ def init_command(
         str | None,
         typer.Option("--branch-prefix", help="prefix for workspace branches"),
     ] = None,
-    branch_pr: Annotated[
+    branch_pr_mode: Annotated[
         str | None,
         typer.Option(
+            "--branch-pr-mode",
             "--branch-pr",
-            help="expect pull requests for workspace branches (true/false)",
+            help="workspace pull request mode (none|draft|ready)",
         ),
     ] = None,
     branch_history: Annotated[
@@ -303,7 +304,7 @@ def init_command(
 
     Args:
         branch_prefix: Prefix for new workspace branches (optional).
-        branch_pr: Whether workspace branches expect pull requests (true/false).
+        branch_pr_mode: Workspace PR mode (none|draft|ready).
         branch_history: History policy (manual|squash|merge|rebase).
         branch_squash_message: Squash commit subject policy
             (deterministic|agent).
@@ -322,7 +323,7 @@ def init_command(
     init_cmd.init_project(
         SimpleNamespace(
             branch_prefix=branch_prefix,
-            branch_pr=branch_pr,
+            branch_pr_mode=branch_pr_mode,
             branch_history=branch_history,
             branch_squash_message=branch_squash_message,
             branch_pr_strategy=branch_pr_strategy,
@@ -347,11 +348,12 @@ def new_command(
         str | None,
         typer.Option("--branch-prefix", help="prefix for workspace branches"),
     ] = None,
-    branch_pr: Annotated[
+    branch_pr_mode: Annotated[
         str | None,
         typer.Option(
+            "--branch-pr-mode",
             "--branch-pr",
-            help="expect pull requests for workspace branches (true/false)",
+            help="workspace pull request mode (none|draft|ready)",
         ),
     ] = None,
     branch_history: Annotated[
@@ -396,7 +398,7 @@ def new_command(
     Args:
         path: Path for the new project (optional).
         branch_prefix: Prefix for new workspace branches (optional).
-        branch_pr: Whether workspace branches expect pull requests (true/false).
+        branch_pr_mode: Workspace PR mode (none|draft|ready).
         branch_history: History policy (manual|squash|merge|rebase).
         branch_squash_message: Squash commit subject policy
             (deterministic|agent).
@@ -416,7 +418,7 @@ def new_command(
         SimpleNamespace(
             path=path,
             branch_prefix=branch_prefix,
-            branch_pr=branch_pr,
+            branch_pr_mode=branch_pr_mode,
             branch_history=branch_history,
             branch_squash_message=branch_squash_message,
             branch_pr_strategy=branch_pr_strategy,

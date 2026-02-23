@@ -242,18 +242,19 @@ def test_align_existing_pr_base_rebases_and_retargets(monkeypatch) -> None:
     )
 
 
-def test_attempt_create_draft_pr_accepts_pr_gate_keyword_contract(monkeypatch) -> None:
+def test_attempt_create_pr_accepts_pr_gate_keyword_contract(monkeypatch) -> None:
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         work_finalization_state.worker_pr_gate,
-        "attempt_create_draft_pr",
+        "attempt_create_pr",
         lambda **kwargs: (calls.append(kwargs) or True, "created"),
     )
 
-    created, detail = work_finalization_state.attempt_create_draft_pr(
+    created, detail = work_finalization_state.attempt_create_pr(
         repo_slug="org/repo",
         issue={"title": "Example"},
         work_branch="feature-work",
+        is_draft=False,
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
         git_path="git",
@@ -264,6 +265,7 @@ def test_attempt_create_draft_pr_accepts_pr_gate_keyword_contract(monkeypatch) -
     assert created is True
     assert detail == "created"
     assert calls
+    assert calls[0]["is_draft"] is False
     assert calls[0]["changeset_base_branch"]("ignored", beads_root=None, repo_root=None) == "main"
     assert calls[0]["render_changeset_pr_body"]({"title": "Example"}) == "summary"
 
@@ -286,7 +288,7 @@ def test_handle_pushed_without_pr_uses_injected_create_callback_contract(monkeyp
     )
     monkeypatch.setattr(
         work_finalization_state.worker_pr_gate,
-        "attempt_create_draft_pr",
+        "attempt_create_pr",
         lambda **_kwargs: (True, "created"),
     )
     monkeypatch.setattr(

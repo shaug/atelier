@@ -50,6 +50,7 @@ def test_handle_pushed_without_pr_returns_review_pending_when_strategy_blocks(
         beads_root=Path("/beads"),
         branch_pr_strategy="on-ready",
         git_path="git",
+        create_as_draft=True,
         changeset_base_branch=lambda *_args, **_kwargs: "main",
         changeset_work_branch=lambda _issue: "feature-work",
         render_changeset_pr_body=lambda _issue: "summary",
@@ -103,6 +104,7 @@ def test_handle_pushed_without_pr_reports_failure_when_pr_create_fails(
         beads_root=Path("/beads"),
         branch_pr_strategy="parallel",
         git_path="git",
+        create_as_draft=True,
         changeset_base_branch=lambda *_args, **_kwargs: "main",
         changeset_work_branch=lambda _issue: "feature-work",
         render_changeset_pr_body=lambda _issue: "summary",
@@ -185,7 +187,7 @@ def test_changeset_pr_creation_decision_blocks_on_ambiguous_dependency_lineage(
     assert decision.reason.startswith("blocked:dependency-lineage-ambiguous")
 
 
-def test_attempt_create_draft_pr_uses_body_file_for_markdown(monkeypatch) -> None:
+def test_attempt_create_pr_uses_body_file_for_markdown(monkeypatch) -> None:
     commands: list[list[str]] = []
     observed: dict[str, object] = {}
 
@@ -199,10 +201,11 @@ def test_attempt_create_draft_pr_uses_body_file_for_markdown(monkeypatch) -> Non
 
     monkeypatch.setattr(pr_gate.exec, "try_run_command", fake_try_run_command)
 
-    created, detail = pr_gate.attempt_create_draft_pr(
+    created, detail = pr_gate.attempt_create_pr(
         repo_slug="org/repo",
         issue={"title": "Title with `ticks` and $(echo safe)"},
         work_branch="feature/work",
+        is_draft=False,
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
         git_path="git",
@@ -216,9 +219,56 @@ def test_attempt_create_draft_pr_uses_body_file_for_markdown(monkeypatch) -> Non
     command = commands[0]
     assert "--body-file" in command
     assert "--body" not in command
+    assert "--draft" not in command
     assert "Title with `ticks` and $(echo safe)" in command
     assert observed["body_exists_during_call"] is True
     assert observed["body"] == "Body with `code`\n$(echo safe)"
     body_path = observed["body_path"]
     assert isinstance(body_path, Path)
     assert not body_path.exists()
+
+
+def test_handle_pushed_without_pr_ready_mode_sets_pr_open_fallback(monkeypatch) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-parent\nchangeset.root_branch: feature-root\n"
+        ),
+        "title": "Example",
+    }
+    observed_states: list[str] = []
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "update_changeset_review",
+        lambda _changeset_id, metadata, **_kwargs: observed_states.append(
+            str(metadata.pr_state or "")
+        ),
+    )
+
+    result = pr_gate.handle_pushed_without_pr(
+        issue=issue,
+        changeset_id="at-123.1",
+        agent_id="atelier/worker/codex/p1",
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        beads_root=Path("/beads"),
+        branch_pr_strategy="parallel",
+        git_path="git",
+        create_as_draft=False,
+        changeset_base_branch=lambda *_args, **_kwargs: "main",
+        changeset_work_branch=lambda _issue: "feature-work",
+        render_changeset_pr_body=lambda _issue: "summary",
+        lookup_pr_payload=lambda *_args, **_kwargs: None,
+        lookup_pr_payload_diagnostic=lambda *_args, **_kwargs: (None, None),
+        mark_changeset_in_progress=lambda *_args, **_kwargs: None,
+        send_planner_notification=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("planner notification should not be sent")
+        ),
+        update_changeset_review_from_pr=lambda **_kwargs: None,
+        emit=lambda _message: None,
+        attempt_create_pr_fn=lambda **_kwargs: (True, "created"),
+    )
+
+    assert result.finalize_result.continue_running is True
+    assert result.finalize_result.reason == "changeset_review_pending"
+    assert observed_states == ["pr-open"]

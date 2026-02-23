@@ -14,16 +14,16 @@ Definitions derived from project config and bead metadata:
 
 - **publish**: run required checks, then publish per the config-derived plan and
   PR strategy.
-- **persist**: save progress without integrating. When `branch_pr` is false,
-  persist is the same as publish.
+- **persist**: save progress without integrating. When `branch_pr_mode` is
+  `none`, persist is the same as publish.
 
 Branch mode mapping:
 
-- `branch_pr = true`
+- `branch_pr_mode = draft|ready`
   - **persist**: commit and push the changeset branch only (no PR).
   - **publish**: commit, push, and create/update the PR when allowed by the PR
     strategy (otherwise push only).
-- `branch_pr = false`
+- `branch_pr_mode = none`
   - **publish/persist**: commit, integrate onto the epic `root_branch` per
     `branch_history`, then push the root branch.
 
@@ -61,8 +61,8 @@ branch and re-apply the workspace changes according to the history policy
 
 ## PR coordination
 
-When `branch_pr` is true, delegate PR creation or updates to the `github-prs`
-skill. Validate results after mutation.
+When `branch_pr_mode` is `draft` or `ready`, delegate PR creation or updates to
+the `github-prs` skill. Validate results after mutation.
 
 PR strategy default: sequential (one PR at a time, defer PR creation until the
 epic is ready for review). When the strategy blocks PR creation, push the branch

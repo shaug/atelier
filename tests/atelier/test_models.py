@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 
-from atelier.models import ProjectUserConfig
+from atelier.models import BranchConfig, ProjectUserConfig
 
 
 class TestEditorConfig:
@@ -19,3 +19,16 @@ class TestEditorConfig:
             parsed = ProjectUserConfig.model_validate(payload)
             assert parsed.editor.edit == [str(editor_path), "-w"]
             assert parsed.editor.work == [str(editor_path)]
+
+
+def test_branch_config_defaults_pr_mode_to_none() -> None:
+    config = BranchConfig()
+    assert config.pr_mode == "none"
+    assert config.pr is False
+
+
+def test_branch_config_maps_legacy_pr_bool_to_pr_mode() -> None:
+    enabled = BranchConfig.model_validate({"pr": True})
+    disabled = BranchConfig.model_validate({"pr": False})
+    assert enabled.pr_mode == "draft"
+    assert disabled.pr_mode == "none"

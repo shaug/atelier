@@ -686,6 +686,57 @@ _DEFAULT_CHANGESET_BASE_BRANCH = changeset_base_branch
 _DEFAULT_RENDER_CHANGESET_PR_BODY = render_changeset_pr_body
 
 
+def attempt_create_pr(
+    *,
+    repo_slug: str,
+    issue: dict[str, object],
+    work_branch: str,
+    is_draft: bool,
+    beads_root: Path,
+    repo_root: Path,
+    git_path: str | None,
+    changeset_base_branch: Callable[..., str | None] | None = None,
+    render_changeset_pr_body: Callable[[dict[str, object]], str] | None = None,
+    changeset_base_branch_fn: Callable[..., str | None] | None = None,
+    render_changeset_pr_body_fn: Callable[[dict[str, object]], str] | None = None,
+) -> tuple[bool, str]:
+    """Attempt create PR.
+
+    Args:
+        repo_slug: Value for `repo_slug`.
+        issue: Value for `issue`.
+        work_branch: Value for `work_branch`.
+        is_draft: Whether to create a draft PR.
+        beads_root: Value for `beads_root`.
+        repo_root: Value for `repo_root`.
+        git_path: Value for `git_path`.
+        changeset_base_branch: Value for `changeset_base_branch`.
+        render_changeset_pr_body: Value for `render_changeset_pr_body`.
+        changeset_base_branch_fn: Value for `changeset_base_branch_fn`.
+        render_changeset_pr_body_fn: Value for `render_changeset_pr_body_fn`.
+
+    Returns:
+        Function result.
+    """
+    return worker_pr_gate.attempt_create_pr(
+        repo_slug=repo_slug,
+        issue=issue,
+        work_branch=work_branch,
+        is_draft=is_draft,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        git_path=git_path,
+        changeset_base_branch=(
+            changeset_base_branch or changeset_base_branch_fn or _DEFAULT_CHANGESET_BASE_BRANCH
+        ),
+        render_changeset_pr_body=(
+            render_changeset_pr_body
+            or render_changeset_pr_body_fn
+            or _DEFAULT_RENDER_CHANGESET_PR_BODY
+        ),
+    )
+
+
 def attempt_create_draft_pr(
     *,
     repo_slug: str,
@@ -699,38 +750,35 @@ def attempt_create_draft_pr(
     changeset_base_branch_fn: Callable[..., str | None] | None = None,
     render_changeset_pr_body_fn: Callable[[dict[str, object]], str] | None = None,
 ) -> tuple[bool, str]:
-    """Attempt create draft pr.
+    """Backward-compatible wrapper around ``attempt_create_pr``.
 
     Args:
-        repo_slug: Value for `repo_slug`.
-        issue: Value for `issue`.
-        work_branch: Value for `work_branch`.
-        beads_root: Value for `beads_root`.
-        repo_root: Value for `repo_root`.
-        git_path: Value for `git_path`.
-        changeset_base_branch: Value for `changeset_base_branch`.
-        render_changeset_pr_body: Value for `render_changeset_pr_body`.
-        changeset_base_branch_fn: Value for `changeset_base_branch_fn`.
-        render_changeset_pr_body_fn: Value for `render_changeset_pr_body_fn`.
+        repo_slug: Repository owner/name slug.
+        issue: Changeset issue payload.
+        work_branch: Work branch to open the PR from.
+        beads_root: Beads root path.
+        repo_root: Repository root path.
+        git_path: Optional git executable path override.
+        changeset_base_branch: Optional base-branch resolver.
+        render_changeset_pr_body: Optional PR body renderer.
+        changeset_base_branch_fn: Legacy alias for base-branch resolver.
+        render_changeset_pr_body_fn: Legacy alias for PR body renderer.
 
     Returns:
-        Function result.
+        Tuple of ``(created, detail)`` from PR creation.
     """
-    return worker_pr_gate.attempt_create_draft_pr(
+    return attempt_create_pr(
         repo_slug=repo_slug,
         issue=issue,
         work_branch=work_branch,
+        is_draft=True,
         beads_root=beads_root,
         repo_root=repo_root,
         git_path=git_path,
-        changeset_base_branch=(
-            changeset_base_branch or changeset_base_branch_fn or _DEFAULT_CHANGESET_BASE_BRANCH
-        ),
-        render_changeset_pr_body=(
-            render_changeset_pr_body
-            or render_changeset_pr_body_fn
-            or _DEFAULT_RENDER_CHANGESET_PR_BODY
-        ),
+        changeset_base_branch=changeset_base_branch,
+        render_changeset_pr_body=render_changeset_pr_body,
+        changeset_base_branch_fn=changeset_base_branch_fn,
+        render_changeset_pr_body_fn=render_changeset_pr_body_fn,
     )
 
 
@@ -815,6 +863,7 @@ def handle_pushed_without_pr(
     beads_root: Path,
     branch_pr_strategy: object,
     git_path: str | None,
+    create_as_draft: bool = True,
     create_detail_prefix: str | None = None,
 ) -> FinalizeResult:
     """Handle pushed without pr.
@@ -828,6 +877,7 @@ def handle_pushed_without_pr(
         beads_root: Value for `beads_root`.
         branch_pr_strategy: Value for `branch_pr_strategy`.
         git_path: Value for `git_path`.
+        create_as_draft: Whether PR creation should use draft mode.
         create_detail_prefix: Value for `create_detail_prefix`.
 
     Returns:
@@ -842,6 +892,7 @@ def handle_pushed_without_pr(
         beads_root=beads_root,
         branch_pr_strategy=branch_pr_strategy,
         git_path=git_path,
+        create_as_draft=create_as_draft,
         create_detail_prefix=create_detail_prefix,
         changeset_base_branch=changeset_base_branch,
         changeset_work_branch=changeset_work_branch,
@@ -852,7 +903,7 @@ def handle_pushed_without_pr(
         send_planner_notification=send_planner_notification,
         update_changeset_review_from_pr=update_changeset_review_from_pr,
         emit=say,
-        attempt_create_draft_pr_fn=attempt_create_draft_pr,
+        attempt_create_pr_fn=attempt_create_pr,
     )
     return gate_result.finalize_result
 
@@ -924,6 +975,7 @@ def recover_premature_merged_changeset(
     agent_id: str,
     agent_bead_id: str | None,
     branch_pr: bool,
+    branch_pr_mode: str,
     branch_history: str,
     branch_squash_message: str,
     branch_pr_strategy: pr_strategy.PrStrategy,
@@ -946,6 +998,7 @@ def recover_premature_merged_changeset(
         agent_id: Value for `agent_id`.
         agent_bead_id: Value for `agent_bead_id`.
         branch_pr: Value for `branch_pr`.
+        branch_pr_mode: Value for `branch_pr_mode`.
         branch_history: Value for `branch_history`.
         branch_squash_message: Value for `branch_squash_message`.
         branch_pr_strategy: Value for `branch_pr_strategy`.
@@ -971,6 +1024,7 @@ def recover_premature_merged_changeset(
         agent_id=agent_id,
         agent_bead_id=agent_bead_id,
         branch_pr=branch_pr,
+        branch_pr_mode=branch_pr_mode,
         branch_history=branch_history,
         branch_squash_message=branch_squash_message,
         branch_pr_strategy=branch_pr_strategy,

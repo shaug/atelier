@@ -29,7 +29,7 @@ description: >-
 1. Load [references/publish-policy.md](references/publish-policy.md) for
    semantics, invariants, and recovery rules.
 1. Resolve publish settings from project config:
-   - Use `branch.pr`, `branch.history`, and the project default branch.
+   - Use `branch.pr_mode`, `branch.history`, and the project default branch.
 1. Resolve changeset metadata (root/parent/work branches and PR strategy) from
    bead descriptions or environment.
 1. Determine whether PR creation is allowed by the PR strategy:
@@ -52,12 +52,13 @@ description: >-
 1. Prepare commits with git as needed. Do not mutate state with `atelier`.
 1. Execute the operation per the resolved plan:
    - Rebase the work branch onto `root_branch` before any integration or PR.
-   - If `branch_pr` is true:
+   - If `branch_pr_mode` is `draft` or `ready`:
      - Push the work branch.
      - If PR creation is allowed, run `pr-draft` to generate the title/body,
-       then use the `github-prs` skill to create/update the PR in this run.
+       then use the `github-prs` skill to create/update the PR in this run
+       (`draft` mode creates draft PRs, `ready` mode creates ready PRs).
      - If PR creation is gated, report the reason and exit after pushing.
-   - If `branch_pr` is false:
+   - If `branch_pr_mode` is `none`:
      - Integrate the rebased work branch onto `root_branch` per `branch_history`
        (rebase/merge/squash).
      - Push the updated `root_branch`.
@@ -92,8 +93,8 @@ description: >-
 - If required checks fail and no explicit override exists, stop and report
   failures.
 - If the working tree is dirty, stop and request cleanup or commit.
-- If project config is missing `branch_pr` or `branch_history`, stop and request
-  repair.
+- If project config is missing `branch_pr_mode` or `branch_history`, stop and
+  request repair.
 - If `default_branch` is required but missing, stop and request project config
   repair.
 - If push or integration fails, follow recovery steps in

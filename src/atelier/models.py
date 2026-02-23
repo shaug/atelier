@@ -13,6 +13,8 @@ BRANCH_HISTORY_VALUES = ("manual", "squash", "merge", "rebase")
 BranchHistory = Literal["manual", "squash", "merge", "rebase"]
 BRANCH_SQUASH_MESSAGE_VALUES = ("deterministic", "agent")
 BranchSquashMessage = Literal["deterministic", "agent"]
+BRANCH_PR_MODE_VALUES = ("none", "draft", "ready")
+BranchPrMode = Literal["none", "draft", "ready"]
 
 UPGRADE_POLICY_VALUES = ("always", "ask", "manual")
 UpgradePolicy = Literal["always", "ask", "manual"]
@@ -26,24 +28,48 @@ class BranchConfig(BaseModel):
 
     Attributes:
         prefix: Prefix applied to workspace branches.
-        pr: Whether pull requests are expected.
+        pr_mode: Pull request mode (none|draft|ready).
         history: History policy (manual|squash|merge|rebase).
         squash_message: Squash commit message policy (deterministic|agent).
         pr_strategy: PR creation strategy
             (sequential|on-ready|on-parent-approved|parallel).
 
     Example:
-        >>> BranchConfig(prefix="scott/", pr=False, history="rebase")
+        >>> BranchConfig(prefix="scott/", pr_mode="none", history="rebase")
         BranchConfig(...)
     """
 
     model_config = ConfigDict(extra="allow")
 
     prefix: str = ""
-    pr: bool = True
+    pr_mode: BranchPrMode = "none"
     history: BranchHistory = "manual"
     squash_message: BranchSquashMessage = "deterministic"
     pr_strategy: PrStrategy = PR_STRATEGY_DEFAULT
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_pr(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        legacy_pr = payload.pop("pr", None)
+        if "pr_mode" in payload and payload.get("pr_mode") is not None:
+            return payload
+        if legacy_pr is None:
+            return payload
+        if isinstance(legacy_pr, bool):
+            payload["pr_mode"] = "draft" if legacy_pr else "none"
+            return payload
+        if isinstance(legacy_pr, str):
+            normalized = legacy_pr.strip().lower()
+            if normalized in {"true", "yes", "1"}:
+                payload["pr_mode"] = "draft"
+                return payload
+            if normalized in {"false", "no", "0"}:
+                payload["pr_mode"] = "none"
+                return payload
+        raise ValueError("pr must be a boolean when branch.pr_mode is unset")
 
     @field_validator("prefix", mode="before")
     @classmethod
@@ -58,6 +84,19 @@ class BranchConfig(BaseModel):
         if isinstance(value, str):
             return value.strip()
         return value
+
+    @field_validator("pr_mode", mode="before")
+    @classmethod
+    def normalize_pr_mode(cls, value: object) -> object:
+        if value is None:
+            return "none"
+        if isinstance(value, str):
+            normalized = value.strip().lower().replace("_", "-")
+            if not normalized:
+                return "none"
+            if normalized in BRANCH_PR_MODE_VALUES:
+                return normalized
+        raise ValueError("pr_mode must be one of: " + ", ".join(BRANCH_PR_MODE_VALUES))
 
     @field_validator("pr_strategy", mode="before")
     @classmethod
@@ -86,6 +125,11 @@ class BranchConfig(BaseModel):
         raise ValueError(
             "squash_message must be one of: " + ", ".join(BRANCH_SQUASH_MESSAGE_VALUES)
         )
+
+    @property
+    def pr(self) -> bool:
+        """Return whether pull requests are enabled for this branch policy."""
+        return self.pr_mode != "none"
 
 
 class GitSection(BaseModel):
