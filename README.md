@@ -77,10 +77,13 @@ Command-specific details live in module docstrings under `src/atelier/commands`.
 - Git (for worktrees and branch operations)
 - `bd` on your PATH (Atelier's local planning store)
 
-## Conventional Commit Hooks
+## Repo-Local Commit Hooks
 
-This repository enforces Conventional Commits at local commit time with a
-repo-local hook path (`.githooks/`) and `commitlint.config.cjs`.
+This repository uses a repo-local hook path (`.githooks/`) for fast local
+quality gates:
+
+- `pre-commit`: Ruff lint/format checks for staged Python files.
+- `commit-msg`: Conventional Commit validation via `commitlint.config.cjs`.
 
 Bootstrap or repair hooks for an existing clone:
 
@@ -96,6 +99,9 @@ The bootstrap step is idempotent and does the following:
 
 If your environment does not expose `commitlint`, the commit hook falls back to
 `npx`. If you use a custom binary path, set `ATELIER_COMMITLINT_BIN`.
+
+If your environment does not expose `uv` or `ruff`, set `ATELIER_RUFF_BIN` to an
+executable Ruff binary path.
 
 ## Agent Setup
 
