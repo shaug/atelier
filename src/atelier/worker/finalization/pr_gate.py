@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import shlex
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -13,8 +15,9 @@ from ... import beads, changesets, dependency_lineage, exec, git, pr_strategy, p
 from ... import log as atelier_log
 from ..models import FinalizeResult
 
-PR_LINT_GATE_COMMAND = ["just", "lint"]
-PR_LINT_GATE_COMMAND_TEXT = "just lint"
+PR_LINT_GATE_POLICY_FILE = "AGENTS.md"
+PR_LINT_GATE_FALLBACK_TEXT = "policy-defined lint gate"
+_BACKTICK_COMMAND_PATTERN = re.compile(r"`([^`\n]+)`")
 
 
 @dataclass(frozen=True)
@@ -27,15 +30,61 @@ class PrGateResult:
 
 def run_pr_lint_gate(*, repo_root: Path) -> tuple[bool, str]:
     """Run the canonical lint gate command prior to PR creation."""
-    result = exec.try_run_command(PR_LINT_GATE_COMMAND, cwd=repo_root)
+    resolved = _resolve_pr_lint_gate_command(repo_root=repo_root)
+    if resolved is None:
+        return (
+            False,
+            "unable to determine canonical lint gate command from AGENTS.md policy",
+        )
+    command, command_text = resolved
+    result = exec.try_run_command(command, cwd=repo_root)
     if result is None:
-        return False, f"missing required command: {PR_LINT_GATE_COMMAND[0]}"
+        return False, f"missing required command: {command[0]}"
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         if detail:
             return False, detail
-        return False, f"command failed: {PR_LINT_GATE_COMMAND_TEXT}"
-    return True, f"passed: {PR_LINT_GATE_COMMAND_TEXT}"
+        return False, f"command failed: {command_text}"
+    return True, f"passed: {command_text}"
+
+
+def _resolve_pr_lint_gate_command(repo_root: Path) -> tuple[list[str], str] | None:
+    agents_path = repo_root / PR_LINT_GATE_POLICY_FILE
+    if not agents_path.is_file():
+        return None
+    try:
+        agents_text = agents_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    lint_candidate: tuple[list[str], str] | None = None
+    for line in agents_text.splitlines():
+        commands = _extract_backtick_commands(line)
+        if not commands:
+            continue
+        line_lower = line.lower()
+        for command_text in commands:
+            tokens = _tokenize_policy_command(command_text)
+            if tokens is None:
+                continue
+            if "lint gate" in line_lower:
+                return tokens, command_text
+            if lint_candidate is None and "lint" in command_text.lower():
+                lint_candidate = (tokens, command_text)
+    return lint_candidate
+
+
+def _extract_backtick_commands(line: str) -> list[str]:
+    return [value.strip() for value in _BACKTICK_COMMAND_PATTERN.findall(line) if value.strip()]
+
+
+def _tokenize_policy_command(command_text: str) -> list[str] | None:
+    try:
+        tokens = shlex.split(command_text)
+    except ValueError:
+        return None
+    if not tokens:
+        return None
+    return tokens
 
 
 def changeset_parent_lifecycle_state(
@@ -312,6 +361,11 @@ def handle_pushed_without_pr(
     lint_gate_runner = lint_gate_fn or (
         lambda current_repo_root: run_pr_lint_gate(repo_root=current_repo_root)
     )
+    lint_gate_command_text = PR_LINT_GATE_FALLBACK_TEXT
+    if lint_gate_fn is None:
+        resolved_lint_gate = _resolve_pr_lint_gate_command(repo_root=repo_root)
+        if resolved_lint_gate is not None:
+            lint_gate_command_text = resolved_lint_gate[1]
     lint_ok, lint_detail = lint_gate_runner(repo_root)
     if not lint_ok:
         mark_changeset_in_progress(changeset_id, beads_root=beads_root, repo_root=repo_root)
@@ -333,7 +387,7 @@ def handle_pushed_without_pr(
         body = (
             "Changeset branch is pushed but PR creation was stopped because the "
             "canonical lint gate failed.\n"
-            f"Command: `{PR_LINT_GATE_COMMAND_TEXT}`."
+            f"Command: `{lint_gate_command_text}`."
         )
         if lint_detail:
             body = f"{body}\nDetail: {lint_detail}"

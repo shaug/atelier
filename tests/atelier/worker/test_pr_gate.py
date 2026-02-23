@@ -6,6 +6,38 @@ from types import SimpleNamespace
 from atelier.worker.finalization import pr_gate
 
 
+def test_run_pr_lint_gate_prefers_agents_canonical_command(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / "AGENTS.md").write_text(
+        (
+            "- Use `bash scripts/lint-gate.sh` as the canonical lint gate "
+            "(also exposed as `just lint`).\n"
+        ),
+        encoding="utf-8",
+    )
+    observed: dict[str, object] = {}
+
+    def fake_try_run_command(command: list[str], **kwargs) -> SimpleNamespace:
+        observed["command"] = command
+        observed["cwd"] = kwargs.get("cwd")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(pr_gate.exec, "try_run_command", fake_try_run_command)
+
+    passed, detail = pr_gate.run_pr_lint_gate(repo_root=tmp_path)
+
+    assert passed is True
+    assert detail == "passed: bash scripts/lint-gate.sh"
+    assert observed["command"] == ["bash", "scripts/lint-gate.sh"]
+    assert observed["cwd"] == tmp_path
+
+
+def test_run_pr_lint_gate_requires_agents_policy(tmp_path: Path) -> None:
+    passed, detail = pr_gate.run_pr_lint_gate(repo_root=tmp_path)
+
+    assert passed is False
+    assert detail == "unable to determine canonical lint gate command from AGENTS.md policy"
+
+
 def test_changeset_pr_creation_decision_on_ready_blocks_when_parent_only_pushed(
     monkeypatch,
 ) -> None:
