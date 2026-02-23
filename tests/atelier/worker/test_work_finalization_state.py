@@ -292,6 +292,11 @@ def test_handle_pushed_without_pr_uses_injected_create_callback_contract(monkeyp
         lambda **_kwargs: (True, "created"),
     )
     monkeypatch.setattr(
+        work_finalization_state.worker_pr_gate,
+        "run_pr_lint_gate",
+        lambda **_kwargs: (True, "passed"),
+    )
+    monkeypatch.setattr(
         work_finalization_state,
         "lookup_pr_payload",
         lambda *_args, **_kwargs: None,

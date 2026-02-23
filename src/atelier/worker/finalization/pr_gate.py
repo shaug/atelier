@@ -22,6 +22,19 @@ class PrGateResult:
     detail: str | None = None
 
 
+def run_pr_lint_gate(*, repo_root: Path) -> tuple[bool, str]:
+    """Run the canonical lint gate command prior to PR creation."""
+    result = exec.try_run_command(["bash", "scripts/lint-gate.sh"], cwd=repo_root)
+    if result is None:
+        return False, "missing required command: bash"
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        if detail:
+            return False, detail
+        return False, "command failed: bash scripts/lint-gate.sh"
+    return True, "passed: bash scripts/lint-gate.sh"
+
+
 def changeset_parent_lifecycle_state(
     issue: dict[str, object],
     *,
@@ -264,6 +277,7 @@ def handle_pushed_without_pr(
     update_changeset_review_from_pr: Callable[..., None],
     emit: Callable[[str], None],
     attempt_create_pr_fn: Callable[..., tuple[bool, str]] | None = None,
+    lint_gate_fn: Callable[[Path], tuple[bool, str]] | None = None,
 ) -> PrGateResult:
     decision = changeset_pr_creation_decision(
         issue,
@@ -290,6 +304,54 @@ def handle_pushed_without_pr(
                 continue_running=True, reason="changeset_review_pending"
             ),
             detail=decision.reason,
+        )
+
+    lint_gate_runner = lint_gate_fn or (
+        lambda current_repo_root: run_pr_lint_gate(repo_root=current_repo_root)
+    )
+    lint_ok, lint_detail = lint_gate_runner(repo_root)
+    if not lint_ok:
+        mark_changeset_in_progress(changeset_id, beads_root=beads_root, repo_root=repo_root)
+        note = (
+            "publish_pending: canonical lint gate failed before PR creation; "
+            f"{lint_detail or 'no detail'}"
+        )
+        beads.run_bd_command(
+            [
+                "update",
+                changeset_id,
+                "--append-notes",
+                note,
+            ],
+            beads_root=beads_root,
+            cwd=repo_root,
+            allow_failure=True,
+        )
+        body = (
+            "Changeset branch is pushed but PR creation was stopped because the "
+            "canonical lint gate failed.\n"
+            "Command: `bash scripts/lint-gate.sh`."
+        )
+        if lint_detail:
+            body = f"{body}\nDetail: {lint_detail}"
+            emit(f"Lint gate failed for {changeset_id}: {lint_detail}")
+        body = (
+            f"{body}\nAction: run the lint gate locally, fix failures, and rerun worker finalize."
+        )
+        send_planner_notification(
+            subject=f"NEEDS-DECISION: Lint gate failed ({changeset_id})",
+            body=body,
+            agent_id=agent_id,
+            thread_id=changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            dry_run=False,
+        )
+        return PrGateResult(
+            finalize_result=FinalizeResult(
+                continue_running=False, reason="changeset_lint_gate_failed"
+            ),
+            detail=lint_detail or None,
         )
 
     failure_reason = "changeset_pr_create_failed"

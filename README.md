@@ -82,8 +82,15 @@ Command-specific details live in module docstrings under `src/atelier/commands`.
 This repository uses a repo-local hook path (`.githooks/`) for fast local
 quality gates:
 
-- `pre-commit`: Ruff lint/format checks for staged Python files.
+- `pre-commit`: staged Python lint/format checks plus pyright via
+  `scripts/lint-gate.sh --staged-python`.
 - `commit-msg`: Conventional Commit validation via `commitlint.config.cjs`.
+
+Canonical lint gate for local/CI/worker publish flows:
+
+```sh
+bash scripts/lint-gate.sh
+```
 
 Bootstrap or repair hooks for an existing clone:
 
@@ -101,7 +108,8 @@ If your environment does not expose `commitlint`, the commit hook falls back to
 `npx`. If you use a custom binary path, set `ATELIER_COMMITLINT_BIN`.
 
 If your environment does not expose `uv` or `ruff`, set `ATELIER_RUFF_BIN` to an
-executable Ruff binary path.
+executable Ruff binary path. If your environment does not expose `uv` or
+`pyright`, set `ATELIER_PYRIGHT_BIN` to a pyright executable path.
 
 ## Agent Setup
 

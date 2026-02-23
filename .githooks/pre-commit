@@ -8,29 +8,6 @@ if ! git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 1
 fi
 
-resolve_ruff_cmd() {
-  if [[ -n "${ATELIER_RUFF_BIN:-}" ]]; then
-    RUFF_CMD=("${ATELIER_RUFF_BIN}")
-    return 0
-  fi
-
-  if command -v uv >/dev/null 2>&1; then
-    RUFF_CMD=(uv run ruff)
-    return 0
-  fi
-
-  if command -v ruff >/dev/null 2>&1; then
-    RUFF_CMD=(ruff)
-    return 0
-  fi
-
-  cat >&2 <<'EOF'
-pre-commit: missing Ruff runtime (uv or ruff not found).
-pre-commit: install uv/ruff, or set ATELIER_RUFF_BIN to a Ruff executable.
-EOF
-  return 1
-}
-
 mapfile -t staged_python_files < <(
   git -C "${repo_root}" diff --cached --name-only --diff-filter=ACMR \
     | awk '/\.(py|pyi)$/'
@@ -40,24 +17,17 @@ if [[ ${#staged_python_files[@]} -eq 0 ]]; then
   exit 0
 fi
 
-resolve_ruff_cmd
-
-if ! (
-  cd "${repo_root}" && "${RUFF_CMD[@]}" check --select I,RUF022 "${staged_python_files[@]}"
-); then
-  cat >&2 <<'EOF'
-pre-commit: Ruff lint checks failed.
-pre-commit: run 'just format' and stage updated files before committing.
-EOF
+if [[ ! -x "${repo_root}/scripts/lint-gate.sh" ]]; then
+  echo "pre-commit: missing executable lint gate script at scripts/lint-gate.sh." >&2
   exit 1
 fi
 
 if ! (
-  cd "${repo_root}" && "${RUFF_CMD[@]}" format --check "${staged_python_files[@]}"
+  cd "${repo_root}" && bash scripts/lint-gate.sh --staged-python "${staged_python_files[@]}"
 ); then
   cat >&2 <<'EOF'
-pre-commit: Ruff formatting check failed.
-pre-commit: run 'just format' and stage updated files before committing.
+pre-commit: lint gate failed.
+pre-commit: run 'just lint' (or 'just format' first), then stage updated files before committing.
 EOF
   exit 1
 fi
