@@ -959,9 +959,10 @@ def build_project_config(
 
     branch_pr_strategy_default = branch_config.pr_strategy
     branch_pr_strategy_arg = read_arg(args, "branch_pr_strategy")
+    prompt_pr_strategy = branch_pr_mode != "none"
     if branch_pr_strategy_arg is not None:
         branch_pr_strategy = normalize_pr_strategy(branch_pr_strategy_arg, "--branch-pr-strategy")
-    elif should_prompt("branch", "pr_strategy"):
+    elif prompt_pr_strategy and should_prompt("branch", "pr_strategy"):
         branch_pr_strategy_input = select(
             "PR strategy",
             pr_strategy.PR_STRATEGY_VALUES,
