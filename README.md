@@ -86,7 +86,7 @@ quality gates:
   `scripts/lint-gate.sh --staged-python`.
 - `commit-msg`: Conventional Commit validation via `commitlint.config.cjs`.
 
-Canonical lint gate for local/CI/worker publish flows:
+Canonical lint gate for local/CI workflows:
 
 ```sh
 bash scripts/lint-gate.sh

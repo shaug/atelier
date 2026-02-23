@@ -219,7 +219,7 @@ ______________________________________________________________________
   `pre-commit` lint checks run in both the main enlistment and linked worktrees.
 - Run `just format` before making commits.
 - Use `bash scripts/lint-gate.sh` as the canonical lint gate (also exposed as
-  `just lint` and used by CI/worker PR finalization).
+  `just lint` and used by CI).
 - Keep full test execution in `just test`/CI.
 - Ensure `just lint` and `just test` pass before shipping changes.
 - When merging PRs to `main`, keep merge commit messages non-Conventional (use

@@ -6,38 +6,6 @@ from types import SimpleNamespace
 from atelier.worker.finalization import pr_gate
 
 
-def test_run_pr_lint_gate_prefers_agents_canonical_command(monkeypatch, tmp_path: Path) -> None:
-    (tmp_path / "AGENTS.md").write_text(
-        (
-            "- Use `bash scripts/lint-gate.sh` as the canonical lint gate "
-            "(also exposed as `just lint`).\n"
-        ),
-        encoding="utf-8",
-    )
-    observed: dict[str, object] = {}
-
-    def fake_try_run_command(command: list[str], **kwargs) -> SimpleNamespace:
-        observed["command"] = command
-        observed["cwd"] = kwargs.get("cwd")
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(pr_gate.exec, "try_run_command", fake_try_run_command)
-
-    passed, detail = pr_gate.run_pr_lint_gate(repo_root=tmp_path)
-
-    assert passed is True
-    assert detail == "passed: bash scripts/lint-gate.sh"
-    assert observed["command"] == ["bash", "scripts/lint-gate.sh"]
-    assert observed["cwd"] == tmp_path
-
-
-def test_run_pr_lint_gate_requires_agents_policy(tmp_path: Path) -> None:
-    passed, detail = pr_gate.run_pr_lint_gate(repo_root=tmp_path)
-
-    assert passed is False
-    assert detail == "unable to determine canonical lint gate command from AGENTS.md policy"
-
-
 def test_changeset_pr_creation_decision_on_ready_blocks_when_parent_only_pushed(
     monkeypatch,
 ) -> None:
@@ -148,7 +116,6 @@ def test_handle_pushed_without_pr_reports_failure_when_pr_create_fails(
         ),
         update_changeset_review_from_pr=lambda **_kwargs: None,
         emit=lambda _message: None,
-        lint_gate_fn=lambda _repo_root: (True, "passed"),
     )
 
     assert result.finalize_result.continue_running is False
@@ -300,59 +267,8 @@ def test_handle_pushed_without_pr_ready_mode_sets_pr_open_fallback(monkeypatch) 
         update_changeset_review_from_pr=lambda **_kwargs: None,
         emit=lambda _message: None,
         attempt_create_pr_fn=lambda **_kwargs: (True, "created"),
-        lint_gate_fn=lambda _repo_root: (True, "passed"),
     )
 
     assert result.finalize_result.continue_running is True
     assert result.finalize_result.reason == "changeset_review_pending"
     assert observed_states == ["pr-open"]
-
-
-def test_handle_pushed_without_pr_blocks_when_lint_gate_fails(monkeypatch) -> None:
-    issue = {
-        "description": (
-            "changeset.parent_branch: feature-parent\nchangeset.root_branch: feature-root\n"
-        ),
-        "title": "Example",
-    }
-    planner_messages: list[str] = []
-    notes: list[list[str]] = []
-
-    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: False)
-    monkeypatch.setattr(
-        pr_gate.beads,
-        "run_bd_command",
-        lambda args, **_kwargs: notes.append(args),
-    )
-
-    result = pr_gate.handle_pushed_without_pr(
-        issue=issue,
-        changeset_id="at-123.1",
-        agent_id="atelier/worker/codex/p1",
-        repo_slug="org/repo",
-        repo_root=Path("/repo"),
-        beads_root=Path("/beads"),
-        branch_pr_strategy="parallel",
-        git_path="git",
-        create_as_draft=True,
-        changeset_base_branch=lambda *_args, **_kwargs: "main",
-        changeset_work_branch=lambda _issue: "feature-work",
-        render_changeset_pr_body=lambda _issue: "summary",
-        lookup_pr_payload=lambda *_args, **_kwargs: None,
-        lookup_pr_payload_diagnostic=lambda *_args, **_kwargs: (None, None),
-        mark_changeset_in_progress=lambda *_args, **_kwargs: None,
-        send_planner_notification=lambda **kwargs: planner_messages.append(
-            str(kwargs.get("subject"))
-        ),
-        update_changeset_review_from_pr=lambda **_kwargs: None,
-        emit=lambda _message: None,
-        attempt_create_pr_fn=lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("PR create should not run when lint gate fails")
-        ),
-        lint_gate_fn=lambda _repo_root: (False, "pyright failed"),
-    )
-
-    assert result.finalize_result.continue_running is False
-    assert result.finalize_result.reason == "changeset_lint_gate_failed"
-    assert notes and "update" in notes[0]
-    assert planner_messages == ["NEEDS-DECISION: Lint gate failed (at-123.1)"]
