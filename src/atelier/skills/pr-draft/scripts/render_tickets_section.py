@@ -11,6 +11,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from atelier.bd_invocation import with_bd_mode
+
 
 @dataclass(frozen=True)
 class TicketRef:
@@ -99,18 +101,11 @@ def render_ticket_section(issue: dict[str, object]) -> str:
     return "\n".join(["## Tickets", *lines])
 
 
-def _bd_command(*args: str) -> list[str]:
-    command = ["bd", *args]
-    if "--no-daemon" not in command:
-        command.append("--no-daemon")
-    return command
-
-
 def load_issue(changeset_id: str, *, beads_dir: Path, repo_path: Path) -> dict[str, object]:
     """Load a changeset issue payload from Beads."""
     env = os.environ.copy()
     env["BEADS_DIR"] = str(beads_dir)
-    command = _bd_command("show", changeset_id, "--json")
+    command = with_bd_mode("show", changeset_id, "--json", beads_dir=str(beads_dir), env=env)
     result = subprocess.run(
         command,
         cwd=repo_path,
