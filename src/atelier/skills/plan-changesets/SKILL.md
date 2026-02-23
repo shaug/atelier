@@ -39,12 +39,13 @@ issues are actionable. Do not wait for approval to create/edit drafts.
 ## Steps
 
 1. For each changeset, create a bead with the script:
-   - `python skills/plan-changesets/scripts/create_changeset.py --epic-id <epic_id> --title "<title>" --acceptance "<acceptance>" [--status-label cs:ready|cs:planned] [--description "<scope/guardrails>"] [--notes "<notes>"] [--beads-dir "<beads_dir>"] [--no-export]`
+   - `python skills/plan-changesets/scripts/create_changeset.py --epic-id <epic_id> --title "<title>" --acceptance "<acceptance>" [--status-label cs:planned|cs:ready] [--description "<scope/guardrails>"] [--notes "<notes>"] [--beads-dir "<beads_dir>"] [--no-export]`
 1. If decomposition would produce exactly one child changeset, stop and either:
    - keep the epic as the executable changeset, or
    - record explicit decomposition rationale in epic/changeset notes before
      creating the child.
-1. If the changeset is not ready, use `cs:planned` instead of `cs:ready`.
+1. Default new changesets to `cs:planned`; promote to `cs:ready` only via the
+   explicit promotion flow.
 1. Capture an estimated LOC range and record it in notes.
 1. If a changeset violates guardrails (especially >800 LOC), pause and request
    explicit approval; record the approval decision in notes.

@@ -201,6 +201,7 @@ def test_plan_changesets_skill_requires_rationale_for_one_child_split() -> None:
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "one child changeset" in text
     assert "decomposition rationale" in text
+    assert "Default new changesets to `cs:planned`" in text
 
 
 def test_plan_changeset_guardrails_skill_mentions_checker_script() -> None:
