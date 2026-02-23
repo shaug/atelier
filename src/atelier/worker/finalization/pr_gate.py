@@ -194,9 +194,7 @@ def attempt_create_pr(
         ]
         if is_draft:
             command.append("--draft")
-        result = exec.try_run_command(
-            command
-        )
+        result = exec.try_run_command(command)
     if result is None:
         return False, "missing required command: gh"
     if result.returncode != 0:
