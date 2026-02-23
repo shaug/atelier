@@ -326,7 +326,8 @@ atelier new [path]
 Options:
 
 - `--branch-prefix`: Prefix for workspace branches (e.g., `scott/`).
-- `--branch-pr`: Whether workspace branches require pull requests.
+- `--branch-pr-mode`: Pull request mode for workspace branches (`none`, `draft`,
+  `ready`).
 - `--branch-history`: History policy (`manual`, `squash`, `merge`, `rebase`).
 - `--agent`: Agent name.
 - `--editor-edit`: Editor command for blocking edits (e.g., `subl -w`).
@@ -352,7 +353,8 @@ atelier init
 Options:
 
 - `--branch-prefix`: Prefix for workspace branches (e.g., `scott/`).
-- `--branch-pr`: Whether workspace branches require pull requests.
+- `--branch-pr-mode`: Pull request mode for workspace branches (`none`, `draft`,
+  `ready`).
 - `--branch-history`: History policy (`manual`, `squash`, `merge`, `rebase`).
 - `--agent`: Agent name.
 - `--editor-edit`: Editor command for blocking edits (e.g., `subl -w`).
@@ -361,7 +363,7 @@ Options:
 Example:
 
 ```sh
-atelier init --branch-prefix scott/ --branch-pr false --branch-history rebase
+atelier init --branch-prefix scott/ --branch-pr-mode none --branch-history rebase
 ```
 
 ### `atelier config [workspace-branch]`

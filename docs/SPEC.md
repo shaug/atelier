@@ -95,6 +95,7 @@ Atelier uses two JSON files for project configuration:
 Key fields include:
 
 - `branch.prefix`: default prefix for root branches
+- `branch.pr_mode`: pull request mode (`none`, `draft`, `ready`)
 - `agent.default`: default agent CLI
 - `editor.edit`: blocking editor for quick edits
 - `editor.work`: non-blocking editor for worktree opens

@@ -157,11 +157,12 @@ def set_changeset_review_pending_state(
         )
 
 
-def attempt_create_draft_pr(
+def attempt_create_pr(
     *,
     repo_slug: str,
     issue: dict[str, object],
     work_branch: str,
+    is_draft: bool,
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
@@ -176,31 +177,58 @@ def attempt_create_draft_pr(
     title = str(issue.get("title") or "").strip() or work_branch
     body = render_changeset_pr_body(issue)
     with _temporary_text_file(body) as body_file:
-        result = exec.try_run_command(
-            [
-                "gh",
-                "pr",
-                "create",
-                "--repo",
-                repo_slug,
-                "--base",
-                base_branch,
-                "--head",
-                work_branch,
-                "--title",
-                title,
-                "--body-file",
-                str(body_file),
-                "--draft",
-            ]
-        )
+        command = [
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            repo_slug,
+            "--base",
+            base_branch,
+            "--head",
+            work_branch,
+            "--title",
+            title,
+            "--body-file",
+            str(body_file),
+        ]
+        if is_draft:
+            command.append("--draft")
+        result = exec.try_run_command(command)
     if result is None:
         return False, "missing required command: gh"
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         return False, detail or "gh pr create failed"
     detail = (result.stdout or "").strip()
-    return True, detail or "created draft PR"
+    if is_draft:
+        return True, detail or "created draft PR"
+    return True, detail or "created PR"
+
+
+def attempt_create_draft_pr(
+    *,
+    repo_slug: str,
+    issue: dict[str, object],
+    work_branch: str,
+    beads_root: Path,
+    repo_root: Path,
+    git_path: str | None,
+    changeset_base_branch: Callable[..., str | None],
+    render_changeset_pr_body: Callable[[dict[str, object]], str],
+) -> tuple[bool, str]:
+    """Backward-compatible wrapper that always creates a draft PR."""
+    return attempt_create_pr(
+        repo_slug=repo_slug,
+        issue=issue,
+        work_branch=work_branch,
+        is_draft=True,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        git_path=git_path,
+        changeset_base_branch=changeset_base_branch,
+        render_changeset_pr_body=render_changeset_pr_body,
+    )
 
 
 @contextmanager
@@ -224,6 +252,7 @@ def handle_pushed_without_pr(
     beads_root: Path,
     branch_pr_strategy: object,
     git_path: str | None,
+    create_as_draft: bool,
     create_detail_prefix: str | None = None,
     changeset_base_branch: Callable[..., str | None],
     changeset_work_branch: Callable[[dict[str, object]], str | None],
@@ -234,7 +263,7 @@ def handle_pushed_without_pr(
     send_planner_notification: Callable[..., None],
     update_changeset_review_from_pr: Callable[..., None],
     emit: Callable[[str], None],
-    attempt_create_draft_pr_fn: Callable[..., tuple[bool, str]] | None = None,
+    attempt_create_pr_fn: Callable[..., tuple[bool, str]] | None = None,
 ) -> PrGateResult:
     decision = changeset_pr_creation_decision(
         issue,
@@ -275,11 +304,12 @@ def handle_pushed_without_pr(
         if not work_branch:
             create_detail = "missing changeset.work_branch metadata for PR creation"
         else:
-            create_fn = attempt_create_draft_pr_fn or attempt_create_draft_pr
+            create_fn = attempt_create_pr_fn or attempt_create_pr
             created, detail = create_fn(
                 repo_slug=repo_slug,
                 issue=issue,
                 work_branch=work_branch,
+                is_draft=create_as_draft,
                 beads_root=beads_root,
                 repo_root=repo_root,
                 git_path=git_path,
@@ -310,7 +340,7 @@ def handle_pushed_without_pr(
                         changeset_id=changeset_id,
                         pr_payload=None,
                         pushed=True,
-                        fallback_pr_state="draft-pr",
+                        fallback_pr_state="draft-pr" if create_as_draft else "pr-open",
                         beads_root=beads_root,
                         repo_root=repo_root,
                         mark_changeset_in_progress=mark_changeset_in_progress,

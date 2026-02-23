@@ -28,6 +28,7 @@ def enlistment_path_for(path: Path) -> str:
 def make_init_args(**overrides: object) -> SimpleNamespace:
     data = {
         "branch_prefix": None,
+        "branch_pr_mode": None,
         "branch_pr": None,
         "branch_history": None,
         "branch_squash_message": None,
@@ -56,7 +57,7 @@ def write_project_config(project_dir: Path, enlistment_path: str) -> dict:
         },
         "branch": {
             "prefix": "scott/",
-            "pr": True,
+            "pr_mode": "draft",
             "history": "manual",
         },
     }
@@ -74,7 +75,7 @@ def make_open_config(enlistment_path: str, **overrides: object) -> dict:
         },
         "branch": {
             "prefix": "scott/",
-            "pr": True,
+            "pr_mode": "draft",
             "history": "manual",
         },
         "agent": {"default": "codex", "options": {"codex": []}},

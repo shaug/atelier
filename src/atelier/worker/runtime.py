@@ -11,7 +11,7 @@ from typing import Protocol
 from .. import agent_home, agents, beads, branching, config, git, prs
 from .. import root_branch as root_branch_module
 from ..config import ProjectConfig
-from ..models import BranchHistory, BranchSquashMessage
+from ..models import BranchHistory, BranchPrMode, BranchSquashMessage
 from ..pr_strategy import PrStrategy
 from ..work_feedback import ReviewFeedbackSnapshot
 from . import work_command_helpers as worker_work
@@ -101,6 +101,7 @@ class WorkerLifecycleAdapter:
         beads_root: Path,
         repo_root: Path,
         branch_pr: bool,
+        branch_pr_mode: BranchPrMode,
         branch_pr_strategy: PrStrategy,
         branch_history: BranchHistory,
         branch_squash_message: BranchSquashMessage,
@@ -121,6 +122,7 @@ class WorkerLifecycleAdapter:
             beads_root=beads_root,
             repo_root=repo_root,
             branch_pr=branch_pr,
+            branch_pr_mode=branch_pr_mode,
             branch_pr_strategy=branch_pr_strategy,
             branch_history=branch_history,
             branch_squash_message=branch_squash_message,

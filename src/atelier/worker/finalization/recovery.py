@@ -8,6 +8,7 @@ from pathlib import Path
 from ... import git, prs
 from ... import log as atelier_log
 from ...agents import AgentSpec
+from ...models import BranchPrMode
 from ...pr_strategy import PrStrategy
 from ..models import FinalizeResult
 
@@ -20,6 +21,7 @@ def recover_premature_merged_changeset(
     agent_id: str,
     agent_bead_id: str | None,
     branch_pr: bool,
+    branch_pr_mode: BranchPrMode,
     branch_history: str,
     branch_squash_message: str,
     branch_pr_strategy: PrStrategy,
@@ -134,5 +136,6 @@ def recover_premature_merged_changeset(
             beads_root=beads_root,
             branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
+            create_as_draft=branch_pr_mode == "draft",
         )
     return None

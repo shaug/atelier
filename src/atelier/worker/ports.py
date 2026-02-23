@@ -13,7 +13,7 @@ from typing import Protocol
 from ..agent_home import AgentHome
 from ..agents import AgentSpec
 from ..config import ProjectConfig
-from ..models import BranchHistory, BranchSquashMessage
+from ..models import BranchHistory, BranchPrMode, BranchSquashMessage
 from ..pr_strategy import PrStrategy
 from ..work_feedback import ReviewFeedbackSnapshot
 from .models import FinalizeResult, ReconcileResult, StartupContractResult
@@ -318,6 +318,7 @@ class WorkerLifecycleService(Protocol):
         beads_root: Path,
         repo_root: Path,
         branch_pr: bool,
+        branch_pr_mode: BranchPrMode,
         branch_pr_strategy: PrStrategy,
         branch_history: BranchHistory,
         branch_squash_message: BranchSquashMessage,

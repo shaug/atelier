@@ -10,6 +10,7 @@ from typing import Protocol
 from .. import beads, git, prs
 from .. import log as atelier_log
 from ..agents import AgentSpec
+from ..models import BranchPrMode
 from ..pr_strategy import PrStrategy
 from .models import FinalizeResult, PublishSignalDiagnostics
 
@@ -27,6 +28,7 @@ class FinalizePipelineContext:
     beads_root: Path
     repo_root: Path
     branch_pr: bool
+    branch_pr_mode: BranchPrMode
     branch_pr_strategy: PrStrategy
     branch_history: str
     branch_squash_message: str
@@ -116,6 +118,7 @@ class FinalizePipelineService(Protocol):
         *,
         issue: Issue,
         context: FinalizePipelineContext,
+        create_as_draft: bool,
         create_detail_prefix: str | None = None,
     ) -> FinalizeResult: ...
 
@@ -152,6 +155,7 @@ def run_finalize_pipeline(
     beads_root = context.beads_root
     repo_root = context.repo_root
     branch_pr = context.branch_pr
+    branch_pr_mode = context.branch_pr_mode
     git_path = context.git_path
     if not changeset_id:
         return FinalizeResult(continue_running=False, reason="changeset_missing")
@@ -334,6 +338,7 @@ def run_finalize_pipeline(
         return service.handle_pushed_without_pr(
             issue=issue,
             context=context,
+            create_as_draft=branch_pr_mode == "draft",
         )
     if not pushed and not pr_payload:
         push_detail: str | None = None
@@ -373,6 +378,7 @@ def run_finalize_pipeline(
                     return service.handle_pushed_without_pr(
                         issue=issue,
                         context=context,
+                        create_as_draft=branch_pr_mode == "draft",
                         create_detail_prefix=push_detail,
                     )
                 service.set_changeset_review_pending_state(

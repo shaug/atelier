@@ -61,7 +61,7 @@ class TestInitProject:
 
             args = make_init_args(
                 branch_prefix="",
-                branch_pr="true",
+                branch_pr_mode="draft",
                 branch_history="manual",
                 branch_pr_strategy="parallel",
                 agent="codex",
@@ -144,7 +144,7 @@ class TestInitProject:
                 assert config_payload.project.repo_url == RAW_ORIGIN
                 assert config_payload.project.provider == "github"
                 assert config_payload.project.auto_export_new is False
-                assert config_payload.branch.pr is True
+                assert config_payload.branch.pr_mode == "none"
                 assert config_payload.branch.history == "manual"
                 assert config_payload.editor.edit == ["cursor", "-w"]
                 assert config_payload.editor.work == ["cursor"]
@@ -286,7 +286,7 @@ class TestInitProject:
             try:
                 args = make_init_args(
                     branch_prefix="",
-                    branch_pr="true",
+                    branch_pr_mode="draft",
                     branch_history="manual",
                     branch_pr_strategy="parallel",
                     agent="codex",
@@ -353,7 +353,7 @@ class TestInitProject:
             try:
                 args = make_init_args(
                     branch_prefix="",
-                    branch_pr="true",
+                    branch_pr_mode="draft",
                     branch_history="manual",
                     branch_pr_strategy="parallel",
                     agent="codex",
@@ -375,7 +375,7 @@ class TestInitProject:
                         },
                         "branch": {
                             "prefix": "",
-                            "pr": True,
+                            "pr_mode": "draft",
                             "history": "manual",
                             "pr_strategy": "parallel",
                         },
@@ -539,7 +539,7 @@ class TestInitProject:
             try:
                 args = make_init_args(
                     branch_prefix="scott/",
-                    branch_pr="true",
+                    branch_pr_mode="draft",
                     branch_history="rebase",
                     branch_pr_strategy="on-ready",
                     agent="codex",
@@ -687,7 +687,7 @@ class TestInitProject:
 
                 args = make_init_args(
                     branch_prefix="feat/",
-                    branch_pr="false",
+                    branch_pr_mode="none",
                     branch_history="merge",
                     branch_pr_strategy="sequential",
                     agent="codex",
