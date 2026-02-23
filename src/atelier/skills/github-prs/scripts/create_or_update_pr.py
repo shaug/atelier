@@ -7,7 +7,10 @@ import argparse
 import json
 import subprocess
 import sys
-from typing import Iterable
+from contextlib import contextmanager
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Iterable, Iterator
 
 
 def run(cmd: list[str]) -> str:
@@ -122,13 +125,31 @@ def read_pr(repo: str, number: int) -> dict[str, object]:
     return payload
 
 
+@contextmanager
+def pr_body_file(*, body: str | None, body_file: str | None) -> Iterator[str]:
+    if body_file:
+        yield body_file
+        return
+    if body is None:
+        raise RuntimeError("PR body is required")
+    with NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+        handle.write(body)
+        temp_path = Path(handle.name)
+    try:
+        yield str(temp_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
 def main(argv: Iterable[str]) -> int:
     parser = argparse.ArgumentParser(description="Create or update a GitHub PR.")
     parser.add_argument("--repo", required=True, help="GitHub repo slug (owner/name)")
     parser.add_argument("--base", required=True, help="Base branch")
     parser.add_argument("--head", required=True, help="Head branch")
     parser.add_argument("--title", required=True, help="PR title")
-    parser.add_argument("--body", required=True, help="PR body")
+    body_group = parser.add_mutually_exclusive_group(required=True)
+    body_group.add_argument("--body", help="PR body")
+    body_group.add_argument("--body-file", help="Path to PR body file")
     parser.add_argument(
         "--labels",
         required=True,
@@ -138,49 +159,52 @@ def main(argv: Iterable[str]) -> int:
     labels = parse_labels(args.labels)
 
     try:
-        number = find_pr_number(args.repo, args.head)
-        if number is None:
-            cmd = [
-                "gh",
-                "pr",
-                "create",
-                "--repo",
-                args.repo,
-                "--base",
-                args.base,
-                "--head",
-                args.head,
-                "--title",
-                args.title,
-                "--body",
-                args.body,
-            ]
-            if labels:
-                cmd.extend(["--label", ",".join(labels)])
-            output = run(cmd).strip()
-            if not output:
-                number = find_pr_number(args.repo, args.head)
-            else:
-                number = int(output.split("/")[-1]) if output.rsplit("/", 1)[-1].isdigit() else None
+        with pr_body_file(body=args.body, body_file=args.body_file) as body_file:
+            number = find_pr_number(args.repo, args.head)
             if number is None:
-                number = find_pr_number(args.repo, args.head)
-            if number is None:
-                raise RuntimeError("Unable to determine created PR number")
-        else:
-            run(
-                [
+                cmd = [
                     "gh",
                     "pr",
-                    "edit",
-                    str(number),
+                    "create",
                     "--repo",
                     args.repo,
+                    "--base",
+                    args.base,
+                    "--head",
+                    args.head,
                     "--title",
                     args.title,
-                    "--body",
-                    args.body,
+                    "--body-file",
+                    body_file,
                 ]
-            )
+                if labels:
+                    cmd.extend(["--label", ",".join(labels)])
+                output = run(cmd).strip()
+                if not output:
+                    number = find_pr_number(args.repo, args.head)
+                else:
+                    number = (
+                        int(output.split("/")[-1]) if output.rsplit("/", 1)[-1].isdigit() else None
+                    )
+                if number is None:
+                    number = find_pr_number(args.repo, args.head)
+                if number is None:
+                    raise RuntimeError("Unable to determine created PR number")
+            else:
+                run(
+                    [
+                        "gh",
+                        "pr",
+                        "edit",
+                        str(number),
+                        "--repo",
+                        args.repo,
+                        "--title",
+                        args.title,
+                        "--body-file",
+                        body_file,
+                    ]
+                )
         edit_labels(args.repo, number, labels)
         payload = read_pr(args.repo, number)
         print(json.dumps(payload, indent=2, sort_keys=True))

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Iterator
 
 from .. import agents, beads, git, worktrees
 
@@ -418,9 +421,12 @@ def integrate_epic_root_to_parent(
                 )
                 if drafted:
                     message = drafted
-            ok, detail = run_git_status(
-                ["commit", "-m", message], repo_root=repo_root, git_path=git_path
-            )
+            with _temporary_text_file(message) as message_file:
+                ok, detail = run_git_status(
+                    ["commit", "-F", str(message_file)],
+                    repo_root=repo_root,
+                    git_path=git_path,
+                )
             if current and current != parent:
                 run_git_status(["checkout", current], repo_root=repo_root, git_path=git_path)
             if not ok:
@@ -448,3 +454,14 @@ def integrate_epic_root_to_parent(
         return False, None, f"unsupported branch.history value: {history!r}"
 
     return False, None, "epic finalization failed after retry"
+
+
+@contextmanager
+def _temporary_text_file(content: str) -> Iterator[Path]:
+    with NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+        handle.write(content)
+        temp_path = Path(handle.name)
+    try:
+        yield temp_path
+    finally:
+        temp_path.unlink(missing_ok=True)

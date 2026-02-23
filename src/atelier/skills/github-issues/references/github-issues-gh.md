@@ -3,10 +3,10 @@
 ## Required gh commands
 
 - Create:
-  `gh issue create --repo <OWNER/REPO> --title <title> --body <body> [--label <label>]`
+  `gh issue create --repo <OWNER/REPO> --title <title> --body-file <path> [--label <label>]`
 - Read: `gh issue view <issue> --repo <OWNER/REPO> --json <fields>`
 - Update:
-  `gh issue edit <issue> --repo <OWNER/REPO> [--title <title>] [--body <body>] [--add-label <label>] [--remove-label <label>]`
+  `gh issue edit <issue> --repo <OWNER/REPO> [--title <title>] [--body-file <path>] [--add-label <label>] [--remove-label <label>]`
 - Close:
   `gh issue close <issue> --repo <OWNER/REPO> [--comment <comment>] [--reason completed|not planned]`
 

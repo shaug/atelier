@@ -14,7 +14,7 @@ description: >-
 - repo: GitHub repository in `OWNER/REPO` form.
 - issue: issue number or URL (required for read/update/close).
 - title: issue title for create/update.
-- body: issue body for create/update.
+- body_file: path to a UTF-8 issue body file for create/update.
 - labels: comma-separated label list; empty string clears labels.
 - comment: optional closing comment when closing.
 - reason: optional close reason (`completed` or `not planned`).
@@ -27,7 +27,7 @@ description: >-
 1. Confirm `gh` is available and authenticated for the target repo.
 1. For create:
    - Run
-     `scripts/create_issue.py --repo <repo> --title <title> --body <body> [--labels <labels>]`.
+     `scripts/create_issue.py --repo <repo> --title <title> --body-file <path> [--labels <labels>]`.
 1. For read:
    - Run `scripts/read_issue.py --repo <repo> --issue <issue>`.
 1. For list:
@@ -35,7 +35,7 @@ description: >-
      `scripts/list_issues.py --repo <repo> [--state <state>] [--search <search>] [--limit <limit>]`.
 1. For update:
    - Run
-     `scripts/update_issue.py --repo <repo> --issue <issue> [--title <title>] [--body <body>] [--labels <labels>]`.
+     `scripts/update_issue.py --repo <repo> --issue <issue> [--title <title>] [--body-file <path>] [--labels <labels>]`.
 1. For close:
    - Run
      `scripts/close_issue.py --repo <repo> --issue <issue> [--comment <comment>] [--reason <reason>]`.
@@ -45,3 +45,4 @@ description: >-
 ## Outputs
 
 - Scripts print issue metadata as JSON to stdout after each action.
+- Body markdown transport must use `--body-file`, not inline shell text.
