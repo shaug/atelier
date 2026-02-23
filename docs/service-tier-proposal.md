@@ -10,6 +10,29 @@ The target is better orchestration clarity, explicit result/error contracts, and
 easier testing at command/runtime boundaries without introducing a heavy
 framework.
 
+## Inspiration and alignment
+
+This proposal is inspired by Ruby ServiceActor:
+https://github.com/sunny/actor
+
+Shared intent:
+
+- one entrypoint per use-case orchestration unit
+- explicit contracts for success/failure behavior
+- composable workflow building blocks
+
+Important Atelier differences (Python-first):
+
+- Default implementation is class-first service modules with one public
+  `<Verb><Domain>Service.run(...)` entrypoint.
+- External inputs are validated with typed request/context models at service
+  boundaries, preferring Pydantic where data crosses CLI/process/provider
+  boundaries.
+- Pure in-process orchestration can use dataclasses/typed models without
+  macro-style DSL behavior.
+- Expected failures return deterministic `ServiceFailure` values instead of
+  relying on raised exceptions for control flow.
+
 ## Why now
 
 Current Atelier code already has strong typed boundaries in many places, but
@@ -68,8 +91,10 @@ policy checks, and error mapping.
 Naming conventions:
 
 - Module path: `src/atelier/services/<domain>/<use_case>.py`
-- Entry function/class name: `<domain>_<verb>_service` or
-  `<Verb><Domain>Service`
+- Default entrypoint: `<Verb><Domain>Service.run(...)`
+- Exception: function-first entrypoint is allowed only for tiny,
+  single-sequence services with no injected collaborators; name must be
+  `<domain>_<verb>_service(...)`.
 - Request models end with `Context` or `Request`.
 - Success payload models end with `Outcome`.
 - Errors use stable string codes (see contracts section).
@@ -81,6 +106,19 @@ Keep pure logic and boundary integrations separate:
 - domain helpers stay in existing modules where no orchestration state is needed
 - adapters remain in typed port/boundary modules (`exec`, `worker/ports`,
   `models_boundary`, provider adapters)
+
+## Service composition rules
+
+Keep composition explicit and bounded:
+
+- Maximum composition depth is three service hops in one request path.
+- Parent services may call child services only through typed request/result
+  contracts.
+- Child `ServiceFailure` values must propagate unchanged unless intentionally
+  remapped at one boundary layer with rationale in code comments/docstring.
+- No hidden side effects: all external writes/commands must run through explicit
+  adapter dependencies.
+- Service modules must avoid mutable global state and implicit singleton caches.
 
 ## Candidate module mapping
 
@@ -145,6 +183,15 @@ Near-term candidate services:
 ## Result and error contracts
 
 Use explicit tagged outcomes for side-effect-heavy services.
+
+Validation rule:
+
+- Every service entrypoint validates request/context input before business
+  orchestration starts.
+- Validation failures must return `validation_failed` deterministically with a
+  stable message and optional recovery hint.
+- Use Pydantic models for untrusted/external input boundaries; use typed
+  dataclasses or validated models internally once boundary validation has passed.
 
 ```python
 from dataclasses import dataclass
