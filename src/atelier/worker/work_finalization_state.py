@@ -19,6 +19,7 @@ from .. import (
     prs,
 )
 from ..io import say
+from ..models import BranchPrMode
 from ..worker import finalization_service as worker_finalization_service
 from ..worker import integration_service as worker_integration_service
 from ..worker import publish as worker_publish
@@ -975,7 +976,7 @@ def recover_premature_merged_changeset(
     agent_id: str,
     agent_bead_id: str | None,
     branch_pr: bool,
-    branch_pr_mode: str,
+    branch_pr_mode: BranchPrMode,
     branch_history: str,
     branch_squash_message: str,
     branch_pr_strategy: pr_strategy.PrStrategy,
