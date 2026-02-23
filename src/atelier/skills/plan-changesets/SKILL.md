@@ -10,6 +10,9 @@ Only use this when an epic should be decomposed. If the epic itself is already
 within guardrails, keep the epic as the executable changeset instead of creating
 children.
 
+Capture new executable work immediately as draft changesets (`cs:planned`) when
+issues are actionable. Do not wait for approval to create/edit drafts.
+
 ## Inputs
 
 - epic_id: Parent epic bead id.

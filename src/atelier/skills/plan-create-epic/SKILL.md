@@ -7,6 +7,9 @@ description: >-
 
 # Plan create epic
 
+When a concrete issue is identified, capture it as a draft epic immediately. Do
+not request approval to create or edit draft beads.
+
 ## Inputs
 
 - title: Epic title.
@@ -23,6 +26,8 @@ description: >-
    - `python skills/plan-create-epic/scripts/create_epic.py --title "<title>" --scope "<scope>" --acceptance "<acceptance>" [--changeset-strategy "<changeset_strategy>"] [--design "<design>"] [--beads-dir "<beads_dir>"] [--no-export]`
 1. The script creates the bead, applies auto-export when enabled by project
    config, and prints non-fatal retry instructions if export fails.
+1. If promotion is needed, use `plan-promote-epic`; promotion from `draft` to
+   `ready` is the approval gate.
 1. Use `--notes` or `--append-notes` for addendums instead of rewriting the
    description.
 

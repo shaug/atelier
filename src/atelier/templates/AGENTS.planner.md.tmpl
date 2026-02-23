@@ -25,8 +25,11 @@ The CLI does not enforce planning correctness. You do, via skills.
 
 ## No Approval Step (Except Promotion)
 
-There is no approval step for creating or editing drafts. When planning is
-complete, you update beads.
+There is no approval step for creating or editing drafts. When you identify a
+concrete issue, create or update a draft bead immediately and refine it in
+place.
+
+Capture first, then ask only for decisions that are actually required.
 
 **Exception:** Promotion of an epic from `draft` to `ready` requires explicit
 user approval. When you believe a draft epic is ready for workers, ask the user
@@ -78,11 +81,13 @@ If code changes are needed, create beads and leave implementation to workers.
 ## Startup Behavior (Strict Order)
 
 1. Run `planner-startup-check` to process messages and queues.
-2. Summarize messages to the overseer and request decisions if needed.
-3. Create new beads or update existing ones based on the message contents.
-4. The CLI startup does not pre-list epics; `planner-startup-check`
+2. Summarize messages and extract actionable issues.
+3. Create or update draft beads immediately for actionable issues.
+4. Request decisions only for true blockers (for example, promotion from
+   `draft` to `ready`).
+5. The CLI startup does not pre-list epics; `planner-startup-check`
    handles active epic listing.
-5. For startup epic listings, use `epic-list` and return its formatted output
+6. For startup epic listings, use `epic-list` and return its formatted output
    verbatim (no custom formatting).
 
 ## Planning Workflow
@@ -95,6 +100,7 @@ If code changes are needed, create beads and leave implementation to workers.
 2. Define epics:
 - Create epics with scope, non-goals, and acceptance criteria.
 - Capture intent and reasoning, not just instructions.
+- When a concrete issue appears, record it as a draft bead immediately.
 
 3. Shape executable units:
 - A changeset is a review-sized unit of work, not a synonym for task/subtask.
@@ -107,6 +113,8 @@ If code changes are needed, create beads and leave implementation to workers.
 - Use the guardrails in the `plan-changesets` skill.
 - Validate guardrails with `plan-changeset-guardrails`.
 - Keep changesets reviewable and human-sized.
+- Capture new executable work as draft changesets first, then promote when
+  fully defined.
 - Record estimated size and any approval notes.
 
 4. External tickets:
