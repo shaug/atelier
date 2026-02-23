@@ -12,8 +12,7 @@ framework.
 
 ## Inspiration and alignment
 
-This proposal is inspired by Ruby ServiceActor:
-https://github.com/sunny/actor
+This proposal is inspired by Ruby ServiceActor: https://github.com/sunny/actor
 
 Shared intent:
 
@@ -92,8 +91,8 @@ Naming conventions:
 
 - Module path: `src/atelier/services/<domain>/<use_case>.py`
 - Default entrypoint: `<Verb><Domain>Service.run(...)`
-- Exception: function-first entrypoint is allowed only for tiny,
-  single-sequence services with no injected collaborators; name must be
+- Exception: function-first entrypoint is allowed only for tiny, single-sequence
+  services with no injected collaborators; name must be
   `<domain>_<verb>_service(...)`.
 - Request models end with `Context` or `Request`.
 - Success payload models end with `Outcome`.
@@ -191,7 +190,8 @@ Validation rule:
 - Validation failures must return `validation_failed` deterministically with a
   stable message and optional recovery hint.
 - Use Pydantic models for untrusted/external input boundaries; use typed
-  dataclasses or validated models internally once boundary validation has passed.
+  dataclasses or validated models internally once boundary validation has
+  passed.
 
 ```python
 from dataclasses import dataclass
