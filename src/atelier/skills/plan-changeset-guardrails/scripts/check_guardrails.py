@@ -12,6 +12,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from atelier.bd_invocation import with_bd_mode
+
 _LOC_TRIGGER = re.compile(r"\b(?:loc|estimate)\b", re.IGNORECASE)
 _NUMBER = re.compile(r"\b\d{2,5}\b")
 _APPROVAL = re.compile(r"\b(?:approve|approved|approval|sign[- ]?off|ok(?:ay)?)\b", re.IGNORECASE)
@@ -29,8 +31,8 @@ class _GuardrailReport:
 
 
 def _run_bd_json(args: list[str], *, beads_dir: str | None) -> list[dict[str, object]]:
-    command = ["bd", *args]
     env = dict(os.environ)
+    command = with_bd_mode(*args, beads_dir=beads_dir, env=env)
     if beads_dir:
         env["BEADS_DIR"] = beads_dir
     try:

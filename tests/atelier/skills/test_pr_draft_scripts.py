@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -48,3 +49,51 @@ def test_render_tickets_section_formats_fixes_and_addresses() -> None:
     assert "## Tickets" in section
     assert "- Fixes #204" in section
     assert "- Addresses ABC-181" in section
+
+
+def test_load_issue_defaults_to_direct_mode(monkeypatch, tmp_path: Path) -> None:
+    module = _load_script_module()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout='[{"id":"at-1","description":"scope: test"}]',
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    issue = module.load_issue("at-1", beads_dir=tmp_path, repo_path=tmp_path)
+
+    assert issue["id"] == "at-1"
+    assert "--no-daemon" in captured["command"]
+
+
+def test_load_issue_uses_daemon_when_project_config_enables_it(monkeypatch, tmp_path: Path) -> None:
+    module = _load_script_module()
+    captured: dict[str, list[str]] = {}
+    project_dir = tmp_path / "project"
+    beads_dir = project_dir / ".beads"
+    beads_dir.mkdir(parents=True)
+    (project_dir / "config.user.json").write_text('{"beads":{"daemon":true}}', encoding="utf-8")
+    for key in ("ATELIER_PROJECT", "ATELIER_BD_DAEMON", "BEADS_DAEMON", "BEADS_NO_DAEMON"):
+        monkeypatch.delenv(key, raising=False)
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout='[{"id":"at-1","description":"scope: test"}]',
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    issue = module.load_issue("at-1", beads_dir=beads_dir, repo_path=tmp_path)
+
+    assert issue["id"] == "at-1"
+    assert "--no-daemon" not in captured["command"]

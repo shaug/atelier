@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from atelier import planner_overview
+from atelier.bd_invocation import with_bd_mode
 
 # Re-exported for tests that load this script directly.
 _status_bucket = planner_overview._status_bucket  # pyright: ignore[reportPrivateUsage]
@@ -18,8 +19,8 @@ _render_epics = planner_overview.render_epics
 
 
 def _run_bd_list(beads_dir: str | None) -> list[dict[str, object]]:
-    cmd = ["bd", "list", "--label", "at:epic", "--json"]
     env = dict(os.environ)
+    cmd = with_bd_mode("list", "--label", "at:epic", "--json", beads_dir=beads_dir, env=env)
     if beads_dir:
         env["BEADS_DIR"] = beads_dir
     try:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 
@@ -58,3 +59,43 @@ def test_render_epics_includes_blocker_list_for_blocked_bucket() -> None:
     assert "Blocked epics:" in rendered
     assert "at-xfw [open] Channel URL input does not work" in rendered
     assert "blockers: at-u9j [in_progress]" in rendered
+
+
+def test_run_bd_list_defaults_to_direct_mode(monkeypatch) -> None:
+    module = _load_script()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    issues = module._run_bd_list(None)
+
+    assert issues == []
+    assert "--no-daemon" in captured["command"]
+
+
+def test_run_bd_list_uses_daemon_when_project_config_enables_it(
+    monkeypatch, tmp_path: Path
+) -> None:
+    module = _load_script()
+    captured: dict[str, list[str]] = {}
+    project_dir = tmp_path / "project"
+    beads_dir = project_dir / ".beads"
+    beads_dir.mkdir(parents=True)
+    (project_dir / "config.user.json").write_text('{"beads":{"daemon":true}}', encoding="utf-8")
+    for key in ("ATELIER_PROJECT", "ATELIER_BD_DAEMON", "BEADS_DAEMON", "BEADS_NO_DAEMON"):
+        monkeypatch.delenv(key, raising=False)
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    issues = module._run_bd_list(str(beads_dir))
+
+    assert issues == []
+    assert "--no-daemon" not in captured["command"]
