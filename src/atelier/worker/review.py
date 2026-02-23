@@ -103,6 +103,32 @@ def _selection_candidates(
     return candidates
 
 
+def _records_for_epic_changesets(
+    *,
+    epic_id: str,
+    beads_root: Path,
+    repo_root: Path,
+    source: str,
+) -> tuple[beads.BeadsClient, list[beads.BeadsIssueRecord]]:
+    descendants = beads.list_descendant_changesets(
+        epic_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+        include_closed=False,
+    )
+    client = beads.create_client(beads_root=beads_root, cwd=repo_root)
+    records = beads.parse_issue_records(descendants, source=f"{source}:descendants")
+    epic_record = client.show_issue(epic_id, source=f"{source}:show_epic")
+    if (
+        epic_record is not None
+        and epic_record.issue.id == epic_id
+        and "at:changeset" in set(epic_record.issue.labels)
+        and all(record.issue.id != epic_id for record in records)
+    ):
+        records = [epic_record, *records]
+    return client, records
+
+
 def _conflict_selection_candidates(
     *,
     records: list[beads.BeadsIssueRecord],
@@ -168,15 +194,11 @@ def select_review_feedback_changeset(
     """Select the oldest unresolved review-feedback candidate under one epic."""
     if not repo_slug:
         return None
-    descendants = beads.list_descendant_changesets(
-        epic_id,
+    client, records = _records_for_epic_changesets(
+        epic_id=epic_id,
         beads_root=beads_root,
-        cwd=repo_root,
-        include_closed=False,
-    )
-    client = beads.create_client(beads_root=beads_root, cwd=repo_root)
-    records = beads.parse_issue_records(
-        descendants, source="select_review_feedback_changeset:descendants"
+        repo_root=repo_root,
+        source="select_review_feedback_changeset",
     )
     candidates = _selection_candidates(
         records=records,
@@ -225,15 +247,11 @@ def select_conflicted_changeset(
     """Select the oldest merge-conflicted changeset under one epic."""
     if not repo_slug:
         return None
-    descendants = beads.list_descendant_changesets(
-        epic_id,
+    client, records = _records_for_epic_changesets(
+        epic_id=epic_id,
         beads_root=beads_root,
-        cwd=repo_root,
-        include_closed=False,
-    )
-    client = beads.create_client(beads_root=beads_root, cwd=repo_root)
-    records = beads.parse_issue_records(
-        descendants, source="select_conflicted_changeset:descendants"
+        repo_root=repo_root,
+        source="select_conflicted_changeset",
     )
     candidates = _conflict_selection_candidates(
         records=records,

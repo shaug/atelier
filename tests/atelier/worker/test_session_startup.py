@@ -224,6 +224,51 @@ def test_run_startup_contract_supports_explicit_epic() -> None:
     assert result.reason == "explicit_epic"
 
 
+def test_run_startup_contract_explicit_epic_prioritizes_review_feedback() -> None:
+    feedback = ReviewFeedbackSelection(
+        epic_id="at-explicit",
+        changeset_id="at-explicit",
+        feedback_at="2026-02-20T00:00:00Z",
+    )
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        branch_pr=True,
+        repo_slug="org/repo",
+        select_review_feedback_changeset=lambda **_kwargs: feedback,
+    )
+
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "at-explicit"
+    assert result.changeset_id == "at-explicit"
+
+
+def test_run_startup_contract_explicit_epic_prioritizes_merge_conflict() -> None:
+    conflict = MergeConflictSelection(
+        epic_id="at-explicit",
+        changeset_id="at-explicit",
+        observed_at="2026-02-20T00:00:00Z",
+        pr_url="https://github.com/org/repo/pull/110",
+    )
+    feedback = ReviewFeedbackSelection(
+        epic_id="at-explicit",
+        changeset_id="at-explicit",
+        feedback_at="2026-02-20T01:00:00Z",
+    )
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        branch_pr=True,
+        repo_slug="org/repo",
+        select_conflicted_changeset=lambda **_kwargs: conflict,
+        select_review_feedback_changeset=lambda **_kwargs: feedback,
+    )
+
+    assert result.reason == "merge_conflict"
+    assert result.epic_id == "at-explicit"
+    assert result.changeset_id == "at-explicit"
+
+
 def test_run_startup_contract_queue_only_exits_after_queue() -> None:
     queue_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
@@ -317,6 +362,32 @@ def test_run_startup_contract_skips_non_claimable_review_feedback_epic() -> None
         if epic_id == "at-blocked":
             return blocked_feedback
         return None
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [
+            {
+                "id": "at-blocked",
+                "status": "open",
+                "assignee": "atelier/worker/codex/p999",
+                "created_at": "2026-02-20T00:00:00Z",
+            },
+            {
+                "id": "at-claimable",
+                "status": "open",
+                "assignee": None,
+                "created_at": "2026-02-21T00:00:00Z",
+            },
+        ],
+        next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.2"},
+        select_review_feedback_changeset=select_feedback,
+    )
+
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "at-claimable"
+    assert result.changeset_id == "at-claimable.1"
+    assert seen_epics == ["at-claimable"]
 
 
 def test_run_startup_contract_skips_planner_owned_epic_for_review_feedback() -> None:

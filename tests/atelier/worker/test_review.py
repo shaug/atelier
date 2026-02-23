@@ -85,6 +85,61 @@ def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
     assert selection.changeset_id == "at-1.2"
 
 
+def test_select_review_feedback_changeset_includes_standalone_epic_changeset() -> None:
+    epic_issue = {
+        "id": "at-standalone",
+        "labels": ["at:epic", "at:changeset"],
+        "status": "in_progress",
+        "description": "changeset.work_branch: feat/standalone\npr_state: in-review\n",
+    }
+    record_by_id = {
+        record.issue.id: record
+        for record in beads.parse_issue_records([epic_issue], source="review_standalone")
+    }
+
+    with (
+        patch(
+            "atelier.worker.review.beads.list_descendant_changesets",
+            return_value=[],
+        ),
+        patch(
+            "atelier.worker.review.beads.BeadsClient.show_issue",
+            side_effect=lambda issue_id, *, source: record_by_id.get(issue_id),
+        ),
+        patch(
+            "atelier.worker.review.prs.lookup_github_pr_status",
+            return_value=prs.GithubPrLookup(
+                outcome="found",
+                payload={
+                    "number": 31,
+                    "state": "OPEN",
+                    "isDraft": False,
+                    "reviewDecision": None,
+                    "reviewRequests": [{"requestedReviewer": {"login": "alice"}}],
+                },
+            ),
+        ),
+        patch(
+            "atelier.worker.review.prs.latest_feedback_timestamp_with_inline_comments",
+            return_value="2026-02-20T12:00:00Z",
+        ),
+        patch(
+            "atelier.worker.review.prs.unresolved_review_thread_count",
+            return_value=1,
+        ),
+    ):
+        selection = review.select_review_feedback_changeset(
+            epic_id="at-standalone",
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selection is not None
+    assert selection.epic_id == "at-standalone"
+    assert selection.changeset_id == "at-standalone"
+
+
 def test_select_global_review_feedback_changeset_uses_resolver() -> None:
     issues = [
         {
@@ -271,6 +326,52 @@ def test_select_conflicted_changeset_picks_oldest_conflict() -> None:
     assert selection.epic_id == "at-1"
     assert selection.changeset_id == "at-1.2"
     assert selection.pr_url == "https://github.com/org/repo/pull/2"
+
+
+def test_select_conflicted_changeset_includes_standalone_epic_changeset() -> None:
+    epic_issue = {
+        "id": "at-standalone",
+        "labels": ["at:epic", "at:changeset"],
+        "status": "in_progress",
+        "description": "changeset.work_branch: feat/standalone\npr_state: in-review\n",
+        "updated_at": "2026-02-20T10:00:00Z",
+    }
+    record_by_id = {
+        record.issue.id: record
+        for record in beads.parse_issue_records([epic_issue], source="conflict_standalone")
+    }
+
+    with (
+        patch(
+            "atelier.worker.review.beads.list_descendant_changesets",
+            return_value=[],
+        ),
+        patch(
+            "atelier.worker.review.beads.BeadsClient.show_issue",
+            side_effect=lambda issue_id, *, source: record_by_id.get(issue_id),
+        ),
+        patch(
+            "atelier.worker.review.prs.read_github_pr_status",
+            return_value={
+                "state": "OPEN",
+                "isDraft": False,
+                "url": "https://github.com/org/repo/pull/44",
+                "updatedAt": "2026-02-20T10:00:00Z",
+                "mergeStateStatus": "DIRTY",
+            },
+        ),
+    ):
+        selection = review.select_conflicted_changeset(
+            epic_id="at-standalone",
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selection is not None
+    assert selection.epic_id == "at-standalone"
+    assert selection.changeset_id == "at-standalone"
+    assert selection.pr_url == "https://github.com/org/repo/pull/44"
 
 
 def test_select_conflicted_changeset_skips_unknown_mergeability() -> None:
