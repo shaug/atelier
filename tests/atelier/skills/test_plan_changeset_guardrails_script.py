@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -107,3 +108,19 @@ def test_evaluate_guardrails_reports_multi_unit_decomposition() -> None:
 
     assert "multi-unit decomposition" in str(report.path_summary)
     assert report.violations == []
+
+
+def test_run_bd_json_defaults_to_direct_mode(monkeypatch) -> None:
+    module = _load_script_module()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    payload = module._run_bd_json(["list", "--json"], beads_dir=None)
+
+    assert payload == []
+    assert "--no-daemon" in captured["command"]

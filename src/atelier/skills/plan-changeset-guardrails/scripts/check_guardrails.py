@@ -28,8 +28,15 @@ class _GuardrailReport:
     checked_ids: list[str]
 
 
-def _run_bd_json(args: list[str], *, beads_dir: str | None) -> list[dict[str, object]]:
+def _bd_command(*args: str) -> list[str]:
     command = ["bd", *args]
+    if "--no-daemon" not in command:
+        command.append("--no-daemon")
+    return command
+
+
+def _run_bd_json(args: list[str], *, beads_dir: str | None) -> list[dict[str, object]]:
+    command = _bd_command(*args)
     env = dict(os.environ)
     if beads_dir:
         env["BEADS_DIR"] = beads_dir

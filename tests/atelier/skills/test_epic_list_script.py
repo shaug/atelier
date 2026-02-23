@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 
@@ -58,3 +59,19 @@ def test_render_epics_includes_blocker_list_for_blocked_bucket() -> None:
     assert "Blocked epics:" in rendered
     assert "at-xfw [open] Channel URL input does not work" in rendered
     assert "blockers: at-u9j [in_progress]" in rendered
+
+
+def test_run_bd_list_defaults_to_direct_mode(monkeypatch) -> None:
+    module = _load_script()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    issues = module._run_bd_list(None)
+
+    assert issues == []
+    assert "--no-daemon" in captured["command"]

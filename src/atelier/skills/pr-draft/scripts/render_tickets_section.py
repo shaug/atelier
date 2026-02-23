@@ -99,11 +99,18 @@ def render_ticket_section(issue: dict[str, object]) -> str:
     return "\n".join(["## Tickets", *lines])
 
 
+def _bd_command(*args: str) -> list[str]:
+    command = ["bd", *args]
+    if "--no-daemon" not in command:
+        command.append("--no-daemon")
+    return command
+
+
 def load_issue(changeset_id: str, *, beads_dir: Path, repo_path: Path) -> dict[str, object]:
     """Load a changeset issue payload from Beads."""
     env = os.environ.copy()
     env["BEADS_DIR"] = str(beads_dir)
-    command = ["bd", "show", changeset_id, "--json"]
+    command = _bd_command("show", changeset_id, "--json")
     result = subprocess.run(
         command,
         cwd=repo_path,

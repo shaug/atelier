@@ -17,8 +17,15 @@ _status_bucket = planner_overview._status_bucket  # pyright: ignore[reportPrivat
 _render_epics = planner_overview.render_epics
 
 
+def _bd_command(*args: str) -> list[str]:
+    command = ["bd", *args]
+    if "--no-daemon" not in command:
+        command.append("--no-daemon")
+    return command
+
+
 def _run_bd_list(beads_dir: str | None) -> list[dict[str, object]]:
-    cmd = ["bd", "list", "--label", "at:epic", "--json"]
+    cmd = _bd_command("list", "--label", "at:epic", "--json")
     env = dict(os.environ)
     if beads_dir:
         env["BEADS_DIR"] = beads_dir

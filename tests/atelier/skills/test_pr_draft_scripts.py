@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -48,3 +49,24 @@ def test_render_tickets_section_formats_fixes_and_addresses() -> None:
     assert "## Tickets" in section
     assert "- Fixes #204" in section
     assert "- Addresses ABC-181" in section
+
+
+def test_load_issue_defaults_to_direct_mode(monkeypatch, tmp_path: Path) -> None:
+    module = _load_script_module()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["command"] = command
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout='[{"id":"at-1","description":"scope: test"}]',
+            stderr="",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    issue = module.load_issue("at-1", beads_dir=tmp_path, repo_path=tmp_path)
+
+    assert issue["id"] == "at-1"
+    assert "--no-daemon" in captured["command"]
