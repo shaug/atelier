@@ -84,6 +84,7 @@ quality gates:
 
 - `pre-commit`: staged Python lint/format checks plus pyright via
   `scripts/lint-gate.sh --staged-python`.
+- `pre-push`: full repository test gate via `just test`.
 - `commit-msg`: Conventional Commit validation via `commitlint.config.cjs`.
 
 Canonical lint gate for local/CI workflows:
@@ -120,7 +121,8 @@ bash .githooks/worktree-bootstrap.sh
 The bootstrap step is idempotent and does the following:
 
 - sets `core.hooksPath=.githooks` in the repository's common Git config
-- ensures tracked hook scripts are executable
+- ensures tracked hook scripts (`pre-commit`, `pre-push`, `commit-msg`,
+  `post-checkout`) are executable
 - keeps linked worktrees aligned through `.githooks/post-checkout`
 
 If your environment does not expose `commitlint`, the commit hook falls back to
@@ -128,7 +130,9 @@ If your environment does not expose `commitlint`, the commit hook falls back to
 
 If your environment does not expose `uv` or `ruff`, set `ATELIER_RUFF_BIN` to an
 executable Ruff binary path. If your environment does not expose `uv` or
-`pyright`, set `ATELIER_PYRIGHT_BIN` to a pyright executable path.
+`pyright`, set `ATELIER_PYRIGHT_BIN` to a pyright executable path. If your
+environment does not expose `just`, set `ATELIER_JUST_BIN` to a compatible
+executable path.
 
 ## Agent Setup
 

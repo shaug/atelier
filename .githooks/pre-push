@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+if ! git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "pre-push: ${repo_root} is not a git work tree" >&2
+  exit 1
+fi
+
+just_bin="${ATELIER_JUST_BIN:-just}"
+if ! command -v "${just_bin}" >/dev/null 2>&1; then
+  echo "pre-push: missing test runner '${just_bin}' (set ATELIER_JUST_BIN if needed)." >&2
+  exit 1
+fi
+
+if [[ -n "${VIRTUAL_ENV:-}" && -z "${UV_PROJECT_ENVIRONMENT:-}" ]]; then
+  export UV_PROJECT_ENVIRONMENT="${VIRTUAL_ENV}"
+fi
+
+if ! (
+  cd "${repo_root}" \
+    && env \
+      -u GIT_DIR \
+      -u GIT_WORK_TREE \
+      -u GIT_INDEX_FILE \
+      -u GIT_OBJECT_DIRECTORY \
+      -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+      -u GIT_COMMON_DIR \
+      -u GIT_PREFIX \
+      "${just_bin}" test
+); then
+  cat >&2 <<'EOF'
+pre-push: test gate failed.
+pre-push: run 'just test', fix failures, then retry push.
+EOF
+  exit 1
+fi

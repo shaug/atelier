@@ -216,11 +216,13 @@ ______________________________________________________________________
 ## Workflow Requirements
 
 - Keep repo-local hooks bootstrapped (`bash .githooks/worktree-bootstrap.sh`) so
-  `pre-commit` lint checks run in both the main enlistment and linked worktrees.
+  `pre-commit` lint/format checks and `pre-push` test checks run in both the
+  main enlistment and linked worktrees.
 - Run `just format` before making commits.
 - Use `bash scripts/lint-gate.sh` as the canonical lint gate (also exposed as
   `just lint` and used by CI).
-- Keep full test execution in `just test`/CI.
+- Keep `just test` as the canonical full test command; `pre-push` should invoke
+  it, with CI as the backstop.
 - Ensure `just lint` and `just test` pass before shipping changes.
 - When merging PRs to `main`, keep merge commit messages non-Conventional (use
   the default “Merge pull request #...” message) so Release Please does not
