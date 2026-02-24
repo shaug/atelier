@@ -4,18 +4,9 @@
 writes project configuration, and avoids modifying the repo itself.
 """
 
-import sys
-from pathlib import Path
-from typing import cast
-
-from .. import config, external_registry
-from ..io import confirm, die, say, select
+from ..io import die, say
 from ..lib import apply
-from ..services import ServiceFailure, ServiceSuccess
-from ..services.project import (
-    InitializeProjectOutcome,
-    InitializeProjectService,
-)
+from ..services.project import InitializeProjectService
 
 
 def init_project(args: object) -> None:
@@ -33,19 +24,9 @@ def init_project(args: object) -> None:
     Example:
         $ atelier init
     """
-    result = InitializeProjectService.run(
-        args=args,
-        cwd=Path.cwd(),
-        stdin_isatty=sys.stdin.isatty(),
-        stdout_isatty=sys.stdout.isatty(),
-        build_config=config.build_project_config,
-        resolve_provider=external_registry.resolve_planner_provider,
-        choose_provider=select,
-        confirm_choice=confirm,
-    )
-    if not result.success:
-        failure = cast(ServiceFailure, result)
+    result = InitializeProjectService.run(args=args)
+    if result.success is False:
+        failure = result
         hint = f"\nHint: {failure.recovery_hint}" if failure.recovery_hint else ""
         die(f"init failed ({failure.code}): {failure.message}{hint}")
-    success = cast(ServiceSuccess[InitializeProjectOutcome], result)
-    apply(say, success.outcome.messages)
+    apply(say, result.outcome.messages)

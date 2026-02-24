@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from pydantic import BaseModel, ConfigDict
 
-from ... import agent_home, beads, config, git, paths, policy, project, skills
+from ... import agent_home, beads, config, external_registry, git, paths, policy, project, skills
+from ...io import confirm, select
 from ...models import ProjectConfig
 from ..result import ServiceResult, ServiceSuccess
 from .compose_project_config import ComposeProjectConfigRequest, ComposeProjectConfigService
@@ -62,29 +64,37 @@ class InitializeProjectService:
         cls,
         *,
         args: object,
-        cwd: Path,
-        stdin_isatty: bool,
-        stdout_isatty: bool,
-        build_config: BuildProjectConfig,
-        resolve_provider: ResolveProvider,
-        choose_provider: ProviderChooser,
-        confirm_choice: ConfirmChoice,
+        cwd: Path | None = None,
+        stdin_isatty: bool | None = None,
+        stdout_isatty: bool | None = None,
+        build_config: BuildProjectConfig | None = None,
+        resolve_provider: ResolveProvider | None = None,
+        choose_provider: ProviderChooser | None = None,
+        confirm_choice: ConfirmChoice | None = None,
     ) -> ServiceResult[InitializeProjectOutcome]:
         """Run init flow with default service dependencies and request wiring."""
+        resolved_cwd = cwd or Path.cwd()
+        resolved_stdin_isatty = sys.stdin.isatty() if stdin_isatty is None else stdin_isatty
+        resolved_stdout_isatty = sys.stdout.isatty() if stdout_isatty is None else stdout_isatty
+        resolved_build_config = build_config or config.build_project_config
+        resolved_resolve_provider = resolve_provider or external_registry.resolve_planner_provider
+        resolved_choose_provider = choose_provider or select
+        resolved_confirm_choice = confirm_choice or confirm
+
         service = cls(
-            compose_config_service=ComposeProjectConfigService(build_config=build_config),
+            compose_config_service=ComposeProjectConfigService(build_config=resolved_build_config),
             resolve_provider_service=ResolveExternalProviderService(
-                resolve_provider=resolve_provider,
-                choose_provider=choose_provider,
-                confirm_choice=confirm_choice,
+                resolve_provider=resolved_resolve_provider,
+                choose_provider=resolved_choose_provider,
+                confirm_choice=resolved_confirm_choice,
             ),
-            confirm_choice=confirm_choice,
+            confirm_choice=resolved_confirm_choice,
         )
         request = InitializeProjectRequest(
             args=args,
-            cwd=cwd,
-            stdin_isatty=stdin_isatty,
-            stdout_isatty=stdout_isatty,
+            cwd=resolved_cwd,
+            stdin_isatty=resolved_stdin_isatty,
+            stdout_isatty=resolved_stdout_isatty,
         )
         return service(request)
 

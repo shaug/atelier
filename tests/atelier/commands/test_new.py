@@ -32,7 +32,7 @@ def test_new_creates_project_and_starts_planning() -> None:
         try:
             with (
                 patch("builtins.input", lambda _: next(responses)),
-                patch("atelier.commands.init.confirm", return_value=False),
+                patch("atelier.services.project.initialize_project.confirm", return_value=False),
                 patch("atelier.config.shutil.which", return_value="/usr/bin/cursor"),
                 patch(
                     "atelier.services.project.initialize_project.beads.run_bd_command",
