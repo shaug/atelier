@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Generic, Literal, TypeGuard, TypeVar
+from typing import Generic, Literal, TypeVar
 
 ServiceFailureCode = Literal[
     "validation_failed",
@@ -30,27 +30,3 @@ class ServiceFailure:
 
 
 ServiceResult = ServiceSuccess[T] | ServiceFailure
-
-
-def is_service_failure(result: ServiceResult[T]) -> TypeGuard[ServiceFailure]:
-    """Return whether a service result represents a failure payload.
-
-    Args:
-        result: Service result union to inspect.
-
-    Returns:
-        ``True`` when ``result`` is a ``ServiceFailure`` instance.
-    """
-    return result.success is False
-
-
-def is_service_success(result: ServiceResult[T]) -> TypeGuard[ServiceSuccess[T]]:
-    """Return whether a service result represents a success payload.
-
-    Args:
-        result: Service result union to inspect.
-
-    Returns:
-        ``True`` when ``result`` is a ``ServiceSuccess`` instance.
-    """
-    return result.success is True

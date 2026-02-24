@@ -15,7 +15,6 @@ from ..services.project import (
     InitializeProjectService,
     ResolveExternalProviderService,
 )
-from ..services.result import is_service_failure, is_service_success
 
 
 def _build_init_service() -> InitializeProjectService:
@@ -61,9 +60,9 @@ def init_project(args: object) -> None:
             stdout_isatty=sys.stdout.isatty(),
         )
     )
-    if is_service_failure(result):
+    if result.success is False:
         hint = f"\nHint: {result.recovery_hint}" if result.recovery_hint else ""
         die(f"init failed ({result.code}): {result.message}{hint}")
-    assert is_service_success(result)
+    assert result.success is True
     for message in result.outcome.messages:
         say(message)
