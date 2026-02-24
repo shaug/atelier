@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from atelier.worker.session import startup
 
 
@@ -97,7 +99,7 @@ class FakeNextChangesetService:
 def _changeset(
     issue_id: str,
     *,
-    dependencies: list[str] | None = None,
+    dependencies: list[object] | None = None,
     parent_branch: str | None = None,
     work_branch: str | None = None,
     status: str = "open",
@@ -217,3 +219,33 @@ def test_next_changeset_service_keeps_cross_epic_dependencies_blocked() -> None:
     selected = startup.next_changeset_service(context=_context(), service=service)
 
     assert selected is None
+
+
+@pytest.mark.parametrize(
+    "parent_dependency",
+    [
+        {"relation": "parent-child", "id": "at-epic"},
+        {"dependency_type": "parent-child", "id": "at-epic"},
+        {"type": "parent_child", "id": "at-epic"},
+        {"dependencyType": "parent-child", "issue": {"id": "at-epic"}},
+        "at-epic (open, dependency_type=parent_child)",
+    ],
+)
+def test_next_changeset_service_ignores_parent_child_dependencies(
+    parent_dependency: object,
+) -> None:
+    downstream = _changeset(
+        "at-epic.1",
+        dependencies=[parent_dependency],
+        work_branch="feat/at-epic.1",
+    )
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), downstream["id"]: downstream},
+        ready_changesets=[],
+        descendants=[downstream],
+    )
+
+    selected = startup.next_changeset_service(context=_context(), service=service)
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.1"

@@ -8,6 +8,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 _DEPENDENCY_ID_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\b")
+_PARENT_CHILD_PATTERN = re.compile(r"parent[\s_-]*child", re.IGNORECASE)
+_PARENT_CHILD_KEYS = ("relation", "dependency_type", "dependencyType", "type")
 
 
 def _clean_str(value: object) -> str | None:
@@ -19,10 +21,13 @@ def _clean_str(value: object) -> str | None:
 
 def _is_parent_child_relation(value: object) -> bool:
     if isinstance(value, dict):
-        relation = value.get("relation")
-        return isinstance(relation, str) and relation.strip().lower() == "parent-child"
+        for key in _PARENT_CHILD_KEYS:
+            relation = value.get(key)
+            if isinstance(relation, str) and _PARENT_CHILD_PATTERN.search(relation.strip()):
+                return True
+        return False
     if isinstance(value, str):
-        return "parent-child" in value.lower()
+        return bool(_PARENT_CHILD_PATTERN.search(value))
     return False
 
 

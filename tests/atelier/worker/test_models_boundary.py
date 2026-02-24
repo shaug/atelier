@@ -49,6 +49,35 @@ def test_parse_issue_boundary_derives_parent_from_parent_child_dependency() -> N
     assert boundary.dependency_ids == ("at-2",)
 
 
+@pytest.mark.parametrize(
+    ("dependency_entry", "expected_parent"),
+    [
+        ({"dependency_type": "parent-child", "id": "at-1"}, "at-1"),
+        ({"type": "parent-child", "id": "at-1"}, "at-1"),
+        ({"dependencyType": "parent_child", "issue": {"id": "at-1"}}, "at-1"),
+        ("at-1 (open, dependency_type=parent_child)", None),
+    ],
+)
+def test_parse_issue_boundary_handles_parent_child_dependency_variants(
+    dependency_entry: object, expected_parent: str | None
+) -> None:
+    issue = {
+        "id": "at-123",
+        "status": "open",
+        "labels": ["at:changeset"],
+        "parent": None,
+        "dependencies": [
+            dependency_entry,
+            {"id": "at-2"},
+        ],
+    }
+
+    boundary = parse_issue_boundary(issue, source="test")
+
+    assert boundary.parent_id == expected_parent
+    assert boundary.dependency_ids == ("at-2",)
+
+
 def test_parse_issue_boundary_rejects_missing_issue_id() -> None:
     with pytest.raises(ValueError, match="invalid beads issue payload"):
         parse_issue_boundary({"status": "open"}, source="test")
