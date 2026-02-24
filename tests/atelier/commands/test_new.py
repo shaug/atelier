@@ -35,19 +35,19 @@ def test_new_creates_project_and_starts_planning() -> None:
                 patch("atelier.commands.init.confirm", return_value=False),
                 patch("atelier.config.shutil.which", return_value="/usr/bin/cursor"),
                 patch(
-                    "atelier.commands.init.beads.run_bd_command",
+                    "atelier.services.project.initialize_project.beads.run_bd_command",
                     return_value=CompletedProcess(args=["bd"], returncode=0, stdout="", stderr=""),
                 ),
                 patch(
-                    "atelier.commands.init.beads.ensure_atelier_types",
+                    "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                     return_value=False,
                 ),
                 patch(
-                    "atelier.commands.init.beads.ensure_atelier_store",
+                    "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                     return_value=False,
                 ),
                 patch(
-                    "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                    "atelier.services.project.initialize_project.beads.ensure_atelier_issue_prefix",
                     return_value=False,
                 ),
                 patch("atelier.paths.atelier_data_dir", return_value=data_dir),

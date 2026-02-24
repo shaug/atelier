@@ -6,20 +6,8 @@ writes project configuration, and avoids modifying the repo itself.
 
 import sys
 from pathlib import Path
-from types import SimpleNamespace
-from typing import cast
 
-from .. import (
-    agent_home,
-    beads,
-    config,
-    external_registry,
-    git,
-    paths,
-    policy,
-    project,
-    skills,
-)
+from .. import config, external_registry
 from ..io import confirm, die, say, select
 from ..services import ServiceFailure
 from ..services.project import (
@@ -29,11 +17,6 @@ from ..services.project import (
     InitializeProjectService,
     ResolveExternalProviderService,
 )
-from ..services.project.initialize_project import (
-    InitializeBeadsGateway,
-    InitializePolicyGateway,
-    InitializeProjectGateway,
-)
 
 
 def _build_init_service() -> InitializeProjectService:
@@ -42,52 +25,8 @@ def _build_init_service() -> InitializeProjectService:
     Returns:
         ``InitializeProjectService`` configured with command dependencies.
     """
-
-    project_ops = cast(
-        InitializeProjectGateway,
-        SimpleNamespace(
-            resolve_repo_enlistment=git.resolve_repo_enlistment,
-            project_dir_for_enlistment=paths.project_dir_for_enlistment,
-            project_config_path=paths.project_config_path,
-            project_config_user_path=paths.project_config_user_path,
-            load_project_config=config.load_project_config,
-            load_json=config.load_json,
-            ensure_project_dirs=project.ensure_project_dirs,
-            resolve_upgrade_policy=config.resolve_upgrade_policy,
-            sync_project_skills=skills.sync_project_skills,
-            write_project_config=config.write_project_config,
-            ensure_project_scaffold=project.ensure_project_scaffold,
-        ),
-    )
-    beads_ops = cast(
-        InitializeBeadsGateway,
-        SimpleNamespace(
-            resolve_beads_root=config.resolve_beads_root,
-            ensure_atelier_store=beads.ensure_atelier_store,
-            ensure_atelier_issue_prefix=beads.ensure_atelier_issue_prefix,
-            run_bd_command=beads.run_bd_command,
-            ensure_atelier_types=beads.ensure_atelier_types,
-            list_policy_beads=beads.list_policy_beads,
-            extract_policy_body=beads.extract_policy_body,
-            update_policy_bead=beads.update_policy_bead,
-            create_policy_bead=beads.create_policy_bead,
-        ),
-    )
-    policy_ops = cast(
-        InitializePolicyGateway,
-        SimpleNamespace(
-            build_combined_policy=policy.build_combined_policy,
-            edit_policy_text=policy.edit_policy_text,
-            split_combined_policy=policy.split_combined_policy,
-            resolve_agent_home=agent_home.resolve_agent_home,
-            sync_agent_home_policy=policy.sync_agent_home_policy,
-        ),
-    )
     return InitializeProjectService(
         InitializeProjectDependencies(
-            project=project_ops,
-            beads=beads_ops,
-            policy=policy_ops,
             compose_config_service=ComposeProjectConfigService(
                 build_config=config.build_project_config
             ),
