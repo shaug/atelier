@@ -370,6 +370,57 @@ def test_run_finalize_pipeline_passes_ready_mode_to_pr_gate(monkeypatch) -> None
     assert observed == [False]
 
 
+def test_run_finalize_pipeline_uses_diagnostic_pr_payload_before_create(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "labels": ["at:changeset", "cs:in_progress"],
+        "description": (
+            "changeset.work_branch: feat/root-at-epic.1\n"
+            "changeset.parent_branch: feat/parent\n"
+            "changeset.root_branch: feat/root\n"
+        ),
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+
+    service = _FinalizeServiceStub()
+    service.lookup_pr_payload_fn = lambda _repo_slug, _branch: None
+    service.lookup_pr_payload_diagnostic_fn = lambda _repo_slug, _branch: (
+        {"number": 165, "baseRefName": "main", "state": "OPEN", "isDraft": False},
+        None,
+    )
+    aligned: list[str] = []
+    pending: list[str] = []
+    service.align_existing_pr_base_fn = lambda *, issue, pr_payload, context: (
+        aligned.append(str(pr_payload.get("baseRefName"))) or True,
+        "retargeted",
+    )
+    service.set_changeset_review_pending_state_fn = (
+        lambda *, changeset_id, pr_payload, pushed, fallback_pr_state: pending.append(changeset_id)
+    )
+    service.handle_pushed_without_pr_fn = lambda **_kwargs: (_ for _ in ()).throw(
+        AssertionError("PR creation path must not run when diagnostic lookup finds a PR")
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(repo_slug="org/repo"),
+        service=service,
+    )
+
+    assert result.reason == "changeset_review_pending"
+    assert result.continue_running is True
+    assert aligned == ["main"]
+    assert pending == ["at-epic.1"]
+
+
 def test_run_finalize_pipeline_blocks_when_pr_base_alignment_fails(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",

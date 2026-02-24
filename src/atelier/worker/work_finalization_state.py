@@ -327,7 +327,7 @@ def lookup_pr_payload_diagnostic(
     """
     if not repo_slug:
         return None, None
-    lookup = prs.lookup_github_pr_status(repo_slug, branch)
+    lookup = prs.lookup_github_pr_status(repo_slug, branch, refresh=True)
     if lookup.found:
         return lookup.payload, None
     if lookup.failed:

@@ -133,6 +133,31 @@ def test_lookup_github_pr_status_uses_runtime_cache() -> None:
     run_json.assert_called_once()
 
 
+def test_lookup_github_pr_status_refresh_bypasses_stale_not_found_cache() -> None:
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch(
+            "atelier.prs._find_latest_pr_number",
+            side_effect=[None, 19],
+        ),
+        patch(
+            "atelier.prs._run_json",
+            return_value={"number": 19, "state": "OPEN"},
+        ) as run_json,
+    ):
+        first = prs.lookup_github_pr_status("org/repo", "feature/test")
+        second = prs.lookup_github_pr_status(
+            "org/repo",
+            "feature/test",
+            refresh=True,
+        )
+
+    assert first.outcome == "not_found"
+    assert second.outcome == "found"
+    assert second.payload == {"number": 19, "state": "OPEN"}
+    run_json.assert_called_once()
+
+
 def test_unresolved_review_thread_count_uses_runtime_cache() -> None:
     payload = {
         "data": {

@@ -266,9 +266,12 @@ def run_finalize_pipeline(
     if repo_slug:
         pr_payload = service.lookup_pr_payload(repo_slug, work_branch)
         if pr_payload is None:
-            _payload_check, pr_lookup_error = service.lookup_pr_payload_diagnostic(
+            payload_check, pr_lookup_error = service.lookup_pr_payload_diagnostic(
                 repo_slug, work_branch
             )
+            if payload_check is not None:
+                pr_payload = payload_check
+                pr_lookup_error = None
     if branch_pr and pr_lookup_error:
         atelier_log.warning(
             "changeset="
@@ -348,9 +351,12 @@ def run_finalize_pipeline(
                 if repo_slug:
                     pr_payload = service.lookup_pr_payload(repo_slug, work_branch)
                     if pr_payload is None:
-                        _payload_check, pr_lookup_error = service.lookup_pr_payload_diagnostic(
+                        payload_check, pr_lookup_error = service.lookup_pr_payload_diagnostic(
                             repo_slug, work_branch
                         )
+                        if payload_check is not None:
+                            pr_payload = payload_check
+                            pr_lookup_error = None
                     if pr_lookup_error:
                         atelier_log.warning(
                             "changeset="
