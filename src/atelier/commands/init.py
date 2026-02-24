@@ -13,31 +13,9 @@ from ..io import confirm, die, say, select
 from ..lib import apply
 from ..services import ServiceFailure, ServiceSuccess
 from ..services.project import (
-    ComposeProjectConfigService,
     InitializeProjectOutcome,
-    InitializeProjectRequest,
     InitializeProjectService,
-    ResolveExternalProviderService,
 )
-
-
-def _build_init_service() -> InitializeProjectService:
-    """Build init orchestration service with command-scoped dependencies.
-
-    Returns:
-        ``InitializeProjectService`` configured with command dependencies.
-    """
-    return InitializeProjectService(
-        compose_config_service=ComposeProjectConfigService(
-            build_config=config.build_project_config
-        ),
-        resolve_provider_service=ResolveExternalProviderService(
-            resolve_provider=external_registry.resolve_planner_provider,
-            choose_provider=select,
-            confirm_choice=confirm,
-        ),
-        confirm_choice=confirm,
-    )
 
 
 def init_project(args: object) -> None:
@@ -55,14 +33,15 @@ def init_project(args: object) -> None:
     Example:
         $ atelier init
     """
-    service = _build_init_service()
-    result = service.run(
-        InitializeProjectRequest(
-            args=args,
-            cwd=Path.cwd(),
-            stdin_isatty=sys.stdin.isatty(),
-            stdout_isatty=sys.stdout.isatty(),
-        )
+    result = InitializeProjectService.run_default(
+        args=args,
+        cwd=Path.cwd(),
+        stdin_isatty=sys.stdin.isatty(),
+        stdout_isatty=sys.stdout.isatty(),
+        build_config=config.build_project_config,
+        resolve_provider=external_registry.resolve_planner_provider,
+        choose_provider=select,
+        confirm_choice=confirm,
     )
     if not result.success:
         failure = cast(ServiceFailure, result)

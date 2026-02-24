@@ -11,12 +11,15 @@ from ...models import ProjectConfig
 from ..result import ServiceResult, ServiceSuccess
 from .compose_project_config import ComposeProjectConfigRequest, ComposeProjectConfigService
 from .resolve_external_provider import (
+    ProviderChooser,
     ResolveExternalProviderRequest,
     ResolveExternalProviderService,
+    ResolveProvider,
 )
 
 PolicyIssue = dict[str, object]
 ConfirmChoice = Callable[[str, bool], bool]
+BuildProjectConfig = Callable[..., ProjectConfig]
 
 
 class InitializeProjectRequest(BaseModel):
@@ -53,6 +56,37 @@ class InitializeProjectService:
         self._compose_config_service = compose_config_service
         self._resolve_provider_service = resolve_provider_service
         self._confirm_choice = confirm_choice
+
+    @classmethod
+    def run_default(
+        cls,
+        *,
+        args: object,
+        cwd: Path,
+        stdin_isatty: bool,
+        stdout_isatty: bool,
+        build_config: BuildProjectConfig,
+        resolve_provider: ResolveProvider,
+        choose_provider: ProviderChooser,
+        confirm_choice: ConfirmChoice,
+    ) -> ServiceResult[InitializeProjectOutcome]:
+        """Run init flow with default service dependencies and request wiring."""
+        service = cls(
+            compose_config_service=ComposeProjectConfigService(build_config=build_config),
+            resolve_provider_service=ResolveExternalProviderService(
+                resolve_provider=resolve_provider,
+                choose_provider=choose_provider,
+                confirm_choice=confirm_choice,
+            ),
+            confirm_choice=confirm_choice,
+        )
+        request = InitializeProjectRequest(
+            args=args,
+            cwd=cwd,
+            stdin_isatty=stdin_isatty,
+            stdout_isatty=stdout_isatty,
+        )
+        return service.run(request)
 
     def run(self, request: InitializeProjectRequest) -> ServiceResult[InitializeProjectOutcome]:
         _root, enlistment, origin_raw, origin = git.resolve_repo_enlistment(request.cwd)

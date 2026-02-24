@@ -166,3 +166,51 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
     assert isinstance(failure, ServiceFailure)
     assert failure.success is False
     assert failure.code == "validation_failed"
+
+
+def test_initialize_project_service_run_default_builds_dependencies() -> None:
+    captured: dict[str, object] = {}
+
+    def fake_build_config(*_args: object, **_kwargs: object) -> ProjectConfig:
+        return ProjectConfig()
+
+    def fake_resolve_provider(*_args: object, **_kwargs: object) -> PlannerProviderResolution:
+        return PlannerProviderResolution(None, (), None)
+
+    def fake_choose_provider(_text: str, options: tuple[str, ...], _default: str | None) -> str:
+        return options[0]
+
+    def fake_confirm_choice(_text: str, _default: bool = False) -> bool:
+        return False
+
+    def fake_run(
+        self: InitializeProjectService, request: InitializeProjectRequest
+    ) -> ServiceFailure:
+        captured["service"] = self
+        captured["request"] = request
+        return ServiceFailure(code="forced_failure", message="forced")
+
+    with patch.object(InitializeProjectService, "run", new=fake_run):
+        result = InitializeProjectService.run_default(
+            args=SimpleNamespace(yes=False),
+            cwd=Path("/repo"),
+            stdin_isatty=True,
+            stdout_isatty=False,
+            build_config=fake_build_config,
+            resolve_provider=fake_resolve_provider,
+            choose_provider=fake_choose_provider,
+            confirm_choice=fake_confirm_choice,
+        )
+
+    assert isinstance(result, ServiceFailure)
+    assert result.code == "forced_failure"
+
+    request = captured["request"]
+    assert isinstance(request, InitializeProjectRequest)
+    assert request.cwd == Path("/repo")
+    assert request.stdin_isatty is True
+    assert request.stdout_isatty is False
+    assert request.yes is False
+
+    service = captured["service"]
+    assert isinstance(service, InitializeProjectService)
