@@ -6,7 +6,8 @@ writes project configuration, and avoids modifying the repo itself.
 
 import sys
 from pathlib import Path
-from typing import Callable
+from types import SimpleNamespace
+from typing import cast
 
 from .. import (
     agent_home,
@@ -20,7 +21,6 @@ from .. import (
     skills,
 )
 from ..io import confirm, die, say, select
-from ..models import ProjectConfig
 from ..services import ServiceFailure
 from ..services.project import (
     ComposeProjectConfigService,
@@ -29,112 +29,11 @@ from ..services.project import (
     InitializeProjectService,
     ResolveExternalProviderService,
 )
-
-
-class _ProjectGateway:
-    def resolve_repo_enlistment(self, cwd: Path) -> tuple[Path, str, str | None, str | None]:
-        return git.resolve_repo_enlistment(cwd)
-
-    def project_dir_for_enlistment(self, enlistment: str, origin: str | None) -> Path:
-        return paths.project_dir_for_enlistment(enlistment, origin)
-
-    def project_config_path(self, project_dir: Path) -> Path:
-        return paths.project_config_path(project_dir)
-
-    def project_config_user_path(self, project_dir: Path) -> Path:
-        return paths.project_config_user_path(project_dir)
-
-    def load_project_config(self, path: Path) -> ProjectConfig | None:
-        return config.load_project_config(path)
-
-    def load_json(self, path: Path) -> dict | None:
-        return config.load_json(path)
-
-    def ensure_project_dirs(self, project_dir: Path) -> None:
-        project.ensure_project_dirs(project_dir)
-
-    def resolve_upgrade_policy(self, value: object | None) -> str:
-        return config.resolve_upgrade_policy(value)
-
-    def sync_project_skills(
-        self,
-        project_dir: Path,
-        *,
-        upgrade_policy: str,
-        yes: bool,
-        interactive: bool,
-        prompt_update: Callable[[str], bool],
-    ) -> skills.ProjectSkillsSyncResult:
-        return skills.sync_project_skills(
-            project_dir,
-            upgrade_policy=upgrade_policy,
-            yes=yes,
-            interactive=interactive,
-            prompt_update=prompt_update,
-        )
-
-    def write_project_config(self, path: Path, payload: ProjectConfig) -> None:
-        config.write_project_config(path, payload)
-
-    def ensure_project_scaffold(self, project_dir: Path) -> None:
-        project.ensure_project_scaffold(project_dir)
-
-
-class _BeadsGateway:
-    def resolve_beads_root(self, project_dir: Path, repo_root: Path) -> Path:
-        return config.resolve_beads_root(project_dir, repo_root)
-
-    def ensure_atelier_store(self, *, beads_root: Path, cwd: Path) -> bool:
-        return beads.ensure_atelier_store(beads_root=beads_root, cwd=cwd)
-
-    def ensure_atelier_issue_prefix(self, *, beads_root: Path, cwd: Path) -> bool:
-        return beads.ensure_atelier_issue_prefix(beads_root=beads_root, cwd=cwd)
-
-    def run_bd_command(self, args: list[str], *, beads_root: Path, cwd: Path) -> object:
-        return beads.run_bd_command(args, beads_root=beads_root, cwd=cwd)
-
-    def ensure_atelier_types(self, *, beads_root: Path, cwd: Path) -> bool:
-        return beads.ensure_atelier_types(beads_root=beads_root, cwd=cwd)
-
-    def list_policy_beads(
-        self, role: str, *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        return beads.list_policy_beads(role, beads_root=beads_root, cwd=cwd)
-
-    def extract_policy_body(self, issue: dict[str, object]) -> str:
-        return beads.extract_policy_body(issue)
-
-    def update_policy_bead(self, issue_id: str, text: str, *, beads_root: Path, cwd: Path) -> None:
-        beads.update_policy_bead(issue_id, text, beads_root=beads_root, cwd=cwd)
-
-    def create_policy_bead(self, role: str, text: str, *, beads_root: Path, cwd: Path) -> object:
-        return beads.create_policy_bead(role, text, beads_root=beads_root, cwd=cwd)
-
-
-class _PolicyGateway:
-    def build_combined_policy(self, planner_text: str, worker_text: str) -> tuple[str, bool]:
-        return policy.build_combined_policy(planner_text, worker_text)
-
-    def edit_policy_text(self, text: str, *, project_config: ProjectConfig, cwd: Path) -> str:
-        return policy.edit_policy_text(text, project_config=project_config, cwd=cwd)
-
-    def split_combined_policy(self, text: str) -> dict[str, str] | None:
-        return policy.split_combined_policy(text)
-
-    def resolve_agent_home(
-        self, project_dir: Path, project_config: ProjectConfig, *, role: str
-    ) -> agent_home.AgentHome:
-        return agent_home.resolve_agent_home(project_dir, project_config, role=role)
-
-    def sync_agent_home_policy(
-        self,
-        agent_home: agent_home.AgentHome,
-        *,
-        role: str,
-        beads_root: Path,
-        cwd: Path,
-    ) -> None:
-        policy.sync_agent_home_policy(agent_home, role=role, beads_root=beads_root, cwd=cwd)
+from ..services.project.initialize_project import (
+    InitializeBeadsGateway,
+    InitializePolicyGateway,
+    InitializeProjectGateway,
+)
 
 
 def _build_init_service() -> InitializeProjectService:
@@ -144,11 +43,51 @@ def _build_init_service() -> InitializeProjectService:
         ``InitializeProjectService`` configured with command dependencies.
     """
 
+    project_ops = cast(
+        InitializeProjectGateway,
+        SimpleNamespace(
+            resolve_repo_enlistment=git.resolve_repo_enlistment,
+            project_dir_for_enlistment=paths.project_dir_for_enlistment,
+            project_config_path=paths.project_config_path,
+            project_config_user_path=paths.project_config_user_path,
+            load_project_config=config.load_project_config,
+            load_json=config.load_json,
+            ensure_project_dirs=project.ensure_project_dirs,
+            resolve_upgrade_policy=config.resolve_upgrade_policy,
+            sync_project_skills=skills.sync_project_skills,
+            write_project_config=config.write_project_config,
+            ensure_project_scaffold=project.ensure_project_scaffold,
+        ),
+    )
+    beads_ops = cast(
+        InitializeBeadsGateway,
+        SimpleNamespace(
+            resolve_beads_root=config.resolve_beads_root,
+            ensure_atelier_store=beads.ensure_atelier_store,
+            ensure_atelier_issue_prefix=beads.ensure_atelier_issue_prefix,
+            run_bd_command=beads.run_bd_command,
+            ensure_atelier_types=beads.ensure_atelier_types,
+            list_policy_beads=beads.list_policy_beads,
+            extract_policy_body=beads.extract_policy_body,
+            update_policy_bead=beads.update_policy_bead,
+            create_policy_bead=beads.create_policy_bead,
+        ),
+    )
+    policy_ops = cast(
+        InitializePolicyGateway,
+        SimpleNamespace(
+            build_combined_policy=policy.build_combined_policy,
+            edit_policy_text=policy.edit_policy_text,
+            split_combined_policy=policy.split_combined_policy,
+            resolve_agent_home=agent_home.resolve_agent_home,
+            sync_agent_home_policy=policy.sync_agent_home_policy,
+        ),
+    )
     return InitializeProjectService(
         InitializeProjectDependencies(
-            project=_ProjectGateway(),
-            beads=_BeadsGateway(),
-            policy=_PolicyGateway(),
+            project=project_ops,
+            beads=beads_ops,
+            policy=policy_ops,
             compose_config_service=ComposeProjectConfigService(
                 build_config=config.build_project_config
             ),
