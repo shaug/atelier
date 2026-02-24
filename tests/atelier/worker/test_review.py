@@ -31,7 +31,7 @@ def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
         },
     ]
 
-    def fake_lookup(repo: str, branch: str) -> prs.GithubPrLookup:
+    def fake_lookup(repo: str, branch: str, *, refresh: bool = False) -> prs.GithubPrLookup:
         number = 11 if branch == "feat/a" else 22
         return prs.GithubPrLookup(
             outcome="found",
