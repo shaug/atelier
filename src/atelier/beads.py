@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import sqlite3
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from .worker.models_boundary import BeadsIssueBoundary, parse_issue_boundary
 POLICY_LABEL = "at:policy"
 POLICY_SCOPE_LABEL = "scope:project"
 EXTERNAL_TICKETS_KEY = "external_tickets"
+PRESERVED_DESCRIPTION_KEYS = (EXTERNAL_TICKETS_KEY,)
 HOOK_SLOT_NAME = "hook"
 ATELIER_CUSTOM_TYPES = ("agent", "policy")
 ATELIER_ISSUE_PREFIX = "at"
@@ -132,6 +134,21 @@ class ChangesetSummary:
             "abandoned": self.abandoned,
             "remaining": self.remaining,
         }
+
+
+@dataclass(frozen=True)
+class ExternalTicketMetadataGap:
+    issue_id: str
+    providers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ExternalTicketMetadataRepairResult:
+    issue_id: str
+    providers: tuple[str, ...]
+    recovered: bool
+    repaired: bool
+    ticket_count: int
 
 
 def beads_env(beads_root: Path) -> dict[str, str]:
@@ -794,6 +811,142 @@ def parse_external_tickets(description: str | None) -> list[ExternalTicketRef]:
             continue
         tickets.append(normalized)
     return tickets
+
+
+def merge_description_preserving_metadata(
+    existing_description: str | None,
+    next_description: str | None,
+    *,
+    preserved_keys: tuple[str, ...] = PRESERVED_DESCRIPTION_KEYS,
+) -> str:
+    """Merge a replacement description while preserving metadata fields."""
+    merged = _normalize_description(next_description)
+    existing_fields = _parse_description_fields(existing_description)
+    for key in preserved_keys:
+        if key not in existing_fields:
+            continue
+        merged = _update_description_field(merged, key=key, value=existing_fields[key])
+    return merged
+
+
+def _external_providers_from_labels(labels: set[str]) -> tuple[str, ...]:
+    providers = sorted(
+        {
+            label[len("ext:") :].strip()
+            for label in labels
+            if label.startswith("ext:") and label not in {"ext:no-export", "ext:skip-export"}
+        }
+    )
+    return tuple(provider for provider in providers if provider)
+
+
+def list_external_ticket_metadata_gaps(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    issue_ids: list[str] | None = None,
+) -> list[ExternalTicketMetadataGap]:
+    """List issues with ext:* labels but missing external_tickets metadata."""
+    if issue_ids:
+        issues: list[dict[str, object]] = []
+        for issue_id in issue_ids:
+            issues.extend(run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd))
+    else:
+        issues = run_bd_json(["list", "--all"], beads_root=beads_root, cwd=cwd)
+
+    gaps: list[ExternalTicketMetadataGap] = []
+    for issue in issues:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        providers = _external_providers_from_labels(_issue_labels(issue))
+        if not providers:
+            continue
+        description = issue.get("description")
+        if parse_external_tickets(description if isinstance(description, str) else None):
+            continue
+        gaps.append(ExternalTicketMetadataGap(issue_id=issue_id.strip(), providers=providers))
+    return sorted(gaps, key=lambda gap: gap.issue_id)
+
+
+def _description_from_event_payload(payload: object) -> str | None:
+    if not isinstance(payload, str) or not payload.strip():
+        return None
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    description = parsed.get("description")
+    return description if isinstance(description, str) else None
+
+
+def recover_external_tickets_from_history(
+    issue_id: str,
+    *,
+    beads_root: Path,
+) -> list[ExternalTicketRef]:
+    """Recover external ticket metadata from Beads event history."""
+    db_path = beads_root / "beads.db"
+    if not db_path.exists():
+        return []
+    try:
+        with sqlite3.connect(db_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT old_value, new_value
+                FROM events
+                WHERE issue_id = ?
+                  AND event_type = 'updated'
+                ORDER BY id DESC
+                """,
+                (issue_id,),
+            )
+            for old_value, new_value in rows:
+                for candidate in (new_value, old_value):
+                    description = _description_from_event_payload(candidate)
+                    if not description:
+                        continue
+                    tickets = parse_external_tickets(description)
+                    if tickets:
+                        return tickets
+    except sqlite3.Error:
+        return []
+    return []
+
+
+def repair_external_ticket_metadata_from_history(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    issue_ids: list[str] | None = None,
+    apply: bool = False,
+) -> list[ExternalTicketMetadataRepairResult]:
+    """Recover dropped external_tickets metadata from event history."""
+    results: list[ExternalTicketMetadataRepairResult] = []
+    gaps = list_external_ticket_metadata_gaps(
+        beads_root=beads_root,
+        cwd=cwd,
+        issue_ids=issue_ids,
+    )
+    for gap in gaps:
+        tickets = recover_external_tickets_from_history(gap.issue_id, beads_root=beads_root)
+        recovered = bool(tickets)
+        repaired = False
+        if recovered and apply:
+            update_external_tickets(gap.issue_id, tickets, beads_root=beads_root, cwd=cwd)
+            repaired = True
+        results.append(
+            ExternalTicketMetadataRepairResult(
+                issue_id=gap.issue_id,
+                providers=gap.providers,
+                recovered=recovered,
+                repaired=repaired,
+                ticket_count=len(tickets),
+            )
+        )
+    return results
 
 
 def list_epics_by_workspace_label(
