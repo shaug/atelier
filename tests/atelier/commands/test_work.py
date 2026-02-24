@@ -74,6 +74,36 @@ def test_start_worker_non_dry_run_previews_and_cleans_agent_home(
     cleanup_agent_home.assert_called_once_with(session_agent, project_dir=tmp_path)
 
 
+def test_start_worker_fails_early_on_worker_role_identity_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "project"
+    repo_root = tmp_path / "repo"
+    project_root.mkdir()
+    repo_root.mkdir()
+    project_cfg = _project_config()
+    monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/planner/codex/p1")
+
+    with (
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(project_root, project_cfg, str(repo_root), repo_root),
+        ),
+        patch(
+            "atelier.commands.work.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions,
+    ):
+        with pytest.raises(SystemExit):
+            work_cmd.start_worker(
+                SimpleNamespace(epic_id=None, mode="auto", run_mode="once", dry_run=False)
+            )
+
+    run_sessions.assert_not_called()
+
+
 def test_start_worker_applies_env_translated_yes_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
