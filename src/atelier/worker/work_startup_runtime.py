@@ -174,6 +174,12 @@ def _no_eligible_epics_summary(
             if ownership_detail
             else "- Ownership violations: none"
         ),
+        (
+            "- Ownership-policy blockers may prevent review-feedback pickup. "
+            "Reassign blocked epics from planner to a worker, then rerun startup."
+            if planner_owned
+            else "- Ownership-policy blockers: none detected"
+        ),
         f"- Timestamp: {timestamp}",
     ]
 

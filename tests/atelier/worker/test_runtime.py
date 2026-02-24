@@ -198,3 +198,6 @@ def test_startup_service_reports_planner_owned_executable_violations() -> None:
 
     assert any("Planner-owned executable epics: 1" in line for line in emitted)
     assert any("Ownership violations: at-violation" in line for line in emitted)
+    assert any(
+        "Ownership-policy blockers may prevent review-feedback pickup." in line for line in emitted
+    )
