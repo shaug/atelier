@@ -4,8 +4,15 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from atelier import agent_home
 from atelier.models import AgentConfig, ProjectConfig
+
+
+@pytest.fixture(autouse=True)
+def _clear_agent_identity_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ATELIER_AGENT_ID", raising=False)
 
 
 def _assert_link_or_marker(base: Path, name: str, target: Path) -> None:
@@ -43,6 +50,34 @@ def test_env_agent_id_overrides_default_name() -> None:
         assert home.name == "alice"
         assert home.agent_id == "atelier/worker/alice"
         assert home.path == project_dir / "agents" / "worker" / "alice"
+
+
+def test_resolve_agent_home_rejects_env_role_mismatch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        project_dir.mkdir(parents=True)
+        with (
+            patch.dict(os.environ, {"ATELIER_AGENT_ID": "atelier/planner/alice"}),
+            patch("atelier.agent_home.die", side_effect=RuntimeError("die called")) as die_fn,
+        ):
+            with pytest.raises(RuntimeError, match="die called"):
+                agent_home.resolve_agent_home(project_dir, ProjectConfig(), role="worker")
+    assert "ATELIER_AGENT_ID role mismatch" in str(die_fn.call_args.args[0])
+    assert "atelier/worker/<name>" in str(die_fn.call_args.args[0])
+
+
+def test_preview_agent_home_rejects_env_role_mismatch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        project_dir.mkdir(parents=True)
+        with (
+            patch.dict(os.environ, {"ATELIER_AGENT_ID": "atelier/planner/alice"}),
+            patch("atelier.agent_home.die", side_effect=RuntimeError("die called")) as die_fn,
+        ):
+            with pytest.raises(RuntimeError, match="die called"):
+                agent_home.preview_agent_home(project_dir, ProjectConfig(), role="worker")
+    assert "ATELIER_AGENT_ID role mismatch" in str(die_fn.call_args.args[0])
+    assert "atelier/worker/<name>" in str(die_fn.call_args.args[0])
 
 
 def test_config_agent_identity_is_used_when_env_missing() -> None:

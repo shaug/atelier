@@ -209,6 +209,29 @@ def test_claim_epic_blocks_planner_owned_executable_work() -> None:
     assert "planner agents cannot own executable work" in str(die_fn.call_args.args[0])
 
 
+def test_claim_epic_rejects_planner_claimant_for_executable_work() -> None:
+    issue = {
+        "id": "atelier-9",
+        "labels": ["at:epic"],
+        "assignee": None,
+    }
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[issue]),
+        patch("atelier.beads.run_bd_command") as run_command,
+        patch("atelier.beads.die", side_effect=RuntimeError("die called")) as die_fn,
+    ):
+        with pytest.raises(RuntimeError, match="die called"):
+            beads.claim_epic(
+                "atelier-9",
+                "atelier/planner/codex/p111",
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )
+    run_command.assert_not_called()
+    assert "planner agents cannot claim executable work" in str(die_fn.call_args.args[0])
+
+
 def test_claim_epic_backfills_epic_label_for_standalone_changeset() -> None:
     issue = {"id": "at-legacy", "labels": ["at:changeset"], "assignee": None}
     updated = {

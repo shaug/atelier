@@ -1243,8 +1243,14 @@ def claim_epic(
     labels = _issue_labels(issue)
     if "at:draft" in labels:
         die(f"epic {epic_id} is marked as draft")
+    executable_labels = {"at:epic", "at:changeset"} & labels
+    if executable_labels and _is_planner_assignee(agent_id):
+        die(
+            f"epic {epic_id} claim rejected for planner {agent_id}; "
+            "planner agents cannot claim executable work"
+        )
     existing_assignee = issue.get("assignee")
-    if _is_planner_assignee(existing_assignee) and {"at:epic", "at:changeset"} & labels:
+    if _is_planner_assignee(existing_assignee) and executable_labels:
         die(
             f"epic {epic_id} is assigned to planner {existing_assignee}; "
             "planner agents cannot own executable work"

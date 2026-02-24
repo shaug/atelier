@@ -96,6 +96,17 @@ def parse_agent_identity(agent_id: str) -> tuple[str | None, str | None, str | N
     return role, name, session_key
 
 
+def _enforce_role_consistent_agent_id(*, role: str, agent_id: str, source: str) -> None:
+    expected_role = role.strip().lower()
+    actual_role, _name, _session_key = parse_agent_identity(agent_id)
+    if actual_role is None or actual_role.strip().lower() == expected_role:
+        return
+    die(
+        f"{source} role mismatch: expected atelier/{expected_role}/<name> for this session, "
+        f"got {agent_id!r}. Unset {source} or set a matching agent identity."
+    )
+
+
 def session_pid_from_agent_id(agent_id: str) -> int | None:
     """Extract the session PID from an agent id when present."""
     _role, _name, session_key = parse_agent_identity(agent_id)
@@ -360,6 +371,11 @@ def resolve_agent_home(
         agent_id = env_agent_id.strip()
         if not agent_id:
             die("ATELIER_AGENT_ID must not be empty")
+        _enforce_role_consistent_agent_id(
+            role=role,
+            agent_id=agent_id,
+            source="ATELIER_AGENT_ID",
+        )
         agent_name = _derive_agent_name(agent_id)
     elif config_agent_id:
         agent_id = config_agent_id
@@ -523,6 +539,11 @@ def preview_agent_home(
         agent_id = env_agent_id.strip()
         if not agent_id:
             die("ATELIER_AGENT_ID must not be empty")
+        _enforce_role_consistent_agent_id(
+            role=role,
+            agent_id=agent_id,
+            source="ATELIER_AGENT_ID",
+        )
         agent_name = _derive_agent_name(agent_id)
     elif config_agent_id:
         agent_id = config_agent_id
