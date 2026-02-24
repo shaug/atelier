@@ -167,3 +167,62 @@ def test_repo_beads_provider_create_ticket_when_allowed(
     assert isinstance(args, list)
     assert "create" in args
     assert "--silent" in args
+
+
+def test_repo_beads_provider_update_preserves_external_ticket_metadata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".beads").mkdir()
+    provider = RepoBeadsProvider(
+        repo_root=tmp_path,
+        allow_write=True,
+        sync_options=ExternalTicketSyncOptions(
+            include_state=False,
+            include_body=False,
+            include_notes=False,
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run_bd(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:2] == ["--readonly", "show"]:
+            return [
+                {
+                    "id": "bd-9",
+                    "description": (
+                        "scope: old\n"
+                        "external_tickets: "
+                        '[{"provider":"github","id":"174","direction":"export"}]\n'
+                    ),
+                    "status": "open",
+                    "updated_at": "2026-02-24T22:00:00Z",
+                }
+            ]
+        return []
+
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
+        captured["args"] = args
+
+        class Result:
+            stdout = ""
+
+        return Result()
+
+    monkeypatch.setattr("atelier.repo_beads_provider.run_bd_json", fake_run_bd)
+    monkeypatch.setattr("atelier.beads.run_bd_command", fake_run_bd_command)
+
+    provider.update_ticket(
+        ExternalTicketRef(provider="beads", ticket_id="bd-9"),
+        body="Intent\nupdated description\n",
+    )
+
+    args = captured.get("args")
+    assert isinstance(args, list)
+    assert "--description" in args
+    description = args[args.index("--description") + 1]
+    assert isinstance(description, str)
+    assert "Intent" in description
+    assert "external_tickets:" in description
+    assert '"id":"174"' in description

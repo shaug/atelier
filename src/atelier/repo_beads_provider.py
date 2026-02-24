@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from . import paths
+from . import beads, paths
 from .beads import run_bd_json
 from .external_providers import (
     ExternalProviderCapabilities,
@@ -122,7 +122,15 @@ class RepoBeadsProvider:
         if title:
             args.extend(["--title", title])
         if body is not None:
-            args.extend(["--description", body])
+            payload = self._run_bd(["--readonly", "show", ref.ticket_id])
+            if not payload:
+                raise RuntimeError(f"Beads issue not found: {ref.ticket_id}")
+            description = payload[0].get("description")
+            merged = beads.merge_description_preserving_metadata(
+                description if isinstance(description, str) else "",
+                body,
+            )
+            args.extend(["--description", merged])
         self._run_bd_command(args)
         return self.sync_state(ref)
 

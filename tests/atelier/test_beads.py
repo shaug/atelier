@@ -1,3 +1,5 @@
+import json
+import sqlite3
 from pathlib import Path
 from subprocess import CompletedProcess
 from tempfile import TemporaryDirectory
@@ -760,3 +762,139 @@ def test_update_external_tickets_updates_labels() -> None:
     assert "ext:jira" in combined
     assert "--remove-label" in combined
     assert "ext:github" in combined
+
+
+def test_merge_description_preserving_metadata_keeps_external_tickets() -> None:
+    existing = (
+        'scope: old\nexternal_tickets: [{"provider":"github","id":"174","direction":"export"}]\n'
+    )
+    next_description = "Intent\nupdated details\n"
+
+    merged = beads.merge_description_preserving_metadata(existing, next_description)
+
+    assert "Intent" in merged
+    assert "external_tickets:" in merged
+    assert '"id":"174"' in merged
+
+
+def test_list_external_ticket_metadata_gaps_detects_missing_field() -> None:
+    issue = {
+        "id": "at-73j",
+        "labels": ["at:epic", "ext:github"],
+        "description": "Intent\nno metadata yet\n",
+    }
+    with patch("atelier.beads.run_bd_json", return_value=[issue]):
+        gaps = beads.list_external_ticket_metadata_gaps(
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert len(gaps) == 1
+    assert gaps[0].issue_id == "at-73j"
+    assert gaps[0].providers == ("github",)
+
+
+def _seed_events_db(
+    db_path: Path, *, issue_id: str, old_description: str, new_description: str
+) -> None:
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                issue_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                old_value TEXT,
+                new_value TEXT,
+                comment TEXT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO events (issue_id, event_type, actor, old_value, new_value)
+            VALUES (?, 'updated', 'test-agent', ?, ?)
+            """,
+            (
+                issue_id,
+                json.dumps({"description": old_description}),
+                json.dumps({"description": new_description}),
+            ),
+        )
+        connection.commit()
+
+
+def test_recover_external_tickets_from_history_returns_latest_recorded_metadata() -> None:
+    with TemporaryDirectory() as tmp:
+        beads_root = Path(tmp)
+        db_path = beads_root / "beads.db"
+        _seed_events_db(
+            db_path,
+            issue_id="at-73j",
+            old_description=(
+                "scope: old\n"
+                "external_tickets: "
+                '[{"provider":"github","id":"174","direction":"export"}]\n'
+            ),
+            new_description="scope: rewritten\n",
+        )
+        tickets = beads.recover_external_tickets_from_history("at-73j", beads_root=beads_root)
+
+    assert len(tickets) == 1
+    assert tickets[0].provider == "github"
+    assert tickets[0].ticket_id == "174"
+
+
+def test_repair_external_ticket_metadata_from_history_recovers_and_updates() -> None:
+    with TemporaryDirectory() as tmp:
+        beads_root = Path(tmp)
+        db_path = beads_root / "beads.db"
+        _seed_events_db(
+            db_path,
+            issue_id="at-73j",
+            old_description=(
+                "scope: old\n"
+                "external_tickets: "
+                '[{"provider":"github","id":"174","direction":"export"}]\n'
+            ),
+            new_description="scope: rewritten\n",
+        )
+
+        issue = {
+            "id": "at-73j",
+            "labels": ["at:epic", "ext:github"],
+            "description": "Intent\nmetadata missing now\n",
+        }
+        captured: dict[str, object] = {}
+
+        def fake_update(
+            issue_id: str,
+            tickets: list[beads.ExternalTicketRef],
+            *,
+            beads_root: Path,
+            cwd: Path,
+        ) -> dict[str, object]:
+            captured["issue_id"] = issue_id
+            captured["tickets"] = tickets
+            return {}
+
+        with (
+            patch("atelier.beads.run_bd_json", return_value=[issue]),
+            patch("atelier.beads.update_external_tickets", side_effect=fake_update),
+        ):
+            results = beads.repair_external_ticket_metadata_from_history(
+                beads_root=beads_root,
+                cwd=Path("/repo"),
+                apply=True,
+            )
+
+    assert len(results) == 1
+    assert results[0].issue_id == "at-73j"
+    assert results[0].recovered is True
+    assert results[0].repaired is True
+    assert captured["issue_id"] == "at-73j"
+    tickets = captured["tickets"]
+    assert isinstance(tickets, list)
+    assert tickets[0].ticket_id == "174"
