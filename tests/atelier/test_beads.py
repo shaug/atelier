@@ -209,6 +209,39 @@ def test_claim_epic_blocks_planner_owned_executable_work() -> None:
     assert "planner agents cannot own executable work" in str(die_fn.call_args.args[0])
 
 
+def test_claim_epic_backfills_epic_label_for_standalone_changeset() -> None:
+    issue = {"id": "at-legacy", "labels": ["at:changeset"], "assignee": None}
+    updated = {
+        "id": "at-legacy",
+        "labels": ["at:changeset", "at:epic", "at:hooked"],
+        "assignee": "agent",
+    }
+    show_calls = 0
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        nonlocal show_calls
+        if args and args[0] == "show":
+            show_calls += 1
+            return [issue] if show_calls == 1 else [updated]
+        return [issue]
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command") as run_command,
+    ):
+        beads.claim_epic(
+            "at-legacy",
+            "agent",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    called_args = run_command.call_args.args[0]
+    assert called_args.count("--add-label") == 2
+    assert "at:hooked" in called_args
+    assert "at:epic" in called_args
+
+
 def test_set_agent_hook_updates_description() -> None:
     issue = {"id": "atelier-agent", "description": "role: worker\n"}
     captured: dict[str, str] = {}
