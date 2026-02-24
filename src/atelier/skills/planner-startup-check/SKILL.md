@@ -7,6 +7,9 @@ description: >-
 
 # Planner startup check
 
+Create or update draft beads immediately when you identify actionable issues
+during startup triage. Do not wait for approval to capture drafts.
+
 ## Inputs
 
 - agent_id: Planner agent identity.
@@ -17,8 +20,10 @@ description: >-
 
 1. List unread inbox messages for the planner.
 1. List queued messages (if queues are enabled) and offer to claim them.
-1. Summarize each message and capture required decisions from the overseer.
-1. Create or update beads based on message content.
+1. Summarize each message and extract actionable issues.
+1. Create or update draft beads immediately for actionable issues.
+1. Capture required decisions from the overseer only when a real blocker exists
+   (for example, promotion from draft to ready).
 1. Mark messages as read when addressed.
 1. Run `epic-list` with drafts enabled and include its output verbatim in the
    startup response:
@@ -28,6 +33,7 @@ description: >-
 ## Verification
 
 - Inbox and queue are processed before planning work starts.
+- Actionable issues are captured as drafts without waiting for approval.
 - Messages are summarized with explicit decisions or follow-up beads.
 - Active epic listing (draft/open/in-progress/blocked as available) is included
   in stable `epic-list` format.

@@ -201,6 +201,7 @@ def test_plan_changesets_skill_requires_rationale_for_one_child_split() -> None:
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "one child changeset" in text
     assert "decomposition rationale" in text
+    assert "Default new changesets to `cs:planned`" in text
 
 
 def test_plan_changeset_guardrails_skill_mentions_checker_script() -> None:
@@ -216,6 +217,20 @@ def test_plan_promote_epic_skill_requires_one_child_rationale() -> None:
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "exactly one child changeset" in text
     assert "decomposition rationale" in text
+
+
+def test_plan_create_epic_skill_captures_drafts_without_approval() -> None:
+    skill = skills.load_packaged_skills()["plan-create-epic"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "capture it as a draft epic immediately" in text
+    assert "not request approval to create or edit draft beads." in text
+
+
+def test_planner_startup_check_skill_captures_drafts_without_approval() -> None:
+    skill = skills.load_packaged_skills()["planner-startup-check"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "Create or update draft beads immediately" in text
+    assert "Do not wait for approval to capture drafts." in text
 
 
 def test_workspace_skill_state_accepts_legacy_underscore_metadata_keys() -> None:

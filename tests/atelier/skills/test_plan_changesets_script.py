@@ -1,0 +1,115 @@
+from __future__ import annotations
+
+import importlib.util
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+
+def _load_script_module():
+    script_path = (
+        Path(__file__).resolve().parents[3]
+        / "src"
+        / "atelier"
+        / "skills"
+        / "plan-changesets"
+        / "scripts"
+        / "create_changeset.py"
+    )
+    spec = importlib.util.spec_from_file_location("create_changeset_script", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _configure_script_mocks(module, monkeypatch, tmp_path: Path) -> list[list[str]]:
+    commands: list[list[str]] = []
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+
+    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+
+    def fake_run_bd(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        assert beads_root == context.beads_root
+        assert cwd == context.project_dir
+        if args and args[0] == "create":
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout="at-123\n", stderr=""
+            )
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: module.auto_export.AutoExportResult(
+            status="skipped",
+            issue_id=issue_id,
+            provider=None,
+            message="auto-export disabled for test",
+        ),
+    )
+    return commands
+
+
+def test_create_changeset_defaults_to_planned_label(monkeypatch, tmp_path: Path) -> None:
+    module = _load_script_module()
+    commands = _configure_script_mocks(module, monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_changeset.py",
+            "--epic-id",
+            "at-epic",
+            "--title",
+            "Draft changeset",
+            "--acceptance",
+            "Acceptance text",
+        ],
+    )
+
+    module.main()
+
+    create_command = commands[0]
+    assert create_command[:2] == ["create", "--parent"]
+    assert "cs:planned" in create_command
+    assert "cs:ready" not in create_command
+
+
+def test_create_changeset_accepts_ready_override(monkeypatch, tmp_path: Path) -> None:
+    module = _load_script_module()
+    commands = _configure_script_mocks(module, monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_changeset.py",
+            "--epic-id",
+            "at-epic",
+            "--title",
+            "Ready changeset",
+            "--acceptance",
+            "Acceptance text",
+            "--status-label",
+            "cs:ready",
+        ],
+    )
+
+    module.main()
+
+    create_command = commands[0]
+    assert "cs:ready" in create_command

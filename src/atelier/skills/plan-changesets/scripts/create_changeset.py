@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument(
         "--status-label",
         choices=("cs:ready", "cs:planned"),
-        default="cs:ready",
+        default="cs:planned",
         help="Lifecycle label to set on create",
     )
     parser.add_argument(
