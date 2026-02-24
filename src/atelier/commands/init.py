@@ -12,7 +12,6 @@ from ..io import confirm, die, say, select
 from ..services import ServiceFailure
 from ..services.project import (
     ComposeProjectConfigService,
-    InitializeProjectDependencies,
     InitializeProjectRequest,
     InitializeProjectService,
     ResolveExternalProviderService,
@@ -26,17 +25,15 @@ def _build_init_service() -> InitializeProjectService:
         ``InitializeProjectService`` configured with command dependencies.
     """
     return InitializeProjectService(
-        InitializeProjectDependencies(
-            compose_config_service=ComposeProjectConfigService(
-                build_config=config.build_project_config
-            ),
-            resolve_provider_service=ResolveExternalProviderService(
-                resolve_provider=external_registry.resolve_planner_provider,
-                choose_provider=select,
-                confirm_choice=confirm,
-            ),
+        compose_config_service=ComposeProjectConfigService(
+            build_config=config.build_project_config
+        ),
+        resolve_provider_service=ResolveExternalProviderService(
+            resolve_provider=external_registry.resolve_planner_provider,
+            choose_provider=select,
             confirm_choice=confirm,
-        )
+        ),
+        confirm_choice=confirm,
     )
 
 

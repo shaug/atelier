@@ -4,7 +4,6 @@ from .compose_project_config import (
     ComposeProjectConfigService,
 )
 from .initialize_project import (
-    InitializeProjectDependencies,
     InitializeProjectOutcome,
     InitializeProjectRequest,
     InitializeProjectService,

@@ -10,7 +10,6 @@ from atelier.services import ServiceFailure, ServiceSuccess
 from atelier.services.project import (
     ComposeProjectConfigRequest,
     ComposeProjectConfigService,
-    InitializeProjectDependencies,
     InitializeProjectRequest,
     InitializeProjectService,
     ResolveExternalProviderRequest,
@@ -64,11 +63,7 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
         )
     )
 
-    deps = InitializeProjectDependencies(
-        compose_config_service=compose_service,
-        resolve_provider_service=provider_service,
-        confirm_choice=lambda _text, default=False: False,
-    )
+    confirm_choice = lambda _text, default=False: False
 
     with (
         patch(
@@ -112,7 +107,11 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
         patch("atelier.services.project.initialize_project.beads.run_bd_command"),
         patch("atelier.services.project.initialize_project.beads.ensure_atelier_types"),
     ):
-        success = InitializeProjectService(deps).run(
+        success = InitializeProjectService(
+            compose_config_service=compose_service,
+            resolve_provider_service=provider_service,
+            confirm_choice=confirm_choice,
+        ).run(
             InitializeProjectRequest(
                 args=SimpleNamespace(yes=True),
                 cwd=Path("/repo"),
@@ -150,7 +149,9 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
         patch("atelier.services.project.initialize_project.config.load_json", return_value=None),
     ):
         failure = InitializeProjectService(
-            deps.__class__(**{**deps.__dict__, "compose_config_service": failing})
+            compose_config_service=failing,
+            resolve_provider_service=provider_service,
+            confirm_choice=confirm_choice,
         ).run(
             InitializeProjectRequest(
                 args=SimpleNamespace(yes=True),

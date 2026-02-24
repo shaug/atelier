@@ -19,13 +19,6 @@ PolicyIssue = dict[str, object]
 ConfirmChoice = Callable[[str, bool], bool]
 
 
-@dataclass(frozen=True)
-class InitializeProjectDependencies:
-    compose_config_service: ComposeProjectConfigService
-    resolve_provider_service: ResolveExternalProviderService
-    confirm_choice: ConfirmChoice
-
-
 class InitializeProjectRequest(BaseModel):
     args: object
     cwd: Path
@@ -51,8 +44,15 @@ class InitializeProjectOutcome:
 
 
 class InitializeProjectService:
-    def __init__(self, dependencies: InitializeProjectDependencies) -> None:
-        self._deps = dependencies
+    def __init__(
+        self,
+        compose_config_service: ComposeProjectConfigService,
+        resolve_provider_service: ResolveExternalProviderService,
+        confirm_choice: ConfirmChoice,
+    ) -> None:
+        self._compose_config_service = compose_config_service
+        self._resolve_provider_service = resolve_provider_service
+        self._confirm_choice = confirm_choice
 
     def run(self, request: InitializeProjectRequest) -> ServiceResult[InitializeProjectOutcome]:
         _root, enlistment, origin_raw, origin = git.resolve_repo_enlistment(request.cwd)
@@ -61,7 +61,7 @@ class InitializeProjectService:
         config_payload = config.load_project_config(config_path)
         raw_user = config.load_json(paths.project_config_user_path(project_dir))
 
-        compose = self._deps.compose_config_service.run(
+        compose = self._compose_config_service.run(
             ComposeProjectConfigRequest(
                 existing=config_payload or {},
                 enlistment_path=enlistment,
@@ -84,7 +84,7 @@ class InitializeProjectService:
                 upgrade_policy=config.resolve_upgrade_policy(payload.atelier.upgrade),
                 yes=request.yes,
                 interactive=request.interactive,
-                prompt_update=lambda message: self._deps.confirm_choice(message, False),
+                prompt_update=lambda message: self._confirm_choice(message, False),
             )
             action = getattr(sync, "action", None)
             if isinstance(action, str) and action in {"installed", "updated", "up_to_date"}:
@@ -92,7 +92,7 @@ class InitializeProjectService:
         except OSError:
             pass
 
-        provider = self._deps.resolve_provider_service.run(
+        provider = self._resolve_provider_service.run(
             ResolveExternalProviderRequest(
                 payload=payload,
                 repo_root=Path(enlistment),
@@ -125,9 +125,7 @@ class InitializeProjectService:
         beads.run_bd_command(["prime"], beads_root=beads_root, cwd=project_dir)
         beads.ensure_atelier_types(beads_root=beads_root, cwd=project_dir)
 
-        if not request.yes and self._deps.confirm_choice(
-            "Add project-wide policy for agents?", False
-        ):
+        if not request.yes and self._confirm_choice("Add project-wide policy for agents?", False):
             self._update_policy(payload, request.cwd, beads_root, project_dir)
 
         messages.append("Initialized Atelier project")
