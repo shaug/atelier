@@ -52,6 +52,8 @@ class ComposeProjectConfigService:
         except SystemExit as exc:
             return ServiceFailure(
                 "validation_failed",
-                str(exc).strip() or "project config validation failed",
+                "project config validation failed",
+                recovery_hint=str(exc).strip() or None,
+                exception=exc,
             )
         return ServiceSuccess(ComposeProjectConfigOutcome(payload=payload))

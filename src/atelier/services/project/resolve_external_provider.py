@@ -63,7 +63,9 @@ class ResolveExternalProviderService:
         except SystemExit as exc:
             return ServiceFailure(
                 "validation_failed",
-                str(exc).strip() or "provider resolution failed",
+                "provider resolution failed",
+                recovery_hint=str(exc).strip() or None,
+                exception=exc,
             )
 
         payload = request.payload

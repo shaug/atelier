@@ -26,6 +26,7 @@ class ServiceFailure:
     code: ServiceFailureCode
     message: str
     recovery_hint: str | None = None
+    exception: BaseException | None = None
     success: Literal[False] = False
 
 

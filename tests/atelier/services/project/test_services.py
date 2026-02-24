@@ -48,6 +48,51 @@ def test_compose_and_provider_contract_failures() -> None:
     assert provider_result.code == "validation_failed"
 
 
+def test_compose_and_provider_failures_capture_system_exit_exception() -> None:
+    compose = ComposeProjectConfigService(
+        build_config=lambda *args, **kwargs: (_ for _ in ()).throw(SystemExit("compose failed"))
+    )
+    compose_result = compose.run(
+        ComposeProjectConfigRequest(
+            existing={},
+            enlistment_path="/repo",
+            origin=None,
+            origin_raw=None,
+            args=None,
+        )
+    )
+    assert isinstance(compose_result, ServiceFailure)
+    assert compose_result.success is False
+    assert compose_result.code == "validation_failed"
+    assert compose_result.message == "project config validation failed"
+    assert compose_result.recovery_hint == "compose failed"
+    assert isinstance(compose_result.exception, SystemExit)
+
+    provider = ResolveExternalProviderService(
+        resolve_provider=lambda *args, **kwargs: (_ for _ in ()).throw(
+            SystemExit("provider failed")
+        ),
+        choose_provider=lambda _text, options, _default: options[0],
+        confirm_choice=lambda _text, _default: False,
+    )
+    provider_result = provider.run(
+        ResolveExternalProviderRequest(
+            payload=ProjectConfig(),
+            repo_root=Path("/repo"),
+            agent_name="planner",
+            project_data_dir=Path("/project-data"),
+            stdin_isatty=False,
+            stdout_isatty=False,
+        )
+    )
+    assert isinstance(provider_result, ServiceFailure)
+    assert provider_result.success is False
+    assert provider_result.code == "validation_failed"
+    assert provider_result.message == "provider resolution failed"
+    assert provider_result.recovery_hint == "provider failed"
+    assert isinstance(provider_result.exception, SystemExit)
+
+
 def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
     payload = ProjectConfig(project=ProjectSection(origin="github.com/acme/widgets"))
     compose_service = SimpleNamespace(
