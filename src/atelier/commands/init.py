@@ -9,13 +9,13 @@ from pathlib import Path
 
 from .. import config, external_registry
 from ..io import confirm, die, say, select
-from ..services import ServiceFailure
 from ..services.project import (
     ComposeProjectConfigService,
     InitializeProjectRequest,
     InitializeProjectService,
     ResolveExternalProviderService,
 )
+from ..services.result import is_service_failure, is_service_success
 
 
 def _build_init_service() -> InitializeProjectService:
@@ -61,8 +61,9 @@ def init_project(args: object) -> None:
             stdout_isatty=sys.stdout.isatty(),
         )
     )
-    if isinstance(result, ServiceFailure):
+    if is_service_failure(result):
         hint = f"\nHint: {result.recovery_hint}" if result.recovery_hint else ""
         die(f"init failed ({result.code}): {result.message}{hint}")
+    assert is_service_success(result)
     for message in result.outcome.messages:
         say(message)

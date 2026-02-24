@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ... import agent_home, beads, config, git, paths, policy, project, skills
 from ...models import ProjectConfig
-from ..result import ServiceFailure, ServiceResult, ServiceSuccess
+from ..result import ServiceResult, ServiceSuccess, is_service_failure, is_service_success
 from .compose_project_config import ComposeProjectConfigRequest, ComposeProjectConfigService
 from .resolve_external_provider import (
     ResolveExternalProviderRequest,
@@ -72,8 +72,9 @@ class InitializeProjectService:
                 raw_existing=raw_user,
             )
         )
-        if isinstance(compose, ServiceFailure):
+        if is_service_failure(compose):
             return compose
+        assert is_service_success(compose)
         payload = compose.outcome.payload
 
         project.ensure_project_dirs(project_dir)
@@ -103,8 +104,9 @@ class InitializeProjectService:
                 yes=request.yes,
             )
         )
-        if isinstance(provider, ServiceFailure):
+        if is_service_failure(provider):
             return provider
+        assert is_service_success(provider)
         payload = provider.outcome.payload
         messages.extend(provider.outcome.messages)
 

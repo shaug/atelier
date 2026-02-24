@@ -25,6 +25,7 @@ def test_compose_and_provider_contract_failures() -> None:
         )
     )
     assert isinstance(compose_result, ServiceFailure)
+    assert compose_result.success is False
     assert compose_result.code == "validation_failed"
 
     provider = ResolveExternalProviderService(
@@ -43,6 +44,7 @@ def test_compose_and_provider_contract_failures() -> None:
         )
     )
     assert isinstance(provider_result, ServiceFailure)
+    assert provider_result.success is False
     assert provider_result.code == "validation_failed"
 
 
@@ -120,6 +122,7 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
             )
         )
     assert isinstance(success, ServiceSuccess)
+    assert success.success is True
     assert success.outcome.messages[-1] == "Initialized Atelier project"
 
     failing = SimpleNamespace(
@@ -161,4 +164,5 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
             )
         )
     assert isinstance(failure, ServiceFailure)
+    assert failure.success is False
     assert failure.code == "validation_failed"
