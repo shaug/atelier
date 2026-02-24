@@ -110,7 +110,11 @@ Keep pure logic and boundary integrations separate:
 
 Keep composition explicit and bounded:
 
-- Maximum composition depth is three service hops in one request path.
+- Default guideline: keep composition depth to at most three service hops in one
+  request path.
+- Exception path: if a workflow temporarily needs deeper composition, document
+  rationale plus an exit plan in the service module docstring and link the
+  tracking issue/changeset.
 - Parent services may call child services only through typed request/result
   contracts.
 - Child `ServiceFailure` values must propagate unchanged unless intentionally
@@ -118,6 +122,19 @@ Keep composition explicit and bounded:
 - No hidden side effects: all external writes/commands must run through explicit
   adapter dependencies.
 - Service modules must avoid mutable global state and implicit singleton caches.
+
+### Dependency injection contract
+
+Service collaborators must be explicit and testable:
+
+- Pass long-lived collaborators (ports, adapters, policy evaluators) through
+  constructors or explicit dependency bundles.
+- Pass per-request values (paths, runtime mode, correlation ids) through typed
+  request/context objects.
+- Do not resolve collaborators via module-level singleton lookups inside service
+  methods.
+- Tests must inject fakes through the same constructor/request seams used in
+  production.
 
 ## Candidate module mapping
 
@@ -185,13 +202,22 @@ Use explicit tagged outcomes for side-effect-heavy services.
 
 Validation rule:
 
-- Every service entrypoint validates request/context input before business
-  orchestration starts.
+- Every service entrypoint uses typed `Request`/`Context` models as first-tier
+  validation before business orchestration starts.
 - Validation failures must return `validation_failed` deterministically with a
   stable message and optional recovery hint.
-- Use Pydantic models for untrusted/external input boundaries; use typed
-  dataclasses or validated models internally once boundary validation has
-  passed.
+- Use Pydantic models for untrusted/external boundaries, then operate on typed
+  dataclasses/validated models internally.
+- Add explicit constraint checks when types alone cannot express requirements
+  (for example numeric bounds, path safety, or string format invariants); return
+  `validation_failed` for these cases.
+
+Failure handling rule:
+
+- Return `ServiceFailure` for expected domain/policy/runtime failures that
+  callers can handle deterministically.
+- Raise exceptions for programmer bugs or invariant violations that indicate a
+  defect requiring code changes.
 
 ```python
 from dataclasses import dataclass
@@ -312,4 +338,6 @@ Exit criteria:
 - lower orchestration complexity in command/runtime entry modules
 - clearer failure reporting from typed service result contracts
 - easier unit testing of orchestration without shelling full CLI sessions
+- baseline observability at service entrypoints: structured
+  start/success/failure logs plus duration measurement
 - no broad helper churn outside declared pilot boundary
