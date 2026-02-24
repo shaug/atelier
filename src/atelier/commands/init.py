@@ -60,9 +60,8 @@ def init_project(args: object) -> None:
             stdout_isatty=sys.stdout.isatty(),
         )
     )
-    if result.success is True:
-        for message in result.outcome.messages:
-            say(message)
-    else:
+    if result.success is False:
         hint = f"\nHint: {result.recovery_hint}" if result.recovery_hint else ""
         die(f"init failed ({result.code}): {result.message}{hint}")
+    for message in result.outcome.messages:
+        say(message)
