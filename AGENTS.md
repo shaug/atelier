@@ -221,7 +221,8 @@ ______________________________________________________________________
 - Run `just format` before making commits.
 - Use `bash scripts/lint-gate.sh` as the canonical lint gate (also exposed as
   `just lint` and used by CI).
-- Keep full test execution in `pre-push` (`just test`) with CI as the backstop.
+- Keep `just test` as the canonical full test command; `pre-push` should invoke
+  it, with CI as the backstop.
 - Ensure `just lint` and `just test` pass before shipping changes.
 - When merging PRs to `main`, keep merge commit messages non-Conventional (use
   the default “Merge pull request #...” message) so Release Please does not
