@@ -3,6 +3,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 import atelier.config as config
 import atelier.paths as paths
 from atelier.models import AtelierSection, ProjectConfig
@@ -155,3 +157,80 @@ def test_build_project_config_accepts_explicit_none_pr_mode() -> None:
                     allow_editor_empty=True,
                 )
     assert payload.branch.pr_mode == "none"
+
+
+def test_build_project_config_skips_pr_strategy_prompt_when_pr_mode_none() -> None:
+    args = SimpleNamespace(
+        branch_prefix="",
+        branch_pr_mode="none",
+        branch_history="merge",
+        branch_squash_message="deterministic",
+        branch_pr_strategy=None,
+        agent="codex",
+        editor_edit="cat",
+        editor_work="cat",
+    )
+    existing = {
+        "branch": {
+            "pr_mode": "none",
+            "pr_strategy": "on-ready",
+        }
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = Path(tmp) / "data"
+        with (
+            patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+            patch("atelier.agents.available_agent_names", return_value=("codex",)),
+            patch(
+                "atelier.config.select",
+                side_effect=AssertionError("select should not be called"),
+            ),
+        ):
+            payload = config.build_project_config(
+                existing,
+                "/repo",
+                "github.com/org/repo",
+                "https://github.com/org/repo",
+                args,
+                allow_editor_empty=True,
+            )
+
+    assert payload.branch.pr_mode == "none"
+    assert payload.branch.pr_strategy == "on-ready"
+
+
+@pytest.mark.parametrize("pr_mode", ("draft", "ready"))
+def test_build_project_config_prompts_pr_strategy_when_pr_mode_enabled(pr_mode: str) -> None:
+    args = SimpleNamespace(
+        branch_prefix="",
+        branch_pr_mode=pr_mode,
+        branch_history="merge",
+        branch_squash_message="deterministic",
+        branch_pr_strategy=None,
+        agent="codex",
+        editor_edit="cat",
+        editor_work="cat",
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = Path(tmp) / "data"
+        with (
+            patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+            patch("atelier.agents.available_agent_names", return_value=("codex",)),
+            patch("atelier.config.select", return_value="parallel") as select_mock,
+        ):
+            payload = config.build_project_config(
+                {},
+                "/repo",
+                "github.com/org/repo",
+                "https://github.com/org/repo",
+                args,
+                allow_editor_empty=True,
+            )
+
+    select_mock.assert_called_once_with(
+        "PR strategy",
+        config.pr_strategy.PR_STRATEGY_VALUES,
+        "sequential",
+    )
+    assert payload.branch.pr_mode == pr_mode
+    assert payload.branch.pr_strategy == "parallel"
