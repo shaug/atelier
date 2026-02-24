@@ -14,6 +14,7 @@ class FakeStartupService:
             "handle_queue_before_claim", lambda *_args, **_kwargs: False
         )
         self._list_epics = overrides.pop("list_epics", lambda: [])
+        self._show_issue = overrides.pop("show_issue", lambda _issue_id: None)
         self._next_changeset = overrides.pop("next_changeset", lambda **_kwargs: None)
         self._resolve_hooked_epic = overrides.pop("resolve_hooked_epic", lambda *_args: None)
         self._stale_family_assigned_epics = overrides.pop(
@@ -65,6 +66,9 @@ class FakeStartupService:
 
     def list_epics(self) -> list[dict[str, object]]:
         return self._list_epics()
+
+    def show_issue(self, issue_id: str) -> dict[str, object] | None:
+        return self._show_issue(issue_id)
 
     def next_changeset(
         self,
@@ -481,6 +485,32 @@ def test_run_startup_contract_skips_unclaimable_global_review_feedback() -> None
 
     assert result.reason == "selected_auto"
     assert result.epic_id == "at-claimable"
+
+
+def test_run_startup_contract_claims_global_feedback_standalone_identity() -> None:
+    standalone_feedback = ReviewFeedbackSelection(
+        epic_id="at-bmu",
+        changeset_id="at-bmu",
+        feedback_at="2026-02-19T00:00:00Z",
+    )
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [],
+        show_issue=lambda issue_id: (
+            {"id": "at-bmu", "status": "open", "labels": ["at:changeset"]}
+            if issue_id == "at-bmu"
+            else None
+        ),
+        select_review_feedback_changeset=lambda **_kwargs: None,
+        select_global_review_feedback_changeset=lambda **_kwargs: standalone_feedback,
+        next_changeset=lambda **_kwargs: {"id": "at-bmu"},
+    )
+
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "at-bmu"
+    assert result.changeset_id == "at-bmu"
 
 
 def test_run_startup_contract_reclaims_stale_family_assignment() -> None:

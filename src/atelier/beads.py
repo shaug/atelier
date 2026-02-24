@@ -446,6 +446,17 @@ def _issue_labels(issue: dict[str, object]) -> set[str]:
     return {str(label) for label in labels if label}
 
 
+def _is_standalone_changeset_without_epic_label(issue: dict[str, object]) -> bool:
+    labels = _issue_labels(issue)
+    if "at:changeset" not in labels or "at:epic" in labels:
+        return False
+    try:
+        boundary = parse_issue_boundary(issue, source="beads:claim_epic")
+    except ValueError:
+        return False
+    return boundary.parent_id is None
+
+
 def _agent_role(agent_id: object) -> str | None:
     if not isinstance(agent_id, str):
         return None
@@ -1244,17 +1255,20 @@ def claim_epic(
         and existing_assignee != allow_takeover_from
     ):
         die(f"epic {epic_id} already has an assignee")
+    update_args = [
+        "update",
+        epic_id,
+        "--assignee",
+        agent_id,
+        "--status",
+        "hooked",
+        "--add-label",
+        "at:hooked",
+    ]
+    if _is_standalone_changeset_without_epic_label(issue):
+        update_args.extend(["--add-label", "at:epic"])
     run_bd_command(
-        [
-            "update",
-            epic_id,
-            "--assignee",
-            agent_id,
-            "--status",
-            "hooked",
-            "--add-label",
-            "at:hooked",
-        ],
+        update_args,
         beads_root=beads_root,
         cwd=cwd,
     )

@@ -86,6 +86,26 @@ def _issue_id(issue: dict[str, object]) -> str | None:
     return cleaned or None
 
 
+def _issue_parent_id(issue: dict[str, object]) -> str | None:
+    try:
+        boundary = parse_issue_boundary(issue, source="startup_contract:issue_parent_id")
+    except ValueError:
+        return None
+    return boundary.parent_id
+
+
+def _is_standalone_changeset_identity(issue: dict[str, object]) -> bool:
+    labels = worker_selection.issue_labels(issue)
+    if "at:changeset" not in labels or "at:epic" in labels:
+        return False
+    return _issue_parent_id(issue) is None
+
+
+def _is_executable_epic_identity(issue: dict[str, object]) -> bool:
+    labels = worker_selection.issue_labels(issue)
+    return "at:epic" in labels or _is_standalone_changeset_identity(issue)
+
+
 def _is_terminal(issue: dict[str, object]) -> bool:
     status = str(issue.get("status") or "").strip().lower()
     return status in _TERMINAL_STATUSES
@@ -285,6 +305,8 @@ class StartupContractService(Protocol):
 
     def list_epics(self) -> list[dict[str, object]]: ...
 
+    def show_issue(self, issue_id: str) -> dict[str, object] | None: ...
+
     def next_changeset(
         self,
         *,
@@ -478,6 +500,28 @@ def run_startup_contract_service(
         if isinstance(issue.get("id"), str) and issue.get("id")
     }
 
+    def load_claimable_issue(epic_id: str, *, stage: str) -> dict[str, object] | None:
+        issue = issues_by_id.get(epic_id)
+        if issue is None:
+            issue = service.show_issue(epic_id)
+            if issue is None:
+                atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=unknown_epic")
+                return None
+            loaded_id = _issue_id(issue)
+            if loaded_id != epic_id:
+                atelier_log.debug(
+                    "startup skipping "
+                    f"{stage} epic={epic_id} reason=identity_mismatch loaded={loaded_id}"
+                )
+                return None
+            if not _is_executable_epic_identity(issue):
+                atelier_log.debug(
+                    f"startup skipping {stage} epic={epic_id} reason=non_executable_identity"
+                )
+                return None
+            issues_by_id[epic_id] = issue
+        return issue
+
     def is_excluded(epic_id: str, *, stage: str) -> bool:
         if epic_id in excluded_epics:
             atelier_log.debug(
@@ -487,9 +531,8 @@ def run_startup_contract_service(
         return False
 
     def is_claimable(epic_id: str, *, stage: str) -> bool:
-        issue = issues_by_id.get(epic_id)
+        issue = load_claimable_issue(epic_id, stage=stage)
         if issue is None:
-            atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=unknown_epic")
             return False
         labels = worker_selection.issue_labels(issue)
         if "at:draft" in labels:

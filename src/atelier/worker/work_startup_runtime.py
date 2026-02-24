@@ -560,6 +560,14 @@ class _StartupContractService(worker_startup.StartupContractService):
             cwd=self._repo_root,
         )
 
+    def show_issue(self, issue_id: str) -> dict[str, object] | None:
+        issues = beads.run_bd_json(
+            ["show", issue_id],
+            beads_root=self._beads_root,
+            cwd=self._repo_root,
+        )
+        return issues[0] if issues else None
+
     def next_changeset(
         self,
         *,
