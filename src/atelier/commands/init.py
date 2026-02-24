@@ -6,11 +6,15 @@ writes project configuration, and avoids modifying the repo itself.
 
 import sys
 from pathlib import Path
+from typing import cast
 
 from .. import config, external_registry
 from ..io import confirm, die, say, select
+from ..lib import apply
+from ..services import ServiceFailure, ServiceSuccess
 from ..services.project import (
     ComposeProjectConfigService,
+    InitializeProjectOutcome,
     InitializeProjectRequest,
     InitializeProjectService,
     ResolveExternalProviderService,
@@ -60,8 +64,9 @@ def init_project(args: object) -> None:
             stdout_isatty=sys.stdout.isatty(),
         )
     )
-    if result.success is False:
-        hint = f"\nHint: {result.recovery_hint}" if result.recovery_hint else ""
-        die(f"init failed ({result.code}): {result.message}{hint}")
-    for message in result.outcome.messages:
-        say(message)
+    if not result.success:
+        failure = cast(ServiceFailure, result)
+        hint = f"\nHint: {failure.recovery_hint}" if failure.recovery_hint else ""
+        die(f"init failed ({failure.code}): {failure.message}{hint}")
+    success = cast(ServiceSuccess[InitializeProjectOutcome], result)
+    apply(success.outcome.messages, say)
