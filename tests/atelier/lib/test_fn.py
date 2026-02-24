@@ -5,7 +5,7 @@ from atelier.lib import apply
 
 def test_apply_invokes_callback_for_each_item_in_order() -> None:
     seen: list[int] = []
-    apply([1, 2, 3], seen.append)
+    apply(seen.append, [1, 2, 3])
     assert seen == [1, 2, 3]
 
 
@@ -17,5 +17,5 @@ def test_apply_consumes_generators_eagerly() -> None:
             touched.append(value)
             yield value
 
-    apply(values(), lambda _item: None)
+    apply(lambda _item: None, values())
     assert touched == [1, 2, 3]

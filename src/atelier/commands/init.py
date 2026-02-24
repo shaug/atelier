@@ -33,7 +33,7 @@ def init_project(args: object) -> None:
     Example:
         $ atelier init
     """
-    result = InitializeProjectService.run_default(
+    result = InitializeProjectService.run(
         args=args,
         cwd=Path.cwd(),
         stdin_isatty=sys.stdin.isatty(),
@@ -48,4 +48,4 @@ def init_project(args: object) -> None:
         hint = f"\nHint: {failure.recovery_hint}" if failure.recovery_hint else ""
         die(f"init failed ({failure.code}): {failure.message}{hint}")
     success = cast(ServiceSuccess[InitializeProjectOutcome], result)
-    apply(success.outcome.messages, say)
+    apply(say, success.outcome.messages)

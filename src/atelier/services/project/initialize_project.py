@@ -58,7 +58,7 @@ class InitializeProjectService:
         self._confirm_choice = confirm_choice
 
     @classmethod
-    def run_default(
+    def run(
         cls,
         *,
         args: object,
@@ -86,9 +86,11 @@ class InitializeProjectService:
             stdin_isatty=stdin_isatty,
             stdout_isatty=stdout_isatty,
         )
-        return service.run(request)
+        return service(request)
 
-    def run(self, request: InitializeProjectRequest) -> ServiceResult[InitializeProjectOutcome]:
+    def __call__(
+        self, request: InitializeProjectRequest
+    ) -> ServiceResult[InitializeProjectOutcome]:
         _root, enlistment, origin_raw, origin = git.resolve_repo_enlistment(request.cwd)
         project_dir = paths.project_dir_for_enlistment(enlistment, origin)
         config_path = paths.project_config_path(project_dir)

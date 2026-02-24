@@ -9,12 +9,12 @@ from typing import TypeVar
 T = TypeVar("T")
 
 
-def apply(values: Iterable[T], fn: Callable[[T], object]) -> None:
+def apply(fn: Callable[[T], object], values: Iterable[T]) -> None:
     """Apply a function to every value in an iterable.
 
     Args:
-        values: Items to apply the callback to.
         fn: Callback invoked once per item in ``values``.
+        values: Items to apply the callback to.
 
     Returns:
         ``None``. The callback side effects are evaluated eagerly.

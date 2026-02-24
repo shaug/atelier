@@ -113,7 +113,7 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
             compose_config_service=compose_service,
             resolve_provider_service=provider_service,
             confirm_choice=confirm_choice,
-        ).run(
+        )(
             InitializeProjectRequest(
                 args=SimpleNamespace(yes=True),
                 cwd=Path("/repo"),
@@ -155,7 +155,7 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
             compose_config_service=failing,
             resolve_provider_service=provider_service,
             confirm_choice=confirm_choice,
-        ).run(
+        )(
             InitializeProjectRequest(
                 args=SimpleNamespace(yes=True),
                 cwd=Path("/repo"),
@@ -168,7 +168,7 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
     assert failure.code == "validation_failed"
 
 
-def test_initialize_project_service_run_default_builds_dependencies() -> None:
+def test_initialize_project_service_run_builds_dependencies() -> None:
     captured: dict[str, object] = {}
 
     def fake_build_config(*_args: object, **_kwargs: object) -> ProjectConfig:
@@ -183,15 +183,15 @@ def test_initialize_project_service_run_default_builds_dependencies() -> None:
     def fake_confirm_choice(_text: str, _default: bool = False) -> bool:
         return False
 
-    def fake_run(
+    def fake_call(
         self: InitializeProjectService, request: InitializeProjectRequest
     ) -> ServiceFailure:
         captured["service"] = self
         captured["request"] = request
         return ServiceFailure(code="forced_failure", message="forced")
 
-    with patch.object(InitializeProjectService, "run", new=fake_run):
-        result = InitializeProjectService.run_default(
+    with patch.object(InitializeProjectService, "__call__", new=fake_call):
+        result = InitializeProjectService.run(
             args=SimpleNamespace(yes=False),
             cwd=Path("/repo"),
             stdin_isatty=True,
