@@ -18,7 +18,18 @@ if [[ -n "${VIRTUAL_ENV:-}" && -z "${UV_PROJECT_ENVIRONMENT:-}" ]]; then
   export UV_PROJECT_ENVIRONMENT="${VIRTUAL_ENV}"
 fi
 
-if ! (cd "${repo_root}" && "${just_bin}" test); then
+if ! (
+  cd "${repo_root}" \
+    && env \
+      -u GIT_DIR \
+      -u GIT_WORK_TREE \
+      -u GIT_INDEX_FILE \
+      -u GIT_OBJECT_DIRECTORY \
+      -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+      -u GIT_COMMON_DIR \
+      -u GIT_PREFIX \
+      "${just_bin}" test
+); then
   cat >&2 <<'EOF'
 pre-push: test gate failed.
 pre-push: run 'just test', fix failures, then retry push.

@@ -192,6 +192,33 @@ SCRIPT
   assert_equals 0 "${guidance_present}"
 }
 
+test_pre_push_unsets_git_repo_context_for_test_gate() {
+  TMP_REPO="$(create_temp_repo)"
+
+  local fake_just git_dir git_work_tree
+  fake_just="${TMP_REPO}/fake-just.sh"
+  git_dir="$(git -C "${TMP_REPO}" rev-parse --path-format=absolute --git-dir)"
+  git_work_tree="$(git -C "${TMP_REPO}" rev-parse --show-toplevel)"
+
+  cat > "${fake_just}" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${GIT_DIR:-}" ]]; then
+  exit 12
+fi
+if [[ -n "${GIT_WORK_TREE:-}" ]]; then
+  exit 13
+fi
+SCRIPT
+  chmod +x "${fake_just}"
+
+  GIT_DIR="${git_dir}" \
+    GIT_WORK_TREE="${git_work_tree}" \
+    ATELIER_JUST_BIN="${fake_just}" \
+    "${TMP_REPO}/.githooks/pre-push" origin git@example.com/repo.git >/dev/null 2>&1
+  assert_equals 0 "$?"
+}
+
 test_post_checkout_repairs_hookspath_from_worktree() {
   TMP_REPO="$(create_temp_repo)"
   "${TMP_REPO}/.githooks/worktree-bootstrap.sh" >/dev/null 2>&1
