@@ -361,9 +361,12 @@ def handle_pushed_without_pr(
                 pr_payload = lookup_pr_payload(repo_slug, work_branch)
                 lookup_error = None
                 if pr_payload is None:
-                    _payload_check, lookup_error = lookup_pr_payload_diagnostic(
+                    payload_check, lookup_error = lookup_pr_payload_diagnostic(
                         repo_slug, work_branch
                     )
+                    if payload_check is not None:
+                        pr_payload = payload_check
+                        lookup_error = None
                 if pr_payload:
                     set_changeset_review_pending_state(
                         changeset_id=changeset_id,
@@ -398,7 +401,10 @@ def handle_pushed_without_pr(
             pr_payload = lookup_pr_payload(repo_slug, work_branch)
             lookup_error = None
             if pr_payload is None:
-                _payload_check, lookup_error = lookup_pr_payload_diagnostic(repo_slug, work_branch)
+                payload_check, lookup_error = lookup_pr_payload_diagnostic(repo_slug, work_branch)
+                if payload_check is not None:
+                    pr_payload = payload_check
+                    lookup_error = None
             if pr_payload:
                 set_changeset_review_pending_state(
                     changeset_id=changeset_id,

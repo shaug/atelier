@@ -53,7 +53,10 @@ def recover_premature_merged_changeset(
     payload = lookup_pr_payload(repo_slug, work_branch)
     lookup_error = None
     if payload is None:
-        _payload_check, lookup_error = lookup_pr_payload_diagnostic(repo_slug, work_branch)
+        payload_check, lookup_error = lookup_pr_payload_diagnostic(repo_slug, work_branch)
+        if payload_check is not None:
+            payload = payload_check
+            lookup_error = None
     if lookup_error:
         atelier_log.warning(
             "changeset="

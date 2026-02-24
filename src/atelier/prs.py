@@ -198,9 +198,20 @@ def _find_latest_pr_number(repo: str, head: str) -> int | None:
     return numbers[-1] if numbers else None
 
 
-def lookup_github_pr_status(repo: str, head: str) -> GithubPrLookup:
-    """Return explicit GitHub PR lookup outcome for a head branch."""
+def lookup_github_pr_status(repo: str, head: str, *, refresh: bool = False) -> GithubPrLookup:
+    """Return explicit GitHub PR lookup outcome for a head branch.
+
+    Args:
+        repo: GitHub owner/repo slug.
+        head: Head branch name used for lookup.
+        refresh: When ``True``, bypass any cached lookup for this branch.
+
+    Returns:
+        Lookup outcome for the requested head branch.
+    """
     cache_key = (repo, head)
+    if refresh:
+        _PR_LOOKUP_CACHE.pop(cache_key, None)
     cached = _PR_LOOKUP_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -252,9 +263,20 @@ def lookup_github_pr_status(repo: str, head: str) -> GithubPrLookup:
     return result
 
 
-def read_github_pr_status(repo: str, head: str) -> dict[str, object] | None:
-    """Return GitHub PR metadata for a head branch when available."""
-    lookup = lookup_github_pr_status(repo, head)
+def read_github_pr_status(
+    repo: str, head: str, *, refresh: bool = False
+) -> dict[str, object] | None:
+    """Return GitHub PR metadata for a head branch when available.
+
+    Args:
+        repo: GitHub owner/repo slug.
+        head: Head branch name used for lookup.
+        refresh: When ``True``, bypass any cached lookup for this branch.
+
+    Returns:
+        PR payload when found, otherwise ``None``.
+    """
+    lookup = lookup_github_pr_status(repo, head, refresh=refresh)
     if lookup.found:
         return lookup.payload
     return None
