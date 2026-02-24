@@ -396,6 +396,7 @@ def test_run_startup_contract_skips_non_claimable_review_feedback_epic() -> None
 
 def test_run_startup_contract_skips_planner_owned_epic_for_review_feedback() -> None:
     select_calls: list[str] = []
+    emitted: list[str] = []
 
     def select_review_feedback_changeset(
         *, epic_id: str, repo_slug: str | None
@@ -419,11 +420,20 @@ def test_run_startup_contract_skips_planner_owned_epic_for_review_feedback() -> 
             }
         ],
         select_review_feedback_changeset=select_review_feedback_changeset,
+        emit=emitted.append,
     )
 
     assert result.should_exit is True
     assert result.reason == "no_eligible_epics"
     assert select_calls == []
+    assert any(
+        "Skipping review-feedback candidate due to ownership policy: at-planner" in line
+        for line in emitted
+    )
+    assert any("Review-feedback ownership-policy blockers: at-planner" in line for line in emitted)
+    assert any(
+        "Remediation: reassign blocked epic(s) from planner to a worker" in line for line in emitted
+    )
 
 
 def test_run_startup_contract_selects_stale_reclaimable_review_feedback() -> None:

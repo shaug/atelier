@@ -453,6 +453,7 @@ def run_startup_contract_service(
 
     issues = service.list_epics()
     actionable_cache: dict[str, bool] = {}
+    review_feedback_ownership_blockers: set[str] = set()
 
     def epic_has_actionable_changeset(epic_id: str) -> bool:
         cached = actionable_cache.get(epic_id)
@@ -546,6 +547,22 @@ def run_startup_contract_service(
             return False
         assignee = issue.get("assignee")
         if isinstance(assignee, str) and assignee.strip():
+            if (
+                "review-feedback" in stage
+                and worker_selection.is_planner_agent_id(assignee)
+                and epic_id not in review_feedback_ownership_blockers
+            ):
+                review_feedback_ownership_blockers.add(epic_id)
+                service.emit(
+                    "Skipping review-feedback candidate due to ownership policy: "
+                    f"{epic_id} is assigned to planner ({assignee}). "
+                    "Reassign to a worker and rerun startup."
+                )
+                atelier_log.warning(
+                    "startup review-feedback blocker "
+                    f"epic={epic_id} reason=planner_owned assignee={assignee}"
+                )
+                return False
             if assignee == agent_id:
                 return True
             if stale_reassign_for_epic(epic_id):
@@ -586,7 +603,8 @@ def run_startup_contract_service(
 
     def resume_conflict(selection: MergeConflictSelection) -> StartupContractResult:
         service.emit(
-            f"Prioritizing merge-conflict resolution: {selection.changeset_id} ({selection.epic_id})"
+            "Prioritizing merge-conflict resolution: "
+            f"{selection.changeset_id} ({selection.epic_id})"
         )
         atelier_log.debug(
             "startup selected merge-conflict "
@@ -686,6 +704,18 @@ def run_startup_contract_service(
             if issue_id == hooked_epic:
                 continue
             if worker_selection.has_planner_executable_assignee(issue):
+                assignee = str(issue.get("assignee") or "").strip() or "planner"
+                if issue_id not in review_feedback_ownership_blockers:
+                    review_feedback_ownership_blockers.add(issue_id)
+                    service.emit(
+                        "Skipping review-feedback candidate due to ownership policy: "
+                        f"{issue_id} is assigned to planner ({assignee}). "
+                        "Reassign to a worker and rerun startup."
+                    )
+                    atelier_log.warning(
+                        "startup review-feedback blocker "
+                        f"epic={issue_id} reason=planner_owned assignee={assignee}"
+                    )
                 continue
             if is_excluded(issue_id, stage="review-feedback"):
                 continue
@@ -818,6 +848,13 @@ def run_startup_contract_service(
 
     if selected_epic is None:
         atelier_log.warning("startup found no eligible epics")
+        if review_feedback_ownership_blockers:
+            blocked = ", ".join(sorted(review_feedback_ownership_blockers))
+            service.emit(f"Review-feedback ownership-policy blockers: {blocked}")
+            service.emit(
+                "Remediation: reassign blocked epic(s) from planner to a worker, "
+                "then rerun startup."
+            )
         service.send_needs_decision(
             agent_id=agent_id,
             mode=mode,
