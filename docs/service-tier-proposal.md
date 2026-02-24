@@ -259,6 +259,29 @@ ServiceResult = ServiceSuccess[T] | ServiceFailure
   - `dependency_missing` for unavailable agent tooling
   - `io_failed` for config write / store setup errors
 
+### Golden path example (controller to service result handling)
+
+```python
+def run_init_controller(argv: list[str], deps: InitControllerDeps) -> int:
+    request = parse_init_request(argv)
+    service_request = InitializeProjectRequest(
+        project_root=request.project_root,
+        planner_mode=request.planner_mode,
+        editor=request.editor,
+    )
+
+    result = deps.initialize_project_service.run(service_request)
+    if isinstance(result, ServiceSuccess):
+        render_init_success(result.outcome)
+        return 0
+
+    render_init_failure(code=result.code, message=result.message)
+    return 2
+```
+
+This keeps input parsing in the controller, orchestration in one service, and
+exit behavior as a deterministic mapping from `ServiceResult`.
+
 ### Contract example: worker finalization orchestration
 
 `FinalizeChangesetService` returns:
@@ -278,6 +301,16 @@ Apply the service tier when all are true:
 - flow spans multiple side effects
 - flow has policy gates or lifecycle transitions
 - flow benefits from stable success/error outcomes
+
+Service vs helper decision checklist:
+
+- Does this flow coordinate two or more side-effect boundaries?
+- Does it enforce policy gates or lifecycle transitions?
+- Does caller behavior depend on stable failure codes?
+- Does it orchestrate multiple adapters/ports in sequence?
+
+If two or more checklist answers are yes, prefer a service entrypoint over a
+helper extraction.
 
 Do not apply when any are true:
 
@@ -314,6 +347,17 @@ Deliverables:
 - extract `InitializeProjectService` and config composition service boundary
 - keep `commands/init.py` thin and behavior-compatible
 - add focused tests around service success/failure contracts
+
+Service test levels rubric:
+
+- Service unit tests:
+  - inject fakes for adapters/ports and assert orchestration sequence plus
+    `ServiceSuccess`/`ServiceFailure` mapping.
+- Request/response contract tests:
+  - validate typed request parsing, constraint failures, and stable error codes.
+- Command-level integration tests:
+  - exercise `atelier init` controller wiring to confirm render/exit behavior
+    remains compatible when the service is introduced.
 
 Exit criteria:
 
