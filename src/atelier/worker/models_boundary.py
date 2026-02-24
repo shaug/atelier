@@ -21,14 +21,11 @@ def _clean_str(value: object) -> str | None:
 
 def _is_parent_child_relation(value: object) -> bool:
     if isinstance(value, dict):
-        for key in _PARENT_CHILD_KEYS:
-            relation = value.get(key)
-            if isinstance(relation, str) and _PARENT_CHILD_PATTERN.search(relation.strip()):
-                return True
-        return False
-    if isinstance(value, str):
-        return bool(_PARENT_CHILD_PATTERN.search(value))
-    return False
+        return any(
+            isinstance(relation, str) and bool(_PARENT_CHILD_PATTERN.search(relation.strip()))
+            for relation in (value.get(key) for key in _PARENT_CHILD_KEYS)
+        )
+    return isinstance(value, str) and bool(_PARENT_CHILD_PATTERN.search(value))
 
 
 def _extract_dependency_id(value: object) -> str | None:
