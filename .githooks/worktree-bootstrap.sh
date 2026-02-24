@@ -16,6 +16,7 @@ main() {
   local required_hooks=(
     "${HOOKS_PATH}/worktree-bootstrap.sh"
     "${HOOKS_PATH}/pre-commit"
+    "${HOOKS_PATH}/pre-push"
     "${HOOKS_PATH}/commit-msg"
     "${HOOKS_PATH}/post-checkout"
   )

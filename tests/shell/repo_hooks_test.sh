@@ -17,12 +17,14 @@ create_temp_repo() {
   mkdir -p "${repo}/.githooks"
   cp "${ROOT_DIR}/.githooks/worktree-bootstrap.sh" "${repo}/.githooks/worktree-bootstrap.sh"
   cp "${ROOT_DIR}/.githooks/pre-commit" "${repo}/.githooks/pre-commit"
+  cp "${ROOT_DIR}/.githooks/pre-push" "${repo}/.githooks/pre-push"
   cp "${ROOT_DIR}/.githooks/commit-msg" "${repo}/.githooks/commit-msg"
   cp "${ROOT_DIR}/.githooks/post-checkout" "${repo}/.githooks/post-checkout"
   mkdir -p "${repo}/scripts"
   cp "${ROOT_DIR}/scripts/lint-gate.sh" "${repo}/scripts/lint-gate.sh"
   chmod +x "${repo}/.githooks/worktree-bootstrap.sh" \
     "${repo}/.githooks/pre-commit" \
+    "${repo}/.githooks/pre-push" \
     "${repo}/.githooks/commit-msg" \
     "${repo}/.githooks/post-checkout" \
     "${repo}/scripts/lint-gate.sh"
@@ -47,6 +49,7 @@ test_bootstrap_sets_hookspath_and_exec_bits() {
   TMP_REPO="$(create_temp_repo)"
   chmod -x \
     "${TMP_REPO}/.githooks/pre-commit" \
+    "${TMP_REPO}/.githooks/pre-push" \
     "${TMP_REPO}/.githooks/commit-msg" \
     "${TMP_REPO}/.githooks/post-checkout"
   git -C "${TMP_REPO}" config --unset-all core.hooksPath || true
@@ -58,12 +61,16 @@ test_bootstrap_sets_hookspath_and_exec_bits() {
   hooks_path="$(git -C "${TMP_REPO}" config --local --get core.hooksPath)"
   assert_equals ".githooks" "${hooks_path}"
 
-  local pre_commit_executable commit_msg_executable post_checkout_executable
+  local pre_commit_executable pre_push_executable commit_msg_executable post_checkout_executable
   pre_commit_executable=1
+  pre_push_executable=1
   commit_msg_executable=1
   post_checkout_executable=1
   if [[ -x "${TMP_REPO}/.githooks/pre-commit" ]]; then
     pre_commit_executable=0
+  fi
+  if [[ -x "${TMP_REPO}/.githooks/pre-push" ]]; then
+    pre_push_executable=0
   fi
   if [[ -x "${TMP_REPO}/.githooks/commit-msg" ]]; then
     commit_msg_executable=0
@@ -72,6 +79,7 @@ test_bootstrap_sets_hookspath_and_exec_bits() {
     post_checkout_executable=0
   fi
   assert_equals 0 "${pre_commit_executable}"
+  assert_equals 0 "${pre_push_executable}"
   assert_equals 0 "${commit_msg_executable}"
   assert_equals 0 "${post_checkout_executable}"
 }
@@ -131,6 +139,57 @@ SCRIPT
   expected="--config ${TMP_REPO}/commitlint.config.cjs --edit ${msg_file}"
   actual="$(cat "${args_file}")"
   assert_equals "${expected}" "${actual}"
+}
+
+test_pre_push_runs_just_test_gate() {
+  TMP_REPO="$(create_temp_repo)"
+
+  local fake_just args_file expected actual
+  fake_just="${TMP_REPO}/fake-just.sh"
+  args_file="${TMP_REPO}/just-args.txt"
+
+  cat > "${fake_just}" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s' "$*" > "${ATELIER_TEST_ARGS_FILE}"
+SCRIPT
+  chmod +x "${fake_just}"
+
+  ATELIER_JUST_BIN="${fake_just}" \
+    ATELIER_TEST_ARGS_FILE="${args_file}" \
+    "${TMP_REPO}/.githooks/pre-push" origin git@example.com/repo.git >/dev/null 2>&1
+  assert_equals 0 "$?"
+
+  expected="test"
+  actual="$(cat "${args_file}")"
+  assert_equals "${expected}" "${actual}"
+}
+
+test_pre_push_blocks_on_failing_tests() {
+  TMP_REPO="$(create_temp_repo)"
+
+  local fake_just stderr_file
+  fake_just="${TMP_REPO}/fake-just.sh"
+  stderr_file="${TMP_REPO}/pre-push.err"
+
+  cat > "${fake_just}" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 3
+SCRIPT
+  chmod +x "${fake_just}"
+
+  ATELIER_JUST_BIN="${fake_just}" \
+    "${TMP_REPO}/.githooks/pre-push" origin git@example.com/repo.git \
+    > /dev/null 2> "${stderr_file}"
+  assert_equals 1 "$?"
+
+  local guidance_present
+  guidance_present=1
+  if grep -q "run 'just test'" "${stderr_file}"; then
+    guidance_present=0
+  fi
+  assert_equals 0 "${guidance_present}"
 }
 
 test_post_checkout_repairs_hookspath_from_worktree() {
