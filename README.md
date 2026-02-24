@@ -92,6 +92,25 @@ Canonical lint gate for local/CI workflows:
 bash scripts/lint-gate.sh
 ```
 
+## CI Required Checks
+
+GitHub Actions CI publishes these check names:
+
+- `ci / lint`: lint gate (`bash scripts/lint-gate.sh`).
+- `ci / test`: Python + shell test suite.
+- `ci / lint-test`: temporary compatibility check that mirrors `lint` + `test`.
+
+Branch protection should require `ci / lint` and `ci / test`. Keep
+`ci / lint-test` only during migration from the legacy single check, then remove
+it once rulesets are updated.
+
+Troubleshooting:
+
+- `ci / lint` failed: lint or type checks failed.
+- `ci / test` failed: tests failed.
+- `ci / lint-test` failed while either check above failed: expected legacy
+  mirror behavior.
+
 Bootstrap or repair hooks for an existing clone:
 
 ```sh
