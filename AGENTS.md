@@ -127,8 +127,9 @@ Do not add hidden behavior or implicit defaults.
   - define `Protocol`/typed dataclasses for dependency boundaries
   - pass grouped typed dependencies instead of long untyped parameter lists
   - for discriminated service results, branch on the `success` discriminator
-    (`if result.success is True: ... else: ...`) instead of `isinstance`/type
-    assertion checks
+    (`if result.success:` / `if not result.success:`), avoid
+    `is True`/`is False`, and avoid explicit `return True`/`return False` when a
+    boolean expression can be returned directly
 - Treat CLI/process boundaries as typed contracts:
   - prefer `CommandRequest` + `CommandSpec[T]` + `run_typed(...)` over ad-hoc
     subprocess parsing

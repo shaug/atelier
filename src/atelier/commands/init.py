@@ -7,6 +7,7 @@ writes project configuration, and avoids modifying the repo itself.
 from ..io import die, say
 from ..lib import apply
 from ..services.project import InitializeProjectService
+from ..services.result import ServiceFailure, ServiceSuccess
 
 
 def init_project(args: object) -> None:
@@ -25,8 +26,11 @@ def init_project(args: object) -> None:
         $ atelier init
     """
     result = InitializeProjectService.run(args=args)
-    if result.success is True:
+    if result.success:
+        assert isinstance(result, ServiceSuccess)
         apply(say, result.outcome.messages)
-    else:
-        hint = f"\nHint: {result.recovery_hint}" if result.recovery_hint else ""
-        die(f"init failed ({result.code}): {result.message}{hint}")
+        return
+
+    assert isinstance(result, ServiceFailure)
+    hint = f"\nHint: {result.recovery_hint}" if result.recovery_hint else ""
+    die(f"init failed ({result.code}): {result.message}{hint}")
