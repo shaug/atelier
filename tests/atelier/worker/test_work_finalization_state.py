@@ -306,6 +306,65 @@ def test_changeset_base_branch_persists_lineage_after_dependency_parent_integrat
     assert updates[-1]["parent_base"] == "main-sha"
 
 
+def test_changeset_base_branch_keeps_downstream_stacked_on_frontier_dependency(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-kid.3",
+        "description": (
+            "changeset.root_branch: feat/at-kid\n"
+            "changeset.parent_branch: feat/at-kid\n"
+            "changeset.work_branch: feat/at-kid.3\n"
+            "workspace.parent_branch: main\n"
+        ),
+        "dependencies": ["at-kid.2"],
+    }
+
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "changeset.work_branch: feat/at-kid.2\n"}]
+            if args == ["show", "at-kid.2"]
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "branch_ref_for_lookup",
+        lambda _repo_root, branch, **_kwargs: branch,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_is_ancestor",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_branch_fully_applied",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_rev_parse",
+        lambda _repo_root, ref, **_kwargs: f"{ref}-sha",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_branch_metadata",
+        lambda *_args, **_kwargs: {},
+    )
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert base == "feat/at-kid.2"
+
+
 def test_align_existing_pr_base_rebases_and_retargets(monkeypatch) -> None:
     issue = {
         "description": (
@@ -475,3 +534,38 @@ def test_handle_pushed_without_pr_uses_injected_create_callback_contract(monkeyp
     assert result.continue_running is True
     assert result.reason == "changeset_review_pending"
     assert review_states == ["draft-pr"]
+
+
+def test_changeset_waiting_on_review_prefers_live_pr_over_stale_closed_metadata(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/at-kid\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/at-kid.2\n"
+            "pr_state: closed\n"
+        )
+    }
+
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "lookup_pr_payload",
+        lambda *_args, **_kwargs: {"state": "OPEN", "isDraft": False},
+    )
+
+    waiting = work_finalization_state.changeset_waiting_on_review_or_signals(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        branch_pr=True,
+        branch_pr_strategy="sequential",
+        git_path="git",
+    )
+
+    assert waiting is True

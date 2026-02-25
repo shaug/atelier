@@ -124,6 +124,73 @@ def test_handle_pushed_without_pr_reports_failure_when_pr_create_fails(
     assert planner_messages and "NEEDS-DECISION: PR creation failed" in planner_messages[0]
 
 
+def test_handle_pushed_without_pr_keeps_deeper_dependency_gated(monkeypatch) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-root\n"
+            "changeset.root_branch: feature-root\n"
+            "changeset.work_branch: feature-kid-3\n"
+        ),
+        "dependencies": ["at-kid.2"],
+    }
+    marked: list[str] = []
+    observed_states: list[str] = []
+
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "changeset.work_branch: feature-kid-2\n"}]
+            if args == ["show", "at-kid.2"]
+            else []
+        ),
+    )
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "update_changeset_review",
+        lambda _changeset_id, metadata, **_kwargs: observed_states.append(
+            str(metadata.pr_state or "")
+        ),
+    )
+
+    result = pr_gate.handle_pushed_without_pr(
+        issue=issue,
+        changeset_id="at-kid.3",
+        agent_id="atelier/worker/codex/p1",
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        beads_root=Path("/beads"),
+        branch_pr_strategy="sequential",
+        git_path="git",
+        create_as_draft=True,
+        changeset_base_branch=lambda *_args, **_kwargs: "main",
+        changeset_work_branch=lambda _issue: "feature-kid-3",
+        render_changeset_pr_body=lambda _issue: "summary",
+        lookup_pr_payload=lambda _repo_slug, branch: (
+            {"state": "OPEN", "isDraft": False} if branch == "feature-kid-2" else None
+        ),
+        lookup_pr_payload_diagnostic=lambda *_args, **_kwargs: (None, None),
+        mark_changeset_in_progress=lambda *_args, **_kwargs: marked.append("in_progress"),
+        send_planner_notification=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("planner notification should not be sent")
+        ),
+        update_changeset_review_from_pr=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("no PR payload should be applied")
+        ),
+        emit=lambda _message: None,
+        attempt_create_pr_fn=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("PR creation should stay gated for downstream changesets")
+        ),
+    )
+
+    assert result.finalize_result.continue_running is True
+    assert result.finalize_result.reason == "changeset_review_pending"
+    assert result.detail == "blocked:pr-open"
+    assert marked == ["in_progress"]
+    assert observed_states == ["pushed"]
+
+
 def test_changeset_pr_creation_decision_resolves_collapsed_dependency_parent(monkeypatch) -> None:
     issue = {
         "description": (

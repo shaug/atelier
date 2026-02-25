@@ -567,6 +567,136 @@ def test_status_sequential_collapses_transitive_duplicate_dependency_parents() -
         assert by_id["cs-3"]["pr_gate_reason"] == "blocked:pr-open"
 
 
+def test_status_at_kid_dag_allows_only_frontier_changeset_after_parent_merge() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        project_config = config.ProjectConfig.model_validate(
+            {"project": {"enlistment": str(repo_root), "origin": "github.com/org/repo"}}
+        )
+        epic = {
+            "id": "at-kid",
+            "title": "at-kid",
+            "status": "open",
+            "labels": ["at:epic"],
+            "description": "workspace.pr_strategy: sequential\n",
+        }
+        changesets = [
+            {
+                "id": "at-kid.1",
+                "title": "Parent",
+                "labels": ["at:changeset", "cs:merged"],
+                "description": "changeset.work_branch: feat/at-kid.1\n",
+            },
+            {
+                "id": "at-kid.2",
+                "title": "Frontier",
+                "labels": ["at:changeset", "cs:in_progress"],
+                "description": (
+                    "changeset.root_branch: feat/at-kid\n"
+                    "changeset.parent_branch: feat/at-kid\n"
+                    "changeset.work_branch: feat/at-kid.2\n"
+                ),
+                "dependencies": ["at-kid.1"],
+            },
+            {
+                "id": "at-kid.3",
+                "title": "Downstream",
+                "labels": ["at:changeset", "cs:in_progress"],
+                "description": (
+                    "changeset.root_branch: feat/at-kid\n"
+                    "changeset.parent_branch: feat/at-kid\n"
+                    "changeset.work_branch: feat/at-kid.3\n"
+                ),
+                "dependencies": ["at-kid.2"],
+            },
+        ]
+
+        def fake_run_bd_json(
+            args: list[str], *, beads_root: Path, cwd: Path
+        ) -> list[dict[str, object]]:
+            if args[:3] == ["list", "--label", "at:epic"]:
+                return [epic]
+            if args[:3] == ["list", "--label", "at:agent"]:
+                return []
+            if args[:3] == ["list", "--label", "at:message"]:
+                return []
+            if args and args[0] == "list" and "--parent" in args:
+                return list(changesets)
+            if args and args[0] == "ready" and "--parent" in args:
+                return []
+            return []
+
+        def fake_load_mapping(path: Path) -> WorktreeMapping | None:
+            if path.name == "at-kid.json":
+                return WorktreeMapping(
+                    epic_id="at-kid",
+                    worktree_path="worktrees/at-kid",
+                    root_branch="feat/at-kid",
+                    changesets={
+                        "at-kid.1": "feat/at-kid.1",
+                        "at-kid.2": "feat/at-kid.2",
+                        "at-kid.3": "feat/at-kid.3",
+                    },
+                    changeset_worktrees={},
+                )
+            return None
+
+        def fake_pr_payload(_repo_slug: str, branch: str) -> dict[str, object] | None:
+            if branch == "feat/at-kid.1":
+                return {
+                    "state": "MERGED",
+                    "mergedAt": "2026-02-25T00:00:00Z",
+                    "isDraft": False,
+                }
+            if branch == "feat/at-kid.2":
+                return {"state": "OPEN", "isDraft": False}
+            return None
+
+        with (
+            patch(
+                "atelier.commands.status.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, str(repo_root), repo_root),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_command",
+                return_value=DummyResult(),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_json",
+                side_effect=fake_run_bd_json,
+            ),
+            patch(
+                "atelier.commands.status.worktrees.load_mapping",
+                side_effect=fake_load_mapping,
+            ),
+            patch(
+                "atelier.commands.status.git.git_ref_exists",
+                return_value=True,
+            ),
+            patch(
+                "atelier.commands.status.prs.read_github_pr_status",
+                side_effect=fake_pr_payload,
+            ),
+        ):
+            buffer = io.StringIO()
+            with patch("sys.stdout", buffer):
+                status_cmd(SimpleNamespace(format="json"))
+
+        payload = json.loads(buffer.getvalue())
+        details = payload["epics"][0]["changeset_details"]
+        by_id = {detail["id"]: detail for detail in details}
+
+        assert by_id["at-kid.2"]["pr_allowed"] is True
+        assert by_id["at-kid.2"]["pr_gate_reason"] == "parent:merged"
+        assert by_id["at-kid.3"]["pr_allowed"] is False
+        assert by_id["at-kid.3"]["pr_gate_reason"] == "blocked:pr-open"
+
+
 def test_status_marks_stale_sessions_and_reclaimable_epics() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
