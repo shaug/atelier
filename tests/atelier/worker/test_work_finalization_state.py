@@ -246,6 +246,66 @@ def test_changeset_base_branch_promotes_to_workspace_parent_after_integration(mo
     assert base == "main"
 
 
+def test_changeset_base_branch_persists_lineage_after_dependency_parent_integration(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.2",
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: feat/root\n"
+            "changeset.work_branch: feat/work\n"
+            "workspace.parent_branch: main\n"
+        ),
+        "dependencies": ["at-epic.1"],
+    }
+    updates: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "changeset.work_branch: feat/parent\n"}]
+            if args == ["show", "at-epic.1"]
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "branch_ref_for_lookup",
+        lambda _repo_root, branch, **_kwargs: branch,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_is_ancestor",
+        lambda _repo, ancestor, descendant, **_kwargs: (
+            ancestor == "feat/parent" and descendant == "main"
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_rev_parse",
+        lambda _repo_root, ref, **_kwargs: f"{ref}-sha",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_branch_metadata",
+        lambda *_args, **kwargs: updates.append(kwargs),
+    )
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert base == "main"
+    assert updates
+    assert updates[-1]["parent_branch"] == "main"
+    assert updates[-1]["parent_base"] == "main-sha"
+
+
 def test_align_existing_pr_base_rebases_and_retargets(monkeypatch) -> None:
     issue = {
         "description": (
