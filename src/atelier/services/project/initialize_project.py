@@ -11,6 +11,12 @@ from ... import agent_home, beads, config, external_registry, git, paths, policy
 from ...io import confirm, select
 from ...models import ProjectConfig
 from ..base import BaseService
+from ..errors import (
+    ExternalCommandFailedError,
+    IoFailedError,
+    ServiceFailure,
+    UnexpectedStateError,
+)
 from .compose_project_config import ComposeProjectConfigRequest, ComposeProjectConfigService
 from .resolve_external_provider import (
     ProviderChooser,
@@ -168,8 +174,18 @@ class InitializeProjectService(BaseService[InitializeProjectRequest, InitializeP
         messages.extend(provider.messages)
 
         messages.append("Writing project configuration...")
-        config.write_project_config(config_path, payload)
-        project.ensure_project_scaffold(project_dir)
+        try:
+            config.write_project_config(config_path, payload)
+            project.ensure_project_scaffold(project_dir)
+        except ServiceFailure:
+            raise
+        except OSError as exc:
+            raise IoFailedError(
+                "failed to persist project configuration",
+                recovery_hint=self._exception_hint(exc),
+            ) from exc
+        except Exception as exc:
+            raise UnexpectedStateError("failed to persist project configuration") from exc
 
         beads_root = config.resolve_beads_root(project_dir, Path(enlistment))
         messages.extend(
@@ -179,16 +195,36 @@ class InitializeProjectService(BaseService[InitializeProjectRequest, InitializeP
                 "Ensuring Beads issue types...",
             )
         )
-        beads.ensure_atelier_store(beads_root=beads_root, cwd=project_dir)
-        beads.ensure_atelier_issue_prefix(beads_root=beads_root, cwd=project_dir)
-        beads.run_bd_command(["prime"], beads_root=beads_root, cwd=project_dir)
-        beads.ensure_atelier_types(beads_root=beads_root, cwd=project_dir)
+        try:
+            beads.ensure_atelier_store(beads_root=beads_root, cwd=project_dir)
+            beads.ensure_atelier_issue_prefix(beads_root=beads_root, cwd=project_dir)
+            beads.run_bd_command(["prime"], beads_root=beads_root, cwd=project_dir)
+            beads.ensure_atelier_types(beads_root=beads_root, cwd=project_dir)
+        except ServiceFailure:
+            raise
+        except OSError as exc:
+            raise IoFailedError(
+                "failed to prepare Beads store",
+                recovery_hint=self._exception_hint(exc),
+            ) from exc
+        except SystemExit as exc:
+            raise ExternalCommandFailedError(
+                "failed to run Beads initialization command",
+                recovery_hint=self._exception_hint(exc),
+            ) from exc
+        except Exception as exc:
+            raise UnexpectedStateError("failed to prepare Beads store") from exc
 
         if not request.yes and self._confirm_choice("Add project-wide policy for agents?", False):
             self._update_policy(payload, request.cwd, beads_root, project_dir)
 
         messages.append("Initialized Atelier project")
         return InitializeProjectOutcome(project_dir, config_path, payload, tuple(messages))
+
+    @staticmethod
+    def _exception_hint(exc: BaseException) -> str | None:
+        detail = str(exc).strip()
+        return detail or None
 
     def _update_policy(
         self, payload: ProjectConfig, cwd: Path, beads_root: Path, beads_cwd: Path

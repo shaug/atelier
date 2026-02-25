@@ -8,7 +8,13 @@ import pytest
 
 from atelier.external_registry import PlannerProviderResolution
 from atelier.models import ProjectConfig, ProjectSection
-from atelier.services import ServiceFailure, UnexpectedStateError, ValidationFailedError
+from atelier.services import (
+    ExternalCommandFailedError,
+    IoFailedError,
+    ServiceFailure,
+    UnexpectedStateError,
+    ValidationFailedError,
+)
 from atelier.services.project import (
     ComposeProjectConfigOutcome,
     ComposeProjectConfigRequest,
@@ -210,6 +216,112 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
                 )
             )
     assert exc_info.value.code == "validation_failed"
+
+
+def test_initialize_project_service_maps_boundary_failures_to_stable_service_errors() -> None:
+    payload = ProjectConfig(project=ProjectSection(origin="github.com/acme/widgets"))
+    compose_service = SimpleNamespace(
+        run=lambda _request: ComposeProjectConfigOutcome(payload=payload)
+    )
+    provider_service = SimpleNamespace(
+        run=lambda _request: ResolveExternalProviderOutcome(
+            payload=payload,
+            selected_provider="github",
+            messages=(),
+        )
+    )
+
+    request = InitializeProjectRequest(
+        args=InitProjectArgs(yes=True),
+        cwd=Path("/repo"),
+        stdin_isatty=False,
+        stdout_isatty=False,
+    )
+
+    def run_service(
+        *,
+        write_side_effect: Exception | None = None,
+        scaffold_side_effect: Exception | None = None,
+        beads_side_effect: BaseException | None = None,
+    ) -> None:
+        with (
+            patch(
+                "atelier.services.project.initialize_project.git.resolve_repo_enlistment",
+                return_value=(Path("/repo"), "/repo", None, payload.project.origin),
+            ),
+            patch(
+                "atelier.services.project.initialize_project.paths.project_dir_for_enlistment",
+                return_value=Path("/project-data"),
+            ),
+            patch(
+                "atelier.services.project.initialize_project.paths.project_config_path",
+                return_value=Path("/project-data/config.json"),
+            ),
+            patch(
+                "atelier.services.project.initialize_project.paths.project_config_user_path",
+                return_value=Path("/project-data/config.user.json"),
+            ),
+            patch(
+                "atelier.services.project.initialize_project.config.load_project_config",
+                return_value=None,
+            ),
+            patch(
+                "atelier.services.project.initialize_project.config.load_json", return_value=None
+            ),
+            patch("atelier.services.project.initialize_project.project.ensure_project_dirs"),
+            patch(
+                "atelier.services.project.initialize_project.config.resolve_upgrade_policy",
+                return_value="ask",
+            ),
+            patch(
+                "atelier.services.project.initialize_project.skills.sync_project_skills",
+                return_value=SimpleNamespace(action="up_to_date"),
+            ),
+            patch(
+                "atelier.services.project.initialize_project.config.write_project_config",
+                side_effect=write_side_effect,
+            ),
+            patch(
+                "atelier.services.project.initialize_project.project.ensure_project_scaffold",
+                side_effect=scaffold_side_effect,
+            ),
+            patch(
+                "atelier.services.project.initialize_project.config.resolve_beads_root",
+                return_value=Path("/project-data/.beads"),
+            ),
+            patch("atelier.services.project.initialize_project.beads.ensure_atelier_store"),
+            patch("atelier.services.project.initialize_project.beads.ensure_atelier_issue_prefix"),
+            patch(
+                "atelier.services.project.initialize_project.beads.run_bd_command",
+                side_effect=beads_side_effect,
+            ),
+            patch("atelier.services.project.initialize_project.beads.ensure_atelier_types"),
+        ):
+            service = InitializeProjectService(
+                compose_config_service=compose_service,
+                resolve_provider_service=provider_service,
+                confirm_choice=lambda _text, _default=False: False,
+            )
+            service(request)
+
+    with pytest.raises(ServiceFailure) as exc_info:
+        run_service(write_side_effect=OSError("disk full"))
+    assert isinstance(exc_info.value, IoFailedError)
+    assert exc_info.value.code == "io_failed"
+    assert isinstance(exc_info.value.__cause__, OSError)
+
+    with pytest.raises(ServiceFailure) as exc_info:
+        run_service(scaffold_side_effect=RuntimeError("boom"))
+    assert isinstance(exc_info.value, UnexpectedStateError)
+    assert exc_info.value.code == "unexpected_state"
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+    with pytest.raises(ServiceFailure) as exc_info:
+        run_service(beads_side_effect=SystemExit("bd failed"))
+    assert isinstance(exc_info.value, ExternalCommandFailedError)
+    assert exc_info.value.code == "external_command_failed"
+    assert exc_info.value.recovery_hint == "bd failed"
+    assert isinstance(exc_info.value.__cause__, SystemExit)
 
 
 def test_initialize_project_service_run_builds_dependencies() -> None:

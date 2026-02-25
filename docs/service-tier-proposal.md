@@ -220,6 +220,12 @@ Failure handling rule:
 
 - Raise `ServiceFailure` for expected domain/policy/runtime failures that
   callers can handle deterministically.
+- At service boundaries, catch non-`ServiceFailure` dependency exceptions and
+  map them to stable failure categories:
+  - map `OSError` to `IoFailedError`
+  - map command/process exits to `ExternalCommandFailedError`
+  - map other unexpected dependency failures to `UnexpectedStateError`
+  - use `raise ... from exc` to preserve causal tracebacks
 - Raise normal exceptions for programmer bugs or invariant violations that
   indicate a defect requiring code changes.
 
