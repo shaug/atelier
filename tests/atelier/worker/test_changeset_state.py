@@ -102,3 +102,23 @@ def test_promote_planned_descendant_changesets_promotes_planned_only() -> None:
 
     assert promoted == ["at-1.1"]
     run_bd_command.assert_called_once()
+
+
+def test_mark_changeset_merged_reconciles_external_tickets() -> None:
+    with (
+        patch("atelier.worker.changeset_state.beads.run_bd_command"),
+        patch(
+            "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
+        ) as reconcile,
+    ):
+        changeset_state.mark_changeset_merged(
+            "at-1.1",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    reconcile.assert_called_once_with(
+        "at-1.1",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )

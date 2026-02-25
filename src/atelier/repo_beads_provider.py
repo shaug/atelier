@@ -42,6 +42,7 @@ class RepoBeadsProvider:
             supports_update=self.allow_write,
             supports_children=False,
             supports_state_sync=True,
+            supports_close=self.allow_write,
         )
 
     def import_tickets(
@@ -147,6 +148,18 @@ class RepoBeadsProvider:
         if not issue_id:
             raise RuntimeError("Failed to create child Beads issue")
         return ExternalTicketRef(provider="beads", ticket_id=issue_id)
+
+    def close_ticket(
+        self,
+        ref: ExternalTicketRef,
+        *,
+        comment: str | None = None,
+    ) -> ExternalTicketRef:
+        del comment  # Not supported by Beads close command.
+        if not self.allow_write:
+            raise RuntimeError("Repo Beads export disabled (allow_write=false)")
+        self._run_bd_command(["close", ref.ticket_id])
+        return self.sync_state(ref)
 
     def sync_state(self, ref: ExternalTicketRef) -> ExternalTicketRef:
         if not self.sync_options.include_state:
