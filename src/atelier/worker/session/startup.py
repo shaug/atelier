@@ -175,7 +175,7 @@ def next_changeset_service(
         issue = target
         issue_id = issue.get("id")
         labels = service.issue_labels(issue)
-        if "at:draft" in labels:
+        if "at:draft" in labels or "at:ready" not in labels:
             return None
         if (
             isinstance(issue_id, str)
@@ -539,6 +539,9 @@ def run_startup_contract_service(
         if "at:draft" in labels:
             atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=draft")
             return False
+        if "at:ready" not in labels:
+            atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=not_ready")
+            return False
         status = str(issue.get("status") or "")
         if status and not worker_selection.is_eligible_status(status, allow_hooked=True):
             atelier_log.debug(
@@ -723,7 +726,7 @@ def run_startup_contract_service(
             if str(status).strip().lower() not in {"open", "ready", "in_progress"}:
                 continue
             labels = worker_selection.issue_labels(issue)
-            if "at:draft" in labels:
+            if "at:draft" in labels or "at:ready" not in labels:
                 continue
             if not is_claimable(issue_id, stage="review-feedback"):
                 continue

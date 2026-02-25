@@ -31,7 +31,7 @@ def render_epics(issues: list[dict[str, object]], *, show_drafts: bool) -> str:
 
     Args:
         issues: Beads epic issue payloads.
-        show_drafts: Include `at:draft` epics when true.
+        show_drafts: Include non-ready epics when true.
 
     Returns:
         Deterministic plain-text listing grouped by epic state buckets.
@@ -136,12 +136,14 @@ def _blocking_dependencies(issue: dict[str, object]) -> list[str]:
 
 
 def _status_bucket(issue: dict[str, object], *, show_drafts: bool) -> str | None:
-    labels = _labels(issue)
-    if "at:draft" in labels:
-        return "draft" if show_drafts else None
     status = _normalize_status(issue.get("status"))
     if status in {"closed", "done"}:
         return None
+    labels = _labels(issue)
+    if "at:draft" in labels and "at:ready" in labels:
+        return "other"
+    if "at:ready" not in labels:
+        return "draft" if show_drafts else None
     if _blocking_dependencies(issue):
         return "blocked"
     if status in {"blocked"}:

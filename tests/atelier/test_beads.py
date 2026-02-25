@@ -193,7 +193,7 @@ def test_claim_epic_allows_expected_takeover() -> None:
 def test_claim_epic_blocks_planner_owned_executable_work() -> None:
     issue = {
         "id": "atelier-9",
-        "labels": ["at:epic", "at:changeset"],
+        "labels": ["at:epic", "at:changeset", "at:ready"],
         "assignee": "atelier/planner/codex/p111",
     }
 
@@ -214,7 +214,7 @@ def test_claim_epic_blocks_planner_owned_executable_work() -> None:
 def test_claim_epic_rejects_planner_claimant_for_executable_work() -> None:
     issue = {
         "id": "atelier-9",
-        "labels": ["at:epic"],
+        "labels": ["at:epic", "at:ready"],
         "assignee": None,
     }
 
@@ -235,10 +235,10 @@ def test_claim_epic_rejects_planner_claimant_for_executable_work() -> None:
 
 
 def test_claim_epic_backfills_epic_label_for_standalone_changeset() -> None:
-    issue = {"id": "at-legacy", "labels": ["at:changeset"], "assignee": None}
+    issue = {"id": "at-legacy", "labels": ["at:changeset", "at:ready"], "assignee": None}
     updated = {
         "id": "at-legacy",
-        "labels": ["at:changeset", "at:epic", "at:hooked"],
+        "labels": ["at:changeset", "at:epic", "at:hooked", "at:ready"],
         "assignee": "agent",
     }
     show_calls = 0
@@ -265,6 +265,42 @@ def test_claim_epic_backfills_epic_label_for_standalone_changeset() -> None:
     assert called_args.count("--add-label") == 2
     assert "at:hooked" in called_args
     assert "at:epic" in called_args
+
+
+def test_claim_epic_requires_explicit_ready_for_executable_work() -> None:
+    issue = {"id": "at-legacy", "labels": ["at:epic"], "assignee": None}
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[issue]),
+        patch("atelier.beads.die", side_effect=RuntimeError("die called")) as die_fn,
+    ):
+        with pytest.raises(RuntimeError, match="die called"):
+            beads.claim_epic(
+                "at-legacy",
+                "agent",
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )
+
+    assert "not marked at:ready" in str(die_fn.call_args.args[0])
+
+
+def test_claim_epic_rejects_legacy_draft_label() -> None:
+    issue = {"id": "at-legacy", "labels": ["at:epic", "at:draft"], "assignee": None}
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[issue]),
+        patch("atelier.beads.die", side_effect=RuntimeError("die called")) as die_fn,
+    ):
+        with pytest.raises(RuntimeError, match="die called"):
+            beads.claim_epic(
+                "at-legacy",
+                "agent",
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )
+
+    assert "legacy at:draft label" in str(die_fn.call_args.args[0])
 
 
 def test_set_agent_hook_updates_description() -> None:

@@ -39,6 +39,16 @@ def has_planner_executable_assignee(issue: dict[str, object]) -> bool:
     return is_planner_agent_id(assignee)
 
 
+def has_executable_identity(issue: dict[str, object]) -> bool:
+    """Return whether an issue represents executable worker work."""
+    return bool(issue_labels(issue).intersection(_EXECUTABLE_LABELS))
+
+
+def has_explicit_ready_label(issue: dict[str, object]) -> bool:
+    """Return whether an issue is explicitly marked ready for execution."""
+    return "at:ready" in issue_labels(issue)
+
+
 def planner_owned_executable_issues(issues: list[dict[str, object]]) -> list[dict[str, object]]:
     return [issue for issue in issues if has_planner_executable_assignee(issue)]
 
@@ -68,8 +78,11 @@ def filter_epics(
             continue
         if has_planner_executable_assignee(issue):
             continue
+        labels = issue_labels(issue)
         if skip_draft:
-            if "at:draft" in issue_labels(issue):
+            if "at:draft" in labels:
+                continue
+            if has_executable_identity(issue) and "at:ready" not in labels:
                 continue
         issue_assignee = issue.get("assignee")
         if assignee is not None:
@@ -140,7 +153,10 @@ def stale_family_assigned_epics(
             continue
         if has_planner_executable_assignee(issue):
             continue
-        if "at:draft" in issue_labels(issue):
+        labels = issue_labels(issue)
+        if "at:draft" in labels:
+            continue
+        if has_executable_identity(issue) and "at:ready" not in labels:
             continue
         assignee = issue.get("assignee")
         if not isinstance(assignee, str) or not assignee or assignee == agent_id:
@@ -174,7 +190,10 @@ def select_epic_from_ready_changesets(
                 candidate = maybe_epic
         candidate_issue = known_epics.get(candidate)
         source_issue = candidate_issue if candidate_issue is not None else changeset
-        if "at:draft" in issue_labels(source_issue):
+        labels = issue_labels(source_issue)
+        if "at:draft" in labels:
+            continue
+        if has_executable_identity(source_issue) and "at:ready" not in labels:
             continue
         if has_planner_executable_assignee(source_issue):
             continue
