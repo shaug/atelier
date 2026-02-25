@@ -184,6 +184,115 @@ def test_run_bd_command_repairs_issue_prefix_without_jsonl_init(tmp_path: Path) 
     assert calls[-1] == ["bd", "list", "--json"]
 
 
+def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "show", "at-2", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout=(
+                    '[{"id":"at-2","status":"open","labels":["at:changeset"],'
+                    '"dependencies":["at-1"]}]'
+                ),
+                stderr="",
+            )
+        if argv == ["bd", "show", "at-1", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='[{"id":"at-1","status":"in_progress","labels":["at:changeset"]}]',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    def fake_die(message: str, code: int = 1) -> None:
+        del code
+        raise RuntimeError(message)
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.die", side_effect=fake_die),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="cannot set changeset at-2 to in_progress: blocking dependencies",
+        ):
+            beads.run_bd_command(
+                ["update", "at-2", "--status", "in_progress"],
+                beads_root=beads_root,
+                cwd=cwd,
+            )
+
+    assert calls == [["bd", "show", "at-2", "--json"], ["bd", "show", "at-1", "--json"]]
+
+
+def test_run_bd_command_allows_changeset_in_progress_when_dependencies_closed(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "show", "at-2", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout=(
+                    '[{"id":"at-2","status":"open","labels":["at:changeset"],'
+                    '"dependencies":["at-1"]}]'
+                ),
+                stderr="",
+            )
+        if argv == ["bd", "show", "at-1", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='[{"id":"at-1","status":"closed","labels":["at:changeset"]}]',
+                stderr="",
+            )
+        if argv == ["bd", "update", "at-2", "--status", "in_progress"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="updated\n",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        result = beads.run_bd_command(
+            ["update", "at-2", "--status", "in_progress"],
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+
+    assert result.returncode == 0
+    assert calls == [
+        ["bd", "show", "at-2", "--json"],
+        ["bd", "show", "at-1", "--json"],
+        ["bd", "update", "at-2", "--status", "in_progress"],
+    ]
+
+
 def test_ensure_agent_bead_returns_existing() -> None:
     existing = {"id": "atelier-1", "title": "agent"}
     with patch("atelier.beads.find_agent_bead", return_value=existing):

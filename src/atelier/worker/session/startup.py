@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ... import changeset_fields
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
@@ -119,18 +118,6 @@ def _dependency_ids(issue: dict[str, object]) -> tuple[str, ...] | None:
     return boundary.dependency_ids
 
 
-def _stacked_lineage_matches(
-    *, dependent_issue: dict[str, object], blocker_issue: dict[str, object]
-) -> bool:
-    dependent_parent = changeset_fields.parent_branch(dependent_issue)
-    blocker_work = changeset_fields.work_branch(blocker_issue)
-    return (
-        isinstance(dependent_parent, str)
-        and isinstance(blocker_work, str)
-        and dependent_parent == blocker_work
-    )
-
-
 def _dependencies_satisfied(
     *,
     issue: dict[str, object],
@@ -139,6 +126,7 @@ def _dependencies_satisfied(
     context: NextChangesetContext,
     service: NextChangesetService,
 ) -> bool:
+    del context
     dependency_ids = _dependency_ids(issue)
     if dependency_ids is None:
         return False
@@ -153,17 +141,7 @@ def _dependencies_satisfied(
             return False
         if _is_terminal(blocker_issue):
             continue
-        if dependency_id not in epic_changesets_by_id:
-            return False
-        if not _stacked_lineage_matches(dependent_issue=issue, blocker_issue=blocker_issue):
-            return False
-        if not service.changeset_has_review_handoff_signal(
-            blocker_issue,
-            repo_slug=context.repo_slug,
-            branch_pr=context.branch_pr,
-            git_path=context.git_path,
-        ):
-            return False
+        return False
     return True
 
 
@@ -202,6 +180,23 @@ def next_changeset_service(
                 )
             )
         ):
+            descendants = service.list_descendant_changesets(
+                context.epic_id,
+                include_closed=True,
+            )
+            descendants_by_id = {
+                descendant_id: descendant
+                for descendant in descendants
+                if (descendant_id := _issue_id(descendant)) is not None
+            }
+            if not _dependencies_satisfied(
+                issue=issue,
+                epic_changesets_by_id=descendants_by_id,
+                dependency_cache={},
+                context=context,
+                service=service,
+            ):
+                return None
             if not service.has_open_descendant_changesets(context.epic_id):
                 return issue
         status = str(issue.get("status") or "").strip().lower()
