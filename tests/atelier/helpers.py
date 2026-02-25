@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -25,20 +24,32 @@ def enlistment_path_for(path: Path) -> str:
     return str(path.resolve())
 
 
-def make_init_args(**overrides: object) -> SimpleNamespace:
+def make_init_args(**overrides: object):
+    from atelier.services.project import InitProjectArgs
+
     data = {
         "branch_prefix": None,
         "branch_pr_mode": None,
-        "branch_pr": None,
         "branch_history": None,
         "branch_squash_message": None,
         "branch_pr_strategy": None,
         "agent": None,
         "editor_edit": None,
         "editor_work": None,
+        "yes": False,
     }
-    data.update(overrides)
-    return SimpleNamespace(**data)
+    data = {**data, **overrides}
+    return InitProjectArgs(
+        branch_prefix=data.get("branch_prefix"),
+        branch_pr_mode=data.get("branch_pr_mode"),
+        branch_history=data.get("branch_history"),
+        branch_squash_message=data.get("branch_squash_message"),
+        branch_pr_strategy=data.get("branch_pr_strategy"),
+        agent=data.get("agent"),
+        editor_edit=data.get("editor_edit"),
+        editor_work=data.get("editor_work"),
+        yes=bool(data.get("yes", False)),
+    )
 
 
 class DummyResult:

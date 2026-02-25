@@ -326,7 +326,7 @@ def init_command(
         $ atelier init --branch-prefix scott/ --branch-history rebase
     """
     init_cmd.init_project(
-        SimpleNamespace(
+        init_cmd.InitProjectArgs(
             branch_prefix=branch_prefix,
             branch_pr_mode=branch_pr_mode,
             branch_history=branch_history,

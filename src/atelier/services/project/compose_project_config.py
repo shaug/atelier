@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ... import config
 from ...models import ProjectConfig
-from ..result import ServiceFailure, ServiceResult, ServiceSuccess
+from ..errors import ValidationFailedError
 
 BuildProjectConfig = Callable[..., ProjectConfig]
 
@@ -33,11 +33,9 @@ class ComposeProjectConfigService:
     def __init__(self, *, build_config: BuildProjectConfig = config.build_project_config) -> None:
         self._build_config = build_config
 
-    def run(
-        self, request: ComposeProjectConfigRequest
-    ) -> ServiceResult[ComposeProjectConfigOutcome]:
+    def run(self, request: ComposeProjectConfigRequest) -> ComposeProjectConfigOutcome:
         if not request.enlistment_path.strip():
-            return ServiceFailure("validation_failed", "enlistment_path must not be empty")
+            raise ValidationFailedError("enlistment_path must not be empty")
         try:
             payload = self._build_config(
                 request.existing,
@@ -50,10 +48,8 @@ class ComposeProjectConfigService:
                 allow_editor_empty=request.allow_editor_empty,
             )
         except SystemExit as exc:
-            return ServiceFailure(
-                "validation_failed",
+            raise ValidationFailedError(
                 "project config validation failed",
                 recovery_hint=str(exc).strip() or None,
-                exception=exc,
-            )
-        return ServiceSuccess(ComposeProjectConfigOutcome(payload=payload))
+            ) from exc
+        return ComposeProjectConfigOutcome(payload=payload)

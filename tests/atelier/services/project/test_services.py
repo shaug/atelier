@@ -4,14 +4,19 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from atelier.external_registry import PlannerProviderResolution
 from atelier.models import ProjectConfig, ProjectSection
-from atelier.services import ServiceFailure, ServiceSuccess
+from atelier.services import ServiceFailure, UnexpectedStateError, ValidationFailedError
 from atelier.services.project import (
+    ComposeProjectConfigOutcome,
     ComposeProjectConfigRequest,
     ComposeProjectConfigService,
     InitializeProjectRequest,
     InitializeProjectService,
+    InitProjectArgs,
+    ResolveExternalProviderOutcome,
     ResolveExternalProviderRequest,
     ResolveExternalProviderService,
 )
@@ -19,54 +24,51 @@ from atelier.services.project import (
 
 def test_compose_and_provider_contract_failures() -> None:
     compose = ComposeProjectConfigService(build_config=lambda *args, **kwargs: ProjectConfig())
-    compose_result = compose.run(
-        ComposeProjectConfigRequest(
-            existing={}, enlistment_path=" ", origin=None, origin_raw=None, args=None
+    with pytest.raises(ServiceFailure) as exc_info:
+        compose.run(
+            ComposeProjectConfigRequest(
+                existing={}, enlistment_path=" ", origin=None, origin_raw=None, args=None
+            )
         )
-    )
-    assert isinstance(compose_result, ServiceFailure)
-    assert compose_result.success is False
-    assert compose_result.code == "validation_failed"
+    assert exc_info.value.code == "validation_failed"
 
     provider = ResolveExternalProviderService(
         resolve_provider=lambda *args, **kwargs: PlannerProviderResolution(None, (), None),
         choose_provider=lambda _text, options, _default: options[0],
         confirm_choice=lambda _text, _default: False,
     )
-    provider_result = provider.run(
-        ResolveExternalProviderRequest(
-            payload=ProjectConfig(),
-            repo_root=Path("/repo"),
-            agent_name=" ",
-            project_data_dir=Path("/project-data"),
-            stdin_isatty=False,
-            stdout_isatty=False,
+    with pytest.raises(ServiceFailure) as exc_info:
+        provider.run(
+            ResolveExternalProviderRequest(
+                payload=ProjectConfig(),
+                repo_root=Path("/repo"),
+                agent_name=" ",
+                project_data_dir=Path("/project-data"),
+                stdin_isatty=False,
+                stdout_isatty=False,
+            )
         )
-    )
-    assert isinstance(provider_result, ServiceFailure)
-    assert provider_result.success is False
-    assert provider_result.code == "validation_failed"
+    assert exc_info.value.code == "validation_failed"
 
 
 def test_compose_and_provider_failures_capture_system_exit_exception() -> None:
     compose = ComposeProjectConfigService(
         build_config=lambda *args, **kwargs: (_ for _ in ()).throw(SystemExit("compose failed"))
     )
-    compose_result = compose.run(
-        ComposeProjectConfigRequest(
-            existing={},
-            enlistment_path="/repo",
-            origin=None,
-            origin_raw=None,
-            args=None,
+    with pytest.raises(ServiceFailure) as exc_info:
+        compose.run(
+            ComposeProjectConfigRequest(
+                existing={},
+                enlistment_path="/repo",
+                origin=None,
+                origin_raw=None,
+                args=None,
+            )
         )
-    )
-    assert isinstance(compose_result, ServiceFailure)
-    assert compose_result.success is False
-    assert compose_result.code == "validation_failed"
-    assert compose_result.message == "project config validation failed"
-    assert compose_result.recovery_hint == "compose failed"
-    assert isinstance(compose_result.exception, SystemExit)
+    assert exc_info.value.code == "validation_failed"
+    assert str(exc_info.value) == "project config validation failed"
+    assert exc_info.value.recovery_hint == "compose failed"
+    assert isinstance(exc_info.value.__cause__, SystemExit)
 
     provider = ResolveExternalProviderService(
         resolve_provider=lambda *args, **kwargs: (_ for _ in ()).throw(
@@ -75,38 +77,36 @@ def test_compose_and_provider_failures_capture_system_exit_exception() -> None:
         choose_provider=lambda _text, options, _default: options[0],
         confirm_choice=lambda _text, _default: False,
     )
-    provider_result = provider.run(
-        ResolveExternalProviderRequest(
-            payload=ProjectConfig(),
-            repo_root=Path("/repo"),
-            agent_name="planner",
-            project_data_dir=Path("/project-data"),
-            stdin_isatty=False,
-            stdout_isatty=False,
+    with pytest.raises(ServiceFailure) as exc_info:
+        provider.run(
+            ResolveExternalProviderRequest(
+                payload=ProjectConfig(),
+                repo_root=Path("/repo"),
+                agent_name="planner",
+                project_data_dir=Path("/project-data"),
+                stdin_isatty=False,
+                stdout_isatty=False,
+            )
         )
-    )
-    assert isinstance(provider_result, ServiceFailure)
-    assert provider_result.success is False
-    assert provider_result.code == "validation_failed"
-    assert provider_result.message == "provider resolution failed"
-    assert provider_result.recovery_hint == "provider failed"
-    assert isinstance(provider_result.exception, SystemExit)
+    assert exc_info.value.code == "validation_failed"
+    assert str(exc_info.value) == "provider resolution failed"
+    assert exc_info.value.recovery_hint == "provider failed"
+    assert isinstance(exc_info.value.__cause__, SystemExit)
 
 
 def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
     payload = ProjectConfig(project=ProjectSection(origin="github.com/acme/widgets"))
     compose_service = SimpleNamespace(
-        run=lambda _request: ServiceSuccess(SimpleNamespace(payload=payload))
+        run=lambda _request: ComposeProjectConfigOutcome(payload=payload)
     )
     provider_service = SimpleNamespace(
-        run=lambda _request: ServiceSuccess(
-            SimpleNamespace(
-                payload=payload,
-                messages=(
-                    "Selected external provider: github",
-                    "Default auto-export for new epics/changesets: disabled",
-                ),
-            )
+        run=lambda _request: ResolveExternalProviderOutcome(
+            payload=payload,
+            selected_provider="github",
+            messages=(
+                "Selected external provider: github",
+                "Default auto-export for new epics/changesets: disabled",
+            ),
         )
     )
 
@@ -154,24 +154,23 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
         patch("atelier.services.project.initialize_project.beads.run_bd_command"),
         patch("atelier.services.project.initialize_project.beads.ensure_atelier_types"),
     ):
-        success = InitializeProjectService(
+        service = InitializeProjectService(
             compose_config_service=compose_service,
             resolve_provider_service=provider_service,
             confirm_choice=confirm_choice,
-        )(
+        )
+        outcome = service(
             InitializeProjectRequest(
-                args=SimpleNamespace(yes=True),
+                args=InitProjectArgs(yes=True),
                 cwd=Path("/repo"),
                 stdin_isatty=False,
                 stdout_isatty=False,
             )
         )
-    assert isinstance(success, ServiceSuccess)
-    assert success.success is True
-    assert success.outcome.messages[-1] == "Initialized Atelier project"
+    assert outcome.messages[-1] == "Initialized Atelier project"
 
     failing = SimpleNamespace(
-        run=lambda _request: ServiceFailure(code="validation_failed", message="bad config")
+        run=lambda _request: (_ for _ in ()).throw(ValidationFailedError("bad config"))
     )
     with (
         patch(
@@ -196,21 +195,21 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
         ),
         patch("atelier.services.project.initialize_project.config.load_json", return_value=None),
     ):
-        failure = InitializeProjectService(
+        service = InitializeProjectService(
             compose_config_service=failing,
             resolve_provider_service=provider_service,
             confirm_choice=confirm_choice,
-        )(
-            InitializeProjectRequest(
-                args=SimpleNamespace(yes=True),
-                cwd=Path("/repo"),
-                stdin_isatty=False,
-                stdout_isatty=False,
-            )
         )
-    assert isinstance(failure, ServiceFailure)
-    assert failure.success is False
-    assert failure.code == "validation_failed"
+        with pytest.raises(ServiceFailure) as exc_info:
+            service(
+                InitializeProjectRequest(
+                    args=InitProjectArgs(yes=True),
+                    cwd=Path("/repo"),
+                    stdin_isatty=False,
+                    stdout_isatty=False,
+                )
+            )
+    assert exc_info.value.code == "validation_failed"
 
 
 def test_initialize_project_service_run_builds_dependencies() -> None:
@@ -228,27 +227,25 @@ def test_initialize_project_service_run_builds_dependencies() -> None:
     def fake_confirm_choice(_text: str, _default: bool = False) -> bool:
         return False
 
-    def fake_call(
-        self: InitializeProjectService, request: InitializeProjectRequest
-    ) -> ServiceFailure:
+    def fake_run(self: InitializeProjectService, request: InitializeProjectRequest) -> None:
         captured["service"] = self
         captured["request"] = request
-        return ServiceFailure(code="forced_failure", message="forced")
+        raise UnexpectedStateError("forced")
 
-    with patch.object(InitializeProjectService, "__call__", new=fake_call):
-        result = InitializeProjectService.run(
-            args=SimpleNamespace(yes=False),
-            cwd=Path("/repo"),
-            stdin_isatty=True,
-            stdout_isatty=False,
-            build_config=fake_build_config,
-            resolve_provider=fake_resolve_provider,
-            choose_provider=fake_choose_provider,
-            confirm_choice=fake_confirm_choice,
-        )
+    with patch.object(InitializeProjectService, "_run", new=fake_run):
+        with pytest.raises(ServiceFailure) as exc_info:
+            InitializeProjectService.run(
+                args=InitProjectArgs(yes=False),
+                cwd=Path("/repo"),
+                stdin_isatty=True,
+                stdout_isatty=False,
+                build_config=fake_build_config,
+                resolve_provider=fake_resolve_provider,
+                choose_provider=fake_choose_provider,
+                confirm_choice=fake_confirm_choice,
+            )
 
-    assert isinstance(result, ServiceFailure)
-    assert result.code == "forced_failure"
+    assert exc_info.value.code == "unexpected_state"
 
     request = captured["request"]
     assert isinstance(request, InitializeProjectRequest)

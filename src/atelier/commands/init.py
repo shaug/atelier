@@ -6,18 +6,16 @@ writes project configuration, and avoids modifying the repo itself.
 
 from ..io import die, say
 from ..lib import apply
-from ..services.project import InitializeProjectService
-from ..services.result import ServiceFailure, ServiceSuccess
+from ..services import ServiceFailure
+from ..services.project import InitializeProjectService, InitProjectArgs
 
 
-def init_project(args: object) -> None:
+def init_project(args: InitProjectArgs) -> None:
     """Initialize an Atelier project for the current Git repository.
 
     Args:
-        args: CLI argument object with optional fields such as
-            ``branch_prefix``, ``branch_pr_mode``, ``branch_history``,
-            ``branch_pr_strategy``, ``agent``, ``editor_edit``, and
-            ``editor_work``.
+        args: Typed init arguments. The CLI layer must populate this from
+            the parsed command before calling.
 
     Returns:
         None.
@@ -25,12 +23,9 @@ def init_project(args: object) -> None:
     Example:
         $ atelier init
     """
-    result = InitializeProjectService.run(args=args)
-    if result.success:
-        assert isinstance(result, ServiceSuccess)
-        apply(say, result.outcome.messages)
-        return
-
-    assert isinstance(result, ServiceFailure)
-    hint = f"\nHint: {result.recovery_hint}" if result.recovery_hint else ""
-    die(f"init failed ({result.code}): {result.message}{hint}")
+    try:
+        outcome = InitializeProjectService.run(args=args)
+        apply(say, outcome.messages)
+    except ServiceFailure as e:
+        hint = f"\nHint: {e.recovery_hint}" if e.recovery_hint else ""
+        die(f"init failed ({e.code}): {e}{hint}")

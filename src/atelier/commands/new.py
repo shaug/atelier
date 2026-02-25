@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 from .. import config, exec, paths
 from ..io import die, prompt
+from ..services.project import InitProjectArgs
 from . import init as init_cmd
 from . import plan as plan_cmd
 
@@ -94,16 +95,18 @@ def new_project(args: object) -> None:
     os.chdir(target_dir)
     try:
         init_cmd.init_project(
-            SimpleNamespace(
+            InitProjectArgs(
                 branch_prefix=getattr(args, "branch_prefix", None),
                 branch_pr_mode=(
                     getattr(args, "branch_pr_mode", None) or getattr(args, "branch_pr", None)
                 ),
                 branch_history=getattr(args, "branch_history", None),
+                branch_squash_message=getattr(args, "branch_squash_message", None),
                 branch_pr_strategy=getattr(args, "branch_pr_strategy", None),
                 agent=getattr(args, "agent", None),
                 editor_edit=getattr(args, "editor_edit", None),
                 editor_work=getattr(args, "editor_work", None),
+                yes=bool(getattr(args, "yes", False)),
             )
         )
 

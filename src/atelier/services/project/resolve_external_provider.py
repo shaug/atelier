@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from ... import external_registry
 from ...io import confirm, select
 from ...models import ProjectConfig
-from ..result import ServiceFailure, ServiceResult, ServiceSuccess
+from ..errors import ValidationFailedError
 
 ProviderChooser = Callable[[str, Sequence[str], str | None], str]
 ConfirmChoice = Callable[[str, bool], bool]
@@ -46,11 +46,9 @@ class ResolveExternalProviderService:
         self._choose_provider = choose_provider
         self._confirm_choice = confirm_choice
 
-    def run(
-        self, request: ResolveExternalProviderRequest
-    ) -> ServiceResult[ResolveExternalProviderOutcome]:
+    def run(self, request: ResolveExternalProviderRequest) -> ResolveExternalProviderOutcome:
         if not request.agent_name.strip():
-            return ServiceFailure("validation_failed", "agent_name must not be empty")
+            raise ValidationFailedError("agent_name must not be empty")
 
         try:
             resolution = self._resolve_provider(
@@ -61,12 +59,10 @@ class ResolveExternalProviderService:
                 interactive=False,
             )
         except SystemExit as exc:
-            return ServiceFailure(
-                "validation_failed",
+            raise ValidationFailedError(
                 "provider resolution failed",
                 recovery_hint=str(exc).strip() or None,
-                exception=exc,
-            )
+            ) from exc
 
         payload = request.payload
         selected = resolution.selected_provider
@@ -110,4 +106,4 @@ class ResolveExternalProviderService:
             "Default auto-export for new epics/changesets: "
             + ("enabled" if bool(payload.project.auto_export_new) else "disabled"),
         )
-        return ServiceSuccess(ResolveExternalProviderOutcome(payload, selected, messages))
+        return ResolveExternalProviderOutcome(payload, selected, messages)

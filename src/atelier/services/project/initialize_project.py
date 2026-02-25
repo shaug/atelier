@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 from ... import agent_home, beads, config, external_registry, git, paths, policy, project, skills
 from ...io import confirm, select
 from ...models import ProjectConfig
-from ..result import ServiceResult, ServiceSuccess
+from ..base import BaseService
 from .compose_project_config import ComposeProjectConfigRequest, ComposeProjectConfigService
 from .resolve_external_provider import (
     ProviderChooser,
@@ -24,8 +24,27 @@ ConfirmChoice = Callable[[str, bool], bool]
 BuildProjectConfig = Callable[..., ProjectConfig]
 
 
+@dataclass(frozen=True)
+class InitProjectArgs:
+    """Typed arguments for project initialization.
+
+    The CLI layer maps from the parsed command into this structure before
+    calling the service.
+    """
+
+    branch_prefix: str | None = None
+    branch_pr_mode: str | None = None
+    branch_history: str | None = None
+    branch_squash_message: str | None = None
+    branch_pr_strategy: str | None = None
+    agent: str | None = None
+    editor_edit: str | None = None
+    editor_work: str | None = None
+    yes: bool = False
+
+
 class InitializeProjectRequest(BaseModel):
-    args: object
+    args: InitProjectArgs
     cwd: Path
     stdin_isatty: bool
     stdout_isatty: bool
@@ -33,7 +52,7 @@ class InitializeProjectRequest(BaseModel):
 
     @property
     def yes(self) -> bool:
-        return bool(getattr(self.args, "yes", False))
+        return self.args.yes
 
     @property
     def interactive(self) -> bool:
@@ -48,7 +67,7 @@ class InitializeProjectOutcome:
     messages: tuple[str, ...]
 
 
-class InitializeProjectService:
+class InitializeProjectService(BaseService[InitializeProjectRequest, InitializeProjectOutcome]):
     def __init__(
         self,
         compose_config_service: ComposeProjectConfigService,
@@ -63,7 +82,7 @@ class InitializeProjectService:
     def run(
         cls,
         *,
-        args: object,
+        args: InitProjectArgs,
         cwd: Path | None = None,
         stdin_isatty: bool | None = None,
         stdout_isatty: bool | None = None,
@@ -71,7 +90,7 @@ class InitializeProjectService:
         resolve_provider: ResolveProvider | None = None,
         choose_provider: ProviderChooser | None = None,
         confirm_choice: ConfirmChoice | None = None,
-    ) -> ServiceResult[InitializeProjectOutcome]:
+    ) -> InitializeProjectOutcome:
         """Run init flow with default service dependencies and request wiring."""
         resolved_cwd = cwd or Path.cwd()
         resolved_stdin_isatty = sys.stdin.isatty() if stdin_isatty is None else stdin_isatty
@@ -98,9 +117,7 @@ class InitializeProjectService:
         )
         return service(request)
 
-    def __call__(
-        self, request: InitializeProjectRequest
-    ) -> ServiceResult[InitializeProjectOutcome]:
+    def _run(self, request: InitializeProjectRequest) -> InitializeProjectOutcome:
         _root, enlistment, origin_raw, origin = git.resolve_repo_enlistment(request.cwd)
         project_dir = paths.project_dir_for_enlistment(enlistment, origin)
         config_path = paths.project_config_path(project_dir)
@@ -118,10 +135,7 @@ class InitializeProjectService:
                 raw_existing=raw_user,
             )
         )
-        if compose.success is False:
-            return compose
-        assert compose.success is True
-        payload = compose.outcome.payload
+        payload = compose.payload
 
         project.ensure_project_dirs(project_dir)
         messages: list[str] = []
@@ -150,11 +164,8 @@ class InitializeProjectService:
                 yes=request.yes,
             )
         )
-        if provider.success is False:
-            return provider
-        assert provider.success is True
-        payload = provider.outcome.payload
-        messages.extend(provider.outcome.messages)
+        payload = provider.payload
+        messages.extend(provider.messages)
 
         messages.append("Writing project configuration...")
         config.write_project_config(config_path, payload)
@@ -177,9 +188,7 @@ class InitializeProjectService:
             self._update_policy(payload, request.cwd, beads_root, project_dir)
 
         messages.append("Initialized Atelier project")
-        return ServiceSuccess(
-            InitializeProjectOutcome(project_dir, config_path, payload, tuple(messages))
-        )
+        return InitializeProjectOutcome(project_dir, config_path, payload, tuple(messages))
 
     def _update_policy(
         self, payload: ProjectConfig, cwd: Path, beads_root: Path, beads_cwd: Path
