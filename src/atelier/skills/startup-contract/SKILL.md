@@ -25,7 +25,8 @@ description: >-
    - Check inbox/queue (message beads) and handle any messages; stop if a
      message requires action before claiming new work.
 1. If still idle:
-   - List eligible epics (`bd list --label at:epic`) and filter out drafts.
+   - List eligible epics (`bd list --label at:epic`) and keep only items with
+     explicit `at:ready`.
    - In auto mode: pick the oldest ready epic; if none, pick the oldest
      unfinished epic already assigned to `agent_id`.
    - In prompt mode: list eligible epics and ask for an epic id.

@@ -1394,9 +1394,14 @@ def claim_epic(
         die(f"epic not found: {epic_id}")
     issue = issues[0]
     labels = _issue_labels(issue)
-    if "at:draft" in labels:
-        die(f"epic {epic_id} is marked as draft")
     executable_labels = {"at:epic", "at:changeset"} & labels
+    if executable_labels and "at:draft" in labels:
+        die(
+            f"epic {epic_id} carries legacy at:draft label; "
+            "remove at:draft and rely on at:ready for executable readiness"
+        )
+    if executable_labels and "at:ready" not in labels:
+        die(f"epic {epic_id} is not marked at:ready")
     if executable_labels and _is_planner_assignee(agent_id):
         die(
             f"epic {epic_id} claim rejected for planner {agent_id}; "

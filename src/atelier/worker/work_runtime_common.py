@@ -331,7 +331,7 @@ def filter_epics(
     assignee: str | None = None,
     require_unassigned: bool = False,
 ) -> list[dict[str, object]]:
-    """Filter epics according to assignment and draft status.
+    """Filter epics according to assignment and explicit ready status.
 
     Args:
         issues: Candidate issue payloads.

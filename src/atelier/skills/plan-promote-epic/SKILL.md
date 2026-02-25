@@ -1,7 +1,7 @@
 ---
 name: plan-promote-epic
 description: >-
-  Promote a draft epic to ready with explicit confirmation after readiness
+  Promote an epic to ready with explicit confirmation after readiness
   checks. Use when planning is complete.
 ---
 
@@ -9,7 +9,7 @@ description: >-
 
 ## Inputs
 
-- epic_id: Draft epic bead id to promote.
+- epic_id: Epic bead id to promote.
 - beads_dir: Optional Beads store path.
 
 ## Readiness checks
@@ -27,7 +27,7 @@ description: >-
 
 ## Steps
 
-1. Show the epic and verify it is labeled `at:draft`.
+1. Show the epic and verify it is not already labeled `at:ready`.
 1. List child changesets and confirm which are fully defined.
 1. If there are no child changesets and the epic is single-changeset sized:
    - Add `at:changeset` to the epic.
@@ -41,14 +41,13 @@ description: >-
 1. Summarize the executable unit(s) for the user (child changesets or the epic
    itself).
 1. Ask for explicit confirmation to promote.
-1. On approval, remove `at:draft` and add `at:ready`.
+1. On approval, add `at:ready` (do not use `at:draft`).
 1. Promote each fully-defined `cs:planned` child changeset to `cs:ready`
    regardless of current dependency blockers.
 1. Let dependency resolution determine runnability (`bd ready`) at worker time.
 
 ## Verification
 
-- Epic no longer has `at:draft`.
 - Epic includes `at:ready`.
 - If the epic has child changesets, all fully-defined children are labeled
   `cs:ready`.

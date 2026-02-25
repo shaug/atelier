@@ -307,7 +307,13 @@ def test_run_startup_contract_prioritizes_review_feedback() -> None:
         resolve_hooked_epic=lambda *_args: "at-epic",
         select_review_feedback_changeset=lambda **_kwargs: feedback,
         next_changeset=next_changeset,
-        list_epics=lambda: [{"id": "at-epic", "assignee": "atelier/worker/codex/p100"}],
+        list_epics=lambda: [
+            {
+                "id": "at-epic",
+                "labels": ["at:epic", "at:ready"],
+                "assignee": "atelier/worker/codex/p100",
+            }
+        ],
     )
 
     assert result.reason == "review_feedback"
@@ -374,12 +380,14 @@ def test_run_startup_contract_skips_non_claimable_review_feedback_epic() -> None
             {
                 "id": "at-blocked",
                 "status": "open",
+                "labels": ["at:epic", "at:ready"],
                 "assignee": "atelier/worker/codex/p999",
                 "created_at": "2026-02-20T00:00:00Z",
             },
             {
                 "id": "at-claimable",
                 "status": "open",
+                "labels": ["at:epic", "at:ready"],
                 "assignee": None,
                 "created_at": "2026-02-21T00:00:00Z",
             },
@@ -440,6 +448,7 @@ def test_run_startup_contract_selects_stale_reclaimable_review_feedback() -> Non
     stale_issue = {
         "id": "at-stale",
         "status": "open",
+        "labels": ["at:epic", "at:ready"],
         "assignee": "atelier/worker/codex/p099",
         "created_at": "2026-02-20T00:00:00Z",
     }
@@ -478,12 +487,14 @@ def test_run_startup_contract_skips_unclaimable_global_review_feedback() -> None
             {
                 "id": "at-blocked",
                 "status": "open",
+                "labels": ["at:epic", "at:ready"],
                 "assignee": "atelier/planner/codex/p001",
                 "created_at": "2026-02-20T00:00:00Z",
             },
             {
                 "id": "at-claimable",
                 "status": "open",
+                "labels": ["at:epic", "at:ready"],
                 "assignee": None,
                 "created_at": "2026-02-21T00:00:00Z",
             },
@@ -509,7 +520,7 @@ def test_run_startup_contract_claims_global_feedback_standalone_identity() -> No
         repo_slug="org/repo",
         list_epics=lambda: [],
         show_issue=lambda issue_id: (
-            {"id": "at-bmu", "status": "open", "labels": ["at:changeset"]}
+            {"id": "at-bmu", "status": "open", "labels": ["at:changeset", "at:ready"]}
             if issue_id == "at-bmu"
             else None
         ),
@@ -554,7 +565,7 @@ def test_run_startup_contract_uses_ready_changeset_fallback() -> None:
 
 
 def test_run_startup_contract_selects_auto_epic() -> None:
-    issues = [{"id": "at-auto", "status": "open"}]
+    issues = [{"id": "at-auto", "status": "open", "labels": ["at:epic", "at:ready"]}]
 
     result = _run_startup(
         list_epics=lambda: issues,

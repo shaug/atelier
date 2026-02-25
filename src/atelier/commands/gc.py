@@ -134,6 +134,44 @@ def _normalize_changeset_labels_for_status(
     return desired, tuple(reasons)
 
 
+def _normalize_executable_ready_labels_for_status(
+    issue: dict[str, object],
+) -> tuple[set[str], tuple[str, ...]]:
+    labels = _issue_labels(issue)
+    if "at:epic" not in labels:
+        return labels, ()
+    desired = set(labels)
+    reasons: list[str] = []
+    status = str(issue.get("status") or "").strip().lower()
+    active = status in {"", "open", "ready", "in_progress", "hooked"}
+    legacy_blocked = "at:draft" in labels
+
+    def _drop(label: str, reason: str) -> None:
+        if label in desired:
+            desired.remove(label)
+            reasons.append(f"remove {label}: {reason}")
+
+    def _add(label: str, reason: str) -> None:
+        if label not in desired:
+            desired.add(label)
+            reasons.append(f"add {label}: {reason}")
+
+    _drop("at:draft", "draft readiness is now implied by missing at:ready")
+    if not active:
+        return desired, tuple(reasons)
+    if legacy_blocked:
+        _drop(
+            "at:ready",
+            "legacy at:draft blocked execution; preserve behavior while removing at:draft",
+        )
+    else:
+        _add(
+            "at:ready",
+            "legacy epic without at:draft was executable; preserve behavior explicitly",
+        )
+    return desired, tuple(reasons)
+
+
 def _workspace_branch_from_labels(labels: set[str]) -> str | None:
     for label in labels:
         if not label.startswith("workspace:"):
@@ -279,6 +317,58 @@ def _gc_normalize_changeset_labels(
                 description=f"Normalize changeset labels for {issue_id}",
                 apply=_apply_normalize,
                 details=tuple(details),
+            )
+        )
+    return actions
+
+
+def _gc_normalize_executable_ready_labels(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:epic", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in issues:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+        labels = _issue_labels(issue)
+        normalized_labels, reasons = _normalize_executable_ready_labels_for_status(issue)
+        if labels == normalized_labels:
+            continue
+        add_labels = sorted(normalized_labels - labels)
+        remove_labels = sorted(labels - normalized_labels)
+        if not add_labels and not remove_labels:
+            continue
+        cmd_args = ["update", issue_id]
+        for label in add_labels:
+            cmd_args.extend(["--add-label", label])
+        for label in remove_labels:
+            cmd_args.extend(["--remove-label", label])
+        details = list(reasons)
+        details.append(
+            f"add: {', '.join(add_labels) if add_labels else '(none)'}; "
+            f"remove: {', '.join(remove_labels) if remove_labels else '(none)'}"
+        )
+
+        def _apply_normalize(cmd: list[str] = list(cmd_args)) -> None:
+            beads.run_bd_command(
+                cmd,
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+
+        actions.append(
+            GcAction(
+                description=f"Normalize executable readiness labels for {issue_id}",
+                details=tuple(details),
+                apply=_apply_normalize,
             )
         )
     return actions
@@ -1187,6 +1277,12 @@ def gc(args: object) -> None:
     actions: list[GcAction] = []
     actions.extend(
         _gc_normalize_changeset_labels(
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
+    actions.extend(
+        _gc_normalize_executable_ready_labels(
             beads_root=beads_root,
             repo_root=repo_root,
         )
