@@ -267,3 +267,41 @@ def test_next_changeset_service_blocks_epic_changeset_with_open_dependency() -> 
     selected = startup.next_changeset_service(context=_context(), service=service)
 
     assert selected is None
+
+
+def test_next_changeset_service_blocks_depends_on_id_payload_dependency() -> None:
+    downstream = _changeset(
+        "at-epic.2",
+        dependencies=[{"depends_on_id": "at-epic.1"}],
+        work_branch="feat/at-epic.2",
+    )
+    blocker = _changeset("at-epic.1", status="open", work_branch="feat/at-epic.1")
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), blocker["id"]: blocker, downstream["id"]: downstream},
+        ready_changesets=[{"id": "at-epic.2", "status": "open", "labels": ["at:changeset"]}],
+        descendants=[downstream],
+    )
+
+    selected = startup.next_changeset_service(context=_context(), service=service)
+
+    assert selected is None
+
+
+def test_next_changeset_service_rehydrates_sparse_ready_candidates() -> None:
+    blocker = _changeset("at-epic.1", status="open", work_branch="feat/at-epic.1")
+    downstream = _changeset(
+        "at-epic.2",
+        dependencies=[{"depends_on_id": "at-epic.1"}],
+        work_branch="feat/at-epic.2",
+    )
+    sparse_ready = {"id": "at-epic.2", "status": "in_progress", "labels": ["at:changeset"]}
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), blocker["id"]: blocker, downstream["id"]: downstream},
+        ready_changesets=[sparse_ready],
+        descendants=[blocker, downstream],
+    )
+
+    selected = startup.next_changeset_service(context=_context(), service=service)
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.1"

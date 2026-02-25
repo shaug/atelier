@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 _DEPENDENCY_ID_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\b")
 _PARENT_CHILD_PATTERN = re.compile(r"parent[\s_-]*child", re.IGNORECASE)
 _PARENT_CHILD_KEYS = ("relation", "dependency_type", "dependencyType", "type")
+_DEPENDENCY_ID_KEYS = ("id", "depends_on_id", "dependsOnId")
+_DEPENDENCY_REF_KEYS = ("issue", "depends_on", "dependsOn")
 
 
 def _clean_str(value: object) -> str | None:
@@ -32,15 +34,7 @@ def _extract_dependency_id(value: object) -> str | None:
     if _is_parent_child_relation(value):
         return None
     if isinstance(value, dict):
-        issue_id = _clean_str(value.get("id"))
-        if issue_id:
-            return issue_id
-        nested_issue = value.get("issue")
-        if isinstance(nested_issue, dict):
-            nested_id = _clean_str(nested_issue.get("id"))
-            if nested_id:
-                return nested_id
-        return None
+        return _extract_dependency_id_from_mapping(value)
     if not isinstance(value, str):
         return None
     text = value.strip()
@@ -59,14 +53,27 @@ def _extract_parent_dependency_id(value: object) -> str | None:
         if not _is_parent_child_relation(entry):
             continue
         if isinstance(entry, dict):
-            parent_id = _clean_str(entry.get("id"))
+            parent_id = _extract_dependency_id_from_mapping(entry)
             if parent_id:
                 return parent_id
-            nested_issue = entry.get("issue")
-            if isinstance(nested_issue, dict):
-                nested_id = _clean_str(nested_issue.get("id"))
-                if nested_id:
-                    return nested_id
+    return None
+
+
+def _extract_dependency_id_from_mapping(value: dict[str, object]) -> str | None:
+    for key in _DEPENDENCY_ID_KEYS:
+        dep_id = _clean_str(value.get(key))
+        if dep_id:
+            return dep_id
+    for key in _DEPENDENCY_REF_KEYS:
+        nested = value.get(key)
+        if isinstance(nested, dict):
+            nested_id = _clean_str(nested.get("id"))
+            if nested_id:
+                return nested_id
+            continue
+        nested_id = _clean_str(nested)
+        if nested_id:
+            return nested_id
     return None
 
 

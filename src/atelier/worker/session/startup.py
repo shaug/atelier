@@ -214,12 +214,25 @@ def next_changeset_service(
             if not descendants:
                 return issue
 
-    changesets = service.ready_changesets(epic_id=context.epic_id)
-    changeset_ids = {issue_id for issue in changesets if (issue_id := _issue_id(issue)) is not None}
     descendants = service.list_descendant_changesets(context.epic_id, include_closed=False)
     descendants_by_id = {
         issue_id: issue for issue in descendants if (issue_id := _issue_id(issue)) is not None
     }
+    changesets: list[dict[str, object]] = []
+    changeset_ids: set[str] = set()
+    for issue in service.ready_changesets(epic_id=context.epic_id):
+        issue_id = _issue_id(issue)
+        if issue_id is None or issue_id in changeset_ids:
+            continue
+        canonical_issue = descendants_by_id.get(issue_id)
+        if canonical_issue is None:
+            loaded_issue = service.show_issue(issue_id)
+            if loaded_issue is not None and _issue_id(loaded_issue) == issue_id:
+                canonical_issue = loaded_issue
+        if canonical_issue is None:
+            canonical_issue = issue
+        changesets.append(canonical_issue)
+        changeset_ids.add(issue_id)
     dependency_cache: dict[str, dict[str, object] | None] = {}
     for issue in descendants:
         issue_id = _issue_id(issue)
@@ -243,6 +256,13 @@ def next_changeset_service(
         issue
         for issue in changesets
         if service.is_changeset_ready(issue)
+        and _dependencies_satisfied(
+            issue=issue,
+            epic_changesets_by_id=descendants_by_id,
+            dependency_cache=dependency_cache,
+            context=context,
+            service=service,
+        )
         and not service.changeset_waiting_on_review_or_signals(
             issue,
             repo_slug=context.repo_slug,
