@@ -555,6 +555,29 @@ def changeset_base_branch(
             repo_root=repo_root,
             git_path=git_path,
         ):
+            changeset_id = issue.get("id")
+            if beads_root is not None and isinstance(changeset_id, str) and changeset_id:
+                root_base = (
+                    git.git_rev_parse(repo_root, root_branch, git_path=git_path)
+                    if root_branch
+                    else None
+                )
+                parent_base = git.git_rev_parse(
+                    repo_root,
+                    integration_parent_branch,
+                    git_path=git_path,
+                )
+                beads.update_changeset_branch_metadata(
+                    changeset_id,
+                    root_branch=root_branch,
+                    parent_branch=integration_parent_branch,
+                    work_branch=changeset_work_branch(issue),
+                    root_base=root_base,
+                    parent_base=parent_base,
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                    allow_override=True,
+                )
             return integration_parent_branch
     if parent_branch:
         if root_branch and parent_branch == root_branch:
