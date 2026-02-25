@@ -17,6 +17,51 @@ from .models import FinalizeResult, PublishSignalDiagnostics
 Issue = dict[str, object]
 
 
+def _normalized_sha(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized or normalized.lower() == "null":
+        return None
+    return normalized
+
+
+def _recorded_integrated_sha(issue: Issue) -> str | None:
+    description = issue.get("description")
+    description_text = description if isinstance(description, str) else ""
+    fields = beads.parse_description_fields(description_text)
+    return _normalized_sha(fields.get("changeset.integrated_sha"))
+
+
+def _persist_integrated_sha(
+    *,
+    issue: Issue,
+    changeset_id: str,
+    integrated_sha: str | None,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    normalized_candidate = _normalized_sha(integrated_sha)
+    if not normalized_candidate:
+        return
+    recorded_sha = _recorded_integrated_sha(issue)
+    if recorded_sha:
+        if recorded_sha != normalized_candidate:
+            atelier_log.warning(
+                "changeset="
+                f"{changeset_id} finalize integrated SHA mismatch "
+                f"recorded={recorded_sha} observed={normalized_candidate}; "
+                "preserving recorded value"
+            )
+        return
+    beads.update_changeset_integrated_sha(
+        changeset_id,
+        normalized_candidate,
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+
+
 @dataclass(frozen=True)
 class FinalizePipelineContext:
     changeset_id: str
@@ -225,13 +270,13 @@ def run_finalize_pipeline(
                     continue_running=False,
                     reason="changeset_blocked_missing_integration",
                 )
-            if integrated_sha and integrated_sha.strip():
-                beads.update_changeset_integrated_sha(
-                    changeset_id,
-                    integrated_sha.strip(),
-                    beads_root=beads_root,
-                    cwd=repo_root,
-                )
+            _persist_integrated_sha(
+                issue=issue,
+                changeset_id=changeset_id,
+                integrated_sha=integrated_sha,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
         service.mark_changeset_closed(changeset_id)
         service.close_completed_container_changesets(epic_id)
         return service.finalize_epic_if_complete(context=context)
