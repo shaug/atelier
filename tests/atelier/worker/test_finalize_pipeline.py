@@ -334,6 +334,89 @@ def test_run_finalize_pipeline_waiting_on_review_returns_pending(monkeypatch) ->
     assert result.continue_running is True
 
 
+def test_run_finalize_pipeline_updates_missing_integrated_sha(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "labels": ["at:changeset", "cs:merged"],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+
+    service = _FinalizeServiceStub()
+    service.changeset_integration_signal_fn = lambda _issue, *, repo_slug, git_path: (
+        True,
+        "abc1234",
+    )
+
+    updates: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "update_changeset_integrated_sha",
+        lambda changeset_id, integrated_sha, **_kwargs: updates.append(
+            (changeset_id, integrated_sha)
+        ),
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_complete"
+    assert result.continue_running is True
+    assert updates == [("at-epic.1", "abc1234")]
+
+
+def test_run_finalize_pipeline_preserves_recorded_integrated_sha(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "labels": ["at:changeset", "cs:merged"],
+        "description": (
+            "changeset.work_branch: feat/root-at-epic.1\nchangeset.integrated_sha: 1111111\n"
+        ),
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+
+    service = _FinalizeServiceStub()
+    service.changeset_integration_signal_fn = lambda _issue, *, repo_slug, git_path: (
+        True,
+        "2222222",
+    )
+
+    updates: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "update_changeset_integrated_sha",
+        lambda changeset_id, integrated_sha, **_kwargs: updates.append(
+            (changeset_id, integrated_sha)
+        ),
+    )
+
+    warnings: list[str] = []
+    monkeypatch.setattr(finalize_pipeline.atelier_log, "warning", warnings.append)
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_complete"
+    assert result.continue_running is True
+    assert updates == []
+    assert warnings == [
+        "changeset=at-epic.1 finalize integrated SHA mismatch "
+        "recorded=1111111 observed=2222222; preserving recorded value"
+    ]
+
+
 def test_run_finalize_pipeline_passes_ready_mode_to_pr_gate(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
