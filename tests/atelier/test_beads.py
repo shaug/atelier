@@ -11,6 +11,13 @@ import atelier.beads as beads
 from atelier import exec as exec_util
 
 
+def test_beads_env_sets_beads_db() -> None:
+    env = beads.beads_env(Path("/tmp/project/.beads"))
+
+    assert env["BEADS_DIR"] == "/tmp/project/.beads"
+    assert env["BEADS_DB"] == "/tmp/project/.beads/beads.db"
+
+
 def test_run_bd_issue_records_validates_issues() -> None:
     with patch(
         "atelier.beads.run_bd_json",
