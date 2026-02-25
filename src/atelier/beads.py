@@ -1637,11 +1637,20 @@ def _create_issue_with_body(
 def find_agent_bead(agent_id: str, *, beads_root: Path, cwd: Path) -> dict[str, object] | None:
     """Find an agent bead by agent identity."""
     issues = run_bd_json(
-        ["list", "--label", "at:agent", "--title-contains", agent_id],
+        ["list", "--label", "at:agent", "--title", agent_id],
         beads_root=beads_root,
         cwd=cwd,
     )
-    return issues[0] if issues else None
+    for issue in issues:
+        title = issue.get("title")
+        if isinstance(title, str) and title == agent_id:
+            return issue
+    for issue in issues:
+        description = issue.get("description")
+        fields = _parse_description_fields(description if isinstance(description, str) else "")
+        if fields.get("agent_id") == agent_id:
+            return issue
+    return None
 
 
 def ensure_agent_bead(

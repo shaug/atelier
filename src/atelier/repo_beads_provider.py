@@ -54,7 +54,7 @@ class RepoBeadsProvider:
         if request.limit:
             args.extend(["--limit", str(request.limit)])
         if request.query:
-            args.extend(["--title-contains", request.query])
+            args.extend(["--title", request.query])
         payload = self._run_bd(args)
         sync_options = request.sync_options or self.sync_options
         records: list[ExternalTicketRecord] = []

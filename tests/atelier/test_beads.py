@@ -191,6 +191,47 @@ def test_ensure_agent_bead_returns_existing() -> None:
     assert result == existing
 
 
+def test_find_agent_bead_uses_title_filter_and_exact_match() -> None:
+    seen: dict[str, object] = {}
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        seen["args"] = args
+        return [
+            {"id": "atelier-1", "title": "atelier/worker/codex/p123-extra"},
+            {"id": "atelier-2", "title": "atelier/worker/codex/p123"},
+        ]
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_json):
+        result = beads.find_agent_bead(
+            "atelier/worker/codex/p123", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+
+    assert result == {"id": "atelier-2", "title": "atelier/worker/codex/p123"}
+    assert seen["args"] == ["list", "--label", "at:agent", "--title", "atelier/worker/codex/p123"]
+
+
+def test_find_agent_bead_falls_back_to_description_agent_id() -> None:
+    def fake_json(_args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        return [
+            {
+                "id": "atelier-2",
+                "title": "planner",
+                "description": "agent_id: atelier/planner/codex/p123\nrole_type: planner\n",
+            }
+        ]
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_json):
+        result = beads.find_agent_bead(
+            "atelier/planner/codex/p123", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+
+    assert result == {
+        "id": "atelier-2",
+        "title": "planner",
+        "description": "agent_id: atelier/planner/codex/p123\nrole_type: planner\n",
+    }
+
+
 def test_ensure_agent_bead_creates_when_missing() -> None:
     def fake_command(*_args, **_kwargs) -> CompletedProcess[str]:
         return CompletedProcess(args=["bd"], returncode=0, stdout="atelier-2\n", stderr="")

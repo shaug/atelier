@@ -62,7 +62,7 @@ def test_repo_beads_provider_import_uses_readonly(
     assert "list" in args
     assert "--all" in args
     assert "--limit" in args
-    assert "--title-contains" in args
+    assert "--title" in args
 
 
 def test_repo_beads_provider_link_reads_issue(
