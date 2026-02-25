@@ -282,6 +282,8 @@ def _build_changeset_details(
                 "merge_conflict": merge_conflict,
                 "pr": _summarize_pr(pr_payload),
                 "_lineage_parent_branch": lineage.effective_parent_branch,
+                "_lineage_dependency_parent_branch": lineage.dependency_parent_branch,
+                "_lineage_has_dependency": bool(lineage.dependency_ids),
                 "_lineage_root_branch": lineage.root_branch,
                 "_lineage_used_dependency_parent": lineage.used_dependency_parent,
                 "_lineage_blocked": lineage.blocked,
@@ -291,6 +293,8 @@ def _build_changeset_details(
         )
     for detail in details:
         parent_branch = detail.pop("_lineage_parent_branch", None)
+        dependency_parent_branch = detail.pop("_lineage_dependency_parent_branch", None)
+        has_dependency_lineage = bool(detail.pop("_lineage_has_dependency", False))
         root_branch = detail.pop("_lineage_root_branch", None)
         used_dependency_parent = bool(detail.pop("_lineage_used_dependency_parent", False))
         blocked_lineage = bool(detail.pop("_lineage_blocked", False))
@@ -306,7 +310,10 @@ def _build_changeset_details(
             continue
 
         parent_state = None
-        if isinstance(parent_branch, str):
+        if strategy == "sequential" and has_dependency_lineage:
+            if isinstance(dependency_parent_branch, str):
+                parent_state = branch_states.get(dependency_parent_branch)
+        elif isinstance(parent_branch, str):
             is_top_level_parent = (
                 isinstance(root_branch, str)
                 and parent_branch == root_branch
@@ -315,7 +322,7 @@ def _build_changeset_details(
             if not is_top_level_parent:
                 parent_state = branch_states.get(parent_branch)
 
-        if strategy == "sequential" and used_dependency_parent and parent_state is None:
+        if strategy == "sequential" and has_dependency_lineage and parent_state is None:
             detail["pr_allowed"] = False
             detail["pr_gate_reason"] = "blocked:dependency-parent-state-unavailable"
             continue
