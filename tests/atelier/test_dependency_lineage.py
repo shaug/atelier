@@ -3,6 +3,56 @@ from __future__ import annotations
 from atelier import dependency_lineage
 
 
+def test_resolve_parent_lineage_uses_dependency_frontier_for_collapsed_parent() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/at-kid\nchangeset.parent_branch: feat/at-kid\n"
+        ),
+        "dependencies": ["at-kid.1"],
+    }
+
+    resolution = dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch="feat/at-kid",
+        lookup_issue=lambda issue_id: (
+            {"description": "changeset.work_branch: feat/at-kid.1\n"}
+            if issue_id == "at-kid.1"
+            else None
+        ),
+    )
+
+    assert resolution.blocked is False
+    assert resolution.used_dependency_parent is True
+    assert resolution.dependency_parent_id == "at-kid.1"
+    assert resolution.effective_parent_branch == "feat/at-kid.1"
+
+
+def test_resolve_parent_lineage_uses_parent_child_hint_to_break_frontier_ties() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/at-kid\nchangeset.parent_branch: feat/at-kid\n"
+        ),
+        "dependencies": [
+            {"relation": "parent-child", "id": "at-kid.2"},
+            "at-kid.1",
+            "at-kid.2",
+        ],
+    }
+
+    resolution = dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch="feat/at-kid",
+        lookup_issue=lambda issue_id: {
+            "description": f"changeset.work_branch: feat/{issue_id}\n"
+        },
+    )
+
+    assert resolution.blocked is False
+    assert resolution.used_dependency_parent is True
+    assert resolution.dependency_parent_id == "at-kid.2"
+    assert resolution.effective_parent_branch == "feat/at-kid.2"
+
+
 def test_resolve_parent_lineage_prefers_unique_transitive_frontier_dependency() -> None:
     issue = {
         "description": (
@@ -33,6 +83,29 @@ def test_resolve_parent_lineage_prefers_unique_transitive_frontier_dependency() 
     assert lineage.dependency_parent_branch == "feature-parent-2"
     assert lineage.used_dependency_parent is True
     assert lineage.effective_parent_branch == "feature-parent-2"
+
+
+def test_resolve_parent_lineage_blocks_when_dependency_frontier_is_ambiguous() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/at-kid\nchangeset.parent_branch: feat/at-kid\n"
+        ),
+        "dependencies": ["at-kid.1", "at-kid.2"],
+    }
+
+    resolution = dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch="feat/at-kid",
+        lookup_issue=lambda issue_id: {
+            "description": f"changeset.work_branch: feat/{issue_id}\n"
+        },
+    )
+
+    assert resolution.blocked is True
+    assert resolution.blocker_reason == "dependency-lineage-ambiguous"
+    assert resolution.used_dependency_parent is False
+    assert resolution.effective_parent_branch == "feat/at-kid"
+    assert "ambiguous dependency parent branches" in resolution.diagnostics[0]
 
 
 def test_resolve_parent_lineage_fails_closed_when_dependency_frontier_is_ambiguous() -> None:
