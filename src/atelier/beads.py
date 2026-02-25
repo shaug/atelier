@@ -41,6 +41,11 @@ _STORE_REPAIR_ERROR_MARKERS = (
     "database not initialized: issue_prefix config is missing",
     "fresh clone detected",
 )
+_EMBEDDED_BACKEND_PANIC_MARKERS = (
+    "panic: runtime error",
+    "invalid memory address or nil pointer dereference",
+    "setcrashonfatalerror",
+)
 _TERMINAL_DEPENDENCY_STATUSES = {"closed", "done"}
 
 
@@ -171,6 +176,7 @@ def beads_env(beads_root: Path) -> dict[str, str]:
     """Return an environment mapping with BEADS_DIR set."""
     env = os.environ.copy()
     env["BEADS_DIR"] = str(beads_root)
+    env.setdefault("BEADS_DB", str(beads_root / "beads.db"))
     agent_id = env.get("ATELIER_AGENT_ID")
     if agent_id:
         env.setdefault("BD_ACTOR", agent_id)
@@ -185,6 +191,15 @@ def _command_output_detail(result: exec.CommandResult) -> str:
 def _is_missing_store_error(detail: str) -> bool:
     normalized = detail.lower()
     return any(marker in normalized for marker in _STORE_REPAIR_ERROR_MARKERS)
+
+
+def _is_embedded_backend_panic(detail: str) -> bool:
+    normalized = detail.lower()
+    return any(marker in normalized for marker in _EMBEDDED_BACKEND_PANIC_MARKERS)
+
+
+def _has_db_flag(args: list[str]) -> bool:
+    return any(token == "--db" or token.startswith("--db=") for token in args)
 
 
 def _store_repair_cwd(*, beads_root: Path, cwd: Path) -> Path:
@@ -293,6 +308,7 @@ def _update_in_progress_targets(args: list[str]) -> tuple[str, ...]:
 def _raw_bd_json(
     args: list[str],
     *,
+    beads_root: Path,
     cwd: Path,
     env: dict[str, str],
 ) -> tuple[list[dict[str, object]], str | None]:
@@ -302,8 +318,20 @@ def _raw_bd_json(
     result = _run_raw_bd_command(["bd", *command], cwd=cwd, env=env)
     if result is None:
         return [], "missing required command: bd"
+    detail = _command_output_detail(result)
+    if result.returncode != 0 and _is_embedded_backend_panic(detail) and not _has_db_flag(command):
+        fallback = bd_invocation.with_bd_mode(
+            *command,
+            beads_dir=str(beads_root),
+            env=env,
+        )
+        retried = _run_raw_bd_command(fallback, cwd=cwd, env=env)
+        if retried is None:
+            return [], "missing required command: bd"
+        result = retried
+        detail = _command_output_detail(result)
     if result.returncode != 0:
-        return [], (_command_output_detail(result) or "bd command failed")
+        return [], (detail or "bd command failed")
     raw = (result.stdout or "").strip()
     if not raw:
         return [], None
@@ -321,10 +349,16 @@ def _raw_bd_json(
 def _show_issue_for_gate(
     issue_id: str,
     *,
+    beads_root: Path,
     cwd: Path,
     env: dict[str, str],
 ) -> tuple[dict[str, object] | None, str | None]:
-    payload, error = _raw_bd_json(["show", issue_id], cwd=cwd, env=env)
+    payload, error = _raw_bd_json(
+        ["show", issue_id],
+        beads_root=beads_root,
+        cwd=cwd,
+        env=env,
+    )
     if error:
         return None, error
     if not payload:
@@ -347,6 +381,7 @@ def _issue_has_label(issue: dict[str, object], label: str) -> bool:
 def _blocking_dependency_states(
     issue: dict[str, object],
     *,
+    beads_root: Path,
     cwd: Path,
     env: dict[str, str],
 ) -> tuple[str, ...]:
@@ -356,7 +391,12 @@ def _blocking_dependency_states(
         return (f"invalid issue payload ({exc})",)
     blockers: list[str] = []
     for dependency_id in boundary.dependency_ids:
-        dependency_issue, error = _show_issue_for_gate(dependency_id, cwd=cwd, env=env)
+        dependency_issue, error = _show_issue_for_gate(
+            dependency_id,
+            beads_root=beads_root,
+            cwd=cwd,
+            env=env,
+        )
         if error or dependency_issue is None:
             blockers.append(f"{dependency_id}(unavailable)")
             continue
@@ -370,6 +410,7 @@ def _blocking_dependency_states(
 def _enforce_in_progress_dependency_gate(
     args: list[str],
     *,
+    beads_root: Path,
     cwd: Path,
     env: dict[str, str],
 ) -> None:
@@ -377,7 +418,12 @@ def _enforce_in_progress_dependency_gate(
     if not targets:
         return
     for issue_id in targets:
-        issue, error = _show_issue_for_gate(issue_id, cwd=cwd, env=env)
+        issue, error = _show_issue_for_gate(
+            issue_id,
+            beads_root=beads_root,
+            cwd=cwd,
+            env=env,
+        )
         if error:
             die(
                 "cannot set issue "
@@ -385,7 +431,12 @@ def _enforce_in_progress_dependency_gate(
             )
         if issue is None or not _issue_has_label(issue, "at:changeset"):
             continue
-        blockers = _blocking_dependency_states(issue, cwd=cwd, env=env)
+        blockers = _blocking_dependency_states(
+            issue,
+            beads_root=beads_root,
+            cwd=cwd,
+            env=env,
+        )
         if not blockers:
             continue
         detail = ", ".join(blockers)
@@ -413,7 +464,7 @@ def run_bd_command(
         bd_invocation.ensure_supported_bd_version(env=env)
     except RuntimeError as exc:
         die(str(exc))
-    _enforce_in_progress_dependency_gate(args, cwd=cwd, env=env)
+    _enforce_in_progress_dependency_gate(args, beads_root=beads_root, cwd=cwd, env=env)
     request = exec.CommandRequest(
         argv=tuple(cmd),
         cwd=cwd,
@@ -425,22 +476,41 @@ def run_bd_command(
     result = exec.run_with_runner(request)
     if result is None:
         die("missing required command: bd")
+    detail = _command_output_detail(result)
+    if result.returncode != 0 and _is_embedded_backend_panic(detail) and not _has_db_flag(args):
+        fallback_cmd = bd_invocation.with_bd_mode(
+            *args,
+            beads_dir=str(beads_root),
+            env=env,
+        )
+        fallback_request = replace(request, argv=tuple(fallback_cmd))
+        retried = exec.run_with_runner(fallback_request)
+        if retried is None:
+            die("missing required command: bd")
+        result = retried
+        detail = _command_output_detail(result)
     if (
         result.returncode != 0
         and not allow_failure
         and _is_repairable_command(args)
-        and _is_missing_store_error(_command_output_detail(result))
+        and _is_missing_store_error(detail)
         and _repair_beads_store(beads_root=beads_root, cwd=cwd, env=env)
     ):
         result = exec.run_with_runner(request)
         if result is None:
             die("missing required command: bd")
+        detail = _command_output_detail(result)
 
     if result.returncode != 0 and not allow_failure:
-        detail = (result.stderr or result.stdout or "").strip()
         message = f"command failed: {' '.join(cmd)}"
         if detail:
             message = f"{message}\n{detail}"
+        if _is_embedded_backend_panic(detail):
+            message = (
+                f"{message}\nDetected an embedded storage panic from bd. "
+                "Atelier retried with an explicit sqlite database path, but "
+                "the command still failed. Run `bd doctor --fix --yes` and retry."
+            )
         die(message)
     return subprocess.CompletedProcess(
         args=list(result.argv),

@@ -20,6 +20,26 @@ def test_with_bd_mode_preserves_arguments() -> None:
     assert command == ["bd", "show", "at-1"]
 
 
+def test_with_bd_mode_pins_db_when_beads_dir_is_provided() -> None:
+    command = with_bd_mode("show", "at-1", "--json", beads_dir="/tmp/beads", env={})
+
+    assert command == ["bd", "--db", "/tmp/beads/beads.db", "show", "at-1", "--json"]
+
+
+def test_with_bd_mode_does_not_override_explicit_db_flag() -> None:
+    command = with_bd_mode(
+        "--db",
+        "/custom/beads.db",
+        "show",
+        "at-1",
+        "--json",
+        beads_dir="/tmp/beads",
+        env={},
+    )
+
+    assert command == ["bd", "--db", "/custom/beads.db", "show", "at-1", "--json"]
+
+
 def test_ensure_supported_bd_version_accepts_minimum(monkeypatch: pytest.MonkeyPatch) -> None:
     bd_invocation._read_bd_version_for_executable.cache_clear()
     monkeypatch.setattr(

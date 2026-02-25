@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 from functools import lru_cache
+from pathlib import Path
 from typing import Mapping
 
 MIN_SUPPORTED_BD_VERSION: tuple[int, int, int] = (0, 51, 0)
@@ -72,7 +73,13 @@ def ensure_supported_bd_version(*, env: Mapping[str, str] | None = None) -> None
 def with_bd_mode(
     *args: str, beads_dir: str | None, env: Mapping[str, str] | None = None
 ) -> list[str]:
-    """Return a direct ``bd`` command."""
+    """Return a ``bd`` command with deterministic database selection."""
 
-    del beads_dir, env
-    return ["bd", *args]
+    del env
+    command = ["bd"]
+    has_db_flag = any(argument == "--db" or argument.startswith("--db=") for argument in args)
+    if beads_dir and not has_db_flag:
+        db_path = Path(beads_dir).expanduser() / "beads.db"
+        command.extend(["--db", str(db_path)])
+    command.extend(args)
+    return command

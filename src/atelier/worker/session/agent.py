@@ -189,6 +189,7 @@ def prepare_agent_session(
     if changeset_id:
         env["ATELIER_CHANGESET_ID"] = str(changeset_id)
     env["BEADS_DIR"] = str(beads_root)
+    env["BEADS_DB"] = str(beads_root / "beads.db")
     return AgentSessionPreparation(
         agent_spec=agent_spec,
         agent_options=agent_options,

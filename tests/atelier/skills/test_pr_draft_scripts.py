@@ -69,4 +69,11 @@ def test_load_issue_defaults_to_direct_mode(monkeypatch, tmp_path: Path) -> None
     issue = module.load_issue("at-1", beads_dir=tmp_path, repo_path=tmp_path)
 
     assert issue["id"] == "at-1"
-    assert captured["command"] == ["bd", "show", "at-1", "--json"]
+    assert captured["command"] == [
+        "bd",
+        "--db",
+        str(tmp_path / "beads.db"),
+        "show",
+        "at-1",
+        "--json",
+    ]

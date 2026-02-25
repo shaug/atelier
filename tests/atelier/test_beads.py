@@ -11,6 +11,13 @@ import atelier.beads as beads
 from atelier import exec as exec_util
 
 
+def test_beads_env_sets_beads_db() -> None:
+    env = beads.beads_env(Path("/tmp/project/.beads"))
+
+    assert env["BEADS_DIR"] == "/tmp/project/.beads"
+    assert env["BEADS_DB"] == "/tmp/project/.beads/beads.db"
+
+
 def test_run_bd_issue_records_validates_issues() -> None:
     with patch(
         "atelier.beads.run_bd_json",
@@ -182,6 +189,48 @@ def test_run_bd_command_repairs_issue_prefix_without_jsonl_init(tmp_path: Path) 
     init_calls = [call for call in calls if call[:4] == ["bd", "init", "--prefix", "at"]]
     assert init_calls == [["bd", "init", "--prefix", "at"]]
     assert calls[-1] == ["bd", "list", "--json"]
+
+
+def test_run_bd_json_retries_embedded_backend_panic_with_explicit_db(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "show", "at-1", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=2,
+                stdout="",
+                stderr=(
+                    "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                    "doltdb.(*DoltDB).SetCrashOnFatalError"
+                ),
+            )
+        if argv == ["bd", "--db", str(beads_root / "beads.db"), "show", "at-1", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='[{"id":"at-1","status":"open","labels":["at:changeset"]}]',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        payload = beads.run_bd_json(["show", "at-1"], beads_root=beads_root, cwd=cwd)
+
+    assert payload == [{"id": "at-1", "status": "open", "labels": ["at:changeset"]}]
+    assert calls == [
+        ["bd", "show", "at-1", "--json"],
+        ["bd", "--db", str(beads_root / "beads.db"), "show", "at-1", "--json"],
+    ]
 
 
 def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
