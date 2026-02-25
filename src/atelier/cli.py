@@ -22,10 +22,9 @@ try:
 except ImportError:  # pragma: no cover - legacy Click fallback
     from click.parser import split_arg_string
 
-from . import __version__, beads, config, git, paths
+from . import __version__, bd_invocation, beads, config, git, paths
 from . import log as atelier_log
 from .commands import config as config_cmd
-from .commands import daemon as daemon_cmd
 from .commands import edit as edit_cmd
 from .commands import gc as gc_cmd
 from .commands import hook as hook_cmd
@@ -51,8 +50,6 @@ app = typer.Typer(
     ),
 )
 
-daemon_app = typer.Typer(help="Manage the Atelier daemon.")
-app.add_typer(daemon_app, name="daemon")
 _COMPLETE_ENV = "_ATELIER_COMPLETE"
 _DEFAULT_BRANCH_EXCLUDES = {"main", "master"}
 _LOG_LEVEL_CHOICES = ("trace", "debug", "info", "success", "warning", "error")
@@ -110,8 +107,16 @@ def _resolve_completion_project(
 
 
 def _collect_workspace_root_branches(repo_root: Path, *, beads_root: Path) -> list[str]:
-    cmd = ["bd", "list", "--label", "at:epic", "--json", "--no-daemon"]
-    result = try_run_command(cmd, cwd=repo_root, env=beads.beads_env(beads_root))
+    env = beads.beads_env(beads_root)
+    cmd = bd_invocation.with_bd_mode(
+        "list",
+        "--label",
+        "at:epic",
+        "--json",
+        beads_dir=str(beads_root),
+        env=env,
+    )
+    result = try_run_command(cmd, cwd=repo_root, env=env)
     if not result or result.returncode != 0:
         return []
     raw = result.stdout.strip() if result.stdout else ""
@@ -521,24 +526,6 @@ def hook_command(
 ) -> None:
     """Run a hook command for agent integrations."""
     hook_cmd.run_hook(SimpleNamespace(event=event))
-
-
-@daemon_app.command("start", help="Start the Atelier daemon.")
-def daemon_start() -> None:
-    """Start the worker + bd daemon."""
-    daemon_cmd.start_daemon(SimpleNamespace())
-
-
-@daemon_app.command("stop", help="Stop the Atelier daemon.")
-def daemon_stop() -> None:
-    """Stop the worker + bd daemon."""
-    daemon_cmd.stop_daemon(SimpleNamespace())
-
-
-@daemon_app.command("status", help="Show daemon status.")
-def daemon_status() -> None:
-    """Show worker + bd daemon status."""
-    daemon_cmd.status_daemon(SimpleNamespace())
 
 
 @app.command(

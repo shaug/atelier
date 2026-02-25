@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import changesets, exec, messages
+from . import bd_invocation, changesets, exec, messages
 from .external_tickets import (
     ExternalTicketRef,
     external_ticket_payload,
@@ -35,6 +35,12 @@ ATELIER_ISSUE_PREFIX = "at"
 _AGENT_ISSUE_TYPE = "agent"
 _FALLBACK_ISSUE_TYPE = "task"
 _ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
+_STORE_REPAIR_ATTEMPTED: set[Path] = set()
+_STORE_REPAIR_ERROR_MARKERS = (
+    "no beads database found",
+    "database not initialized: issue_prefix config is missing",
+    "fresh clone detected",
+)
 
 
 class _IssueTypeModel(BaseModel):
@@ -87,14 +93,12 @@ class BeadsClient:
         args: list[str],
         *,
         allow_failure: bool = False,
-        daemon: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         return run_bd_command(
             args,
             beads_root=self.beads_root,
             cwd=self.cwd,
             allow_failure=allow_failure,
-            daemon=daemon,
         )
 
     def run_json(self, args: list[str]) -> list[dict[str, object]]:
@@ -173,13 +177,99 @@ def beads_env(beads_root: Path) -> dict[str, str]:
     return env
 
 
+def _command_output_detail(result: exec.CommandResult) -> str:
+    return (result.stderr or result.stdout or "").strip()
+
+
+def _is_missing_store_error(detail: str) -> bool:
+    normalized = detail.lower()
+    return any(marker in normalized for marker in _STORE_REPAIR_ERROR_MARKERS)
+
+
+def _store_repair_cwd(*, beads_root: Path, cwd: Path) -> Path:
+    """Return the directory where Beads repair commands should run."""
+    candidate = beads_root.parent
+    if candidate.exists():
+        return candidate
+    return cwd
+
+
+def _run_raw_bd_command(
+    argv: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> exec.CommandResult | None:
+    return exec.run_with_runner(
+        exec.CommandRequest(
+            argv=tuple(argv),
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+    )
+
+
+def _repair_beads_store(*, beads_root: Path, cwd: Path, env: dict[str, str]) -> bool:
+    """Attempt to repair a missing or stale Beads store.
+
+    This routine intentionally avoids raising; callers decide whether to retry
+    the original command or surface the original failure.
+    """
+
+    key = beads_root.resolve()
+    if key in _STORE_REPAIR_ATTEMPTED:
+        return False
+    _STORE_REPAIR_ATTEMPTED.add(key)
+
+    repair_cwd = _store_repair_cwd(beads_root=beads_root, cwd=cwd)
+
+    _run_raw_bd_command(["bd", "doctor", "--fix", "--yes"], cwd=repair_cwd, env=env)
+
+    init_args = ["bd", "init", "--prefix", ATELIER_ISSUE_PREFIX]
+    if (beads_root / "issues.jsonl").exists():
+        init_args.append("--from-jsonl")
+    _run_raw_bd_command(init_args, cwd=repair_cwd, env=env)
+
+    _run_raw_bd_command(
+        ["bd", "config", "set", "issue_prefix", ATELIER_ISSUE_PREFIX],
+        cwd=repair_cwd,
+        env=env,
+    )
+    _run_raw_bd_command(
+        ["bd", "config", "set", "beads.role", "maintainer"],
+        cwd=repair_cwd,
+        env=env,
+    )
+    verify = _run_raw_bd_command(
+        ["bd", "config", "get", "issue_prefix", "--json"],
+        cwd=repair_cwd,
+        env=env,
+    )
+    return verify is not None and verify.returncode == 0
+
+
+def _is_repairable_command(args: list[str]) -> bool:
+    if not args:
+        return False
+    command = args[0]
+    if command in {"doctor", "init"}:
+        return False
+    if command == "config" and len(args) >= 3 and args[1] == "set":
+        key = args[2].strip().lower()
+        if key in {"issue_prefix", "beads.role"}:
+            return False
+    return True
+
+
 def run_bd_command(
     args: list[str],
     *,
     beads_root: Path,
     cwd: Path,
     allow_failure: bool = False,
-    daemon: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run a bd command and return the CompletedProcess.
 
@@ -187,20 +277,33 @@ def run_bd_command(
     unless allow_failure is True.
     """
     cmd = ["bd", *args]
-    if not daemon and "--no-daemon" not in cmd:
-        cmd.append("--no-daemon")
-    result = exec.run_with_runner(
-        exec.CommandRequest(
-            argv=tuple(cmd),
-            cwd=cwd,
-            env=beads_env(beads_root),
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,
-        )
+    env = beads_env(beads_root)
+    try:
+        bd_invocation.ensure_supported_bd_version(env=env)
+    except RuntimeError as exc:
+        die(str(exc))
+    request = exec.CommandRequest(
+        argv=tuple(cmd),
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
     )
+    result = exec.run_with_runner(request)
     if result is None:
         die("missing required command: bd")
+    if (
+        result.returncode != 0
+        and not allow_failure
+        and _is_repairable_command(args)
+        and _is_missing_store_error(_command_output_detail(result))
+        and _repair_beads_store(beads_root=beads_root, cwd=cwd, env=env)
+    ):
+        result = exec.run_with_runner(request)
+        if result is None:
+            die("missing required command: bd")
+
     if result.returncode != 0 and not allow_failure:
         detail = (result.stderr or result.stdout or "").strip()
         message = f"command failed: {' '.join(cmd)}"
@@ -263,11 +366,13 @@ def run_bd_issues(
 
 def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
     """Return `bd prime --full` markdown without failing the caller."""
+    env = beads_env(beads_root)
+    command = ["bd", "prime", "--full"]
     result = exec.run_with_runner(
         exec.CommandRequest(
-            argv=("bd", "prime", "--full", "--no-daemon"),
+            argv=tuple(command),
             cwd=cwd,
-            env=beads_env(beads_root),
+            env=env,
             capture_output=True,
             text=True,
             stdin=subprocess.DEVNULL,
@@ -322,11 +427,13 @@ def _list_issue_types(*, beads_root: Path, cwd: Path) -> set[str]:
     cached = _ISSUE_TYPE_CACHE.get(beads_root)
     if cached is not None:
         return cached
+    env = beads_env(beads_root)
+    command = ["bd", "types", "--json"]
     result = exec.run_with_runner(
         exec.CommandRequest(
-            argv=("bd", "types", "--json", "--no-daemon"),
+            argv=tuple(command),
             cwd=cwd,
-            env=beads_env(beads_root),
+            env=env,
             capture_output=True,
             text=True,
             stdin=subprocess.DEVNULL,

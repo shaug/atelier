@@ -81,7 +81,6 @@ class BeadsService(Protocol):
         beads_root: Path,
         cwd: Path,
         allow_failure: bool = False,
-        daemon: bool = False,
     ) -> subprocess.CompletedProcess[str]: ...
 
     def run_bd_json(

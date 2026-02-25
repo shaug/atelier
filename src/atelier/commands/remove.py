@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+import signal
 from pathlib import Path
 
 from .. import config, git, worktrees
 from .. import exec as exec_util
 from ..io import confirm, die, say
-from . import daemon as daemon_cmd
 from . import gc as gc_cmd
 from .resolve import resolve_current_project_with_repo_root
 
@@ -25,17 +26,41 @@ def _run_git(repo_root: Path, args: list[str], *, git_path: str) -> tuple[bool, 
     return True, (result.stdout or "").strip() or None
 
 
-def _stop_project_daemons(project_dir: Path, *, beads_root: Path) -> tuple[bool, bool]:
-    stopped_worker = daemon_cmd._stop_worker(project_dir)
-    db_path = daemon_cmd._resolve_beads_db(beads_root)
-    stopped_bd = False
-    if db_path is not None and project_dir.exists():
-        cmd = ["bd", "daemon", "stop", "--db", str(db_path)]
-        result = exec_util.try_run_command(
-            cmd, cwd=project_dir, env=daemon_cmd.beads.beads_env(beads_root)
-        )
-        stopped_bd = bool(result and result.returncode == 0)
-    return stopped_worker, stopped_bd
+def _worker_pid_path(project_dir: Path) -> Path:
+    return project_dir / "runtime" / "worker.pid"
+
+
+def _read_pid(path: Path) -> int | None:
+    if not path.exists():
+        return None
+    try:
+        value = int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _pid_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _stop_worker_process(project_dir: Path) -> bool:
+    pid_path = _worker_pid_path(project_dir)
+    pid = _read_pid(pid_path)
+    if pid is None:
+        return False
+    if not _pid_running(pid):
+        pid_path.unlink(missing_ok=True)
+        return False
+    os.kill(pid, signal.SIGTERM)
+    pid_path.unlink(missing_ok=True)
+    return True
 
 
 def _managed_worktrees_from_git(
@@ -112,7 +137,6 @@ def remove_project(args: object) -> None:
     """Remove Atelier project state for the current repo."""
     project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
-    beads_root = config.resolve_beads_root(project_data_dir, repo_root)
     git_path = config.resolve_git_path(project_config)
 
     yes = bool(getattr(args, "yes", False))
@@ -155,11 +179,9 @@ def remove_project(args: object) -> None:
         say("Cancelled.")
         return
 
-    stopped_worker, stopped_bd = _stop_project_daemons(project_data_dir, beads_root=beads_root)
+    stopped_worker = _stop_worker_process(project_data_dir)
     if stopped_worker:
-        say("Stopped worker daemon.")
-    if stopped_bd:
-        say("Stopped bd daemon.")
+        say("Stopped worker process.")
 
     if run_gc:
         say("Running GC before removal.")

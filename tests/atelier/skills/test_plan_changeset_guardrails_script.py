@@ -123,28 +123,4 @@ def test_run_bd_json_defaults_to_direct_mode(monkeypatch) -> None:
     payload = module._run_bd_json(["list", "--json"], beads_dir=None)
 
     assert payload == []
-    assert "--no-daemon" in captured["command"]
-
-
-def test_run_bd_json_uses_daemon_when_project_config_enables_it(
-    monkeypatch, tmp_path: Path
-) -> None:
-    module = _load_script_module()
-    captured: dict[str, list[str]] = {}
-    project_dir = tmp_path / "project"
-    beads_dir = project_dir / ".beads"
-    beads_dir.mkdir(parents=True)
-    (project_dir / "config.user.json").write_text('{"beads":{"daemon":true}}', encoding="utf-8")
-    for key in ("ATELIER_PROJECT", "ATELIER_BD_DAEMON", "BEADS_DAEMON", "BEADS_NO_DAEMON"):
-        monkeypatch.delenv(key, raising=False)
-
-    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        captured["command"] = command
-        return subprocess.CompletedProcess(args=command, returncode=0, stdout="[]", stderr="")
-
-    monkeypatch.setattr(module.subprocess, "run", fake_run)
-
-    payload = module._run_bd_json(["list", "--json"], beads_dir=str(beads_dir))
-
-    assert payload == []
-    assert "--no-daemon" not in captured["command"]
+    assert captured["command"] == ["bd", "list", "--json"]

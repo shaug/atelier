@@ -13,7 +13,6 @@ TEMPLATES_DIRNAME = "templates"
 SKILLS_DIRNAME = "skills"
 AGENTS_DIRNAME = "agents"
 BEADS_DIRNAME = ".beads"
-DAEMON_DIRNAME = "daemon"
 LEGACY_CONFIG_FILENAME = "config.json"
 PROJECT_CONFIG_SYS_FILENAME = "config.sys.json"
 PROJECT_CONFIG_USER_FILENAME = "config.user.json"
@@ -94,11 +93,6 @@ def project_skills_dir(project_dir: Path) -> Path:
 def project_agents_dir(project_dir: Path) -> Path:
     """Return the agents directory for a project."""
     return project_dir / AGENTS_DIRNAME
-
-
-def project_daemon_dir(project_dir: Path) -> Path:
-    """Return the daemon state directory for a project."""
-    return project_dir / DAEMON_DIRNAME
 
 
 def installed_legacy_config_path() -> Path:

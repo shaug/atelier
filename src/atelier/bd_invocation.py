@@ -2,145 +2,77 @@
 
 from __future__ import annotations
 
-import json
 import os
-from pathlib import Path
+import re
+import shutil
+import subprocess
+from functools import lru_cache
 from typing import Mapping
 
-from . import paths
-
-_TRUE_VALUES = {"1", "true", "yes", "on"}
-_FALSE_VALUES = {"0", "false", "no", "off"}
+MIN_SUPPORTED_BD_VERSION: tuple[int, int, int] = (0, 51, 0)
+_SEMVER_PATTERN = re.compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
 
 
-def _parse_bool(value: object) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in _TRUE_VALUES:
-            return True
-        if normalized in _FALSE_VALUES:
-            return False
-    return None
+def _format_version(version: tuple[int, int, int]) -> str:
+    return f"{version[0]}.{version[1]}.{version[2]}"
 
 
-def _load_json_dict(path: Path) -> dict[str, object]:
-    if not path.exists():
-        return {}
+def _parse_semver(value: str) -> tuple[int, int, int] | None:
+    match = _SEMVER_PATTERN.search(value)
+    if match is None:
+        return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+@lru_cache(maxsize=16)
+def _read_bd_version_for_executable(executable: str) -> tuple[int, int, int] | None:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if isinstance(payload, dict):
-        return payload
-    return {}
+        result = subprocess.run(
+            [executable, "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+    except OSError:
+        return None
+    output = f"{result.stdout or ''}\n{result.stderr or ''}"
+    return _parse_semver(output)
 
 
-def _project_beads_settings(project_dir: Path) -> dict[str, object]:
-    sys_payload = _load_json_dict(paths.project_config_sys_path(project_dir))
-    user_payload = _load_json_dict(paths.project_config_user_path(project_dir))
-    settings: dict[str, object] = {}
-    for payload in (sys_payload, user_payload):
-        beads_section = payload.get("beads")
-        if isinstance(beads_section, dict):
-            settings.update(beads_section)
-    return settings
+def ensure_supported_bd_version(*, env: Mapping[str, str] | None = None) -> None:
+    """Validate that the active ``bd`` executable meets Atelier's minimum version.
 
+    Args:
+        env: Optional environment mapping used for resolving ``PATH``.
 
-def _daemon_mode_from_settings(settings: Mapping[str, object]) -> bool | None:
-    for key in ("daemon", "daemon_enabled", "use_daemon"):
-        parsed = _parse_bool(settings.get(key))
-        if parsed is not None:
-            return parsed
-
-    for key in ("no_daemon", "no-daemon"):
-        parsed = _parse_bool(settings.get(key))
-        if parsed is not None:
-            return not parsed
-
-    for key in ("mode", "invocation", "invocation_mode"):
-        value = settings.get(key)
-        if not isinstance(value, str):
-            continue
-        normalized = value.strip().lower().replace("_", "-")
-        if normalized == "daemon":
-            return True
-        if normalized in {"direct", "no-daemon"}:
-            return False
-
-    for key in ("daemon.db", "daemon_db"):
-        value = settings.get(key)
-        if isinstance(value, str) and value.strip():
-            return True
-    return None
-
-
-def _candidate_project_dirs(*, beads_dir: str | None, env: Mapping[str, str]) -> list[Path]:
-    candidates: list[Path] = []
-    seen: set[Path] = set()
-
-    for raw in (env.get("ATELIER_PROJECT"), beads_dir, env.get("BEADS_DIR")):
-        if not raw:
-            continue
-        expanded = Path(raw).expanduser()
-        project_dir = expanded
-        if expanded.name == paths.BEADS_DIRNAME:
-            project_dir = expanded.parent
-        if project_dir in seen:
-            continue
-        seen.add(project_dir)
-        candidates.append(project_dir)
-    return candidates
-
-
-def should_use_bd_daemon(*, beads_dir: str | None, env: Mapping[str, str] | None = None) -> bool:
-    """Return whether daemon mode is explicitly configured for ``bd`` calls.
-
-    The default is direct mode (``--no-daemon``). Daemon mode is enabled only
-    when explicit env/config overrides request it.
+    Raises:
+        RuntimeError: If ``bd`` is missing, unparsable, or below the minimum
+            supported version.
     """
 
     env_map = dict(env or os.environ)
+    executable = shutil.which("bd", path=env_map.get("PATH"))
+    if not executable:
+        raise RuntimeError("missing required command: bd")
 
-    for key in ("ATELIER_BD_DAEMON", "BEADS_DAEMON"):
-        parsed = _parse_bool(env_map.get(key))
-        if parsed is not None:
-            return parsed
-
-    no_daemon = _parse_bool(env_map.get("BEADS_NO_DAEMON"))
-    if no_daemon is True:
-        return False
-    if no_daemon is False:
-        return True
-
-    auto_start_daemon = _parse_bool(env_map.get("BEADS_AUTO_START_DAEMON"))
-    if auto_start_daemon is True:
-        return True
-
-    beads_db = env_map.get("BEADS_DB")
-    if isinstance(beads_db, str) and beads_db.strip():
-        return True
-
-    for project_dir in _candidate_project_dirs(beads_dir=beads_dir, env=env_map):
-        mode = _daemon_mode_from_settings(_project_beads_settings(project_dir))
-        if mode is not None:
-            return mode
-
-    return False
+    detected = _read_bd_version_for_executable(executable)
+    required = _format_version(MIN_SUPPORTED_BD_VERSION)
+    if detected is None:
+        raise RuntimeError(
+            f"unsupported bd version: unable to determine version; Atelier requires bd >= {required}"
+        )
+    if detected < MIN_SUPPORTED_BD_VERSION:
+        detected_str = _format_version(detected)
+        raise RuntimeError(
+            f"unsupported bd version: {detected_str}; Atelier requires bd >= {required}"
+        )
 
 
 def with_bd_mode(
     *args: str, beads_dir: str | None, env: Mapping[str, str] | None = None
 ) -> list[str]:
-    """Return a ``bd`` command with deterministic mode selection."""
+    """Return a direct ``bd`` command."""
 
-    command = ["bd", *args]
-    if args and args[0] == "daemon":
-        return command
-    if "--no-daemon" in command:
-        return command
-    if should_use_bd_daemon(beads_dir=beads_dir, env=env):
-        return command
-    command.append("--no-daemon")
-    return command
+    del beads_dir, env
+    return ["bd", *args]

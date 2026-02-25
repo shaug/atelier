@@ -12,7 +12,6 @@ def test_remove_project_dry_run_does_not_mutate() -> None:
         root = Path(tmp)
         project_dir = root / "project-data"
         repo_root = root / "repo"
-        beads_root = project_dir / ".beads"
         project_dir.mkdir(parents=True, exist_ok=True)
         repo_root.mkdir(parents=True, exist_ok=True)
         project_config = config.ProjectConfig()
@@ -25,10 +24,6 @@ def test_remove_project_dry_run_does_not_mutate() -> None:
             patch(
                 "atelier.commands.remove.config.resolve_project_data_dir",
                 return_value=project_dir,
-            ),
-            patch(
-                "atelier.commands.remove.config.resolve_beads_root",
-                return_value=beads_root,
             ),
             patch(
                 "atelier.commands.remove._managed_worktrees_from_git",
@@ -63,7 +58,6 @@ def test_remove_project_applies_cleanup_and_deletes_project_dir() -> None:
         root = Path(tmp)
         project_dir = root / "project-data"
         repo_root = root / "repo"
-        beads_root = project_dir / ".beads"
         project_dir.mkdir(parents=True, exist_ok=True)
         repo_root.mkdir(parents=True, exist_ok=True)
         (project_dir / "state.txt").write_text("ok", encoding="utf-8")
@@ -80,10 +74,6 @@ def test_remove_project_applies_cleanup_and_deletes_project_dir() -> None:
                 return_value=project_dir,
             ),
             patch(
-                "atelier.commands.remove.config.resolve_beads_root",
-                return_value=beads_root,
-            ),
-            patch(
                 "atelier.commands.remove._managed_worktrees_from_git",
                 side_effect=[[managed_worktree], [managed_worktree]],
             ),
@@ -92,8 +82,8 @@ def test_remove_project_applies_cleanup_and_deletes_project_dir() -> None:
                 return_value={"main", "feat/test"},
             ),
             patch(
-                "atelier.commands.remove._stop_project_daemons",
-                return_value=(True, True),
+                "atelier.commands.remove._stop_worker_process",
+                return_value=True,
             ),
             patch("atelier.commands.remove.gc_cmd.gc") as run_gc,
             patch("atelier.commands.remove._remove_worktree") as remove_worktree,

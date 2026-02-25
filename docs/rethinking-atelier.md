@@ -20,10 +20,9 @@ system.
   and changeset stacks.
 - Workers are orchestrated by `atelier work`; each session targets a single
   changeset and exits.
-- No background daemons by default. `atelier work` can loop or watch for new
-  work while it runs, and `atelier daemon` can run a long-lived worker loop when
-  full-stack mode is desired.
-- In minimal mode, bd runs in direct mode (no daemon) to avoid startup delays.
+- No background workers by default. `atelier work` can loop or watch for new
+  work while it runs.
+- Beads is invoked directly from commands.
 - Most state lives in bd; optional local SQLite only for stronger claim
   atomicity.
 - Planner creates epics + tasks + subtasks with changeset guardrails.
@@ -619,7 +618,6 @@ User-facing commands should be minimal:
 
 - `atelier plan` -> start planner session
 - `atelier work` -> start worker session
-- `atelier daemon` -> start/stop/status full-stack worker loop
 - `atelier edit` -> open a workspace repo in the work editor
 - `atelier status` -> show hooks, claims, queue state
 - `atelier gc` -> cleanup stale hooks, claims, channels, queues
