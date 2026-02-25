@@ -97,7 +97,10 @@ def test_run_bd_command_repairs_missing_store_and_retries(tmp_path: Path) -> Non
             )
         raise AssertionError(f"unexpected command: {argv}")
 
-    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
         result = beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
 
     assert result.returncode == 0
@@ -169,7 +172,10 @@ def test_run_bd_command_repairs_issue_prefix_without_jsonl_init(tmp_path: Path) 
             )
         raise AssertionError(f"unexpected command: {argv}")
 
-    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
         result = beads.run_bd_command(["list", "--json"], beads_root=beads_root, cwd=cwd)
 
     assert result.returncode == 0

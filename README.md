@@ -75,7 +75,7 @@ Command-specific details live in module docstrings under `src/atelier/commands`.
 ## Requirements
 
 - Git (for worktrees and branch operations)
-- `bd` on your PATH (Atelier's local planning store)
+- `bd` `>= 0.51.0` on your PATH (Atelier's local planning store)
 
 ## Repo-Local Commit Hooks
 

@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import changesets, exec, messages
+from . import bd_invocation, changesets, exec, messages
 from .external_tickets import (
     ExternalTicketRef,
     external_ticket_payload,
@@ -278,6 +278,10 @@ def run_bd_command(
     """
     cmd = ["bd", *args]
     env = beads_env(beads_root)
+    try:
+        bd_invocation.ensure_supported_bd_version(env=env)
+    except RuntimeError as exc:
+        die(str(exc))
     request = exec.CommandRequest(
         argv=tuple(cmd),
         cwd=cwd,
