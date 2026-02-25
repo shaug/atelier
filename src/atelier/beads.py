@@ -41,6 +41,7 @@ _STORE_REPAIR_ERROR_MARKERS = (
     "database not initialized: issue_prefix config is missing",
     "fresh clone detected",
 )
+_TERMINAL_DEPENDENCY_STATUSES = {"closed", "done"}
 
 
 class _IssueTypeModel(BaseModel):
@@ -264,6 +265,136 @@ def _is_repairable_command(args: list[str]) -> bool:
     return True
 
 
+def _update_in_progress_targets(args: list[str]) -> tuple[str, ...]:
+    if not args or args[0] != "update":
+        return ()
+    status: str | None = None
+    for index, token in enumerate(args):
+        if token != "--status":
+            continue
+        if index + 1 < len(args):
+            status = str(args[index + 1]).strip().lower()
+        break
+    if status != "in_progress":
+        return ()
+    targets: list[str] = []
+    index = 1
+    while index < len(args):
+        token = args[index]
+        if token.startswith("-"):
+            break
+        cleaned = token.strip()
+        if cleaned:
+            targets.append(cleaned)
+        index += 1
+    return tuple(targets)
+
+
+def _raw_bd_json(
+    args: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[list[dict[str, object]], str | None]:
+    command = list(args)
+    if "--json" not in command:
+        command.append("--json")
+    result = _run_raw_bd_command(["bd", *command], cwd=cwd, env=env)
+    if result is None:
+        return [], "missing required command: bd"
+    if result.returncode != 0:
+        return [], (_command_output_detail(result) or "bd command failed")
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return [], None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return [], f"failed to parse bd json output: {exc}"
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)], None
+    if isinstance(payload, dict):
+        return [payload], None
+    return [], None
+
+
+def _show_issue_for_gate(
+    issue_id: str,
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[dict[str, object] | None, str | None]:
+    payload, error = _raw_bd_json(["show", issue_id], cwd=cwd, env=env)
+    if error:
+        return None, error
+    if not payload:
+        return None, f"issue {issue_id} not found"
+    return payload[0], None
+
+
+def _issue_has_label(issue: dict[str, object], label: str) -> bool:
+    labels = issue.get("labels")
+    if not isinstance(labels, list):
+        return False
+    for entry in labels:
+        if entry is None:
+            continue
+        if str(entry).strip() == label:
+            return True
+    return False
+
+
+def _blocking_dependency_states(
+    issue: dict[str, object],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[str, ...]:
+    try:
+        boundary = parse_issue_boundary(issue, source="beads:in_progress_gate")
+    except ValueError as exc:
+        return (f"invalid issue payload ({exc})",)
+    blockers: list[str] = []
+    for dependency_id in boundary.dependency_ids:
+        dependency_issue, error = _show_issue_for_gate(dependency_id, cwd=cwd, env=env)
+        if error or dependency_issue is None:
+            blockers.append(f"{dependency_id}(unavailable)")
+            continue
+        status = str(dependency_issue.get("status") or "").strip().lower()
+        if status in _TERMINAL_DEPENDENCY_STATUSES:
+            continue
+        blockers.append(f"{dependency_id}({status or 'unknown'})")
+    return tuple(blockers)
+
+
+def _enforce_in_progress_dependency_gate(
+    args: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> None:
+    targets = _update_in_progress_targets(args)
+    if not targets:
+        return
+    for issue_id in targets:
+        issue, error = _show_issue_for_gate(issue_id, cwd=cwd, env=env)
+        if error:
+            die(
+                "cannot set issue "
+                f"{issue_id} to in_progress: unable to evaluate dependencies ({error})"
+            )
+        if issue is None or not _issue_has_label(issue, "at:changeset"):
+            continue
+        blockers = _blocking_dependency_states(issue, cwd=cwd, env=env)
+        if not blockers:
+            continue
+        detail = ", ".join(blockers)
+        die(
+            f"cannot set changeset {issue_id} to in_progress: blocking dependencies "
+            f"not complete ({detail}). Close dependencies before retrying."
+        )
+
+
 def run_bd_command(
     args: list[str],
     *,
@@ -282,6 +413,7 @@ def run_bd_command(
         bd_invocation.ensure_supported_bd_version(env=env)
     except RuntimeError as exc:
         die(str(exc))
+    _enforce_in_progress_dependency_gate(args, cwd=cwd, env=env)
     request = exec.CommandRequest(
         argv=tuple(cmd),
         cwd=cwd,

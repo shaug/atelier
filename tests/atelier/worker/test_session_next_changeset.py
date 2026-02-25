@@ -137,7 +137,7 @@ def _epic() -> dict[str, object]:
     return {"id": "at-epic", "status": "open", "labels": ["at:epic", "at:ready"]}
 
 
-def test_next_changeset_service_allows_stacked_intra_epic_review_handoff() -> None:
+def test_next_changeset_service_blocks_stacked_dependency_until_blocker_terminal() -> None:
     blocker = _changeset("at-epic.1", work_branch="feat/at-epic.1")
     downstream = _changeset(
         "at-epic.2",
@@ -155,8 +155,7 @@ def test_next_changeset_service_allows_stacked_intra_epic_review_handoff() -> No
 
     selected = startup.next_changeset_service(context=_context(), service=service)
 
-    assert selected is not None
-    assert selected["id"] == "at-epic.2"
+    assert selected is None
 
 
 def test_next_changeset_service_blocks_when_review_handoff_evidence_missing() -> None:
@@ -249,3 +248,22 @@ def test_next_changeset_service_ignores_parent_child_dependencies(
 
     assert selected is not None
     assert selected["id"] == "at-epic.1"
+
+
+def test_next_changeset_service_blocks_epic_changeset_with_open_dependency() -> None:
+    epic_changeset = {
+        "id": "at-epic",
+        "status": "open",
+        "labels": ["at:epic", "at:changeset", "at:ready"],
+        "dependencies": ["at-epic.1"],
+    }
+    blocker = _changeset("at-epic.1", status="open", work_branch="feat/at-epic.1")
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": epic_changeset, blocker["id"]: blocker},
+        ready_changesets=[],
+        descendants=[blocker],
+    )
+
+    selected = startup.next_changeset_service(context=_context(), service=service)
+
+    assert selected is None
