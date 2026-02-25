@@ -65,3 +65,46 @@ def test_ensure_supported_bd_version_rejects_missing_bd(monkeypatch: pytest.Monk
 
     with pytest.raises(RuntimeError, match="missing required command: bd"):
         bd_invocation.ensure_supported_bd_version(env={})
+
+
+def test_ensure_supported_bd_version_accepts_override_minimum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bd_invocation._read_bd_version_for_executable.cache_clear()
+    monkeypatch.setattr(
+        bd_invocation.shutil, "which", lambda *_args, **_kwargs: "/usr/local/bin/bd"
+    )
+    monkeypatch.setattr(
+        bd_invocation.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["bd", "--version"],
+            returncode=0,
+            stdout="bd version 0.56.1",
+            stderr="",
+        ),
+    )
+
+    bd_invocation.ensure_supported_bd_version(env={}, min_version=(0, 56, 1))
+
+
+def test_ensure_supported_bd_version_rejects_override_minimum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bd_invocation._read_bd_version_for_executable.cache_clear()
+    monkeypatch.setattr(
+        bd_invocation.shutil, "which", lambda *_args, **_kwargs: "/usr/local/bin/bd"
+    )
+    monkeypatch.setattr(
+        bd_invocation.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["bd", "--version"],
+            returncode=0,
+            stdout="bd version 0.56.0",
+            stderr="",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="requires bd >= 0.56.1"):
+        bd_invocation.ensure_supported_bd_version(env={}, min_version=(0, 56, 1))

@@ -184,6 +184,178 @@ def test_run_bd_command_repairs_issue_prefix_without_jsonl_init(tmp_path: Path) 
     assert calls[-1] == ["bd", "list", "--json"]
 
 
+def _seed_legacy_issue_db(path: Path, *, issue_count: int) -> None:
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE issues (id TEXT PRIMARY KEY)")
+        for index in range(issue_count):
+            connection.execute("INSERT INTO issues (id) VALUES (?)", (f"at-{index + 1}",))
+        connection.commit()
+
+
+def test_run_bd_command_auto_migrates_missing_dolt_when_legacy_exists(tmp_path: Path) -> None:
+    beads._STORE_AUTO_MIGRATION_ATTEMPTED.clear()
+    beads_root = tmp_path / "project" / ".beads"
+    beads_root.mkdir(parents=True)
+    _seed_legacy_issue_db(beads_root / "beads.db", issue_count=3)
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv[:2] == ["bd", "migrate"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"status":"ok"}',
+                stderr="",
+            )
+        if argv[:3] == ["bd", "info", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"database_path":"/tmp/.beads/dolt","issue_count":3}',
+                stderr="",
+            )
+        if argv[:2] == ["bd", "prime"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="primed",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        result = beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert ["bd", "migrate", "--to-dolt", "--yes", "--json"] in calls
+    backups = list(beads_root.glob("beads.backup-pre-dolt-*.db"))
+    assert backups
+
+
+def test_run_bd_command_auto_migration_blocks_unsupported_bd_version(tmp_path: Path) -> None:
+    beads._STORE_AUTO_MIGRATION_ATTEMPTED.clear()
+    beads_root = tmp_path / "project" / ".beads"
+    beads_root.mkdir(parents=True)
+    _seed_legacy_issue_db(beads_root / "beads.db", issue_count=2)
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+
+    def fake_version_check(
+        *, env: dict[str, str] | None = None, min_version: tuple[int, int, int] | None = None
+    ) -> None:
+        _ = env
+        if min_version == (0, 56, 1):
+            raise RuntimeError("unsupported bd version: 0.55.0; Atelier requires bd >= 0.56.1")
+
+    with (
+        patch(
+            "atelier.beads.bd_invocation.ensure_supported_bd_version",
+            side_effect=fake_version_check,
+        ),
+        patch("atelier.beads.die", side_effect=RuntimeError("die called")) as die_fn,
+    ):
+        with pytest.raises(RuntimeError, match="die called"):
+            beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    message = str(die_fn.call_args.args[0])
+    assert "automatic beads migration is blocked" in message
+    assert "Upgrade bd to >= 0.56.1" in message
+
+
+def test_run_bd_command_auto_migration_fails_when_parity_regresses(tmp_path: Path) -> None:
+    beads._STORE_AUTO_MIGRATION_ATTEMPTED.clear()
+    beads_root = tmp_path / "project" / ".beads"
+    beads_root.mkdir(parents=True)
+    _seed_legacy_issue_db(beads_root / "beads.db", issue_count=3)
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        if argv[:2] == ["bd", "migrate"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"status":"ok"}',
+                stderr="",
+            )
+        if argv[:3] == ["bd", "info", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"database_path":"/tmp/.beads/dolt","issue_count":2}',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.die", side_effect=RuntimeError("die called")) as die_fn,
+    ):
+        with pytest.raises(RuntimeError, match="die called"):
+            beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    assert "parity check failed" in str(die_fn.call_args.args[0])
+
+
+def test_run_bd_command_auto_migrates_insufficient_dolt_issue_count(tmp_path: Path) -> None:
+    beads._STORE_AUTO_MIGRATION_ATTEMPTED.clear()
+    beads_root = tmp_path / "project" / ".beads"
+    beads_root.mkdir(parents=True)
+    _seed_legacy_issue_db(beads_root / "beads.db", issue_count=4)
+    (beads_root / "dolt").mkdir()
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+    calls: list[list[str]] = []
+    info_calls = 0
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        nonlocal info_calls
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv[:3] == ["bd", "info", "--json"]:
+            info_calls += 1
+            count = 2 if info_calls == 1 else 4
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout=f'{{"database_path":"/tmp/.beads/dolt","issue_count":{count}}}',
+                stderr="",
+            )
+        if argv[:2] == ["bd", "migrate"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"status":"ok"}',
+                stderr="",
+            )
+        if argv[:2] == ["bd", "prime"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="primed",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        result = beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert ["bd", "migrate", "--to-dolt", "--yes", "--json"] in calls
+
+
 def test_ensure_agent_bead_returns_existing() -> None:
     existing = {"id": "atelier-1", "title": "agent"}
     with patch("atelier.beads.find_agent_bead", return_value=existing):

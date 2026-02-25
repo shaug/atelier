@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 from collections.abc import Callable
@@ -36,11 +37,13 @@ _AGENT_ISSUE_TYPE = "agent"
 _FALLBACK_ISSUE_TYPE = "task"
 _ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
 _STORE_REPAIR_ATTEMPTED: set[Path] = set()
+_STORE_AUTO_MIGRATION_ATTEMPTED: set[Path] = set()
 _STORE_REPAIR_ERROR_MARKERS = (
     "no beads database found",
     "database not initialized: issue_prefix config is missing",
     "fresh clone detected",
 )
+_MIN_AUTO_MIGRATE_BD_VERSION: tuple[int, int, int] = (0, 56, 1)
 
 
 class _IssueTypeModel(BaseModel):
@@ -264,6 +267,178 @@ def _is_repairable_command(args: list[str]) -> bool:
     return True
 
 
+def _utc_timestamp_token() -> str:
+    return dt.datetime.now(tz=dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+
+def _copy_if_exists(source: Path, destination: Path) -> None:
+    if not source.exists():
+        return
+    shutil.copy2(source, destination)
+
+
+def _create_pre_migration_backup(beads_root: Path) -> None:
+    token = _utc_timestamp_token()
+    db_path = beads_root / "beads.db"
+    backup_db = beads_root / f"beads.backup-pre-dolt-{token}.db"
+    _copy_if_exists(db_path, backup_db)
+    _copy_if_exists(
+        db_path.with_name(f"{db_path.name}-wal"), backup_db.with_name(f"{backup_db.name}-wal")
+    )
+    _copy_if_exists(
+        db_path.with_name(f"{db_path.name}-shm"), backup_db.with_name(f"{backup_db.name}-shm")
+    )
+
+    dolt_dir = beads_root / "dolt"
+    if dolt_dir.exists() and dolt_dir.is_dir():
+        backup_dolt = beads_root / f"dolt.pre-recover-{token}"
+        shutil.copytree(dolt_dir, backup_dolt)
+
+
+def _legacy_sqlite_issue_count(beads_root: Path) -> int | None:
+    db_path = beads_root / "beads.db"
+    if not db_path.exists():
+        return None
+    query = "SELECT COUNT(*) FROM issues"
+    try:
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as connection:
+            cursor = connection.execute(query)
+            row = cursor.fetchone()
+    except sqlite3.Error:
+        return None
+    if row is None or not row:
+        return None
+    count = row[0]
+    if isinstance(count, int):
+        return count
+    return None
+
+
+def _read_active_issue_count(
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[int | None, str]:
+    result = _run_raw_bd_command(["bd", "info", "--json"], cwd=cwd, env=env)
+    if result is None:
+        return None, "missing required command: bd"
+    if result.returncode != 0:
+        return None, _command_output_detail(result)
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return None, "bd info returned no JSON payload"
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None, "bd info returned invalid JSON payload"
+    if not isinstance(payload, dict):
+        return None, "bd info returned an unexpected payload"
+    issue_count = payload.get("issue_count")
+    if isinstance(issue_count, int):
+        return issue_count, ""
+    return None, "bd info payload omitted issue_count"
+
+
+def _auto_migration_version_block_message(*, reason: str) -> str:
+    required = ".".join(str(part) for part in _MIN_AUTO_MIGRATE_BD_VERSION)
+    return (
+        "automatic beads migration is blocked: "
+        f"{reason}. Upgrade bd to >= {required}, then rerun your Atelier command."
+    )
+
+
+def _run_auto_migration(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    env: dict[str, str],
+    reason: str,
+    legacy_issue_count: int,
+) -> None:
+    try:
+        bd_invocation.ensure_supported_bd_version(
+            env=env,
+            min_version=_MIN_AUTO_MIGRATE_BD_VERSION,
+        )
+    except RuntimeError as exc:
+        die(f"{_auto_migration_version_block_message(reason=reason)}\n{exc}")
+
+    _create_pre_migration_backup(beads_root)
+    migration = _run_raw_bd_command(
+        ["bd", "migrate", "--to-dolt", "--yes", "--json"], cwd=cwd, env=env
+    )
+    if migration is None:
+        die("missing required command: bd")
+    if migration.returncode != 0:
+        detail = _command_output_detail(migration)
+        message = f"automatic beads migration failed: {reason}"
+        if detail:
+            message = f"{message}\n{detail}"
+        die(message)
+
+    active_issue_count, detail = _read_active_issue_count(cwd=cwd, env=env)
+    if active_issue_count is None:
+        die(
+            "automatic beads migration parity check failed: "
+            f"{detail or 'unable to determine active issue count'}"
+        )
+    if active_issue_count < legacy_issue_count:
+        die(
+            "automatic beads migration parity check failed: "
+            f"active issue count {active_issue_count} is below legacy issue "
+            f"count {legacy_issue_count}"
+        )
+
+
+def _maybe_auto_migrate_legacy_store(*, beads_root: Path, cwd: Path, env: dict[str, str]) -> None:
+    key = beads_root.resolve()
+    if key in _STORE_AUTO_MIGRATION_ATTEMPTED:
+        return
+    _STORE_AUTO_MIGRATION_ATTEMPTED.add(key)
+    if not beads_root.exists():
+        return
+
+    legacy_issue_count = _legacy_sqlite_issue_count(beads_root)
+    if legacy_issue_count is None or legacy_issue_count <= 0:
+        return
+
+    dolt_dir = beads_root / "dolt"
+    if not dolt_dir.exists():
+        _run_auto_migration(
+            beads_root=beads_root,
+            cwd=cwd,
+            env=env,
+            reason="legacy SQLite data exists but Dolt backend is missing",
+            legacy_issue_count=legacy_issue_count,
+        )
+        return
+
+    active_issue_count, detail = _read_active_issue_count(cwd=cwd, env=env)
+    if active_issue_count is None:
+        if _is_missing_store_error(detail):
+            _run_auto_migration(
+                beads_root=beads_root,
+                cwd=cwd,
+                env=env,
+                reason="active Dolt backend is unreadable while legacy SQLite data exists",
+                legacy_issue_count=legacy_issue_count,
+            )
+        return
+
+    if active_issue_count < legacy_issue_count:
+        _run_auto_migration(
+            beads_root=beads_root,
+            cwd=cwd,
+            env=env,
+            reason=(
+                "active Dolt issue count "
+                f"({active_issue_count}) is below legacy SQLite issue count "
+                f"({legacy_issue_count})"
+            ),
+            legacy_issue_count=legacy_issue_count,
+        )
+
+
 def run_bd_command(
     args: list[str],
     *,
@@ -282,6 +457,7 @@ def run_bd_command(
         bd_invocation.ensure_supported_bd_version(env=env)
     except RuntimeError as exc:
         die(str(exc))
+    _maybe_auto_migrate_legacy_store(beads_root=beads_root, cwd=cwd, env=env)
     request = exec.CommandRequest(
         argv=tuple(cmd),
         cwd=cwd,

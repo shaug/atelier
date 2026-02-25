@@ -40,7 +40,11 @@ def _read_bd_version_for_executable(executable: str) -> tuple[int, int, int] | N
     return _parse_semver(output)
 
 
-def ensure_supported_bd_version(*, env: Mapping[str, str] | None = None) -> None:
+def ensure_supported_bd_version(
+    *,
+    env: Mapping[str, str] | None = None,
+    min_version: tuple[int, int, int] | None = None,
+) -> None:
     """Validate that the active ``bd`` executable meets Atelier's minimum version.
 
     Args:
@@ -57,12 +61,13 @@ def ensure_supported_bd_version(*, env: Mapping[str, str] | None = None) -> None
         raise RuntimeError("missing required command: bd")
 
     detected = _read_bd_version_for_executable(executable)
-    required = _format_version(MIN_SUPPORTED_BD_VERSION)
+    minimum = min_version or MIN_SUPPORTED_BD_VERSION
+    required = _format_version(minimum)
     if detected is None:
         raise RuntimeError(
             f"unsupported bd version: unable to determine version; Atelier requires bd >= {required}"
         )
-    if detected < MIN_SUPPORTED_BD_VERSION:
+    if detected < minimum:
         detected_str = _format_version(detected)
         raise RuntimeError(
             f"unsupported bd version: {detected_str}; Atelier requires bd >= {required}"
