@@ -88,6 +88,69 @@ def _dependency_ids(issue: Issue) -> tuple[str, ...]:
     return ()
 
 
+def _dependency_transitive_closure(
+    issue_id: str,
+    *,
+    lookup_issue: LookupIssueFn,
+    closure_cache: dict[str, frozenset[str]],
+    visiting: set[str],
+) -> frozenset[str]:
+    cached = closure_cache.get(issue_id)
+    if cached is not None:
+        return cached
+    if issue_id in visiting:
+        return frozenset()
+
+    visiting.add(issue_id)
+    try:
+        dependency_issue = lookup_issue(issue_id)
+        if dependency_issue is None:
+            closure = frozenset()
+        else:
+            direct_dependency_ids = _dependency_ids(dependency_issue)
+            expanded: set[str] = set(direct_dependency_ids)
+            for direct_dependency_id in direct_dependency_ids:
+                expanded.update(
+                    _dependency_transitive_closure(
+                        direct_dependency_id,
+                        lookup_issue=lookup_issue,
+                        closure_cache=closure_cache,
+                        visiting=visiting,
+                    )
+                )
+            closure = frozenset(expanded)
+    finally:
+        visiting.remove(issue_id)
+
+    closure_cache[issue_id] = closure
+    return closure
+
+
+def _transitive_dependency_frontier(
+    candidate_ids: tuple[str, ...],
+    *,
+    lookup_issue: LookupIssueFn,
+) -> tuple[str, ...]:
+    closure_cache: dict[str, frozenset[str]] = {}
+    covered_ids: set[str] = set()
+    candidate_set = set(candidate_ids)
+
+    for candidate_id in candidate_ids:
+        closure = _dependency_transitive_closure(
+            candidate_id,
+            lookup_issue=lookup_issue,
+            closure_cache=closure_cache,
+            visiting=set(),
+        )
+        covered_ids.update(
+            dependency_id
+            for dependency_id in closure
+            if dependency_id in candidate_set and dependency_id != candidate_id
+        )
+
+    return tuple(candidate_id for candidate_id in candidate_ids if candidate_id not in covered_ids)
+
+
 @dataclass(frozen=True)
 class ParentLineageResolution:
     """Resolved parent lineage details for a changeset issue."""
@@ -122,6 +185,13 @@ def resolve_parent_lineage(
     parent can be selected.
     """
     lookup = lookup_issue or (lambda _issue_id: None)
+    issue_cache: dict[str, Issue | None] = {}
+
+    def lookup_cached_issue(issue_id: str) -> Issue | None:
+        if issue_id not in issue_cache:
+            issue_cache[issue_id] = lookup(issue_id)
+        return issue_cache[issue_id]
+
     normalized_root = _normalize_branch(root_branch) or _normalize_branch(
         changeset_fields.root_branch(issue)
     )
@@ -135,7 +205,7 @@ def resolve_parent_lineage(
     missing_branches: list[str] = []
 
     for dependency_id in dependency_ids:
-        dependency_issue = lookup(dependency_id)
+        dependency_issue = lookup_cached_issue(dependency_id)
         if dependency_issue is None:
             missing_dependencies.append(dependency_id)
             continue
@@ -153,10 +223,19 @@ def resolve_parent_lineage(
     elif len(dependency_candidates) == 1:
         dependency_parent_id, dependency_parent_branch = next(iter(dependency_candidates.items()))
     elif len(dependency_candidates) > 1:
-        dependency_pairs = ", ".join(
-            f"{issue_id}->{branch}" for issue_id, branch in sorted(dependency_candidates.items())
+        candidate_ids = tuple(dependency_candidates)
+        frontier_ids = _transitive_dependency_frontier(
+            candidate_ids, lookup_issue=lookup_cached_issue
         )
-        diagnostics.append(f"ambiguous dependency parent branches: {dependency_pairs}")
+        if len(frontier_ids) == 1:
+            dependency_parent_id = frontier_ids[0]
+            dependency_parent_branch = dependency_candidates[dependency_parent_id]
+        else:
+            unresolved_ids = sorted(frontier_ids) if frontier_ids else sorted(dependency_candidates)
+            dependency_pairs = ", ".join(
+                f"{issue_id}->{dependency_candidates[issue_id]}" for issue_id in unresolved_ids
+            )
+            diagnostics.append(f"ambiguous dependency parent branches: {dependency_pairs}")
 
     if missing_dependencies:
         diagnostics.append(

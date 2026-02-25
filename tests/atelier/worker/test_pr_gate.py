@@ -154,6 +154,53 @@ def test_changeset_pr_creation_decision_resolves_collapsed_dependency_parent(mon
     assert decision.reason == "blocked:pr-open"
 
 
+def test_changeset_pr_creation_decision_collapses_transitive_duplicate_dependencies(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-root\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": ["at-epic.1", "at-epic.2"],
+    }
+
+    def _show_issue(args: list[str], **_kwargs) -> list[dict[str, object]]:
+        if args == ["show", "at-epic.1"]:
+            return [{"id": "at-epic.1", "description": "changeset.work_branch: feature-parent-1\n"}]
+        if args == ["show", "at-epic.2"]:
+            return [
+                {
+                    "id": "at-epic.2",
+                    "description": "changeset.work_branch: feature-parent-2\n",
+                    "dependencies": ["at-epic.1"],
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(pr_gate.beads, "run_bd_json", _show_issue)
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+
+    def _lookup(_repo_slug: str, branch: str) -> dict[str, object] | None:
+        if branch == "feature-parent-2":
+            return {"state": "OPEN", "isDraft": False}
+        if branch == "feature-parent-1":
+            return {"state": "CLOSED", "closedAt": "2026-02-25T00:00:00Z"}
+        return None
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=_lookup,
+    )
+
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:pr-open"
+
+
 def test_changeset_pr_creation_decision_blocks_on_ambiguous_dependency_lineage(
     monkeypatch,
 ) -> None:
