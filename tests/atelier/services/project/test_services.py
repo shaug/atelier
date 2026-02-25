@@ -71,8 +71,8 @@ def test_compose_and_provider_failures_capture_system_exit_exception() -> None:
                 args=None,
             )
         )
-    assert exc_info.value.code == "validation_failed"
-    assert str(exc_info.value) == "project config validation failed"
+    assert exc_info.value.code == "external_command_failed"
+    assert str(exc_info.value) == "project config composition exited"
     assert exc_info.value.recovery_hint == "compose failed"
     assert isinstance(exc_info.value.__cause__, SystemExit)
 

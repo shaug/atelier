@@ -32,10 +32,18 @@ BuildProjectConfig = Callable[..., ProjectConfig]
 
 @dataclass(frozen=True)
 class InitProjectArgs:
-    """Typed arguments for project initialization.
+    """Typed inputs for project initialization orchestration.
 
-    The CLI layer maps from the parsed command into this structure before
-    calling the service.
+    Attributes:
+        branch_prefix: Optional branch prefix override for generated worktrees.
+        branch_pr_mode: Optional PR mode override for new changesets.
+        branch_history: Optional git history mode override.
+        branch_squash_message: Optional squash commit message policy override.
+        branch_pr_strategy: Optional PR sequencing strategy override.
+        agent: Optional default agent override.
+        editor_edit: Optional editor command for editing flows.
+        editor_work: Optional editor command for workspace operations.
+        yes: Whether interactive prompts should be skipped.
     """
 
     branch_prefix: str | None = None
@@ -50,6 +58,8 @@ class InitProjectArgs:
 
 
 class InitializeProjectRequest(BaseModel):
+    """Service request payload for project initialization."""
+
     args: InitProjectArgs
     cwd: Path
     stdin_isatty: bool
@@ -67,6 +77,8 @@ class InitializeProjectRequest(BaseModel):
 
 @dataclass(frozen=True)
 class InitializeProjectOutcome:
+    """Service outcome for successful project initialization."""
+
     project_dir: Path
     config_path: Path
     payload: ProjectConfig

@@ -31,7 +31,7 @@ Important Atelier differences (Python-first):
   macro-style DSL behavior.
 - Expected failures raise `ServiceFailure` (extends Exception); services extend
   `BaseService` which catches it and invokes a configurable handler (default
-  re-raises; CLI services pass a handler that dies with a message).
+  re-raises; callers decide interface-specific behavior).
 
 ## Why now
 
@@ -202,7 +202,7 @@ Near-term candidate services:
 
 Services return typed outcomes on success and raise `ServiceFailure` on expected
 domain/policy/runtime failures. Callers catch `ServiceFailure` and handle per
-their interface (CLI dies, web returns 4xx/5xx, native app shows dialog).
+their interface (e.g., CLI dies, web returns 4xx/5xx, native app shows dialog).
 
 Validation rule:
 

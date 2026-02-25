@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ... import config
 from ...models import ProjectConfig
-from ..errors import ValidationFailedError
+from ..errors import ExternalCommandFailedError, ValidationFailedError
 
 BuildProjectConfig = Callable[..., ProjectConfig]
 
@@ -48,8 +48,8 @@ class ComposeProjectConfigService:
                 allow_editor_empty=request.allow_editor_empty,
             )
         except SystemExit as exc:
-            raise ValidationFailedError(
-                "project config validation failed",
+            raise ExternalCommandFailedError(
+                "project config composition exited",
                 recovery_hint=str(exc).strip() or None,
             ) from exc
         return ComposeProjectConfigOutcome(payload=payload)
