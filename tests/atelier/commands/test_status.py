@@ -446,6 +446,127 @@ def test_status_sequential_uses_dependency_frontier_for_non_top_level_changeset(
         assert by_id["cs-2"]["pr_gate_reason"] == "blocked:pr-open"
 
 
+def test_status_sequential_collapses_transitive_duplicate_dependency_parents() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        project_config = config.ProjectConfig.model_validate(
+            {"project": {"enlistment": str(repo_root), "origin": "github.com/org/repo"}}
+        )
+        epic = {
+            "id": "epic-1",
+            "title": "Epic",
+            "status": "open",
+            "labels": ["at:epic"],
+            "description": "workspace.pr_strategy: sequential\n",
+        }
+        changesets = [
+            {
+                "id": "cs-1",
+                "title": "Ancestor",
+                "labels": ["at:changeset"],
+                "description": "changeset.work_branch: alpha-cs-1\n",
+            },
+            {
+                "id": "cs-2",
+                "title": "Frontier Parent",
+                "labels": ["at:changeset"],
+                "description": "changeset.work_branch: alpha-cs-2\n",
+                "dependencies": ["cs-1"],
+            },
+            {
+                "id": "cs-3",
+                "title": "Child",
+                "labels": ["at:changeset"],
+                "description": (
+                    "changeset.root_branch: alpha\n"
+                    "changeset.parent_branch: alpha\n"
+                    "changeset.work_branch: alpha-cs-3\n"
+                ),
+                "dependencies": ["cs-1", "cs-2"],
+            },
+        ]
+
+        def fake_run_bd_json(
+            args: list[str], *, beads_root: Path, cwd: Path
+        ) -> list[dict[str, object]]:
+            if args[:3] == ["list", "--label", "at:epic"]:
+                return [epic]
+            if args[:3] == ["list", "--label", "at:agent"]:
+                return []
+            if args[:3] == ["list", "--label", "at:message"]:
+                return []
+            if args and args[0] == "list" and "--parent" in args:
+                return list(changesets)
+            if args and args[0] == "ready" and "--parent" in args:
+                return []
+            return []
+
+        def fake_load_mapping(path: Path) -> WorktreeMapping | None:
+            if path.name == "epic-1.json":
+                return WorktreeMapping(
+                    epic_id="epic-1",
+                    worktree_path="worktrees/epic-1",
+                    root_branch="alpha",
+                    changesets={
+                        "cs-1": "alpha-cs-1",
+                        "cs-2": "alpha-cs-2",
+                        "cs-3": "alpha-cs-3",
+                    },
+                    changeset_worktrees={},
+                )
+            return None
+
+        def fake_pr_payload(_repo_slug: str, branch: str) -> dict[str, object] | None:
+            if branch == "alpha-cs-1":
+                return {"state": "CLOSED", "closedAt": "2026-02-25T00:00:00Z"}
+            if branch == "alpha-cs-2":
+                return {"state": "OPEN", "isDraft": False}
+            if branch == "alpha-cs-3":
+                return {"state": "OPEN", "isDraft": True}
+            return None
+
+        with (
+            patch(
+                "atelier.commands.status.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, str(repo_root), repo_root),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_command",
+                return_value=DummyResult(),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_json",
+                side_effect=fake_run_bd_json,
+            ),
+            patch(
+                "atelier.commands.status.worktrees.load_mapping",
+                side_effect=fake_load_mapping,
+            ),
+            patch(
+                "atelier.commands.status.git.git_ref_exists",
+                return_value=True,
+            ),
+            patch(
+                "atelier.commands.status.prs.read_github_pr_status",
+                side_effect=fake_pr_payload,
+            ),
+        ):
+            buffer = io.StringIO()
+            with patch("sys.stdout", buffer):
+                status_cmd(SimpleNamespace(format="json"))
+
+        payload = json.loads(buffer.getvalue())
+        details = payload["epics"][0]["changeset_details"]
+        by_id = {detail["id"]: detail for detail in details}
+        assert by_id["cs-3"]["pr_allowed"] is False
+        assert by_id["cs-3"]["pr_gate_reason"] == "blocked:pr-open"
+
+
 def test_status_marks_stale_sessions_and_reclaimable_epics() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
