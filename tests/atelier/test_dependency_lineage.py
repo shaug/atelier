@@ -42,9 +42,7 @@ def test_resolve_parent_lineage_uses_parent_child_hint_to_break_frontier_ties() 
     resolution = dependency_lineage.resolve_parent_lineage(
         issue,
         root_branch="feat/at-kid",
-        lookup_issue=lambda issue_id: {
-            "description": f"changeset.work_branch: feat/{issue_id}\n"
-        },
+        lookup_issue=lambda issue_id: {"description": f"changeset.work_branch: feat/{issue_id}\n"},
     )
 
     assert resolution.blocked is False
@@ -96,9 +94,7 @@ def test_resolve_parent_lineage_blocks_when_dependency_frontier_is_ambiguous() -
     resolution = dependency_lineage.resolve_parent_lineage(
         issue,
         root_branch="feat/at-kid",
-        lookup_issue=lambda issue_id: {
-            "description": f"changeset.work_branch: feat/{issue_id}\n"
-        },
+        lookup_issue=lambda issue_id: {"description": f"changeset.work_branch: feat/{issue_id}\n"},
     )
 
     assert resolution.blocked is True
