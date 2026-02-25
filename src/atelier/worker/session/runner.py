@@ -436,9 +436,59 @@ def run_worker_once(
             )
         finishstep()
         finishstep = control.step("Validate changeset labels", timings=timings, trace=trace)
-        invalid_changesets = lifecycle.find_invalid_changeset_labels(
-            selected_epic, beads_root=beads_root, repo_root=repo_root
-        )
+        try:
+            invalid_changesets = lifecycle.find_invalid_changeset_labels(
+                selected_epic, beads_root=beads_root, repo_root=repo_root
+            )
+        except SystemExit as exc:
+            detail = f"bd read failed (exit={exc.code})"
+            finishstep(extra=detail)
+            if dry_run:
+                control.dry_run_log("Would release epic assignment and clear agent hook.")
+                return finish(
+                    WorkerRunSummary(
+                        started=False,
+                        reason="changeset_label_validation_failed",
+                        epic_id=selected_epic,
+                    )
+                )
+            try:
+                lifecycle.send_planner_notification(
+                    subject=f"NEEDS-DECISION: Beads read failure during startup ({selected_epic})",
+                    body=(
+                        "Worker startup could not validate changeset labels because "
+                        "Beads issue reads failed.\n"
+                        f"Epic: {selected_epic}\n"
+                        "Action: run `bd doctor --fix --yes`, verify `bd show --json "
+                        f"{selected_epic}` succeeds, then retry `atelier work`."
+                    ),
+                    agent_id=agent.agent_id,
+                    thread_id=selected_epic,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    dry_run=False,
+                )
+            except SystemExit:
+                pass
+            try:
+                lifecycle.release_epic_assignment(
+                    selected_epic, beads_root=beads_root, repo_root=repo_root
+                )
+            except SystemExit:
+                pass
+            try:
+                infra.beads.clear_agent_hook(
+                    agent_bead_id_required, beads_root=beads_root, cwd=repo_root
+                )
+            except SystemExit:
+                pass
+            return finish(
+                WorkerRunSummary(
+                    started=False,
+                    reason="changeset_label_validation_failed",
+                    epic_id=selected_epic,
+                )
+            )
         if invalid_changesets:
             detail = lifecycle.send_invalid_changeset_labels_notification(
                 epic_id=selected_epic,

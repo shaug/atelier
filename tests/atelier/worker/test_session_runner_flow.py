@@ -267,3 +267,47 @@ def test_run_worker_once_retries_after_claim_conflict() -> None:
     assert len(startup_contexts) == 2
     assert startup_contexts[0].excluded_epic_ids == ()
     assert startup_contexts[1].excluded_epic_ids == ("at-conflict",)
+
+
+def test_run_worker_once_releases_epic_when_label_validation_reads_fail() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p4",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p4",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.lifecycle.find_invalid_changeset_labels = Mock(side_effect=SystemExit(1))
+    deps.lifecycle.release_epic_assignment = Mock()
+    deps.lifecycle.send_planner_notification = Mock()
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p4"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "changeset_label_validation_failed"
+    assert summary.epic_id == "at-epic"
+    deps.lifecycle.send_planner_notification.assert_called_once()
+    deps.lifecycle.release_epic_assignment.assert_called_once_with(
+        "at-epic",
+        beads_root=Path("/project/.atelier/.beads"),
+        repo_root=Path("/repo"),
+    )
+    deps.infra.beads.clear_agent_hook.assert_called_once_with(
+        "at-agent",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+    )
+    assert not deps.control._die.called
