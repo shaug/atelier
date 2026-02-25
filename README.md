@@ -276,14 +276,6 @@ Unsupported keys for this CLI-default translation layer: `ATELIER_PLAN_TRACE`,
 `ATELIER_WORK_TRACE`, `ATELIER_LOG_LEVEL`, `ATELIER_NO_COLOR`. Use global CLI
 flags instead: `--log-level` and `--color/--no-color`.
 
-Run the optional daemon (full-stack mode):
-
-```sh
-atelier daemon start
-atelier daemon status
-atelier daemon stop
-```
-
 Plan epics and changesets:
 
 ```sh

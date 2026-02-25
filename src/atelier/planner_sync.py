@@ -496,7 +496,6 @@ class PlannerSyncMonitor:
         self._thread = threading.Thread(
             target=self._run,
             name="atelier-planner-sync",
-            daemon=True,
         )
         self._thread.start()
 

@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 import atelier.beads as beads
+from atelier import exec as exec_util
 
 
 def test_run_bd_issue_records_validates_issues() -> None:
@@ -32,6 +33,149 @@ def test_run_bd_issue_records_rejects_invalid_payload() -> None:
             beads.run_bd_issue_records(
                 ["list"], beads_root=Path("/beads"), cwd=Path("/repo"), source="test"
             )
+
+
+def test_run_bd_command_repairs_missing_store_and_retries(tmp_path: Path) -> None:
+    beads_root = tmp_path / "project" / ".beads"
+    beads_root.mkdir(parents=True)
+    (beads_root / "issues.jsonl").write_text("{}", encoding="utf-8")
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv[:2] == ["bd", "prime"] and len(calls) == 1:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr="Error: no beads database found",
+            )
+        if argv[:3] == ["bd", "doctor", "--fix"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="fixed",
+                stderr="",
+            )
+        if argv[:4] == ["bd", "init", "--prefix", "at"] and "--from-jsonl" in argv:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="initialized",
+                stderr="",
+            )
+        if argv[:5] == ["bd", "config", "set", "issue_prefix", "at"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="ok",
+                stderr="",
+            )
+        if argv[:5] == ["bd", "config", "set", "beads.role", "maintainer"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="ok",
+                stderr="",
+            )
+        if argv[:5] == ["bd", "config", "get", "issue_prefix", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"value":"at"}',
+                stderr="",
+            )
+        if argv[:2] == ["bd", "prime"] and len(calls) > 1:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="primed",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+        result = beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert calls[0] == ["bd", "prime"]
+    assert ["bd", "doctor", "--fix", "--yes"] in calls
+    assert ["bd", "init", "--prefix", "at", "--from-jsonl"] in calls
+    assert ["bd", "config", "set", "issue_prefix", "at"] in calls
+    assert calls[-1] == ["bd", "prime"]
+
+
+def test_run_bd_command_repairs_issue_prefix_without_jsonl_init(tmp_path: Path) -> None:
+    beads_root = tmp_path / "project" / ".beads"
+    beads_root.mkdir(parents=True)
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv[:2] == ["bd", "list"] and len(calls) == 1:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr="Error: database not initialized: issue_prefix config is missing",
+            )
+        if argv[:3] == ["bd", "doctor", "--fix"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr="manual fix required",
+            )
+        if argv[:4] == ["bd", "init", "--prefix", "at"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr="already initialized",
+            )
+        if argv[:5] == ["bd", "config", "set", "issue_prefix", "at"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="ok",
+                stderr="",
+            )
+        if argv[:5] == ["bd", "config", "set", "beads.role", "maintainer"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="ok",
+                stderr="",
+            )
+        if argv[:5] == ["bd", "config", "get", "issue_prefix", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"value":"at"}',
+                stderr="",
+            )
+        if argv[:2] == ["bd", "list"] and len(calls) > 1:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="[]",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+        result = beads.run_bd_command(["list", "--json"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    init_calls = [call for call in calls if call[:4] == ["bd", "init", "--prefix", "at"]]
+    assert init_calls == [["bd", "init", "--prefix", "at"]]
+    assert calls[-1] == ["bd", "list", "--json"]
 
 
 def test_ensure_agent_bead_returns_existing() -> None:
