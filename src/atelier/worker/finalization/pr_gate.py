@@ -75,10 +75,17 @@ def changeset_parent_lifecycle_state(
         lookup_issue=lookup_dependency_issue,
     )
     normalized = lineage.effective_parent_branch
+    if lineage.dependency_ids and lineage.dependency_parent_branch:
+        normalized = lineage.dependency_parent_branch
     if normalized is None:
         return None
     normalized_root = lineage.root_branch
-    if normalized_root and normalized == normalized_root and not lineage.used_dependency_parent:
+    if (
+        normalized_root
+        and normalized == normalized_root
+        and not lineage.used_dependency_parent
+        and not lineage.dependency_ids
+    ):
         # True top-level changesets use root==parent; treat as no-parent so
         # strategies do not self-deadlock.
         return None
@@ -144,6 +151,20 @@ def changeset_pr_creation_decision(
             allow_pr=False,
             reason=f"blocked:{reason_suffix}",
         )
+    if (
+        normalized_strategy == "sequential"
+        and lineage.dependency_ids
+        and not lineage.dependency_parent_branch
+    ):
+        reason_suffix = "dependency-parent-state-unavailable"
+        if lineage.diagnostics:
+            reason_suffix = f"{reason_suffix} ({lineage.diagnostics[0]})"
+        return pr_strategy.PrStrategyDecision(
+            strategy=normalized_strategy,
+            parent_state=None,
+            allow_pr=False,
+            reason=f"blocked:{reason_suffix}",
+        )
 
     parent_state = changeset_parent_lifecycle_state(
         issue,
@@ -153,11 +174,7 @@ def changeset_pr_creation_decision(
         beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
     )
-    if (
-        normalized_strategy == "sequential"
-        and lineage.used_dependency_parent
-        and parent_state is None
-    ):
+    if normalized_strategy == "sequential" and lineage.dependency_ids and parent_state is None:
         return pr_strategy.PrStrategyDecision(
             strategy=normalized_strategy,
             parent_state=None,

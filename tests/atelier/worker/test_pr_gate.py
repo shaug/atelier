@@ -187,6 +187,80 @@ def test_changeset_pr_creation_decision_blocks_on_ambiguous_dependency_lineage(
     assert decision.reason.startswith("blocked:dependency-lineage-ambiguous")
 
 
+def test_changeset_pr_creation_decision_blocks_dependency_lineage_when_parent_state_missing(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: legacy-parent\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": ["at-epic.1"],
+    }
+
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "changeset.work_branch: active-parent\n"}]
+            if args == ["show", "at-epic.1"]
+            else []
+        ),
+    )
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug=None,
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda *_args, **_kwargs: None,
+    )
+
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:dependency-parent-state-unavailable"
+
+
+def test_changeset_pr_creation_decision_uses_dependency_frontier_parent_state(monkeypatch) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: legacy-parent\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": ["at-epic.1"],
+    }
+
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "changeset.work_branch: active-parent\n"}]
+            if args == ["show", "at-epic.1"]
+            else []
+        ),
+    )
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+
+    def _lookup(_repo_slug: str, branch: str) -> dict[str, object] | None:
+        if branch == "active-parent":
+            return {"state": "OPEN", "isDraft": False}
+        if branch == "legacy-parent":
+            return {"state": "CLOSED", "closedAt": "2026-02-25T00:00:00Z"}
+        return None
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=_lookup,
+    )
+
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:pr-open"
+
+
 def test_changeset_pr_creation_decision_treats_integration_parent_as_top_level(
     monkeypatch,
 ) -> None:
