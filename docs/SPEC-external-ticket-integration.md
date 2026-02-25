@@ -49,6 +49,14 @@ Recommended per-entry fields:
 - `notes_updated_at`: optional timestamp for cached notes.
 - `last_synced_at`: optional last successful sync timestamp.
 
+Closed-bead reconciliation defaults:
+
+- For `direction=exported` GitHub tickets, closing the local bead attempts a
+  deterministic remote close unless `relation=context` or `on_close=none`.
+- `on_close=sync` only refreshes cached remote state.
+- Reconciliation failures append an `external_close_pending:` note so planner
+  follow-up is explicit.
+
 ### `relation`
 
 Defines why a ticket is linked.

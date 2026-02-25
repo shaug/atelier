@@ -165,3 +165,36 @@ def test_update_ticket_uses_body_file(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured_body["text"] == "Body with markdown `code`\n$(echo safe)"
     assert any("--body-file" in command for command in captured_commands)
     assert not any(token == "--body" for command in captured_commands for token in command)
+
+
+def test_close_ticket_uses_issue_close_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = GithubIssuesProvider(repo="org/repo")
+    captured_commands: list[list[str]] = []
+
+    def fake_run(cmd: list[str]) -> str:
+        captured_commands.append(cmd)
+        return ""
+
+    monkeypatch.setattr("atelier.github_issues_provider._run", fake_run)
+    monkeypatch.setattr("atelier.github_issues_provider._require_gh", lambda: None)
+    monkeypatch.setattr(GithubIssuesProvider, "sync_state", lambda self, ref: ref)
+
+    ref = ExternalTicketRef(provider="github", ticket_id="44")
+    updated = provider.close_ticket(
+        ref,
+        comment="Closed because local bead is complete.",
+    )
+
+    assert updated == ref
+    assert captured_commands == [
+        [
+            "gh",
+            "issue",
+            "close",
+            "44",
+            "--repo",
+            "org/repo",
+            "--comment",
+            "Closed because local bead is complete.",
+        ]
+    ]

@@ -41,6 +41,7 @@ class ExternalProviderCapabilities:
     supports_update: bool = False
     supports_children: bool = False
     supports_state_sync: bool = False
+    supports_close: bool = False
 
     @property
     def supports_export(self) -> bool:
@@ -155,4 +156,13 @@ class ExternalProvider(Protocol):
 
     def sync_state(self, ref: ExternalTicketRef) -> ExternalTicketRef:
         """Optional: refresh cached state for the external ticket."""
+        ...
+
+    def close_ticket(
+        self,
+        ref: ExternalTicketRef,
+        *,
+        comment: str | None = None,
+    ) -> ExternalTicketRef:
+        """Optional: close the external ticket and return refreshed state."""
         ...

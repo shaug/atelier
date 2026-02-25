@@ -107,6 +107,11 @@ def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Pat
         beads_root=beads_root,
         cwd=repo_root,
     )
+    beads.reconcile_closed_issue_exported_github_tickets(
+        changeset_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
 
 
 def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
@@ -132,6 +137,11 @@ def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Pat
         beads_root=beads_root,
         cwd=repo_root,
     )
+    beads.reconcile_closed_issue_exported_github_tickets(
+        changeset_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
 
 
 def mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
@@ -154,6 +164,11 @@ def mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: 
             "--status",
             "closed",
         ],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    beads.reconcile_closed_issue_exported_github_tickets(
+        changeset_id,
         beads_root=beads_root,
         cwd=repo_root,
     )

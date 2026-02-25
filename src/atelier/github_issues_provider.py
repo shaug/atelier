@@ -41,6 +41,7 @@ class GithubIssuesProvider:
         supports_update=True,
         supports_children=False,
         supports_state_sync=True,
+        supports_close=True,
     )
 
     def import_tickets(
@@ -152,6 +153,19 @@ class GithubIssuesProvider:
         self, ref: ExternalTicketRef, *, title: str, body: str | None = None
     ) -> ExternalTicketRef:
         raise NotImplementedError("GitHub Issues does not support child tickets")
+
+    def close_ticket(
+        self,
+        ref: ExternalTicketRef,
+        *,
+        comment: str | None = None,
+    ) -> ExternalTicketRef:
+        _require_gh()
+        cmd = ["gh", "issue", "close", str(ref.ticket_id), "--repo", self.repo]
+        if comment:
+            cmd.extend(["--comment", comment])
+        _run(cmd)
+        return self.sync_state(ref)
 
     def sync_state(self, ref: ExternalTicketRef) -> ExternalTicketRef:
         if not self.sync_options.include_state:

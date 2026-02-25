@@ -5,12 +5,14 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import re
 import sqlite3
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -149,6 +151,15 @@ class ExternalTicketMetadataRepairResult:
     recovered: bool
     repaired: bool
     ticket_count: int
+
+
+@dataclass(frozen=True)
+class ExternalTicketReconcileResult:
+    issue_id: str
+    stale_exported_github_tickets: int
+    reconciled_tickets: int
+    updated: bool
+    needs_decision_notes: tuple[str, ...]
 
 
 def beads_env(beads_root: Path) -> dict[str, str]:
@@ -811,6 +822,192 @@ def parse_external_tickets(description: str | None) -> list[ExternalTicketRef]:
             continue
         tickets.append(normalized)
     return tickets
+
+
+_GITHUB_API_ISSUE_PATH = re.compile(r"^/repos/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
+_GITHUB_WEB_ISSUE_PATH = re.compile(r"^/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
+_EXTERNAL_CLOSE_NOTE_PREFIX = "external_close_pending:"
+
+
+def _github_repo_from_ticket_url(url: str | None) -> str | None:
+    cleaned = (url or "").strip()
+    if not cleaned:
+        return None
+    parsed = urlparse(cleaned)
+    host = parsed.netloc.lower().split(":", 1)[0]
+    path = parsed.path or ""
+    if host == "api.github.com":
+        match = _GITHUB_API_ISSUE_PATH.match(path)
+    elif host in {"github.com", "www.github.com"}:
+        match = _GITHUB_WEB_ISSUE_PATH.match(path)
+    else:
+        return None
+    if not match:
+        return None
+    owner = match.group("owner").strip()
+    repo = match.group("repo").strip()
+    if not owner or not repo:
+        return None
+    return f"{owner}/{repo}"
+
+
+def _close_action_for_ticket(ticket: ExternalTicketRef) -> str:
+    # Keep context and explicit opt-out links untouched on local close.
+    if ticket.relation == "context" or ticket.on_close == "none":
+        return "none"
+    if ticket.on_close in {"close", "comment"}:
+        return "close"
+    if ticket.on_close == "sync":
+        return "sync"
+    if ticket.direction != "exported":
+        return "none"
+    return "close"
+
+
+def _merge_ticket_state(
+    ticket: ExternalTicketRef,
+    refreshed: ExternalTicketRef,
+    *,
+    assume_closed: bool = False,
+) -> ExternalTicketRef:
+    return replace(
+        ticket,
+        url=refreshed.url or ticket.url,
+        state=refreshed.state or ("closed" if assume_closed else ticket.state),
+        raw_state=refreshed.raw_state or ticket.raw_state,
+        state_updated_at=refreshed.state_updated_at or ticket.state_updated_at,
+        content_updated_at=refreshed.content_updated_at or ticket.content_updated_at,
+        notes_updated_at=refreshed.notes_updated_at or ticket.notes_updated_at,
+        last_synced_at=dt.datetime.now(tz=dt.timezone.utc).isoformat(),
+    )
+
+
+def _append_external_close_note(
+    issue_id: str,
+    note: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    run_bd_command(
+        ["update", issue_id, "--append-notes", f"{_EXTERNAL_CLOSE_NOTE_PREFIX} {note}"],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
+
+
+def reconcile_closed_issue_exported_github_tickets(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> ExternalTicketReconcileResult:
+    """Reconcile stale exported GitHub ticket metadata for a closed bead.
+
+    Exported GitHub links default to close-on-bead-close unless the ticket is
+    `relation=context` or explicitly sets `on_close=none`.
+    """
+    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        return ExternalTicketReconcileResult(
+            issue_id=issue_id,
+            stale_exported_github_tickets=0,
+            reconciled_tickets=0,
+            updated=False,
+            needs_decision_notes=tuple(),
+        )
+    issue = issues[0]
+    status = str(issue.get("status") or "").strip().lower()
+    if status not in {"closed", "done"}:
+        return ExternalTicketReconcileResult(
+            issue_id=issue_id,
+            stale_exported_github_tickets=0,
+            reconciled_tickets=0,
+            updated=False,
+            needs_decision_notes=tuple(),
+        )
+    description = issue.get("description")
+    existing_tickets = parse_external_tickets(description if isinstance(description, str) else None)
+    if not existing_tickets:
+        return ExternalTicketReconcileResult(
+            issue_id=issue_id,
+            stale_exported_github_tickets=0,
+            reconciled_tickets=0,
+            updated=False,
+            needs_decision_notes=tuple(),
+        )
+
+    from .github_issues_provider import GithubIssuesProvider
+
+    stale = 0
+    reconciled = 0
+    updated = False
+    notes: list[str] = []
+    provider_cache: dict[str, GithubIssuesProvider] = {}
+    merged_tickets: list[ExternalTicketRef] = []
+    for ticket in existing_tickets:
+        if ticket.provider != "github" or ticket.direction != "exported":
+            merged_tickets.append(ticket)
+            continue
+        if ticket.state == "closed":
+            merged_tickets.append(ticket)
+            continue
+        stale += 1
+        action = _close_action_for_ticket(ticket)
+        if action == "none":
+            merged_tickets.append(ticket)
+            continue
+        repo_slug = _github_repo_from_ticket_url(ticket.url)
+        if not repo_slug:
+            notes.append(
+                f"github:{ticket.ticket_id} missing repo slug; "
+                "cannot reconcile exported ticket state"
+            )
+            merged_tickets.append(ticket)
+            continue
+        provider = provider_cache.get(repo_slug)
+        if provider is None:
+            provider = GithubIssuesProvider(repo=repo_slug)
+            provider_cache[repo_slug] = provider
+        close_comment = None
+        if ticket.on_close == "comment":
+            close_comment = f"Closing external ticket because local bead {issue_id} is closed."
+        try:
+            if action == "close":
+                refreshed = provider.close_ticket(ticket, comment=close_comment)
+                merged = _merge_ticket_state(ticket, refreshed, assume_closed=True)
+            else:
+                refreshed = provider.sync_state(ticket)
+                merged = _merge_ticket_state(ticket, refreshed, assume_closed=False)
+        except RuntimeError as exc:
+            notes.append(f"github:{ticket.ticket_id} {exc}")
+            merged_tickets.append(ticket)
+            continue
+        merged_tickets.append(merged)
+        reconciled += 1
+        if merged != ticket:
+            updated = True
+
+    if updated:
+        update_external_tickets(issue_id, merged_tickets, beads_root=beads_root, cwd=cwd)
+
+    unique_notes: list[str] = []
+    seen_notes: set[str] = set()
+    for note in notes:
+        if note in seen_notes:
+            continue
+        seen_notes.add(note)
+        unique_notes.append(note)
+        _append_external_close_note(issue_id, note, beads_root=beads_root, cwd=cwd)
+
+    return ExternalTicketReconcileResult(
+        issue_id=issue_id,
+        stale_exported_github_tickets=stale,
+        reconciled_tickets=reconciled,
+        updated=updated,
+        needs_decision_notes=tuple(unique_notes),
+    )
 
 
 def merge_description_preserving_metadata(
@@ -1485,6 +1682,11 @@ def close_epic_if_complete(
     if confirm is not None and not confirm(summary):
         return False
     run_bd_command(["close", epic_id], beads_root=beads_root, cwd=cwd)
+    reconcile_closed_issue_exported_github_tickets(
+        epic_id,
+        beads_root=beads_root,
+        cwd=cwd,
+    )
     if agent_bead_id:
         clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=cwd)
     return True
