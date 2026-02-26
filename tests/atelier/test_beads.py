@@ -675,6 +675,228 @@ def test_run_bd_command_prime_blocks_when_migration_parity_fails(tmp_path: Path)
     assert ["bd", "prime"] not in calls
 
 
+def test_run_bd_command_prime_reconciles_runtime_agent_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "beads.db").write_bytes(b"legacy")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    monkeypatch.setenv("ATELIER_AGENT_BEAD_ID", "at-agent-runtime")
+    monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/planner/codex/runtime")
+
+    db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    migrate = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--yes",
+        "--json",
+    ]
+    stats_calls = 0
+    show_calls = 0
+    updated_descriptions: list[str] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        nonlocal stats_calls, show_calls
+        argv = list(request.argv)
+        if argv == ["bd", "stats", "--json"]:
+            stats_calls += 1
+            if stats_calls == 1:
+                return exec_util.CommandResult(
+                    argv=request.argv,
+                    returncode=2,
+                    stdout="",
+                    stderr=(
+                        "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                        "doltdb.(*DoltDB).SetCrashOnFatalError"
+                    ),
+                )
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        if argv == db_stats:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        if argv == ["bd", "show", "at-agent-runtime", "--json"]:
+            show_calls += 1
+            description = (
+                "agent_id: atelier/planner/codex/runtime\nplanner_sync.last_synced_sha: fresh\n"
+            )
+            if show_calls > 1:
+                description = (
+                    "agent_id: atelier/planner/codex/runtime\nplanner_sync.last_synced_sha: stale\n"
+                )
+            payload = [
+                {
+                    "id": "at-agent-runtime",
+                    "title": "atelier/planner/codex/runtime",
+                    "labels": ["at:agent"],
+                    "description": description,
+                }
+            ]
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout=json.dumps(payload),
+                stderr="",
+            )
+        if argv == migrate:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"migrated":8}',
+                stderr="",
+            )
+        if argv[:3] == ["bd", "update", "at-agent-runtime"] and "--body-file" in argv:
+            body_path = Path(argv[argv.index("--body-file") + 1])
+            updated_descriptions.append(body_path.read_text(encoding="utf-8"))
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="updated",
+                stderr="",
+            )
+        if argv == ["bd", "prime"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="primed",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.bd_invocation.detect_bd_version", return_value=(0, 56, 1)),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        result = beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert updated_descriptions
+    assert "planner_sync.last_synced_sha: fresh" in updated_descriptions[0]
+    assert "planner_sync.last_synced_sha: stale" not in updated_descriptions[0]
+
+
+def test_run_bd_command_prime_recreates_missing_runtime_agent_bead(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "beads.db").write_bytes(b"legacy")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    monkeypatch.setenv("ATELIER_AGENT_BEAD_ID", "at-agent-required")
+    monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/planner/codex/runtime")
+
+    db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    migrate = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--yes",
+        "--json",
+    ]
+    stats_calls = 0
+    create_calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        nonlocal stats_calls
+        argv = list(request.argv)
+        if argv == ["bd", "stats", "--json"]:
+            stats_calls += 1
+            if stats_calls == 1:
+                return exec_util.CommandResult(
+                    argv=request.argv,
+                    returncode=2,
+                    stdout="",
+                    stderr=(
+                        "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                        "doltdb.(*DoltDB).SetCrashOnFatalError"
+                    ),
+                )
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":2}}',
+                stderr="",
+            )
+        if argv == db_stats:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":2}}',
+                stderr="",
+            )
+        if argv == ["bd", "show", "at-agent-required", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="[]",
+                stderr="",
+            )
+        if argv == migrate:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"migrated":2}',
+                stderr="",
+            )
+        if argv == ["bd", "types", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"types":[{"name":"task"}]}',
+                stderr="",
+            )
+        if argv[:2] == ["bd", "create"]:
+            create_calls.append(argv)
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="at-agent-required\n",
+                stderr="",
+            )
+        if argv == ["bd", "prime"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="primed",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.bd_invocation.detect_bd_version", return_value=(0, 56, 1)),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        result = beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert create_calls
+    create_call = create_calls[0]
+    assert "--id" in create_call
+    assert create_call[create_call.index("--id") + 1] == "at-agent-required"
+    assert "--description" in create_call
+    description = create_call[create_call.index("--description") + 1]
+    assert "agent_id: atelier/planner/codex/runtime" in description
+    assert "role_type: planner" in description
+
+
 def test_detect_startup_beads_state_reports_healthy_dolt(tmp_path: Path) -> None:
     beads_root = tmp_path / ".beads"
     (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
