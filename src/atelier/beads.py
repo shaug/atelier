@@ -37,6 +37,7 @@ ATELIER_ISSUE_PREFIX = "at"
 _AGENT_ISSUE_TYPE = "agent"
 _FALLBACK_ISSUE_TYPE = "task"
 _ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
+_BD_COMMAND_CAPABILITY_CACHE: dict[tuple[Path, tuple[str, ...]], bool] = {}
 _STORE_REPAIR_ATTEMPTED: set[Path] = set()
 _EMBEDDED_PANIC_REPAIR_ATTEMPTED: set[Path] = set()
 _DOLT_RUNTIME_NORMALIZED: set[Path] = set()
@@ -99,6 +100,12 @@ class BeadsIssueRecord:
 
     raw: dict[str, object]
     issue: BeadsIssueBoundary
+
+
+@dataclass(frozen=True)
+class _PrimeGuidanceCapabilities:
+    supports_export: bool
+    supports_dolt: bool
 
 
 @dataclass(frozen=True)
@@ -1185,6 +1192,34 @@ _DEPRECATED_SYNC_NOOP_GUIDANCE = (
 )
 
 
+def _supports_bd_command(command: tuple[str, ...], *, beads_root: Path, cwd: Path) -> bool:
+    cache_key = (beads_root, command)
+    cached = _BD_COMMAND_CAPABILITY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    env = beads_env(beads_root)
+    result = exec.run_with_runner(
+        exec.CommandRequest(
+            argv=("bd", *command, "--help"),
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+    )
+    supported = result is not None and result.returncode == 0
+    _BD_COMMAND_CAPABILITY_CACHE[cache_key] = supported
+    return supported
+
+
+def _prime_guidance_capabilities(*, beads_root: Path, cwd: Path) -> _PrimeGuidanceCapabilities:
+    return _PrimeGuidanceCapabilities(
+        supports_export=_supports_bd_command(("export",), beads_root=beads_root, cwd=cwd),
+        supports_dolt=_supports_bd_command(("dolt",), beads_root=beads_root, cwd=cwd),
+    )
+
+
 def _append_sync_noop_guidance(markdown: str) -> str:
     if _DEPRECATED_SYNC_NOOP_GUIDANCE in markdown:
         return markdown
@@ -1193,10 +1228,18 @@ def _append_sync_noop_guidance(markdown: str) -> str:
     return f"{markdown.rstrip()}\n\n{_DEPRECATED_SYNC_NOOP_GUIDANCE}"
 
 
-def _normalize_prime_addendum_markdown(markdown: str) -> str:
-    """Rewrite deprecated sync guidance to supported Dolt persistence commands."""
-    normalized = _DEPRECATED_SYNC_COMMAND_PATTERN.sub(_CANONICAL_DOLT_PERSIST_COMMAND, markdown)
-    if normalized == markdown:
+def _normalize_prime_addendum_markdown(
+    markdown: str, *, capabilities: _PrimeGuidanceCapabilities
+) -> str:
+    """Rewrite deprecated sync guidance using supported command capabilities."""
+    if capabilities.supports_export:
+        replacement = 'bd export -o "${BEADS_DIR:-.beads}/issues.jsonl"'
+    elif capabilities.supports_dolt:
+        replacement = _CANONICAL_DOLT_PERSIST_COMMAND
+    else:
+        return markdown
+    normalized = _DEPRECATED_SYNC_COMMAND_PATTERN.sub(replacement, markdown)
+    if capabilities.supports_export or normalized == markdown:
         return normalized
     return _append_sync_noop_guidance(normalized)
 
@@ -1219,7 +1262,11 @@ def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
         return None
     if result.returncode != 0:
         return None
-    output = _normalize_prime_addendum_markdown((result.stdout or "").strip())
+    capabilities = _prime_guidance_capabilities(beads_root=beads_root, cwd=cwd)
+    output = _normalize_prime_addendum_markdown(
+        (result.stdout or "").strip(),
+        capabilities=capabilities,
+    )
     return output or None
 
 
