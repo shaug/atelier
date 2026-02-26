@@ -1,8 +1,10 @@
 """Template loading and rendering helpers."""
 
+import json
 from dataclasses import dataclass
-from importlib import resources
+from importlib import metadata, resources
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from . import paths
 
@@ -67,6 +69,47 @@ def _packaged_template_path(*parts: str) -> str:
     return str(resources.files("atelier").joinpath("templates").joinpath(*parts))
 
 
+def _runtime_distribution_template_roots() -> tuple[tuple[str, Path], ...]:
+    """Return stable package-template roots from the active runtime distribution."""
+    try:
+        dist = metadata.distribution("atelier")
+    except metadata.PackageNotFoundError:
+        return ()
+
+    roots: list[tuple[str, Path]] = []
+    locate_root = Path(str(dist.locate_file("atelier/templates")))
+    if locate_root.is_dir():
+        roots.append(("runtime_distribution_locate_file", locate_root))
+
+    direct_url = dist.read_text("direct_url.json")
+    if direct_url:
+        try:
+            payload = json.loads(direct_url)
+        except json.JSONDecodeError:
+            payload = {}
+        source_url = payload.get("url") if isinstance(payload, dict) else None
+        if isinstance(source_url, str):
+            parsed = urlparse(source_url)
+            if parsed.scheme == "file":
+                source_path = Path(unquote(parsed.path))
+                for candidate in (
+                    source_path / "src" / "atelier" / "templates",
+                    source_path / "atelier" / "templates",
+                ):
+                    if candidate.is_dir():
+                        roots.append(("runtime_distribution_direct_url", candidate))
+
+    deduped: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+    for origin, root in roots:
+        key = str(root.resolve())
+        if key in seen:
+            continue
+        deduped.append((origin, root))
+        seen.add(key)
+    return tuple(deduped)
+
+
 def read_installed_template(*parts: str) -> str | None:
     """Read a template from the installed cache when present.
 
@@ -104,7 +147,6 @@ def read_template_result(
     """
     attempts: list[str] = []
     installed_path = _installed_template_path(*parts)
-    packaged_path = _packaged_template_path(*parts)
 
     def load_installed() -> str | None:
         if not installed_path.exists():
@@ -121,15 +163,41 @@ def read_template_result(
         return text
 
     def load_packaged() -> str | None:
+        runtime_packaged_path = _packaged_template_path(*parts)
         try:
             text = _read_template(*parts)
         except OSError as exc:
             attempts.append(
-                f"packaged default unreadable: {packaged_path} ({type(exc).__name__}: {exc})"
+                "packaged default unreadable: "
+                f"{runtime_packaged_path} [origin=runtime_package_resources] "
+                f"({type(exc).__name__}: {exc})"
             )
-            return None
-        attempts.append(f"packaged default loaded: {packaged_path}")
-        return text
+        else:
+            attempts.append(
+                "packaged default loaded: "
+                f"{runtime_packaged_path} [origin=runtime_package_resources]"
+            )
+            return text
+
+        seen_packaged_paths = {runtime_packaged_path}
+        for origin, templates_root in _runtime_distribution_template_roots():
+            candidate_path = templates_root.joinpath(*parts)
+            candidate_path_str = str(candidate_path)
+            if candidate_path_str in seen_packaged_paths:
+                continue
+            seen_packaged_paths.add(candidate_path_str)
+            try:
+                text = candidate_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                attempts.append(
+                    "packaged default unreadable: "
+                    f"{candidate_path} [origin={origin}] "
+                    f"({type(exc).__name__}: {exc})"
+                )
+                continue
+            attempts.append(f"packaged default loaded: {candidate_path} [origin={origin}]")
+            return text
+        return None
 
     selected_source = "packaged_default"
     selected_text: str | None = None
