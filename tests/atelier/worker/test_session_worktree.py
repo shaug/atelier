@@ -221,7 +221,9 @@ def test_prepare_worktrees_reconciles_epic_changeset_metadata_before_checkout() 
         patch("atelier.worker.session.worktree.beads.update_worktree_path"),
         patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.worker.session.worktree.beads.list_descendant_changesets", return_value=[]),
-        patch("atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership", return_value=()),
+        patch(
+            "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership", return_value=()
+        ),
         patch(
             "atelier.worker.session.worktree.beads.update_changeset_branch_metadata"
         ) as update_metadata,
@@ -313,7 +315,9 @@ def test_prepare_worktrees_blocks_ambiguous_epic_changeset_lineage_drift() -> No
         patch("atelier.worker.session.worktree.beads.update_worktree_path"),
         patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch("atelier.worker.session.worktree.beads.list_descendant_changesets", return_value=[]),
-        patch("atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership", return_value=()),
+        patch(
+            "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership", return_value=()
+        ),
         patch("atelier.worker.session.worktree.beads.update_changeset_branch_metadata") as update,
         patch("atelier.worker.session.worktree.worktrees.ensure_changeset_checkout", checkout),
     ):
