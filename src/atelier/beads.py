@@ -7,8 +7,10 @@ import json
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -64,6 +66,39 @@ _DOLT_DATABASE_DEFAULT = "beads"
 _STARTUP_AUTO_MIGRATION_DIAGNOSTICS: dict[Path, "_StartupAutoMigrationDiagnostic"] = {}
 _RUNTIME_AGENT_ID_ENV = "ATELIER_AGENT_ID"
 _RUNTIME_AGENT_BEAD_ID_ENV = "ATELIER_AGENT_BEAD_ID"
+_DOLT_SERVER_PID_FILENAME = "dolt-server.pid"
+_DOLT_SERVER_STARTUP_TIMEOUT_SECONDS = 2.0
+_DOLT_SERVER_STARTUP_POLL_INTERVAL_SECONDS = 0.1
+_DOLT_SERVER_RECOVERY_MAX_ATTEMPTS = 2
+_DOLT_SERVER_PRECHECK_BYPASS_COMMANDS = {
+    "completion",
+    "doctor",
+    "help",
+    "human",
+    "init",
+    "migrate",
+    "onboard",
+    "quickstart",
+    "setup",
+    "upgrade",
+    "version",
+}
+_DOLT_SERVER_ERROR_MARKERS = (
+    "can't connect to mysql server",
+    "connection refused",
+    "connection reset by peer",
+    "connect: cannot assign requested address",
+    "connect: no route to host",
+    "connect: operation timed out",
+    "dial tcp",
+    "driver: bad connection",
+    "error 2002",
+    "error 2003",
+    "i/o timeout",
+    "mysql server has gone away",
+    "no such host",
+    "unknown database",
+)
 
 
 class _IssueTypeModel(BaseModel):
@@ -241,6 +276,17 @@ class _StartupAutoMigrationDiagnostic:
     status: str
     reason: str
     startup_state: StartupBeadsState
+
+
+@dataclass(frozen=True)
+class DoltServerRuntime:
+    """Resolved Dolt server runtime coordinates for a project Beads store."""
+
+    dolt_root: Path
+    pid_path: Path
+    host: str
+    port: int
+    database: str
 
 
 def beads_env(beads_root: Path) -> dict[str, str]:
@@ -1054,6 +1100,294 @@ def _run_raw_bd_command(
     )
 
 
+def _is_dolt_server_supervision_target(args: list[str]) -> bool:
+    if not args or _has_db_flag(args):
+        return False
+    command = args[0].strip().lower()
+    if not command:
+        return False
+    if command in _DOLT_SERVER_PRECHECK_BYPASS_COMMANDS:
+        return False
+    if command == "dolt":
+        return False
+    return True
+
+
+def _is_dolt_server_failure(detail: str) -> bool:
+    normalized = detail.lower()
+    return any(marker in normalized for marker in _DOLT_SERVER_ERROR_MARKERS)
+
+
+def _parse_dolt_runtime_port(value: object) -> int:
+    if isinstance(value, bool):
+        return _DOLT_SERVER_PORT_DEFAULT
+    if isinstance(value, int):
+        return value if value > 0 else _DOLT_SERVER_PORT_DEFAULT
+    if isinstance(value, str):
+        try:
+            parsed = int(value.strip())
+        except ValueError:
+            return _DOLT_SERVER_PORT_DEFAULT
+        return parsed if parsed > 0 else _DOLT_SERVER_PORT_DEFAULT
+    return _DOLT_SERVER_PORT_DEFAULT
+
+
+def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
+    metadata_path = beads_root / "metadata.json"
+    payload: dict[str, object] = {}
+    try:
+        raw = metadata_path.read_text(encoding="utf-8")
+    except OSError:
+        raw = ""
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = {}
+        if isinstance(parsed, dict):
+            payload = parsed
+    host_value = payload.get("dolt_server_host")
+    host = host_value.strip() if isinstance(host_value, str) and host_value.strip() else "127.0.0.1"
+    port = _parse_dolt_runtime_port(payload.get("dolt_server_port"))
+    database_value = payload.get("dolt_database")
+    if isinstance(database_value, str) and database_value.strip():
+        database = database_value.strip()
+    else:
+        database = _discover_dolt_database_name(beads_root)
+    dolt_root = beads_root / "dolt"
+    return DoltServerRuntime(
+        dolt_root=dolt_root,
+        pid_path=dolt_root / _DOLT_SERVER_PID_FILENAME,
+        host=host,
+        port=port,
+        database=database,
+    )
+
+
+def _read_pid_file(pid_path: Path) -> int | None:
+    try:
+        raw = pid_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    try:
+        pid = int(raw)
+    except ValueError:
+        return None
+    return pid if pid > 0 else None
+
+
+def _pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
+
+
+def _remove_pid_file(pid_path: Path) -> None:
+    try:
+        pid_path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
+
+
+def _list_dolt_server_pids_for_port(
+    *,
+    port: int,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[int, ...]:
+    snapshot = _run_raw_bd_command(["ps", "-ax", "-o", "pid=,command="], cwd=cwd, env=env)
+    if snapshot is None or snapshot.returncode != 0:
+        return ()
+    matches: list[int] = []
+    for line in (snapshot.stdout or "").splitlines():
+        entry = line.strip()
+        if not entry:
+            continue
+        parts = entry.split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        pid_raw, command = parts
+        if "dolt sql-server" not in command:
+            continue
+        if f"--port {port}" not in command and f"--port={port}" not in command:
+            continue
+        try:
+            pid = int(pid_raw)
+        except ValueError:
+            continue
+        if pid > 0:
+            matches.append(pid)
+    return tuple(sorted(set(matches)))
+
+
+def _terminate_pid(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if not _pid_is_alive(pid):
+        return True
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return False
+    deadline = time.monotonic() + _DOLT_SERVER_STARTUP_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if not _pid_is_alive(pid):
+            return True
+        time.sleep(_DOLT_SERVER_STARTUP_POLL_INTERVAL_SECONDS)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        return False
+    return not _pid_is_alive(pid)
+
+
+def _stop_dolt_server_processes(
+    runtime: DoltServerRuntime,
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[int, ...]:
+    target_pids = set(_list_dolt_server_pids_for_port(port=runtime.port, cwd=cwd, env=env))
+    pid_from_file = _read_pid_file(runtime.pid_path)
+    if pid_from_file is not None:
+        target_pids.add(pid_from_file)
+    stopped: list[int] = []
+    for pid in sorted(target_pids):
+        if _terminate_pid(pid):
+            stopped.append(pid)
+    _remove_pid_file(runtime.pid_path)
+    return tuple(stopped)
+
+
+def _start_dolt_server(
+    runtime: DoltServerRuntime, *, env: dict[str, str]
+) -> tuple[bool, str | None]:
+    try:
+        runtime.dolt_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return False, f"unable to create dolt runtime directory ({exc})"
+    try:
+        process = subprocess.Popen(
+            [
+                "dolt",
+                "sql-server",
+                "--host",
+                runtime.host,
+                "--port",
+                str(runtime.port),
+                "--no-auto-commit",
+            ],
+            cwd=runtime.dolt_root,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        return False, f"unable to start dolt sql-server ({exc})"
+    try:
+        runtime.pid_path.write_text(f"{process.pid}\n", encoding="utf-8")
+    except OSError as exc:
+        _terminate_pid(process.pid)
+        return False, f"started dolt sql-server but failed to write pid file ({exc})"
+    return True, None
+
+
+def _probe_dolt_server_health(
+    runtime: DoltServerRuntime,
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[bool, str | None]:
+    result = _run_raw_bd_command(["bd", "dolt", "show", "--json"], cwd=cwd, env=env)
+    if result is None:
+        return False, "missing required command: bd"
+    if result.returncode != 0:
+        detail = _short_detail(_command_output_detail(result))
+        return False, detail or "bd dolt show failed"
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return False, "empty payload from bd dolt show --json"
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return False, f"invalid dolt show payload ({exc})"
+    if not isinstance(payload, dict):
+        return False, "invalid dolt show payload type"
+    if not bool(payload.get("connection_ok")):
+        return False, "dolt server health check reported connection_ok=false"
+    database = payload.get("database")
+    if isinstance(database, str) and database.strip() and database.strip() != runtime.database:
+        return (
+            False,
+            "dolt server ownership mismatch: "
+            f"expected database={runtime.database}, got {database.strip()}",
+        )
+    return True, None
+
+
+def _restart_dolt_server_with_recovery(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[bool, str]:
+    runtime = _resolve_dolt_server_runtime(beads_root)
+    stopped = _stop_dolt_server_processes(runtime, cwd=cwd, env=env)
+    started, start_detail = _start_dolt_server(runtime, env=env)
+    if not started:
+        detail = start_detail or "failed to start dolt sql-server"
+        return False, f"dolt restart failed ({detail})"
+    deadline = time.monotonic() + _DOLT_SERVER_STARTUP_TIMEOUT_SECONDS
+    last_detail = ""
+    while time.monotonic() < deadline:
+        healthy, detail = _probe_dolt_server_health(runtime, cwd=cwd, env=env)
+        if healthy:
+            stopped_detail = f", stopped={list(stopped)}" if stopped else ""
+            return (
+                True,
+                f"dolt server recovered for {runtime.host}:{runtime.port}{stopped_detail}",
+            )
+        last_detail = detail or "dolt server health check failed"
+        time.sleep(_DOLT_SERVER_STARTUP_POLL_INTERVAL_SECONDS)
+    return False, f"dolt restart did not become healthy ({last_detail})"
+
+
+def _ensure_dolt_server_preflight(
+    *,
+    args: list[str],
+    beads_root: Path,
+    cwd: Path,
+    env: dict[str, str],
+) -> str | None:
+    if not _is_dolt_server_supervision_target(args):
+        return None
+    if not (beads_root / "dolt").exists():
+        return None
+    runtime = _resolve_dolt_server_runtime(beads_root)
+    healthy, detail = _probe_dolt_server_health(runtime, cwd=cwd, env=env)
+    if healthy:
+        return None
+    for _ in range(_DOLT_SERVER_RECOVERY_MAX_ATTEMPTS):
+        recovered, recovery_detail = _restart_dolt_server_with_recovery(
+            beads_root=beads_root,
+            cwd=cwd,
+            env=env,
+        )
+        if not recovered:
+            return recovery_detail
+        healthy, detail = _probe_dolt_server_health(runtime, cwd=cwd, env=env)
+        if healthy:
+            return None
+    return detail or "dolt server preflight failed"
+
+
 def _repair_beads_store(*, beads_root: Path, cwd: Path, env: dict[str, str]) -> bool:
     """Attempt to repair a missing or stale Beads store.
 
@@ -1175,58 +1509,85 @@ def _raw_bd_json(
     if "--json" not in command:
         command.append("--json")
     has_db_flag = _has_db_flag(command)
-    result = _run_raw_bd_command(["bd", *command], cwd=cwd, env=env)
-    if result is None:
-        return [], "missing required command: bd"
-    detail = _command_output_detail(result)
-    fallback_command: list[str] | None = None
-    if result.returncode != 0 and _is_embedded_backend_panic(detail) and not has_db_flag:
-        fallback = bd_invocation.with_bd_mode(
-            *command,
-            beads_dir=str(beads_root),
-            env=env,
-        )
-        fallback_command = fallback
-        retried = _run_raw_bd_command(fallback, cwd=cwd, env=env)
-        if retried is None:
-            return [], "missing required command: bd"
-        result = retried
-        detail = _command_output_detail(result)
     panic_repair_attempted = False
-    if (
-        result.returncode != 0
-        and _is_embedded_backend_panic(detail)
-        and _is_embedded_panic_repairable_command(command)
-    ):
-        panic_repair_attempted = _attempt_embedded_panic_repair(
-            beads_root=beads_root,
-            cwd=cwd,
-            env=env,
-        )
-        if panic_repair_attempted:
-            retry_command = fallback_command or ["bd", *command]
-            retried_after_repair = _run_raw_bd_command(retry_command, cwd=cwd, env=env)
-            if retried_after_repair is None:
-                return [], "missing required command: bd"
-            result = retried_after_repair
-            detail = _command_output_detail(result)
-    if (
-        result.returncode != 0
-        and _is_repairable_command(command)
-        and _is_missing_store_error(detail)
-        and _repair_beads_store(beads_root=beads_root, cwd=cwd, env=env)
-    ):
-        retried_after_store_repair = _run_raw_bd_command(["bd", *command], cwd=cwd, env=env)
-        if retried_after_store_repair is None:
+    dolt_recovery_detail: str | None = None
+    result: exec.CommandResult | None = None
+    detail = ""
+    recovery_attempts = 0
+    while True:
+        result = _run_raw_bd_command(["bd", *command], cwd=cwd, env=env)
+        if result is None:
             return [], "missing required command: bd"
-        result = retried_after_store_repair
         detail = _command_output_detail(result)
+        fallback_command: list[str] | None = None
+        if result.returncode != 0 and _is_embedded_backend_panic(detail) and not has_db_flag:
+            fallback = bd_invocation.with_bd_mode(
+                *command,
+                beads_dir=str(beads_root),
+                env=env,
+            )
+            fallback_command = fallback
+            retried = _run_raw_bd_command(fallback, cwd=cwd, env=env)
+            if retried is None:
+                return [], "missing required command: bd"
+            result = retried
+            detail = _command_output_detail(result)
+        if (
+            result.returncode != 0
+            and _is_embedded_backend_panic(detail)
+            and _is_embedded_panic_repairable_command(command)
+        ):
+            panic_repair_attempted = _attempt_embedded_panic_repair(
+                beads_root=beads_root,
+                cwd=cwd,
+                env=env,
+            )
+            if panic_repair_attempted:
+                retry_command = fallback_command or ["bd", *command]
+                retried_after_repair = _run_raw_bd_command(retry_command, cwd=cwd, env=env)
+                if retried_after_repair is None:
+                    return [], "missing required command: bd"
+                result = retried_after_repair
+                detail = _command_output_detail(result)
+        if (
+            result.returncode != 0
+            and _is_repairable_command(command)
+            and _is_missing_store_error(detail)
+            and _repair_beads_store(beads_root=beads_root, cwd=cwd, env=env)
+        ):
+            retried_after_store_repair = _run_raw_bd_command(["bd", *command], cwd=cwd, env=env)
+            if retried_after_store_repair is None:
+                return [], "missing required command: bd"
+            result = retried_after_store_repair
+            detail = _command_output_detail(result)
+        if result.returncode == 0:
+            break
+        if (
+            recovery_attempts < _DOLT_SERVER_RECOVERY_MAX_ATTEMPTS
+            and _is_dolt_server_supervision_target(command)
+            and _is_dolt_server_failure(detail)
+        ):
+            recovered, recovery_detail = _restart_dolt_server_with_recovery(
+                beads_root=beads_root,
+                cwd=cwd,
+                env=env,
+            )
+            dolt_recovery_detail = recovery_detail
+            recovery_attempts += 1
+            if recovered:
+                continue
+        break
     if result.returncode != 0:
         guidance = ""
         if _is_embedded_backend_panic(detail):
             guidance = _embedded_panic_guidance(repair_attempted=panic_repair_attempted)
         elif _is_missing_store_error(detail):
             guidance = _missing_store_guidance(beads_root=beads_root)
+        elif _is_dolt_server_failure(detail) and dolt_recovery_detail:
+            guidance = (
+                "Atelier attempted bounded Dolt server recovery, but the command still failed. "
+                f"{dolt_recovery_detail}"
+            )
         diagnostics = _startup_state_diagnostics(beads_root=beads_root, cwd=cwd)
         if guidance:
             return [], f"{detail or 'bd command failed'}\n{guidance}\n{diagnostics}"
@@ -1367,7 +1728,18 @@ def run_bd_command(
     _normalize_dolt_runtime_metadata_once(beads_root=beads_root)
     if _is_startup_auto_migration_command(args):
         _emit_startup_auto_migration_diagnostic(beads_root)
-    _normalize_dolt_runtime_metadata_once(beads_root=beads_root)
+    preflight_error = _ensure_dolt_server_preflight(
+        args=args,
+        beads_root=beads_root,
+        cwd=cwd,
+        env=env,
+    )
+    if preflight_error and not allow_failure:
+        die(
+            "dolt server preflight failed before running bd command.\n"
+            f"{preflight_error}\n"
+            f"{_startup_state_diagnostics(beads_root=beads_root, cwd=cwd)}"
+        )
     _enforce_in_progress_dependency_gate(args, beads_root=beads_root, cwd=cwd, env=env)
     request = exec.CommandRequest(
         argv=tuple(cmd),
@@ -1377,54 +1749,76 @@ def run_bd_command(
         text=True,
         stdin=subprocess.DEVNULL,
     )
-    result = exec.run_with_runner(request)
-    if result is None:
-        die("missing required command: bd")
-    detail = _command_output_detail(result)
     has_db_flag = _has_db_flag(args)
-    fallback_request: exec.CommandRequest | None = None
-    if result.returncode != 0 and _is_embedded_backend_panic(detail) and not has_db_flag:
-        fallback_cmd = bd_invocation.with_bd_mode(
-            *args,
-            beads_dir=str(beads_root),
-            env=env,
-        )
-        fallback_request = replace(request, argv=tuple(fallback_cmd))
-        retried = exec.run_with_runner(fallback_request)
-        if retried is None:
-            die("missing required command: bd")
-        result = retried
-        detail = _command_output_detail(result)
     panic_repair_attempted = False
-    if (
-        result.returncode != 0
-        and not allow_failure
-        and _is_embedded_backend_panic(detail)
-        and _is_embedded_panic_repairable_command(args)
-    ):
-        panic_repair_attempted = _attempt_embedded_panic_repair(
-            beads_root=beads_root,
-            cwd=cwd,
-            env=env,
-        )
-        if panic_repair_attempted:
-            retry_request = fallback_request or request
-            retried_after_repair = exec.run_with_runner(retry_request)
-            if retried_after_repair is None:
-                die("missing required command: bd")
-            result = retried_after_repair
-            detail = _command_output_detail(result)
-    if (
-        result.returncode != 0
-        and not allow_failure
-        and _is_repairable_command(args)
-        and _is_missing_store_error(detail)
-        and _repair_beads_store(beads_root=beads_root, cwd=cwd, env=env)
-    ):
+    dolt_recovery_detail: str | None = None
+    detail = ""
+    result: exec.CommandResult | None = None
+    recovery_attempts = 0
+    while True:
         result = exec.run_with_runner(request)
         if result is None:
             die("missing required command: bd")
         detail = _command_output_detail(result)
+        fallback_request: exec.CommandRequest | None = None
+        if result.returncode != 0 and _is_embedded_backend_panic(detail) and not has_db_flag:
+            fallback_cmd = bd_invocation.with_bd_mode(
+                *args,
+                beads_dir=str(beads_root),
+                env=env,
+            )
+            fallback_request = replace(request, argv=tuple(fallback_cmd))
+            retried = exec.run_with_runner(fallback_request)
+            if retried is None:
+                die("missing required command: bd")
+            result = retried
+            detail = _command_output_detail(result)
+        if (
+            result.returncode != 0
+            and not allow_failure
+            and _is_embedded_backend_panic(detail)
+            and _is_embedded_panic_repairable_command(args)
+        ):
+            panic_repair_attempted = _attempt_embedded_panic_repair(
+                beads_root=beads_root,
+                cwd=cwd,
+                env=env,
+            )
+            if panic_repair_attempted:
+                retry_request = fallback_request or request
+                retried_after_repair = exec.run_with_runner(retry_request)
+                if retried_after_repair is None:
+                    die("missing required command: bd")
+                result = retried_after_repair
+                detail = _command_output_detail(result)
+        if (
+            result.returncode != 0
+            and not allow_failure
+            and _is_repairable_command(args)
+            and _is_missing_store_error(detail)
+            and _repair_beads_store(beads_root=beads_root, cwd=cwd, env=env)
+        ):
+            result = exec.run_with_runner(request)
+            if result is None:
+                die("missing required command: bd")
+            detail = _command_output_detail(result)
+        if result.returncode == 0:
+            break
+        if (
+            recovery_attempts < _DOLT_SERVER_RECOVERY_MAX_ATTEMPTS
+            and _is_dolt_server_supervision_target(args)
+            and _is_dolt_server_failure(detail)
+        ):
+            recovered, recovery_detail = _restart_dolt_server_with_recovery(
+                beads_root=beads_root,
+                cwd=cwd,
+                env=env,
+            )
+            dolt_recovery_detail = recovery_detail
+            recovery_attempts += 1
+            if recovered:
+                continue
+        break
 
     if result.returncode != 0 and not allow_failure:
         message = f"command failed: {' '.join(cmd)}"
@@ -1436,6 +1830,11 @@ def run_bd_command(
             )
         elif _is_missing_store_error(detail):
             message = f"{message}\n{_missing_store_guidance(beads_root=beads_root)}"
+        elif _is_dolt_server_failure(detail) and dolt_recovery_detail:
+            message = (
+                f"{message}\nAtelier attempted bounded Dolt server recovery, "
+                f"but the command still failed. {dolt_recovery_detail}"
+            )
         message = f"{message}\n{_startup_state_diagnostics(beads_root=beads_root, cwd=cwd)}"
         die(message)
     return subprocess.CompletedProcess(
