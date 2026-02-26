@@ -161,7 +161,7 @@ def canonical_lifecycle_status(status: object, *, labels: set[str] | None = None
         return normalized
     if normalized in _LEGACY_STATUS_ALIASES:
         return _LEGACY_STATUS_ALIASES[normalized]
-    if labels:
+    if normalized is None and labels:
         hint = _legacy_status_hint_from_labels(labels)
         if hint is not None:
             return hint

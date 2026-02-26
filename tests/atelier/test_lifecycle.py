@@ -141,6 +141,10 @@ def test_canonical_lifecycle_status_uses_legacy_label_hints() -> None:
     )
 
 
+def test_canonical_lifecycle_status_preserves_unknown_non_empty_status() -> None:
+    assert lifecycle.canonical_lifecycle_status("tombstone", labels={"at:ready"}) == "tombstone"
+
+
 def test_is_work_issue_excludes_explicit_non_work_types_and_labels() -> None:
     assert (
         lifecycle.is_work_issue(
@@ -214,3 +218,13 @@ def test_evaluate_runnable_leaf_requires_leaf_status_and_dependencies() -> None:
     )
     assert runnable.runnable is True
     assert runnable.reasons == ()
+
+
+def test_is_active_root_branch_owner_rejects_unknown_status_even_with_ready_label() -> None:
+    assert (
+        lifecycle.is_active_root_branch_owner(
+            status="tombstone",
+            labels={"at:epic", "at:ready"},
+        )
+        is False
+    )
