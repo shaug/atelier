@@ -311,3 +311,106 @@ def test_run_worker_once_releases_epic_when_label_validation_reads_fail() -> Non
         cwd=Path("/repo"),
     )
     assert not deps.control._die.called
+
+
+def test_run_worker_once_releases_epic_when_changeset_selection_reads_fail() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p5",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p5",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id="at-epic.2",
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+
+    def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
+        if args[:2] == ["show", "at-epic.2"]:
+            raise SystemExit(1)
+        return []
+
+    deps.infra.beads.run_bd_json = Mock(side_effect=run_bd_json)
+    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
+    deps.lifecycle.release_epic_assignment = Mock()
+    deps.lifecycle.send_planner_notification = Mock()
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p5"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "changeset_selection_read_failed"
+    assert summary.epic_id == "at-epic"
+    deps.lifecycle.send_planner_notification.assert_called_once()
+    deps.lifecycle.release_epic_assignment.assert_called_once_with(
+        "at-epic",
+        beads_root=Path("/project/.atelier/.beads"),
+        repo_root=Path("/repo"),
+    )
+    deps.infra.beads.clear_agent_hook.assert_called_once_with(
+        "at-agent",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+    )
+    assert not deps.control._die.called
+
+
+def test_run_worker_once_releases_epic_when_selected_changeset_read_fails() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p6",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p6",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
+
+    def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
+        if args[:2] == ["show", "at-epic.1"]:
+            raise SystemExit(1)
+        return []
+
+    deps.infra.beads.run_bd_json = Mock(side_effect=run_bd_json)
+    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
+    deps.lifecycle.release_epic_assignment = Mock()
+    deps.lifecycle.send_planner_notification = Mock()
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p6"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "changeset_metadata_read_failed"
+    assert summary.epic_id == "at-epic"
+    deps.lifecycle.send_planner_notification.assert_called_once()
+    deps.lifecycle.release_epic_assignment.assert_called_once_with(
+        "at-epic",
+        beads_root=Path("/project/.atelier/.beads"),
+        repo_root=Path("/repo"),
+    )
+    deps.infra.beads.clear_agent_hook.assert_called_once_with(
+        "at-agent",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+    )
+    assert not deps.control._die.called

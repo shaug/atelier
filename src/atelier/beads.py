@@ -36,6 +36,7 @@ _AGENT_ISSUE_TYPE = "agent"
 _FALLBACK_ISSUE_TYPE = "task"
 _ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
 _STORE_REPAIR_ATTEMPTED: set[Path] = set()
+_EMBEDDED_PANIC_REPAIR_ATTEMPTED: set[Path] = set()
 _STORE_REPAIR_ERROR_MARKERS = (
     "no beads database found",
     "database not initialized: issue_prefix config is missing",
@@ -198,6 +199,15 @@ def _is_embedded_backend_panic(detail: str) -> bool:
     return any(marker in normalized for marker in _EMBEDDED_BACKEND_PANIC_MARKERS)
 
 
+def _is_embedded_panic_repairable_command(args: list[str]) -> bool:
+    if not args:
+        return False
+    command = args[0].strip().lower()
+    if command in {"blocked", "list", "prime", "ready", "show", "stats"}:
+        return True
+    return command == "config" and len(args) >= 2 and args[1].strip().lower() == "get"
+
+
 def _has_db_flag(args: list[str]) -> bool:
     return any(token == "--db" or token.startswith("--db=") for token in args)
 
@@ -267,6 +277,17 @@ def _repair_beads_store(*, beads_root: Path, cwd: Path, env: dict[str, str]) -> 
     return verify is not None and verify.returncode == 0
 
 
+def _attempt_embedded_panic_repair(*, beads_root: Path, cwd: Path, env: dict[str, str]) -> bool:
+    """Run a one-time embedded-store repair attempt for panic recovery."""
+    key = beads_root.resolve()
+    if key in _EMBEDDED_PANIC_REPAIR_ATTEMPTED:
+        return False
+    _EMBEDDED_PANIC_REPAIR_ATTEMPTED.add(key)
+    repair_cwd = _store_repair_cwd(beads_root=beads_root, cwd=cwd)
+    _run_raw_bd_command(["bd", "doctor", "--fix", "--yes"], cwd=repair_cwd, env=env)
+    return True
+
+
 def _is_repairable_command(args: list[str]) -> bool:
     if not args:
         return False
@@ -278,6 +299,28 @@ def _is_repairable_command(args: list[str]) -> bool:
         if key in {"issue_prefix", "beads.role"}:
             return False
     return True
+
+
+def _embedded_panic_guidance(*, repair_attempted: bool) -> str:
+    if repair_attempted:
+        return (
+            "Detected an embedded storage panic from bd. Atelier retried with an explicit sqlite "
+            "database path and ran `bd doctor --fix --yes`, but the command still failed. "
+            "Verify store health with `bd doctor` and retry once `bd show --json <issue-id>` "
+            "succeeds."
+        )
+    return (
+        "Detected an embedded storage panic from bd. Atelier retried with an explicit sqlite "
+        "database path, but automatic repair was skipped because this command may mutate state. "
+        "Run `bd doctor --fix --yes` and retry."
+    )
+
+
+def _missing_store_guidance(*, beads_root: Path) -> str:
+    return (
+        "Detected a missing or uninitialized Beads store. Verify `BEADS_DIR` points at "
+        f"{beads_root} and run `bd doctor --fix --yes`, then retry."
+    )
 
 
 def _update_in_progress_targets(args: list[str]) -> tuple[str, ...]:
@@ -315,22 +358,61 @@ def _raw_bd_json(
     command = list(args)
     if "--json" not in command:
         command.append("--json")
+    has_db_flag = _has_db_flag(command)
     result = _run_raw_bd_command(["bd", *command], cwd=cwd, env=env)
     if result is None:
         return [], "missing required command: bd"
     detail = _command_output_detail(result)
-    if result.returncode != 0 and _is_embedded_backend_panic(detail) and not _has_db_flag(command):
+    fallback_command: list[str] | None = None
+    if result.returncode != 0 and _is_embedded_backend_panic(detail) and not has_db_flag:
         fallback = bd_invocation.with_bd_mode(
             *command,
             beads_dir=str(beads_root),
             env=env,
         )
+        fallback_command = fallback
         retried = _run_raw_bd_command(fallback, cwd=cwd, env=env)
         if retried is None:
             return [], "missing required command: bd"
         result = retried
         detail = _command_output_detail(result)
+    panic_repair_attempted = False
+    if (
+        result.returncode != 0
+        and _is_embedded_backend_panic(detail)
+        and _is_embedded_panic_repairable_command(command)
+    ):
+        panic_repair_attempted = _attempt_embedded_panic_repair(
+            beads_root=beads_root,
+            cwd=cwd,
+            env=env,
+        )
+        if panic_repair_attempted:
+            retry_command = fallback_command or ["bd", *command]
+            retried_after_repair = _run_raw_bd_command(retry_command, cwd=cwd, env=env)
+            if retried_after_repair is None:
+                return [], "missing required command: bd"
+            result = retried_after_repair
+            detail = _command_output_detail(result)
+    if (
+        result.returncode != 0
+        and _is_repairable_command(command)
+        and _is_missing_store_error(detail)
+        and _repair_beads_store(beads_root=beads_root, cwd=cwd, env=env)
+    ):
+        retried_after_store_repair = _run_raw_bd_command(["bd", *command], cwd=cwd, env=env)
+        if retried_after_store_repair is None:
+            return [], "missing required command: bd"
+        result = retried_after_store_repair
+        detail = _command_output_detail(result)
     if result.returncode != 0:
+        guidance = ""
+        if _is_embedded_backend_panic(detail):
+            guidance = _embedded_panic_guidance(repair_attempted=panic_repair_attempted)
+        elif _is_missing_store_error(detail):
+            guidance = _missing_store_guidance(beads_root=beads_root)
+        if guidance:
+            return [], f"{detail or 'bd command failed'}\n{guidance}"
         return [], (detail or "bd command failed")
     raw = (result.stdout or "").strip()
     if not raw:
@@ -477,7 +559,9 @@ def run_bd_command(
     if result is None:
         die("missing required command: bd")
     detail = _command_output_detail(result)
-    if result.returncode != 0 and _is_embedded_backend_panic(detail) and not _has_db_flag(args):
+    has_db_flag = _has_db_flag(args)
+    fallback_request: exec.CommandRequest | None = None
+    if result.returncode != 0 and _is_embedded_backend_panic(detail) and not has_db_flag:
         fallback_cmd = bd_invocation.with_bd_mode(
             *args,
             beads_dir=str(beads_root),
@@ -489,6 +573,25 @@ def run_bd_command(
             die("missing required command: bd")
         result = retried
         detail = _command_output_detail(result)
+    panic_repair_attempted = False
+    if (
+        result.returncode != 0
+        and not allow_failure
+        and _is_embedded_backend_panic(detail)
+        and _is_embedded_panic_repairable_command(args)
+    ):
+        panic_repair_attempted = _attempt_embedded_panic_repair(
+            beads_root=beads_root,
+            cwd=cwd,
+            env=env,
+        )
+        if panic_repair_attempted:
+            retry_request = fallback_request or request
+            retried_after_repair = exec.run_with_runner(retry_request)
+            if retried_after_repair is None:
+                die("missing required command: bd")
+            result = retried_after_repair
+            detail = _command_output_detail(result)
     if (
         result.returncode != 0
         and not allow_failure
@@ -507,10 +610,10 @@ def run_bd_command(
             message = f"{message}\n{detail}"
         if _is_embedded_backend_panic(detail):
             message = (
-                f"{message}\nDetected an embedded storage panic from bd. "
-                "Atelier retried with an explicit sqlite database path, but "
-                "the command still failed. Run `bd doctor --fix --yes` and retry."
+                f"{message}\n{_embedded_panic_guidance(repair_attempted=panic_repair_attempted)}"
             )
+        elif _is_missing_store_error(detail):
+            message = f"{message}\n{_missing_store_guidance(beads_root=beads_root)}"
         die(message)
     return subprocess.CompletedProcess(
         args=list(result.argv),

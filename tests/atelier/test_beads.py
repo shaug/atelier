@@ -233,6 +233,140 @@ def test_run_bd_json_retries_embedded_backend_panic_with_explicit_db(tmp_path: P
     ]
 
 
+def test_run_bd_json_attempts_doctor_fix_after_repeated_embedded_panic(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    calls: list[list[str]] = []
+    fallback = ["bd", "--db", str(beads_root / "beads.db"), "show", "at-1", "--json"]
+    fallback_count = 0
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        nonlocal fallback_count
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "show", "at-1", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=2,
+                stdout="",
+                stderr=(
+                    "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                    "doltdb.(*DoltDB).SetCrashOnFatalError"
+                ),
+            )
+        if argv == fallback:
+            fallback_count += 1
+            if fallback_count == 1:
+                return exec_util.CommandResult(
+                    argv=request.argv,
+                    returncode=2,
+                    stdout="",
+                    stderr=(
+                        "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                        "doltdb.(*DoltDB).SetCrashOnFatalError"
+                    ),
+                )
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='[{"id":"at-1"}]',
+                stderr="",
+            )
+        if argv == ["bd", "doctor", "--fix", "--yes"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr="repair attempted",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        payload = beads.run_bd_json(["show", "at-1"], beads_root=beads_root, cwd=cwd)
+
+    assert payload == [{"id": "at-1"}]
+    assert calls == [
+        ["bd", "show", "at-1", "--json"],
+        fallback,
+        ["bd", "doctor", "--fix", "--yes"],
+        fallback,
+    ]
+
+
+def test_run_bd_command_embedded_panic_guidance_mentions_doctor_retry(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    fallback = ["bd", "--db", str(beads_root / "beads.db"), "show", "at-1", "--json"]
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        if argv in (["bd", "show", "at-1", "--json"], fallback):
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=2,
+                stdout="",
+                stderr=(
+                    "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                    "doltdb.(*DoltDB).SetCrashOnFatalError"
+                ),
+            )
+        if argv == ["bd", "doctor", "--fix", "--yes"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr="repair failed",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    def fake_die(message: str, code: int = 1) -> None:
+        del code
+        raise RuntimeError(message)
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.die", side_effect=fake_die),
+    ):
+        with pytest.raises(RuntimeError, match="embedded storage panic from bd"):
+            beads.run_bd_command(["show", "at-1", "--json"], beads_root=beads_root, cwd=cwd)
+
+
+def test_run_bd_command_missing_store_guidance_mentions_beads_dir(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        return exec_util.CommandResult(
+            argv=request.argv,
+            returncode=1,
+            stdout="",
+            stderr="Error: database not initialized: issue_prefix config is missing",
+        )
+
+    def fake_die(message: str, code: int = 1) -> None:
+        del code
+        raise RuntimeError(message)
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads._repair_beads_store", return_value=False),
+        patch("atelier.beads.die", side_effect=fake_die),
+    ):
+        with pytest.raises(RuntimeError, match="missing or uninitialized Beads store"):
+            beads.run_bd_command(["list", "--json"], beads_root=beads_root, cwd=cwd)
+
+
 def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
     tmp_path: Path,
 ) -> None:
