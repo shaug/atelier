@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import atelier.cli as cli
 import atelier.config as config
@@ -65,3 +66,21 @@ def test_workspace_only_completion_returns_root_branches(monkeypatch):
     )
 
     assert cli._workspace_only_shell_complete(None, [], "b") == ["bug/two"]
+
+
+def test_collect_workspace_root_branches_includes_hooked_active_labels(monkeypatch):
+    payload = (
+        '[{"id":"at-1","status":"hooked","labels":["at:epic","at:hooked"],'
+        '"description":"workspace.root_branch: feat/hooked\\n"},'
+        '{"id":"at-2","status":"closed","labels":["at:epic","at:ready"],'
+        '"description":"workspace.root_branch: feat/closed\\n"}]'
+    )
+    monkeypatch.setattr(
+        cli,
+        "try_run_command",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=payload),
+    )
+
+    names = cli._collect_workspace_root_branches(Path("/repo"), beads_root=Path("/beads"))
+
+    assert names == ["feat/hooked"]

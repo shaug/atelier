@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 ACTIVE_REVIEW_STATES = {"draft-pr", "pr-open", "in-review", "approved"}
+_ROOT_BRANCH_ACTIVE_STATUSES = {"open", "ready", "in_progress", "planned", "hooked"}
+_ROOT_BRANCH_ACTIVE_LABELS = {"at:hooked", "cs:in_progress"}
+_ROOT_BRANCH_TERMINAL_LABELS = {"cs:merged", "cs:abandoned"}
 
 
 def normalize_review_state(value: object) -> str | None:
@@ -29,6 +32,29 @@ def is_eligible_epic_status(status: object, *, allow_hooked: bool) -> bool:
     if normalized in {"open", "ready", "in_progress"}:
         return True
     if allow_hooked and normalized == "hooked":
+        return True
+    return False
+
+
+def normalized_labels(raw_labels: object) -> set[str]:
+    """Normalize issue labels into a comparable set."""
+    if not isinstance(raw_labels, list):
+        return set()
+    return {cleaned for label in raw_labels if label is not None if (cleaned := str(label).strip())}
+
+
+def is_active_root_branch_owner(*, status: object, labels: set[str]) -> bool:
+    """Return whether root-branch ownership should be treated as active."""
+    normalized = str(status or "").strip().lower()
+    if normalized in {"closed", "done"}:
+        return False
+    if _ROOT_BRANCH_TERMINAL_LABELS.intersection(labels):
+        return False
+    if normalized in _ROOT_BRANCH_ACTIVE_STATUSES:
+        return True
+    if _ROOT_BRANCH_ACTIVE_LABELS.intersection(labels):
+        return True
+    if not normalized and "at:ready" in labels:
         return True
     return False
 

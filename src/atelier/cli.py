@@ -22,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover - legacy Click fallback
     from click.parser import split_arg_string
 
-from . import __version__, bd_invocation, beads, config, git, paths
+from . import __version__, bd_invocation, beads, config, git, lifecycle, paths
 from . import log as atelier_log
 from .commands import config as config_cmd
 from .commands import edit as edit_cmd
@@ -136,8 +136,10 @@ def _collect_workspace_root_branches(repo_root: Path, *, beads_root: Path) -> li
     for issue in issues:
         if not isinstance(issue, dict):
             continue
-        status = str(issue.get("status") or "").lower()
-        if status and status not in {"open", "in_progress", "ready"}:
+        if not lifecycle.is_active_root_branch_owner(
+            status=issue.get("status"),
+            labels=lifecycle.normalized_labels(issue.get("labels")),
+        ):
             continue
         root_branch = beads.extract_workspace_root_branch(issue)
         if root_branch:
