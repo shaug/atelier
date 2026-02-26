@@ -4,8 +4,28 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import beads, branching, git
+from . import beads, branching, git, lifecycle
 from .io import confirm, die, prompt, say
+
+
+def partition_root_branch_conflicts(
+    issues: list[dict[str, object]],
+    *,
+    owner_issue_id: str | None = None,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Split root-branch owners into active blockers and reusable history."""
+    blocking: list[dict[str, object]] = []
+    reusable: list[dict[str, object]] = []
+    for issue in issues:
+        issue_id = str(issue.get("id") or "").strip()
+        if owner_issue_id and issue_id == owner_issue_id:
+            continue
+        labels = lifecycle.normalized_labels(issue.get("labels"))
+        if lifecycle.is_active_root_branch_owner(status=issue.get("status"), labels=labels):
+            blocking.append(issue)
+            continue
+        reusable.append(issue)
+    return blocking, reusable
 
 
 def prompt_root_branch(
@@ -44,14 +64,7 @@ def prompt_root_branch(
         conflicts = beads.find_epics_by_root_branch(
             root_branch, beads_root=beads_root, cwd=repo_root
         )
-        blocking: list[dict[str, object]] = []
-        reusable: list[dict[str, object]] = []
-        for issue in conflicts:
-            status = str(issue.get("status") or "").lower()
-            if status in {"open", "in_progress", "ready", "planned"} or not status:
-                blocking.append(issue)
-            else:
-                reusable.append(issue)
+        blocking, reusable = partition_root_branch_conflicts(conflicts)
         if blocking:
             say("Root branch already claimed by active epics:")
             for issue in blocking:

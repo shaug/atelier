@@ -231,6 +231,63 @@ def test_run_worker_once_skips_claim_for_non_actionable_explicit_epic() -> None:
     deps.infra.beads.claim_epic.assert_not_called()
 
 
+def test_run_worker_once_blocks_on_active_root_branch_conflict() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p1root",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p1root",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.infra.beads.claim_epic = Mock(return_value={"id": "at-epic", "title": "Epic"})
+
+    def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
+        if args == ["list", "--label", "at:epic"]:
+            return [
+                {
+                    "id": "at-owner",
+                    "status": "hooked",
+                    "title": "Owner epic",
+                    "labels": ["at:epic", "at:ready", "at:hooked"],
+                    "description": "workspace.root_branch: feat/root\n",
+                }
+            ]
+        return []
+
+    deps.infra.beads.run_bd_json = Mock(side_effect=run_bd_json)
+    deps.lifecycle.release_epic_assignment = Mock()
+    deps.lifecycle.send_planner_notification = Mock()
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p1root"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "root_branch_conflict"
+    assert summary.epic_id == "at-epic"
+    deps.lifecycle.release_epic_assignment.assert_called_once_with(
+        "at-epic",
+        beads_root=Path("/project/.atelier/.beads"),
+        repo_root=Path("/repo"),
+    )
+    deps.lifecycle.send_planner_notification.assert_called_once()
+    assert "at-owner [hooked] Owner epic" in str(
+        deps.lifecycle.send_planner_notification.call_args.kwargs["body"]
+    )
+    deps.infra.beads.set_agent_hook.assert_not_called()
+
+
 def test_run_worker_once_dry_run_without_epic_stops_cleanly() -> None:
     agent = AgentHome(
         name="worker",

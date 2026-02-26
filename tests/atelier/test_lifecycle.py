@@ -9,6 +9,38 @@ def test_is_eligible_epic_status_accepts_core_active_states() -> None:
     assert lifecycle.is_eligible_epic_status("hooked", allow_hooked=True) is True
 
 
+def test_normalized_labels_handles_non_list_and_none_entries() -> None:
+    assert lifecycle.normalized_labels(None) == set()
+    assert lifecycle.normalized_labels(["at:ready", None, " at:hooked "]) == {
+        "at:ready",
+        "at:hooked",
+    }
+
+
+def test_is_active_root_branch_owner_uses_status_and_labels() -> None:
+    assert (
+        lifecycle.is_active_root_branch_owner(
+            status="hooked",
+            labels={"at:epic", "at:ready"},
+        )
+        is True
+    )
+    assert (
+        lifecycle.is_active_root_branch_owner(
+            status="blocked",
+            labels={"at:epic", "at:hooked"},
+        )
+        is True
+    )
+    assert (
+        lifecycle.is_active_root_branch_owner(
+            status="closed",
+            labels={"at:epic", "at:ready", "at:hooked"},
+        )
+        is False
+    )
+
+
 def test_is_changeset_ready_accepts_ready_label() -> None:
     labels = {"at:changeset", "cs:ready"}
     assert lifecycle.is_changeset_ready("open", labels) is True

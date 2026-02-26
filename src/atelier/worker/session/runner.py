@@ -8,6 +8,7 @@ from typing import Protocol
 
 from ... import beads as beads_runtime
 from ... import changeset_fields
+from ... import root_branch as root_branch_runtime
 from ...pr_strategy import PrStrategy
 from ..context import ChangesetSelectionContext, WorkerRunContext
 from ..models import StartupContractResult, WorkerRunSummary
@@ -45,6 +46,32 @@ def _claim_conflict_assignee(
     if allow_takeover_from and assignee == allow_takeover_from:
         return None
     return assignee
+
+
+def _format_root_branch_owner(issue: dict[str, object]) -> str:
+    issue_id = str(issue.get("id") or "unknown")
+    status = str(issue.get("status") or "unknown")
+    title = str(issue.get("title") or "")
+    return f"{issue_id} [{status}] {title}".strip()
+
+
+def _find_active_root_branch_conflicts(
+    *,
+    beads: BeadsService,
+    root_branch: str,
+    selected_epic: str,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[dict[str, object]]:
+    issues = beads.run_bd_json(["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root)
+    owners = [
+        issue for issue in issues if beads.extract_workspace_root_branch(issue) == root_branch
+    ]
+    blocking, _ = root_branch_runtime.partition_root_branch_conflicts(
+        owners,
+        owner_issue_id=selected_epic,
+    )
+    return blocking
 
 
 def _abort_startup_read_failure(
@@ -534,6 +561,7 @@ def run_worker_once(
             break
         finishstep = control.step("Resolve root branch", timings=timings, trace=trace)
         root_branch_value = infra.beads.extract_workspace_root_branch(epic_issue)
+        persist_prompted_root_branch = False
         if not root_branch_value:
             root_branch_value = lifecycle.extract_changeset_root_branch(epic_issue)
         suggested_root_branch = None
@@ -564,12 +592,70 @@ def run_worker_once(
                             epic_id=selected_epic,
                         )
                     )
-                infra.beads.update_workspace_root_branch(
-                    selected_epic,
-                    root_branch_value,
-                    beads_root=beads_root,
-                    cwd=repo_root,
+                persist_prompted_root_branch = True
+        if root_branch_value:
+            blocking_root_owners = _find_active_root_branch_conflicts(
+                beads=infra.beads,
+                root_branch=root_branch_value,
+                selected_epic=selected_epic,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            if blocking_root_owners:
+                finishstep(extra=f"blocked ({root_branch_value})")
+                control.say(
+                    "Root branch reuse blocked: "
+                    f"{root_branch_value!r} is already owned by an active epic."
                 )
+                for owner in blocking_root_owners:
+                    control.say(f"- {_format_root_branch_owner(owner)}")
+                if dry_run:
+                    control.dry_run_log("Would release the selected epic assignment and exit.")
+                    return finish(
+                        WorkerRunSummary(
+                            started=False,
+                            reason="root_branch_conflict",
+                            epic_id=selected_epic,
+                        )
+                    )
+                lifecycle.send_planner_notification(
+                    subject=f"NEEDS-DECISION: Root branch conflict during startup ({selected_epic})",
+                    body=(
+                        "Worker startup blocked root-branch reuse for an active epic.\n"
+                        f"Epic: {selected_epic}\n"
+                        f"Root branch: {root_branch_value}\n"
+                        "Owners:\n"
+                        + "\n".join(
+                            f"- {_format_root_branch_owner(owner)}"
+                            for owner in blocking_root_owners
+                        )
+                        + "\nAction: assign a unique root branch to this epic and rerun startup."
+                    ),
+                    agent_id=agent.agent_id,
+                    thread_id=selected_epic,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    dry_run=False,
+                )
+                lifecycle.release_epic_assignment(
+                    selected_epic,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                )
+                return finish(
+                    WorkerRunSummary(
+                        started=False,
+                        reason="root_branch_conflict",
+                        epic_id=selected_epic,
+                    )
+                )
+        if persist_prompted_root_branch and root_branch_value and not dry_run:
+            infra.beads.update_workspace_root_branch(
+                selected_epic,
+                root_branch_value,
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
         finishstep(extra=root_branch_value or "unset")
         finishstep = control.step("Set parent branch + hook", timings=timings, trace=trace)
         parent_branch_value = lifecycle.extract_workspace_parent_branch(epic_issue)
