@@ -419,6 +419,135 @@ def test_run_bd_command_missing_store_guidance_mentions_beads_dir(tmp_path: Path
             beads.run_bd_command(["list", "--json"], beads_root=beads_root, cwd=cwd)
 
 
+def test_run_bd_command_preflight_recovers_dolt_server_before_command(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    (beads_root / "dolt").mkdir(parents=True)
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "list", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="[]",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch(
+            "atelier.beads._probe_dolt_server_health",
+            side_effect=[(False, "connection refused"), (True, None)],
+        ) as probe_health,
+        patch(
+            "atelier.beads._restart_dolt_server_with_recovery",
+            return_value=(True, "recovered"),
+        ) as restart,
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        result = beads.run_bd_command(["list", "--json"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert calls == [["bd", "list", "--json"]]
+    assert probe_health.call_count == 2
+    assert restart.call_count == 1
+
+
+def test_run_bd_command_retries_after_dolt_server_recovery(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    (beads_root / "dolt").mkdir(parents=True)
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    calls: list[list[str]] = []
+    attempts = 0
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        nonlocal attempts
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "show", "at-1", "--json"]:
+            attempts += 1
+            if attempts == 1:
+                return exec_util.CommandResult(
+                    argv=request.argv,
+                    returncode=1,
+                    stdout="",
+                    stderr="dial tcp 127.0.0.1:3307: connect: connection refused",
+                )
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='[{"id":"at-1"}]',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads._probe_dolt_server_health", return_value=(True, None)),
+        patch(
+            "atelier.beads._restart_dolt_server_with_recovery",
+            return_value=(True, "recovered"),
+        ) as restart,
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        result = beads.run_bd_command(["show", "at-1", "--json"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert calls == [["bd", "show", "at-1", "--json"], ["bd", "show", "at-1", "--json"]]
+    assert restart.call_count == 1
+
+
+def test_run_bd_command_dolt_recovery_is_bounded_and_surfaces_failure(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    (beads_root / "dolt").mkdir(parents=True)
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "show", "at-1", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr="dial tcp 127.0.0.1:3307: connect: connection refused",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    def fake_die(message: str, code: int = 1) -> None:
+        del code
+        raise RuntimeError(message)
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads._probe_dolt_server_health", return_value=(True, None)),
+        patch(
+            "atelier.beads._restart_dolt_server_with_recovery",
+            side_effect=[(True, "first recovery"), (True, "second recovery")],
+        ) as restart,
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads._startup_state_diagnostics", return_value="startup-diag"),
+        patch("atelier.beads.die", side_effect=fake_die),
+    ):
+        with pytest.raises(RuntimeError, match="bounded Dolt server recovery"):
+            beads.run_bd_command(["show", "at-1", "--json"], beads_root=beads_root, cwd=cwd)
+
+    assert calls == [
+        ["bd", "show", "at-1", "--json"],
+        ["bd", "show", "at-1", "--json"],
+        ["bd", "show", "at-1", "--json"],
+    ]
+    assert restart.call_count == 2
+
+
 def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
     tmp_path: Path,
 ) -> None:
