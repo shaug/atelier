@@ -176,6 +176,7 @@ def _abort_startup_preparation_failure(
     dry_run: bool,
     stage: str,
     error: BaseException,
+    summary_reason: str = "changeset_startup_preparation_blocked",
 ) -> WorkerRunSummary:
     """Fail closed on startup preparation errors after selecting a changeset."""
     detail = str(error).strip() or repr(error)
@@ -186,7 +187,7 @@ def _abort_startup_preparation_failure(
         )
         return WorkerRunSummary(
             started=False,
-            reason="changeset_startup_preparation_blocked",
+            reason=summary_reason,
             epic_id=selected_epic,
             changeset_id=changeset_id,
         )
@@ -233,7 +234,7 @@ def _abort_startup_preparation_failure(
         pass
     return WorkerRunSummary(
         started=False,
-        reason="changeset_startup_preparation_blocked",
+        reason=summary_reason,
         epic_id=selected_epic,
         changeset_id=changeset_id,
     )
@@ -966,6 +967,11 @@ def run_worker_once(
             )
         except (RuntimeError, SystemExit) as exc:
             finishstep(extra="blocked")
+            summary_reason = "changeset_startup_preparation_blocked"
+            if isinstance(exc, RuntimeError) and str(exc).startswith(
+                "worker_template_load_failed:"
+            ):
+                summary_reason = "worker_template_unavailable"
             return finish(
                 _abort_startup_preparation_failure(
                     beads=infra.beads,
@@ -980,6 +986,7 @@ def run_worker_once(
                     dry_run=dry_run,
                     stage="prepare agent session",
                     error=exc,
+                    summary_reason=summary_reason,
                 )
             )
         if agent_prep is None:
