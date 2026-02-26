@@ -21,11 +21,15 @@ def issue_parent_id(issue: dict[str, object]) -> str | None:
     return boundary.parent_id
 
 
+def issue_type(issue: dict[str, object]) -> object:
+    return lifecycle.issue_payload_type(issue)
+
+
 def evaluate_epic_claimability(issue: dict[str, object]) -> lifecycle.EpicClaimEvaluation:
     return lifecycle.evaluate_epic_claimability(
         status=issue.get("status"),
         labels=issue_labels(issue),
-        issue_type=issue.get("type"),
+        issue_type=issue_type(issue),
         parent_id=issue_parent_id(issue),
     )
 

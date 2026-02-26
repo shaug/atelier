@@ -31,6 +31,27 @@ def test_filter_epics_uses_status_contract_for_unassigned_and_assigned() -> None
     assert [item["id"] for item in assigned] == ["at-3"]
 
 
+def test_filter_epics_accepts_issue_type_identity_without_labels() -> None:
+    issues = [
+        {
+            "id": "at-typed-epic",
+            "status": "open",
+            "issue_type": "epic",
+            "labels": [],
+            "assignee": None,
+        }
+    ]
+
+    ready = selection.filter_epics(
+        issues,
+        require_unassigned=True,
+        allow_hooked=False,
+        skip_draft=True,
+    )
+
+    assert [item["id"] for item in ready] == ["at-typed-epic"]
+
+
 def test_sort_by_created_at_orders_oldest_first() -> None:
     issues = [
         {"id": "at-2", "created_at": "2026-02-22T00:00:00+00:00"},

@@ -540,7 +540,7 @@ def _raw_show_issue(issue_id: str, *, cwd: Path, env: dict[str, str]) -> dict[st
 def _is_agent_issue(issue: dict[str, object]) -> bool:
     if "at:agent" in _issue_labels(issue):
         return True
-    issue_type = _clean_text(issue.get("type"))
+    issue_type = _clean_text(lifecycle.issue_payload_type(issue))
     if issue_type == "agent":
         return True
     description = issue.get("description")
@@ -2160,7 +2160,7 @@ def _evaluate_epic_claimability(issue: dict[str, object]) -> lifecycle.EpicClaim
     return lifecycle.evaluate_epic_claimability(
         status=issue.get("status"),
         labels=_issue_labels(issue),
-        issue_type=issue.get("type"),
+        issue_type=lifecycle.issue_payload_type(issue),
         parent_id=_issue_parent_id(issue),
     )
 

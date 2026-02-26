@@ -21,7 +21,6 @@ from .work_finalization_runtime import (
     changeset_waiting_on_review_or_signals,
     has_open_descendant_changesets,
     is_changeset_in_progress,
-    is_changeset_ready,
     is_changeset_recovery_candidate,
     resolve_epic_id_for_changeset,
 )
@@ -29,7 +28,6 @@ from .work_finalization_state import mark_changeset_merged
 from .work_runtime_common import (
     dry_run_log,
     filter_epics,
-    issue_labels,
 )
 
 ReviewFeedbackSelection = worker_review.ReviewFeedbackSelection
@@ -50,19 +48,6 @@ class _NextChangesetService(worker_startup.NextChangesetService):
             ["show", issue_id], beads_root=self._beads_root, cwd=self._repo_root
         )
         return issues[0] if issues else None
-
-    def ready_changesets(self, *, epic_id: str) -> list[dict[str, object]]:
-        return beads.run_bd_json(
-            ["ready", "--parent", epic_id],
-            beads_root=self._beads_root,
-            cwd=self._repo_root,
-        )
-
-    def issue_labels(self, issue: dict[str, object]) -> set[str]:
-        return issue_labels(issue)
-
-    def is_changeset_ready(self, issue: dict[str, object]) -> bool:
-        return is_changeset_ready(issue)
 
     def changeset_waiting_on_review_or_signals(
         self,

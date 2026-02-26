@@ -226,6 +226,29 @@ def test_next_changeset_service_resume_review_requires_handoff_signal() -> None:
     assert selected is None
 
 
+def test_next_changeset_service_accepts_issue_type_leaf_without_changeset_label() -> None:
+    issue_type_changeset = {
+        "id": "at-epic.1",
+        "status": "open",
+        "issue_type": "task",
+        "labels": [],
+        "parent": "at-epic",
+    }
+    service = FakeNextChangesetService(
+        issues_by_id={
+            "at-epic": {"id": "at-epic", "status": "open", "issue_type": "epic", "labels": []},
+            issue_type_changeset["id"]: issue_type_changeset,
+        },
+        ready_changesets=[],
+        descendants=[issue_type_changeset],
+    )
+
+    selected = startup.next_changeset_service(context=_context(), service=service)
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.1"
+
+
 def test_next_changeset_service_blocks_when_branch_lineage_is_broken() -> None:
     blocker = _changeset("at-epic.1", work_branch="feat/at-epic.1")
     downstream = _changeset(

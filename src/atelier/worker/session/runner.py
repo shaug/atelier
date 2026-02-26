@@ -63,7 +63,7 @@ def _classify_claim_failure(
     claimability = lifecycle.evaluate_epic_claimability(
         status=issue.get("status"),
         labels=lifecycle.normalized_labels(issue.get("labels")),
-        issue_type=issue.get("type"),
+        issue_type=lifecycle.issue_payload_type(issue),
         parent_id=parent_id,
     )
     if claimability.role.is_epic and not claimability.claimable:

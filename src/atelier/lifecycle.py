@@ -131,6 +131,22 @@ def normalized_labels(raw_labels: object) -> set[str]:
     return normalized
 
 
+def issue_payload_type(issue: dict[str, object]) -> object:
+    """Return canonical issue type payload with legacy fallback.
+
+    Args:
+        issue: Raw issue payload mapping.
+
+    Returns:
+        Issue type value from ``issue_type`` when available, otherwise legacy
+        ``type``.
+    """
+    issue_type = issue.get("issue_type")
+    if issue_type is not None:
+        return issue_type
+    return issue.get("type")
+
+
 def normalize_status_value(status: object) -> str | None:
     """Normalize a raw Beads status into lower-case text.
 

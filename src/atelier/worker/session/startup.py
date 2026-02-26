@@ -34,12 +34,6 @@ class NextChangesetService(Protocol):
 
     def show_issue(self, issue_id: str) -> dict[str, object] | None: ...
 
-    def ready_changesets(self, *, epic_id: str) -> list[dict[str, object]]: ...
-
-    def issue_labels(self, issue: dict[str, object]) -> set[str]: ...
-
-    def is_changeset_ready(self, issue: dict[str, object]) -> bool: ...
-
     def changeset_waiting_on_review_or_signals(
         self,
         issue: dict[str, object],
@@ -117,6 +111,21 @@ def _dependency_ids(issue: dict[str, object]) -> tuple[str, ...] | None:
     return boundary.dependency_ids
 
 
+def _work_parent_ids(issues: list[dict[str, object]]) -> set[str]:
+    known_ids = {issue_id for issue in issues if (issue_id := _issue_id(issue)) is not None}
+    parent_ids: set[str] = set()
+    for issue in issues:
+        if not lifecycle.is_work_issue(
+            labels=worker_selection.issue_labels(issue),
+            issue_type=worker_selection.issue_type(issue),
+        ):
+            continue
+        parent_id = worker_selection.issue_parent_id(issue)
+        if parent_id is not None and parent_id in known_ids:
+            parent_ids.add(parent_id)
+    return parent_ids
+
+
 def _dependencies_satisfied(
     *,
     issue: dict[str, object],
@@ -142,6 +151,22 @@ def _dependencies_satisfied(
             continue
         return False
     return True
+
+
+def _is_runnable_changeset(
+    issue: dict[str, object],
+    *,
+    has_work_children: bool,
+    dependencies_satisfied: bool,
+) -> bool:
+    return lifecycle.evaluate_runnable_leaf(
+        status=issue.get("status"),
+        labels=worker_selection.issue_labels(issue),
+        issue_type=worker_selection.issue_type(issue),
+        parent_id=worker_selection.issue_parent_id(issue),
+        has_work_children=has_work_children,
+        dependencies_satisfied=dependencies_satisfied,
+    ).runnable
 
 
 def next_changeset_service(
@@ -173,101 +198,94 @@ def next_changeset_service(
         claimability = worker_selection.evaluate_epic_claimability(issue)
         if not claimability.claimable:
             return None
+        explicit_descendants = service.list_descendant_changesets(
+            context.epic_id,
+            include_closed=True,
+        )
+        explicit_descendants_by_id = {
+            descendant_id: descendant
+            for descendant in explicit_descendants
+            if (descendant_id := _issue_id(descendant)) is not None
+        }
+        explicit_work_parent_ids = _work_parent_ids([issue, *explicit_descendants])
+        target_has_work_children = (
+            bool(explicit_descendants) or context.epic_id in explicit_work_parent_ids
+        )
+        target_dependencies_satisfied = _dependencies_satisfied(
+            issue=issue,
+            epic_changesets_by_id=explicit_descendants_by_id,
+            dependency_cache={},
+            context=context,
+            service=service,
+        )
+        target_runnable = _is_runnable_changeset(
+            issue,
+            has_work_children=target_has_work_children,
+            dependencies_satisfied=target_dependencies_satisfied,
+        )
+        target_recovery_candidate = service.is_changeset_recovery_candidate(
+            issue,
+            repo_slug=context.repo_slug,
+            branch_pr=context.branch_pr,
+            git_path=context.git_path,
+        )
         if (
             isinstance(issue_id, str)
             and issue_id == context.epic_id
             and claimability.role.is_changeset
             and not _is_terminal_explicit_issue(issue)
             and (
-                (
-                    service.is_changeset_ready(issue)
-                    and (not review_waiting(issue) or review_resume_allowed(issue))
-                )
-                or service.is_changeset_recovery_candidate(
-                    issue,
-                    repo_slug=context.repo_slug,
-                    branch_pr=context.branch_pr,
-                    git_path=context.git_path,
-                )
+                (target_runnable and (not review_waiting(issue) or review_resume_allowed(issue)))
+                or target_recovery_candidate
             )
         ):
-            descendants = service.list_descendant_changesets(
-                context.epic_id,
-                include_closed=True,
-            )
-            descendants_by_id = {
-                descendant_id: descendant
-                for descendant in descendants
-                if (descendant_id := _issue_id(descendant)) is not None
-            }
-            if not _dependencies_satisfied(
-                issue=issue,
-                epic_changesets_by_id=descendants_by_id,
-                dependency_cache={},
-                context=context,
-                service=service,
-            ):
-                return None
             if not service.has_open_descendant_changesets(context.epic_id):
                 return issue
-        if isinstance(issue_id, str) and issue_id == context.epic_id and claimability.role.is_epic:
-            descendants = service.list_descendant_changesets(
-                context.epic_id,
-                include_closed=True,
+        if (
+            isinstance(issue_id, str)
+            and issue_id == context.epic_id
+            and claimability.role.is_changeset
+            and not _is_terminal_explicit_issue(issue)
+            and not target_recovery_candidate
+            and (
+                not target_has_work_children
+                or "at:changeset" in worker_selection.issue_labels(issue)
             )
-            if not descendants:
+        ):
+            return None
+        if isinstance(issue_id, str) and issue_id == context.epic_id and claimability.role.is_epic:
+            if not explicit_descendants:
                 return issue
 
     descendants = service.list_descendant_changesets(context.epic_id, include_closed=False)
     descendants_by_id = {
         issue_id: issue for issue in descendants if (issue_id := _issue_id(issue)) is not None
     }
+    work_parent_ids = _work_parent_ids(descendants)
     changesets: list[dict[str, object]] = []
-    changeset_ids: set[str] = set()
-    for issue in service.ready_changesets(epic_id=context.epic_id):
-        issue_id = _issue_id(issue)
-        if issue_id is None or issue_id in changeset_ids:
-            continue
-        canonical_issue = descendants_by_id.get(issue_id)
-        if canonical_issue is None:
-            loaded_issue = service.show_issue(issue_id)
-            if loaded_issue is not None and _issue_id(loaded_issue) == issue_id:
-                canonical_issue = loaded_issue
-        if canonical_issue is None:
-            canonical_issue = issue
-        changesets.append(canonical_issue)
-        changeset_ids.add(issue_id)
     dependency_cache: dict[str, dict[str, object] | None] = {}
     for issue in descendants:
         issue_id = _issue_id(issue)
-        if issue_id is None or issue_id in changeset_ids:
+        if issue_id is None:
             continue
-        if not service.is_changeset_ready(issue):
-            continue
-        if not _dependencies_satisfied(
-            issue=issue,
-            epic_changesets_by_id=descendants_by_id,
-            dependency_cache=dependency_cache,
-            context=context,
-            service=service,
-        ):
-            continue
-        changesets.append(issue)
-        changeset_ids.add(issue_id)
-    if not changesets:
-        return None
-    actionable = [
-        issue
-        for issue in changesets
-        if service.is_changeset_ready(issue)
-        and _dependencies_satisfied(
+        dependencies_satisfied = _dependencies_satisfied(
             issue=issue,
             epic_changesets_by_id=descendants_by_id,
             dependency_cache=dependency_cache,
             context=context,
             service=service,
         )
-        and (not review_waiting(issue) or review_resume_allowed(issue))
+        if not _is_runnable_changeset(
+            issue,
+            has_work_children=issue_id in work_parent_ids,
+            dependencies_satisfied=dependencies_satisfied,
+        ):
+            continue
+        changesets.append(issue)
+    if not changesets:
+        return None
+    actionable = [
+        issue for issue in changesets if not review_waiting(issue) or review_resume_allowed(issue)
     ]
     prioritized = sorted(
         actionable,
