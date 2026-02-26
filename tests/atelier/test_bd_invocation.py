@@ -59,6 +59,45 @@ def test_ensure_supported_bd_version_accepts_minimum(monkeypatch: pytest.MonkeyP
     bd_invocation.ensure_supported_bd_version(env={})
 
 
+def test_detect_bd_version_returns_semver(monkeypatch: pytest.MonkeyPatch) -> None:
+    bd_invocation._read_bd_version_for_executable.cache_clear()
+    monkeypatch.setattr(
+        bd_invocation.shutil, "which", lambda *_args, **_kwargs: "/usr/local/bin/bd"
+    )
+    monkeypatch.setattr(
+        bd_invocation.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["bd", "--version"],
+            returncode=0,
+            stdout="bd version 0.56.1",
+            stderr="",
+        ),
+    )
+
+    assert bd_invocation.detect_bd_version(env={}) == (0, 56, 1)
+
+
+def test_detect_bd_version_rejects_unparsable(monkeypatch: pytest.MonkeyPatch) -> None:
+    bd_invocation._read_bd_version_for_executable.cache_clear()
+    monkeypatch.setattr(
+        bd_invocation.shutil, "which", lambda *_args, **_kwargs: "/usr/local/bin/bd"
+    )
+    monkeypatch.setattr(
+        bd_invocation.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["bd", "--version"],
+            returncode=0,
+            stdout="bd version unknown",
+            stderr="",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="unable to determine version"):
+        bd_invocation.detect_bd_version(env={})
+
+
 def test_ensure_supported_bd_version_rejects_older(monkeypatch: pytest.MonkeyPatch) -> None:
     bd_invocation._read_bd_version_for_executable.cache_clear()
     monkeypatch.setattr(
