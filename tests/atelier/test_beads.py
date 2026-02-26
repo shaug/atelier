@@ -927,10 +927,19 @@ def test_ensure_atelier_store_skips_existing_root() -> None:
 
 
 def test_prime_addendum_returns_output() -> None:
-    with patch(
-        "atelier.beads.subprocess.run",
-        return_value=CompletedProcess(
-            args=["bd", "prime"], returncode=0, stdout="# Addendum\n", stderr=""
+    with (
+        patch(
+            "atelier.beads.subprocess.run",
+            return_value=CompletedProcess(
+                args=["bd", "prime"], returncode=0, stdout="# Addendum\n", stderr=""
+            ),
+        ),
+        patch(
+            "atelier.beads._prime_guidance_capabilities",
+            return_value=beads._PrimeGuidanceCapabilities(
+                supports_export=True,
+                supports_dolt=True,
+            ),
         ),
     ):
         value = beads.prime_addendum(beads_root=Path("/beads"), cwd=Path("/repo"))
@@ -948,7 +957,7 @@ def test_prime_addendum_returns_none_on_error() -> None:
     assert value is None
 
 
-def test_prime_addendum_rewrites_deprecated_sync_guidance() -> None:
+def test_prime_addendum_rewrites_deprecated_sync_guidance_when_export_supported() -> None:
     stdout = (
         "## Beads Workflow Context\n\n"
         "```\n"
@@ -956,9 +965,20 @@ def test_prime_addendum_rewrites_deprecated_sync_guidance() -> None:
         "```\n"
         "- `bd sync` exports JSONL.\n"
     )
-    with patch(
-        "atelier.beads.subprocess.run",
-        return_value=CompletedProcess(args=["bd", "prime"], returncode=0, stdout=stdout, stderr=""),
+    with (
+        patch(
+            "atelier.beads.subprocess.run",
+            return_value=CompletedProcess(
+                args=["bd", "prime"], returncode=0, stdout=stdout, stderr=""
+            ),
+        ),
+        patch(
+            "atelier.beads._prime_guidance_capabilities",
+            return_value=beads._PrimeGuidanceCapabilities(
+                supports_export=True,
+                supports_dolt=True,
+            ),
+        ),
     ):
         value = beads.prime_addendum(beads_root=Path("/beads"), cwd=Path("/repo"))
 
@@ -966,6 +986,39 @@ def test_prime_addendum_rewrites_deprecated_sync_guidance() -> None:
     assert "bd sync --flush-only" not in value
     assert "`bd sync`" not in value
     assert value.count('bd export -o "${BEADS_DIR:-.beads}/issues.jsonl"') == 2
+
+
+def test_prime_addendum_rewrites_deprecated_sync_guidance_when_export_unsupported() -> None:
+    stdout = (
+        "## Beads Workflow Context\n\n"
+        "```\n"
+        "[ ] bd sync --flush-only\n"
+        "```\n"
+        "- `bd sync` exports JSONL.\n"
+    )
+    with (
+        patch(
+            "atelier.beads.subprocess.run",
+            return_value=CompletedProcess(
+                args=["bd", "prime"], returncode=0, stdout=stdout, stderr=""
+            ),
+        ),
+        patch(
+            "atelier.beads._prime_guidance_capabilities",
+            return_value=beads._PrimeGuidanceCapabilities(
+                supports_export=False,
+                supports_dolt=True,
+            ),
+        ),
+    ):
+        value = beads.prime_addendum(beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert value is not None
+    assert "bd sync --flush-only" not in value
+    assert "- `bd sync` exports JSONL." not in value
+    assert value.count("bd dolt commit") == 3
+    assert "Deprecated `bd sync` paths are no-op in this bd build." in value
+    assert "`bd dolt push` / `bd dolt pull`" in value
 
 
 def test_ensure_issue_prefix_noop_when_already_expected() -> None:

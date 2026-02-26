@@ -37,6 +37,7 @@ ATELIER_ISSUE_PREFIX = "at"
 _AGENT_ISSUE_TYPE = "agent"
 _FALLBACK_ISSUE_TYPE = "task"
 _ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
+_BD_COMMAND_CACHE: dict[Path, set[str]] = {}
 _STORE_REPAIR_ATTEMPTED: set[Path] = set()
 _EMBEDDED_PANIC_REPAIR_ATTEMPTED: set[Path] = set()
 _DOLT_RUNTIME_NORMALIZED: set[Path] = set()
@@ -61,6 +62,7 @@ _DOLT_SERVER_HOST_DEFAULT = "127.0.0.1"
 _DOLT_SERVER_PORT_DEFAULT = 3307
 _DOLT_SERVER_USER_DEFAULT = "root"
 _DOLT_DATABASE_DEFAULT = "beads"
+_BD_HELP_COMMAND_PATTERN = re.compile(r"^\s{2,}([a-z][a-z0-9-]*)\s{2,}")
 
 
 class _IssueTypeModel(BaseModel):
@@ -99,6 +101,12 @@ class BeadsIssueRecord:
 
     raw: dict[str, object]
     issue: BeadsIssueBoundary
+
+
+@dataclass(frozen=True)
+class _PrimeGuidanceCapabilities:
+    supports_export: bool
+    supports_dolt: bool
 
 
 @dataclass(frozen=True)
@@ -1178,11 +1186,77 @@ def run_bd_issues(
 
 _DEPRECATED_SYNC_COMMAND_PATTERN = re.compile(r"\bbd sync(?: --flush-only)?\b")
 _CANONICAL_SYNC_EXPORT_COMMAND = 'bd export -o "${BEADS_DIR:-.beads}/issues.jsonl"'
+_CANONICAL_DOLT_PERSIST_COMMAND = "bd dolt commit"
+_DEPRECATED_SYNC_NOOP_GUIDANCE = (
+    "- Deprecated `bd sync` paths are no-op in this bd build. Use `bd dolt commit` "
+    "to persist local Dolt changes and `bd dolt push` / `bd dolt pull` for "
+    "remote sync."
+)
 
 
-def _normalize_prime_addendum_markdown(markdown: str) -> str:
-    """Rewrite deprecated sync guidance to current export guidance."""
-    return _DEPRECATED_SYNC_COMMAND_PATTERN.sub(_CANONICAL_SYNC_EXPORT_COMMAND, markdown)
+def _extract_bd_help_commands(raw: str) -> set[str]:
+    commands: set[str] = set()
+    for line in raw.splitlines():
+        match = _BD_HELP_COMMAND_PATTERN.match(line)
+        if match is None:
+            continue
+        commands.add(match.group(1))
+    return commands
+
+
+def _available_bd_commands(*, beads_root: Path, cwd: Path) -> set[str]:
+    cached = _BD_COMMAND_CACHE.get(beads_root)
+    if cached is not None:
+        return cached
+    env = beads_env(beads_root)
+    result = exec.run_with_runner(
+        exec.CommandRequest(
+            argv=("bd", "--help"),
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+    )
+    if result is None or result.returncode != 0:
+        commands: set[str] = set()
+    else:
+        commands = _extract_bd_help_commands(f"{result.stdout or ''}\n{result.stderr or ''}")
+    _BD_COMMAND_CACHE[beads_root] = commands
+    return commands
+
+
+def _prime_guidance_capabilities(*, beads_root: Path, cwd: Path) -> _PrimeGuidanceCapabilities:
+    commands = _available_bd_commands(beads_root=beads_root, cwd=cwd)
+    return _PrimeGuidanceCapabilities(
+        supports_export="export" in commands,
+        supports_dolt="dolt" in commands,
+    )
+
+
+def _append_sync_noop_guidance(markdown: str) -> str:
+    if _DEPRECATED_SYNC_NOOP_GUIDANCE in markdown:
+        return markdown
+    if not markdown.strip():
+        return _DEPRECATED_SYNC_NOOP_GUIDANCE
+    return f"{markdown.rstrip()}\n\n{_DEPRECATED_SYNC_NOOP_GUIDANCE}"
+
+
+def _normalize_prime_addendum_markdown(
+    markdown: str, *, capabilities: _PrimeGuidanceCapabilities
+) -> str:
+    """Rewrite deprecated sync guidance using supported command capabilities."""
+    if capabilities.supports_export:
+        replacement = _CANONICAL_SYNC_EXPORT_COMMAND
+    elif capabilities.supports_dolt:
+        replacement = _CANONICAL_DOLT_PERSIST_COMMAND
+    else:
+        return markdown
+    normalized = _DEPRECATED_SYNC_COMMAND_PATTERN.sub(replacement, markdown)
+    if capabilities.supports_export or normalized == markdown:
+        return normalized
+    return _append_sync_noop_guidance(normalized)
 
 
 def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
@@ -1203,7 +1277,11 @@ def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
         return None
     if result.returncode != 0:
         return None
-    output = _normalize_prime_addendum_markdown((result.stdout or "").strip())
+    capabilities = _prime_guidance_capabilities(beads_root=beads_root, cwd=cwd)
+    output = _normalize_prime_addendum_markdown(
+        (result.stdout or "").strip(),
+        capabilities=capabilities,
+    )
     return output or None
 
 
