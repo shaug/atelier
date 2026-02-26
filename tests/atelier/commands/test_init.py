@@ -74,7 +74,9 @@ class TestInitProject:
             try:
                 with (
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
-                    patch("atelier.commands.init.confirm", return_value=False),
+                    patch(
+                        "atelier.services.project.initialize_project.confirm", return_value=False
+                    ),
                     patch(
                         "atelier.config.agents.available_agent_names",
                         return_value=("codex",),
@@ -109,21 +111,22 @@ class TestInitProject:
                     patch("builtins.input", lambda _: next(responses)),
                     patch("atelier.config.shutil.which", return_value="/usr/bin/cursor"),
                     patch(
-                        "atelier.commands.init.beads.run_bd_command",
+                        "atelier.services.project.initialize_project.beads.run_bd_command",
                         return_value=CompletedProcess(
                             args=["bd"], returncode=0, stdout="", stderr=""
                         ),
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_types",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_store",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project."
+                        "beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -190,21 +193,24 @@ class TestInitProject:
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
-                    patch("atelier.commands.init.confirm", return_value=False),
                     patch(
-                        "atelier.commands.init.beads.run_bd_command",
+                        "atelier.services.project.initialize_project.confirm", return_value=False
+                    ),
+                    patch(
+                        "atelier.services.project.initialize_project.beads.run_bd_command",
                         side_effect=fake_bd,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_types",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                         side_effect=fake_ensure_types,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_store",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                         side_effect=fake_ensure_store,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project."
+                        "beads.ensure_atelier_issue_prefix",
                         side_effect=fake_ensure_prefix,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -234,25 +240,27 @@ class TestInitProject:
                 with (
                     patch("builtins.input", lambda _: next(responses)),
                     patch(
-                        "atelier.commands.init.beads.run_bd_command",
+                        "atelier.services.project.initialize_project.beads.run_bd_command",
                         return_value=CompletedProcess(
                             args=["bd"], returncode=0, stdout="", stderr=""
                         ),
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_types",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_store",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project."
+                        "beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.external_registry.resolve_planner_provider",
+                        "atelier.services.project.initialize_project."
+                        "external_registry.resolve_planner_provider",
                         return_value=external_registry.PlannerProviderResolution(
                             selected_provider="linear",
                             available_providers=("github", "linear"),
@@ -295,34 +303,38 @@ class TestInitProject:
                 )
                 with (
                     patch(
-                        "atelier.commands.init.beads.run_bd_command",
+                        "atelier.services.project.initialize_project.beads.run_bd_command",
                         return_value=CompletedProcess(
                             args=["bd"], returncode=0, stdout="", stderr=""
                         ),
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_types",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_store",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project."
+                        "beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.external_registry.resolve_planner_provider",
+                        "atelier.services.project.initialize_project."
+                        "external_registry.resolve_planner_provider",
                         return_value=external_registry.PlannerProviderResolution(
                             selected_provider="github",
                             available_providers=("github", "linear"),
                             github_repo="acme/widgets",
                         ),
                     ),
-                    patch("atelier.commands.init.select", return_value="github"),
                     patch(
-                        "atelier.commands.init.confirm",
+                        "atelier.services.project.initialize_project.select", return_value="github"
+                    ),
+                    patch(
+                        "atelier.services.project.initialize_project.confirm",
                         side_effect=[True, False],
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -387,33 +399,39 @@ class TestInitProject:
 
                 with (
                     patch(
-                        "atelier.commands.init.beads.run_bd_command",
+                        "atelier.services.project.initialize_project.beads.run_bd_command",
                         return_value=CompletedProcess(
                             args=["bd"], returncode=0, stdout="", stderr=""
                         ),
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_types",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_store",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project."
+                        "beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.external_registry.resolve_planner_provider",
+                        "atelier.services.project.initialize_project."
+                        "external_registry.resolve_planner_provider",
                         return_value=external_registry.PlannerProviderResolution(
                             selected_provider="github",
                             available_providers=("github", "linear"),
                             github_repo="acme/widgets",
                         ),
                     ),
-                    patch("atelier.commands.init.select", return_value="none") as choose,
-                    patch("atelier.commands.init.confirm", return_value=False),
+                    patch(
+                        "atelier.services.project.initialize_project.select", return_value="none"
+                    ) as choose,
+                    patch(
+                        "atelier.services.project.initialize_project.confirm", return_value=False
+                    ),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -446,21 +464,22 @@ class TestInitProject:
                     patch("atelier.config.shutil.which", return_value="/usr/bin/cursor"),
                     patch.dict(os.environ, {"EDITOR": "nano -w"}),
                     patch(
-                        "atelier.commands.init.beads.run_bd_command",
+                        "atelier.services.project.initialize_project.beads.run_bd_command",
                         return_value=CompletedProcess(
                             args=["bd"], returncode=0, stdout="", stderr=""
                         ),
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_types",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_store",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project."
+                        "beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -494,21 +513,22 @@ class TestInitProject:
                 with (
                     patch("builtins.input", lambda _: next(responses)),
                     patch(
-                        "atelier.commands.init.beads.run_bd_command",
+                        "atelier.services.project.initialize_project.beads.run_bd_command",
                         return_value=CompletedProcess(
                             args=["bd"], returncode=0, stdout="", stderr=""
                         ),
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_types",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_store",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project."
+                        "beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -564,28 +584,34 @@ class TestInitProject:
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
                     patch("atelier.git.git_repo_root", return_value=root),
                     patch("atelier.git.git_origin_url", return_value=RAW_ORIGIN),
-                    patch("atelier.commands.init.confirm", return_value=False),
-                    patch("atelier.commands.init.select", return_value="none") as choose,
                     patch(
-                        "atelier.commands.init.external_registry.resolve_planner_provider",
+                        "atelier.services.project.initialize_project.confirm", return_value=False
+                    ),
+                    patch(
+                        "atelier.services.project.initialize_project.select", return_value="none"
+                    ) as choose,
+                    patch(
+                        "atelier.services.project.initialize_project."
+                        "external_registry.resolve_planner_provider",
                         side_effect=fake_resolve_provider,
                     ),
                     patch(
-                        "atelier.commands.init.beads.run_bd_command",
+                        "atelier.services.project.initialize_project.beads.run_bd_command",
                         return_value=CompletedProcess(
                             args=["bd"], returncode=0, stdout="", stderr=""
                         ),
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_types",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_store",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project."
+                        "beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch("sys.stdin.isatty", return_value=True),
@@ -616,21 +642,22 @@ class TestInitProject:
                     patch("atelier.config.shutil.which", return_value=None),
                     patch.dict(os.environ, {"EDITOR": "nano -w"}),
                     patch(
-                        "atelier.commands.init.beads.run_bd_command",
+                        "atelier.services.project.initialize_project.beads.run_bd_command",
                         return_value=CompletedProcess(
                             args=["bd"], returncode=0, stdout="", stderr=""
                         ),
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_types",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_store",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project."
+                        "beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -700,23 +727,26 @@ class TestInitProject:
                         "builtins.input",
                         side_effect=AssertionError("prompt should not be called"),
                     ),
-                    patch("atelier.commands.init.confirm", return_value=False),
                     patch(
-                        "atelier.commands.init.beads.run_bd_command",
+                        "atelier.services.project.initialize_project.confirm", return_value=False
+                    ),
+                    patch(
+                        "atelier.services.project.initialize_project.beads.run_bd_command",
                         return_value=CompletedProcess(
                             args=["bd"], returncode=0, stdout="", stderr=""
                         ),
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_types",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_store",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project."
+                        "beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -779,23 +809,26 @@ class TestInitProject:
 
                 with (
                     patch("builtins.input", lambda _: next(responses)),
-                    patch("atelier.commands.init.confirm", return_value=False),
                     patch(
-                        "atelier.commands.init.beads.run_bd_command",
+                        "atelier.services.project.initialize_project.confirm", return_value=False
+                    ),
+                    patch(
+                        "atelier.services.project.initialize_project.beads.run_bd_command",
                         return_value=CompletedProcess(
                             args=["bd"], returncode=0, stdout="", stderr=""
                         ),
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_types",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_types",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_store",
+                        "atelier.services.project.initialize_project.beads.ensure_atelier_store",
                         return_value=False,
                     ),
                     patch(
-                        "atelier.commands.init.beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project."
+                        "beads.ensure_atelier_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),

@@ -29,8 +29,9 @@ Important Atelier differences (Python-first):
   boundaries.
 - Pure in-process orchestration can use dataclasses/typed models without
   macro-style DSL behavior.
-- Expected failures return deterministic `ServiceFailure` values instead of
-  relying on raised exceptions for control flow.
+- Expected failures raise `ServiceFailure` (extends Exception); services extend
+  `BaseService` which catches it and invokes a configurable handler (default
+  re-raises; callers decide interface-specific behavior).
 
 ## Why now
 
@@ -117,8 +118,9 @@ Keep composition explicit and bounded:
   tracking issue/changeset.
 - Parent services may call child services only through typed request/result
   contracts.
-- Child `ServiceFailure` values must propagate unchanged unless intentionally
-  remapped at one boundary layer with rationale in code comments/docstring.
+- Child services that raise `ServiceFailure` propagate unchanged unless
+  intentionally remapped at one boundary layer with rationale in code
+  comments/docstring.
 - No hidden side effects: all external writes/commands must run through explicit
   adapter dependencies.
 - Service modules must avoid mutable global state and implicit singleton caches.
@@ -198,51 +200,93 @@ Near-term candidate services:
 
 ## Result and error contracts
 
-Use explicit tagged outcomes for side-effect-heavy services.
+Services return typed outcomes on success and raise `ServiceFailure` on expected
+domain/policy/runtime failures. Callers catch `ServiceFailure` and handle per
+their interface (e.g., CLI dies, web returns 4xx/5xx, native app shows dialog).
 
 Validation rule:
 
 - Every service entrypoint uses typed `Request`/`Context` models as first-tier
   validation before business orchestration starts.
-- Validation failures must return `validation_failed` deterministically with a
-  stable message and optional recovery hint.
+- Validation failures must raise `ServiceFailure("validation_failed", ...)` with
+  a stable message and optional recovery hint.
 - Use Pydantic models for untrusted/external boundaries, then operate on typed
   dataclasses/validated models internally.
 - Add explicit constraint checks when types alone cannot express requirements
-  (for example numeric bounds, path safety, or string format invariants); return
-  `validation_failed` for these cases.
+  (for example numeric bounds, path safety, or string format invariants); raise
+  `ServiceFailure("validation_failed", ...)` for these cases.
 
 Failure handling rule:
 
-- Return `ServiceFailure` for expected domain/policy/runtime failures that
+- Raise `ServiceFailure` for expected domain/policy/runtime failures that
   callers can handle deterministically.
-- Raise exceptions for programmer bugs or invariant violations that indicate a
-  defect requiring code changes.
+- At service boundaries, catch non-`ServiceFailure` dependency exceptions and
+  map them to stable failure categories:
+  - map `OSError` to `IoFailedError`
+  - map command/process exits to `ExternalCommandFailedError`
+  - map other unexpected dependency failures to `UnexpectedStateError`
+  - use `raise ... from exc` to preserve causal tracebacks
+- Raise normal exceptions for programmer bugs or invariant violations that
+  indicate a defect requiring code changes.
 
 ```python
-from dataclasses import dataclass
+from abc import ABC, abstractmethod
 from typing import Generic, Literal, TypeVar
 
+R = TypeVar("R")
 T = TypeVar("T")
 
-@dataclass(frozen=True)
-class ServiceSuccess(Generic[T]):
-    outcome: T
+ServiceFailureCode = Literal[
+    "validation_failed",
+    "dependency_missing",
+    "policy_blocked",
+    "external_command_failed",
+    "io_failed",
+    "unexpected_state",
+]
 
-@dataclass(frozen=True)
-class ServiceFailure:
-    code: Literal[
-        "validation_failed",
-        "dependency_missing",
-        "policy_blocked",
-        "external_command_failed",
-        "io_failed",
-        "unexpected_state",
-    ]
-    message: str
-    recovery_hint: str | None = None
 
-ServiceResult = ServiceSuccess[T] | ServiceFailure
+class ServiceFailure(Exception):
+    """Expected service failure. Raised by services; callers catch and handle."""
+
+    def __init__(
+        self,
+        code: ServiceFailureCode,
+        message: str,
+        *,
+        recovery_hint: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.recovery_hint = recovery_hint
+
+
+# Convenience subclasses (omit code; use ``raise ValidationFailedError("msg")``)
+class ValidationFailedError(ServiceFailure): ...
+class DependencyMissingError(ServiceFailure): ...
+class PolicyBlockedError(ServiceFailure): ...
+class ExternalCommandFailedError(ServiceFailure): ...
+class IoFailedError(ServiceFailure): ...
+class UnexpectedStateError(ServiceFailure): ...
+
+
+class BaseService(ABC, Generic[R, T]):
+    """Abstract base. Subclasses implement _run(request) -> T."""
+
+    def __call__(self, request: R) -> T:
+        try:
+            return self._run(request)
+        except ServiceFailure as e:
+            return self._handle_failure(e)
+
+    @abstractmethod
+    def _run(self, request: R) -> T:
+        """Execute service logic. Raise ServiceFailure on expected errors."""
+        ...
+
+    def _handle_failure(self, error: ServiceFailure) -> T:
+        """Handle ServiceFailure. Default re-raises; override for recovery."""
+        raise
 ```
 
 ### Contract example: init/config orchestration
@@ -259,28 +303,24 @@ ServiceResult = ServiceSuccess[T] | ServiceFailure
   - `dependency_missing` for unavailable agent tooling
   - `io_failed` for config write / store setup errors
 
-### Golden path example (controller to service result handling)
+### Golden path example (controller to service)
 
 ```python
 def run_init_controller(argv: list[str], deps: InitControllerDeps) -> int:
     request = parse_init_request(argv)
-    service_request = InitializeProjectRequest(
-        project_root=request.project_root,
-        planner_mode=request.planner_mode,
-        editor=request.editor,
-    )
+    service_request = InitializeProjectRequest(...)
 
-    result = deps.initialize_project_service.run(service_request)
-    if isinstance(result, ServiceSuccess):
-        render_init_success(result.outcome)
+    try:
+        outcome = deps.initialize_project_service.run(service_request)
+        render_init_success(outcome)
         return 0
-
-    render_init_failure(code=result.code, message=result.message)
-    return 2
+    except ServiceFailure as e:
+        hint = f"\nHint: {e.recovery_hint}" if e.recovery_hint else ""
+        die(f"init failed ({e.code}): {e}{hint}")
 ```
 
-This keeps input parsing in the controller, orchestration in one service, and
-exit behavior as a deterministic mapping from `ServiceResult`.
+The caller catches `ServiceFailure` and handles per its interface. CLI calls
+`die()`; web would return 4xx/5xx; tests use `pytest.raises(ServiceFailure)`.
 
 ### Contract example: worker finalization orchestration
 
@@ -351,8 +391,8 @@ Deliverables:
 Service test levels rubric:
 
 - Service unit tests:
-  - inject fakes for adapters/ports and assert orchestration sequence plus
-    `ServiceSuccess`/`ServiceFailure` mapping.
+  - inject fakes for adapters/ports and assert orchestration sequence; use
+    `pytest.raises(ServiceFailure)` for failure paths.
 - Request/response contract tests:
   - validate typed request parsing, constraint failures, and stable error codes.
 - Command-level integration tests:
