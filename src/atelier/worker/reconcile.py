@@ -7,8 +7,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import beads, config, prs
+from .. import beads, changesets, config, git, lifecycle, prs
 from .models import FinalizeResult, ReconcileResult
+
+_TERMINAL_CHANGESET_STATUSES = {"closed", "done"}
 
 
 @dataclass(frozen=True)
@@ -19,6 +21,111 @@ class ReconcileCandidate:
     epic_id: str
     integrated_sha: str | None
     dependency_ids: tuple[str, ...]
+
+
+def _description_fields(issue: dict[str, object]) -> dict[str, str]:
+    description = issue.get("description")
+    text = description if isinstance(description, str) else ""
+    return beads.parse_description_fields(text)
+
+
+def _changeset_work_branch(issue: dict[str, object]) -> str | None:
+    value = _description_fields(issue).get("changeset.work_branch")
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized or normalized.lower() == "null":
+        return None
+    return normalized
+
+
+def _stored_review_state(issue: dict[str, object]) -> str | None:
+    return lifecycle.normalize_review_state(_description_fields(issue).get("pr_state"))
+
+
+def _live_review_state(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+) -> str | None:
+    if not repo_slug:
+        return None
+    work_branch = _changeset_work_branch(issue)
+    if not work_branch:
+        return None
+    pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path)
+    pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+    review_requested = prs.has_review_requests(pr_payload)
+    return prs.lifecycle_state(pr_payload, pushed=pushed, review_requested=review_requested)
+
+
+def _review_drift_state(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+) -> str | None:
+    status = str(issue.get("status") or "").strip().lower()
+    if status not in _TERMINAL_CHANGESET_STATUSES:
+        return None
+    stored_state = _stored_review_state(issue)
+    if stored_state in lifecycle.ACTIVE_REVIEW_STATES:
+        return stored_state
+    live_state = _live_review_state(
+        issue,
+        repo_slug=repo_slug,
+        repo_root=repo_root,
+        git_path=git_path,
+    )
+    if live_state in lifecycle.ACTIVE_REVIEW_STATES:
+        return live_state
+    return None
+
+
+def _reopen_changeset_for_review(
+    *,
+    changeset_id: str,
+    review_state: str,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+    beads.run_bd_command(
+        [
+            "update",
+            changeset_id,
+            "--status",
+            "in_progress",
+            "--remove-label",
+            "cs:ready",
+            "--remove-label",
+            "cs:planned",
+            "--remove-label",
+            "cs:in_progress",
+            "--remove-label",
+            "cs:blocked",
+            "--remove-label",
+            "cs:merged",
+            "--remove-label",
+            "cs:abandoned",
+            "--append-notes",
+            (
+                "reconcile_reopened_for_review: "
+                f"{timestamp} state={review_state} source=closed_changeset_pr_drift"
+            ),
+        ],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    beads.update_changeset_review(
+        changeset_id,
+        changesets.ReviewMetadata(pr_state=review_state),
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
 
 
 def list_reconcile_epic_candidates(
@@ -33,8 +140,13 @@ def list_reconcile_epic_candidates(
     epic_root_integrated_into_parent: Callable[..., bool],
 ) -> dict[str, list[str]]:
     """Return merged changeset reconciliation candidates grouped by epic."""
-    issues = beads.run_bd_json(
+    merged_issues = beads.run_bd_json(
         ["list", "--label", "at:changeset", "--label", "cs:merged", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    all_changesets = beads.run_bd_json(
+        ["list", "--label", "at:changeset", "--all"],
         beads_root=beads_root,
         cwd=repo_root,
     )
@@ -51,9 +163,31 @@ def list_reconcile_epic_candidates(
         return epic_cache[epic_id]
 
     candidates: dict[str, list[str]] = {}
-    for issue in issues:
+    drift_ids: set[str] = set()
+    for issue in all_changesets:
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        changeset_id = issue_id.strip()
+        drift_state = _review_drift_state(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+        )
+        if drift_state is None:
+            continue
+        epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
+        if not epic_id:
+            continue
+        candidates.setdefault(epic_id, []).append(changeset_id)
+        drift_ids.add(changeset_id)
+    for issue in merged_issues:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        changeset_id = issue_id.strip()
+        if changeset_id in drift_ids:
             continue
         status = str(issue.get("status") or "").strip().lower()
         if status not in {"", "blocked", "closed"}:
@@ -79,7 +213,7 @@ def list_reconcile_epic_candidates(
                 )
             ):
                 continue
-        candidates.setdefault(epic_id, []).append(issue_id.strip())
+        candidates.setdefault(epic_id, []).append(changeset_id)
     ordered: dict[str, list[str]] = {}
     for epic_id in sorted(candidates):
         ordered[epic_id] = sorted(candidates[epic_id])
@@ -129,7 +263,7 @@ def reconcile_blocked_merged_changesets(
     finalize_epic_if_complete: Callable[..., FinalizeResult],
 ) -> ReconcileResult:
     """Reconcile merged changesets, honoring dependency order."""
-    issues = beads.run_bd_json(
+    merged_issues = beads.run_bd_json(
         [
             "list",
             "--label",
@@ -141,6 +275,11 @@ def reconcile_blocked_merged_changesets(
         beads_root=beads_root,
         cwd=repo_root,
     )
+    all_changesets = beads.run_bd_json(
+        ["list", "--label", "at:changeset", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
     scanned = 0
     actionable = 0
     reconciled = 0
@@ -149,12 +288,62 @@ def reconcile_blocked_merged_changesets(
     repo_slug = prs.github_repo_slug(
         project_config.project.origin or project_config.project.repo_url
     )
-    candidates: dict[str, ReconcileCandidate] = {}
-    for issue in issues:
+    reopened_drift_ids: set[str] = set()
+    for issue in all_changesets:
         changeset_id = issue.get("id")
         if not isinstance(changeset_id, str) or not changeset_id.strip():
             continue
         changeset_id = changeset_id.strip()
+        if changeset_filter is not None and changeset_id not in changeset_filter:
+            continue
+        status = str(issue.get("status") or "").strip().lower()
+        if status not in _TERMINAL_CHANGESET_STATUSES:
+            continue
+        drift_state = _review_drift_state(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+        )
+        if drift_state is None:
+            continue
+        epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
+        if epic_filter and epic_id != epic_filter:
+            continue
+        scanned += 1
+        if not epic_id:
+            failed += 1
+            if log:
+                log(f"reconcile error: {changeset_id} (unable to resolve epic)")
+            continue
+        actionable += 1
+        reopened_drift_ids.add(changeset_id)
+        if dry_run:
+            reconciled += 1
+            if log:
+                log(
+                    "reconcile dry-run: "
+                    f"{changeset_id} -> epic={epic_id} reopen(state={drift_state})"
+                )
+            continue
+        _reopen_changeset_for_review(
+            changeset_id=changeset_id,
+            review_state=drift_state,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        reconciled += 1
+        if log:
+            log(f"reconcile reopened: {changeset_id} -> epic={epic_id} (state={drift_state})")
+
+    candidates: dict[str, ReconcileCandidate] = {}
+    for issue in merged_issues:
+        changeset_id = issue.get("id")
+        if not isinstance(changeset_id, str) or not changeset_id.strip():
+            continue
+        changeset_id = changeset_id.strip()
+        if changeset_id in reopened_drift_ids:
+            continue
         if changeset_filter is not None and changeset_id not in changeset_filter:
             continue
         status = str(issue.get("status") or "").strip().lower()
@@ -189,7 +378,7 @@ def reconcile_blocked_merged_changesets(
             integrated_sha=integrated_sha.strip() if integrated_sha else None,
             dependency_ids=issue_dependency_ids(issue),
         )
-    actionable = len(candidates)
+    actionable += len(candidates)
     if not candidates:
         return ReconcileResult(
             scanned=scanned,

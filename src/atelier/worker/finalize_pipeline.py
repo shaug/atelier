@@ -231,6 +231,14 @@ def run_finalize_pipeline(
         )
         return FinalizeResult(continue_running=False, reason="changeset_label_violation")
     if "cs:merged" in labels or "cs:abandoned" in labels:
+        if service.changeset_waiting_on_review_or_signals(issue, context=context):
+            atelier_log.warning(
+                "changeset="
+                f"{changeset_id} finalize suppressed terminal close while PR lifecycle "
+                "remains active"
+            )
+            service.mark_changeset_in_progress(changeset_id)
+            return FinalizeResult(continue_running=True, reason="changeset_review_pending")
         if service.has_open_descendant_changesets(changeset_id):
             descendants = beads.list_descendant_changesets(
                 changeset_id,

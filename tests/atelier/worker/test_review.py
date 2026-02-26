@@ -140,6 +140,71 @@ def test_select_review_feedback_changeset_includes_standalone_epic_changeset() -
     assert selection.changeset_id == "at-standalone"
 
 
+def test_select_review_feedback_changeset_pr_160_closed_then_reopened_sequence() -> None:
+    closed_issue = {
+        "id": "at-1.60",
+        "labels": ["at:changeset"],
+        "status": "closed",
+        "description": (
+            "changeset.work_branch: feat/pr-160\n"
+            "pr_state: closed\n"
+            "review.last_feedback_seen_at: 2026-02-20T10:00:00Z\n"
+        ),
+    }
+    reopened_issue = {
+        "id": "at-1.60",
+        "labels": ["at:changeset"],
+        "status": "in_progress",
+        "description": (
+            "changeset.work_branch: feat/pr-160\n"
+            "pr_state: pr-open\n"
+            "review.last_feedback_seen_at: 2026-02-20T10:00:00Z\n"
+        ),
+    }
+    pr_payload = {
+        "number": 160,
+        "state": "OPEN",
+        "isDraft": False,
+        "reviewDecision": None,
+        "reviewRequests": [{"requestedReviewer": {"login": "alice"}}],
+    }
+    pr_lookup = prs.GithubPrLookup(outcome="found", payload=pr_payload)
+
+    def select(issue: dict[str, object], *, source: str):
+        with (
+            patch(
+                "atelier.worker.review.beads.list_descendant_changesets",
+                return_value=[issue],
+            ),
+            patch(
+                "atelier.worker.review.beads.BeadsClient.show_issue",
+                return_value=beads.parse_issue_records([issue], source=source)[0],
+            ),
+            patch("atelier.worker.review.prs.lookup_github_pr_status", return_value=pr_lookup),
+            patch(
+                "atelier.worker.review.prs.latest_feedback_timestamp_with_inline_comments",
+                return_value="2026-02-20T11:00:00Z",
+            ),
+            patch(
+                "atelier.worker.review.prs.unresolved_review_thread_count",
+                return_value=1,
+            ),
+        ):
+            return review.select_review_feedback_changeset(
+                epic_id="at-1",
+                repo_slug="org/repo",
+                beads_root=Path("/beads"),
+                repo_root=Path("/repo"),
+            )
+
+    closed_selection = select(closed_issue, source="review_pr_160_closed")
+    reopened_selection = select(reopened_issue, source="review_pr_160_reopened")
+
+    assert closed_selection is None
+    assert reopened_selection is not None
+    assert reopened_selection.changeset_id == "at-1.60"
+
+
 def test_select_global_review_feedback_changeset_uses_resolver() -> None:
     issues = [
         {
