@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -88,6 +89,134 @@ def write_mapping(path: Path, mapping: WorktreeMapping) -> None:
         "changeset_worktrees": mapping.changeset_worktrees,
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def reconcile_mapping_ownership(
+    project_dir: Path,
+    *,
+    owner_by_changeset: Mapping[str, str],
+    epic_root_branches: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Reconcile mapping ownership so entries belong to owning epic descendants.
+
+    Args:
+        project_dir: Project data directory that stores worktree metadata.
+        owner_by_changeset: Canonical changeset-to-epic ownership map derived
+            from Beads topology.
+        epic_root_branches: Optional epic-to-root-branch values used when a
+            migration creates a missing destination mapping.
+
+    Returns:
+        Tuple of epic ids whose mapping files were updated.
+    """
+
+    owner_map: dict[str, str] = {}
+    for raw_changeset_id, raw_epic_id in owner_by_changeset.items():
+        changeset_id = raw_changeset_id.strip()
+        epic_id = raw_epic_id.strip()
+        if not changeset_id or not epic_id:
+            continue
+        owner_map[changeset_id] = epic_id
+
+    root_map: dict[str, str] = {}
+    for raw_epic_id, raw_root_branch in (epic_root_branches or {}).items():
+        epic_id = raw_epic_id.strip()
+        root_branch = raw_root_branch.strip()
+        if not epic_id or not root_branch:
+            continue
+        root_map[epic_id] = root_branch
+
+    meta_dir = worktrees_root(project_dir) / METADATA_DIRNAME
+    if not meta_dir.exists():
+        return ()
+
+    mappings: dict[str, WorktreeMapping] = {}
+    for path in sorted(meta_dir.glob("*.json")):
+        mapping = load_mapping(path)
+        if mapping is None:
+            continue
+        mappings[mapping.epic_id] = mapping
+    if not mappings:
+        return ()
+
+    moved_changesets: dict[str, dict[str, str]] = {}
+    moved_worktrees: dict[str, dict[str, str]] = {}
+    changed_epics: set[str] = set()
+
+    for epic_id in sorted(mappings):
+        mapping = mappings[epic_id]
+        owned_changesets: dict[str, str] = {}
+        owned_worktrees: dict[str, str] = {}
+
+        for changeset_id, branch in mapping.changesets.items():
+            owner = owner_map.get(changeset_id)
+            if owner == epic_id:
+                owned_changesets[changeset_id] = branch
+                continue
+            if not owner:
+                continue
+            destination = moved_changesets.setdefault(owner, {})
+            destination.setdefault(changeset_id, branch)
+
+        for changeset_id, relpath in mapping.changeset_worktrees.items():
+            owner = owner_map.get(changeset_id)
+            if owner == epic_id:
+                owned_worktrees[changeset_id] = relpath
+                continue
+            if not owner:
+                continue
+            destination = moved_worktrees.setdefault(owner, {})
+            destination.setdefault(changeset_id, relpath)
+
+        if owned_changesets != mapping.changesets or owned_worktrees != mapping.changeset_worktrees:
+            mappings[epic_id] = WorktreeMapping(
+                epic_id=mapping.epic_id,
+                worktree_path=mapping.worktree_path,
+                root_branch=mapping.root_branch,
+                changesets=owned_changesets,
+                changeset_worktrees=owned_worktrees,
+            )
+            changed_epics.add(epic_id)
+
+    destination_epics = sorted(set(moved_changesets) | set(moved_worktrees))
+    for epic_id in destination_epics:
+        current = mappings.get(epic_id)
+        if current is None:
+            current = WorktreeMapping(
+                epic_id=epic_id,
+                worktree_path=f"{paths.WORKTREES_DIRNAME}/{epic_id}",
+                root_branch=root_map.get(epic_id, ""),
+                changesets={},
+                changeset_worktrees={},
+            )
+
+        merged_changesets = dict(current.changesets)
+        for changeset_id, branch in moved_changesets.get(epic_id, {}).items():
+            merged_changesets.setdefault(changeset_id, branch)
+
+        merged_worktrees = dict(current.changeset_worktrees)
+        for changeset_id, relpath in moved_worktrees.get(epic_id, {}).items():
+            merged_worktrees.setdefault(changeset_id, relpath)
+
+        resolved_root = current.root_branch or root_map.get(epic_id, "")
+        updated = WorktreeMapping(
+            epic_id=current.epic_id,
+            worktree_path=current.worktree_path,
+            root_branch=resolved_root,
+            changesets=merged_changesets,
+            changeset_worktrees=merged_worktrees,
+        )
+        if updated != current:
+            changed_epics.add(epic_id)
+        mappings[epic_id] = updated
+
+    if not changed_epics:
+        return ()
+
+    paths.ensure_dir(meta_dir)
+    for epic_id in sorted(changed_epics):
+        write_mapping(mapping_path(project_dir, epic_id), mappings[epic_id])
+    return tuple(sorted(changed_epics))
 
 
 def _worktree_branch_in_use(

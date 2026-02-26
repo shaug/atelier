@@ -38,6 +38,51 @@ class WorktreePreparationControl(Protocol):
     def dry_run_log(self, message: str) -> None: ...
 
 
+def _issue_labels(issue: dict[str, object]) -> set[str]:
+    labels = issue.get("labels")
+    if not isinstance(labels, list):
+        return set()
+    return {str(label) for label in labels if label}
+
+
+def _mapping_ownership_from_beads(
+    *, beads_root: Path, repo_root: Path
+) -> tuple[dict[str, str], dict[str, str]]:
+    owner_by_changeset: dict[str, str] = {}
+    epic_root_branches: dict[str, str] = {}
+    epic_issues = beads.run_bd_json(
+        ["list", "--label", "at:epic", "--all"], beads_root=beads_root, cwd=repo_root
+    )
+    for issue in epic_issues:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str):
+            continue
+        epic_id = issue_id.strip()
+        if not epic_id:
+            continue
+        root_branch = beads.extract_workspace_root_branch(issue)
+        if root_branch:
+            epic_root_branches[epic_id] = root_branch
+        labels = _issue_labels(issue)
+        if "at:changeset" in labels:
+            owner_by_changeset.setdefault(epic_id, epic_id)
+        descendants = beads.list_descendant_changesets(
+            epic_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=True,
+        )
+        for descendant in descendants:
+            descendant_id = descendant.get("id")
+            if not isinstance(descendant_id, str):
+                continue
+            normalized_descendant = descendant_id.strip()
+            if not normalized_descendant:
+                continue
+            owner_by_changeset.setdefault(normalized_descendant, epic_id)
+    return owner_by_changeset, epic_root_branches
+
+
 def prepare_worktrees(
     *,
     context: WorktreePreparationContext,
@@ -105,6 +150,18 @@ def prepare_worktrees(
             changeset_worktree_path=changeset_worktree_path,
             branch=branch,
         )
+
+    owner_by_changeset, epic_root_branches = _mapping_ownership_from_beads(
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+    changed_mappings = worktrees.reconcile_mapping_ownership(
+        project_data_dir,
+        owner_by_changeset=owner_by_changeset,
+        epic_root_branches=epic_root_branches,
+    )
+    if changed_mappings:
+        control.say("Reconciled mapping ownership: " + ", ".join(changed_mappings))
 
     epic_worktree_path = worktrees.ensure_git_worktree(
         project_data_dir,
