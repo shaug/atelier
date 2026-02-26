@@ -41,6 +41,33 @@ def _read_bd_version_for_executable(executable: str) -> tuple[int, int, int] | N
     return _parse_semver(output)
 
 
+def detect_bd_version(*, env: Mapping[str, str] | None = None) -> tuple[int, int, int]:
+    """Return the semantic version for the active ``bd`` executable.
+
+    Args:
+        env: Optional environment mapping used for resolving ``PATH``.
+
+    Returns:
+        Parsed semantic version tuple for ``bd``.
+
+    Raises:
+        RuntimeError: If ``bd`` is missing or its version cannot be parsed.
+    """
+
+    env_map = dict(env or os.environ)
+    executable = shutil.which("bd", path=env_map.get("PATH"))
+    if not executable:
+        raise RuntimeError("missing required command: bd")
+
+    detected = _read_bd_version_for_executable(executable)
+    if detected is None:
+        raise RuntimeError(
+            "unsupported bd version: unable to determine version; "
+            "Atelier requires a semantic version"
+        )
+    return detected
+
+
 def ensure_supported_bd_version(*, env: Mapping[str, str] | None = None) -> None:
     """Validate that the active ``bd`` executable meets Atelier's minimum version.
 
@@ -52,17 +79,8 @@ def ensure_supported_bd_version(*, env: Mapping[str, str] | None = None) -> None
             supported version.
     """
 
-    env_map = dict(env or os.environ)
-    executable = shutil.which("bd", path=env_map.get("PATH"))
-    if not executable:
-        raise RuntimeError("missing required command: bd")
-
-    detected = _read_bd_version_for_executable(executable)
+    detected = detect_bd_version(env=env)
     required = _format_version(MIN_SUPPORTED_BD_VERSION)
-    if detected is None:
-        raise RuntimeError(
-            f"unsupported bd version: unable to determine version; Atelier requires bd >= {required}"
-        )
     if detected < MIN_SUPPORTED_BD_VERSION:
         detected_str = _format_version(detected)
         raise RuntimeError(

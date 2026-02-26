@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 from collections.abc import Callable
@@ -53,6 +54,8 @@ _BEADS_STARTUP_HEALTHY = "healthy_dolt"
 _BEADS_STARTUP_MISSING_DOLT = "missing_dolt_with_legacy_sqlite"
 _BEADS_STARTUP_INSUFFICIENT_DOLT = "insufficient_dolt_vs_legacy_data"
 _BEADS_STARTUP_UNKNOWN = "startup_state_unknown"
+_STARTUP_AUTO_MIGRATION_MIN_BD_VERSION = (0, 56, 1)
+_STARTUP_AUTO_MIGRATION_ATTEMPTED: set[Path] = set()
 
 
 class _IssueTypeModel(BaseModel):
@@ -220,7 +223,7 @@ def beads_env(beads_root: Path) -> dict[str, str]:
     """Return an environment mapping with BEADS_DIR set."""
     env = os.environ.copy()
     env["BEADS_DIR"] = str(beads_root)
-    env.setdefault("BEADS_DB", str(beads_root / "beads.db"))
+    env["BEADS_DB"] = str(beads_root / "beads.db")
     agent_id = env.get("ATELIER_AGENT_ID")
     if agent_id:
         env.setdefault("BD_ACTOR", agent_id)
@@ -413,6 +416,136 @@ def _startup_state_diagnostics(*, beads_root: Path, cwd: Path) -> str:
     else:
         atelier_log.debug(summary)
     return summary
+
+
+def _format_semver(version: tuple[int, int, int]) -> str:
+    return f"{version[0]}.{version[1]}.{version[2]}"
+
+
+def _is_startup_auto_migration_command(args: list[str]) -> bool:
+    if not args:
+        return False
+    return args[0].strip().lower() == "prime"
+
+
+def _backup_startup_legacy_sqlite(beads_root: Path) -> Path:
+    db_path = beads_root / "beads.db"
+    if not db_path.exists():
+        raise RuntimeError(f"legacy SQLite database missing at {db_path}")
+    backups_dir = beads_root / "backups"
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile(
+        prefix="beads.db.",
+        suffix=".bak",
+        dir=backups_dir,
+        delete=False,
+    ) as handle:
+        backup_path = Path(handle.name)
+    shutil.copy2(db_path, backup_path)
+    return backup_path
+
+
+def _parity_verified_after_migration(
+    *,
+    before: StartupBeadsState,
+    after: StartupBeadsState,
+) -> bool:
+    if after.migration_eligible:
+        return False
+    if after.classification != _BEADS_STARTUP_HEALTHY:
+        return False
+    if after.dolt_issue_total is None:
+        return False
+    if before.legacy_issue_total is None:
+        return True
+    return after.dolt_issue_total >= before.legacy_issue_total
+
+
+def _attempt_startup_auto_migration(
+    *,
+    args: list[str],
+    beads_root: Path,
+    cwd: Path,
+    env: dict[str, str],
+) -> None:
+    if not _is_startup_auto_migration_command(args):
+        return
+    if _has_db_flag(args):
+        return
+    if not (beads_root / "beads.db").exists():
+        return
+    key = beads_root.resolve()
+    if key in _STARTUP_AUTO_MIGRATION_ATTEMPTED:
+        return
+    startup_state = detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
+    if not startup_state.migration_eligible:
+        return
+    _STARTUP_AUTO_MIGRATION_ATTEMPTED.add(key)
+
+    required_version = _format_semver(_STARTUP_AUTO_MIGRATION_MIN_BD_VERSION)
+    startup_diagnostics = format_startup_beads_diagnostics(startup_state)
+    try:
+        detected_version = bd_invocation.detect_bd_version(env=env)
+    except RuntimeError as exc:
+        die(
+            "startup migration blocked: recoverable legacy Beads state detected, "
+            "but automatic migration could not verify `bd` version "
+            f"(requires >= {required_version}; {exc}).\n"
+            f"{startup_diagnostics}"
+        )
+    if detected_version < _STARTUP_AUTO_MIGRATION_MIN_BD_VERSION:
+        detected_version_text = _format_semver(detected_version)
+        die(
+            "startup migration blocked: recoverable legacy Beads state detected, "
+            "but automatic migration requires "
+            f"bd >= {required_version} (detected {detected_version_text}). "
+            "Upgrade `bd` and rerun startup.\n"
+            f"{startup_diagnostics}"
+        )
+
+    try:
+        backup_path = _backup_startup_legacy_sqlite(beads_root)
+    except (OSError, RuntimeError) as exc:
+        die(
+            "startup migration blocked: failed to create SQLite backup before migration "
+            f"({exc}).\n"
+            f"{startup_diagnostics}"
+        )
+    migration_command = bd_invocation.with_bd_mode(
+        "migrate",
+        "--to-dolt",
+        "--yes",
+        "--json",
+        beads_dir=str(beads_root),
+        env=env,
+    )
+    migration_result = _run_raw_bd_command(migration_command, cwd=cwd, env=env)
+    if migration_result is None:
+        die("missing required command: bd")
+    if migration_result.returncode != 0:
+        migration_detail = _command_output_detail(migration_result) or "bd migrate failed"
+        die(
+            "startup migration blocked: automatic migration failed.\n"
+            f"backup_path={backup_path}\n"
+            f"migration_detail={migration_detail}\n"
+            f"{startup_diagnostics}"
+        )
+
+    post_state = detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
+    if not _parity_verified_after_migration(before=startup_state, after=post_state):
+        die(
+            "startup migration blocked: parity verification failed after migration.\n"
+            f"backup_path={backup_path}\n"
+            f"before={format_startup_beads_diagnostics(startup_state)}\n"
+            f"after={format_startup_beads_diagnostics(post_state)}\n"
+            "Run `bd migrate --to-dolt --inspect` and resolve parity before retrying."
+        )
+    atelier_log.warning(
+        "Startup Beads auto-migration completed: "
+        f"backup_path={backup_path}; "
+        f"before={format_startup_beads_diagnostics(startup_state)}; "
+        f"after={format_startup_beads_diagnostics(post_state)}"
+    )
 
 
 def _is_embedded_panic_repairable_command(args: list[str]) -> bool:
@@ -763,6 +896,7 @@ def run_bd_command(
         bd_invocation.ensure_supported_bd_version(env=env)
     except RuntimeError as exc:
         die(str(exc))
+    _attempt_startup_auto_migration(args=args, beads_root=beads_root, cwd=cwd, env=env)
     _enforce_in_progress_dependency_gate(args, beads_root=beads_root, cwd=cwd, env=env)
     request = exec.CommandRequest(
         argv=tuple(cmd),
