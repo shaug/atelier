@@ -669,6 +669,15 @@ def run_bd_issues(
     ]
 
 
+_DEPRECATED_SYNC_COMMAND_PATTERN = re.compile(r"\bbd sync(?: --flush-only)?\b")
+_CANONICAL_SYNC_EXPORT_COMMAND = 'bd export -o "${BEADS_DIR:-.beads}/issues.jsonl"'
+
+
+def _normalize_prime_addendum_markdown(markdown: str) -> str:
+    """Rewrite deprecated sync guidance to current export guidance."""
+    return _DEPRECATED_SYNC_COMMAND_PATTERN.sub(_CANONICAL_SYNC_EXPORT_COMMAND, markdown)
+
+
 def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
     """Return `bd prime --full` markdown without failing the caller."""
     env = beads_env(beads_root)
@@ -687,7 +696,7 @@ def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
         return None
     if result.returncode != 0:
         return None
-    output = (result.stdout or "").strip()
+    output = _normalize_prime_addendum_markdown((result.stdout or "").strip())
     return output or None
 
 

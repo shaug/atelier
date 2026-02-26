@@ -30,8 +30,8 @@ description: >-
    - `bd create --acceptance ... --design ... --estimate ... --priority ...`
    - use `--notes` / `--append-notes` for addendums without rewriting
      descriptions
-1. Sync Beads after changes or before ending a session:
-   - `bd sync`
+1. Export Beads JSONL after changes or before ending a session:
+   - `bd export -o "${BEADS_DIR:-.beads}/issues.jsonl"`
 
 ## Notes
 
