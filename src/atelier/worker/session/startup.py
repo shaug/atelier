@@ -211,6 +211,7 @@ def next_changeset_service(
         target_has_work_children = (
             bool(explicit_descendants) or context.epic_id in explicit_work_parent_ids
         )
+        target_is_leaf = not target_has_work_children
         target_dependencies_satisfied = _dependencies_satisfied(
             issue=issue,
             epic_changesets_by_id=explicit_descendants_by_id,
@@ -232,7 +233,7 @@ def next_changeset_service(
         if (
             isinstance(issue_id, str)
             and issue_id == context.epic_id
-            and claimability.role.is_changeset
+            and target_is_leaf
             and not _is_terminal_explicit_issue(issue)
             and (
                 (target_runnable and (not review_waiting(issue) or review_resume_allowed(issue)))
@@ -244,13 +245,9 @@ def next_changeset_service(
         if (
             isinstance(issue_id, str)
             and issue_id == context.epic_id
-            and claimability.role.is_changeset
+            and target_is_leaf
             and not _is_terminal_explicit_issue(issue)
             and not target_recovery_candidate
-            and (
-                not target_has_work_children
-                or "at:changeset" in worker_selection.issue_labels(issue)
-            )
         ):
             return None
         if isinstance(issue_id, str) and issue_id == context.epic_id and claimability.role.is_epic:

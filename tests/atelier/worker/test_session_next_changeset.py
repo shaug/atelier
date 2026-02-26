@@ -320,7 +320,7 @@ def test_next_changeset_service_ignores_parent_child_dependencies(
     assert selected["id"] == "at-epic.1"
 
 
-def test_next_changeset_service_blocks_epic_changeset_with_open_dependency() -> None:
+def test_next_changeset_service_selects_descendant_when_explicit_epic_dependency_open() -> None:
     epic_changeset = {
         "id": "at-epic",
         "status": "open",
@@ -336,7 +336,27 @@ def test_next_changeset_service_blocks_epic_changeset_with_open_dependency() -> 
 
     selected = startup.next_changeset_service(context=_context(), service=service)
 
-    assert selected is None
+    assert selected is not None
+    assert selected["id"] == "at-epic.1"
+
+
+def test_next_changeset_service_selects_child_when_explicit_epic_has_dual_labels() -> None:
+    explicit_epic = {
+        "id": "at-epic",
+        "status": "open",
+        "labels": ["at:epic", "at:changeset", "at:ready"],
+    }
+    child = _changeset("at-epic.1", status="open", work_branch="feat/at-epic.1")
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": explicit_epic, child["id"]: child},
+        ready_changesets=[],
+        descendants=[child],
+    )
+
+    selected = startup.next_changeset_service(context=_context(), service=service)
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.1"
 
 
 def test_next_changeset_service_blocks_depends_on_id_payload_dependency() -> None:
