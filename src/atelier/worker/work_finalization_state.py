@@ -986,6 +986,87 @@ def handle_pushed_without_pr(
     return gate_result.finalize_result
 
 
+def _reconcile_parent_review_state(
+    *,
+    parent_issue: dict[str, object],
+    parent_issue_id: str,
+    parent_payload: dict[str, object] | None,
+    parent_state: str,
+    pushed: bool,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    if parent_payload:
+        update_changeset_review_from_pr(
+            parent_issue_id,
+            pr_payload=parent_payload,
+            pushed=pushed,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        return
+    parent_description = parent_issue.get("description")
+    existing = changesets.parse_review_metadata(
+        parent_description if isinstance(parent_description, str) else ""
+    )
+    beads.update_changeset_review(
+        parent_issue_id,
+        changesets.ReviewMetadata(
+            pr_url=None if parent_state == "pushed" else existing.pr_url,
+            pr_number=None if parent_state == "pushed" else existing.pr_number,
+            pr_state=parent_state,
+            review_owner=existing.review_owner,
+        ),
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+
+
+def changeset_stack_integrity_preflight(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+    branch_pr_strategy: object,
+    beads_root: Path | None = None,
+) -> worker_pr_gate.StackIntegrityPreflightResult:
+    """Run sequential stack-integrity preflight for a changeset issue.
+
+    Args:
+        issue: Changeset issue payload.
+        repo_slug: Optional GitHub owner/repo slug.
+        repo_root: Repository checkout path.
+        git_path: Optional git executable override.
+        branch_pr_strategy: Configured PR strategy value.
+        beads_root: Optional Beads root for dependency issue lookups.
+
+    Returns:
+        Preflight result describing whether stack integrity passed.
+    """
+    return worker_pr_gate.sequential_stack_integrity_preflight(
+        issue,
+        repo_slug=repo_slug,
+        repo_root=repo_root,
+        git_path=git_path,
+        branch_pr_strategy=branch_pr_strategy,
+        beads_root=beads_root,
+        lookup_pr_payload=lookup_pr_payload,
+        lookup_pr_payload_diagnostic=lookup_pr_payload_diagnostic,
+        reconcile_parent_review_state=(
+            (
+                lambda **kwargs: _reconcile_parent_review_state(
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    **kwargs,
+                )
+            )
+            if beads_root is not None
+            else None
+        ),
+    )
+
+
 def changeset_parent_lifecycle_state(
     issue: dict[str, object],
     *,
@@ -1614,6 +1695,7 @@ __all__ = [
     "changeset_pr_url",
     "changeset_review_state",
     "changeset_root_branch",
+    "changeset_stack_integrity_preflight",
     "changeset_waiting_on_review",
     "changeset_waiting_on_review_or_signals",
     "changeset_work_branch",

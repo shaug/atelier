@@ -32,6 +32,9 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
             continue_running=True, reason="changeset_complete"
         )
         self.mark_changeset_in_progress_fn = lambda _changeset_id: None
+        self.stack_integrity_preflight_fn = lambda issue, *, context: (
+            finalize_pipeline.StackIntegrityCheck(ok=True)
+        )
         self.changeset_waiting_on_review_or_signals_fn = lambda issue, *, context: False
         self.lookup_pr_payload_fn = lambda repo_slug, branch: None
         self.lookup_pr_payload_diagnostic_fn = lambda repo_slug, branch: (None, None)
@@ -129,6 +132,14 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
 
     def mark_changeset_in_progress(self, changeset_id: str) -> None:
         self.mark_changeset_in_progress_fn(changeset_id)
+
+    def stack_integrity_preflight(
+        self,
+        issue: dict[str, object],
+        *,
+        context: finalize_pipeline.FinalizePipelineContext,
+    ) -> finalize_pipeline.StackIntegrityCheck:
+        return self.stack_integrity_preflight_fn(issue, context=context)
 
     def changeset_waiting_on_review_or_signals(
         self,
@@ -332,6 +343,48 @@ def test_run_finalize_pipeline_waiting_on_review_returns_pending(monkeypatch) ->
 
     assert result.reason == "changeset_review_pending"
     assert result.continue_running is True
+
+
+def test_run_finalize_pipeline_blocks_on_stack_integrity_preflight(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "labels": ["at:changeset", "cs:in_progress"],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+
+    service = _FinalizeServiceStub()
+    blocked_reasons: list[str] = []
+    notifications: list[str] = []
+    service.stack_integrity_preflight_fn = lambda _issue, *, context: (
+        finalize_pipeline.StackIntegrityCheck(
+            ok=False,
+            reason="dependency-parent-pr-closed",
+            edge="at-epic.1 -> at-epic.0 (feat/parent)",
+            detail="dependency parent PR is closed",
+            remediation="Reopen or recreate the dependency parent PR.",
+        )
+    )
+    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked_reasons.append(
+        reason
+    )
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("subject"))
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_stack_integrity_failed"
+    assert result.continue_running is False
+    assert blocked_reasons == ["sequential stack integrity failed: dependency-parent-pr-closed"]
+    assert notifications == ["NEEDS-DECISION: Stack integrity failed (at-epic.1)"]
 
 
 def test_run_finalize_pipeline_updates_missing_integrated_sha(monkeypatch) -> None:
