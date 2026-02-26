@@ -47,6 +47,7 @@ class TestTemplateFallback:
                     "atelier.templates._read_template",
                     side_effect=FileNotFoundError("missing packaged template"),
                 ),
+                patch("atelier.templates._runtime_distribution_template_roots", return_value=()),
             ):
                 result = templates.read_template_result(
                     "AGENTS.worker.md.tmpl",
@@ -67,6 +68,7 @@ class TestTemplateFallback:
                     "atelier.templates._read_template",
                     side_effect=FileNotFoundError("missing packaged template"),
                 ),
+                patch("atelier.templates._runtime_distribution_template_roots", return_value=()),
             ):
                 with pytest.raises(templates.TemplateReadError) as exc_info:
                     templates.read_template_result(
@@ -77,3 +79,46 @@ class TestTemplateFallback:
         assert exc_info.value.template == "AGENTS.worker.md.tmpl"
         assert any("installed cache missing:" in attempt for attempt in exc_info.value.attempts)
         assert any("packaged default unreadable:" in attempt for attempt in exc_info.value.attempts)
+
+    def test_packaged_template_falls_back_from_stale_worktree_origin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data_dir = root / "data"
+            stable_templates_root = root / "runtime" / "src" / "atelier" / "templates"
+            stable_templates_root.mkdir(parents=True)
+            packaged_template_path = stable_templates_root / "AGENTS.worker.md.tmpl"
+            packaged_template_path.write_text("worker-template-packaged\n", encoding="utf-8")
+
+            with (
+                patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+                patch(
+                    "atelier.templates._packaged_template_path",
+                    return_value="/tmp/worktree/src/atelier/templates/AGENTS.worker.md.tmpl",
+                ),
+                patch(
+                    "atelier.templates._read_template",
+                    side_effect=FileNotFoundError("missing stale packaged template"),
+                ),
+                patch(
+                    "atelier.templates._runtime_distribution_template_roots",
+                    return_value=(("runtime_distribution_direct_url", stable_templates_root),),
+                ),
+            ):
+                result = templates.read_template_result(
+                    "AGENTS.worker.md.tmpl",
+                    prefer_installed_if_modified=True,
+                )
+
+        assert result.text == "worker-template-packaged\n"
+        assert result.source == "packaged_default"
+        assert any(
+            "packaged default unreadable: "
+            "/tmp/worktree/src/atelier/templates/AGENTS.worker.md.tmpl "
+            "[origin=runtime_package_resources]" in attempt
+            for attempt in result.attempts
+        )
+        assert any(
+            f"packaged default loaded: {packaged_template_path} "
+            "[origin=runtime_distribution_direct_url]" in attempt
+            for attempt in result.attempts
+        )
