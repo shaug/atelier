@@ -27,6 +27,7 @@ class FakeProvider:
             supports_state_sync=True,
         )
         self.created: list[ExternalTicketCreateRequest] = []
+        self.created_children: list[tuple[ExternalTicketRef, str, str | None, tuple[str, ...]]] = []
         self.fail_create = False
 
     def import_tickets(self, request):  # pragma: no cover - not used here
@@ -53,8 +54,16 @@ class FakeProvider:
     def update_ticket(self, ref, *, title=None, body=None):  # pragma: no cover - not used here
         raise NotImplementedError
 
-    def create_child_ticket(self, ref, *, title, body=None):  # pragma: no cover - not used here
-        raise NotImplementedError
+    def create_child_ticket(self, ref, *, title, body=None, labels=()):
+        if not self.capabilities.supports_children:
+            raise NotImplementedError
+        self.created_children.append((ref, title, body, labels))
+        return ExternalTicketRef(
+            provider=self.slug,
+            ticket_id=str(700 + len(self.created_children)),
+            url=f"https://example.test/{700 + len(self.created_children)}",
+            parent_id=ref.ticket_id,
+        )
 
     def sync_state(self, ref):  # pragma: no cover - not used here
         return ref
@@ -196,6 +205,56 @@ def test_auto_export_adds_parent_cross_link_when_children_not_supported(monkeypa
     assert isinstance(ticket, ExternalTicketRef)
     assert ticket.parent_id == "99"
     assert ticket.relation == "derived"
+
+
+def test_auto_export_creates_provider_child_ticket_when_supported(monkeypatch) -> None:
+    provider = FakeProvider(supports_children=True)
+    context = _context(auto_enabled=True)
+    parent_tickets = json.dumps(
+        [
+            {
+                "provider": "github",
+                "id": "99",
+                "url": "https://example.test/99",
+                "direction": "exported",
+                "sync_mode": "export",
+            }
+        ]
+    )
+    issues = {
+        "at-child": {
+            "id": "at-child",
+            "parent": "at-parent",
+            "title": "Child changeset",
+            "labels": ["at:changeset"],
+            "description": "scope: child\n",
+        },
+        "at-parent": {
+            "id": "at-parent",
+            "title": "Parent epic",
+            "labels": ["at:epic"],
+            "description": f"external_tickets: {parent_tickets}\n",
+        },
+    }
+
+    monkeypatch.setattr(auto_export, "_resolve_provider", lambda *_args, **_kwargs: provider)
+    monkeypatch.setattr(
+        auto_export, "_load_issue", lambda issue_id, **_kwargs: issues.get(issue_id)
+    )
+    monkeypatch.setattr(
+        auto_export.beads, "update_external_tickets", lambda *_args, **_kwargs: None
+    )
+
+    result = auto_export.auto_export_issue("at-child", context=context)
+
+    assert result.status == "exported"
+    assert not provider.created
+    assert provider.created_children
+    parent_ref, title, body, labels = provider.created_children[0]
+    assert parent_ref.ticket_id == "99"
+    assert title == "Child changeset"
+    assert isinstance(body, str)
+    assert labels == ("atelier", "changeset")
 
 
 def test_auto_export_failure_is_non_fatal_and_returns_retry(monkeypatch) -> None:

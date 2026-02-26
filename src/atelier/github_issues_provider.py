@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from contextlib import contextmanager
@@ -22,6 +23,7 @@ from .external_providers import (
 from .external_tickets import ExternalTicketRef, normalize_state
 
 DEFAULT_IN_PROGRESS_LABEL = "in-progress"
+_NOT_FOUND_PATTERN = re.compile(r"(^|\D)404(\D|$)")
 
 
 @dataclass(frozen=True)
@@ -39,7 +41,7 @@ class GithubIssuesProvider:
         supports_link=True,
         supports_set_in_progress=True,
         supports_update=True,
-        supports_children=False,
+        supports_children=True,
         supports_state_sync=True,
         supports_close=True,
     )
@@ -78,23 +80,7 @@ class GithubIssuesProvider:
 
     def create_ticket(self, request: ExternalTicketCreateRequest) -> ExternalTicketRecord:
         _require_gh()
-        create_payload: dict[str, object] = {"title": request.title}
-        if request.body:
-            create_payload["body"] = request.body
-        if request.labels:
-            create_payload["labels"] = list(request.labels)
-        with _temporary_text_file(json.dumps(create_payload)) as payload_file:
-            payload = _run_json(
-                [
-                    "gh",
-                    "api",
-                    "-X",
-                    "POST",
-                    f"repos/{self.repo}/issues",
-                    "--input",
-                    str(payload_file),
-                ]
-            )
+        payload = self._create_issue_payload(request)
         if not isinstance(payload, dict):
             raise RuntimeError("Unexpected gh issue create output")
         record = issue_payload_to_record(payload)
@@ -150,9 +136,44 @@ class GithubIssuesProvider:
         return self.sync_state(ref)
 
     def create_child_ticket(
-        self, ref: ExternalTicketRef, *, title: str, body: str | None = None
+        self,
+        ref: ExternalTicketRef,
+        *,
+        title: str,
+        body: str | None = None,
+        labels: tuple[str, ...] = (),
     ) -> ExternalTicketRef:
-        raise NotImplementedError("GitHub Issues does not support child tickets")
+        _require_gh()
+        create_payload = self._create_issue_payload(
+            ExternalTicketCreateRequest(
+                bead_id=title,
+                title=title,
+                body=body,
+                labels=labels,
+            )
+        )
+        if not isinstance(create_payload, dict):
+            raise RuntimeError("Unexpected gh issue create output")
+        created_ref = issue_payload_to_ref(create_payload, parent_id=ref.ticket_id)
+        if not created_ref:
+            raise RuntimeError("Failed to parse created child issue")
+        sub_issue_id = _payload_issue_id(create_payload)
+        if sub_issue_id is None:
+            raise RuntimeError("Failed to parse created child issue id")
+        attach_payload = {"sub_issue_id": sub_issue_id}
+        with _temporary_text_file(json.dumps(attach_payload)) as payload_file:
+            _run_json(
+                [
+                    "gh",
+                    "api",
+                    "-X",
+                    "POST",
+                    f"repos/{self.repo}/issues/{ref.ticket_id}/sub_issues",
+                    "--input",
+                    str(payload_file),
+                ]
+            )
+        return created_ref
 
     def close_ticket(
         self,
@@ -174,10 +195,37 @@ class GithubIssuesProvider:
         payload = _run_json(["gh", "api", f"repos/{self.repo}/issues/{ref.ticket_id}"])
         if not isinstance(payload, dict):
             raise RuntimeError("Unexpected gh issue view output")
-        ticket_ref = issue_payload_to_ref(payload, sync_options=self.sync_options)
+        parent_payload = _run_json_allow_not_found(
+            ["gh", "api", f"repos/{self.repo}/issues/{ref.ticket_id}/parent"]
+        )
+        parent_id = _payload_ticket_id(parent_payload) if isinstance(parent_payload, dict) else None
+        ticket_ref = issue_payload_to_ref(
+            payload,
+            sync_options=self.sync_options,
+            parent_id=parent_id,
+        )
         if not ticket_ref:
             raise RuntimeError("Failed to parse issue state")
         return ticket_ref
+
+    def _create_issue_payload(self, request: ExternalTicketCreateRequest) -> object:
+        create_payload: dict[str, object] = {"title": request.title}
+        if request.body:
+            create_payload["body"] = request.body
+        if request.labels:
+            create_payload["labels"] = list(request.labels)
+        with _temporary_text_file(json.dumps(create_payload)) as payload_file:
+            return _run_json(
+                [
+                    "gh",
+                    "api",
+                    "-X",
+                    "POST",
+                    f"repos/{self.repo}/issues",
+                    "--input",
+                    str(payload_file),
+                ]
+            )
 
 
 def issue_payload_to_record(
@@ -213,12 +261,12 @@ def issue_payload_to_ref(
     payload: dict[str, object],
     *,
     sync_options: ExternalTicketSyncOptions | None = None,
+    parent_id: str | None = None,
 ) -> ExternalTicketRef | None:
     options = sync_options or ExternalTicketSyncOptions()
-    number = payload.get("number") or payload.get("id")
-    if not isinstance(number, int | str):
+    ticket_id = _payload_ticket_id(payload)
+    if ticket_id is None:
         return None
-    ticket_id = str(number)
     url = payload.get("url") or payload.get("html_url")
     url_value = url if isinstance(url, str) else None
     raw_state_value = None
@@ -234,6 +282,7 @@ def issue_payload_to_ref(
         state_updated_at = updated_at_value
     if options.include_body or options.include_notes:
         content_updated_at = updated_at_value
+    parent_ticket_id = parent_id or _payload_ticket_id(payload.get("parent"))
     return ExternalTicketRef(
         provider="github",
         ticket_id=ticket_id,
@@ -242,7 +291,33 @@ def issue_payload_to_ref(
         raw_state=raw_state_value,
         state_updated_at=state_updated_at,
         content_updated_at=content_updated_at,
+        parent_id=parent_ticket_id,
     )
+
+
+def _payload_ticket_id(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    number = payload.get("number") or payload.get("id")
+    if isinstance(number, int):
+        return str(number)
+    if isinstance(number, str):
+        cleaned = number.strip()
+        return cleaned or None
+    return None
+
+
+def _payload_issue_id(payload: object) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    issue_id = payload.get("id")
+    if isinstance(issue_id, int):
+        return issue_id
+    if isinstance(issue_id, str):
+        cleaned = issue_id.strip()
+        if cleaned.isdigit():
+            return int(cleaned)
+    return None
 
 
 def _label_names(payload: object) -> list[str]:
@@ -277,6 +352,15 @@ def _run_json(cmd: list[str]) -> object:
     if not output.strip():
         return None
     return json.loads(output)
+
+
+def _run_json_allow_not_found(cmd: list[str]) -> object | None:
+    try:
+        return _run_json(cmd)
+    except RuntimeError as exc:
+        if _NOT_FOUND_PATTERN.search(str(exc)):
+            return None
+        raise
 
 
 @contextmanager

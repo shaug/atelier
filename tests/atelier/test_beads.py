@@ -1357,6 +1357,7 @@ def test_reconcile_closed_issue_exported_github_tickets_closes_and_updates() -> 
                 "direction": "exported",
                 "sync_mode": "export",
                 "state": "open",
+                "parent_id": "174",
             }
         ]
     )
@@ -1372,6 +1373,7 @@ def test_reconcile_closed_issue_exported_github_tickets_closes_and_updates() -> 
         state="closed",
         raw_state="completed",
         state_updated_at="2026-02-25T21:00:00Z",
+        parent_id="200",
     )
     captured: dict[str, object] = {}
 
@@ -1409,6 +1411,7 @@ def test_reconcile_closed_issue_exported_github_tickets_closes_and_updates() -> 
     assert isinstance(updated_tickets, list)
     assert updated_tickets[0].state == "closed"
     assert updated_tickets[0].state_updated_at == "2026-02-25T21:00:00Z"
+    assert updated_tickets[0].parent_id == "200"
     assert updated_tickets[0].last_synced_at is not None
 
 

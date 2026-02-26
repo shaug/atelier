@@ -51,6 +51,21 @@ def test_issue_payload_to_ref_respects_state_toggle() -> None:
     assert ref.state_updated_at is None
 
 
+def test_issue_payload_to_ref_extracts_parent_ticket_id() -> None:
+    payload = {
+        "number": 88,
+        "url": "https://github.com/org/repo/issues/88",
+        "state": "OPEN",
+        "parent": {"number": 42},
+    }
+
+    ref = issue_payload_to_ref(payload)
+
+    assert ref is not None
+    assert ref.ticket_id == "88"
+    assert ref.parent_id == "42"
+
+
 def test_issue_payload_to_record_includes_labels() -> None:
     payload = {
         "number": 7,
@@ -138,6 +153,45 @@ def test_create_ticket_uses_input_file_for_payload(monkeypatch: pytest.MonkeyPat
     assert record.ref.ticket_id == "21"
 
 
+def test_create_child_ticket_creates_issue_then_attaches_to_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = GithubIssuesProvider(repo="org/repo")
+    calls: list[list[str]] = []
+    payloads: list[dict[str, object]] = []
+
+    def fake_run_json(cmd: list[str]) -> object:
+        calls.append(cmd)
+        input_index = cmd.index("--input")
+        payload_path = Path(cmd[input_index + 1])
+        payloads.append(json.loads(payload_path.read_text(encoding="utf-8")))
+        if "sub_issues" in cmd[4]:
+            return {"id": 9001}
+        return {"id": 5001, "number": 501, "url": "https://github.com/org/repo/issues/501"}
+
+    monkeypatch.setattr("atelier.github_issues_provider._run_json", fake_run_json)
+    monkeypatch.setattr("atelier.github_issues_provider._require_gh", lambda: None)
+
+    child_ref = provider.create_child_ticket(
+        ExternalTicketRef(provider="github", ticket_id="42"),
+        title="Child issue",
+        body="Child details",
+        labels=("atelier", "changeset"),
+    )
+
+    assert child_ref.ticket_id == "501"
+    assert child_ref.parent_id == "42"
+    assert len(calls) == 2
+    assert calls[0][4] == "repos/org/repo/issues"
+    assert calls[1][4] == "repos/org/repo/issues/42/sub_issues"
+    assert payloads[0] == {
+        "title": "Child issue",
+        "body": "Child details",
+        "labels": ["atelier", "changeset"],
+    }
+    assert payloads[1] == {"sub_issue_id": 5001}
+
+
 def test_update_ticket_uses_body_file(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = GithubIssuesProvider(repo="org/repo")
     captured_commands: list[list[str]] = []
@@ -165,6 +219,46 @@ def test_update_ticket_uses_body_file(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured_body["text"] == "Body with markdown `code`\n$(echo safe)"
     assert any("--body-file" in command for command in captured_commands)
     assert not any(token == "--body" for command in captured_commands for token in command)
+
+
+def test_sync_state_includes_parent_issue_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = GithubIssuesProvider(repo="org/repo")
+    calls: list[list[str]] = []
+
+    def fake_run_json(cmd: list[str]) -> object:
+        calls.append(cmd)
+        if cmd[-1].endswith("/parent"):
+            return {"number": 7}
+        return {"number": 44, "url": "https://github.com/org/repo/issues/44", "state": "OPEN"}
+
+    monkeypatch.setattr("atelier.github_issues_provider._run_json", fake_run_json)
+    monkeypatch.setattr("atelier.github_issues_provider._require_gh", lambda: None)
+
+    ref = provider.sync_state(ExternalTicketRef(provider="github", ticket_id="44"))
+
+    assert ref.parent_id == "7"
+    assert len(calls) == 2
+    assert calls[0][-1] == "repos/org/repo/issues/44"
+    assert calls[1][-1] == "repos/org/repo/issues/44/parent"
+
+
+def test_sync_state_handles_missing_parent_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = GithubIssuesProvider(repo="org/repo")
+    calls: list[list[str]] = []
+
+    def fake_run_json(cmd: list[str]) -> object:
+        calls.append(cmd)
+        if cmd[-1].endswith("/parent"):
+            raise RuntimeError("HTTP 404: not found")
+        return {"number": 44, "url": "https://github.com/org/repo/issues/44", "state": "OPEN"}
+
+    monkeypatch.setattr("atelier.github_issues_provider._run_json", fake_run_json)
+    monkeypatch.setattr("atelier.github_issues_provider._require_gh", lambda: None)
+
+    ref = provider.sync_state(ExternalTicketRef(provider="github", ticket_id="44"))
+
+    assert ref.parent_id is None
+    assert len(calls) == 2
 
 
 def test_close_ticket_uses_issue_close_command(monkeypatch: pytest.MonkeyPatch) -> None:
