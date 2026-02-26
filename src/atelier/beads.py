@@ -61,6 +61,8 @@ _DOLT_SERVER_HOST_DEFAULT = "127.0.0.1"
 _DOLT_SERVER_PORT_DEFAULT = 3307
 _DOLT_SERVER_USER_DEFAULT = "root"
 _DOLT_DATABASE_DEFAULT = "beads"
+_RUNTIME_AGENT_ID_ENV = "ATELIER_AGENT_ID"
+_RUNTIME_AGENT_BEAD_ID_ENV = "ATELIER_AGENT_BEAD_ID"
 
 
 class _IssueTypeModel(BaseModel):
@@ -222,6 +224,15 @@ class StartupBeadsState:
         if self.legacy_detail:
             details.append(f"legacy_detail={self.legacy_detail}")
         return tuple(details)
+
+
+@dataclass(frozen=True)
+class _RuntimeAgentSnapshot:
+    issue_id: str
+    title: str
+    description: str
+    labels: tuple[str, ...]
+    agent_id: str | None
 
 
 def beads_env(beads_root: Path) -> dict[str, str]:
@@ -429,6 +440,228 @@ def _read_bd_stats_total(
     return issue_total, None
 
 
+def _clean_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    return cleaned
+
+
+def _parse_raw_json_output(result: exec.CommandResult | None) -> object | None:
+    if result is None or result.returncode != 0:
+        return None
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def _issue_from_json_payload(payload: object) -> dict[str, object] | None:
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, list):
+        for entry in payload:
+            if isinstance(entry, dict):
+                return entry
+    return None
+
+
+def _raw_show_issue(issue_id: str, *, cwd: Path, env: dict[str, str]) -> dict[str, object] | None:
+    payload = _parse_raw_json_output(
+        _run_raw_bd_command(
+            ["bd", "show", issue_id, "--json"],
+            cwd=cwd,
+            env=env,
+        )
+    )
+    return _issue_from_json_payload(payload)
+
+
+def _is_agent_issue(issue: dict[str, object]) -> bool:
+    if "at:agent" in _issue_labels(issue):
+        return True
+    issue_type = _clean_text(issue.get("type"))
+    if issue_type == "agent":
+        return True
+    description = issue.get("description")
+    fields = _parse_description_fields(description if isinstance(description, str) else "")
+    return _clean_text(fields.get("agent_id")) is not None
+
+
+def _runtime_agent_snapshot(issue: dict[str, object]) -> _RuntimeAgentSnapshot | None:
+    issue_id = _clean_text(issue.get("id"))
+    if issue_id is None or not _is_agent_issue(issue):
+        return None
+    title = _clean_text(issue.get("title")) or issue_id
+    description = issue.get("description")
+    text = description if isinstance(description, str) else ""
+    fields = _parse_description_fields(text)
+    agent_id = _clean_text(fields.get("agent_id")) or _clean_text(issue.get("title"))
+    return _RuntimeAgentSnapshot(
+        issue_id=issue_id,
+        title=title,
+        description=text,
+        labels=tuple(sorted(_issue_labels(issue))),
+        agent_id=agent_id,
+    )
+
+
+def _collect_required_runtime_agent_snapshots(
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> dict[str, _RuntimeAgentSnapshot]:
+    snapshots: dict[str, _RuntimeAgentSnapshot] = {}
+    required_bead_id = _clean_text(env.get(_RUNTIME_AGENT_BEAD_ID_ENV))
+    if not required_bead_id:
+        return snapshots
+    issue = _raw_show_issue(required_bead_id, cwd=cwd, env=env)
+    if issue is None:
+        return snapshots
+    snapshot = _runtime_agent_snapshot(issue)
+    if snapshot is not None:
+        snapshots[snapshot.issue_id] = snapshot
+    return snapshots
+
+
+def _merge_runtime_agent_description(
+    *,
+    existing_description: str | None,
+    snapshot_description: str | None,
+    agent_id: str | None,
+) -> str:
+    merged = _normalize_description(existing_description)
+    snapshot = _normalize_description(snapshot_description)
+    snapshot_fields = _parse_description_fields(snapshot)
+    if snapshot_fields:
+        for key, value in snapshot_fields.items():
+            merged = _update_description_field(merged, key=key, value=value)
+    elif snapshot and not merged:
+        merged = snapshot
+    if agent_id:
+        merged = _update_description_field(merged, key="agent_id", value=agent_id)
+        merged_fields = _parse_description_fields(merged)
+        role = _agent_role(agent_id)
+        has_role = _clean_text(merged_fields.get("role_type")) or _clean_text(
+            merged_fields.get("role")
+        )
+        if role and not has_role:
+            merged = _update_description_field(merged, key="role_type", value=role)
+    return merged
+
+
+def _create_runtime_agent_bead(
+    issue_id: str,
+    *,
+    snapshot: _RuntimeAgentSnapshot | None,
+    runtime_agent_id: str | None,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    agent_id = snapshot.agent_id if snapshot is not None else runtime_agent_id
+    title = snapshot.title if snapshot is not None else (agent_id or issue_id)
+    labels = set(snapshot.labels if snapshot is not None else ())
+    labels.add("at:agent")
+    description = _merge_runtime_agent_description(
+        existing_description=snapshot.description if snapshot is not None else "",
+        snapshot_description=snapshot.description if snapshot is not None else "",
+        agent_id=agent_id,
+    )
+    create_args = [
+        "create",
+        "--id",
+        issue_id,
+        "--type",
+        _agent_issue_type(beads_root=beads_root, cwd=cwd),
+        "--labels",
+        ",".join(sorted(labels)),
+        "--title",
+        title,
+        "--silent",
+    ]
+    if description:
+        create_args.extend(["--description", description])
+    run_bd_command(create_args, beads_root=beads_root, cwd=cwd)
+
+
+def _reconcile_runtime_agent_bead(
+    issue_id: str,
+    *,
+    existing_issue: dict[str, object] | None,
+    snapshot: _RuntimeAgentSnapshot | None,
+    runtime_agent_id: str | None,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    if existing_issue is None:
+        _create_runtime_agent_bead(
+            issue_id,
+            snapshot=snapshot,
+            runtime_agent_id=runtime_agent_id,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+        return
+    raw_description = existing_issue.get("description")
+    current_description = raw_description if isinstance(raw_description, str) else ""
+    snapshot_description = snapshot.description if snapshot is not None else ""
+    agent_id = snapshot.agent_id if snapshot is not None else runtime_agent_id
+    merged = _merge_runtime_agent_description(
+        existing_description=current_description,
+        snapshot_description=snapshot_description,
+        agent_id=agent_id,
+    )
+    if _normalize_description(merged) != _normalize_description(current_description):
+        _update_issue_description(issue_id, merged, beads_root=beads_root, cwd=cwd)
+    labels = {"at:agent"}
+    if snapshot is not None:
+        labels.update(snapshot.labels)
+    missing_labels = sorted(labels - _issue_labels(existing_issue))
+    if missing_labels:
+        update_args = ["update", issue_id]
+        for label in missing_labels:
+            update_args.extend(["--add-label", label])
+        run_bd_command(update_args, beads_root=beads_root, cwd=cwd)
+    if snapshot is not None:
+        current_title = _clean_text(existing_issue.get("title")) or ""
+        if snapshot.title and snapshot.title != current_title:
+            run_bd_command(
+                ["update", issue_id, "--title", snapshot.title],
+                beads_root=beads_root,
+                cwd=cwd,
+            )
+
+
+def _reconcile_required_runtime_agent_beads(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    env: dict[str, str],
+    snapshots: dict[str, _RuntimeAgentSnapshot],
+) -> None:
+    required_bead_id = _clean_text(env.get(_RUNTIME_AGENT_BEAD_ID_ENV))
+    runtime_agent_id = _clean_text(env.get(_RUNTIME_AGENT_ID_ENV))
+    required_ids = set(snapshots)
+    if required_bead_id:
+        required_ids.add(required_bead_id)
+    for issue_id in sorted(required_ids):
+        existing_issue = _raw_show_issue(issue_id, cwd=cwd, env=env)
+        snapshot = snapshots.get(issue_id)
+        _reconcile_runtime_agent_bead(
+            issue_id,
+            existing_issue=existing_issue,
+            snapshot=snapshot,
+            runtime_agent_id=runtime_agent_id,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+
+
 def detect_startup_beads_state(*, beads_root: Path, cwd: Path) -> StartupBeadsState:
     """Classify startup Beads state without mutating Dolt or SQLite stores.
 
@@ -599,6 +832,7 @@ def _attempt_startup_auto_migration(
     if not startup_state.migration_eligible:
         return
     _STARTUP_AUTO_MIGRATION_ATTEMPTED.add(key)
+    runtime_agent_snapshots = _collect_required_runtime_agent_snapshots(cwd=cwd, env=env)
 
     required_version = _format_semver(_STARTUP_AUTO_MIGRATION_MIN_BD_VERSION)
     startup_diagnostics = format_startup_beads_diagnostics(startup_state)
@@ -658,6 +892,13 @@ def _attempt_startup_auto_migration(
             f"after={format_startup_beads_diagnostics(post_state)}\n"
             "Run `bd migrate --to-dolt --inspect` and resolve parity before retrying."
         )
+    _ISSUE_TYPE_CACHE.pop(beads_root, None)
+    _reconcile_required_runtime_agent_beads(
+        beads_root=beads_root,
+        cwd=cwd,
+        env=env,
+        snapshots=runtime_agent_snapshots,
+    )
     atelier_log.warning(
         "Startup Beads auto-migration completed: "
         f"backup_path={backup_path}; "
