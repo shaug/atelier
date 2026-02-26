@@ -454,6 +454,71 @@ def test_run_worker_once_releases_epic_when_selected_changeset_read_fails() -> N
     assert not deps.control._die.called
 
 
+def test_run_worker_once_blocks_changeset_on_non_recoverable_worktree_prep_error() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p6b",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p6b",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
+    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [{"id": "at-epic.1", "title": "Changeset", "description": ""}]
+            if args[:2] == ["show", "at-epic.1"]
+            else []
+        )
+    )
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        side_effect=RuntimeError(
+            "worktree mapping migration blocked: expected 'feat/old' or 'feat/new'"
+        )
+    )
+    deps.lifecycle.mark_changeset_blocked = Mock()
+    deps.lifecycle.send_planner_notification = Mock()
+    deps.lifecycle.release_epic_assignment = Mock()
+    deps.infra.beads.clear_agent_hook = Mock()
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p6b"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "changeset_startup_preparation_blocked"
+    assert summary.epic_id == "at-epic"
+    assert summary.changeset_id == "at-epic.1"
+    deps.lifecycle.mark_changeset_blocked.assert_called_once()
+    blocked_args = deps.lifecycle.mark_changeset_blocked.call_args.kwargs
+    assert "startup preparation failed at prepare worktrees" in str(blocked_args["reason"])
+    deps.lifecycle.send_planner_notification.assert_called_once()
+    subject = str(deps.lifecycle.send_planner_notification.call_args.kwargs["subject"])
+    assert subject == "NEEDS-DECISION: Startup preparation failed (at-epic.1)"
+    deps.lifecycle.release_epic_assignment.assert_called_once_with(
+        "at-epic",
+        beads_root=Path("/project/.atelier/.beads"),
+        repo_root=Path("/repo"),
+    )
+    deps.infra.beads.clear_agent_hook.assert_called_once_with(
+        "at-agent",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+    )
+    assert not deps.control._die.called
+
+
 def test_run_worker_once_returns_terminal_handoff_after_review_pending_finalize() -> None:
     agent = AgentHome(
         name="worker",

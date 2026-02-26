@@ -109,6 +109,83 @@ def _abort_startup_read_failure(
     return WorkerRunSummary(started=False, reason=reason, epic_id=selected_epic)
 
 
+def _abort_startup_preparation_failure(
+    *,
+    beads: BeadsService,
+    lifecycle: WorkerLifecycleService,
+    control: WorkerControlService,
+    selected_epic: str,
+    changeset_id: str,
+    agent_id: str,
+    agent_bead_id: str,
+    beads_root: Path,
+    repo_root: Path,
+    dry_run: bool,
+    stage: str,
+    error: BaseException,
+) -> WorkerRunSummary:
+    """Fail closed on startup preparation errors after selecting a changeset."""
+    detail = str(error).strip() or repr(error)
+    if dry_run:
+        control.dry_run_log(
+            "Would block selected changeset and notify planner after startup "
+            f"preparation failure at {stage}: {detail}"
+        )
+        return WorkerRunSummary(
+            started=False,
+            reason="changeset_startup_preparation_blocked",
+            epic_id=selected_epic,
+            changeset_id=changeset_id,
+        )
+    try:
+        lifecycle.mark_changeset_blocked(
+            changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            reason=f"startup preparation failed at {stage}: {detail}",
+        )
+    except SystemExit:
+        pass
+    try:
+        lifecycle.send_planner_notification(
+            subject=f"NEEDS-DECISION: Startup preparation failed ({changeset_id})",
+            body=(
+                "Worker startup failed during non-recoverable preparation.\n"
+                f"Epic: {selected_epic}\n"
+                f"Changeset: {changeset_id}\n"
+                f"Stage: {stage}\n"
+                f"Error: {detail}\n"
+                "Action: resolve the preparation mismatch, then rerun the worker "
+                "for this changeset."
+            ),
+            agent_id=agent_id,
+            thread_id=changeset_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            dry_run=False,
+        )
+    except SystemExit:
+        pass
+    try:
+        lifecycle.release_epic_assignment(
+            selected_epic,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    except SystemExit:
+        pass
+    try:
+        beads.clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
+    except SystemExit:
+        pass
+    return WorkerRunSummary(
+        started=False,
+        reason="changeset_startup_preparation_blocked",
+        epic_id=selected_epic,
+        changeset_id=changeset_id,
+    )
+
+
 @dataclass(frozen=True)
 class ChangesetSelection:
     issue: dict[str, object] | None
@@ -686,21 +763,40 @@ def run_worker_once(
         else:
             control.say(f"Next changeset: {changeset_id} {changeset_title}")
         finishstep = control.step("Prepare worktrees", timings=timings, trace=trace)
-        worktree_prep = infra.worker_session_worktree.prepare_worktrees(
-            context=WorktreePreparationContext(
-                dry_run=dry_run,
-                project_data_dir=project_data_dir,
-                repo_root=repo_root,
-                beads_root=beads_root,
-                selected_epic=selected_epic,
-                changeset_id=str(changeset_id),
-                root_branch_value=root_branch_value or "",
-                changeset_parent_branch=parent_branch_for_changeset or "",
-                allow_parent_branch_override=allow_parent_branch_override,
-                git_path=git_path,
-            ),
-            control=control,
-        )
+        try:
+            worktree_prep = infra.worker_session_worktree.prepare_worktrees(
+                context=WorktreePreparationContext(
+                    dry_run=dry_run,
+                    project_data_dir=project_data_dir,
+                    repo_root=repo_root,
+                    beads_root=beads_root,
+                    selected_epic=selected_epic,
+                    changeset_id=str(changeset_id),
+                    root_branch_value=root_branch_value or "",
+                    changeset_parent_branch=parent_branch_for_changeset or "",
+                    allow_parent_branch_override=allow_parent_branch_override,
+                    git_path=git_path,
+                ),
+                control=control,
+            )
+        except (RuntimeError, SystemExit) as exc:
+            finishstep(extra="blocked")
+            return finish(
+                _abort_startup_preparation_failure(
+                    beads=infra.beads,
+                    lifecycle=lifecycle,
+                    control=control,
+                    selected_epic=selected_epic,
+                    changeset_id=str(changeset_id),
+                    agent_id=agent.agent_id,
+                    agent_bead_id=agent_bead_id_required,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    dry_run=dry_run,
+                    stage="prepare worktrees",
+                    error=exc,
+                )
+            )
         changeset_worktree_path = worktree_prep.changeset_worktree_path
         finishstep()
         finishstep = control.step("Mark changeset in progress", timings=timings, trace=trace)
@@ -732,14 +828,22 @@ def run_worker_once(
                 session_control=control,
                 command_ops=command_ports,
             )
-        except RuntimeError as exc:
-            control.die(str(exc))
+        except (RuntimeError, SystemExit) as exc:
+            finishstep(extra="blocked")
             return finish(
-                WorkerRunSummary(
-                    started=False,
-                    reason="agent_prepare_failed",
-                    epic_id=selected_epic,
-                    changeset_id=changeset_id,
+                _abort_startup_preparation_failure(
+                    beads=infra.beads,
+                    lifecycle=lifecycle,
+                    control=control,
+                    selected_epic=selected_epic,
+                    changeset_id=str(changeset_id),
+                    agent_id=agent.agent_id,
+                    agent_bead_id=agent_bead_id_required,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    dry_run=dry_run,
+                    stage="prepare agent session",
+                    error=exc,
                 )
             )
         if agent_prep is None:

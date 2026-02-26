@@ -422,6 +422,209 @@ def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
     assert calls == [["bd", "show", "at-2", "--json"], ["bd", "show", "at-1", "--json"]]
 
 
+def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "beads.db").write_bytes(b"legacy")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    migrate = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--yes",
+        "--json",
+    ]
+    stats_calls = 0
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        nonlocal stats_calls
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "stats", "--json"]:
+            stats_calls += 1
+            if stats_calls == 1:
+                return exec_util.CommandResult(
+                    argv=request.argv,
+                    returncode=2,
+                    stdout="",
+                    stderr=(
+                        "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                        "doltdb.(*DoltDB).SetCrashOnFatalError"
+                    ),
+                )
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        if argv == db_stats:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        if argv == migrate:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"migrated":8}',
+                stderr="",
+            )
+        if argv == ["bd", "prime"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="primed",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.bd_invocation.detect_bd_version", return_value=(0, 56, 1)),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        result = beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert migrate in calls
+    assert calls[-1] == ["bd", "prime"]
+    backups = list((beads_root / "backups").glob("beads.db.*.bak"))
+    assert len(backups) == 1
+
+
+def test_run_bd_command_prime_blocks_auto_migration_for_old_bd_version(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "beads.db").write_bytes(b"legacy")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "stats", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=2,
+                stdout="",
+                stderr=(
+                    "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                    "doltdb.(*DoltDB).SetCrashOnFatalError"
+                ),
+            )
+        if argv == db_stats:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    def fake_die(message: str, code: int = 1) -> None:
+        del code
+        raise RuntimeError(message)
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.bd_invocation.detect_bd_version", return_value=(0, 56, 0)),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.die", side_effect=fake_die),
+    ):
+        with pytest.raises(RuntimeError, match="requires bd >= 0.56.1"):
+            beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    assert ["bd", "prime"] not in calls
+    assert not list((beads_root / "backups").glob("*.bak"))
+
+
+def test_run_bd_command_prime_blocks_when_migration_parity_fails(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "beads.db").write_bytes(b"legacy")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    migrate = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--yes",
+        "--json",
+    ]
+    stats_calls = 0
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        nonlocal stats_calls
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "stats", "--json"]:
+            stats_calls += 1
+            if stats_calls == 1:
+                return exec_util.CommandResult(
+                    argv=request.argv,
+                    returncode=2,
+                    stdout="",
+                    stderr=(
+                        "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                        "doltdb.(*DoltDB).SetCrashOnFatalError"
+                    ),
+                )
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":3}}',
+                stderr="",
+            )
+        if argv == db_stats:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        if argv == migrate:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"migrated":8}',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    def fake_die(message: str, code: int = 1) -> None:
+        del code
+        raise RuntimeError(message)
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.bd_invocation.detect_bd_version", return_value=(0, 56, 1)),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.die", side_effect=fake_die),
+    ):
+        with pytest.raises(RuntimeError, match="parity verification failed"):
+            beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    assert migrate in calls
+    assert ["bd", "prime"] not in calls
+
+
 def test_detect_startup_beads_state_reports_healthy_dolt(tmp_path: Path) -> None:
     beads_root = tmp_path / ".beads"
     (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
