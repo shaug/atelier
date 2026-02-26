@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -18,6 +19,55 @@ def _bootstrap_source_import() -> None:
 _bootstrap_source_import()
 
 from atelier import auto_export, beads  # noqa: E402
+
+_STATUS_UPDATE_ATTEMPTS = 2
+_FAIL_CLOSED_REASON = "automatic fail-closed: unable to set deferred status after create"
+
+
+def _command_detail(result: subprocess.CompletedProcess[str]) -> str:
+    stderr = (result.stderr or "").strip()
+    if stderr:
+        return stderr
+    return (result.stdout or "").strip()
+
+
+def _set_deferred_with_fail_closed(*, issue_id: str, beads_root: Path, cwd: Path) -> None:
+    failure_detail = ""
+    for _ in range(_STATUS_UPDATE_ATTEMPTS):
+        status_result = beads.run_bd_command(
+            ["update", issue_id, "--status", "deferred"],
+            beads_root=beads_root,
+            cwd=cwd,
+            allow_failure=True,
+        )
+        if status_result.returncode == 0:
+            return
+        failure_detail = _command_detail(status_result)
+
+    close_result = beads.run_bd_command(
+        ["close", issue_id, "--reason", _FAIL_CLOSED_REASON],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
+    detail = failure_detail or "status update failed"
+    if close_result.returncode == 0:
+        print(
+            f"error: created epic {issue_id} but failed to set status=deferred "
+            f"after {_STATUS_UPDATE_ATTEMPTS} attempts; auto-closed to fail closed "
+            f"({detail})",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    close_detail = _command_detail(close_result) or "close command failed"
+    print(
+        f"error: created epic {issue_id} but failed to set status=deferred "
+        f"after {_STATUS_UPDATE_ATTEMPTS} attempts; auto-close failed ({detail}; "
+        f"{close_detail})",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 
 
 def _description(scope: str, changeset_strategy: str | None) -> str:
@@ -89,8 +139,8 @@ def main() -> None:
         print("error: failed to create epic bead", file=sys.stderr)
         raise SystemExit(1)
 
-    beads.run_bd_command(
-        ["update", issue_id, "--status", "deferred"],
+    _set_deferred_with_fail_closed(
+        issue_id=issue_id,
         beads_root=context.beads_root,
         cwd=context.project_dir,
     )
