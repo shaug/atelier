@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from .. import beads, git, prs
+from .. import beads, git, lifecycle, prs
 from .. import log as atelier_log
 from ..agents import AgentSpec
 from ..models import BranchPrMode
@@ -31,6 +31,13 @@ def _recorded_integrated_sha(issue: Issue) -> str | None:
     description_text = description if isinstance(description, str) else ""
     fields = beads.parse_description_fields(description_text)
     return _normalized_sha(fields.get("changeset.integrated_sha"))
+
+
+def _stored_review_state(issue: Issue) -> str | None:
+    description = issue.get("description")
+    description_text = description if isinstance(description, str) else ""
+    fields = beads.parse_description_fields(description_text)
+    return lifecycle.normalize_review_state(fields.get("pr_state"))
 
 
 def _persist_integrated_sha(
@@ -222,6 +229,19 @@ def run_finalize_pipeline(
         return FinalizeResult(continue_running=False, reason="changeset_not_found")
     issue = issues[0]
     labels = service.issue_labels(issue)
+    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+    terminal_label_state: str | None = None
+    if "cs:merged" in labels:
+        terminal_label_state = "merged"
+    elif "cs:abandoned" in labels:
+        terminal_label_state = "abandoned"
+    review_state = _stored_review_state(issue)
+    terminal_state = terminal_label_state
+    if terminal_state is None and canonical_status == "closed":
+        if review_state == "merged":
+            terminal_state = "merged"
+        elif review_state in {None, "closed"}:
+            terminal_state = "abandoned"
     invalid_changesets = service.find_invalid_changeset_labels(epic_id)
     if invalid_changesets:
         service.send_invalid_changeset_labels_notification(
@@ -230,7 +250,7 @@ def run_finalize_pipeline(
             agent_id=agent_id,
         )
         return FinalizeResult(continue_running=False, reason="changeset_label_violation")
-    if "cs:merged" in labels or "cs:abandoned" in labels:
+    if terminal_state is not None or canonical_status == "closed":
         if service.changeset_waiting_on_review_or_signals(issue, context=context):
             atelier_log.warning(
                 "changeset="
@@ -266,7 +286,7 @@ def run_finalize_pipeline(
             service.mark_changeset_children_in_progress(changeset_id)
             service.close_completed_container_changesets(epic_id)
             return FinalizeResult(continue_running=True, reason="changeset_children_pending")
-        if "cs:merged" in labels:
+        if terminal_state == "merged":
             integration_proven, integrated_sha = service.changeset_integration_signal(
                 issue, repo_slug=repo_slug, git_path=git_path
             )
@@ -278,12 +298,14 @@ def run_finalize_pipeline(
                 if recovered is not None:
                     return recovered
                 service.mark_changeset_blocked(
-                    changeset_id, reason="missing integration signal for cs:merged"
+                    changeset_id, reason="missing integration signal for merged terminal state"
                 )
                 service.send_planner_notification(
                     subject=(f"NEEDS-DECISION: Missing integration signal ({changeset_id})"),
-                    body="Changeset is labeled cs:merged but no integration signal "
-                    "(changeset.integrated_sha or merged PR) was found.",
+                    body=(
+                        "Changeset resolved to merged terminal state but no integration signal "
+                        "(changeset.integrated_sha or merged PR) was found."
+                    ),
                     agent_id=agent_id,
                     thread_id=changeset_id,
                 )
@@ -298,6 +320,21 @@ def run_finalize_pipeline(
                 beads_root=beads_root,
                 repo_root=repo_root,
             )
+        if terminal_state is None:
+            integration_proven, integrated_sha = service.changeset_integration_signal(
+                issue, repo_slug=repo_slug, git_path=git_path
+            )
+            if integration_proven:
+                _persist_integrated_sha(
+                    issue=issue,
+                    changeset_id=changeset_id,
+                    integrated_sha=integrated_sha,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                )
+                terminal_state = "merged"
+            else:
+                terminal_state = "abandoned"
         service.mark_changeset_closed(changeset_id)
         service.close_completed_container_changesets(epic_id)
         return service.finalize_epic_if_complete(context=context)
@@ -331,9 +368,10 @@ def run_finalize_pipeline(
     ):
         service.mark_changeset_blocked(changeset_id, reason="message requires planner decision")
         return FinalizeResult(continue_running=False, reason="changeset_blocked_message")
-    if "cs:in_progress" in labels:
-        if service.changeset_waiting_on_review_or_signals(issue, context=context):
-            return FinalizeResult(continue_running=True, reason="changeset_review_pending")
+    if canonical_status == "in_progress" and service.changeset_waiting_on_review_or_signals(
+        issue, context=context
+    ):
+        return FinalizeResult(continue_running=True, reason="changeset_review_pending")
 
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
@@ -381,13 +419,13 @@ def run_finalize_pipeline(
             thread_id=changeset_id,
         )
         return FinalizeResult(continue_running=False, reason="changeset_pr_status_query_failed")
-    lifecycle: str | None = None
+    lifecycle_state: str | None = None
     if branch_pr:
         review_requested = prs.has_review_requests(pr_payload)
-        lifecycle = prs.lifecycle_state(
+        lifecycle_state = prs.lifecycle_state(
             pr_payload, pushed=pushed, review_requested=review_requested
         )
-    if lifecycle == "merged":
+    if lifecycle_state == "merged":
         atelier_log.debug(f"changeset={changeset_id} finalize lifecycle=merged")
         service.update_changeset_review_from_pr(
             changeset_id,
@@ -402,7 +440,7 @@ def run_finalize_pipeline(
             terminal_state="merged",
             integrated_sha=integrated_sha,
         )
-    if lifecycle == "closed":
+    if lifecycle_state == "closed":
         atelier_log.debug(f"changeset={changeset_id} finalize lifecycle=closed")
         service.update_changeset_review_from_pr(
             changeset_id,

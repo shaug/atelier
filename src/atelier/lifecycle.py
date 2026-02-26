@@ -411,12 +411,9 @@ def is_changeset_in_progress(status: object, labels: set[str]) -> bool:
         labels: Normalized issue labels.
 
     Returns:
-        ``True`` for explicit in-progress status or legacy in-progress label.
+        ``True`` when canonical lifecycle status is ``in_progress``.
     """
-    normalized = normalize_status_value(status)
-    if normalized == "in_progress":
-        return True
-    return "cs:in_progress" in labels
+    return canonical_lifecycle_status(status, labels=labels) == "in_progress"
 
 
 def is_changeset_ready(status: object, labels: set[str]) -> bool:
@@ -427,23 +424,12 @@ def is_changeset_ready(status: object, labels: set[str]) -> bool:
         labels: Normalized issue labels.
 
     Returns:
-        ``True`` when the changeset is considered runnable by current
-        compatibility rules.
+        ``True`` when the issue is a changeset with active canonical status.
     """
-    if "cs:ready" in labels:
-        return True
-    if "at:changeset" not in labels and "cs:in_progress" not in labels:
-        return False
-    if "cs:planned" in labels or "cs:blocked" in labels:
-        return False
-    if TERMINAL_CHANGESET_LABELS.intersection(labels):
+    if "at:changeset" not in labels:
         return False
     canonical_status = canonical_lifecycle_status(status, labels=labels)
-    if canonical_status in {"closed", "blocked", "deferred"}:
-        return False
-    if canonical_status in ACTIVE_LIFECYCLE_STATUSES:
-        return True
-    return "cs:in_progress" in labels
+    return canonical_status in ACTIVE_LIFECYCLE_STATUSES
 
 
 def is_changeset_in_review_candidate(

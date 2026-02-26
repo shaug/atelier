@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import beads
+from .. import beads, lifecycle
 
 
 def issue_labels(issue: dict[str, object]) -> set[str]:
@@ -250,11 +250,12 @@ def close_completed_container_changesets(
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id:
             continue
-        status = str(issue.get("status") or "").lower()
-        if status in {"closed", "done"}:
-            continue
         labels = issue_labels(issue)
-        if "cs:merged" not in labels and "cs:abandoned" not in labels:
+        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+        if canonical_status != "closed":
+            continue
+        status = str(issue.get("status") or "").strip().lower()
+        if status in {"closed", "done"}:
             continue
         if has_open_descendant_changesets(issue_id):
             continue

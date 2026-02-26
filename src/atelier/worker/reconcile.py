@@ -10,8 +10,6 @@ from pathlib import Path
 from .. import beads, changesets, config, git, lifecycle, prs
 from .models import FinalizeResult, ReconcileResult
 
-_TERMINAL_CHANGESET_STATUSES = {"closed", "done"}
-
 
 @dataclass(frozen=True)
 class ReconcileCandidate:
@@ -21,6 +19,16 @@ class ReconcileCandidate:
     epic_id: str
     integrated_sha: str | None
     dependency_ids: tuple[str, ...]
+
+
+def _normalized_labels(issue: dict[str, object]) -> set[str]:
+    return lifecycle.normalized_labels(issue.get("labels"))
+
+
+def _canonical_changeset_status(issue: dict[str, object]) -> str | None:
+    return lifecycle.canonical_lifecycle_status(
+        issue.get("status"), labels=_normalized_labels(issue)
+    )
 
 
 def _description_fields(issue: dict[str, object]) -> dict[str, str]:
@@ -68,8 +76,7 @@ def _review_drift_state(
     repo_root: Path,
     git_path: str | None,
 ) -> str | None:
-    status = str(issue.get("status") or "").strip().lower()
-    if status not in _TERMINAL_CHANGESET_STATUSES:
+    if _canonical_changeset_status(issue) != "closed":
         return None
     stored_state = _stored_review_state(issue)
     if stored_state in lifecycle.ACTIVE_REVIEW_STATES:
@@ -158,7 +165,6 @@ def list_reconcile_epic_candidates(
         return epic_cache[epic_id]
 
     candidates: dict[str, list[str]] = {}
-    drift_ids: set[str] = set()
     for issue in all_changesets:
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id.strip():
@@ -171,46 +177,36 @@ def list_reconcile_epic_candidates(
             git_path=git_path,
         )
         if drift_state is None:
-            continue
-        epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
-        if not epic_id:
-            continue
-        candidates.setdefault(epic_id, []).append(changeset_id)
-        drift_ids.add(changeset_id)
-    for issue in all_changesets:
-        issue_id = issue.get("id")
-        if not isinstance(issue_id, str) or not issue_id.strip():
-            continue
-        changeset_id = issue_id.strip()
-        if changeset_id in drift_ids:
-            continue
-        labels = lifecycle.normalized_labels(issue.get("labels"))
-        if "cs:abandoned" in labels:
-            continue
-        status = str(issue.get("status") or "").strip().lower()
-        if status not in {"", "open", "in_progress", "blocked", "closed", "done"}:
-            continue
-        integration_proven, integrated_sha = changeset_integration_signal(
-            issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
-        )
-        if not integration_proven:
-            continue
-        epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
-        if not epic_id:
-            continue
-        issue_status = status
-        if issue_status == "closed":
-            epic_issue = load_epic(epic_id)
-            epic_closed = bool(epic_issue) and is_closed_status(epic_issue.get("status"))
-            if (
-                epic_closed
-                and integrated_sha
-                and epic_issue
-                and epic_root_integrated_into_parent(
-                    epic_issue, repo_root=repo_root, git_path=git_path
-                )
-            ):
+            status = _canonical_changeset_status(issue)
+            if status not in {"open", "in_progress", "blocked", "closed"}:
                 continue
+            integration_proven, integrated_sha = changeset_integration_signal(
+                issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
+            )
+            if not integration_proven:
+                continue
+            epic_id = resolve_epic_id_for_changeset(
+                issue, beads_root=beads_root, repo_root=repo_root
+            )
+            if not epic_id:
+                continue
+            if status == "closed":
+                epic_issue = load_epic(epic_id)
+                epic_closed = bool(epic_issue) and is_closed_status(epic_issue.get("status"))
+                if (
+                    epic_closed
+                    and integrated_sha
+                    and epic_issue
+                    and epic_root_integrated_into_parent(
+                        epic_issue, repo_root=repo_root, git_path=git_path
+                    )
+                ):
+                    continue
+            candidates.setdefault(epic_id, []).append(changeset_id)
+            continue
+        epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
+        if not epic_id:
+            continue
         candidates.setdefault(epic_id, []).append(changeset_id)
     ordered: dict[str, list[str]] = {}
     for epic_id in sorted(candidates):
@@ -282,8 +278,7 @@ def reconcile_blocked_merged_changesets(
         changeset_id = changeset_id.strip()
         if changeset_filter is not None and changeset_id not in changeset_filter:
             continue
-        status = str(issue.get("status") or "").strip().lower()
-        if status not in _TERMINAL_CHANGESET_STATUSES:
+        if _canonical_changeset_status(issue) != "closed":
             continue
         drift_state = _review_drift_state(
             issue,
@@ -332,11 +327,8 @@ def reconcile_blocked_merged_changesets(
             continue
         if changeset_filter is not None and changeset_id not in changeset_filter:
             continue
-        labels = issue_labels(issue)
-        if "cs:abandoned" in labels:
-            continue
-        status = str(issue.get("status") or "").strip().lower()
-        if status not in {"", "open", "in_progress", "blocked", "closed", "done"}:
+        status = _canonical_changeset_status(issue)
+        if status not in {"open", "in_progress", "blocked", "closed"}:
             if log:
                 log(f"reconcile scan: {changeset_id} status={status or 'unknown'}")
                 log(f"reconcile skip: {changeset_id} (status={status})")
@@ -400,19 +392,32 @@ def reconcile_blocked_merged_changesets(
         if "at:changeset" not in labels:
             dependency_finalized_cache[issue_id] = True
             return True
-        if "cs:abandoned" in labels:
-            status = str(issue.get("status") or "").strip().lower()
-            finalized = status in {"", "closed", "done"}
-            dependency_finalized_cache[issue_id] = finalized
-            return finalized
-        if "cs:merged" not in labels:
+        if _canonical_changeset_status(issue) != "closed":
+            dependency_finalized_cache[issue_id] = False
+            return False
+        if (
+            _review_drift_state(
+                issue,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                git_path=git_path,
+            )
+            is not None
+        ):
             dependency_finalized_cache[issue_id] = False
             return False
         integrated, _ = changeset_integration_signal(
             issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
         )
-        dependency_finalized_cache[issue_id] = integrated
-        return integrated
+        if integrated:
+            dependency_finalized_cache[issue_id] = True
+            return True
+        stored_state = _stored_review_state(issue)
+        if stored_state in lifecycle.ACTIVE_REVIEW_STATES or stored_state in {"pushed", "merged"}:
+            dependency_finalized_cache[issue_id] = False
+            return False
+        dependency_finalized_cache[issue_id] = True
+        return True
 
     remaining = set(candidates)
     reconciled_ids: set[str] = set()
