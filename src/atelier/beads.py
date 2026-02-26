@@ -623,6 +623,42 @@ def run_bd_command(
     )
 
 
+def close_issue(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    allow_failure: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Close a Beads issue and reconcile exported GitHub ticket metadata.
+
+    Args:
+        issue_id: Bead identifier to close.
+        beads_root: Path to the Beads data directory.
+        cwd: Working directory for `bd` invocation.
+        allow_failure: Whether to allow close failures without exiting.
+
+    Returns:
+        `CompletedProcess` for the underlying `bd close` command.
+    """
+    cleaned_issue_id = issue_id.strip()
+    if not cleaned_issue_id:
+        raise ValueError("issue_id must not be empty")
+    result = run_bd_command(
+        ["close", cleaned_issue_id],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=allow_failure,
+    )
+    if result.returncode == 0:
+        reconcile_closed_issue_exported_github_tickets(
+            cleaned_issue_id,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+    return result
+
+
 def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
     """Run a bd command with --json and return parsed output."""
     cmd = list(args)
@@ -2102,8 +2138,7 @@ def close_epic_if_complete(
         return False
     if confirm is not None and not confirm(summary):
         return False
-    run_bd_command(["close", epic_id], beads_root=beads_root, cwd=cwd)
-    reconcile_closed_issue_exported_github_tickets(
+    close_issue(
         epic_id,
         beads_root=beads_root,
         cwd=cwd,

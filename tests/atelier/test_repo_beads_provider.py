@@ -226,3 +226,42 @@ def test_repo_beads_provider_update_preserves_external_ticket_metadata(
     assert "Intent" in description
     assert "external_tickets:" in description
     assert '"id":"174"' in description
+
+
+def test_repo_beads_provider_close_uses_close_issue_helper(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".beads").mkdir()
+    provider = RepoBeadsProvider(repo_root=tmp_path, allow_write=True)
+    captured: dict[str, object] = {}
+
+    def fake_close_issue(
+        issue_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> object:
+        captured["issue_id"] = issue_id
+        captured["beads_root"] = beads_root
+        captured["cwd"] = cwd
+        captured["allow_failure"] = allow_failure
+        return object()
+
+    monkeypatch.setattr("atelier.beads.close_issue", fake_close_issue)
+    monkeypatch.setattr(
+        RepoBeadsProvider,
+        "sync_state",
+        lambda self, ref: ExternalTicketRef(provider=ref.provider, ticket_id=ref.ticket_id),
+    )
+
+    ref = ExternalTicketRef(provider="beads", ticket_id="bd-7")
+    closed = provider.close_ticket(ref)
+
+    assert closed.ticket_id == "bd-7"
+    assert captured == {
+        "issue_id": "bd-7",
+        "beads_root": tmp_path / ".beads",
+        "cwd": tmp_path,
+        "allow_failure": False,
+    }

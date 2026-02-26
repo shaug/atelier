@@ -158,7 +158,14 @@ class RepoBeadsProvider:
         del comment  # Not supported by Beads close command.
         if not self.allow_write:
             raise RuntimeError("Repo Beads export disabled (allow_write=false)")
-        self._run_bd_command(["close", ref.ticket_id])
+        beads_root = self.beads_root or (self.repo_root / paths.BEADS_DIRNAME)
+        if not beads_root.exists():
+            raise RuntimeError(f"missing Beads store at {beads_root}")
+        beads.close_issue(
+            ref.ticket_id,
+            beads_root=beads_root,
+            cwd=self.repo_root,
+        )
         return self.sync_state(ref)
 
     def sync_state(self, ref: ExternalTicketRef) -> ExternalTicketRef:

@@ -1076,7 +1076,7 @@ def test_close_epic_if_complete_closes_and_clears_hook() -> None:
 
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads.run_bd_command") as run_command,
+        patch("atelier.beads.close_issue") as close_issue,
         patch("atelier.beads.clear_agent_hook") as clear_hook,
     ):
         result = beads.close_epic_if_complete(
@@ -1088,8 +1088,10 @@ def test_close_epic_if_complete_closes_and_clears_hook() -> None:
         )
 
     assert result is True
-    run_command.assert_called_with(
-        ["close", "epic-1"], beads_root=Path("/beads"), cwd=Path("/repo")
+    close_issue.assert_called_once_with(
+        "epic-1",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
     )
     clear_hook.assert_called_once()
 
@@ -1107,7 +1109,7 @@ def test_close_epic_if_complete_respects_confirm() -> None:
 
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads.run_bd_command") as run_command,
+        patch("atelier.beads.close_issue") as close_issue,
         patch("atelier.beads.clear_agent_hook"),
     ):
         result = beads.close_epic_if_complete(
@@ -1119,7 +1121,7 @@ def test_close_epic_if_complete_respects_confirm() -> None:
         )
 
     assert result is False
-    run_command.assert_not_called()
+    close_issue.assert_not_called()
 
 
 def test_close_epic_if_complete_closes_standalone_changeset() -> None:
@@ -1137,7 +1139,7 @@ def test_close_epic_if_complete_closes_standalone_changeset() -> None:
 
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads.run_bd_command") as run_command,
+        patch("atelier.beads.close_issue") as close_issue,
         patch("atelier.beads.clear_agent_hook") as clear_hook,
     ):
         result = beads.close_epic_if_complete(
@@ -1148,10 +1150,71 @@ def test_close_epic_if_complete_closes_standalone_changeset() -> None:
         )
 
     assert result is True
-    run_command.assert_called_with(
-        ["close", "at-irs"], beads_root=Path("/beads"), cwd=Path("/repo")
+    close_issue.assert_called_once_with(
+        "at-irs",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
     )
     clear_hook.assert_called_once()
+
+
+def test_close_issue_runs_close_and_reconciles_on_success() -> None:
+    completed = CompletedProcess(
+        args=["bd", "close", "at-1"],
+        returncode=0,
+        stdout="",
+        stderr="",
+    )
+    with (
+        patch("atelier.beads.run_bd_command", return_value=completed) as run_command,
+        patch("atelier.beads.reconcile_closed_issue_exported_github_tickets") as reconcile,
+    ):
+        result = beads.close_issue(
+            "at-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result.returncode == 0
+    run_command.assert_called_once_with(
+        ["close", "at-1"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_failure=False,
+    )
+    reconcile.assert_called_once_with(
+        "at-1",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
+def test_close_issue_skips_reconcile_when_close_fails_with_allow_failure() -> None:
+    failed = CompletedProcess(
+        args=["bd", "close", "at-1"],
+        returncode=1,
+        stdout="",
+        stderr="failed",
+    )
+    with (
+        patch("atelier.beads.run_bd_command", return_value=failed) as run_command,
+        patch("atelier.beads.reconcile_closed_issue_exported_github_tickets") as reconcile,
+    ):
+        result = beads.close_issue(
+            "at-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            allow_failure=True,
+        )
+
+    assert result.returncode == 1
+    run_command.assert_called_once_with(
+        ["close", "at-1"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_failure=True,
+    )
+    reconcile.assert_not_called()
 
 
 def test_update_changeset_review_updates_description() -> None:
@@ -1467,8 +1530,7 @@ def test_close_epic_if_complete_reconciles_exported_github_tickets() -> None:
     with (
         patch("atelier.beads.run_bd_json", return_value=[issue]),
         patch("atelier.beads.epic_changeset_summary", return_value=summary),
-        patch("atelier.beads.run_bd_command") as run_bd_command,
-        patch("atelier.beads.reconcile_closed_issue_exported_github_tickets") as reconcile_external,
+        patch("atelier.beads.close_issue") as close_issue,
     ):
         closed = beads.close_epic_if_complete(
             "at-4kv",
@@ -1478,12 +1540,7 @@ def test_close_epic_if_complete_reconciles_exported_github_tickets() -> None:
         )
 
     assert closed is True
-    run_bd_command.assert_called_once_with(
-        ["close", "at-4kv"],
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
-    reconcile_external.assert_called_once_with(
+    close_issue.assert_called_once_with(
         "at-4kv",
         beads_root=Path("/beads"),
         cwd=Path("/repo"),

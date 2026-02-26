@@ -17,12 +17,14 @@ description: >-
 1. Verify all changesets are complete:
    - `bd list --parent <epic_id> --label at:changeset`
    - Ensure every changeset is `cs:merged` or `cs:abandoned`.
-1. Close the epic:
-   - `bd close <epic_id>`
-1. Clear the hook slot on the agent bead:
-   - `bd slot clear <agent_bead_id> hook`
+1. Close the epic and clear the hook through the deterministic helper:
+   - `python src/atelier/skills/work-done/scripts/close_epic.py --epic-id <epic_id> --agent-bead-id <agent_bead_id>`
+1. For explicit direct-close flows (skip readiness checks), use:
+   - `python src/atelier/skills/work-done/scripts/close_epic.py --epic-id <epic_id> --agent-bead-id <agent_bead_id> --direct-close`
 
 ## Verification
 
 - Epic is closed.
 - Agent hook slot is empty.
+- If `external_tickets` has exported GitHub links, close-state metadata is
+  reconciled.
