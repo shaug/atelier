@@ -471,6 +471,46 @@ def test_run_finalize_pipeline_treats_closed_status_as_terminal_without_labels(m
     assert closed == ["at-epic.1"]
 
 
+def test_run_finalize_pipeline_closed_status_checks_integration_before_abandon(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "closed",
+        "labels": ["at:changeset"],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+
+    service = _FinalizeServiceStub()
+    service.changeset_integration_signal_fn = lambda _issue, *, repo_slug, git_path: (
+        True,
+        "abc1234",
+    )
+    closed: list[str] = []
+    updates: list[tuple[str, str]] = []
+    service.mark_changeset_closed_fn = lambda changeset_id: closed.append(changeset_id)
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "update_changeset_integrated_sha",
+        lambda changeset_id, integrated_sha, **_kwargs: updates.append(
+            (changeset_id, integrated_sha)
+        ),
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_complete"
+    assert result.continue_running is True
+    assert closed == ["at-epic.1"]
+    assert updates == [("at-epic.1", "abc1234")]
+
+
 def test_run_finalize_pipeline_updates_missing_integrated_sha(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",

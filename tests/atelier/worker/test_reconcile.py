@@ -244,3 +244,108 @@ def test_reconcile_blocked_merged_changesets_reopens_closed_review_drift() -> No
     assert run_bd_command.call_count == 1
     assert update_review.call_count == 1
     assert any("reconcile reopened: at-1.9 -> epic=at-1" in line for line in logs)
+
+
+def test_reconcile_dependency_without_terminal_review_or_merge_blocks_finalize() -> None:
+    project = config.ProjectConfig(
+        project=config.ProjectSection(origin="https://github.com/org/repo"),
+        branch=config.BranchConfig(pr=False),
+    )
+    candidate = {
+        "id": "at-1.2",
+        "status": "blocked",
+        "labels": ["at:changeset"],
+    }
+    dependency = {
+        "id": "at-1.1",
+        "status": "closed",
+        "labels": ["at:changeset"],
+        "description": "",
+    }
+
+    def run_bd_json(args: list[str], **_kwargs):
+        if args[:4] == ["list", "--label", "at:changeset", "--all"]:
+            return [candidate]
+        if args[:2] == ["show", "at-1.1"]:
+            return [dependency]
+        return []
+
+    logs: list[str] = []
+    with patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json):
+        result = reconcile.reconcile_blocked_merged_changesets(
+            agent_id="worker/1",
+            agent_bead_id="at-agent",
+            project_config=project,
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            dry_run=False,
+            log=logs.append,
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            changeset_integration_signal=lambda issue, **_kwargs: (
+                (True, "abc1234") if issue.get("id") == "at-1.2" else (False, None)
+            ),
+            issue_dependency_ids=lambda issue: ("at-1.1",) if issue.get("id") == "at-1.2" else (),
+            issue_labels=lambda issue: {str(label) for label in issue.get("labels", [])},
+            finalize_changeset=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("finalize should not run when dependency is unresolved")
+            ),
+            finalize_epic_if_complete=lambda **_kwargs: FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        )
+
+    assert result.reconciled == 0
+    assert result.failed == 1
+    assert any("blocked by dependencies: at-1.1" in line for line in logs)
+
+
+def test_reconcile_dependency_with_abandoned_label_allows_finalize() -> None:
+    project = config.ProjectConfig(
+        project=config.ProjectSection(origin="https://github.com/org/repo"),
+        branch=config.BranchConfig(pr=False),
+    )
+    candidate = {
+        "id": "at-1.2",
+        "status": "blocked",
+        "labels": ["at:changeset"],
+    }
+    dependency = {
+        "id": "at-1.1",
+        "status": "closed",
+        "labels": ["at:changeset", "cs:abandoned"],
+        "description": "",
+    }
+
+    def run_bd_json(args: list[str], **_kwargs):
+        if args[:4] == ["list", "--label", "at:changeset", "--all"]:
+            return [candidate]
+        if args[:2] == ["show", "at-1.1"]:
+            return [dependency]
+        return []
+
+    with patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json):
+        result = reconcile.reconcile_blocked_merged_changesets(
+            agent_id="worker/1",
+            agent_bead_id="at-agent",
+            project_config=project,
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            dry_run=True,
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            changeset_integration_signal=lambda issue, **_kwargs: (
+                (True, "abc1234") if issue.get("id") == "at-1.2" else (False, None)
+            ),
+            issue_dependency_ids=lambda issue: ("at-1.1",) if issue.get("id") == "at-1.2" else (),
+            issue_labels=lambda issue: {str(label) for label in issue.get("labels", [])},
+            finalize_changeset=lambda **_kwargs: FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+            finalize_epic_if_complete=lambda **_kwargs: FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        )
+
+    assert result.reconciled == 1
+    assert result.failed == 0

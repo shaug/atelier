@@ -240,8 +240,6 @@ def run_finalize_pipeline(
     if terminal_state is None and canonical_status == "closed":
         if review_state == "merged":
             terminal_state = "merged"
-        elif review_state in {None, "closed"}:
-            terminal_state = "abandoned"
     invalid_changesets = service.find_invalid_changeset_labels(epic_id)
     if invalid_changesets:
         service.send_invalid_changeset_labels_notification(
