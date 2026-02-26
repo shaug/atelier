@@ -534,6 +534,7 @@ def run_startup_contract_service(
             branch_pr=branch_pr,
             branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
+            resume_review=resume_review,
         )
         if explicit_next_changeset is None:
             if status in {"in_progress", "hooked"}:
