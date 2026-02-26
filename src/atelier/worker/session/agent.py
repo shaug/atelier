@@ -149,7 +149,31 @@ def prepare_agent_session(
                 project_skill_lookup_paths=project_lookup_paths,
             )
         worker_agents_path = agent.path / "AGENTS.md"
-        worker_template = templates.worker_template(prefer_installed_if_modified=True)
+        try:
+            worker_template_result = templates.read_template_result(
+                "AGENTS.worker.md.tmpl",
+                prefer_installed_if_modified=True,
+            )
+        except templates.TemplateReadError as exc:
+            fallback_attempts = " | ".join(exc.attempts) if exc.attempts else "no attempts recorded"
+            raise RuntimeError(
+                "worker_template_load_failed: "
+                f"epic={selected_epic}; "
+                f"worktree={changeset_worktree_path}; "
+                f"template={exc.template}; "
+                f"fallback_attempts={fallback_attempts}"
+            ) from exc
+        if worker_template_result.source != "packaged_default" or any(
+            "unreadable" in attempt for attempt in worker_template_result.attempts
+        ):
+            session_control.say(
+                "Worker template diagnostics: "
+                f"epic={selected_epic}, "
+                f"worktree={changeset_worktree_path}, "
+                f"source={worker_template_result.source}, "
+                f"attempts={' | '.join(worker_template_result.attempts)}"
+            )
+        worker_template = worker_template_result.text
         worker_content = prompting.render_template(
             worker_template,
             {

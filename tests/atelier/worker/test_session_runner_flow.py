@@ -661,6 +661,87 @@ def test_run_worker_once_blocks_changeset_on_non_recoverable_worktree_prep_error
     assert not deps.control._die.called
 
 
+def test_run_worker_once_reports_worker_template_load_failure_reason_code() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p6c",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p6c",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
+    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [{"id": "at-epic.1", "title": "Changeset", "description": ""}]
+            if args[:2] == ["show", "at-epic.1"]
+            else []
+        )
+    )
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        return_value=SimpleNamespace(
+            epic_worktree_path=Path("/tmp/epic"),
+            changeset_worktree_path=Path("/tmp/changeset"),
+            branch="feat/root-at-epic.1",
+        )
+    )
+    deps.infra.worker_session_agent.prepare_agent_session = Mock(
+        side_effect=RuntimeError(
+            "worker_template_load_failed: epic=at-epic; worktree=/tmp/changeset; "
+            "template=AGENTS.worker.md.tmpl; fallback_attempts=installed cache missing: "
+            "/tmp/cache/AGENTS.worker.md.tmpl | packaged default unreadable: "
+            "/tmp/worktree/src/atelier/templates/AGENTS.worker.md.tmpl "
+            "(FileNotFoundError: missing)"
+        )
+    )
+    deps.lifecycle.mark_changeset_blocked = Mock()
+    deps.lifecycle.send_planner_notification = Mock()
+    deps.lifecycle.release_epic_assignment = Mock()
+    deps.infra.beads.clear_agent_hook = Mock()
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p6c"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "worker_template_unavailable"
+    assert summary.epic_id == "at-epic"
+    assert summary.changeset_id == "at-epic.1"
+    deps.lifecycle.mark_changeset_blocked.assert_called_once()
+    blocked_reason = str(deps.lifecycle.mark_changeset_blocked.call_args.kwargs["reason"])
+    assert "startup preparation failed at prepare agent session" in blocked_reason
+    assert "worker_template_load_failed:" in blocked_reason
+    deps.lifecycle.send_planner_notification.assert_called_once()
+    notification_body = str(deps.lifecycle.send_planner_notification.call_args.kwargs["body"])
+    assert "Epic: at-epic" in notification_body
+    assert "Changeset: at-epic.1" in notification_body
+    assert "Stage: prepare agent session" in notification_body
+    assert "AGENTS.worker.md.tmpl" in notification_body
+    assert "fallback_attempts=" in notification_body
+    deps.lifecycle.release_epic_assignment.assert_called_once_with(
+        "at-epic",
+        beads_root=Path("/project/.atelier/.beads"),
+        repo_root=Path("/repo"),
+    )
+    deps.infra.beads.clear_agent_hook.assert_called_once_with(
+        "at-agent",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+    )
+    assert not deps.control._die.called
+
+
 def test_run_worker_once_continues_after_review_pending_finalize() -> None:
     agent = AgentHome(
         name="worker",
