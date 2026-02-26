@@ -537,15 +537,142 @@ def test_run_bd_command_dolt_recovery_is_bounded_and_surfaces_failure(tmp_path: 
         patch("atelier.beads._startup_state_diagnostics", return_value="startup-diag"),
         patch("atelier.beads.die", side_effect=fake_die),
     ):
-        with pytest.raises(RuntimeError, match="bounded Dolt server recovery"):
+        with pytest.raises(RuntimeError) as excinfo:
             beads.run_bd_command(["show", "at-1", "--json"], beads_root=beads_root, cwd=cwd)
 
+    message = str(excinfo.value)
+    assert "bounded Dolt server recovery" in message
+    assert "degraded-mode diagnostics" in message
+    assert "`bd doctor --fix --yes`" in message
     assert calls == [
         ["bd", "show", "at-1", "--json"],
         ["bd", "show", "at-1", "--json"],
         ["bd", "show", "at-1", "--json"],
     ]
     assert restart.call_count == 2
+
+
+def test_run_bd_command_covers_dolt_lifecycle_paths_across_projects(tmp_path: Path) -> None:
+    healthy_beads_root = tmp_path / "healthy" / ".beads"
+    recovering_beads_root = tmp_path / "recovering" / ".beads"
+    failing_beads_root = tmp_path / "failing" / ".beads"
+    for beads_root in (healthy_beads_root, recovering_beads_root, failing_beads_root):
+        (beads_root / "dolt").mkdir(parents=True)
+
+    healthy_repo = tmp_path / "healthy-repo"
+    recovering_repo = tmp_path / "recovering-repo"
+    failing_repo = tmp_path / "failing-repo"
+    for repo_path in (healthy_repo, recovering_repo, failing_repo):
+        repo_path.mkdir()
+
+    command_calls: list[tuple[Path, list[str]]] = []
+    probe_counts: dict[Path, int] = {
+        healthy_beads_root: 0,
+        recovering_beads_root: 0,
+        failing_beads_root: 0,
+    }
+    restart_calls: list[Path] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        command_calls.append((request.cwd, argv))
+        if argv != ["bd", "show", "at-1", "--json"]:
+            raise AssertionError(f"unexpected command: {argv}")
+        if request.cwd in {healthy_repo, recovering_repo}:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='[{"id":"at-1"}]',
+                stderr="",
+            )
+        raise AssertionError("failing project should not run command after preflight failure")
+
+    def fake_probe_dolt_server_health(
+        runtime: beads.DoltServerRuntime, *, cwd: Path, env: dict[str, str]
+    ) -> tuple[bool, str | None]:
+        del cwd, env
+        beads_root = runtime.dolt_root.parent
+        probe_counts[beads_root] += 1
+        if beads_root == healthy_beads_root:
+            return True, None
+        if beads_root == recovering_beads_root:
+            if probe_counts[beads_root] == 1:
+                return False, "dial tcp 127.0.0.1:3307: connect: connection refused"
+            return True, None
+        if beads_root == failing_beads_root:
+            return False, "dial tcp 127.0.0.1:3307: connect: connection refused"
+        raise AssertionError(f"unexpected beads root: {beads_root}")
+
+    def fake_restart_dolt_server_with_recovery(
+        *, beads_root: Path, cwd: Path, env: dict[str, str]
+    ) -> tuple[bool, str]:
+        del cwd, env
+        restart_calls.append(beads_root)
+        if beads_root == recovering_beads_root:
+            return True, "dolt server recovered for 127.0.0.1:3307"
+        if beads_root == failing_beads_root:
+            return (
+                False,
+                "panic: runtime error: invalid memory address or nil pointer dereference",
+            )
+        raise AssertionError(f"unexpected restart root: {beads_root}")
+
+    def fake_startup_state_diagnostics(*, beads_root: Path, cwd: Path) -> str:
+        del cwd
+        return f"startup-diag:{beads_root.parent.name}"
+
+    def fake_die(message: str, code: int = 1) -> None:
+        del code
+        raise RuntimeError(message)
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads._probe_dolt_server_health", side_effect=fake_probe_dolt_server_health),
+        patch(
+            "atelier.beads._restart_dolt_server_with_recovery",
+            side_effect=fake_restart_dolt_server_with_recovery,
+        ),
+        patch(
+            "atelier.beads._startup_state_diagnostics", side_effect=fake_startup_state_diagnostics
+        ),
+        patch("atelier.beads.die", side_effect=fake_die),
+    ):
+        healthy = beads.run_bd_command(
+            ["show", "at-1", "--json"],
+            beads_root=healthy_beads_root,
+            cwd=healthy_repo,
+        )
+        recovering = beads.run_bd_command(
+            ["show", "at-1", "--json"],
+            beads_root=recovering_beads_root,
+            cwd=recovering_repo,
+        )
+        with pytest.raises(RuntimeError) as excinfo:
+            beads.run_bd_command(
+                ["show", "at-1", "--json"],
+                beads_root=failing_beads_root,
+                cwd=failing_repo,
+            )
+
+    assert healthy.returncode == 0
+    assert recovering.returncode == 0
+    failure_message = str(excinfo.value)
+    assert "dolt server preflight failed before running bd command" in failure_message
+    assert "degraded-mode diagnostics" in failure_message
+    assert "`bd dolt show --json`" in failure_message
+    assert "`bd doctor --fix --yes`" in failure_message
+    assert "panic: runtime error" not in failure_message
+    assert "embedded panic while checking Dolt server health" in failure_message
+    assert "startup-diag:failing" in failure_message
+    assert command_calls == [
+        (healthy_repo, ["bd", "show", "at-1", "--json"]),
+        (recovering_repo, ["bd", "show", "at-1", "--json"]),
+    ]
+    assert probe_counts[healthy_beads_root] == 1
+    assert probe_counts[recovering_beads_root] == 2
+    assert probe_counts[failing_beads_root] == 1
+    assert restart_calls == [recovering_beads_root, failing_beads_root]
 
 
 def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(

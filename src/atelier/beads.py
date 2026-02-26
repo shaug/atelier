@@ -1474,6 +1474,18 @@ def _missing_store_guidance(*, beads_root: Path) -> str:
     )
 
 
+def _dolt_recovery_guidance(*, recovery_detail: str | None) -> str:
+    detail = _short_detail(recovery_detail) or "dolt server recovery detail unavailable"
+    if _is_embedded_backend_panic(detail):
+        detail = "bd reported an embedded panic while checking Dolt server health"
+    return (
+        "Atelier attempted bounded Dolt server recovery, but the command still failed. "
+        f"Recovery detail: {detail}. Atelier degraded-mode diagnostics are active for this "
+        "failure path. Action: run `bd dolt show --json`, run `bd doctor --fix --yes`, and "
+        "retry once `bd show --json <issue-id>` succeeds."
+    )
+
+
 def _update_in_progress_targets(args: list[str]) -> tuple[str, ...]:
     if not args or args[0] != "update":
         return ()
@@ -1585,10 +1597,7 @@ def _raw_bd_json(
         elif _is_missing_store_error(detail):
             guidance = _missing_store_guidance(beads_root=beads_root)
         elif _is_dolt_server_failure(detail) and dolt_recovery_detail:
-            guidance = (
-                "Atelier attempted bounded Dolt server recovery, but the command still failed. "
-                f"{dolt_recovery_detail}"
-            )
+            guidance = _dolt_recovery_guidance(recovery_detail=dolt_recovery_detail)
         diagnostics = _startup_state_diagnostics(beads_root=beads_root, cwd=cwd)
         if guidance:
             return [], f"{detail or 'bd command failed'}\n{guidance}\n{diagnostics}"
@@ -1738,7 +1747,7 @@ def run_bd_command(
     if preflight_error and not allow_failure:
         die(
             "dolt server preflight failed before running bd command.\n"
-            f"{preflight_error}\n"
+            f"{_dolt_recovery_guidance(recovery_detail=preflight_error)}\n"
             f"{_startup_state_diagnostics(beads_root=beads_root, cwd=cwd)}"
         )
     _enforce_in_progress_dependency_gate(args, beads_root=beads_root, cwd=cwd, env=env)
@@ -1832,10 +1841,7 @@ def run_bd_command(
         elif _is_missing_store_error(detail):
             message = f"{message}\n{_missing_store_guidance(beads_root=beads_root)}"
         elif _is_dolt_server_failure(detail) and dolt_recovery_detail:
-            message = (
-                f"{message}\nAtelier attempted bounded Dolt server recovery, "
-                f"but the command still failed. {dolt_recovery_detail}"
-            )
+            message = f"{message}\n{_dolt_recovery_guidance(recovery_detail=dolt_recovery_detail)}"
         message = f"{message}\n{_startup_state_diagnostics(beads_root=beads_root, cwd=cwd)}"
         die(message)
     return subprocess.CompletedProcess(
