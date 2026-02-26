@@ -16,6 +16,21 @@ class FakeStartupService:
         self._list_epics = overrides.pop("list_epics", lambda: [])
         self._show_issue = overrides.pop("show_issue", lambda _issue_id: None)
         self._next_changeset = overrides.pop("next_changeset", lambda **_kwargs: None)
+        self._list_descendant_changesets = overrides.pop(
+            "list_descendant_changesets", lambda _parent_id, include_closed: []
+        )
+        self._changeset_integration_signal = overrides.pop(
+            "changeset_integration_signal", lambda _issue, repo_slug, git_path: (False, None)
+        )
+        self._mark_changeset_merged = overrides.pop(
+            "mark_changeset_merged", lambda _changeset_id: None
+        )
+        self._update_changeset_integrated_sha = overrides.pop(
+            "update_changeset_integrated_sha", lambda _changeset_id, _integrated_sha: None
+        )
+        self._close_epic_if_complete = overrides.pop(
+            "close_epic_if_complete", lambda _epic_id, _agent_bead_id: False
+        )
         self._resolve_hooked_epic = overrides.pop("resolve_hooked_epic", lambda *_args: None)
         self._stale_family_assigned_epics = overrides.pop(
             "stale_family_assigned_epics", lambda issues, agent_id: []
@@ -88,6 +103,32 @@ class FakeStartupService:
             git_path=git_path,
             resume_review=resume_review,
         )
+
+    def list_descendant_changesets(
+        self,
+        parent_id: str,
+        *,
+        include_closed: bool,
+    ) -> list[dict[str, object]]:
+        return self._list_descendant_changesets(parent_id, include_closed=include_closed)
+
+    def changeset_integration_signal(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        git_path: str | None,
+    ) -> tuple[bool, str | None]:
+        return self._changeset_integration_signal(issue, repo_slug=repo_slug, git_path=git_path)
+
+    def mark_changeset_merged(self, changeset_id: str) -> None:
+        self._mark_changeset_merged(changeset_id)
+
+    def update_changeset_integrated_sha(self, changeset_id: str, integrated_sha: str) -> None:
+        self._update_changeset_integrated_sha(changeset_id, integrated_sha)
+
+    def close_epic_if_complete(self, epic_id: str, agent_bead_id: str | None) -> bool:
+        return self._close_epic_if_complete(epic_id, agent_bead_id)
 
     def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None:
         return self._resolve_hooked_epic(agent_bead_id, agent_id)
@@ -351,6 +392,143 @@ def test_run_startup_contract_explicit_epic_review_pending_exits_cleanly() -> No
     assert emitted == [
         "Explicit epic at-explicit is in progress and waiting on review; "
         "resume review feedback and rerun without an epic id."
+    ]
+
+
+def test_run_startup_contract_explicit_epic_no_actionable_reconciles_and_closes() -> None:
+    emitted: list[str] = []
+    close_calls: list[tuple[str, str | None]] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        agent_bead_id="at-agent",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "open",
+            "labels": ["at:epic", "at:ready"],
+        },
+        next_changeset=lambda **_kwargs: None,
+        list_descendant_changesets=lambda _parent_id, include_closed: (
+            [
+                {
+                    "id": "at-explicit.1",
+                    "status": "closed",
+                    "labels": ["at:changeset", "cs:merged"],
+                },
+                {
+                    "id": "at-explicit.2",
+                    "status": "closed",
+                    "labels": ["at:changeset", "cs:abandoned"],
+                },
+            ]
+            if include_closed
+            else []
+        ),
+        close_epic_if_complete=lambda epic_id, agent_bead_id: (
+            close_calls.append((epic_id, agent_bead_id)) or True
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_completed"
+    assert result.epic_id == "at-explicit"
+    assert close_calls == [("at-explicit", "at-agent")]
+    assert emitted == [
+        "Explicit epic at-explicit is completed; run without an epic id to select new ready work."
+    ]
+
+
+def test_run_startup_contract_explicit_epic_reconciles_stale_closed_changeset() -> None:
+    merged_ids: list[str] = []
+    integrated_updates: list[tuple[str, str]] = []
+    close_calls: list[tuple[str, str | None]] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        agent_bead_id="at-agent",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "open",
+            "labels": ["at:epic", "at:ready"],
+        },
+        next_changeset=lambda **_kwargs: None,
+        list_descendant_changesets=lambda _parent_id, include_closed: (
+            [
+                {
+                    "id": "at-explicit.1",
+                    "status": "closed",
+                    "labels": ["at:changeset", "cs:in_progress"],
+                }
+            ]
+            if include_closed
+            else []
+        ),
+        changeset_integration_signal=lambda issue, repo_slug, git_path: (
+            (issue["id"] == "at-explicit.1"),
+            "abc1234" if issue["id"] == "at-explicit.1" else None,
+        ),
+        mark_changeset_merged=lambda changeset_id: merged_ids.append(changeset_id),
+        update_changeset_integrated_sha=lambda changeset_id, integrated_sha: (
+            integrated_updates.append((changeset_id, integrated_sha))
+        ),
+        close_epic_if_complete=lambda epic_id, agent_bead_id: (
+            close_calls.append((epic_id, agent_bead_id)) or True
+        ),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_completed"
+    assert merged_ids == ["at-explicit.1"]
+    assert integrated_updates == [("at-explicit.1", "abc1234")]
+    assert close_calls == [("at-explicit", "at-agent")]
+
+
+def test_run_startup_contract_explicit_epic_no_actionable_remains_non_terminal() -> None:
+    merged_ids: list[str] = []
+    close_calls: list[tuple[str, str | None]] = []
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        agent_bead_id="at-agent",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "open",
+            "labels": ["at:epic", "at:ready"],
+        },
+        next_changeset=lambda **_kwargs: None,
+        list_descendant_changesets=lambda _parent_id, include_closed: (
+            [
+                {
+                    "id": "at-explicit.1",
+                    "status": "closed",
+                    "labels": ["at:changeset", "cs:in_progress"],
+                },
+                {
+                    "id": "at-explicit.2",
+                    "status": "open",
+                    "labels": ["at:changeset", "cs:ready"],
+                },
+            ]
+            if include_closed
+            else []
+        ),
+        changeset_integration_signal=lambda _issue, repo_slug, git_path: (False, None),
+        mark_changeset_merged=lambda changeset_id: merged_ids.append(changeset_id),
+        close_epic_if_complete=lambda epic_id, agent_bead_id: (
+            close_calls.append((epic_id, agent_bead_id)) or False
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_not_actionable"
+    assert merged_ids == []
+    assert close_calls == [("at-explicit", "at-agent")]
+    assert emitted == [
+        "Explicit epic at-explicit has no actionable ready changesets; run without an epic id to "
+        "select available work."
     ]
 
 
