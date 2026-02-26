@@ -99,6 +99,13 @@ def test_packaged_planning_skills_include_scripts() -> None:
     assert "scripts/send_message.py" in definitions["mail-send"].files
 
 
+def test_work_done_skill_references_close_epic_script() -> None:
+    skill = skills.load_packaged_skills()["work-done"]
+    text = skill.files["SKILL.md"].decode("utf-8")
+    assert "scripts/close_epic.py" in text
+    assert "--direct-close" in text
+
+
 def test_publish_skill_mentions_pr_draft_and_github_prs() -> None:
     skill = skills.load_packaged_skills()["publish"]
     text = skill.files["SKILL.md"].decode("utf-8")
