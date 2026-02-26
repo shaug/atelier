@@ -38,3 +38,4 @@ class ChangesetSelectionContext:
 
     selected_epic: str
     startup_changeset_id: str | None
+    resume_review: bool = False

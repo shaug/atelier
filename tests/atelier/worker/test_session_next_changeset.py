@@ -179,6 +179,53 @@ def test_next_changeset_service_blocks_when_review_handoff_evidence_missing() ->
     assert selected is None
 
 
+def test_next_changeset_service_resume_review_selects_waiting_handoff() -> None:
+    waiting = _changeset("at-epic.1", status="in_progress", work_branch="feat/at-epic.1")
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), waiting["id"]: waiting},
+        ready_changesets=[],
+        descendants=[waiting],
+        review_handoff_by_id={"at-epic.1": True},
+        waiting_by_id={"at-epic.1": True},
+    )
+    context = startup.NextChangesetContext(
+        epic_id="at-epic",
+        repo_slug="org/repo",
+        branch_pr=True,
+        branch_pr_strategy="sequential",
+        git_path="git",
+        resume_review=True,
+    )
+
+    selected = startup.next_changeset_service(context=context, service=service)
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.1"
+
+
+def test_next_changeset_service_resume_review_requires_handoff_signal() -> None:
+    waiting = _changeset("at-epic.1", status="in_progress", work_branch="feat/at-epic.1")
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), waiting["id"]: waiting},
+        ready_changesets=[],
+        descendants=[waiting],
+        review_handoff_by_id={"at-epic.1": False},
+        waiting_by_id={"at-epic.1": True},
+    )
+    context = startup.NextChangesetContext(
+        epic_id="at-epic",
+        repo_slug="org/repo",
+        branch_pr=True,
+        branch_pr_strategy="sequential",
+        git_path="git",
+        resume_review=True,
+    )
+
+    selected = startup.next_changeset_service(context=context, service=service)
+
+    assert selected is None
+
+
 def test_next_changeset_service_blocks_when_branch_lineage_is_broken() -> None:
     blocker = _changeset("at-epic.1", work_branch="feat/at-epic.1")
     downstream = _changeset(

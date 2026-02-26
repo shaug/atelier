@@ -112,7 +112,7 @@ class ChangesetSelectionService(Protocol):
 
     def resolve_epic_id_for_changeset(self, issue: dict[str, object]) -> str | None: ...
 
-    def next_changeset(self, epic_id: str) -> dict[str, object] | None: ...
+    def next_changeset(self, epic_id: str, *, resume_review: bool) -> dict[str, object] | None: ...
 
 
 def select_changeset(
@@ -133,7 +133,10 @@ def select_changeset(
             if resolved_epic == context.selected_epic:
                 changeset = override_issue
     if changeset is None:
-        changeset = service.next_changeset(context.selected_epic)
+        changeset = service.next_changeset(
+            context.selected_epic,
+            resume_review=context.resume_review,
+        )
         if changeset is not None:
             parse_issue_boundary(changeset, source="select_changeset:next")
     return ChangesetSelection(issue=changeset, selected_override=selected_override)
@@ -165,7 +168,7 @@ class _BoundChangesetSelectionService:
             repo_root=self.repo_root,
         )
 
-    def next_changeset(self, epic_id: str) -> dict[str, object] | None:
+    def next_changeset(self, epic_id: str, *, resume_review: bool) -> dict[str, object] | None:
         return self.lifecycle.next_changeset(
             epic_id=epic_id,
             beads_root=self.beads_root,
@@ -174,6 +177,7 @@ class _BoundChangesetSelectionService:
             branch_pr=self.branch_pr,
             branch_pr_strategy=self.branch_pr_strategy,
             git_path=self.git_path,
+            resume_review=resume_review,
         )
 
 
@@ -258,6 +262,7 @@ def run_worker_once(
         finishstep()
 
         epic_id = getattr(args, "epic_id", None)
+        explicit_resume_requested = isinstance(epic_id, str) and bool(epic_id.strip())
         queue_only = bool(getattr(args, "queue", False))
         assume_yes = bool(getattr(args, "yes", False))
         should_reconcile = bool(getattr(args, "reconcile", False))
@@ -317,6 +322,7 @@ def run_worker_once(
                     branch_pr_strategy=project_config.branch.pr_strategy,
                     git_path=git_path,
                     worker_queue_name=_WORKER_QUEUE_NAME,
+                    resume_review=explicit_resume_requested,
                     excluded_epic_ids=tuple(sorted(claim_conflict_excluded_epics)),
                 )
             )
@@ -550,6 +556,8 @@ def run_worker_once(
                 context=ChangesetSelectionContext(
                     selected_epic=selected_epic,
                     startup_changeset_id=startup_result.changeset_id,
+                    resume_review=explicit_resume_requested
+                    and startup_result.reason == "explicit_epic",
                 ),
                 service=_BoundChangesetSelectionService(
                     lifecycle=lifecycle,
@@ -884,6 +892,26 @@ def run_worker_once(
                 repo_slug=repo_slug,
                 beads_root=beads_root,
                 repo_root=repo_root,
+            )
+        terminal_review_handoff = (
+            finalize_result.continue_running
+            and finalize_result.reason == "changeset_review_pending"
+            and not review_feedback
+            and not explicit_resume_requested
+        )
+        if terminal_review_handoff:
+            control.say(
+                "Review handoff reached; stopping autonomous loop after PR publication. "
+                f"Rerun with explicit epic selection to resume `{changeset_id}`."
+            )
+            finishstep(extra="changeset_review_handoff")
+            return finish(
+                WorkerRunSummary(
+                    started=False,
+                    reason="changeset_review_handoff",
+                    epic_id=selected_epic,
+                    changeset_id=str(changeset_id) if changeset_id else None,
+                )
             )
         finishstep(extra=finalize_result.reason)
         if not finalize_result.continue_running:

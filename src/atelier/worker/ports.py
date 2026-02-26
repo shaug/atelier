@@ -353,6 +353,7 @@ class WorkerLifecycleService(Protocol):
         branch_pr: bool,
         branch_pr_strategy: PrStrategy,
         git_path: str | None,
+        resume_review: bool,
     ) -> Issue | None: ...
 
     def persist_review_feedback_cursor(

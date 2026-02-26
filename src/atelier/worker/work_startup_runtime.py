@@ -193,6 +193,7 @@ def next_changeset(
     branch_pr: bool = True,
     branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     git_path: str | None = None,
+    resume_review: bool = False,
 ) -> dict[str, object] | None:
     """Next changeset.
 
@@ -204,6 +205,7 @@ def next_changeset(
         branch_pr: Value for `branch_pr`.
         branch_pr_strategy: Value for `branch_pr_strategy`.
         git_path: Value for `git_path`.
+        resume_review: Value for `resume_review`.
 
     Returns:
         Function result.
@@ -214,6 +216,7 @@ def next_changeset(
         branch_pr=branch_pr,
         branch_pr_strategy=branch_pr_strategy,
         git_path=git_path,
+        resume_review=resume_review,
     )
     service = _NextChangesetService(beads_root=beads_root, repo_root=repo_root)
     return worker_startup.next_changeset_service(context=context, service=service)
@@ -582,6 +585,7 @@ class _StartupContractService(worker_startup.StartupContractService):
         branch_pr: bool,
         branch_pr_strategy: object,
         git_path: str | None,
+        resume_review: bool,
     ) -> dict[str, object] | None:
         return next_changeset(
             epic_id=epic_id,
@@ -591,6 +595,7 @@ class _StartupContractService(worker_startup.StartupContractService):
             branch_pr=branch_pr,
             branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
+            resume_review=resume_review,
         )
 
     def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None:

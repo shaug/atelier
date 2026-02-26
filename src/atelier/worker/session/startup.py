@@ -24,6 +24,7 @@ class NextChangesetContext:
     branch_pr: bool
     branch_pr_strategy: object
     git_path: str | None
+    resume_review: bool = False
 
 
 class NextChangesetService(Protocol):
@@ -148,6 +149,25 @@ def _dependencies_satisfied(
 def next_changeset_service(
     *, context: NextChangesetContext, service: NextChangesetService
 ) -> dict[str, object] | None:
+    def review_waiting(issue: dict[str, object]) -> bool:
+        return service.changeset_waiting_on_review_or_signals(
+            issue,
+            repo_slug=context.repo_slug,
+            branch_pr=context.branch_pr,
+            branch_pr_strategy=context.branch_pr_strategy,
+            git_path=context.git_path,
+        )
+
+    def review_resume_allowed(issue: dict[str, object]) -> bool:
+        if not context.resume_review:
+            return False
+        return service.changeset_has_review_handoff_signal(
+            issue,
+            repo_slug=context.repo_slug,
+            branch_pr=context.branch_pr,
+            git_path=context.git_path,
+        )
+
     target = service.show_issue(context.epic_id)
     if target:
         issue = target
@@ -164,13 +184,7 @@ def next_changeset_service(
             and (
                 (
                     service.is_changeset_ready(issue)
-                    and not service.changeset_waiting_on_review_or_signals(
-                        issue,
-                        repo_slug=context.repo_slug,
-                        branch_pr=context.branch_pr,
-                        branch_pr_strategy=context.branch_pr_strategy,
-                        git_path=context.git_path,
-                    )
+                    and (not review_waiting(issue) or review_resume_allowed(issue))
                 )
                 or service.is_changeset_recovery_candidate(
                     issue,
@@ -263,13 +277,7 @@ def next_changeset_service(
             context=context,
             service=service,
         )
-        and not service.changeset_waiting_on_review_or_signals(
-            issue,
-            repo_slug=context.repo_slug,
-            branch_pr=context.branch_pr,
-            branch_pr_strategy=context.branch_pr_strategy,
-            git_path=context.git_path,
-        )
+        and (not review_waiting(issue) or review_resume_allowed(issue))
     ]
     prioritized = sorted(
         actionable,
@@ -302,6 +310,7 @@ class StartupContractContext:
     branch_pr_strategy: object
     git_path: str | None
     worker_queue_name: str
+    resume_review: bool = False
     excluded_epic_ids: tuple[str, ...] = ()
 
 
@@ -330,6 +339,7 @@ class StartupContractService(Protocol):
         branch_pr: bool,
         branch_pr_strategy: object,
         git_path: str | None,
+        resume_review: bool,
     ) -> dict[str, object] | None: ...
 
     def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None: ...
@@ -412,6 +422,7 @@ def run_startup_contract_service(
     branch_pr_strategy = context.branch_pr_strategy
     git_path = context.git_path
     worker_queue_name = context.worker_queue_name
+    resume_review = context.resume_review
     excluded_epics = {
         str(epic_id).strip() for epic_id in context.excluded_epic_ids if str(epic_id).strip()
     }
@@ -481,6 +492,7 @@ def run_startup_contract_service(
                 branch_pr=branch_pr,
                 branch_pr_strategy=branch_pr_strategy,
                 git_path=git_path,
+                resume_review=resume_review and explicit_epic_id is not None,
             )
             is not None
         )
