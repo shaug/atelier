@@ -15,6 +15,7 @@ from ..models import StartupContractResult
 from ..models_boundary import parse_issue_boundary
 from ..review import MergeConflictSelection, ReviewFeedbackSelection
 
+_TERMINAL_STATUSES = {"closed", "done"}
 _TERMINAL_CHANGESET_LABELS = {"cs:merged", "cs:abandoned"}
 
 
