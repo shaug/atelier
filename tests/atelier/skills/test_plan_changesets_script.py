@@ -63,7 +63,7 @@ def _configure_script_mocks(module, monkeypatch, tmp_path: Path) -> list[list[st
     return commands
 
 
-def test_create_changeset_defaults_to_planned_label(monkeypatch, tmp_path: Path) -> None:
+def test_create_changeset_defaults_to_deferred_status(monkeypatch, tmp_path: Path) -> None:
     module = _load_script_module()
     commands = _configure_script_mocks(module, monkeypatch, tmp_path)
 
@@ -85,11 +85,13 @@ def test_create_changeset_defaults_to_planned_label(monkeypatch, tmp_path: Path)
 
     create_command = commands[0]
     assert create_command[:2] == ["create", "--parent"]
-    assert "cs:planned" in create_command
+    assert "at:changeset" in create_command
+    assert "cs:planned" not in create_command
     assert "cs:ready" not in create_command
+    assert commands[1] == ["update", "at-123", "--status", "deferred"]
 
 
-def test_create_changeset_accepts_ready_override(monkeypatch, tmp_path: Path) -> None:
+def test_create_changeset_accepts_open_status_override(monkeypatch, tmp_path: Path) -> None:
     module = _load_script_module()
     commands = _configure_script_mocks(module, monkeypatch, tmp_path)
 
@@ -104,12 +106,13 @@ def test_create_changeset_accepts_ready_override(monkeypatch, tmp_path: Path) ->
             "Ready changeset",
             "--acceptance",
             "Acceptance text",
-            "--status-label",
-            "cs:ready",
+            "--status",
+            "open",
         ],
     )
 
     module.main()
 
     create_command = commands[0]
-    assert "cs:ready" in create_command
+    assert "cs:ready" not in create_command
+    assert commands[1] == ["update", "at-123", "--status", "open"]

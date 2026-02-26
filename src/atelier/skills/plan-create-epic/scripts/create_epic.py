@@ -88,6 +88,13 @@ def main() -> None:
     if not issue_id:
         print("error: failed to create epic bead", file=sys.stderr)
         raise SystemExit(1)
+
+    beads.run_bd_command(
+        ["update", issue_id, "--status", "deferred"],
+        beads_root=context.beads_root,
+        cwd=context.project_dir,
+    )
+
     print(issue_id)
 
     export_result = auto_export.auto_export_issue(

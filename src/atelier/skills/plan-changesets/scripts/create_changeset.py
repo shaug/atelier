@@ -26,10 +26,10 @@ def main() -> None:
     parser.add_argument("--title", required=True, help="Changeset title")
     parser.add_argument("--acceptance", required=True, help="Acceptance criteria")
     parser.add_argument(
-        "--status-label",
-        choices=("cs:ready", "cs:planned"),
-        default="cs:planned",
-        help="Lifecycle label to set on create",
+        "--status",
+        choices=("deferred", "open"),
+        default="deferred",
+        help="Lifecycle status to set after create",
     )
     parser.add_argument(
         "--description",
@@ -66,8 +66,6 @@ def main() -> None:
         "task",
         "--label",
         "at:changeset",
-        "--label",
-        args.status_label,
         "--title",
         args.title,
         "--acceptance",
@@ -89,6 +87,12 @@ def main() -> None:
     if not issue_id:
         print("error: failed to create changeset bead", file=sys.stderr)
         raise SystemExit(1)
+
+    beads.run_bd_command(
+        ["update", issue_id, "--status", args.status],
+        beads_root=context.beads_root,
+        cwd=context.project_dir,
+    )
 
     notes = str(args.notes).strip()
     if notes:

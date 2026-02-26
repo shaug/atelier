@@ -1,7 +1,7 @@
 ---
 name: plan-split-tasks
 description: >-
-  Split an epic into changeset beads with dependency-safe labeling when
+  Split an epic into changeset beads with dependency-safe statuses when
   decomposition is needed.
 ---
 
@@ -25,9 +25,11 @@ review-sized unit, keep it as the executable changeset.
    the executable changeset unless explicit decomposition rationale is recorded
    in notes/description.
 1. Create changeset beads under the epic:
-   - `bd create --parent <epic_id> --type task --label at:changeset --label cs:planned --title <title> --acceptance <acceptance>`
+   - `bd create --parent <epic_id> --type task --label at:changeset --title <title> --acceptance <acceptance>`
+   - `bd update <new_changeset_id> --status deferred`
 1. Create nested changesets under a parent changeset when needed:
-   - `bd create --parent <changeset_id> --type task --label at:changeset --label cs:planned --title <title> --acceptance <acceptance>`
+   - `bd create --parent <changeset_id> --type task --label at:changeset --title <title> --acceptance <acceptance>`
+   - `bd update <new_changeset_id> --status deferred`
 1. Use `--notes` for follow-up details instead of editing descriptions.
 
 ## Verification

@@ -26,6 +26,6 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "one child changeset" in content
     assert "decomposition rationale" in content
     assert "Do not claim or keep assignee ownership" in content
-    assert "concrete issue, create or update a draft bead immediately" in content
-    assert "Create or update draft beads immediately" in content
+    assert "concrete issue, create or update a deferred bead immediately" in content
+    assert "Create or update deferred beads immediately" in content
     assert "Capture first, then ask only for decisions" in content

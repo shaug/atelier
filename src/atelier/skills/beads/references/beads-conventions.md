@@ -9,8 +9,6 @@ projects. Stick to core Beads fields so existing Beads repos remain compatible.
 - `at:changeset` for changeset tasks
 - do not use `at:subtask` for executable work; nested units remain
   `at:changeset`
-- `at:ready` for executable beads that are claimable; missing `at:ready` implies
-  draft/planning state
 - `at:hooked` for epics claimed by an agent
 - `at:message` for message beads
 - `at:unread` for unread message beads
@@ -18,7 +16,11 @@ projects. Stick to core Beads fields so existing Beads repos remain compatible.
 
 ## Status
 
-- Prefer Beads core statuses (`open`, `in_progress`, `closed`).
+- Prefer Beads core statuses plus planning status (`deferred`, `open`,
+  `in_progress`, `blocked`, `closed`).
+- Use `deferred` for planned/draft work and `open` for executable work.
+- Promotion is a status transition (`deferred -> open`), not a lifecycle-label
+  mutation.
 - If custom statuses are not supported, represent `hooked` / `pinned` as labels
   and keep status at `open`.
 
