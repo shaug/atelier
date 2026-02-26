@@ -335,6 +335,97 @@ def test_ensure_worktree_mapping_reconcile_blocks_ambiguous_branch_state() -> No
                 )
 
 
+def test_reconcile_mapping_ownership_migrates_cross_epic_entries() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        meta_dir = worktrees.worktrees_root(project_dir) / worktrees.METADATA_DIRNAME
+        meta_dir.mkdir(parents=True, exist_ok=True)
+
+        worktrees.write_mapping(
+            worktrees.mapping_path(project_dir, "at-gnc"),
+            worktrees.WorktreeMapping(
+                epic_id="at-gnc",
+                worktree_path="worktrees/at-gnc",
+                root_branch="feat/gnc",
+                changesets={
+                    "at-gnc.1": "feat/gnc-at-gnc.1",
+                    "at-1my.1": "feat/1my-at-1my.1",
+                },
+                changeset_worktrees={
+                    "at-gnc.1": "worktrees/at-gnc.1",
+                    "at-1my.1": "worktrees/at-1my.1",
+                },
+            ),
+        )
+        worktrees.write_mapping(
+            worktrees.mapping_path(project_dir, "at-1my"),
+            worktrees.WorktreeMapping(
+                epic_id="at-1my",
+                worktree_path="worktrees/at-1my",
+                root_branch="feat/1my",
+                changesets={"at-1my": "feat/1my"},
+                changeset_worktrees={},
+            ),
+        )
+
+        changed = worktrees.reconcile_mapping_ownership(
+            project_dir,
+            owner_by_changeset={
+                "at-gnc.1": "at-gnc",
+                "at-1my": "at-1my",
+                "at-1my.1": "at-1my",
+            },
+            epic_root_branches={"at-gnc": "feat/gnc", "at-1my": "feat/1my"},
+        )
+
+        assert changed == ("at-1my", "at-gnc")
+        gnc_mapping = worktrees.load_mapping(worktrees.mapping_path(project_dir, "at-gnc"))
+        assert gnc_mapping is not None
+        assert gnc_mapping.changesets == {"at-gnc.1": "feat/gnc-at-gnc.1"}
+        assert gnc_mapping.changeset_worktrees == {"at-gnc.1": "worktrees/at-gnc.1"}
+
+        one_my_mapping = worktrees.load_mapping(worktrees.mapping_path(project_dir, "at-1my"))
+        assert one_my_mapping is not None
+        assert one_my_mapping.changesets["at-1my"] == "feat/1my"
+        assert one_my_mapping.changesets["at-1my.1"] == "feat/1my-at-1my.1"
+        assert one_my_mapping.changeset_worktrees["at-1my.1"] == "worktrees/at-1my.1"
+
+
+def test_reconcile_mapping_ownership_prunes_unknown_contamination() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        meta_dir = worktrees.worktrees_root(project_dir) / worktrees.METADATA_DIRNAME
+        meta_dir.mkdir(parents=True, exist_ok=True)
+
+        worktrees.write_mapping(
+            worktrees.mapping_path(project_dir, "at-no6"),
+            worktrees.WorktreeMapping(
+                epic_id="at-no6",
+                worktree_path="worktrees/at-no6",
+                root_branch="feat/no6",
+                changesets={
+                    "at-no6.1": "feat/no6-at-no6.1",
+                    "at-d1w.1": "feat/d1w-at-d1w.1",
+                },
+                changeset_worktrees={
+                    "at-no6.1": "worktrees/at-no6.1",
+                    "at-d1w.1": "worktrees/at-d1w.1",
+                },
+            ),
+        )
+
+        changed = worktrees.reconcile_mapping_ownership(
+            project_dir,
+            owner_by_changeset={"at-no6.1": "at-no6"},
+        )
+
+        assert changed == ("at-no6",)
+        mapping = worktrees.load_mapping(worktrees.mapping_path(project_dir, "at-no6"))
+        assert mapping is not None
+        assert mapping.changesets == {"at-no6.1": "feat/no6-at-no6.1"}
+        assert mapping.changeset_worktrees == {"at-no6.1": "worktrees/at-no6.1"}
+
+
 def test_remove_git_worktree_noop_when_missing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"
