@@ -4,7 +4,7 @@ import datetime as dt
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 from atelier import config
 from atelier.agent_home import AgentHome
@@ -384,6 +384,62 @@ def test_run_worker_once_retries_after_claim_conflict() -> None:
     assert len(startup_contexts) == 2
     assert startup_contexts[0].excluded_epic_ids == ()
     assert startup_contexts[1].excluded_epic_ids == ("at-conflict",)
+
+
+def test_run_worker_once_reclaims_stale_explicit_assignment_and_clears_old_hook() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p3b",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p3b",
+    )
+    stale_assignee = "atelier/worker/codex/p777"
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-explicit",
+            changeset_id=None,
+            should_exit=False,
+            reason="explicit_epic",
+            reassign_from=stale_assignee,
+        ),
+        preview_agent=agent,
+    )
+    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
+    deps.infra.beads.find_agent_bead = Mock(
+        side_effect=lambda agent_id, **_kwargs: (
+            {"id": "at-previous-agent"} if agent_id == stale_assignee else {"id": "at-agent"}
+        )
+    )
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id="at-explicit", queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p3b"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "no_ready_changesets"
+    assert summary.epic_id == "at-explicit"
+    deps.infra.beads.claim_epic.assert_called_once_with(
+        "at-explicit",
+        "atelier/worker/codex/p3b",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+        allow_takeover_from=stale_assignee,
+    )
+    assert deps.infra.beads.clear_agent_hook.call_args_list == [
+        call(
+            "at-previous-agent",
+            beads_root=Path("/project/.atelier/.beads"),
+            cwd=Path("/repo"),
+        ),
+        call(
+            "at-agent",
+            beads_root=Path("/project/.atelier/.beads"),
+            cwd=Path("/repo"),
+        ),
+    ]
 
 
 def test_run_worker_once_releases_epic_when_label_validation_reads_fail() -> None:
