@@ -1016,7 +1016,6 @@ def run_bd_command(
         die(str(exc))
     _attempt_startup_auto_migration(args=args, beads_root=beads_root, cwd=cwd, env=env)
     _normalize_dolt_runtime_metadata_once(beads_root=beads_root)
-    _normalize_dolt_runtime_metadata_once(beads_root=beads_root)
     _enforce_in_progress_dependency_gate(args, beads_root=beads_root, cwd=cwd, env=env)
     request = exec.CommandRequest(
         argv=tuple(cmd),
