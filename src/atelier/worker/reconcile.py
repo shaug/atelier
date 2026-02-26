@@ -140,11 +140,6 @@ def list_reconcile_epic_candidates(
     epic_root_integrated_into_parent: Callable[..., bool],
 ) -> dict[str, list[str]]:
     """Return merged changeset reconciliation candidates grouped by epic."""
-    merged_issues = beads.run_bd_json(
-        ["list", "--label", "at:changeset", "--label", "cs:merged", "--all"],
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
     all_changesets = beads.run_bd_json(
         ["list", "--label", "at:changeset", "--all"],
         beads_root=beads_root,
@@ -182,15 +177,18 @@ def list_reconcile_epic_candidates(
             continue
         candidates.setdefault(epic_id, []).append(changeset_id)
         drift_ids.add(changeset_id)
-    for issue in merged_issues:
+    for issue in all_changesets:
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id.strip():
             continue
         changeset_id = issue_id.strip()
         if changeset_id in drift_ids:
             continue
+        labels = lifecycle.normalized_labels(issue.get("labels"))
+        if "cs:abandoned" in labels:
+            continue
         status = str(issue.get("status") or "").strip().lower()
-        if status not in {"", "blocked", "closed"}:
+        if status not in {"", "open", "in_progress", "blocked", "closed", "done"}:
             continue
         integration_proven, integrated_sha = changeset_integration_signal(
             issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
@@ -200,7 +198,7 @@ def list_reconcile_epic_candidates(
         epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
         if not epic_id:
             continue
-        issue_status = str(issue.get("status") or "").strip().lower()
+        issue_status = status
         if issue_status == "closed":
             epic_issue = load_epic(epic_id)
             epic_closed = bool(epic_issue) and is_closed_status(epic_issue.get("status"))
@@ -263,18 +261,6 @@ def reconcile_blocked_merged_changesets(
     finalize_epic_if_complete: Callable[..., FinalizeResult],
 ) -> ReconcileResult:
     """Reconcile merged changesets, honoring dependency order."""
-    merged_issues = beads.run_bd_json(
-        [
-            "list",
-            "--label",
-            "at:changeset",
-            "--label",
-            "cs:merged",
-            "--all",
-        ],
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
     all_changesets = beads.run_bd_json(
         ["list", "--label", "at:changeset", "--all"],
         beads_root=beads_root,
@@ -337,7 +323,7 @@ def reconcile_blocked_merged_changesets(
             log(f"reconcile reopened: {changeset_id} -> epic={epic_id} (state={drift_state})")
 
     candidates: dict[str, ReconcileCandidate] = {}
-    for issue in merged_issues:
+    for issue in all_changesets:
         changeset_id = issue.get("id")
         if not isinstance(changeset_id, str) or not changeset_id.strip():
             continue
@@ -346,8 +332,11 @@ def reconcile_blocked_merged_changesets(
             continue
         if changeset_filter is not None and changeset_id not in changeset_filter:
             continue
+        labels = issue_labels(issue)
+        if "cs:abandoned" in labels:
+            continue
         status = str(issue.get("status") or "").strip().lower()
-        if status not in {"", "blocked", "closed"}:
+        if status not in {"", "open", "in_progress", "blocked", "closed", "done"}:
             if log:
                 log(f"reconcile scan: {changeset_id} status={status or 'unknown'}")
                 log(f"reconcile skip: {changeset_id} (status={status})")
@@ -473,7 +462,35 @@ def reconcile_blocked_merged_changesets(
                         )
                     )
                 continue
-            if candidate.status == "closed":
+            if candidate.status in {"closed", "done"}:
+                if "cs:merged" not in issue_labels(candidate.issue):
+                    beads.run_bd_command(
+                        [
+                            "update",
+                            changeset_id,
+                            "--add-label",
+                            "cs:merged",
+                            "--remove-label",
+                            "cs:abandoned",
+                            "--remove-label",
+                            "cs:ready",
+                            "--remove-label",
+                            "cs:planned",
+                            "--remove-label",
+                            "cs:in_progress",
+                            "--remove-label",
+                            "cs:blocked",
+                            "--status",
+                            "closed",
+                        ],
+                        beads_root=beads_root,
+                        cwd=repo_root,
+                    )
+                    beads.reconcile_closed_issue_exported_github_tickets(
+                        changeset_id,
+                        beads_root=beads_root,
+                        cwd=repo_root,
+                    )
                 if candidate.integrated_sha:
                     beads.update_changeset_integrated_sha(
                         changeset_id,

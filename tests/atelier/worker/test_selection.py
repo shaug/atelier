@@ -136,7 +136,7 @@ def test_select_epic_prompt_supports_assume_yes() -> None:
     assert selected == "at-ready"
 
 
-def test_stale_family_assigned_epics_filters_to_inactive_family_members() -> None:
+def test_stale_family_assigned_epics_reclaims_inactive_assignees_across_families() -> None:
     issues = [
         {
             "id": "at-stale",
@@ -156,7 +156,7 @@ def test_stale_family_assigned_epics_filters_to_inactive_family_members() -> Non
             "id": "at-other-family",
             "status": "in_progress",
             "labels": ["at:epic", "at:ready"],
-            "assignee": "atelier/planner/codex/p333",
+            "assignee": "atelier/worker/other/p333",
             "created_at": "2026-02-22T00:00:00+00:00",
         },
     ]
@@ -167,7 +167,7 @@ def test_stale_family_assigned_epics_filters_to_inactive_family_members() -> Non
         is_session_active=lambda assignee: assignee.endswith("/p222"),
     )
 
-    assert [item["id"] for item in stale] == ["at-stale"]
+    assert [item["id"] for item in stale] == ["at-stale", "at-other-family"]
 
 
 def test_select_epic_from_ready_changesets_uses_epic_for_child_issue() -> None:
