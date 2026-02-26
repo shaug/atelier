@@ -78,6 +78,7 @@ class FakeStartupService:
         branch_pr: bool,
         branch_pr_strategy: object,
         git_path: str | None,
+        resume_review: bool,
     ) -> dict[str, object] | None:
         return self._next_changeset(
             epic_id=epic_id,
@@ -85,6 +86,7 @@ class FakeStartupService:
             branch_pr=branch_pr,
             branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
+            resume_review=resume_review,
         )
 
     def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None:

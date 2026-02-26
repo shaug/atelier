@@ -168,6 +168,7 @@ class WorkerLifecycleAdapter:
         branch_pr: bool,
         branch_pr_strategy: PrStrategy,
         git_path: str | None,
+        resume_review: bool,
     ) -> Issue | None:
         return worker_work.next_changeset(
             epic_id=epic_id,
@@ -177,6 +178,7 @@ class WorkerLifecycleAdapter:
             branch_pr=branch_pr,
             branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
+            resume_review=resume_review,
         )
 
     def persist_review_feedback_cursor(

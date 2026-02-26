@@ -55,6 +55,31 @@ def test_run_worker_sessions_dry_run_once_exits_after_started() -> None:
     assert calls == 1
 
 
+def test_run_worker_sessions_default_exits_after_review_handoff() -> None:
+    calls = 0
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del args, mode, dry_run, session_key
+        nonlocal calls
+        calls += 1
+        return WorkerRunSummary(started=False, reason="changeset_review_handoff")
+
+    runtime.run_worker_sessions(
+        args=type("Args", (), {"queue": False})(),
+        mode="auto",
+        run_mode="default",
+        dry_run=False,
+        session_key="sess",
+        run_worker_once=run_once,
+        report_worker_summary=lambda _summary, _dry: None,
+        watch_interval_seconds=lambda: 5,
+        dry_run_log=lambda _message: None,
+        emit=lambda _message: None,
+    )
+
+    assert calls == 1
+
+
 def test_run_worker_sessions_watch_logs_and_sleeps_on_no_ready() -> None:
     calls = 0
     emitted: list[str] = []

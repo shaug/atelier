@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -412,6 +413,7 @@ def test_run_worker_once_releases_epic_when_selected_changeset_read_fails() -> N
         preview_agent=agent,
     )
     deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
+    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
 
     def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
         if args[:2] == ["show", "at-epic.1"]:
@@ -444,3 +446,67 @@ def test_run_worker_once_releases_epic_when_selected_changeset_read_fails() -> N
         cwd=Path("/repo"),
     )
     assert not deps.control._die.called
+
+
+def test_run_worker_once_returns_terminal_handoff_after_review_pending_finalize() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p7",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p7",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
+    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [{"id": "at-epic.1", "title": "Changeset", "description": ""}]
+            if args[:2] == ["show", "at-epic.1"]
+            else []
+        )
+    )
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        return_value=SimpleNamespace(
+            epic_worktree_path=Path("/tmp/epic"),
+            changeset_worktree_path=Path("/tmp/changeset"),
+            branch="feat/root-at-epic.1",
+        )
+    )
+    deps.infra.worker_session_agent.prepare_agent_session = Mock(
+        return_value=SimpleNamespace(
+            agent_spec=SimpleNamespace(name="demo", display_name="Demo"),
+            agent_options=[],
+            project_enlistment=Path("/repo"),
+            workspace_branch="feat/root",
+            env={},
+        )
+    )
+    deps.infra.worker_session_agent.start_agent_session = Mock(
+        return_value=SimpleNamespace(
+            started_at=dt.datetime.now(dt.timezone.utc),
+            returncode=0,
+        )
+    )
+    deps.lifecycle.finalize_changeset = lambda **_kwargs: FinalizeResult(
+        continue_running=True,
+        reason="changeset_review_pending",
+    )
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p7"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "changeset_review_handoff"
+    deps.infra.worker_session_agent.start_agent_session.assert_called_once()
