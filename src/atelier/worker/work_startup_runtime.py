@@ -17,6 +17,7 @@ from ..worker.models import StartupContractResult
 from ..worker.session import startup as worker_startup
 from .work_finalization_runtime import (
     changeset_has_review_handoff_signal,
+    changeset_integration_signal,
     changeset_waiting_on_review_or_signals,
     has_open_descendant_changesets,
     is_changeset_in_progress,
@@ -24,6 +25,7 @@ from .work_finalization_runtime import (
     is_changeset_recovery_candidate,
     resolve_epic_id_for_changeset,
 )
+from .work_finalization_state import mark_changeset_merged
 from .work_runtime_common import (
     dry_run_log,
     filter_epics,
@@ -596,6 +598,57 @@ class _StartupContractService(worker_startup.StartupContractService):
             branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
             resume_review=resume_review,
+        )
+
+    def list_descendant_changesets(
+        self,
+        parent_id: str,
+        *,
+        include_closed: bool,
+    ) -> list[dict[str, object]]:
+        return beads.list_descendant_changesets(
+            parent_id,
+            beads_root=self._beads_root,
+            cwd=self._repo_root,
+            include_closed=include_closed,
+        )
+
+    def changeset_integration_signal(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        git_path: str | None,
+    ) -> tuple[bool, str | None]:
+        return changeset_integration_signal(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=self._repo_root,
+            git_path=git_path,
+        )
+
+    def mark_changeset_merged(self, changeset_id: str) -> None:
+        mark_changeset_merged(
+            changeset_id,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
+        )
+
+    def update_changeset_integrated_sha(self, changeset_id: str, integrated_sha: str) -> None:
+        beads.update_changeset_integrated_sha(
+            changeset_id,
+            integrated_sha,
+            beads_root=self._beads_root,
+            cwd=self._repo_root,
+            allow_override=True,
+        )
+
+    def close_epic_if_complete(self, epic_id: str, agent_bead_id: str | None) -> bool:
+        return beads.close_epic_if_complete(
+            epic_id,
+            agent_bead_id,
+            beads_root=self._beads_root,
+            cwd=self._repo_root,
         )
 
     def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None:

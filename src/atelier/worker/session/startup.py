@@ -351,6 +351,27 @@ class StartupContractService(Protocol):
         resume_review: bool,
     ) -> dict[str, object] | None: ...
 
+    def list_descendant_changesets(
+        self,
+        parent_id: str,
+        *,
+        include_closed: bool,
+    ) -> list[dict[str, object]]: ...
+
+    def changeset_integration_signal(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        git_path: str | None,
+    ) -> tuple[bool, str | None]: ...
+
+    def mark_changeset_merged(self, changeset_id: str) -> None: ...
+
+    def update_changeset_integrated_sha(self, changeset_id: str, integrated_sha: str) -> None: ...
+
+    def close_epic_if_complete(self, epic_id: str, agent_bead_id: str | None) -> bool: ...
+
     def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None: ...
 
     def stale_family_assigned_epics(
@@ -435,6 +456,41 @@ def run_startup_contract_service(
     excluded_epics = {
         str(epic_id).strip() for epic_id in context.excluded_epic_ids if str(epic_id).strip()
     }
+
+    def reconcile_explicit_epic_before_exit(
+        *,
+        epic_id: str,
+        issue: dict[str, object],
+    ) -> bool:
+        candidates = service.list_descendant_changesets(epic_id, include_closed=True)
+        explicit_labels = worker_selection.issue_labels(issue)
+        if "at:changeset" in explicit_labels:
+            candidates = [issue, *candidates]
+        seen_changesets: set[str] = set()
+        for candidate in candidates:
+            changeset_id = _issue_id(candidate)
+            if changeset_id is None or changeset_id in seen_changesets:
+                continue
+            seen_changesets.add(changeset_id)
+            labels = worker_selection.issue_labels(candidate)
+            status = str(candidate.get("status") or "").strip().lower()
+            if "at:changeset" not in labels:
+                continue
+            if status not in _TERMINAL_STATUSES:
+                continue
+            if _TERMINAL_CHANGESET_LABELS.intersection(labels):
+                continue
+            integration_proven, integrated_sha = service.changeset_integration_signal(
+                candidate,
+                repo_slug=repo_slug,
+                git_path=git_path,
+            )
+            if not integration_proven:
+                continue
+            service.mark_changeset_merged(changeset_id)
+            if integrated_sha and integrated_sha.strip():
+                service.update_changeset_integrated_sha(changeset_id, integrated_sha.strip())
+        return service.close_epic_if_complete(epic_id, agent_bead_id)
 
     """Apply startup-contract skill ordering to select the next epic."""
     selected_epic: str | None = None
@@ -537,6 +593,17 @@ def run_startup_contract_service(
             resume_review=resume_review,
         )
         if explicit_next_changeset is None:
+            if reconcile_explicit_epic_before_exit(epic_id=selected_epic, issue=explicit_issue):
+                service.emit(
+                    f"Explicit epic {selected_epic} is completed; run without an epic id to "
+                    "select new ready work."
+                )
+                return StartupContractResult(
+                    epic_id=selected_epic,
+                    changeset_id=None,
+                    should_exit=True,
+                    reason="explicit_epic_completed",
+                )
             if status in {"in_progress", "hooked"}:
                 service.emit(
                     f"Explicit epic {selected_epic} is in progress and waiting on review; "
