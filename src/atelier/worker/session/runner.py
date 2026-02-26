@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ... import beads as beads_runtime
-from ... import changeset_fields
+from ... import changeset_fields, lifecycle
 from ... import root_branch as root_branch_runtime
 from ...pr_strategy import PrStrategy
 from ..context import ChangesetSelectionContext, WorkerRunContext
@@ -25,7 +25,14 @@ from .worktree import WorktreePreparationContext
 _WORKER_QUEUE_NAME = "worker"
 
 
-def _claim_conflict_assignee(
+@dataclass(frozen=True)
+class ClaimFailure:
+    kind: str
+    assignee: str | None = None
+    detail: str | None = None
+
+
+def _classify_claim_failure(
     *,
     beads: BeadsService,
     epic_id: str,
@@ -33,19 +40,38 @@ def _claim_conflict_assignee(
     allow_takeover_from: str | None,
     beads_root: Path,
     repo_root: Path,
-) -> str | None:
-    """Return conflicting assignee when an epic claim failed due assignment."""
+) -> ClaimFailure:
+    """Classify claim failure cause for deterministic retry handling."""
     issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
     if not issues:
-        return None
-    assignee = issues[0].get("assignee")
+        return ClaimFailure(kind="unknown", detail="issue_unavailable")
+    issue = issues[0]
+    assignee = issue.get("assignee")
     if not isinstance(assignee, str) or not assignee:
-        return None
-    if assignee == agent_id:
-        return None
-    if allow_takeover_from and assignee == allow_takeover_from:
-        return None
-    return assignee
+        assignee = None
+    if (
+        assignee
+        and assignee != agent_id
+        and (not allow_takeover_from or assignee != allow_takeover_from)
+    ):
+        return ClaimFailure(kind="assignee_conflict", assignee=assignee)
+    try:
+        boundary = parse_issue_boundary(issue, source="runner:claim_failure_parent")
+        parent_id = boundary.parent_id
+    except ValueError:
+        parent_id = issue.get("parent")
+    claimability = lifecycle.evaluate_epic_claimability(
+        status=issue.get("status"),
+        labels=lifecycle.normalized_labels(issue.get("labels")),
+        issue_type=issue.get("type"),
+        parent_id=parent_id,
+    )
+    if claimability.role.is_epic and not claimability.claimable:
+        return ClaimFailure(
+            kind="non_claimable",
+            detail=",".join(claimability.reasons) or "not_claimable",
+        )
+    return ClaimFailure(kind="unknown")
 
 
 def _format_root_branch_owner(issue: dict[str, object]) -> str:
@@ -518,7 +544,7 @@ def run_worker_once(
                     allow_takeover_from=startup_result.reassign_from,
                 )
             except SystemExit:
-                conflicting_assignee = _claim_conflict_assignee(
+                claim_failure = _classify_claim_failure(
                     beads=infra.beads,
                     epic_id=selected_epic,
                     agent_id=agent.agent_id,
@@ -529,16 +555,24 @@ def run_worker_once(
                 can_retry = (
                     not dry_run
                     and epic_id is None
-                    and bool(conflicting_assignee)
                     and selected_epic not in claim_conflict_excluded_epics
                 )
-                if can_retry and conflicting_assignee is not None:
+                if can_retry and claim_failure.kind == "assignee_conflict":
                     claim_conflict_excluded_epics.add(selected_epic)
                     control.say(
                         "Skipping conflicted epic and retrying selection: "
-                        f"{selected_epic} (assigned to {conflicting_assignee})"
+                        f"{selected_epic} (assigned to {claim_failure.assignee})"
                     )
                     finishstep(extra=f"retry after conflict ({selected_epic})")
+                    continue
+                if can_retry and claim_failure.kind == "non_claimable":
+                    claim_conflict_excluded_epics.add(selected_epic)
+                    detail = claim_failure.detail or "not_claimable"
+                    control.say(
+                        "Skipping non-claimable epic and retrying selection: "
+                        f"{selected_epic} ({detail})"
+                    )
+                    finishstep(extra=f"retry after non-claimable ({selected_epic})")
                     continue
                 raise
 

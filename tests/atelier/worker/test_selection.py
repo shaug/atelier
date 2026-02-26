@@ -1,7 +1,7 @@
 from atelier.worker import selection
 
 
-def test_filter_epics_requires_explicit_ready_and_requires_unassigned() -> None:
+def test_filter_epics_uses_status_contract_for_unassigned_and_assigned() -> None:
     issues = [
         {"id": "at-1", "status": "open", "labels": ["at:epic", "at:ready"], "assignee": None},
         {"id": "at-2", "status": "open", "labels": ["at:epic", "at:draft"], "assignee": None},
@@ -27,7 +27,7 @@ def test_filter_epics_requires_explicit_ready_and_requires_unassigned() -> None:
         skip_draft=True,
     )
 
-    assert [item["id"] for item in ready] == ["at-1"]
+    assert [item["id"] for item in ready] == ["at-1", "at-2", "at-4"]
     assert [item["id"] for item in assigned] == ["at-3"]
 
 

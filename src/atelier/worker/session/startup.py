@@ -8,13 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ... import lifecycle
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
 from ..models_boundary import parse_issue_boundary
 from ..review import MergeConflictSelection, ReviewFeedbackSelection
 
-_TERMINAL_STATUSES = {"closed", "done"}
 _TERMINAL_CHANGESET_LABELS = {"cs:merged", "cs:abandoned"}
 
 
@@ -87,34 +87,22 @@ def _issue_id(issue: dict[str, object]) -> str | None:
     return cleaned or None
 
 
-def _issue_parent_id(issue: dict[str, object]) -> str | None:
-    try:
-        boundary = parse_issue_boundary(issue, source="startup_contract:issue_parent_id")
-    except ValueError:
-        return None
-    return boundary.parent_id
-
-
-def _is_standalone_changeset_identity(issue: dict[str, object]) -> bool:
-    labels = worker_selection.issue_labels(issue)
-    if "at:changeset" not in labels or "at:epic" in labels:
-        return False
-    return _issue_parent_id(issue) is None
-
-
 def _is_executable_epic_identity(issue: dict[str, object]) -> bool:
-    labels = worker_selection.issue_labels(issue)
-    return "at:epic" in labels or _is_standalone_changeset_identity(issue)
+    return worker_selection.has_executable_identity(issue)
 
 
 def _is_terminal(issue: dict[str, object]) -> bool:
-    status = str(issue.get("status") or "").strip().lower()
-    return status in _TERMINAL_STATUSES
+    return lifecycle.is_closed_status(
+        issue.get("status"),
+        labels=worker_selection.issue_labels(issue),
+    )
 
 
 def _is_terminal_explicit_issue(issue: dict[str, object]) -> bool:
-    status = str(issue.get("status") or "").strip().lower()
-    if status in _TERMINAL_STATUSES:
+    if lifecycle.is_closed_status(
+        issue.get("status"),
+        labels=worker_selection.issue_labels(issue),
+    ):
         return True
     labels = worker_selection.issue_labels(issue)
     return bool(_TERMINAL_CHANGESET_LABELS.intersection(labels))
@@ -181,15 +169,14 @@ def next_changeset_service(
     if target:
         issue = target
         issue_id = issue.get("id")
-        labels = service.issue_labels(issue)
-        if "at:draft" in labels or "at:ready" not in labels:
+        claimability = worker_selection.evaluate_epic_claimability(issue)
+        if not claimability.claimable:
             return None
         if (
             isinstance(issue_id, str)
             and issue_id == context.epic_id
-            and "at:changeset" in labels
-            and "cs:merged" not in labels
-            and "cs:abandoned" not in labels
+            and claimability.role.is_changeset
+            and not _is_terminal_explicit_issue(issue)
             and (
                 (
                     service.is_changeset_ready(issue)
@@ -222,14 +209,7 @@ def next_changeset_service(
                 return None
             if not service.has_open_descendant_changesets(context.epic_id):
                 return issue
-        status = str(issue.get("status") or "").strip().lower()
-        if (
-            isinstance(issue_id, str)
-            and issue_id == context.epic_id
-            and "at:epic" in labels
-            and "at:ready" in labels
-            and status not in {"closed", "done"}
-        ):
+        if isinstance(issue_id, str) and issue_id == context.epic_id and claimability.role.is_epic:
             descendants = service.list_descendant_changesets(
                 context.epic_id,
                 include_closed=True,
@@ -521,8 +501,8 @@ def run_startup_contract_service(
                 should_exit=True,
                 reason="explicit_epic_not_executable",
             )
-        labels = worker_selection.issue_labels(explicit_issue)
-        status = str(explicit_issue.get("status") or "").strip().lower()
+        claimability = worker_selection.evaluate_epic_claimability(explicit_issue)
+        status = claimability.status
         if _is_terminal_explicit_issue(explicit_issue):
             service.emit(
                 f"Explicit epic {selected_epic} is completed; run without an epic id to "
@@ -534,16 +514,17 @@ def run_startup_contract_service(
                 should_exit=True,
                 reason="explicit_epic_completed",
             )
-        if "at:draft" in labels or "at:ready" not in labels:
+        if not claimability.claimable:
+            detail = ", ".join(claimability.reasons)
             service.emit(
-                f"Explicit epic {selected_epic} is not ready; mark it at:ready or run "
-                "without an epic id."
+                f"Explicit epic {selected_epic} is not claimable under lifecycle contract "
+                f"({detail}); move it to open/in_progress and rerun without an epic id."
             )
             return StartupContractResult(
                 epic_id=selected_epic,
                 changeset_id=None,
                 should_exit=True,
-                reason="explicit_epic_not_ready",
+                reason="explicit_epic_not_claimable",
             )
         assignee = explicit_issue.get("assignee")
         if isinstance(assignee, str):
@@ -731,17 +712,17 @@ def run_startup_contract_service(
         issue = load_claimable_issue(epic_id, stage=stage)
         if issue is None:
             return False
-        labels = worker_selection.issue_labels(issue)
-        if "at:draft" in labels:
-            atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=draft")
-            return False
-        if "at:ready" not in labels:
-            atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=not_ready")
-            return False
-        status = str(issue.get("status") or "")
-        if status and not worker_selection.is_eligible_status(status, allow_hooked=True):
+        status = issue.get("status")
+        if not worker_selection.is_eligible_status(status, allow_hooked=True):
             atelier_log.debug(
                 f"startup skipping {stage} epic={epic_id} reason=ineligible_status status={status}"
+            )
+            return False
+        evaluation = worker_selection.evaluate_epic_claimability(issue)
+        if not evaluation.claimable:
+            detail = ",".join(evaluation.reasons)
+            atelier_log.debug(
+                f"startup skipping {stage} epic={epic_id} reason=not_claimable detail={detail}"
             )
             return False
         assignee = issue.get("assignee")
@@ -917,12 +898,6 @@ def run_startup_contract_service(
                     )
                 continue
             if is_excluded(issue_id, stage="review-feedback"):
-                continue
-            status = str(issue.get("status") or "")
-            if str(status).strip().lower() not in {"open", "ready", "in_progress"}:
-                continue
-            labels = worker_selection.issue_labels(issue)
-            if "at:draft" in labels or "at:ready" not in labels:
                 continue
             if not is_claimable(issue_id, stage="review-feedback"):
                 continue

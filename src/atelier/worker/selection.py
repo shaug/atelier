@@ -5,14 +5,29 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Callable
 
-_EXECUTABLE_LABELS = {"at:epic", "at:changeset"}
+from .. import lifecycle
+from .models_boundary import parse_issue_boundary
 
 
 def issue_labels(issue: dict[str, object]) -> set[str]:
-    labels = issue.get("labels")
-    if not isinstance(labels, list):
-        return set()
-    return {str(label) for label in labels if label is not None}
+    return lifecycle.normalized_labels(issue.get("labels"))
+
+
+def issue_parent_id(issue: dict[str, object]) -> str | None:
+    try:
+        boundary = parse_issue_boundary(issue, source="worker_selection:issue_parent_id")
+    except ValueError:
+        return None
+    return boundary.parent_id
+
+
+def evaluate_epic_claimability(issue: dict[str, object]) -> lifecycle.EpicClaimEvaluation:
+    return lifecycle.evaluate_epic_claimability(
+        status=issue.get("status"),
+        labels=issue_labels(issue),
+        issue_type=issue.get("type"),
+        parent_id=issue_parent_id(issue),
+    )
 
 
 def agent_role(agent_id: object) -> str | None:
@@ -32,16 +47,16 @@ def is_planner_agent_id(agent_id: object) -> bool:
 
 
 def has_planner_executable_assignee(issue: dict[str, object]) -> bool:
-    labels = issue_labels(issue)
-    if not labels.intersection(_EXECUTABLE_LABELS):
+    evaluation = evaluate_epic_claimability(issue)
+    if not evaluation.role.is_epic:
         return False
     assignee = issue.get("assignee")
     return is_planner_agent_id(assignee)
 
 
 def has_executable_identity(issue: dict[str, object]) -> bool:
-    """Return whether an issue represents executable worker work."""
-    return bool(issue_labels(issue).intersection(_EXECUTABLE_LABELS))
+    """Return whether an issue is top-level executable work identity."""
+    return evaluate_epic_claimability(issue).role.is_epic
 
 
 def has_explicit_ready_label(issue: dict[str, object]) -> bool:
@@ -53,13 +68,8 @@ def planner_owned_executable_issues(issues: list[dict[str, object]]) -> list[dic
     return [issue for issue in issues if has_planner_executable_assignee(issue)]
 
 
-def is_eligible_status(status: str, *, allow_hooked: bool) -> bool:
-    normalized = status.strip().lower()
-    if normalized in {"open", "ready", "in_progress"}:
-        return True
-    if allow_hooked and normalized == "hooked":
-        return True
-    return False
+def is_eligible_status(status: object, *, allow_hooked: bool) -> bool:
+    return lifecycle.is_eligible_epic_status(status, allow_hooked=allow_hooked)
 
 
 def filter_epics(
@@ -73,17 +83,18 @@ def filter_epics(
     """Filter epics according to assignee and eligible status."""
     filtered: list[dict[str, object]] = []
     for issue in issues:
-        status = str(issue.get("status") or "")
+        evaluation = evaluate_epic_claimability(issue)
+        if not evaluation.role.is_epic:
+            continue
+        status = issue.get("status")
         if not is_eligible_status(status, allow_hooked=allow_hooked):
+            continue
+        if skip_draft and evaluation.status == "deferred":
+            continue
+        if not evaluation.claimable:
             continue
         if has_planner_executable_assignee(issue):
             continue
-        labels = issue_labels(issue)
-        if skip_draft:
-            if "at:draft" in labels:
-                continue
-            if has_executable_identity(issue) and "at:ready" not in labels:
-                continue
         issue_assignee = issue.get("assignee")
         if assignee is not None:
             if issue_assignee != assignee:
@@ -148,15 +159,12 @@ def stale_family_assigned_epics(
     family = agent_family_id(agent_id)
     candidates: list[dict[str, object]] = []
     for issue in issues:
-        status = str(issue.get("status") or "")
-        if not is_eligible_status(status, allow_hooked=True):
+        evaluation = evaluate_epic_claimability(issue)
+        if not evaluation.role.is_epic or not evaluation.claimable:
+            continue
+        if not is_eligible_status(issue.get("status"), allow_hooked=True):
             continue
         if has_planner_executable_assignee(issue):
-            continue
-        labels = issue_labels(issue)
-        if "at:draft" in labels:
-            continue
-        if has_executable_identity(issue) and "at:ready" not in labels:
             continue
         assignee = issue.get("assignee")
         if not isinstance(assignee, str) or not assignee or assignee == agent_id:
@@ -190,10 +198,10 @@ def select_epic_from_ready_changesets(
                 candidate = maybe_epic
         candidate_issue = known_epics.get(candidate)
         source_issue = candidate_issue if candidate_issue is not None else changeset
-        labels = issue_labels(source_issue)
-        if "at:draft" in labels:
+        evaluation = evaluate_epic_claimability(source_issue)
+        if not evaluation.claimable or not evaluation.role.is_epic:
             continue
-        if has_executable_identity(source_issue) and "at:ready" not in labels:
+        if not is_eligible_status(source_issue.get("status"), allow_hooked=False):
             continue
         if has_planner_executable_assignee(source_issue):
             continue

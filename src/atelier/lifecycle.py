@@ -77,6 +77,16 @@ class RunnableLeafEvaluation:
     reasons: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class EpicClaimEvaluation:
+    """Evaluation result for whether a top-level work bead is claimable."""
+
+    claimable: bool
+    status: str | None
+    role: WorkRoleInference
+    reasons: tuple[str, ...]
+
+
 def _clean_text(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -288,6 +298,46 @@ def evaluate_runnable_leaf(
         reasons.append("dependencies-unsatisfied")
     return RunnableLeafEvaluation(
         runnable=not reasons,
+        status=canonical_status,
+        role=role,
+        reasons=tuple(reasons),
+    )
+
+
+def evaluate_epic_claimability(
+    *,
+    status: object,
+    labels: set[str],
+    issue_type: object,
+    parent_id: object,
+) -> EpicClaimEvaluation:
+    """Evaluate whether an issue is claimable as top-level executable work.
+
+    Args:
+        status: Raw issue status.
+        labels: Normalized issue labels.
+        issue_type: Raw issue type value.
+        parent_id: Raw parent issue identifier.
+
+    Returns:
+        Claimability evaluation with canonical status and diagnostics.
+    """
+    role = infer_work_role(
+        labels=labels,
+        issue_type=issue_type,
+        parent_id=parent_id,
+        has_work_children=False,
+    )
+    canonical_status = canonical_lifecycle_status(status, labels=labels)
+    reasons: list[str] = []
+    if not role.is_work:
+        reasons.append("not-work-bead")
+    if not role.is_epic:
+        reasons.append("not-top-level-work")
+    if canonical_status not in ACTIVE_LIFECYCLE_STATUSES:
+        reasons.append(f"status={canonical_status or 'missing'}")
+    return EpicClaimEvaluation(
+        claimable=not reasons,
         status=canonical_status,
         role=role,
         reasons=tuple(reasons),

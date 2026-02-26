@@ -1731,7 +1731,7 @@ def test_claim_epic_backfills_epic_label_for_standalone_changeset() -> None:
     assert "at:epic" in called_args
 
 
-def test_claim_epic_requires_explicit_ready_for_executable_work() -> None:
+def test_claim_epic_rejects_executable_work_without_active_status() -> None:
     issue = {"id": "at-legacy", "labels": ["at:epic"], "assignee": None}
 
     with (
@@ -1746,10 +1746,12 @@ def test_claim_epic_requires_explicit_ready_for_executable_work() -> None:
                 cwd=Path("/repo"),
             )
 
-    assert "not marked at:ready" in str(die_fn.call_args.args[0])
+    assert "not claimable under lifecycle contract (status=missing)" in str(
+        die_fn.call_args.args[0]
+    )
 
 
-def test_claim_epic_rejects_legacy_draft_label() -> None:
+def test_claim_epic_rejects_deferred_executable_work() -> None:
     issue = {"id": "at-legacy", "labels": ["at:epic", "at:draft"], "assignee": None}
 
     with (
@@ -1764,7 +1766,9 @@ def test_claim_epic_rejects_legacy_draft_label() -> None:
                 cwd=Path("/repo"),
             )
 
-    assert "legacy at:draft label" in str(die_fn.call_args.args[0])
+    assert "not claimable under lifecycle contract (status=deferred)" in str(
+        die_fn.call_args.args[0]
+    )
 
 
 def test_set_agent_hook_updates_description() -> None:

@@ -53,7 +53,7 @@ class _NextChangesetService(worker_startup.NextChangesetService):
 
     def ready_changesets(self, *, epic_id: str) -> list[dict[str, object]]:
         return beads.run_bd_json(
-            ["ready", "--parent", epic_id, "--label", "at:changeset"],
+            ["ready", "--parent", epic_id],
             beads_root=self._beads_root,
             cwd=self._repo_root,
         )
@@ -566,7 +566,7 @@ class _StartupContractService(worker_startup.StartupContractService):
 
     def list_epics(self) -> list[dict[str, object]]:
         return beads.run_bd_json(
-            ["list", "--label", "at:epic"],
+            ["list"],
             beads_root=self._beads_root,
             cwd=self._repo_root,
         )
@@ -713,7 +713,7 @@ class _StartupContractService(worker_startup.StartupContractService):
 
     def ready_changesets_global(self) -> list[dict[str, object]]:
         return beads.run_bd_json(
-            ["ready", "--label", "at:changeset"],
+            ["ready"],
             beads_root=self._beads_root,
             cwd=self._repo_root,
         )
