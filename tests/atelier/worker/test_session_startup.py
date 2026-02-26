@@ -559,9 +559,16 @@ def test_run_startup_contract_explicit_epic_not_ready_exits_cleanly() -> None:
 
 def test_run_startup_contract_explicit_epic_assigned_exits_cleanly() -> None:
     emitted: list[str] = []
+    stale_probe: list[tuple[str, str]] = []
 
     def next_changeset(**_kwargs: Any) -> dict[str, object] | None:
         raise AssertionError("next_changeset should not run for assigned explicit epic")
+
+    def stale_family_assigned_epics(
+        issues: list[dict[str, object]], *, agent_id: str
+    ) -> list[dict[str, object]]:
+        stale_probe.extend((str(issue.get("id")), agent_id) for issue in issues)
+        return []
 
     result = _run_startup(
         explicit_epic_id="at-explicit",
@@ -571,6 +578,7 @@ def test_run_startup_contract_explicit_epic_assigned_exits_cleanly() -> None:
             "assignee": "atelier/worker/codex/p777",
             "labels": ["at:epic", "at:ready", "at:hooked"],
         },
+        stale_family_assigned_epics=stale_family_assigned_epics,
         next_changeset=next_changeset,
         emit=lambda message: emitted.append(message),
     )
@@ -581,6 +589,33 @@ def test_run_startup_contract_explicit_epic_assigned_exits_cleanly() -> None:
     assert emitted == [
         "Explicit epic at-explicit is already assigned/hooked by atelier/worker/codex/p777; "
         "release the stale lock or rerun without an epic id."
+    ]
+    assert stale_probe == [("at-explicit", "atelier/worker/codex/p100")]
+
+
+def test_run_startup_contract_reclaims_stale_explicit_epic_assignment() -> None:
+    emitted: list[str] = []
+    stale_issue = {
+        "id": "at-explicit",
+        "status": "hooked",
+        "assignee": "atelier/worker/codex/p777",
+        "labels": ["at:epic", "at:ready", "at:hooked"],
+    }
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        show_issue=lambda _issue_id: stale_issue,
+        stale_family_assigned_epics=lambda issues, agent_id: issues,
+        next_changeset=lambda **_kwargs: {"id": "at-explicit.1"},
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is False
+    assert result.reason == "explicit_epic"
+    assert result.epic_id == "at-explicit"
+    assert result.reassign_from == "atelier/worker/codex/p777"
+    assert emitted == [
+        "Reclaiming stale epic assignment: at-explicit (from atelier/worker/codex/p777)"
     ]
 
 

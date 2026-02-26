@@ -550,17 +550,30 @@ def run_startup_contract_service(
             assignee = assignee.strip()
         else:
             assignee = ""
+        explicit_reassign_from: str | None = None
         if assignee and assignee != agent_id:
-            service.emit(
-                f"Explicit epic {selected_epic} is already assigned/hooked by {assignee}; "
-                "release the stale lock or rerun without an epic id."
+            stale_explicit_assignee = service.stale_family_assigned_epics(
+                [explicit_issue],
+                agent_id=agent_id,
             )
-            return StartupContractResult(
-                epic_id=selected_epic,
-                changeset_id=None,
-                should_exit=True,
-                reason="explicit_epic_assigned",
-            )
+            if stale_explicit_assignee:
+                explicit_reassign_from = assignee
+                service.emit(f"Reclaiming stale epic assignment: {selected_epic} (from {assignee})")
+                atelier_log.warning(
+                    "startup reclaiming stale assignment "
+                    f"epic={selected_epic} previous_assignee={assignee}"
+                )
+            else:
+                service.emit(
+                    f"Explicit epic {selected_epic} is already assigned/hooked by {assignee}; "
+                    "release the stale lock or rerun without an epic id."
+                )
+                return StartupContractResult(
+                    epic_id=selected_epic,
+                    changeset_id=None,
+                    should_exit=True,
+                    reason="explicit_epic_assigned",
+                )
         if branch_pr and repo_slug:
             explicit_conflict = service.select_conflicted_changeset(
                 epic_id=selected_epic,
@@ -572,6 +585,7 @@ def run_startup_contract_service(
                     changeset_id=explicit_conflict.changeset_id,
                     should_exit=False,
                     reason="merge_conflict",
+                    reassign_from=explicit_reassign_from,
                 )
             explicit_feedback = service.select_review_feedback_changeset(
                 epic_id=selected_epic,
@@ -583,6 +597,7 @@ def run_startup_contract_service(
                     changeset_id=explicit_feedback.changeset_id,
                     should_exit=False,
                     reason="review_feedback",
+                    reassign_from=explicit_reassign_from,
                 )
         explicit_next_changeset = service.next_changeset(
             epic_id=selected_epic,
@@ -630,6 +645,7 @@ def run_startup_contract_service(
             changeset_id=None,
             should_exit=False,
             reason="explicit_epic",
+            reassign_from=explicit_reassign_from,
         )
 
     if queue_only:
