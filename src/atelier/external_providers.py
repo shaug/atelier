@@ -149,7 +149,12 @@ class ExternalProvider(Protocol):
         ...
 
     def create_child_ticket(
-        self, ref: ExternalTicketRef, *, title: str, body: str | None = None
+        self,
+        ref: ExternalTicketRef,
+        *,
+        title: str,
+        body: str | None = None,
+        labels: tuple[str, ...] = (),
     ) -> ExternalTicketRef:
         """Optional: create a child/split ticket for review-sized work."""
         ...

@@ -344,9 +344,15 @@ def _create_ticket_ref(
     body: str | None,
     parent_ticket: ExternalTicketRef | None,
 ) -> ExternalTicketRef:
+    labels = _external_labels(issue)
     if parent_ticket and provider.capabilities.supports_children:
         try:
-            return provider.create_child_ticket(parent_ticket, title=title, body=body)
+            return provider.create_child_ticket(
+                parent_ticket,
+                title=title,
+                body=body,
+                labels=labels,
+            )
         except NotImplementedError:
             pass
     issue_id = str(issue.get("id") or "").strip()
@@ -355,7 +361,7 @@ def _create_ticket_ref(
             bead_id=issue_id or title,
             title=title,
             body=body,
-            labels=_external_labels(issue),
+            labels=labels,
         )
     )
     return record.ref

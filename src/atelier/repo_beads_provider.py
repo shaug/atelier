@@ -136,13 +136,21 @@ class RepoBeadsProvider:
         return self.sync_state(ref)
 
     def create_child_ticket(
-        self, ref: ExternalTicketRef, *, title: str, body: str | None = None
+        self,
+        ref: ExternalTicketRef,
+        *,
+        title: str,
+        body: str | None = None,
+        labels: tuple[str, ...] = (),
     ) -> ExternalTicketRef:
         if not self.allow_write:
             raise RuntimeError("Repo Beads export disabled (allow_write=false)")
+        del ref
         args = ["create", "--title", title, "--type", "task", "--silent"]
         if body:
             args.extend(["--description", body])
+        if labels:
+            args.extend(["--labels", ",".join(labels)])
         result = self._run_bd_command(args)
         issue_id = result.stdout.strip()
         if not issue_id:

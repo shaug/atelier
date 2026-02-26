@@ -1285,6 +1285,7 @@ def _merge_ticket_state(
     return replace(
         ticket,
         url=refreshed.url or ticket.url,
+        parent_id=refreshed.parent_id or ticket.parent_id,
         state=refreshed.state or ("closed" if assume_closed else ticket.state),
         raw_state=refreshed.raw_state or ticket.raw_state,
         state_updated_at=refreshed.state_updated_at or ticket.state_updated_at,
