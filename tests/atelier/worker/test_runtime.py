@@ -120,7 +120,7 @@ def test_run_worker_sessions_explicit_fail_closed_exits_nonzero() -> None:
             session_key="sess",
             run_worker_once=lambda *_args, **_kwargs: WorkerRunSummary(
                 started=False,
-                reason="explicit_epic_not_ready",
+                reason="explicit_epic_not_claimable",
                 epic_id="at-explicit",
             ),
             report_worker_summary=lambda _summary, _dry: None,
@@ -131,7 +131,7 @@ def test_run_worker_sessions_explicit_fail_closed_exits_nonzero() -> None:
 
     assert raised.value.code == 1
     assert emitted[-1] == (
-        "Terminal outcome: taxonomy=fail_closed, summary_reason=explicit_epic_not_ready, "
+        "Terminal outcome: taxonomy=fail_closed, summary_reason=explicit_epic_not_claimable, "
         "epic=at-explicit"
     )
 

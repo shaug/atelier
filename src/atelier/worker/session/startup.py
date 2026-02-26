@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ... import lifecycle
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
@@ -32,12 +33,6 @@ class NextChangesetService(Protocol):
     """Typed next-changeset service boundary."""
 
     def show_issue(self, issue_id: str) -> dict[str, object] | None: ...
-
-    def ready_changesets(self, *, epic_id: str) -> list[dict[str, object]]: ...
-
-    def issue_labels(self, issue: dict[str, object]) -> set[str]: ...
-
-    def is_changeset_ready(self, issue: dict[str, object]) -> bool: ...
 
     def changeset_waiting_on_review_or_signals(
         self,
@@ -87,34 +82,22 @@ def _issue_id(issue: dict[str, object]) -> str | None:
     return cleaned or None
 
 
-def _issue_parent_id(issue: dict[str, object]) -> str | None:
-    try:
-        boundary = parse_issue_boundary(issue, source="startup_contract:issue_parent_id")
-    except ValueError:
-        return None
-    return boundary.parent_id
-
-
-def _is_standalone_changeset_identity(issue: dict[str, object]) -> bool:
-    labels = worker_selection.issue_labels(issue)
-    if "at:changeset" not in labels or "at:epic" in labels:
-        return False
-    return _issue_parent_id(issue) is None
-
-
 def _is_executable_epic_identity(issue: dict[str, object]) -> bool:
-    labels = worker_selection.issue_labels(issue)
-    return "at:epic" in labels or _is_standalone_changeset_identity(issue)
+    return worker_selection.has_executable_identity(issue)
 
 
 def _is_terminal(issue: dict[str, object]) -> bool:
-    status = str(issue.get("status") or "").strip().lower()
-    return status in _TERMINAL_STATUSES
+    return lifecycle.is_closed_status(
+        issue.get("status"),
+        labels=worker_selection.issue_labels(issue),
+    )
 
 
 def _is_terminal_explicit_issue(issue: dict[str, object]) -> bool:
-    status = str(issue.get("status") or "").strip().lower()
-    if status in _TERMINAL_STATUSES:
+    if lifecycle.is_closed_status(
+        issue.get("status"),
+        labels=worker_selection.issue_labels(issue),
+    ):
         return True
     labels = worker_selection.issue_labels(issue)
     return bool(_TERMINAL_CHANGESET_LABELS.intersection(labels))
@@ -126,6 +109,21 @@ def _dependency_ids(issue: dict[str, object]) -> tuple[str, ...] | None:
     except ValueError:
         return None
     return boundary.dependency_ids
+
+
+def _work_parent_ids(issues: list[dict[str, object]]) -> set[str]:
+    known_ids = {issue_id for issue in issues if (issue_id := _issue_id(issue)) is not None}
+    parent_ids: set[str] = set()
+    for issue in issues:
+        if not lifecycle.is_work_issue(
+            labels=worker_selection.issue_labels(issue),
+            issue_type=worker_selection.issue_type(issue),
+        ):
+            continue
+        parent_id = worker_selection.issue_parent_id(issue)
+        if parent_id is not None and parent_id in known_ids:
+            parent_ids.add(parent_id)
+    return parent_ids
 
 
 def _dependencies_satisfied(
@@ -155,6 +153,22 @@ def _dependencies_satisfied(
     return True
 
 
+def _is_runnable_changeset(
+    issue: dict[str, object],
+    *,
+    has_work_children: bool,
+    dependencies_satisfied: bool,
+) -> bool:
+    return lifecycle.evaluate_runnable_leaf(
+        status=issue.get("status"),
+        labels=worker_selection.issue_labels(issue),
+        issue_type=worker_selection.issue_type(issue),
+        parent_id=worker_selection.issue_parent_id(issue),
+        has_work_children=has_work_children,
+        dependencies_satisfied=dependencies_satisfied,
+    ).runnable
+
+
 def next_changeset_service(
     *, context: NextChangesetContext, service: NextChangesetService
 ) -> dict[str, object] | None:
@@ -181,112 +195,94 @@ def next_changeset_service(
     if target:
         issue = target
         issue_id = issue.get("id")
-        labels = service.issue_labels(issue)
-        if "at:draft" in labels or "at:ready" not in labels:
+        claimability = worker_selection.evaluate_epic_claimability(issue)
+        if not claimability.claimable:
             return None
+        explicit_descendants = service.list_descendant_changesets(
+            context.epic_id,
+            include_closed=True,
+        )
+        explicit_descendants_by_id = {
+            descendant_id: descendant
+            for descendant in explicit_descendants
+            if (descendant_id := _issue_id(descendant)) is not None
+        }
+        explicit_work_parent_ids = _work_parent_ids([issue, *explicit_descendants])
+        target_has_work_children = (
+            bool(explicit_descendants) or context.epic_id in explicit_work_parent_ids
+        )
+        target_is_leaf = not target_has_work_children
+        target_dependencies_satisfied = _dependencies_satisfied(
+            issue=issue,
+            epic_changesets_by_id=explicit_descendants_by_id,
+            dependency_cache={},
+            context=context,
+            service=service,
+        )
+        target_runnable = _is_runnable_changeset(
+            issue,
+            has_work_children=target_has_work_children,
+            dependencies_satisfied=target_dependencies_satisfied,
+        )
+        target_recovery_candidate = service.is_changeset_recovery_candidate(
+            issue,
+            repo_slug=context.repo_slug,
+            branch_pr=context.branch_pr,
+            git_path=context.git_path,
+        )
         if (
             isinstance(issue_id, str)
             and issue_id == context.epic_id
-            and "at:changeset" in labels
-            and "cs:merged" not in labels
-            and "cs:abandoned" not in labels
+            and target_is_leaf
+            and not _is_terminal_explicit_issue(issue)
             and (
-                (
-                    service.is_changeset_ready(issue)
-                    and (not review_waiting(issue) or review_resume_allowed(issue))
-                )
-                or service.is_changeset_recovery_candidate(
-                    issue,
-                    repo_slug=context.repo_slug,
-                    branch_pr=context.branch_pr,
-                    git_path=context.git_path,
-                )
+                (target_runnable and (not review_waiting(issue) or review_resume_allowed(issue)))
+                or target_recovery_candidate
             )
         ):
-            descendants = service.list_descendant_changesets(
-                context.epic_id,
-                include_closed=True,
-            )
-            descendants_by_id = {
-                descendant_id: descendant
-                for descendant in descendants
-                if (descendant_id := _issue_id(descendant)) is not None
-            }
-            if not _dependencies_satisfied(
-                issue=issue,
-                epic_changesets_by_id=descendants_by_id,
-                dependency_cache={},
-                context=context,
-                service=service,
-            ):
-                return None
             if not service.has_open_descendant_changesets(context.epic_id):
                 return issue
-        status = str(issue.get("status") or "").strip().lower()
         if (
             isinstance(issue_id, str)
             and issue_id == context.epic_id
-            and "at:epic" in labels
-            and "at:ready" in labels
-            and status not in {"closed", "done"}
+            and target_is_leaf
+            and not _is_terminal_explicit_issue(issue)
+            and not target_recovery_candidate
         ):
-            descendants = service.list_descendant_changesets(
-                context.epic_id,
-                include_closed=True,
-            )
-            if not descendants:
+            return None
+        if isinstance(issue_id, str) and issue_id == context.epic_id and claimability.role.is_epic:
+            if not explicit_descendants:
                 return issue
 
     descendants = service.list_descendant_changesets(context.epic_id, include_closed=False)
     descendants_by_id = {
         issue_id: issue for issue in descendants if (issue_id := _issue_id(issue)) is not None
     }
+    work_parent_ids = _work_parent_ids(descendants)
     changesets: list[dict[str, object]] = []
-    changeset_ids: set[str] = set()
-    for issue in service.ready_changesets(epic_id=context.epic_id):
-        issue_id = _issue_id(issue)
-        if issue_id is None or issue_id in changeset_ids:
-            continue
-        canonical_issue = descendants_by_id.get(issue_id)
-        if canonical_issue is None:
-            loaded_issue = service.show_issue(issue_id)
-            if loaded_issue is not None and _issue_id(loaded_issue) == issue_id:
-                canonical_issue = loaded_issue
-        if canonical_issue is None:
-            canonical_issue = issue
-        changesets.append(canonical_issue)
-        changeset_ids.add(issue_id)
     dependency_cache: dict[str, dict[str, object] | None] = {}
     for issue in descendants:
         issue_id = _issue_id(issue)
-        if issue_id is None or issue_id in changeset_ids:
+        if issue_id is None:
             continue
-        if not service.is_changeset_ready(issue):
-            continue
-        if not _dependencies_satisfied(
-            issue=issue,
-            epic_changesets_by_id=descendants_by_id,
-            dependency_cache=dependency_cache,
-            context=context,
-            service=service,
-        ):
-            continue
-        changesets.append(issue)
-        changeset_ids.add(issue_id)
-    if not changesets:
-        return None
-    actionable = [
-        issue
-        for issue in changesets
-        if service.is_changeset_ready(issue)
-        and _dependencies_satisfied(
+        dependencies_satisfied = _dependencies_satisfied(
             issue=issue,
             epic_changesets_by_id=descendants_by_id,
             dependency_cache=dependency_cache,
             context=context,
             service=service,
         )
-        and (not review_waiting(issue) or review_resume_allowed(issue))
+        if not _is_runnable_changeset(
+            issue,
+            has_work_children=issue_id in work_parent_ids,
+            dependencies_satisfied=dependencies_satisfied,
+        ):
+            continue
+        changesets.append(issue)
+    if not changesets:
+        return None
+    actionable = [
+        issue for issue in changesets if not review_waiting(issue) or review_resume_allowed(issue)
     ]
     prioritized = sorted(
         actionable,
@@ -521,8 +517,8 @@ def run_startup_contract_service(
                 should_exit=True,
                 reason="explicit_epic_not_executable",
             )
-        labels = worker_selection.issue_labels(explicit_issue)
-        status = str(explicit_issue.get("status") or "").strip().lower()
+        claimability = worker_selection.evaluate_epic_claimability(explicit_issue)
+        status = claimability.status
         if _is_terminal_explicit_issue(explicit_issue):
             service.emit(
                 f"Explicit epic {selected_epic} is completed; run without an epic id to "
@@ -534,16 +530,17 @@ def run_startup_contract_service(
                 should_exit=True,
                 reason="explicit_epic_completed",
             )
-        if "at:draft" in labels or "at:ready" not in labels:
+        if not claimability.claimable:
+            detail = ", ".join(claimability.reasons)
             service.emit(
-                f"Explicit epic {selected_epic} is not ready; mark it at:ready or run "
-                "without an epic id."
+                f"Explicit epic {selected_epic} is not claimable under lifecycle contract "
+                f"({detail}); move it to open/in_progress and rerun without an epic id."
             )
             return StartupContractResult(
                 epic_id=selected_epic,
                 changeset_id=None,
                 should_exit=True,
-                reason="explicit_epic_not_ready",
+                reason="explicit_epic_not_claimable",
             )
         assignee = explicit_issue.get("assignee")
         if isinstance(assignee, str):
@@ -747,17 +744,17 @@ def run_startup_contract_service(
         issue = load_claimable_issue(epic_id, stage=stage)
         if issue is None:
             return False
-        labels = worker_selection.issue_labels(issue)
-        if "at:draft" in labels:
-            atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=draft")
-            return False
-        if "at:ready" not in labels:
-            atelier_log.debug(f"startup skipping {stage} epic={epic_id} reason=not_ready")
-            return False
-        status = str(issue.get("status") or "")
-        if status and not worker_selection.is_eligible_status(status, allow_hooked=True):
+        status = issue.get("status")
+        if not worker_selection.is_eligible_status(status, allow_hooked=True):
             atelier_log.debug(
                 f"startup skipping {stage} epic={epic_id} reason=ineligible_status status={status}"
+            )
+            return False
+        evaluation = worker_selection.evaluate_epic_claimability(issue)
+        if not evaluation.claimable:
+            detail = ",".join(evaluation.reasons)
+            atelier_log.debug(
+                f"startup skipping {stage} epic={epic_id} reason=not_claimable detail={detail}"
             )
             return False
         assignee = issue.get("assignee")
@@ -933,12 +930,6 @@ def run_startup_contract_service(
                     )
                 continue
             if is_excluded(issue_id, stage="review-feedback"):
-                continue
-            status = str(issue.get("status") or "")
-            if str(status).strip().lower() not in {"open", "ready", "in_progress"}:
-                continue
-            labels = worker_selection.issue_labels(issue)
-            if "at:draft" in labels or "at:ready" not in labels:
                 continue
             if not is_claimable(issue_id, stage="review-feedback"):
                 continue

@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import bd_invocation, changesets, exec, messages
+from . import bd_invocation, changesets, exec, lifecycle, messages
 from . import log as atelier_log
 from .external_tickets import (
     ExternalTicketRef,
@@ -540,7 +540,7 @@ def _raw_show_issue(issue_id: str, *, cwd: Path, env: dict[str, str]) -> dict[st
 def _is_agent_issue(issue: dict[str, object]) -> bool:
     if "at:agent" in _issue_labels(issue):
         return True
-    issue_type = _clean_text(issue.get("type"))
+    issue_type = _clean_text(lifecycle.issue_payload_type(issue))
     if issue_type == "agent":
         return True
     description = issue.get("description")
@@ -2145,10 +2145,24 @@ def ensure_atelier_types(*, beads_root: Path, cwd: Path) -> bool:
 
 
 def _issue_labels(issue: dict[str, object]) -> set[str]:
-    labels = issue.get("labels")
-    if not isinstance(labels, list):
-        return set()
-    return {str(label) for label in labels if label}
+    return lifecycle.normalized_labels(issue.get("labels"))
+
+
+def _issue_parent_id(issue: dict[str, object]) -> str | None:
+    try:
+        boundary = parse_issue_boundary(issue, source="beads:issue_parent_id")
+    except ValueError:
+        return None
+    return boundary.parent_id
+
+
+def _evaluate_epic_claimability(issue: dict[str, object]) -> lifecycle.EpicClaimEvaluation:
+    return lifecycle.evaluate_epic_claimability(
+        status=issue.get("status"),
+        labels=_issue_labels(issue),
+        issue_type=lifecycle.issue_payload_type(issue),
+        parent_id=_issue_parent_id(issue),
+    )
 
 
 def _is_standalone_changeset_without_epic_label(issue: dict[str, object]) -> bool:
@@ -3277,22 +3291,21 @@ def claim_epic(
     if not issues:
         die(f"epic not found: {epic_id}")
     issue = issues[0]
-    labels = _issue_labels(issue)
-    executable_labels = {"at:epic", "at:changeset"} & labels
-    if executable_labels and "at:draft" in labels:
+    claimability = _evaluate_epic_claimability(issue)
+    is_executable_work = claimability.role.is_epic
+    if is_executable_work and not claimability.claimable:
+        detail = ", ".join(claimability.reasons)
         die(
-            f"epic {epic_id} carries legacy at:draft label; "
-            "remove at:draft and rely on at:ready for executable readiness"
+            f"epic {epic_id} is not claimable under lifecycle contract ({detail}); "
+            "require top-level work in open/in_progress status"
         )
-    if executable_labels and "at:ready" not in labels:
-        die(f"epic {epic_id} is not marked at:ready")
-    if executable_labels and _is_planner_assignee(agent_id):
+    if is_executable_work and _is_planner_assignee(agent_id):
         die(
             f"epic {epic_id} claim rejected for planner {agent_id}; "
             "planner agents cannot claim executable work"
         )
     existing_assignee = issue.get("assignee")
-    if _is_planner_assignee(existing_assignee) and executable_labels:
+    if _is_planner_assignee(existing_assignee) and is_executable_work:
         die(
             f"epic {epic_id} is assigned to planner {existing_assignee}; "
             "planner agents cannot own executable work"

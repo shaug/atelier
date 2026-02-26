@@ -532,17 +532,17 @@ def test_run_startup_contract_explicit_epic_no_actionable_remains_non_terminal()
     ]
 
 
-def test_run_startup_contract_explicit_epic_not_ready_exits_cleanly() -> None:
+def test_run_startup_contract_explicit_epic_not_claimable_exits_cleanly() -> None:
     emitted: list[str] = []
 
     def next_changeset(**_kwargs: Any) -> dict[str, object] | None:
-        raise AssertionError("next_changeset should not run for non-ready explicit epic")
+        raise AssertionError("next_changeset should not run for non-claimable explicit epic")
 
     result = _run_startup(
         explicit_epic_id="at-explicit",
         show_issue=lambda _issue_id: {
             "id": "at-explicit",
-            "status": "open",
+            "status": "deferred",
             "labels": ["at:epic"],
         },
         next_changeset=next_changeset,
@@ -550,10 +550,11 @@ def test_run_startup_contract_explicit_epic_not_ready_exits_cleanly() -> None:
     )
 
     assert result.should_exit is True
-    assert result.reason == "explicit_epic_not_ready"
+    assert result.reason == "explicit_epic_not_claimable"
     assert result.epic_id == "at-explicit"
     assert emitted == [
-        "Explicit epic at-explicit is not ready; mark it at:ready or run without an epic id."
+        "Explicit epic at-explicit is not claimable under lifecycle contract "
+        "(status=deferred); move it to open/in_progress and rerun without an epic id."
     ]
 
 
@@ -902,7 +903,9 @@ def test_run_startup_contract_uses_ready_changeset_fallback() -> None:
         list_epics=lambda: issues,
         mode="prompt",
         select_epic_prompt=lambda **_kwargs: None,
-        ready_changesets_global=lambda: [{"id": "at-ready"}],
+        ready_changesets_global=lambda: [
+            {"id": "at-ready", "status": "open", "labels": ["at:changeset"]}
+        ],
         next_changeset=lambda **_kwargs: {"id": "at-ready"},
     )
 
