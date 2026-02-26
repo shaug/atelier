@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Mapping
 
-MIN_SUPPORTED_BD_VERSION: tuple[int, int, int] = (0, 51, 0)
+MIN_SUPPORTED_BD_VERSION: tuple[int, int, int] = (0, 56, 1)
 _SEMVER_PATTERN = re.compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
 
 

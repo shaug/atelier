@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 
-from atelier.models import BranchConfig, ProjectUserConfig
+from atelier.models import BeadsSection, BranchConfig, ProjectUserConfig
 
 
 class TestEditorConfig:
@@ -32,3 +32,13 @@ def test_branch_config_maps_legacy_pr_bool_to_pr_mode() -> None:
     disabled = BranchConfig.model_validate({"pr": False})
     assert enabled.pr_mode == "draft"
     assert disabled.pr_mode == "none"
+
+
+def test_beads_section_normalizes_server_runtime_aliases() -> None:
+    parsed = BeadsSection.model_validate({"runtime_mode": "server"})
+    assert parsed.runtime_mode == "dolt-server"
+
+
+def test_beads_section_migrates_legacy_mode_key() -> None:
+    parsed = BeadsSection.model_validate({"mode": "dolt_server"})
+    assert parsed.runtime_mode == "dolt-server"

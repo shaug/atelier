@@ -76,6 +76,40 @@ def test_build_project_config_forces_project_beads_location() -> None:
                     allow_editor_empty=True,
                 )
     assert payload.beads.location == "project"
+    assert payload.beads.runtime_mode == "dolt-server"
+
+
+def test_build_project_config_normalizes_legacy_beads_runtime_mode() -> None:
+    args = SimpleNamespace(
+        branch_prefix="",
+        branch_pr_mode="draft",
+        branch_history="merge",
+        branch_pr_strategy="sequential",
+        agent="codex",
+        editor_edit="cat",
+        editor_work="cat",
+    )
+    existing = {
+        "beads": {"mode": "server"},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = Path(tmp) / "data"
+        with patch("atelier.paths.atelier_data_dir", return_value=data_dir):
+            with patch("atelier.agents.available_agent_names", return_value=("codex",)):
+                payload = config.build_project_config(
+                    existing,
+                    "/repo",
+                    "github.com/org/repo",
+                    "https://github.com/org/repo",
+                    args,
+                    allow_editor_empty=True,
+                )
+    assert payload.beads.runtime_mode == "dolt-server"
+
+
+def test_resolve_beads_runtime_mode_defaults_to_dolt_server() -> None:
+    assert config.resolve_beads_runtime_mode(None) == "dolt-server"
+    assert config.resolve_beads_runtime_mode({"beads": {"runtime_mode": "server"}}) == "dolt-server"
 
 
 def test_build_project_config_accepts_branch_squash_message_override() -> None:
