@@ -439,7 +439,7 @@ def test_run_startup_contract_explicit_epic_no_actionable_reconciles_and_closes(
     ]
 
 
-def test_run_startup_contract_explicit_epic_reconciles_stale_closed_changeset() -> None:
+def test_run_startup_contract_explicit_epic_reconciles_stale_in_progress_changeset() -> None:
     merged_ids: list[str] = []
     integrated_updates: list[tuple[str, str]] = []
     close_calls: list[tuple[str, str | None]] = []
@@ -452,12 +452,14 @@ def test_run_startup_contract_explicit_epic_reconciles_stale_closed_changeset() 
             "status": "open",
             "labels": ["at:epic", "at:ready"],
         },
-        next_changeset=lambda **_kwargs: None,
+        next_changeset=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("next_changeset should not run after explicit merge reconciliation")
+        ),
         list_descendant_changesets=lambda _parent_id, include_closed: (
             [
                 {
                     "id": "at-explicit.1",
-                    "status": "closed",
+                    "status": "in_progress",
                     "labels": ["at:changeset", "cs:in_progress"],
                 }
             ]
@@ -894,6 +896,65 @@ def test_run_startup_contract_reclaims_stale_family_assignment() -> None:
     assert result.reason == "stale_assignee_epic"
     assert result.epic_id == "at-epic"
     assert result.reassign_from == "atelier/worker/codex/p099"
+
+
+def test_run_startup_contract_auto_reconciles_stale_merged_state_before_selection() -> None:
+    merged_ids: list[str] = []
+    close_calls: list[tuple[str, str | None]] = []
+    list_epics_calls = 0
+    stale_epic = {
+        "id": "at-stale",
+        "status": "open",
+        "labels": ["at:epic", "at:ready"],
+        "assignee": None,
+        "created_at": "2026-02-20T00:00:00Z",
+    }
+    ready_epic = {
+        "id": "at-ready",
+        "status": "open",
+        "labels": ["at:epic", "at:ready"],
+        "assignee": None,
+        "created_at": "2026-02-21T00:00:00Z",
+    }
+
+    def list_epics() -> list[dict[str, object]]:
+        nonlocal list_epics_calls
+        list_epics_calls += 1
+        if list_epics_calls == 1:
+            return [stale_epic, ready_epic]
+        return [ready_epic]
+
+    result = _run_startup(
+        list_epics=list_epics,
+        list_descendant_changesets=lambda parent_id, include_closed: (
+            [
+                {
+                    "id": "at-stale.1",
+                    "status": "in_progress",
+                    "labels": ["at:changeset", "cs:in_progress"],
+                }
+            ]
+            if include_closed and parent_id == "at-stale"
+            else []
+        ),
+        changeset_integration_signal=lambda issue, repo_slug, git_path: (
+            issue.get("id") == "at-stale.1",
+            "abc1234" if issue.get("id") == "at-stale.1" else None,
+        ),
+        mark_changeset_merged=lambda changeset_id: merged_ids.append(changeset_id),
+        close_epic_if_complete=lambda epic_id, agent_bead_id: (
+            close_calls.append((epic_id, agent_bead_id)) or epic_id == "at-stale"
+        ),
+        next_changeset=lambda **kwargs: (
+            {"id": "at-ready.1"} if kwargs["epic_id"] == "at-ready" else None
+        ),
+    )
+
+    assert result.reason == "selected_auto"
+    assert result.epic_id == "at-ready"
+    assert merged_ids == ["at-stale.1"]
+    assert ("at-stale", None) in close_calls
+    assert list_epics_calls == 2
 
 
 def test_run_startup_contract_uses_ready_changeset_fallback() -> None:

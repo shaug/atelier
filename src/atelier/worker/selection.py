@@ -160,7 +160,6 @@ def stale_family_assigned_epics(
     agent_id: str,
     is_session_active: Callable[[str], bool],
 ) -> list[dict[str, object]]:
-    family = agent_family_id(agent_id)
     candidates: list[dict[str, object]] = []
     for issue in issues:
         evaluation = evaluate_epic_claimability(issue)
@@ -172,8 +171,6 @@ def stale_family_assigned_epics(
             continue
         assignee = issue.get("assignee")
         if not isinstance(assignee, str) or not assignee or assignee == agent_id:
-            continue
-        if agent_family_id(assignee) != family:
             continue
         if is_session_active(assignee):
             continue
