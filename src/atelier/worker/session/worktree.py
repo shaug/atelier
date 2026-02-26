@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ... import beads, git, worktrees
+from ... import beads, changeset_fields, git, worktrees
 
 
 @dataclass(frozen=True)
@@ -81,6 +81,93 @@ def _mapping_ownership_from_beads(
                 continue
             owner_by_changeset.setdefault(normalized_descendant, epic_id)
     return owner_by_changeset, epic_root_branches
+
+
+def _normalize_branch(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized or normalized.lower() == "null":
+        return None
+    return normalized
+
+
+def _reconcile_epic_changeset_lineage(
+    *,
+    selected_epic: str,
+    changeset_id: str,
+    canonical_root_branch: str,
+    beads_root: Path,
+    repo_root: Path,
+    control: WorktreePreparationControl,
+) -> None:
+    issues = beads.run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=repo_root)
+    if not issues:
+        raise RuntimeError(
+            "epic-as-changeset metadata drift blocked: "
+            f"unable to load changeset metadata for {changeset_id!r}"
+        )
+    issue = issues[0]
+    workspace_root = _normalize_branch(beads.extract_workspace_root_branch(issue))
+    metadata_root = _normalize_branch(changeset_fields.root_branch(issue))
+    metadata_work = _normalize_branch(changeset_fields.work_branch(issue))
+    canonical = _normalize_branch(canonical_root_branch)
+    if canonical is None:
+        raise RuntimeError(
+            "epic-as-changeset metadata drift blocked: missing canonical root branch metadata"
+        )
+
+    if (
+        workspace_root is None
+        and metadata_root is None
+        and metadata_work is not None
+        and metadata_work != canonical
+    ):
+        raise RuntimeError(
+            "epic-as-changeset metadata drift blocked: "
+            f"workspace.root_branch and changeset.root_branch are unset, "
+            f"but changeset.work_branch={metadata_work!r} conflicts with "
+            f"canonical root {canonical!r}"
+        )
+
+    conflicting_metadata = {
+        value
+        for value in (metadata_root, metadata_work)
+        if value is not None and value != canonical
+    }
+    if len(conflicting_metadata) > 1:
+        raise RuntimeError(
+            "epic-as-changeset metadata drift blocked: "
+            f"workspace.root_branch={workspace_root!r}, "
+            f"changeset.root_branch={metadata_root!r}, "
+            f"changeset.work_branch={metadata_work!r}, "
+            f"canonical={canonical!r}"
+        )
+
+    if workspace_root is None:
+        beads.update_workspace_root_branch(
+            selected_epic,
+            canonical,
+            beads_root=beads_root,
+            cwd=repo_root,
+            allow_override=True,
+        )
+        control.say(f"Reconciled workspace.root_branch for {selected_epic}: {canonical}")
+
+    if metadata_root != canonical or metadata_work != canonical:
+        beads.update_changeset_branch_metadata(
+            changeset_id,
+            root_branch=canonical,
+            parent_branch=None,
+            work_branch=canonical,
+            beads_root=beads_root,
+            cwd=repo_root,
+            allow_override=True,
+        )
+        control.say(
+            f"Reconciled epic-as-changeset lineage for {changeset_id}: "
+            f"root={canonical}, work={canonical}"
+        )
 
 
 def prepare_worktrees(
@@ -184,6 +271,15 @@ def prepare_worktrees(
         beads_root=beads_root,
         cwd=repo_root,
     )
+    if epic_is_changeset:
+        _reconcile_epic_changeset_lineage(
+            selected_epic=selected_epic,
+            changeset_id=changeset_id,
+            canonical_root_branch=root_branch_value,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            control=control,
+        )
     if epic_is_changeset:
         changeset_worktree_path = epic_worktree_path
     else:

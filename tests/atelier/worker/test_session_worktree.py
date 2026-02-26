@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import pytest
 
 from atelier import worktrees
 from atelier.worker.session import worktree
@@ -169,3 +171,172 @@ def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: 
         },
     )
     assert any("Reconciled mapping ownership: at-1my, at-gnc" in line for line in logs)
+
+
+def test_prepare_worktrees_reconciles_epic_changeset_metadata_before_checkout() -> None:
+    logs: list[str] = []
+    project_data_dir = Path("/project")
+    repo_root = Path("/repo")
+    mapping = worktrees.WorktreeMapping(
+        epic_id="at-epic",
+        worktree_path="worktrees/at-epic",
+        root_branch="feat/root",
+        changesets={"at-epic": "feat/root"},
+        changeset_worktrees={},
+    )
+    stale_issue = {
+        "id": "at-epic",
+        "description": (
+            "workspace.root_branch: feat/root\n"
+            "changeset.root_branch: feat/old\n"
+            "changeset.work_branch: feat/old\n"
+            "pr_state: in-review\n"
+            "pr_url: https://example.test/pr/7\n"
+        ),
+    }
+    epics = [
+        {
+            "id": "at-epic",
+            "labels": ["at:epic", "at:changeset"],
+            "description": "workspace.root_branch: feat/root\n",
+        }
+    ]
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:3] == ["list", "--label", "at:epic"]:
+            return epics
+        if args[:1] == ["show"]:
+            return [stale_issue]
+        raise AssertionError(f"unexpected bd command: {args!r}")
+
+    with (
+        patch("atelier.worker.session.worktree.worktrees.ensure_git_worktree") as ensure_epic,
+        patch("atelier.worker.session.worktree.worktrees.ensure_changeset_branch") as ensure_branch,
+        patch("atelier.worker.session.worktree.beads.update_worktree_path"),
+        patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.worker.session.worktree.beads.list_descendant_changesets", return_value=[]),
+        patch(
+            "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership", return_value=()
+        ),
+        patch(
+            "atelier.worker.session.worktree.beads.update_changeset_branch_metadata"
+        ) as update_metadata,
+        patch("atelier.worker.session.worktree.worktrees.ensure_changeset_checkout"),
+        patch("atelier.worker.session.worktree.git.git_rev_parse", return_value="abc1234"),
+    ):
+        ensure_epic.return_value = Path("/project/worktrees/at-epic")
+        ensure_branch.return_value = ("feat/root", mapping)
+
+        result = worktree.prepare_worktrees(
+            context=worktree.WorktreePreparationContext(
+                dry_run=False,
+                project_data_dir=project_data_dir,
+                repo_root=repo_root,
+                beads_root=Path("/beads"),
+                selected_epic="at-epic",
+                changeset_id="at-epic",
+                root_branch_value="feat/root",
+                changeset_parent_branch="main",
+                allow_parent_branch_override=False,
+                git_path="git",
+            ),
+            control=_TestControl(logs),
+        )
+
+    assert result.branch == "feat/root"
+    assert result.changeset_worktree_path == Path("/project/worktrees/at-epic")
+    assert update_metadata.call_count == 2
+    reconcile_call = update_metadata.call_args_list[0]
+    assert reconcile_call.kwargs["root_branch"] == "feat/root"
+    assert reconcile_call.kwargs["work_branch"] == "feat/root"
+    assert reconcile_call.kwargs["parent_branch"] is None
+    assert reconcile_call.kwargs["allow_override"] is True
+    finalize_call = update_metadata.call_args_list[1]
+    assert finalize_call.kwargs["root_branch"] == "feat/root"
+    assert finalize_call.kwargs["work_branch"] == "feat/root"
+    assert finalize_call.kwargs["parent_branch"] == "main"
+    assert finalize_call.kwargs["allow_override"] is False
+    assert any("Reconciled epic-as-changeset lineage for at-epic" in line for line in logs)
+
+
+def test_prepare_worktrees_blocks_ambiguous_epic_changeset_lineage_drift() -> None:
+    mapping = worktrees.WorktreeMapping(
+        epic_id="at-epic",
+        worktree_path="worktrees/at-epic",
+        root_branch="feat/root",
+        changesets={"at-epic": "feat/root"},
+        changeset_worktrees={},
+    )
+    drifted_issue = {
+        "id": "at-epic",
+        "description": (
+            "workspace.root_branch: feat/root\n"
+            "changeset.root_branch: feat/one\n"
+            "changeset.work_branch: feat/two\n"
+        ),
+    }
+    checkout = Mock()
+    epics = [
+        {
+            "id": "at-epic",
+            "labels": ["at:epic", "at:changeset"],
+            "description": "workspace.root_branch: feat/root\n",
+        }
+    ]
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:3] == ["list", "--label", "at:epic"]:
+            return epics
+        if args[:1] == ["show"]:
+            return [drifted_issue]
+        raise AssertionError(f"unexpected bd command: {args!r}")
+
+    with (
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_git_worktree",
+            return_value=Path("/project/worktrees/at-epic"),
+        ),
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_changeset_branch",
+            return_value=("feat/root", mapping),
+        ),
+        patch("atelier.worker.session.worktree.beads.update_worktree_path"),
+        patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.worker.session.worktree.beads.list_descendant_changesets", return_value=[]),
+        patch(
+            "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership", return_value=()
+        ),
+        patch("atelier.worker.session.worktree.beads.update_changeset_branch_metadata") as update,
+        patch("atelier.worker.session.worktree.worktrees.ensure_changeset_checkout", checkout),
+    ):
+        with pytest.raises(RuntimeError, match="metadata drift blocked"):
+            worktree.prepare_worktrees(
+                context=worktree.WorktreePreparationContext(
+                    dry_run=False,
+                    project_data_dir=Path("/project"),
+                    repo_root=Path("/repo"),
+                    beads_root=Path("/beads"),
+                    selected_epic="at-epic",
+                    changeset_id="at-epic",
+                    root_branch_value="feat/root",
+                    changeset_parent_branch="main",
+                    allow_parent_branch_override=False,
+                    git_path="git",
+                ),
+                control=_TestControl([]),
+            )
+
+    update.assert_not_called()
+    checkout.assert_not_called()
