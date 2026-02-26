@@ -11,7 +11,12 @@ from ...pr_strategy import PrStrategy
 from ..context import ChangesetSelectionContext, WorkerRunContext
 from ..models import StartupContractResult, WorkerRunSummary
 from ..models_boundary import parse_issue_boundary
-from ..ports import BeadsService, WorkerLifecycleService, WorkerRuntimeDependencies
+from ..ports import (
+    BeadsService,
+    WorkerControlService,
+    WorkerLifecycleService,
+    WorkerRuntimeDependencies,
+)
 from .startup import StartupContractContext
 from .worktree import WorktreePreparationContext
 
@@ -39,6 +44,59 @@ def _claim_conflict_assignee(
     if allow_takeover_from and assignee == allow_takeover_from:
         return None
     return assignee
+
+
+def _abort_startup_read_failure(
+    *,
+    beads: BeadsService,
+    lifecycle: WorkerLifecycleService,
+    control: WorkerControlService,
+    selected_epic: str,
+    agent_id: str,
+    agent_bead_id: str,
+    beads_root: Path,
+    repo_root: Path,
+    dry_run: bool,
+    stage: str,
+    verification_issue_id: str | None,
+    reason: str,
+) -> WorkerRunSummary:
+    """Clean up startup assignment/hook state after Beads read failures."""
+    if dry_run:
+        control.dry_run_log(
+            "Would release epic assignment and clear agent hook after startup Beads read failure."
+        )
+        return WorkerRunSummary(started=False, reason=reason, epic_id=selected_epic)
+    verification_target = verification_issue_id or selected_epic
+    try:
+        lifecycle.send_planner_notification(
+            subject=f"NEEDS-DECISION: Beads read failure during startup ({selected_epic})",
+            body=(
+                "Worker startup could not continue because Beads issue reads failed.\n"
+                f"Epic: {selected_epic}\n"
+                f"Stage: {stage}\n"
+                "Diagnostics: this usually indicates an embedded `bd` panic or an uninitialized "
+                "Beads store.\n"
+                "Action: run `bd doctor --fix --yes`, verify `bd show --json "
+                f"{verification_target}` succeeds, then retry `atelier work`."
+            ),
+            agent_id=agent_id,
+            thread_id=selected_epic,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            dry_run=False,
+        )
+    except SystemExit:
+        pass
+    try:
+        lifecycle.release_epic_assignment(selected_epic, beads_root=beads_root, repo_root=repo_root)
+    except SystemExit:
+        pass
+    try:
+        beads.clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
+    except SystemExit:
+        pass
+    return WorkerRunSummary(started=False, reason=reason, epic_id=selected_epic)
 
 
 @dataclass(frozen=True)
@@ -443,50 +501,20 @@ def run_worker_once(
         except SystemExit as exc:
             detail = f"bd read failed (exit={exc.code})"
             finishstep(extra=detail)
-            if dry_run:
-                control.dry_run_log("Would release epic assignment and clear agent hook.")
-                return finish(
-                    WorkerRunSummary(
-                        started=False,
-                        reason="changeset_label_validation_failed",
-                        epic_id=selected_epic,
-                    )
-                )
-            try:
-                lifecycle.send_planner_notification(
-                    subject=f"NEEDS-DECISION: Beads read failure during startup ({selected_epic})",
-                    body=(
-                        "Worker startup could not validate changeset labels because "
-                        "Beads issue reads failed.\n"
-                        f"Epic: {selected_epic}\n"
-                        "Action: run `bd doctor --fix --yes`, verify `bd show --json "
-                        f"{selected_epic}` succeeds, then retry `atelier work`."
-                    ),
+            return finish(
+                _abort_startup_read_failure(
+                    beads=infra.beads,
+                    lifecycle=lifecycle,
+                    control=control,
+                    selected_epic=selected_epic,
                     agent_id=agent.agent_id,
-                    thread_id=selected_epic,
+                    agent_bead_id=agent_bead_id_required,
                     beads_root=beads_root,
                     repo_root=repo_root,
-                    dry_run=False,
-                )
-            except SystemExit:
-                pass
-            try:
-                lifecycle.release_epic_assignment(
-                    selected_epic, beads_root=beads_root, repo_root=repo_root
-                )
-            except SystemExit:
-                pass
-            try:
-                infra.beads.clear_agent_hook(
-                    agent_bead_id_required, beads_root=beads_root, cwd=repo_root
-                )
-            except SystemExit:
-                pass
-            return finish(
-                WorkerRunSummary(
-                    started=False,
+                    dry_run=dry_run,
+                    stage="validate changeset labels",
+                    verification_issue_id=selected_epic,
                     reason="changeset_label_validation_failed",
-                    epic_id=selected_epic,
                 )
             )
         if invalid_changesets:
@@ -517,22 +545,42 @@ def run_worker_once(
             )
         finishstep()
         finishstep = control.step("Select changeset", timings=timings, trace=trace)
-        selected = select_changeset(
-            context=ChangesetSelectionContext(
-                selected_epic=selected_epic,
-                startup_changeset_id=startup_result.changeset_id,
-            ),
-            service=_BoundChangesetSelectionService(
-                lifecycle=lifecycle,
-                beads=infra.beads,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                repo_slug=repo_slug,
-                branch_pr=project_config.branch.pr,
-                branch_pr_strategy=project_config.branch.pr_strategy,
-                git_path=git_path,
-            ),
-        )
+        try:
+            selected = select_changeset(
+                context=ChangesetSelectionContext(
+                    selected_epic=selected_epic,
+                    startup_changeset_id=startup_result.changeset_id,
+                ),
+                service=_BoundChangesetSelectionService(
+                    lifecycle=lifecycle,
+                    beads=infra.beads,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    repo_slug=repo_slug,
+                    branch_pr=project_config.branch.pr,
+                    branch_pr_strategy=project_config.branch.pr_strategy,
+                    git_path=git_path,
+                ),
+            )
+        except SystemExit as exc:
+            detail = f"bd read failed (exit={exc.code})"
+            finishstep(extra=detail)
+            return finish(
+                _abort_startup_read_failure(
+                    beads=infra.beads,
+                    lifecycle=lifecycle,
+                    control=control,
+                    selected_epic=selected_epic,
+                    agent_id=agent.agent_id,
+                    agent_bead_id=agent_bead_id_required,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    dry_run=dry_run,
+                    stage="select startup changeset",
+                    verification_issue_id=startup_result.changeset_id or selected_epic,
+                    reason="changeset_selection_read_failed",
+                )
+            )
         changeset = selected.issue
         selected_changeset_override = selected.selected_override
         if changeset is None:
@@ -581,9 +629,27 @@ def run_worker_once(
                     root_branch=parent_branch_for_changeset,
                 )
             else:
-                selected_changeset = infra.beads.run_bd_json(
-                    ["show", str(changeset_id)], beads_root=beads_root, cwd=repo_root
-                )
+                try:
+                    selected_changeset = infra.beads.run_bd_json(
+                        ["show", str(changeset_id)], beads_root=beads_root, cwd=repo_root
+                    )
+                except SystemExit:
+                    return finish(
+                        _abort_startup_read_failure(
+                            beads=infra.beads,
+                            lifecycle=lifecycle,
+                            control=control,
+                            selected_epic=selected_epic,
+                            agent_id=agent.agent_id,
+                            agent_bead_id=agent_bead_id_required,
+                            beads_root=beads_root,
+                            repo_root=repo_root,
+                            dry_run=dry_run,
+                            stage="read selected changeset metadata",
+                            verification_issue_id=str(changeset_id),
+                            reason="changeset_metadata_read_failed",
+                        )
+                    )
                 if selected_changeset:
                     current_parent_branch = changeset_fields.parent_branch(selected_changeset[0])
                     parent_branch_for_changeset = lifecycle.changeset_parent_branch(
