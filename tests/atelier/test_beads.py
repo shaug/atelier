@@ -333,6 +333,7 @@ def test_run_bd_command_embedded_panic_guidance_mentions_doctor_retry(tmp_path: 
     with (
         patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
         patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads._startup_state_diagnostics", return_value="startup-diag"),
         patch("atelier.beads.die", side_effect=fake_die),
     ):
         with pytest.raises(RuntimeError, match="embedded storage panic from bd"):
@@ -361,6 +362,7 @@ def test_run_bd_command_missing_store_guidance_mentions_beads_dir(tmp_path: Path
         patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
         patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
         patch("atelier.beads._repair_beads_store", return_value=False),
+        patch("atelier.beads._startup_state_diagnostics", return_value="startup-diag"),
         patch("atelier.beads.die", side_effect=fake_die),
     ):
         with pytest.raises(RuntimeError, match="missing or uninitialized Beads store"):
@@ -418,6 +420,110 @@ def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
             )
 
     assert calls == [["bd", "show", "at-2", "--json"], ["bd", "show", "at-1", "--json"]]
+
+
+def test_detect_startup_beads_state_reports_healthy_dolt(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "beads.db").write_bytes(b"")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    legacy_argv = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        if argv == ["bd", "stats", "--json"] or argv == legacy_argv:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":12}}',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+        state = beads.detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
+
+    assert state.classification == "healthy_dolt"
+    assert state.migration_eligible is False
+    assert state.dolt_issue_total == 12
+    assert state.legacy_issue_total == 12
+
+
+def test_detect_startup_beads_state_reports_missing_dolt_with_legacy(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "beads.db").write_bytes(b"")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    legacy_argv = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        if argv == ["bd", "stats", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=2,
+                stdout="",
+                stderr=(
+                    "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                    "doltdb.(*DoltDB).SetCrashOnFatalError"
+                ),
+            )
+        if argv == legacy_argv:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+        state = beads.detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
+
+    assert state.classification == "missing_dolt_with_legacy_sqlite"
+    assert state.migration_eligible is True
+    assert state.dolt_issue_total is None
+    assert state.legacy_issue_total == 8
+
+
+def test_detect_startup_beads_state_reports_insufficient_dolt(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "beads.db").write_bytes(b"")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    legacy_argv = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        if argv == ["bd", "stats", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":3}}',
+                stderr="",
+            )
+        if argv == legacy_argv:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":11}}',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+        state = beads.detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
+
+    assert state.classification == "insufficient_dolt_vs_legacy_data"
+    assert state.migration_eligible is True
+    assert state.dolt_issue_total == 3
+    assert state.legacy_issue_total == 11
 
 
 def test_run_bd_command_allows_changeset_in_progress_when_dependencies_closed(

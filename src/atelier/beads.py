@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import bd_invocation, changesets, exec, messages
+from . import log as atelier_log
 from .external_tickets import (
     ExternalTicketRef,
     external_ticket_payload,
@@ -48,6 +49,10 @@ _EMBEDDED_BACKEND_PANIC_MARKERS = (
     "setcrashonfatalerror",
 )
 _TERMINAL_DEPENDENCY_STATUSES = {"closed", "done"}
+_BEADS_STARTUP_HEALTHY = "healthy_dolt"
+_BEADS_STARTUP_MISSING_DOLT = "missing_dolt_with_legacy_sqlite"
+_BEADS_STARTUP_INSUFFICIENT_DOLT = "insufficient_dolt_vs_legacy_data"
+_BEADS_STARTUP_UNKNOWN = "startup_state_unknown"
 
 
 class _IssueTypeModel(BaseModel):
@@ -173,6 +178,44 @@ class ExternalTicketReconcileResult:
     needs_decision_notes: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class StartupBeadsState:
+    """Read-only startup classification for Dolt and legacy SQLite parity."""
+
+    classification: str
+    migration_eligible: bool
+    has_dolt_store: bool
+    has_legacy_sqlite: bool
+    dolt_issue_total: int | None
+    legacy_issue_total: int | None
+    reason: str
+    dolt_detail: str | None = None
+    legacy_detail: str | None = None
+
+    def diagnostics(self) -> tuple[str, ...]:
+        """Render stable startup diagnostics lines for logs and notifications."""
+        details = [
+            f"classification={self.classification}",
+            "migration_eligible=" + ("yes" if self.migration_eligible else "no"),
+            "dolt_store=" + ("present" if self.has_dolt_store else "missing"),
+            "legacy_sqlite=" + ("present" if self.has_legacy_sqlite else "missing"),
+            "dolt_issue_total="
+            + (str(self.dolt_issue_total) if self.dolt_issue_total is not None else "unavailable"),
+            "legacy_issue_total="
+            + (
+                str(self.legacy_issue_total)
+                if self.legacy_issue_total is not None
+                else "unavailable"
+            ),
+            f"reason={self.reason}",
+        ]
+        if self.dolt_detail:
+            details.append(f"dolt_detail={self.dolt_detail}")
+        if self.legacy_detail:
+            details.append(f"legacy_detail={self.legacy_detail}")
+        return tuple(details)
+
+
 def beads_env(beads_root: Path) -> dict[str, str]:
     """Return an environment mapping with BEADS_DIR set."""
     env = os.environ.copy()
@@ -189,6 +232,15 @@ def _command_output_detail(result: exec.CommandResult) -> str:
     return (result.stderr or result.stdout or "").strip()
 
 
+def _short_detail(value: str | None) -> str | None:
+    if not value:
+        return None
+    flattened = " ".join(part for part in value.strip().splitlines() if part.strip())
+    if not flattened:
+        return None
+    return flattened[:220]
+
+
 def _is_missing_store_error(detail: str) -> bool:
     normalized = detail.lower()
     return any(marker in normalized for marker in _STORE_REPAIR_ERROR_MARKERS)
@@ -197,6 +249,170 @@ def _is_missing_store_error(detail: str) -> bool:
 def _is_embedded_backend_panic(detail: str) -> bool:
     normalized = detail.lower()
     return any(marker in normalized for marker in _EMBEDDED_BACKEND_PANIC_MARKERS)
+
+
+def _startup_dolt_store_exists(beads_root: Path) -> bool:
+    dolt_root = beads_root / "dolt"
+    if not dolt_root.exists():
+        return False
+    if (dolt_root / "beads_at" / ".dolt").is_dir():
+        return True
+    for candidate in dolt_root.glob("**/.dolt"):
+        if candidate.is_dir():
+            return True
+    return False
+
+
+def _extract_total_issues(payload: object) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return None
+    total = summary.get("total_issues")
+    if isinstance(total, bool):
+        return None
+    if isinstance(total, int):
+        return total
+    if isinstance(total, float) and total.is_integer():
+        return int(total)
+    if isinstance(total, str):
+        try:
+            return int(total.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _read_bd_stats_total(
+    argv: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[int | None, str | None]:
+    result = _run_raw_bd_command(argv, cwd=cwd, env=env)
+    if result is None:
+        return None, "missing required command: bd"
+    if result.returncode != 0:
+        return None, _short_detail(_command_output_detail(result))
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return None, "empty stats payload"
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, f"invalid stats payload ({exc})"
+    issue_total = _extract_total_issues(payload)
+    if issue_total is None:
+        return None, "stats payload missing summary.total_issues"
+    return issue_total, None
+
+
+def detect_startup_beads_state(*, beads_root: Path, cwd: Path) -> StartupBeadsState:
+    """Classify startup Beads state without mutating Dolt or SQLite stores.
+
+    Args:
+        beads_root: Project Beads directory.
+        cwd: Working directory for command execution.
+
+    Returns:
+        A deterministic state classification with migration eligibility flags
+        and diagnostics payload fields.
+    """
+    has_legacy_sqlite = (beads_root / "beads.db").exists()
+    has_dolt_store = _startup_dolt_store_exists(beads_root)
+    if not beads_root.exists():
+        return StartupBeadsState(
+            classification=_BEADS_STARTUP_UNKNOWN,
+            migration_eligible=False,
+            has_dolt_store=has_dolt_store,
+            has_legacy_sqlite=has_legacy_sqlite,
+            dolt_issue_total=None,
+            legacy_issue_total=None,
+            reason="beads_root_missing",
+        )
+
+    env = beads_env(beads_root)
+    dolt_issue_total, dolt_detail = _read_bd_stats_total(
+        ["bd", "stats", "--json"], cwd=cwd, env=env
+    )
+    legacy_issue_total: int | None = None
+    legacy_detail: str | None = None
+    if has_legacy_sqlite:
+        legacy_issue_total, legacy_detail = _read_bd_stats_total(
+            ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"],
+            cwd=cwd,
+            env=env,
+        )
+
+    if dolt_issue_total is not None:
+        if (
+            has_legacy_sqlite
+            and legacy_issue_total is not None
+            and legacy_issue_total > dolt_issue_total
+        ):
+            return StartupBeadsState(
+                classification=_BEADS_STARTUP_INSUFFICIENT_DOLT,
+                migration_eligible=True,
+                has_dolt_store=has_dolt_store,
+                has_legacy_sqlite=has_legacy_sqlite,
+                dolt_issue_total=dolt_issue_total,
+                legacy_issue_total=legacy_issue_total,
+                reason="legacy_issue_total_exceeds_dolt_issue_total",
+                dolt_detail=dolt_detail,
+                legacy_detail=legacy_detail,
+            )
+        return StartupBeadsState(
+            classification=_BEADS_STARTUP_HEALTHY,
+            migration_eligible=False,
+            has_dolt_store=has_dolt_store,
+            has_legacy_sqlite=has_legacy_sqlite,
+            dolt_issue_total=dolt_issue_total,
+            legacy_issue_total=legacy_issue_total,
+            reason="dolt_issue_total_is_healthy",
+            dolt_detail=dolt_detail,
+            legacy_detail=legacy_detail,
+        )
+
+    legacy_has_data = bool(legacy_issue_total and legacy_issue_total > 0)
+    if legacy_has_data and (not has_dolt_store or _is_embedded_backend_panic(dolt_detail or "")):
+        return StartupBeadsState(
+            classification=_BEADS_STARTUP_MISSING_DOLT,
+            migration_eligible=True,
+            has_dolt_store=has_dolt_store,
+            has_legacy_sqlite=has_legacy_sqlite,
+            dolt_issue_total=dolt_issue_total,
+            legacy_issue_total=legacy_issue_total,
+            reason="legacy_sqlite_has_data_while_dolt_is_unavailable",
+            dolt_detail=dolt_detail,
+            legacy_detail=legacy_detail,
+        )
+    return StartupBeadsState(
+        classification=_BEADS_STARTUP_UNKNOWN,
+        migration_eligible=False,
+        has_dolt_store=has_dolt_store,
+        has_legacy_sqlite=has_legacy_sqlite,
+        dolt_issue_total=dolt_issue_total,
+        legacy_issue_total=legacy_issue_total,
+        reason="insufficient_signals_for_classification",
+        dolt_detail=dolt_detail,
+        legacy_detail=legacy_detail,
+    )
+
+
+def format_startup_beads_diagnostics(state: StartupBeadsState) -> str:
+    """Format startup state diagnostics for logs, guidance, and notifications."""
+    return "Startup Beads state: " + "; ".join(state.diagnostics())
+
+
+def _startup_state_diagnostics(*, beads_root: Path, cwd: Path) -> str:
+    state = detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
+    summary = format_startup_beads_diagnostics(state)
+    if state.migration_eligible:
+        atelier_log.warning(summary)
+    else:
+        atelier_log.debug(summary)
+    return summary
 
 
 def _is_embedded_panic_repairable_command(args: list[str]) -> bool:
@@ -411,9 +627,10 @@ def _raw_bd_json(
             guidance = _embedded_panic_guidance(repair_attempted=panic_repair_attempted)
         elif _is_missing_store_error(detail):
             guidance = _missing_store_guidance(beads_root=beads_root)
+        diagnostics = _startup_state_diagnostics(beads_root=beads_root, cwd=cwd)
         if guidance:
-            return [], f"{detail or 'bd command failed'}\n{guidance}"
-        return [], (detail or "bd command failed")
+            return [], f"{detail or 'bd command failed'}\n{guidance}\n{diagnostics}"
+        return [], f"{detail or 'bd command failed'}\n{diagnostics}"
     raw = (result.stdout or "").strip()
     if not raw:
         return [], None
@@ -614,6 +831,7 @@ def run_bd_command(
             )
         elif _is_missing_store_error(detail):
             message = f"{message}\n{_missing_store_guidance(beads_root=beads_root)}"
+        message = f"{message}\n{_startup_state_diagnostics(beads_root=beads_root, cwd=cwd)}"
         die(message)
     return subprocess.CompletedProcess(
         args=list(result.argv),

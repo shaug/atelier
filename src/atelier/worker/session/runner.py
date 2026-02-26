@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ... import beads as beads_runtime
 from ... import changeset_fields
 from ...pr_strategy import PrStrategy
 from ..context import ChangesetSelectionContext, WorkerRunContext
@@ -62,10 +63,18 @@ def _abort_startup_read_failure(
     reason: str,
 ) -> WorkerRunSummary:
     """Clean up startup assignment/hook state after Beads read failures."""
+    startup_state = beads_runtime.detect_startup_beads_state(beads_root=beads_root, cwd=repo_root)
+    startup_diagnostics = beads_runtime.format_startup_beads_diagnostics(startup_state)
+    recovery_hint = (
+        "recoverable legacy SQLite state detected; follow migration guidance once available."
+        if startup_state.migration_eligible
+        else "run `bd doctor --fix --yes`, verify `bd show --json <issue-id>`, then retry startup."
+    )
     if dry_run:
         control.dry_run_log(
             "Would release epic assignment and clear agent hook after startup Beads read failure."
         )
+        control.dry_run_log(f"Would include startup diagnostics: {startup_diagnostics}")
         return WorkerRunSummary(started=False, reason=reason, epic_id=selected_epic)
     verification_target = verification_issue_id or selected_epic
     try:
@@ -77,8 +86,9 @@ def _abort_startup_read_failure(
                 f"Stage: {stage}\n"
                 "Diagnostics: this usually indicates an embedded `bd` panic or an uninitialized "
                 "Beads store.\n"
-                "Action: run `bd doctor --fix --yes`, verify `bd show --json "
-                f"{verification_target}` succeeds, then retry `atelier work`."
+                f"Startup state: {startup_diagnostics}\n"
+                "Action: "
+                f"{recovery_hint} (verification target: `bd show --json {verification_target}`)."
             ),
             agent_id=agent_id,
             thread_id=selected_epic,

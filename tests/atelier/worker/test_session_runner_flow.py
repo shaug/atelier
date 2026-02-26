@@ -300,6 +300,8 @@ def test_run_worker_once_releases_epic_when_label_validation_reads_fail() -> Non
     assert summary.reason == "changeset_label_validation_failed"
     assert summary.epic_id == "at-epic"
     deps.lifecycle.send_planner_notification.assert_called_once()
+    notification = deps.lifecycle.send_planner_notification.call_args.kwargs
+    assert "Startup state: Startup Beads state:" in str(notification.get("body"))
     deps.lifecycle.release_epic_assignment.assert_called_once_with(
         "at-epic",
         beads_root=Path("/project/.atelier/.beads"),
@@ -351,6 +353,8 @@ def test_run_worker_once_releases_epic_when_changeset_selection_reads_fail() -> 
     assert summary.reason == "changeset_selection_read_failed"
     assert summary.epic_id == "at-epic"
     deps.lifecycle.send_planner_notification.assert_called_once()
+    notification = deps.lifecycle.send_planner_notification.call_args.kwargs
+    assert "Startup state: Startup Beads state:" in str(notification.get("body"))
     deps.lifecycle.release_epic_assignment.assert_called_once_with(
         "at-epic",
         beads_root=Path("/project/.atelier/.beads"),
@@ -403,6 +407,8 @@ def test_run_worker_once_releases_epic_when_selected_changeset_read_fails() -> N
     assert summary.reason == "changeset_metadata_read_failed"
     assert summary.epic_id == "at-epic"
     deps.lifecycle.send_planner_notification.assert_called_once()
+    notification = deps.lifecycle.send_planner_notification.call_args.kwargs
+    assert "Startup state: Startup Beads state:" in str(notification.get("body"))
     deps.lifecycle.release_epic_assignment.assert_called_once_with(
         "at-epic",
         beads_root=Path("/project/.atelier/.beads"),
