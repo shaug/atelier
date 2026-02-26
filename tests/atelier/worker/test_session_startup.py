@@ -211,7 +211,15 @@ def _run_startup(**overrides: Any) -> startup.StartupContractResult:
 
 
 def test_run_startup_contract_service_supports_typed_context() -> None:
-    context, service = _startup_context_service(explicit_epic_id="at-explicit")
+    context, service = _startup_context_service(
+        explicit_epic_id="at-explicit",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "open",
+            "labels": ["at:epic", "at:ready"],
+        },
+        next_changeset=lambda **_kwargs: {"id": "at-explicit.1"},
+    )
 
     result = startup.run_startup_contract_service(context=context, service=service)
 
@@ -221,7 +229,15 @@ def test_run_startup_contract_service_supports_typed_context() -> None:
 
 
 def test_run_startup_contract_supports_explicit_epic() -> None:
-    result = _run_startup(explicit_epic_id="at-explicit")
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "open",
+            "labels": ["at:epic", "at:ready"],
+        },
+        next_changeset=lambda **_kwargs: {"id": "at-explicit.1"},
+    )
 
     assert result.epic_id == "at-explicit"
     assert result.should_exit is False
@@ -239,6 +255,11 @@ def test_run_startup_contract_explicit_epic_prioritizes_review_feedback() -> Non
         explicit_epic_id="at-explicit",
         branch_pr=True,
         repo_slug="org/repo",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "open",
+            "labels": ["at:epic", "at:ready"],
+        },
         select_review_feedback_changeset=lambda **_kwargs: feedback,
     )
 
@@ -264,6 +285,11 @@ def test_run_startup_contract_explicit_epic_prioritizes_merge_conflict() -> None
         explicit_epic_id="at-explicit",
         branch_pr=True,
         repo_slug="org/repo",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "open",
+            "labels": ["at:epic", "at:ready"],
+        },
         select_conflicted_changeset=lambda **_kwargs: conflict,
         select_review_feedback_changeset=lambda **_kwargs: feedback,
     )
@@ -271,6 +297,111 @@ def test_run_startup_contract_explicit_epic_prioritizes_merge_conflict() -> None
     assert result.reason == "merge_conflict"
     assert result.epic_id == "at-explicit"
     assert result.changeset_id == "at-explicit"
+
+
+def test_run_startup_contract_explicit_epic_completed_exits_cleanly() -> None:
+    emitted: list[str] = []
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "closed",
+            "labels": ["at:epic", "at:ready"],
+        },
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_completed"
+    assert result.epic_id == "at-explicit"
+    assert emitted == [
+        "Explicit epic at-explicit is completed; run without an epic id to select new ready work."
+    ]
+
+
+def test_run_startup_contract_explicit_epic_review_pending_exits_cleanly() -> None:
+    emitted: list[str] = []
+    next_changeset_calls = 0
+
+    def next_changeset(**_kwargs: Any) -> dict[str, object] | None:
+        nonlocal next_changeset_calls
+        next_changeset_calls += 1
+        return None
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        branch_pr=True,
+        repo_slug="org/repo",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "in_progress",
+            "assignee": "atelier/worker/codex/p100",
+            "labels": ["at:epic", "at:ready"],
+        },
+        next_changeset=next_changeset,
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_review_pending"
+    assert result.epic_id == "at-explicit"
+    assert next_changeset_calls == 1
+    assert emitted == [
+        "Explicit epic at-explicit is in progress and waiting on review; "
+        "resume review feedback and rerun without an epic id."
+    ]
+
+
+def test_run_startup_contract_explicit_epic_not_ready_exits_cleanly() -> None:
+    emitted: list[str] = []
+
+    def next_changeset(**_kwargs: Any) -> dict[str, object] | None:
+        raise AssertionError("next_changeset should not run for non-ready explicit epic")
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "open",
+            "labels": ["at:epic"],
+        },
+        next_changeset=next_changeset,
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_not_ready"
+    assert result.epic_id == "at-explicit"
+    assert emitted == [
+        "Explicit epic at-explicit is not ready; mark it at:ready or run without an epic id."
+    ]
+
+
+def test_run_startup_contract_explicit_epic_assigned_exits_cleanly() -> None:
+    emitted: list[str] = []
+
+    def next_changeset(**_kwargs: Any) -> dict[str, object] | None:
+        raise AssertionError("next_changeset should not run for assigned explicit epic")
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "hooked",
+            "assignee": "atelier/worker/codex/p777",
+            "labels": ["at:epic", "at:ready", "at:hooked"],
+        },
+        next_changeset=next_changeset,
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_assigned"
+    assert result.epic_id == "at-explicit"
+    assert emitted == [
+        "Explicit epic at-explicit is already assigned/hooked by atelier/worker/codex/p777; "
+        "release the stale lock or rerun without an epic id."
+    ]
 
 
 def test_run_startup_contract_queue_only_exits_after_queue() -> None:

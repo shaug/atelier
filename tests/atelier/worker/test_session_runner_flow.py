@@ -171,6 +171,36 @@ def test_run_worker_once_returns_startup_exit_summary() -> None:
     deps.lifecycle.run_startup_contract.assert_called_once()
 
 
+def test_run_worker_once_skips_claim_for_non_actionable_explicit_epic() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p1x",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p1x",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-explicit",
+            changeset_id=None,
+            should_exit=True,
+            reason="explicit_epic_review_pending",
+        ),
+        preview_agent=agent,
+    )
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id="at-explicit", queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p1x"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "explicit_epic_review_pending"
+    assert summary.epic_id == "at-explicit"
+    deps.infra.beads.claim_epic.assert_not_called()
+
+
 def test_run_worker_once_dry_run_without_epic_stops_cleanly() -> None:
     agent = AgentHome(
         name="worker",

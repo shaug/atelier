@@ -15,6 +15,7 @@ from ..models_boundary import parse_issue_boundary
 from ..review import MergeConflictSelection, ReviewFeedbackSelection
 
 _TERMINAL_STATUSES = {"closed", "done"}
+_TERMINAL_CHANGESET_LABELS = {"cs:merged", "cs:abandoned"}
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,14 @@ def _is_executable_epic_identity(issue: dict[str, object]) -> bool:
 def _is_terminal(issue: dict[str, object]) -> bool:
     status = str(issue.get("status") or "").strip().lower()
     return status in _TERMINAL_STATUSES
+
+
+def _is_terminal_explicit_issue(issue: dict[str, object]) -> bool:
+    status = str(issue.get("status") or "").strip().lower()
+    if status in _TERMINAL_STATUSES:
+        return True
+    labels = worker_selection.issue_labels(issue)
+    return bool(_TERMINAL_CHANGESET_LABELS.intersection(labels))
 
 
 def _dependency_ids(issue: dict[str, object]) -> tuple[str, ...] | None:
@@ -422,6 +431,69 @@ def run_startup_contract_service(
         selected_epic = str(explicit_epic_id).strip()
         if not selected_epic:
             service.die("epic id must not be empty")
+        explicit_issue = service.show_issue(selected_epic)
+        if explicit_issue is None:
+            service.emit(
+                f"Explicit epic {selected_epic} was not found; run without an epic id to "
+                "select ready work."
+            )
+            return StartupContractResult(
+                epic_id=selected_epic,
+                changeset_id=None,
+                should_exit=True,
+                reason="explicit_epic_not_found",
+            )
+        if not _is_executable_epic_identity(explicit_issue):
+            service.emit(
+                f"Explicit epic {selected_epic} is not executable work; run without an epic id "
+                "to select a ready epic."
+            )
+            return StartupContractResult(
+                epic_id=selected_epic,
+                changeset_id=None,
+                should_exit=True,
+                reason="explicit_epic_not_executable",
+            )
+        labels = worker_selection.issue_labels(explicit_issue)
+        status = str(explicit_issue.get("status") or "").strip().lower()
+        if _is_terminal_explicit_issue(explicit_issue):
+            service.emit(
+                f"Explicit epic {selected_epic} is completed; run without an epic id to "
+                "select new ready work."
+            )
+            return StartupContractResult(
+                epic_id=selected_epic,
+                changeset_id=None,
+                should_exit=True,
+                reason="explicit_epic_completed",
+            )
+        if "at:draft" in labels or "at:ready" not in labels:
+            service.emit(
+                f"Explicit epic {selected_epic} is not ready; mark it at:ready or run "
+                "without an epic id."
+            )
+            return StartupContractResult(
+                epic_id=selected_epic,
+                changeset_id=None,
+                should_exit=True,
+                reason="explicit_epic_not_ready",
+            )
+        assignee = explicit_issue.get("assignee")
+        if isinstance(assignee, str):
+            assignee = assignee.strip()
+        else:
+            assignee = ""
+        if assignee and assignee != agent_id:
+            service.emit(
+                f"Explicit epic {selected_epic} is already assigned/hooked by {assignee}; "
+                "release the stale lock or rerun without an epic id."
+            )
+            return StartupContractResult(
+                epic_id=selected_epic,
+                changeset_id=None,
+                should_exit=True,
+                reason="explicit_epic_assigned",
+            )
         if branch_pr and repo_slug:
             explicit_conflict = service.select_conflicted_changeset(
                 epic_id=selected_epic,
@@ -445,6 +517,35 @@ def run_startup_contract_service(
                     should_exit=False,
                     reason="review_feedback",
                 )
+        explicit_next_changeset = service.next_changeset(
+            epic_id=selected_epic,
+            repo_slug=repo_slug,
+            branch_pr=branch_pr,
+            branch_pr_strategy=branch_pr_strategy,
+            git_path=git_path,
+        )
+        if explicit_next_changeset is None:
+            if status in {"in_progress", "hooked"}:
+                service.emit(
+                    f"Explicit epic {selected_epic} is in progress and waiting on review; "
+                    "resume review feedback and rerun without an epic id."
+                )
+                return StartupContractResult(
+                    epic_id=selected_epic,
+                    changeset_id=None,
+                    should_exit=True,
+                    reason="explicit_epic_review_pending",
+                )
+            service.emit(
+                f"Explicit epic {selected_epic} has no actionable ready changesets; run "
+                "without an epic id to select available work."
+            )
+            return StartupContractResult(
+                epic_id=selected_epic,
+                changeset_id=None,
+                should_exit=True,
+                reason="explicit_epic_not_actionable",
+            )
         return StartupContractResult(
             epic_id=selected_epic,
             changeset_id=None,
