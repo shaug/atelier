@@ -85,6 +85,15 @@ class FinalizePipelineContext:
     git_path: str | None
 
 
+@dataclass(frozen=True)
+class StackIntegrityCheck:
+    ok: bool
+    reason: str | None = None
+    edge: str | None = None
+    detail: str | None = None
+    remediation: str | None = None
+
+
 class FinalizePipelineService(Protocol):
     def issue_labels(self, issue: Issue) -> set[str]: ...
 
@@ -123,6 +132,10 @@ class FinalizePipelineService(Protocol):
     def finalize_epic_if_complete(self, *, context: FinalizePipelineContext) -> FinalizeResult: ...
 
     def mark_changeset_in_progress(self, changeset_id: str) -> None: ...
+
+    def stack_integrity_preflight(
+        self, issue: Issue, *, context: FinalizePipelineContext
+    ) -> StackIntegrityCheck: ...
 
     def changeset_waiting_on_review_or_signals(
         self, issue: Issue, *, context: FinalizePipelineContext
@@ -280,6 +293,30 @@ def run_finalize_pipeline(
         service.mark_changeset_closed(changeset_id)
         service.close_completed_container_changesets(epic_id)
         return service.finalize_epic_if_complete(context=context)
+    if branch_pr:
+        integrity = service.stack_integrity_preflight(issue, context=context)
+        if not integrity.ok:
+            reason = integrity.reason or "dependency-parent-unresolved"
+            service.mark_changeset_blocked(
+                changeset_id, reason=f"sequential stack integrity failed: {reason}"
+            )
+            body_lines = ["Sequential dependency stack-integrity preflight failed during finalize."]
+            if integrity.edge:
+                body_lines.append(f"Failing edge: {integrity.edge}")
+            if integrity.detail:
+                body_lines.append(f"Detail: {integrity.detail}")
+            if integrity.remediation:
+                body_lines.append(f"Action: {integrity.remediation}")
+            service.send_planner_notification(
+                subject=f"NEEDS-DECISION: Stack integrity failed ({changeset_id})",
+                body="\n".join(body_lines),
+                agent_id=agent_id,
+                thread_id=changeset_id,
+            )
+            return FinalizeResult(
+                continue_running=False,
+                reason="changeset_stack_integrity_failed",
+            )
     if service.has_blocking_messages(
         thread_ids={changeset_id, epic_id},
         started_at=started_at,

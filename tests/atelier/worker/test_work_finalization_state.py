@@ -569,3 +569,68 @@ def test_changeset_waiting_on_review_prefers_live_pr_over_stale_closed_metadata(
     )
 
     assert waiting is True
+
+
+def test_changeset_stack_integrity_preflight_reconciles_parent_review_metadata(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-kid.2",
+        "description": (
+            "changeset.root_branch: feat/at-kid\n"
+            "changeset.parent_branch: feat/at-kid\n"
+            "changeset.work_branch: feat/at-kid.2\n"
+        ),
+        "dependencies": ["at-kid.1"],
+    }
+    observed_states: list[str] = []
+
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [
+                {
+                    "description": (
+                        "changeset.work_branch: feat/at-kid.1\npr_state: closed\npr_number: 101\n"
+                    )
+                }
+            ]
+            if args == ["show", "at-kid.1"]
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "lookup_pr_payload",
+        lambda *_args, **_kwargs: {"number": 101, "state": "OPEN", "isDraft": False},
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "lookup_pr_payload_diagnostic",
+        lambda *_args, **_kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_review",
+        lambda _changeset_id, metadata, **_kwargs: observed_states.append(
+            str(metadata.pr_state or "")
+        ),
+    )
+
+    preflight = work_finalization_state.changeset_stack_integrity_preflight(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+    )
+
+    assert preflight.ok is True
+    assert observed_states == ["pr-open"]

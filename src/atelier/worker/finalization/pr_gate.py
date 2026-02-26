@@ -22,6 +22,65 @@ class PrGateResult:
     detail: str | None = None
 
 
+@dataclass(frozen=True)
+class StackIntegrityPreflightResult:
+    """Sequential stack-integrity preflight outcome."""
+
+    ok: bool
+    reason: str | None = None
+    edge: str | None = None
+    detail: str | None = None
+    remediation: str | None = None
+
+
+_STACK_INTEGRITY_REMEDIATIONS: dict[str, str] = {
+    "dependency-lineage-ambiguous": (
+        "Set a single deterministic dependency parent (or explicit "
+        "`changeset.parent_branch`) and rerun finalize."
+    ),
+    "dependency-parent-unresolved": (
+        "Ensure dependency changesets exist and publish `changeset.work_branch` "
+        "metadata before retrying."
+    ),
+    "dependency-parent-state-unavailable": (
+        "Push the dependency parent branch and verify GitHub PR status lookups for that branch."
+    ),
+    "dependency-parent-pr-closed": (
+        "Reopen or recreate the dependency parent PR, or merge the parent "
+        "changeset before retrying."
+    ),
+    "dependency-parent-pr-missing": (
+        "Recreate the missing dependency parent PR for the parent branch, then rerun finalize."
+    ),
+    "dependency-parent-status-query-failed": (
+        "Resolve GitHub status query failures for the dependency parent branch and rerun finalize."
+    ),
+    "dependency-parent-metadata-reconcile-failed": (
+        "Repair parent review metadata and rerun finalize."
+    ),
+}
+
+
+def _remediation_for_stack_reason(reason: str) -> str:
+    return _STACK_INTEGRITY_REMEDIATIONS.get(
+        reason,
+        "Repair dependency parent lineage metadata and retry finalize.",
+    )
+
+
+def _dependency_edge(
+    *,
+    issue: dict[str, object],
+    parent_id: str | None,
+    parent_branch: str | None,
+) -> str:
+    child_id = str(issue.get("id") or "").strip() or "unknown-changeset"
+    resolved_parent = parent_id or "unknown-parent"
+    if parent_branch:
+        return f"{child_id} -> {resolved_parent} ({parent_branch})"
+    return f"{child_id} -> {resolved_parent}"
+
+
 def _normalize_branch(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -29,6 +88,178 @@ def _normalize_branch(value: object) -> str | None:
     if not cleaned or cleaned.lower() == "null":
         return None
     return cleaned
+
+
+def sequential_stack_integrity_preflight(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+    branch_pr_strategy: object,
+    beads_root: Path | None = None,
+    lookup_pr_payload: Callable[..., dict[str, object] | None],
+    lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]]
+    | None = None,
+    reconcile_parent_review_state: Callable[..., None] | None = None,
+) -> StackIntegrityPreflightResult:
+    """Validate sequential parent-child PR integrity for dependency stacks."""
+    normalized_strategy = pr_strategy.normalize_pr_strategy(branch_pr_strategy)
+    if normalized_strategy != "sequential":
+        return StackIntegrityPreflightResult(ok=True)
+
+    description = issue.get("description")
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
+    issue_cache: dict[str, dict[str, object] | None] = {}
+
+    def lookup_dependency_issue(issue_id: str) -> dict[str, object] | None:
+        if beads_root is None:
+            return None
+        if issue_id in issue_cache:
+            return issue_cache[issue_id]
+        issues = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
+        issue_cache[issue_id] = issues[0] if issues else None
+        return issue_cache[issue_id]
+
+    lineage = dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch=fields.get("changeset.root_branch"),
+        lookup_issue=lookup_dependency_issue,
+    )
+    if not lineage.dependency_ids:
+        return StackIntegrityPreflightResult(ok=True)
+
+    edge = _dependency_edge(
+        issue=issue,
+        parent_id=lineage.dependency_parent_id,
+        parent_branch=lineage.dependency_parent_branch,
+    )
+    if lineage.blocked or not lineage.dependency_parent_branch:
+        reason = lineage.blocker_reason or "dependency-parent-unresolved"
+        detail = lineage.diagnostics[0] if lineage.diagnostics else None
+        return StackIntegrityPreflightResult(
+            ok=False,
+            reason=reason,
+            edge=edge,
+            detail=detail,
+            remediation=_remediation_for_stack_reason(reason),
+        )
+    if not repo_slug:
+        reason = "dependency-parent-state-unavailable"
+        return StackIntegrityPreflightResult(
+            ok=False,
+            reason=reason,
+            edge=edge,
+            detail="missing repo slug for dependency parent PR state lookup",
+            remediation=_remediation_for_stack_reason(reason),
+        )
+
+    parent_branch = lineage.dependency_parent_branch
+    parent_issue = (
+        lookup_dependency_issue(lineage.dependency_parent_id)
+        if lineage.dependency_parent_id
+        else None
+    )
+    parent_payload = lookup_pr_payload(repo_slug, parent_branch)
+    lookup_error: str | None = None
+    if parent_payload is None and lookup_pr_payload_diagnostic is not None:
+        payload_check, lookup_error = lookup_pr_payload_diagnostic(repo_slug, parent_branch)
+        if payload_check is not None:
+            parent_payload = payload_check
+            lookup_error = None
+    if lookup_error:
+        reason = "dependency-parent-status-query-failed"
+        return StackIntegrityPreflightResult(
+            ok=False,
+            reason=reason,
+            edge=edge,
+            detail=lookup_error,
+            remediation=_remediation_for_stack_reason(reason),
+        )
+
+    pushed = git.git_ref_exists(
+        repo_root, f"refs/remotes/origin/{parent_branch}", git_path=git_path
+    )
+    parent_state = prs.lifecycle_state(
+        parent_payload,
+        pushed=pushed,
+        review_requested=prs.has_review_requests(parent_payload),
+    )
+
+    parent_review = None
+    has_recorded_pr_signal = False
+    if parent_issue:
+        parent_description = parent_issue.get("description")
+        metadata = changesets.parse_review_metadata(
+            parent_description if isinstance(parent_description, str) else ""
+        )
+        parent_review = metadata.pr_state.strip().lower() if metadata.pr_state else None
+        has_recorded_pr_signal = bool(
+            metadata.pr_url
+            or metadata.pr_number
+            or (
+                metadata.pr_state
+                and metadata.pr_state.strip().lower() not in {"", "null", "pushed"}
+            )
+        )
+        if (
+            parent_payload
+            and parent_state
+            and parent_state != parent_review
+            and reconcile_parent_review_state is not None
+            and isinstance(lineage.dependency_parent_id, str)
+            and lineage.dependency_parent_id
+        ):
+            try:
+                reconcile_parent_review_state(
+                    parent_issue=parent_issue,
+                    parent_issue_id=lineage.dependency_parent_id,
+                    parent_payload=parent_payload,
+                    parent_state=parent_state,
+                    pushed=pushed,
+                )
+            except Exception as exc:  # pragma: no cover - defensive boundary
+                reason = "dependency-parent-metadata-reconcile-failed"
+                return StackIntegrityPreflightResult(
+                    ok=False,
+                    reason=reason,
+                    edge=edge,
+                    detail=str(exc),
+                    remediation=_remediation_for_stack_reason(reason),
+                )
+
+    if parent_state is None:
+        reason = "dependency-parent-state-unavailable"
+        return StackIntegrityPreflightResult(
+            ok=False,
+            reason=reason,
+            edge=edge,
+            detail=f"unable to resolve lifecycle for dependency parent branch {parent_branch!r}",
+            remediation=_remediation_for_stack_reason(reason),
+        )
+    if parent_state == "closed":
+        reason = "dependency-parent-pr-closed"
+        return StackIntegrityPreflightResult(
+            ok=False,
+            reason=reason,
+            edge=edge,
+            detail=f"dependency parent PR for branch {parent_branch!r} is closed",
+            remediation=_remediation_for_stack_reason(reason),
+        )
+    if parent_state == "pushed" and has_recorded_pr_signal:
+        reason = "dependency-parent-pr-missing"
+        detail = (
+            f"dependency parent branch {parent_branch!r} has no live PR but stored "
+            f"review state is {parent_review or 'unknown'}"
+        )
+        return StackIntegrityPreflightResult(
+            ok=False,
+            reason=reason,
+            edge=edge,
+            detail=detail,
+            remediation=_remediation_for_stack_reason(reason),
+        )
+    return StackIntegrityPreflightResult(ok=True)
 
 
 def _top_level_integration_parent(
@@ -123,6 +354,24 @@ def changeset_pr_creation_decision(
     lookup_pr_payload: Callable[..., dict[str, object] | None],
 ) -> pr_strategy.PrStrategyDecision:
     normalized_strategy = pr_strategy.normalize_pr_strategy(branch_pr_strategy)
+    preflight = sequential_stack_integrity_preflight(
+        issue,
+        repo_slug=repo_slug,
+        repo_root=repo_root,
+        git_path=git_path,
+        branch_pr_strategy=normalized_strategy,
+        beads_root=beads_root,
+        lookup_pr_payload=lookup_pr_payload,
+    )
+    if not preflight.ok:
+        reason_suffix = preflight.reason or "dependency-parent-unresolved"
+        return pr_strategy.PrStrategyDecision(
+            strategy=normalized_strategy,
+            parent_state=None,
+            allow_pr=False,
+            reason=f"blocked:{reason_suffix}",
+        )
+
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     issue_cache: dict[str, dict[str, object] | None] = {}

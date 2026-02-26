@@ -19,6 +19,7 @@ from .work_finalization_integration import (
 from .work_finalization_state import (
     align_existing_pr_base,
     changeset_integration_signal,
+    changeset_stack_integrity_preflight,
     changeset_waiting_on_review_or_signals,
     close_completed_container_changesets,
     find_invalid_changeset_labels,
@@ -186,6 +187,28 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
     def mark_changeset_in_progress(self, changeset_id: str) -> None:
         mark_changeset_in_progress(
             changeset_id, beads_root=self._beads_root, repo_root=self._repo_root
+        )
+
+    def stack_integrity_preflight(
+        self,
+        issue: dict[str, object],
+        *,
+        context: worker_finalize_pipeline.FinalizePipelineContext,
+    ) -> worker_finalize_pipeline.StackIntegrityCheck:
+        preflight = changeset_stack_integrity_preflight(
+            issue,
+            repo_slug=context.repo_slug,
+            repo_root=self._repo_root,
+            git_path=context.git_path,
+            branch_pr_strategy=context.branch_pr_strategy,
+            beads_root=self._beads_root,
+        )
+        return worker_finalize_pipeline.StackIntegrityCheck(
+            ok=preflight.ok,
+            reason=preflight.reason,
+            edge=preflight.edge,
+            detail=preflight.detail,
+            remediation=preflight.remediation,
         )
 
     def changeset_waiting_on_review_or_signals(
