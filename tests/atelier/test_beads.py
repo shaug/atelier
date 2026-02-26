@@ -491,6 +491,7 @@ def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(tmp_path: 
     ]
     stats_calls = 0
     calls: list[list[str]] = []
+    diagnostics: list[str] = []
 
     def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
         nonlocal stats_calls
@@ -541,6 +542,7 @@ def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(tmp_path: 
         patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
         patch("atelier.beads.bd_invocation.detect_bd_version", return_value=(0, 56, 1)),
         patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.say", side_effect=diagnostics.append),
     ):
         result = beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
 
@@ -549,6 +551,131 @@ def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(tmp_path: 
     assert calls[-1] == ["bd", "prime"]
     backups = list((beads_root / "backups").glob("beads.db.*.bak"))
     assert len(backups) == 1
+    assert diagnostics
+    assert "auto-upgrade migrated" in diagnostics[0]
+    assert "legacy SQLite data exists but Dolt backend is missing" in diagnostics[0]
+
+
+def test_run_bd_command_prime_reports_skipped_healthy_dolt_diagnostic(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "beads.db").write_bytes(b"legacy")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    calls: list[list[str]] = []
+    diagnostics: list[str] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "stats", "--json"] or argv == db_stats:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":4}}',
+                stderr="",
+            )
+        if argv == ["bd", "prime"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="primed",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.say", side_effect=diagnostics.append),
+    ):
+        result = beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert not any("migrate" in call for call in calls)
+    assert diagnostics
+    assert "auto-upgrade skipped" in diagnostics[0]
+    assert "active Dolt issue count already covers legacy SQLite issue count" in diagnostics[0]
+
+
+def test_run_bd_command_prime_auto_migrates_insufficient_dolt_state(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "beads.db").write_bytes(b"legacy")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    migrate = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--yes",
+        "--json",
+    ]
+    stats_calls = 0
+    calls: list[list[str]] = []
+    diagnostics: list[str] = []
+
+    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+        nonlocal stats_calls
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "stats", "--json"]:
+            stats_calls += 1
+            if stats_calls == 1:
+                return exec_util.CommandResult(
+                    argv=request.argv,
+                    returncode=0,
+                    stdout='{"summary":{"total_issues":2}}',
+                    stderr="",
+                )
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":4}}',
+                stderr="",
+            )
+        if argv == db_stats:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":4}}',
+                stderr="",
+            )
+        if argv == migrate:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"migrated":4}',
+                stderr="",
+            )
+        if argv == ["bd", "prime"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="primed",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.bd_invocation.detect_bd_version", return_value=(0, 56, 1)),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.say", side_effect=diagnostics.append),
+    ):
+        result = beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert migrate in calls
+    assert diagnostics
+    assert "auto-upgrade migrated" in diagnostics[0]
+    assert "active Dolt issue count (2) is below legacy SQLite issue count (4)" in diagnostics[0]
 
 
 def test_run_bd_command_prime_blocks_auto_migration_for_old_bd_version(tmp_path: Path) -> None:

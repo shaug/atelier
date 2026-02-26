@@ -24,7 +24,7 @@ from .external_tickets import (
     external_ticket_payload,
     normalize_external_ticket_entry,
 )
-from .io import die
+from .io import die, say
 from .worker.models_boundary import BeadsIssueBoundary, parse_issue_boundary
 
 POLICY_LABEL = "at:policy"
@@ -61,6 +61,7 @@ _DOLT_SERVER_HOST_DEFAULT = "127.0.0.1"
 _DOLT_SERVER_PORT_DEFAULT = 3307
 _DOLT_SERVER_USER_DEFAULT = "root"
 _DOLT_DATABASE_DEFAULT = "beads"
+_STARTUP_AUTO_MIGRATION_DIAGNOSTICS: dict[Path, "_StartupAutoMigrationDiagnostic"] = {}
 _RUNTIME_AGENT_ID_ENV = "ATELIER_AGENT_ID"
 _RUNTIME_AGENT_BEAD_ID_ENV = "ATELIER_AGENT_BEAD_ID"
 
@@ -233,6 +234,13 @@ class _RuntimeAgentSnapshot:
     description: str
     labels: tuple[str, ...]
     agent_id: str | None
+
+
+@dataclass(frozen=True)
+class _StartupAutoMigrationDiagnostic:
+    status: str
+    reason: str
+    startup_state: StartupBeadsState
 
 
 def beads_env(beads_root: Path) -> dict[str, str]:
@@ -759,6 +767,57 @@ def format_startup_beads_diagnostics(state: StartupBeadsState) -> str:
     return "Startup Beads state: " + "; ".join(state.diagnostics())
 
 
+def _startup_auto_migration_reason(state: StartupBeadsState) -> str:
+    if state.classification == _BEADS_STARTUP_MISSING_DOLT:
+        return "legacy SQLite data exists but Dolt backend is missing"
+    if state.classification == _BEADS_STARTUP_INSUFFICIENT_DOLT:
+        dolt_count = state.dolt_issue_total if state.dolt_issue_total is not None else "unavailable"
+        legacy_count = (
+            state.legacy_issue_total if state.legacy_issue_total is not None else "unavailable"
+        )
+        return (
+            "active Dolt issue count "
+            f"({dolt_count}) is below legacy SQLite issue count ({legacy_count})"
+        )
+    if state.classification == _BEADS_STARTUP_HEALTHY:
+        return "active Dolt issue count already covers legacy SQLite issue count"
+    return state.reason.replace("_", " ")
+
+
+def _record_startup_auto_migration_diagnostic(
+    *,
+    beads_root: Path,
+    status: str,
+    reason: str,
+    startup_state: StartupBeadsState,
+) -> None:
+    _STARTUP_AUTO_MIGRATION_DIAGNOSTICS[beads_root.resolve()] = _StartupAutoMigrationDiagnostic(
+        status=status,
+        reason=reason,
+        startup_state=startup_state,
+    )
+
+
+def _take_startup_auto_migration_diagnostic(
+    beads_root: Path,
+) -> _StartupAutoMigrationDiagnostic | None:
+    return _STARTUP_AUTO_MIGRATION_DIAGNOSTICS.pop(beads_root.resolve(), None)
+
+
+def _format_startup_auto_migration_diagnostic(
+    diagnostic: _StartupAutoMigrationDiagnostic,
+) -> str:
+    state_summary = format_startup_beads_diagnostics(diagnostic.startup_state)
+    return f"Beads startup auto-upgrade {diagnostic.status}: {diagnostic.reason} | {state_summary}"
+
+
+def _emit_startup_auto_migration_diagnostic(beads_root: Path) -> None:
+    diagnostic = _take_startup_auto_migration_diagnostic(beads_root)
+    if diagnostic is None:
+        return
+    say(_format_startup_auto_migration_diagnostic(diagnostic))
+
+
 def _startup_state_diagnostics(*, beads_root: Path, cwd: Path) -> str:
     state = detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
     summary = format_startup_beads_diagnostics(state)
@@ -821,15 +880,22 @@ def _attempt_startup_auto_migration(
 ) -> None:
     if not _is_startup_auto_migration_command(args):
         return
+    key = beads_root.resolve()
+    _STARTUP_AUTO_MIGRATION_DIAGNOSTICS.pop(key, None)
     if _has_db_flag(args):
         return
     if not (beads_root / "beads.db").exists():
         return
-    key = beads_root.resolve()
     if key in _STARTUP_AUTO_MIGRATION_ATTEMPTED:
         return
     startup_state = detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
     if not startup_state.migration_eligible:
+        _record_startup_auto_migration_diagnostic(
+            beads_root=beads_root,
+            status="skipped",
+            reason=_startup_auto_migration_reason(startup_state),
+            startup_state=startup_state,
+        )
         return
     _STARTUP_AUTO_MIGRATION_ATTEMPTED.add(key)
     runtime_agent_snapshots = _collect_required_runtime_agent_snapshots(cwd=cwd, env=env)
@@ -839,6 +905,12 @@ def _attempt_startup_auto_migration(
     try:
         detected_version = bd_invocation.detect_bd_version(env=env)
     except RuntimeError as exc:
+        _record_startup_auto_migration_diagnostic(
+            beads_root=beads_root,
+            status="blocked",
+            reason="automatic migration could not verify bd version",
+            startup_state=startup_state,
+        )
         die(
             "startup migration blocked: recoverable legacy Beads state detected, "
             "but automatic migration could not verify `bd` version "
@@ -847,6 +919,12 @@ def _attempt_startup_auto_migration(
         )
     if detected_version < _STARTUP_AUTO_MIGRATION_MIN_BD_VERSION:
         detected_version_text = _format_semver(detected_version)
+        _record_startup_auto_migration_diagnostic(
+            beads_root=beads_root,
+            status="blocked",
+            reason=f"automatic migration requires bd >= {required_version}",
+            startup_state=startup_state,
+        )
         die(
             "startup migration blocked: recoverable legacy Beads state detected, "
             "but automatic migration requires "
@@ -858,6 +936,12 @@ def _attempt_startup_auto_migration(
     try:
         backup_path = _backup_startup_legacy_sqlite(beads_root)
     except (OSError, RuntimeError) as exc:
+        _record_startup_auto_migration_diagnostic(
+            beads_root=beads_root,
+            status="blocked",
+            reason="failed to create SQLite backup before migration",
+            startup_state=startup_state,
+        )
         die(
             "startup migration blocked: failed to create SQLite backup before migration "
             f"({exc}).\n"
@@ -873,9 +957,21 @@ def _attempt_startup_auto_migration(
     )
     migration_result = _run_raw_bd_command(migration_command, cwd=cwd, env=env)
     if migration_result is None:
+        _record_startup_auto_migration_diagnostic(
+            beads_root=beads_root,
+            status="blocked",
+            reason="missing required command: bd",
+            startup_state=startup_state,
+        )
         die("missing required command: bd")
     if migration_result.returncode != 0:
         migration_detail = _command_output_detail(migration_result) or "bd migrate failed"
+        _record_startup_auto_migration_diagnostic(
+            beads_root=beads_root,
+            status="blocked",
+            reason="automatic migration failed",
+            startup_state=startup_state,
+        )
         die(
             "startup migration blocked: automatic migration failed.\n"
             f"backup_path={backup_path}\n"
@@ -885,6 +981,12 @@ def _attempt_startup_auto_migration(
 
     post_state = detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
     if not _parity_verified_after_migration(before=startup_state, after=post_state):
+        _record_startup_auto_migration_diagnostic(
+            beads_root=beads_root,
+            status="blocked",
+            reason="parity verification failed after migration",
+            startup_state=post_state,
+        )
         die(
             "startup migration blocked: parity verification failed after migration.\n"
             f"backup_path={backup_path}\n"
@@ -898,6 +1000,12 @@ def _attempt_startup_auto_migration(
         cwd=cwd,
         env=env,
         snapshots=runtime_agent_snapshots,
+    )
+    _record_startup_auto_migration_diagnostic(
+        beads_root=beads_root,
+        status="migrated",
+        reason=_startup_auto_migration_reason(startup_state),
+        startup_state=post_state,
     )
     atelier_log.warning(
         "Startup Beads auto-migration completed: "
@@ -1256,6 +1364,9 @@ def run_bd_command(
     except RuntimeError as exc:
         die(str(exc))
     _attempt_startup_auto_migration(args=args, beads_root=beads_root, cwd=cwd, env=env)
+    _normalize_dolt_runtime_metadata_once(beads_root=beads_root)
+    if _is_startup_auto_migration_command(args):
+        _emit_startup_auto_migration_diagnostic(beads_root)
     _normalize_dolt_runtime_metadata_once(beads_root=beads_root)
     _enforce_in_progress_dependency_gate(args, beads_root=beads_root, cwd=cwd, env=env)
     request = exec.CommandRequest(
