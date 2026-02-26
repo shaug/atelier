@@ -1289,12 +1289,8 @@ def is_changeset_recovery_candidate(
         ``True`` when recovery should re-run finalize logic.
     """
     labels = issue_labels(issue)
-    status = str(issue.get("status") or "").strip().lower()
-    if "cs:blocked" not in labels and status != "blocked":
-        return False
-    if "cs:merged" in labels or "cs:abandoned" in labels:
-        return False
-    if status in {"closed", "done"}:
+    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+    if canonical_status != "blocked":
         return False
     work_branch = changeset_work_branch(issue)
     if not work_branch:
@@ -1303,10 +1299,10 @@ def is_changeset_recovery_candidate(
     if branch_pr:
         pr_payload = lookup_pr_payload(repo_slug, work_branch)
         review_requested = prs.has_review_requests(pr_payload)
-        lifecycle = prs.lifecycle_state(
+        lifecycle_state = prs.lifecycle_state(
             pr_payload, pushed=pushed, review_requested=review_requested
         )
-        if lifecycle in {"pushed", "draft-pr", "pr-open", "in-review", "approved"}:
+        if lifecycle_state in {"pushed", "draft-pr", "pr-open", "in-review", "approved"}:
             return True
         review_state = changeset_review_state(issue)
         return review_state in {

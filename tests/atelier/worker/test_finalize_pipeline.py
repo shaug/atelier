@@ -345,6 +345,31 @@ def test_run_finalize_pipeline_waiting_on_review_returns_pending(monkeypatch) ->
     assert result.continue_running is True
 
 
+def test_run_finalize_pipeline_waiting_on_review_uses_in_progress_status(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "in_progress",
+        "labels": ["at:changeset"],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+
+    service = _FinalizeServiceStub()
+    service.changeset_waiting_on_review_or_signals_fn = lambda _issue, *, context: True
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_review_pending"
+    assert result.continue_running is True
+
+
 def test_run_finalize_pipeline_blocks_on_stack_integrity_preflight(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
@@ -417,6 +442,33 @@ def test_run_finalize_pipeline_keeps_terminal_labeled_changeset_open_while_pr_ac
     assert result.continue_running is True
     assert marks == ["at-epic.1"]
     assert closed == []
+
+
+def test_run_finalize_pipeline_treats_closed_status_as_terminal_without_labels(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "closed",
+        "labels": ["at:changeset"],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+
+    service = _FinalizeServiceStub()
+    closed: list[str] = []
+    service.mark_changeset_closed_fn = lambda changeset_id: closed.append(changeset_id)
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_complete"
+    assert result.continue_running is True
+    assert closed == ["at-epic.1"]
 
 
 def test_run_finalize_pipeline_updates_missing_integrated_sha(monkeypatch) -> None:

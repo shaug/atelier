@@ -18,7 +18,7 @@ def test_list_reconcile_epic_candidates_groups_by_epic() -> None:
         {
             "id": "at-1.1",
             "status": "blocked",
-            "labels": ["at:changeset", "cs:merged"],
+            "labels": ["at:changeset"],
         }
     ]
     with patch("atelier.worker.reconcile.beads.run_bd_json", return_value=issues):
@@ -40,7 +40,7 @@ def test_list_reconcile_epic_candidates_includes_non_terminal_merge_signal() -> 
         {
             "id": "at-1.2",
             "status": "in_progress",
-            "labels": ["at:changeset", "cs:in_progress"],
+            "labels": ["at:changeset"],
         }
     ]
     with patch("atelier.worker.reconcile.beads.run_bd_json", return_value=issues):
@@ -61,7 +61,7 @@ def test_list_reconcile_epic_candidates_includes_closed_open_pr_drift() -> None:
     drift_issue = {
         "id": "at-1.9",
         "status": "closed",
-        "labels": ["at:changeset", "cs:merged"],
+        "labels": ["at:changeset"],
         "description": "changeset.work_branch: feat/at-1.9\npr_state: closed\n",
     }
     with (
@@ -120,7 +120,7 @@ def test_reconcile_blocked_merged_changesets_dry_run_counts_candidates() -> None
         {
             "id": "at-1.1",
             "status": "blocked",
-            "labels": ["at:changeset", "cs:merged"],
+            "labels": ["at:changeset"],
         }
     ]
     with patch("atelier.worker.reconcile.beads.run_bd_json", return_value=issues):
@@ -159,7 +159,7 @@ def test_reconcile_blocked_merged_changesets_reconciles_non_terminal_merge_signa
         {
             "id": "at-1.2",
             "status": "in_progress",
-            "labels": ["at:changeset", "cs:in_progress"],
+            "labels": ["at:changeset"],
         }
     ]
     with patch("atelier.worker.reconcile.beads.run_bd_json", return_value=issues):
@@ -193,7 +193,7 @@ def test_reconcile_blocked_merged_changesets_reopens_closed_review_drift() -> No
     drift_issue = {
         "id": "at-1.9",
         "status": "closed",
-        "labels": ["at:changeset", "cs:merged"],
+        "labels": ["at:changeset"],
         "description": "changeset.work_branch: feat/at-1.9\npr_state: closed\n",
     }
     project = config.ProjectConfig(
