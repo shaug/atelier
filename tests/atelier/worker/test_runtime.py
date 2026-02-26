@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from atelier.worker import runtime, work_command_helpers, work_startup_runtime
 from atelier.worker.models import WorkerRunSummary
 from atelier.worker.ports import WorkerRuntimeDependencies
@@ -55,17 +57,18 @@ def test_run_worker_sessions_dry_run_once_exits_after_started() -> None:
     assert calls == 1
 
 
-def test_run_worker_sessions_default_exits_after_review_handoff() -> None:
+def test_run_worker_sessions_explicit_no_work_exits_cleanly() -> None:
     calls = 0
+    emitted: list[str] = []
 
     def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
         del args, mode, dry_run, session_key
         nonlocal calls
         calls += 1
-        return WorkerRunSummary(started=False, reason="changeset_review_handoff")
+        return WorkerRunSummary(started=False, reason="explicit_epic_not_actionable")
 
     runtime.run_worker_sessions(
-        args=type("Args", (), {"queue": False})(),
+        args=type("Args", (), {"queue": False, "epic_id": "at-explicit"})(),
         mode="auto",
         run_mode="default",
         dry_run=False,
@@ -74,10 +77,108 @@ def test_run_worker_sessions_default_exits_after_review_handoff() -> None:
         report_worker_summary=lambda _summary, _dry: None,
         watch_interval_seconds=lambda: 5,
         dry_run_log=lambda _message: None,
-        emit=lambda _message: None,
+        emit=emitted.append,
     )
 
     assert calls == 1
+    assert emitted[-1] == (
+        "Terminal outcome: taxonomy=no_work_explicit_epic, "
+        "summary_reason=explicit_epic_not_actionable"
+    )
+
+
+def test_run_worker_sessions_auto_no_work_exits_cleanly() -> None:
+    emitted: list[str] = []
+    runtime.run_worker_sessions(
+        args=type("Args", (), {"queue": False, "epic_id": None})(),
+        mode="auto",
+        run_mode="default",
+        dry_run=False,
+        session_key="sess",
+        run_worker_once=lambda *_args, **_kwargs: WorkerRunSummary(
+            started=False, reason="no_eligible_epics"
+        ),
+        report_worker_summary=lambda _summary, _dry: None,
+        watch_interval_seconds=lambda: 5,
+        dry_run_log=lambda _message: None,
+        emit=emitted.append,
+    )
+
+    assert (
+        emitted[-1] == "Terminal outcome: taxonomy=no_work_global, summary_reason=no_eligible_epics"
+    )
+
+
+def test_run_worker_sessions_explicit_fail_closed_exits_nonzero() -> None:
+    emitted: list[str] = []
+    with pytest.raises(SystemExit) as raised:
+        runtime.run_worker_sessions(
+            args=type("Args", (), {"queue": False, "epic_id": "at-explicit"})(),
+            mode="auto",
+            run_mode="default",
+            dry_run=False,
+            session_key="sess",
+            run_worker_once=lambda *_args, **_kwargs: WorkerRunSummary(
+                started=False,
+                reason="explicit_epic_not_ready",
+                epic_id="at-explicit",
+            ),
+            report_worker_summary=lambda _summary, _dry: None,
+            watch_interval_seconds=lambda: 5,
+            dry_run_log=lambda _message: None,
+            emit=emitted.append,
+        )
+
+    assert raised.value.code == 1
+    assert emitted[-1] == (
+        "Terminal outcome: taxonomy=fail_closed, summary_reason=explicit_epic_not_ready, "
+        "epic=at-explicit"
+    )
+
+
+def test_run_worker_sessions_auto_fail_closed_exits_nonzero() -> None:
+    emitted: list[str] = []
+    with pytest.raises(SystemExit) as raised:
+        runtime.run_worker_sessions(
+            args=type("Args", (), {"queue": False, "epic_id": None})(),
+            mode="auto",
+            run_mode="default",
+            dry_run=False,
+            session_key="sess",
+            run_worker_once=lambda *_args, **_kwargs: WorkerRunSummary(
+                started=False,
+                reason="inbox_blocked",
+            ),
+            report_worker_summary=lambda _summary, _dry: None,
+            watch_interval_seconds=lambda: 5,
+            dry_run_log=lambda _message: None,
+            emit=emitted.append,
+        )
+
+    assert raised.value.code == 1
+    assert emitted[-1] == "Terminal outcome: taxonomy=fail_closed, summary_reason=inbox_blocked"
+
+
+def test_classify_non_watch_exit_outcome_is_deterministic() -> None:
+    explicit_success = runtime.classify_non_watch_exit_outcome(
+        WorkerRunSummary(started=False, reason="explicit_epic_completed"),
+        explicit_epic_requested=True,
+    )
+    global_success = runtime.classify_non_watch_exit_outcome(
+        WorkerRunSummary(started=False, reason="no_eligible_epics"),
+        explicit_epic_requested=False,
+    )
+    failure = runtime.classify_non_watch_exit_outcome(
+        WorkerRunSummary(started=False, reason="queue_blocked"),
+        explicit_epic_requested=False,
+    )
+
+    assert explicit_success.taxonomy == runtime.NON_WATCH_EXIT_REASON_NO_WORK_EXPLICIT
+    assert explicit_success.success is True
+    assert global_success.taxonomy == runtime.NON_WATCH_EXIT_REASON_NO_WORK_GLOBAL
+    assert global_success.success is True
+    assert failure.taxonomy == runtime.NON_WATCH_EXIT_REASON_FAIL_CLOSED
+    assert failure.success is False
 
 
 def test_run_worker_sessions_watch_logs_and_sleeps_on_no_ready() -> None:
