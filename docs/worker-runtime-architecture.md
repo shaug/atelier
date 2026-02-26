@@ -11,6 +11,38 @@ For service/use-case tier boundaries and migration sequencing, see
 - Keep worker orchestration deterministic via typed runtime ports.
 - Keep shell and external-tool interactions behind explicit boundaries.
 
+## Lifecycle Contract
+
+Worker and planner lifecycle decisions share one canonical contract defined in
+`src/atelier/lifecycle.py`.
+
+Canonical status model:
+
+- `deferred`: planned/draft work that is not runnable.
+- `open`: runnable when graph constraints are satisfied.
+- `in_progress`: actively claimed/executing.
+- `blocked`: explicitly blocked by an operational dependency.
+- `closed`: terminal lifecycle state.
+
+Graph role inference:
+
+- work identity excludes explicit special/non-work records (`at:message`,
+  `at:agent`, `at:policy` and matching types).
+- epic role is inferred from top-level work nodes (no parent).
+- changeset role is inferred from leaf work nodes (no work children).
+- a top-level leaf node is both epic and changeset.
+
+Runnable leaf evaluation:
+
+- only work-bead leaves are runnable.
+- lifecycle status must resolve to `open` or `in_progress`.
+- all dependency blockers must be terminal before execution.
+
+Migration compatibility:
+
+- legacy lifecycle labels (`at:ready`, `cs:*`) are compatibility hints only.
+- canonical status + graph shape are the source of truth for decisions.
+
 ## Layering
 
 1. **Command layer**
