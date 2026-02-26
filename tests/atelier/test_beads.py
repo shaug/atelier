@@ -1297,7 +1297,7 @@ def test_prime_addendum_returns_none_on_error() -> None:
     assert value is None
 
 
-def test_prime_addendum_rewrites_deprecated_sync_guidance() -> None:
+def test_prime_addendum_returns_prime_output_without_rewriting() -> None:
     stdout = (
         "## Beads Workflow Context\n\n"
         "```\n"
@@ -1311,10 +1311,7 @@ def test_prime_addendum_rewrites_deprecated_sync_guidance() -> None:
     ):
         value = beads.prime_addendum(beads_root=Path("/beads"), cwd=Path("/repo"))
 
-    assert value is not None
-    assert "bd sync --flush-only" not in value
-    assert "`bd sync`" not in value
-    assert value.count('bd export -o "${BEADS_DIR:-.beads}/issues.jsonl"') == 2
+    assert value == stdout.strip()
 
 
 def test_ensure_issue_prefix_noop_when_already_expected() -> None:
