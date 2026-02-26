@@ -142,6 +142,35 @@ def _build_runner_deps(
     )
 
 
+def test_changeset_block_handler_marks_and_notifies() -> None:
+    lifecycle = SimpleNamespace(
+        mark_changeset_blocked=Mock(),
+        send_planner_notification=Mock(),
+    )
+    handler = runner._ChangesetBlockHandler(  # pyright: ignore[reportPrivateUsage]
+        lifecycle=lifecycle,
+        agent_id="atelier/worker/codex/p9",
+        changeset_id="at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    handler.mark_changeset_blocked("missing required command: codex")
+
+    lifecycle.mark_changeset_blocked.assert_called_once_with(
+        "at-epic.1",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        reason="missing required command: codex",
+    )
+    lifecycle.send_planner_notification.assert_called_once()
+    call = lifecycle.send_planner_notification.call_args.kwargs
+    assert call["agent_id"] == "atelier/worker/codex/p9"
+    assert call["thread_id"] == "at-epic.1"
+    assert "Stage: start agent session" in call["body"]
+    assert "Diagnostics: missing required command: codex" in call["body"]
+
+
 def test_run_worker_once_returns_startup_exit_summary() -> None:
     agent = AgentHome(
         name="worker",
@@ -454,7 +483,7 @@ def test_run_worker_once_releases_epic_when_selected_changeset_read_fails() -> N
     assert not deps.control._die.called
 
 
-def test_run_worker_once_returns_terminal_handoff_after_review_pending_finalize() -> None:
+def test_run_worker_once_continues_after_review_pending_finalize() -> None:
     agent = AgentHome(
         name="worker",
         agent_id="atelier/worker/codex/p7",
@@ -513,6 +542,6 @@ def test_run_worker_once_returns_terminal_handoff_after_review_pending_finalize(
         deps=deps,
     )
 
-    assert summary.started is False
-    assert summary.reason == "changeset_review_handoff"
+    assert summary.started is True
+    assert summary.reason == "agent_session_complete"
     deps.infra.worker_session_agent.start_agent_session.assert_called_once()

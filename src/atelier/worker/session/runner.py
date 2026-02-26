@@ -194,6 +194,7 @@ class _BoundChangesetSelectionService:
 @dataclass(frozen=True)
 class _ChangesetBlockHandler:
     lifecycle: WorkerLifecycleService
+    agent_id: str
     changeset_id: str
     beads_root: Path
     repo_root: Path
@@ -204,6 +205,21 @@ class _ChangesetBlockHandler:
             beads_root=self.beads_root,
             repo_root=self.repo_root,
             reason=reason,
+        )
+        self.lifecycle.send_planner_notification(
+            subject=f"NEEDS-DECISION: Worker session start failed ({self.changeset_id})",
+            body=(
+                "Worker could not start the agent session and blocked the changeset.\n"
+                f"Changeset: {self.changeset_id}\n"
+                "Stage: start agent session\n"
+                f"Diagnostics: {reason}\n"
+                "Action: fix agent startup command/env prerequisites and rerun worker."
+            ),
+            agent_id=self.agent_id,
+            thread_id=self.changeset_id,
+            beads_root=self.beads_root,
+            repo_root=self.repo_root,
+            dry_run=False,
         )
 
 
@@ -813,6 +829,7 @@ def run_worker_once(
             session_control=control,
             blocked_handler=_ChangesetBlockHandler(
                 lifecycle=lifecycle,
+                agent_id=agent.agent_id,
                 changeset_id=str(changeset_id),
                 beads_root=beads_root,
                 repo_root=repo_root,
@@ -911,17 +928,8 @@ def run_worker_once(
         )
         if terminal_review_handoff:
             control.say(
-                "Review handoff reached; stopping autonomous loop after PR publication. "
-                f"Rerun with explicit epic selection to resume `{changeset_id}`."
-            )
-            finishstep(extra="changeset_review_handoff")
-            return finish(
-                WorkerRunSummary(
-                    started=False,
-                    reason="changeset_review_handoff",
-                    epic_id=selected_epic,
-                    changeset_id=str(changeset_id) if changeset_id else None,
-                )
+                "Review handoff reached; continuing autonomous loop after PR publication "
+                f"to look for additional actionable work beyond `{changeset_id}`."
             )
         finishstep(extra=finalize_result.reason)
         if not finalize_result.continue_running:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -42,6 +43,60 @@ class RunWorkerOnceFn(Protocol):
     def __call__(
         self, args: object, *, mode: str, dry_run: bool, session_key: str
     ) -> WorkerRunSummary: ...
+
+
+NON_WATCH_EXIT_REASON_NO_WORK_EXPLICIT = "no_work_explicit_epic"
+NON_WATCH_EXIT_REASON_NO_WORK_GLOBAL = "no_work_global"
+NON_WATCH_EXIT_REASON_FAIL_CLOSED = "fail_closed"
+
+_EXPLICIT_NO_WORK_REASONS = {"explicit_epic_not_actionable", "explicit_epic_completed"}
+_GLOBAL_NO_WORK_REASONS = {"no_eligible_epics"}
+
+
+@dataclass(frozen=True)
+class NonWatchExitOutcome:
+    """Classify a terminal non-watch worker outcome for stable reporting."""
+
+    taxonomy: str
+    success: bool
+    summary_reason: str
+
+
+def classify_non_watch_exit_outcome(
+    summary: WorkerRunSummary, *, explicit_epic_requested: bool
+) -> NonWatchExitOutcome:
+    """Classify terminal non-watch exits into deterministic taxonomy labels."""
+    reason = summary.reason
+    if explicit_epic_requested and reason in _EXPLICIT_NO_WORK_REASONS:
+        return NonWatchExitOutcome(
+            taxonomy=NON_WATCH_EXIT_REASON_NO_WORK_EXPLICIT,
+            success=True,
+            summary_reason=reason,
+        )
+    if reason in _GLOBAL_NO_WORK_REASONS:
+        return NonWatchExitOutcome(
+            taxonomy=NON_WATCH_EXIT_REASON_NO_WORK_GLOBAL,
+            success=True,
+            summary_reason=reason,
+        )
+    return NonWatchExitOutcome(
+        taxonomy=NON_WATCH_EXIT_REASON_FAIL_CLOSED,
+        success=False,
+        summary_reason=reason,
+    )
+
+
+def _terminal_outcome_detail(summary: WorkerRunSummary, outcome: NonWatchExitOutcome) -> str:
+    parts = [
+        "Terminal outcome",
+        f"taxonomy={outcome.taxonomy}",
+        f"summary_reason={summary.reason}",
+    ]
+    if summary.epic_id:
+        parts.append(f"epic={summary.epic_id}")
+    if summary.changeset_id:
+        parts.append(f"changeset={summary.changeset_id}")
+    return ": ".join((parts[0], ", ".join(parts[1:])))
 
 
 class WorkerLifecycleAdapter:
@@ -393,6 +448,8 @@ def run_worker_sessions(
     emit: Callable[[str], None],
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> None:
+    explicit_epic_requested = bool(str(getattr(args, "epic_id", "")).strip())
+
     if bool(getattr(args, "queue", False)):
         summary = run_worker_once(args, mode=mode, dry_run=dry_run, session_key=session_key)
         report_worker_summary(summary, dry_run)
@@ -413,6 +470,13 @@ def run_worker_sessions(
                     sleep_fn(interval)
                 continue
             if run_mode != "watch":
+                outcome = classify_non_watch_exit_outcome(
+                    summary,
+                    explicit_epic_requested=explicit_epic_requested,
+                )
+                dry_run_log(_terminal_outcome_detail(summary, outcome))
+                if not outcome.success:
+                    raise SystemExit(1)
                 return
             interval = watch_interval_seconds()
             dry_run_log(f"Watching for updates (sleeping {interval}s before next check).")
@@ -437,6 +501,13 @@ def run_worker_sessions(
             emit(f"No ready work; watching for updates (sleeping {interval}s).")
             sleep_fn(interval)
             continue
+        outcome = classify_non_watch_exit_outcome(
+            summary,
+            explicit_epic_requested=explicit_epic_requested,
+        )
+        emit(_terminal_outcome_detail(summary, outcome))
+        if not outcome.success:
+            raise SystemExit(1)
         return
 
 
