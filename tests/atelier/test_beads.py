@@ -927,19 +927,10 @@ def test_ensure_atelier_store_skips_existing_root() -> None:
 
 
 def test_prime_addendum_returns_output() -> None:
-    with (
-        patch(
-            "atelier.beads.subprocess.run",
-            return_value=CompletedProcess(
-                args=["bd", "prime"], returncode=0, stdout="# Addendum\n", stderr=""
-            ),
-        ),
-        patch(
-            "atelier.beads._prime_guidance_capabilities",
-            return_value=beads._PrimeGuidanceCapabilities(
-                supports_export=True,
-                supports_dolt=True,
-            ),
+    with patch(
+        "atelier.beads.subprocess.run",
+        return_value=CompletedProcess(
+            args=["bd", "prime"], returncode=0, stdout="# Addendum\n", stderr=""
         ),
     ):
         value = beads.prime_addendum(beads_root=Path("/beads"), cwd=Path("/repo"))
@@ -957,7 +948,7 @@ def test_prime_addendum_returns_none_on_error() -> None:
     assert value is None
 
 
-def test_prime_addendum_rewrites_deprecated_sync_guidance_when_export_supported() -> None:
+def test_prime_addendum_returns_prime_output_without_rewriting() -> None:
     stdout = (
         "## Beads Workflow Context\n\n"
         "```\n"
@@ -965,111 +956,13 @@ def test_prime_addendum_rewrites_deprecated_sync_guidance_when_export_supported(
         "```\n"
         "- `bd sync` exports JSONL.\n"
     )
-    with (
-        patch(
-            "atelier.beads.subprocess.run",
-            return_value=CompletedProcess(
-                args=["bd", "prime"], returncode=0, stdout=stdout, stderr=""
-            ),
-        ),
-        patch(
-            "atelier.beads._prime_guidance_capabilities",
-            return_value=beads._PrimeGuidanceCapabilities(
-                supports_export=True,
-                supports_dolt=True,
-            ),
-        ),
+    with patch(
+        "atelier.beads.subprocess.run",
+        return_value=CompletedProcess(args=["bd", "prime"], returncode=0, stdout=stdout, stderr=""),
     ):
         value = beads.prime_addendum(beads_root=Path("/beads"), cwd=Path("/repo"))
 
-    assert value is not None
-    assert "bd sync --flush-only" not in value
-    assert "`bd sync`" not in value
-    assert value.count('bd export -o "${BEADS_DIR:-.beads}/issues.jsonl"') == 2
-
-
-def test_prime_addendum_rewrites_deprecated_sync_guidance_when_export_unsupported() -> None:
-    stdout = (
-        "## Beads Workflow Context\n\n"
-        "```\n"
-        "[ ] bd sync --flush-only\n"
-        "```\n"
-        "- `bd sync` exports JSONL.\n"
-    )
-    with (
-        patch(
-            "atelier.beads.subprocess.run",
-            return_value=CompletedProcess(
-                args=["bd", "prime"], returncode=0, stdout=stdout, stderr=""
-            ),
-        ),
-        patch(
-            "atelier.beads._prime_guidance_capabilities",
-            return_value=beads._PrimeGuidanceCapabilities(
-                supports_export=False,
-                supports_dolt=True,
-            ),
-        ),
-    ):
-        value = beads.prime_addendum(beads_root=Path("/beads"), cwd=Path("/repo"))
-
-    assert value is not None
-    assert "bd sync --flush-only" not in value
-    assert "- `bd sync` exports JSONL." not in value
-    assert value.count("bd dolt commit") == 3
-    assert "Deprecated `bd sync` paths are no-op in this bd build." in value
-    assert "`bd dolt push` / `bd dolt pull`" in value
-
-
-def test_prime_guidance_capabilities_derive_from_supported_bd_commands() -> None:
-    beads._BD_COMMAND_CAPABILITY_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
-
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
-        if request.argv == ("bd", "export", "--help"):
-            return exec_util.CommandResult(
-                argv=request.argv,
-                returncode=0,
-                stdout="",
-                stderr="",
-            )
-        if request.argv == ("bd", "dolt", "--help"):
-            return exec_util.CommandResult(
-                argv=request.argv,
-                returncode=0,
-                stdout="",
-                stderr="",
-            )
-        raise AssertionError(f"unexpected command: {request.argv}")
-
-    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
-        capabilities = beads._prime_guidance_capabilities(  # pyright: ignore[reportPrivateUsage]
-            beads_root=Path("/beads"),
-            cwd=Path("/repo"),
-        )
-
-    assert capabilities.supports_export is True
-    assert capabilities.supports_dolt is True
-
-
-def test_prime_guidance_capabilities_treat_unknown_commands_as_unsupported() -> None:
-    beads._BD_COMMAND_CAPABILITY_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
-
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
-        return exec_util.CommandResult(
-            argv=request.argv,
-            returncode=1,
-            stdout="",
-            stderr='Error: unknown command "export" for "bd"',
-        )
-
-    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
-        capabilities = beads._prime_guidance_capabilities(  # pyright: ignore[reportPrivateUsage]
-            beads_root=Path("/beads"),
-            cwd=Path("/repo"),
-        )
-
-    assert capabilities.supports_export is False
-    assert capabilities.supports_dolt is False
+    assert value == stdout.strip()
 
 
 def test_ensure_issue_prefix_noop_when_already_expected() -> None:
