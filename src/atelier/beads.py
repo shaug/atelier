@@ -78,6 +78,7 @@ _DOLT_SERVER_PRECHECK_BYPASS_COMMANDS = {
     "init",
     "migrate",
     "onboard",
+    "prime",
     "quickstart",
     "setup",
     "upgrade",
