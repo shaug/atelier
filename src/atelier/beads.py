@@ -223,7 +223,7 @@ def beads_env(beads_root: Path) -> dict[str, str]:
     """Return an environment mapping with BEADS_DIR set."""
     env = os.environ.copy()
     env["BEADS_DIR"] = str(beads_root)
-    env.setdefault("BEADS_DB", str(beads_root / "beads.db"))
+    env["BEADS_DB"] = str(beads_root / "beads.db")
     agent_id = env.get("ATELIER_AGENT_ID")
     if agent_id:
         env.setdefault("BD_ACTOR", agent_id)
