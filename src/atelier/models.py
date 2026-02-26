@@ -21,6 +21,8 @@ UpgradePolicy = Literal["always", "ask", "manual"]
 
 BEADS_LOCATION_VALUES = ("repo", "project")
 BeadsLocation = Literal["repo", "project"]
+BEADS_RUNTIME_MODE_VALUES = ("dolt-server",)
+BeadsRuntimeMode = Literal["dolt-server"]
 
 
 class BranchConfig(BaseModel):
@@ -350,6 +352,20 @@ class BeadsSection(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     location: BeadsLocation | None = None
+    runtime_mode: BeadsRuntimeMode | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_runtime_mode(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        if payload.get("runtime_mode") is not None:
+            return payload
+        legacy_runtime = payload.get("mode")
+        if legacy_runtime is not None:
+            payload["runtime_mode"] = legacy_runtime
+        return payload
 
     @field_validator("location", mode="before")
     @classmethod
@@ -360,6 +376,22 @@ class BeadsSection(BaseModel):
             normalized = value.strip().lower()
             return normalized or None
         return value
+
+    @field_validator("runtime_mode", mode="before")
+    @classmethod
+    def normalize_runtime_mode(cls, value: object) -> object:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("runtime_mode must be one of: " + ", ".join(BEADS_RUNTIME_MODE_VALUES))
+        normalized = value.strip().lower().replace("_", "-")
+        if not normalized:
+            return None
+        if normalized in {"server", "dolt", "doltserver"}:
+            return "dolt-server"
+        if normalized in BEADS_RUNTIME_MODE_VALUES:
+            return normalized
+        raise ValueError("runtime_mode must be one of: " + ", ".join(BEADS_RUNTIME_MODE_VALUES))
 
 
 class AtelierSection(BaseModel):

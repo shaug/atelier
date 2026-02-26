@@ -39,6 +39,7 @@ _FALLBACK_ISSUE_TYPE = "task"
 _ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
 _STORE_REPAIR_ATTEMPTED: set[Path] = set()
 _EMBEDDED_PANIC_REPAIR_ATTEMPTED: set[Path] = set()
+_DOLT_RUNTIME_NORMALIZED: set[Path] = set()
 _STORE_REPAIR_ERROR_MARKERS = (
     "no beads database found",
     "database not initialized: issue_prefix config is missing",
@@ -56,6 +57,10 @@ _BEADS_STARTUP_INSUFFICIENT_DOLT = "insufficient_dolt_vs_legacy_data"
 _BEADS_STARTUP_UNKNOWN = "startup_state_unknown"
 _STARTUP_AUTO_MIGRATION_MIN_BD_VERSION = (0, 56, 1)
 _STARTUP_AUTO_MIGRATION_ATTEMPTED: set[Path] = set()
+_DOLT_SERVER_HOST_DEFAULT = "127.0.0.1"
+_DOLT_SERVER_PORT_DEFAULT = 3307
+_DOLT_SERVER_USER_DEFAULT = "root"
+_DOLT_DATABASE_DEFAULT = "beads"
 
 
 class _IssueTypeModel(BaseModel):
@@ -242,6 +247,119 @@ def _short_detail(value: str | None) -> str | None:
     if not flattened:
         return None
     return flattened[:220]
+
+
+def _discover_dolt_database_name(beads_root: Path) -> str:
+    dolt_root = beads_root / "dolt"
+    if not dolt_root.is_dir():
+        return _DOLT_DATABASE_DEFAULT
+    candidates: list[str] = []
+    for child in dolt_root.iterdir():
+        if not child.is_dir():
+            continue
+        if (child / ".dolt").is_dir():
+            candidates.append(child.name)
+    if not candidates:
+        return _DOLT_DATABASE_DEFAULT
+    if "beads_at" in candidates:
+        return "beads_at"
+    return sorted(candidates)[0]
+
+
+def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
+    key = beads_root.resolve()
+    if key in _DOLT_RUNTIME_NORMALIZED:
+        return
+    _DOLT_RUNTIME_NORMALIZED.add(key)
+    metadata_path = beads_root / "metadata.json"
+    if not metadata_path.exists():
+        atelier_log.warning(
+            f"Skipping Beads runtime normalization: metadata.json missing at {metadata_path}"
+        )
+        return
+    try:
+        raw = metadata_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        atelier_log.warning(
+            f"Skipping Beads runtime normalization: unable to read {metadata_path} ({exc})"
+        )
+        return
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        atelier_log.warning(
+            f"Skipping Beads runtime normalization: invalid metadata JSON at {metadata_path} ({exc})"
+        )
+        return
+    if not isinstance(payload, dict):
+        atelier_log.warning(
+            f"Skipping Beads runtime normalization: metadata payload is not an object at "
+            f"{metadata_path}"
+        )
+        return
+    backend = str(payload.get("backend") or "").strip().lower()
+    if backend and backend != "dolt":
+        atelier_log.warning(
+            f"Skipping Beads runtime normalization: backend={backend} is not dolt at "
+            f"{metadata_path}"
+        )
+        return
+
+    updated = dict(payload)
+    changes: list[str] = []
+
+    if backend != "dolt":
+        updated["backend"] = "dolt"
+        changes.append("backend")
+
+    mode_value = str(updated.get("dolt_mode") or "").strip().lower()
+    if mode_value != "server":
+        updated["dolt_mode"] = "server"
+        changes.append("dolt_mode")
+
+    host_value = updated.get("dolt_server_host")
+    if not isinstance(host_value, str) or not host_value.strip():
+        updated["dolt_server_host"] = _DOLT_SERVER_HOST_DEFAULT
+        changes.append("dolt_server_host")
+
+    port_value = updated.get("dolt_server_port")
+    if isinstance(port_value, bool):
+        port_value = None
+    if isinstance(port_value, str):
+        try:
+            port_value = int(port_value.strip())
+        except ValueError:
+            port_value = None
+    if not isinstance(port_value, int) or port_value <= 0:
+        updated["dolt_server_port"] = _DOLT_SERVER_PORT_DEFAULT
+        changes.append("dolt_server_port")
+
+    user_value = updated.get("dolt_server_user")
+    if not isinstance(user_value, str) or not user_value.strip():
+        updated["dolt_server_user"] = _DOLT_SERVER_USER_DEFAULT
+        changes.append("dolt_server_user")
+
+    database_value = updated.get("dolt_database")
+    if not isinstance(database_value, str) or not database_value.strip():
+        updated["dolt_database"] = _discover_dolt_database_name(beads_root)
+        changes.append("dolt_database")
+
+    if not changes:
+        atelier_log.debug(
+            f"Beads runtime metadata already normalized for Dolt server mode at {metadata_path}"
+        )
+        return
+    try:
+        metadata_path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        atelier_log.warning(
+            f"Skipping Beads runtime normalization: unable to write {metadata_path} ({exc})"
+        )
+        return
+    changes_text = ", ".join(changes)
+    atelier_log.info(
+        f"Normalized Beads runtime metadata to Dolt server mode at {metadata_path} ({changes_text})"
+    )
 
 
 def _is_missing_store_error(detail: str) -> bool:
@@ -897,6 +1015,7 @@ def run_bd_command(
     except RuntimeError as exc:
         die(str(exc))
     _attempt_startup_auto_migration(args=args, beads_root=beads_root, cwd=cwd, env=env)
+    _normalize_dolt_runtime_metadata_once(beads_root=beads_root)
     _enforce_in_progress_dependency_gate(args, beads_root=beads_root, cwd=cwd, env=env)
     request = exec.CommandRequest(
         argv=tuple(cmd),

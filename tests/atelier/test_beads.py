@@ -18,6 +18,56 @@ def test_beads_env_sets_beads_db() -> None:
     assert env["BEADS_DB"] == "/tmp/project/.beads/beads.db"
 
 
+def test_normalize_dolt_runtime_metadata_once_updates_legacy_fields(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "database": "dolt",
+                "backend": "dolt",
+                "dolt_mode": "embedded",
+                "dolt_server_host": "",
+                "dolt_server_port": 0,
+                "dolt_database": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    beads._DOLT_RUNTIME_NORMALIZED.clear()  # pyright: ignore[reportPrivateUsage]
+    beads._normalize_dolt_runtime_metadata_once(  # pyright: ignore[reportPrivateUsage]
+        beads_root=beads_root
+    )
+    beads._normalize_dolt_runtime_metadata_once(  # pyright: ignore[reportPrivateUsage]
+        beads_root=beads_root
+    )
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert payload["backend"] == "dolt"
+    assert payload["dolt_mode"] == "server"
+    assert payload["dolt_server_host"] == "127.0.0.1"
+    assert payload["dolt_server_port"] == 3307
+    assert payload["dolt_server_user"] == "root"
+    assert payload["dolt_database"] == "beads_at"
+
+
+def test_normalize_dolt_runtime_metadata_once_skips_invalid_json(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text("{not-json", encoding="utf-8")
+
+    beads._DOLT_RUNTIME_NORMALIZED.clear()  # pyright: ignore[reportPrivateUsage]
+    beads._normalize_dolt_runtime_metadata_once(  # pyright: ignore[reportPrivateUsage]
+        beads_root=beads_root
+    )
+
+    assert metadata_path.read_text(encoding="utf-8") == "{not-json"
+
+
 def test_run_bd_issue_records_validates_issues() -> None:
     with patch(
         "atelier.beads.run_bd_json",

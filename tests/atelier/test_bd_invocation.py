@@ -51,7 +51,7 @@ def test_ensure_supported_bd_version_accepts_minimum(monkeypatch: pytest.MonkeyP
         lambda *_args, **_kwargs: subprocess.CompletedProcess(
             args=["bd", "--version"],
             returncode=0,
-            stdout="bd version 0.51.0",
+            stdout="bd version 0.56.1",
             stderr="",
         ),
     )
@@ -109,12 +109,12 @@ def test_ensure_supported_bd_version_rejects_older(monkeypatch: pytest.MonkeyPat
         lambda *_args, **_kwargs: subprocess.CompletedProcess(
             args=["bd", "--version"],
             returncode=0,
-            stdout="bd version 0.50.9",
+            stdout="bd version 0.56.0",
             stderr="",
         ),
     )
 
-    with pytest.raises(RuntimeError, match="requires bd >= 0.51.0"):
+    with pytest.raises(RuntimeError, match="requires bd >= 0.56.1"):
         bd_invocation.ensure_supported_bd_version(env={})
 
 

@@ -479,6 +479,22 @@ def resolve_beads_root(project_dir: Path, repo_root: Path) -> Path:
     return paths.project_beads_dir(project_dir)
 
 
+def resolve_beads_runtime_mode(config_payload: ProjectConfig | dict | None = None) -> str:
+    """Resolve the normalized Beads runtime mode for project operations."""
+    if isinstance(config_payload, ProjectConfig):
+        value = config_payload.beads.runtime_mode
+        return value or "dolt-server"
+    if isinstance(config_payload, dict):
+        beads_payload = config_payload.get("beads")
+        if isinstance(beads_payload, dict):
+            value = beads_payload.get("runtime_mode")
+            if isinstance(value, str):
+                normalized = value.strip().lower().replace("_", "-")
+                if normalized in {"dolt-server", "server", "dolt", "doltserver"}:
+                    return "dolt-server"
+    return "dolt-server"
+
+
 def is_github_provider(value: str | None) -> bool:
     """Return whether the provider string identifies GitHub."""
     if not value:
@@ -1063,8 +1079,9 @@ def build_project_config(
     project_provider_url = existing_config.project.provider_url
     project_owner = existing_config.project.owner
 
-    beads_location = "project"
-    beads_section = existing_config.beads.model_copy(update={"location": beads_location})
+    beads_section = existing_config.beads.model_copy(
+        update={"location": "project", "runtime_mode": "dolt-server"}
+    )
 
     branch_config = BranchConfig.model_validate(
         {
