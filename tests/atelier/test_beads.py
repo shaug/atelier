@@ -1676,6 +1676,34 @@ def test_prime_addendum_returns_prime_output_without_rewriting() -> None:
     assert value == stdout.strip()
 
 
+def test_prime_addendum_strips_unsupported_export_command_lines() -> None:
+    """Lines referencing bd export or bd sync --export are removed (unsupported/deprecated)."""
+    stdout = (
+        "## Beads Workflow Context\n\n"
+        "```\n"
+        "[ ] bd export\n"
+        "[ ] bd sync --flush-only\n"
+        "[ ] bd sync --export\n"
+        "```\n"
+        "- Use bd ready.\n"
+    )
+    with patch(
+        "atelier.beads.exec.run_with_runner",
+        return_value=type(
+            "Result",
+            (),
+            {"returncode": 0, "stdout": stdout, "stderr": ""},
+        )(),
+    ):
+        value = beads.prime_addendum(beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert value is not None
+    assert "bd export" not in value
+    assert "sync --export" not in value
+    assert "bd sync --flush-only" in value
+    assert "Use bd ready" in value
+
+
 def test_ensure_issue_prefix_noop_when_already_expected() -> None:
     with (
         patch("atelier.beads._current_issue_prefix", return_value="at"),

@@ -2000,8 +2000,31 @@ def list_epics(
     return result
 
 
+def _strip_unsupported_export_from_addendum(text: str) -> str:
+    """Remove lines referencing bd export or bd sync --export (unsupported/deprecated)."""
+    if not text:
+        return text
+    out: list[str] = []
+    for line in text.splitlines():
+        lower = line.lower()
+        if "bd export" in lower or "sync --export" in lower:
+            continue
+        out.append(line)
+    return "\n".join(out).strip()
+
+
 def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
-    """Return `bd prime --full` markdown without failing the caller."""
+    """Return `bd prime --full` markdown without failing the caller.
+
+    The addendum is workflow context produced by the Beads CLI (e.g. suggested
+    next commands like `bd sync --flush-only`). Atelier injects it into
+    agent AGENTS.md so the planner or worker sees up-to-date Beads guidance.
+    Injection is done elsewhere via agent_home.apply_beads_prime_addendum():
+    the planner syncs it during plan, and the worker syncs it at session start.
+    Lines that reference unsupported or deprecated commands (bd export,
+    bd sync --export) are stripped before return so agents are not told to
+    run unavailable commands.
+    """
     env = beads_env(beads_root)
     command = ["bd", "prime", "--full"]
     result = exec.run_with_runner(
@@ -2019,6 +2042,7 @@ def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
     if result.returncode != 0:
         return None
     output = (result.stdout or "").strip()
+    output = _strip_unsupported_export_from_addendum(output)
     return output or None
 
 
