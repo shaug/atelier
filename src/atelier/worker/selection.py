@@ -52,7 +52,7 @@ def is_planner_agent_id(agent_id: object) -> bool:
 
 def has_planner_executable_assignee(issue: dict[str, object]) -> bool:
     evaluation = evaluate_epic_claimability(issue)
-    if not evaluation.role.is_epic:
+    if not evaluation.role.is_epic or not evaluation.claimable:
         return False
     assignee = issue.get("assignee")
     return is_planner_agent_id(assignee)
@@ -61,11 +61,6 @@ def has_planner_executable_assignee(issue: dict[str, object]) -> bool:
 def has_executable_identity(issue: dict[str, object]) -> bool:
     """Return whether an issue is top-level executable work identity."""
     return evaluate_epic_claimability(issue).role.is_epic
-
-
-def has_explicit_ready_label(issue: dict[str, object]) -> bool:
-    """Return whether an issue is explicitly marked ready for execution."""
-    return "at:ready" in issue_labels(issue)
 
 
 def planner_owned_executable_issues(issues: list[dict[str, object]]) -> list[dict[str, object]]:

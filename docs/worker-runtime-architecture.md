@@ -38,10 +38,10 @@ Runnable leaf evaluation:
 - lifecycle status must resolve to `open` or `in_progress`.
 - all dependency blockers must be terminal before execution.
 
-Migration compatibility:
+Lifecycle authority:
 
-- legacy lifecycle labels (`at:ready`, `cs:*`) are compatibility hints only.
 - canonical status + graph shape are the source of truth for decisions.
+- labels are informational identity metadata, not lifecycle execution gates.
 
 ## Layering
 

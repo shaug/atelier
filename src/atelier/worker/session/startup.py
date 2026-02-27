@@ -15,8 +15,6 @@ from ..models import StartupContractResult
 from ..models_boundary import parse_issue_boundary
 from ..review import MergeConflictSelection, ReviewFeedbackSelection
 
-_TERMINAL_CHANGESET_LABELS = {"cs:merged", "cs:abandoned"}
-
 
 @dataclass(frozen=True)
 class NextChangesetContext:
@@ -86,20 +84,11 @@ def _is_executable_epic_identity(issue: dict[str, object]) -> bool:
 
 
 def _is_terminal(issue: dict[str, object]) -> bool:
-    return lifecycle.is_closed_status(
-        issue.get("status"),
-        labels=worker_selection.issue_labels(issue),
-    )
+    return lifecycle.is_closed_status(issue.get("status"))
 
 
 def _is_terminal_explicit_issue(issue: dict[str, object]) -> bool:
-    if lifecycle.is_closed_status(
-        issue.get("status"),
-        labels=worker_selection.issue_labels(issue),
-    ):
-        return True
-    labels = worker_selection.issue_labels(issue)
-    return bool(_TERMINAL_CHANGESET_LABELS.intersection(labels))
+    return lifecycle.is_closed_status(issue.get("status"))
 
 
 def _dependency_ids(issue: dict[str, object]) -> tuple[str, ...] | None:
@@ -472,7 +461,7 @@ def run_startup_contract_service(
             labels = worker_selection.issue_labels(candidate)
             if "at:changeset" not in labels:
                 continue
-            if _TERMINAL_CHANGESET_LABELS.intersection(labels):
+            if lifecycle.is_closed_status(candidate.get("status")):
                 continue
             integration_proven, integrated_sha = service.changeset_integration_signal(
                 candidate,

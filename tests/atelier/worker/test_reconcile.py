@@ -300,7 +300,7 @@ def test_reconcile_dependency_without_terminal_review_or_merge_blocks_finalize()
     assert any("blocked by dependencies: at-1.1" in line for line in logs)
 
 
-def test_reconcile_dependency_with_abandoned_label_allows_finalize() -> None:
+def test_reconcile_dependency_with_abandoned_label_requires_review_metadata() -> None:
     project = config.ProjectConfig(
         project=config.ProjectSection(origin="https://github.com/org/repo"),
         branch=config.BranchConfig(pr=False),
@@ -347,5 +347,5 @@ def test_reconcile_dependency_with_abandoned_label_allows_finalize() -> None:
             ),
         )
 
-    assert result.reconciled == 1
-    assert result.failed == 0
+    assert result.reconciled == 0
+    assert result.failed == 1

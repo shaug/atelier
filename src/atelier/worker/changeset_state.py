@@ -30,7 +30,6 @@ def find_invalid_changeset_labels(
     *,
     beads_root: Path,
     repo_root: Path,
-    valid_changeset_state_labels: set[str],
 ) -> list[str]:
     invalid: list[str] = []
     seen: set[str] = set()
@@ -47,16 +46,7 @@ def find_invalid_changeset_labels(
             seen.add(issue_id)
             queue.append(issue_id)
             labels = issue_labels(issue)
-            has_cs_label = any(label.startswith("cs:") for label in labels)
-            invalid_cs_labels = {
-                label
-                for label in labels
-                if label.startswith("cs:") and label not in valid_changeset_state_labels
-            }
-            if "at:subtask" in labels or (has_cs_label and "at:changeset" not in labels):
-                invalid.append(issue_id)
-                continue
-            if invalid_cs_labels:
+            if "at:subtask" in labels:
                 invalid.append(issue_id)
     return invalid
 
@@ -68,18 +58,6 @@ def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root
             changeset_id,
             "--add-label",
             "at:changeset",
-            "--remove-label",
-            "cs:ready",
-            "--remove-label",
-            "cs:in_progress",
-            "--remove-label",
-            "cs:planned",
-            "--remove-label",
-            "cs:blocked",
-            "--remove-label",
-            "cs:merged",
-            "--remove-label",
-            "cs:abandoned",
             "--status",
             "in_progress",
         ],
@@ -95,14 +73,6 @@ def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Pat
             changeset_id,
             "--status",
             "closed",
-            "--remove-label",
-            "cs:ready",
-            "--remove-label",
-            "cs:planned",
-            "--remove-label",
-            "cs:in_progress",
-            "--remove-label",
-            "cs:blocked",
         ],
         beads_root=beads_root,
         cwd=repo_root,
@@ -119,18 +89,6 @@ def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Pat
         [
             "update",
             changeset_id,
-            "--add-label",
-            "cs:merged",
-            "--remove-label",
-            "cs:abandoned",
-            "--remove-label",
-            "cs:ready",
-            "--remove-label",
-            "cs:planned",
-            "--remove-label",
-            "cs:in_progress",
-            "--remove-label",
-            "cs:blocked",
             "--status",
             "closed",
         ],
@@ -149,18 +107,6 @@ def mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: 
         [
             "update",
             changeset_id,
-            "--add-label",
-            "cs:abandoned",
-            "--remove-label",
-            "cs:merged",
-            "--remove-label",
-            "cs:ready",
-            "--remove-label",
-            "cs:planned",
-            "--remove-label",
-            "cs:in_progress",
-            "--remove-label",
-            "cs:blocked",
             "--status",
             "closed",
         ],
@@ -183,18 +129,6 @@ def mark_changeset_blocked(
         [
             "update",
             changeset_id,
-            "--remove-label",
-            "cs:in_progress",
-            "--remove-label",
-            "cs:ready",
-            "--remove-label",
-            "cs:planned",
-            "--remove-label",
-            "cs:merged",
-            "--remove-label",
-            "cs:abandoned",
-            "--add-label",
-            "cs:blocked",
             "--status",
             "blocked",
             "--append-notes",
@@ -214,18 +148,6 @@ def mark_changeset_children_in_progress(
             changeset_id,
             "--status",
             "in_progress",
-            "--remove-label",
-            "cs:ready",
-            "--remove-label",
-            "cs:in_progress",
-            "--remove-label",
-            "cs:planned",
-            "--remove-label",
-            "cs:blocked",
-            "--remove-label",
-            "cs:merged",
-            "--remove-label",
-            "cs:abandoned",
         ],
         beads_root=beads_root,
         cwd=repo_root,
@@ -250,12 +172,11 @@ def close_completed_container_changesets(
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id:
             continue
-        labels = issue_labels(issue)
-        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
         if canonical_status != "closed":
             continue
         status = str(issue.get("status") or "").strip().lower()
-        if status in {"closed", "done"}:
+        if status == "closed":
             continue
         if has_open_descendant_changesets(issue_id):
             continue
@@ -278,17 +199,13 @@ def promote_planned_descendant_changesets(
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id:
             continue
-        labels = issue_labels(issue)
-        if "cs:planned" not in labels:
+        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
+        if canonical_status != "deferred":
             continue
         beads.run_bd_command(
             [
                 "update",
                 issue_id,
-                "--add-label",
-                "cs:ready",
-                "--remove-label",
-                "cs:planned",
                 "--status",
                 "open",
             ],

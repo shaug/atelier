@@ -146,7 +146,7 @@ def _status_bucket(issue: dict[str, object], *, show_drafts: bool) -> str | None
     )
     if not role.is_epic:
         return None
-    status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+    status = lifecycle.canonical_lifecycle_status(issue.get("status"))
     if status == "closed":
         return None
     if status == "deferred":
@@ -173,7 +173,7 @@ def _sort_key(issue: dict[str, object]) -> tuple[str, str]:
 def _append_issue(lines: list[str], issue: dict[str, object]) -> None:
     issue_id = str(issue.get("id") or "").strip() or "(unknown)"
     labels = _labels(issue)
-    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
     raw_status = str(issue.get("status") or "unknown").strip() or "unknown"
     status = canonical_status or raw_status
     title = str(issue.get("title") or "").strip() or "(untitled)"

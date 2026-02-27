@@ -2193,7 +2193,7 @@ def _is_planner_assignee(agent_id: object) -> bool:
 
 
 def summarize_changesets(
-    changesets: list[dict[str, object]],
+    changeset_issues: list[dict[str, object]],
     *,
     ready: list[dict[str, object]] | None = None,
 ) -> ChangesetSummary:
@@ -2201,14 +2201,22 @@ def summarize_changesets(
     ready_count = len(ready) if ready is not None else 0
     merged = 0
     abandoned = 0
-    for issue in changesets:
-        labels = _issue_labels(issue)
-        if "cs:merged" in labels:
+    remaining = 0
+    for issue in changeset_issues:
+        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
+        if canonical_status != "closed":
+            remaining += 1
+            continue
+        description = issue.get("description")
+        review = changesets.parse_review_metadata(
+            description if isinstance(description, str) else ""
+        )
+        pr_state = lifecycle.normalize_review_state(review.pr_state)
+        if pr_state == "merged":
             merged += 1
-        if "cs:abandoned" in labels:
+        elif pr_state in {"closed", "abandoned"}:
             abandoned += 1
-    total = len(changesets)
-    remaining = max(total - merged - abandoned, 0)
+    total = len(changeset_issues)
     return ChangesetSummary(
         total=total,
         ready=ready_count,
@@ -3373,8 +3381,8 @@ def close_epic_if_complete(
         return False
     issue = issues[0]
     labels = _issue_labels(issue)
-    is_standalone_changeset = "at:changeset" in labels and (
-        "cs:merged" in labels or "cs:abandoned" in labels
+    is_standalone_changeset = "at:changeset" in labels and lifecycle.is_closed_status(
+        issue.get("status")
     )
     summary = epic_changeset_summary(epic_id, beads_root=beads_root, cwd=cwd)
     if not is_standalone_changeset and not summary.ready_to_close:

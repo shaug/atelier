@@ -172,7 +172,7 @@ def test_stale_family_assigned_epics_reclaims_inactive_assignees_across_families
 
 def test_select_epic_from_ready_changesets_uses_epic_for_child_issue() -> None:
     issues = [
-        {"id": "at-epic", "labels": ["at:epic", "at:ready"], "assignee": None},
+        {"id": "at-epic", "status": "open", "labels": ["at:epic", "at:ready"], "assignee": None},
     ]
     ready_changesets = [
         {"id": "at-epic.1", "created_at": "2026-02-20T00:00:00+00:00"},

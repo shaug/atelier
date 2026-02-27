@@ -1657,6 +1657,7 @@ def test_claim_epic_allows_expected_takeover() -> None:
 def test_claim_epic_blocks_planner_owned_executable_work() -> None:
     issue = {
         "id": "atelier-9",
+        "status": "open",
         "labels": ["at:epic", "at:changeset", "at:ready"],
         "assignee": "atelier/planner/codex/p111",
     }
@@ -1678,6 +1679,7 @@ def test_claim_epic_blocks_planner_owned_executable_work() -> None:
 def test_claim_epic_rejects_planner_claimant_for_executable_work() -> None:
     issue = {
         "id": "atelier-9",
+        "status": "open",
         "labels": ["at:epic", "at:ready"],
         "assignee": None,
     }
@@ -1699,9 +1701,15 @@ def test_claim_epic_rejects_planner_claimant_for_executable_work() -> None:
 
 
 def test_claim_epic_backfills_epic_label_for_standalone_changeset() -> None:
-    issue = {"id": "at-legacy", "labels": ["at:changeset", "at:ready"], "assignee": None}
+    issue = {
+        "id": "at-legacy",
+        "status": "open",
+        "labels": ["at:changeset", "at:ready"],
+        "assignee": None,
+    }
     updated = {
         "id": "at-legacy",
+        "status": "in_progress",
         "labels": ["at:changeset", "at:epic", "at:hooked", "at:ready"],
         "assignee": "agent",
     }
@@ -1752,7 +1760,12 @@ def test_claim_epic_rejects_executable_work_without_active_status() -> None:
 
 
 def test_claim_epic_rejects_deferred_executable_work() -> None:
-    issue = {"id": "at-legacy", "labels": ["at:epic", "at:draft"], "assignee": None}
+    issue = {
+        "id": "at-legacy",
+        "status": "deferred",
+        "labels": ["at:epic", "at:draft"],
+        "assignee": None,
+    }
 
     with (
         patch("atelier.beads.run_bd_json", return_value=[issue]),
@@ -2011,9 +2024,9 @@ def test_list_child_changesets_uses_changeset_label() -> None:
 
 def test_summarize_changesets_counts_and_ready() -> None:
     changesets = [
-        {"labels": ["cs:merged"]},
-        {"labels": ["cs:abandoned"]},
-        {"labels": ["cs:ready"]},
+        {"status": "closed", "description": "pr_state: merged\n"},
+        {"status": "closed", "description": "pr_state: closed\n"},
+        {"status": "open"},
     ]
     summary = beads.summarize_changesets(changesets, ready=[changesets[2]])
     assert summary.total == 3
@@ -2026,8 +2039,8 @@ def test_summarize_changesets_counts_and_ready() -> None:
 
 def test_epic_changeset_summary_ready_to_close() -> None:
     changesets = {
-        "epic-1": [{"id": "epic-1.1", "labels": ["cs:merged"]}],
-        "epic-1.1": [{"id": "epic-1.1.1", "labels": ["cs:abandoned"]}],
+        "epic-1": [{"id": "epic-1.1", "status": "closed"}],
+        "epic-1.1": [{"id": "epic-1.1.1", "status": "closed"}],
         "epic-1.1.1": [],
     }
 
@@ -2048,7 +2061,7 @@ def test_epic_changeset_summary_ready_to_close() -> None:
 
 def test_close_epic_if_complete_closes_and_clears_hook() -> None:
     changesets = {
-        "epic-1": [{"id": "epic-1.1", "labels": ["cs:merged"]}],
+        "epic-1": [{"id": "epic-1.1", "status": "closed"}],
         "epic-1.1": [],
     }
 
@@ -2083,7 +2096,7 @@ def test_close_epic_if_complete_closes_and_clears_hook() -> None:
 
 def test_close_epic_if_complete_respects_confirm() -> None:
     changesets = {
-        "epic-1": [{"id": "epic-1.1", "labels": ["cs:merged"]}],
+        "epic-1": [{"id": "epic-1.1", "status": "closed"}],
         "epic-1.1": [],
     }
 
@@ -2115,7 +2128,8 @@ def test_close_epic_if_complete_closes_standalone_changeset() -> None:
             return [
                 {
                     "id": "at-irs",
-                    "labels": ["at:changeset", "cs:merged"],
+                    "labels": ["at:changeset"],
+                    "status": "closed",
                 }
             ]
         if args[:2] == ["list", "--parent"]:

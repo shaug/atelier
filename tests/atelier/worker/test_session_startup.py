@@ -659,6 +659,7 @@ def test_run_startup_contract_prioritizes_review_feedback() -> None:
         list_epics=lambda: [
             {
                 "id": "at-epic",
+                "status": "open",
                 "labels": ["at:epic", "at:ready"],
                 "assignee": "atelier/worker/codex/p100",
             }

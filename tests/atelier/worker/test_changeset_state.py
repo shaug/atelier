@@ -4,7 +4,7 @@ from unittest.mock import patch
 from atelier.worker import changeset_state
 
 
-def test_find_invalid_changeset_labels_flags_subtask_and_invalid_cs_labels() -> None:
+def test_find_invalid_changeset_labels_flags_subtask_only() -> None:
     by_parent: dict[str, list[dict[str, object]]] = {
         "at-epic": [
             {"id": "at-epic.1", "labels": ["at:subtask", "cs:ready"]},
@@ -24,10 +24,9 @@ def test_find_invalid_changeset_labels_flags_subtask_and_invalid_cs_labels() -> 
             "at-epic",
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
-            valid_changeset_state_labels={"cs:ready", "cs:planned"},
         )
 
-    assert invalid == ["at-epic.1", "at-epic.2"]
+    assert invalid == ["at-epic.1"]
 
 
 def test_mark_changeset_blocked_adds_blocked_state_and_note() -> None:
@@ -41,7 +40,8 @@ def test_mark_changeset_blocked_adds_blocked_state_and_note() -> None:
 
     args = run_bd_command.call_args.args[0]
     assert args[0:2] == ["update", "at-1"]
-    assert "cs:blocked" in args
+    assert "--status" in args
+    assert "blocked" in args
     assert "--append-notes" in args
     assert "missing integration" in args[-1]
 
@@ -50,18 +50,23 @@ def test_close_completed_container_changesets_closes_eligible_nodes() -> None:
     descendants = [
         {
             "id": "at-1.1",
-            "status": "",
+            "status": "done",
             "labels": ["at:changeset", "cs:merged"],
         },
         {
             "id": "at-1.2",
-            "status": "",
+            "status": "done",
             "labels": ["at:changeset", "cs:abandoned"],
         },
         {
             "id": "at-1.3",
             "status": "open",
             "labels": ["at:changeset", "cs:ready"],
+        },
+        {
+            "id": "at-1.4",
+            "status": "",
+            "labels": ["at:changeset", "cs:merged"],
         },
     ]
     with (
@@ -84,10 +89,10 @@ def test_close_completed_container_changesets_closes_eligible_nodes() -> None:
     )
 
 
-def test_promote_planned_descendant_changesets_promotes_planned_only() -> None:
+def test_promote_planned_descendant_changesets_promotes_deferred_only() -> None:
     descendants = [
-        {"id": "at-1.1", "labels": ["at:changeset", "cs:planned"]},
-        {"id": "at-1.2", "labels": ["at:changeset", "cs:ready"]},
+        {"id": "at-1.1", "status": "deferred", "labels": ["at:changeset", "cs:planned"]},
+        {"id": "at-1.2", "status": "open", "labels": ["at:changeset", "cs:ready"]},
     ]
     with (
         patch(

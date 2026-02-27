@@ -91,42 +91,20 @@ def _resolve_changeset_status_for_migration(
     if "at:changeset" not in labels:
         return None, ()
     current_status = lifecycle.normalize_status_value(issue.get("status"))
-    target_status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+    target_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
     if target_status not in lifecycle.CANONICAL_LIFECYCLE_STATUSES:
         return None, ()
-
-    reasons: list[str] = []
-    terminal_labels = {"cs:merged", "cs:abandoned"}.intersection(labels)
-    review_state = _changeset_review_state(issue)
-    if terminal_labels and target_status != "closed":
-        target_status = "closed"
-        joined = ", ".join(sorted(terminal_labels))
-        reasons.append(
-            "status -> closed: terminal label(s) "
-            f"{joined} require tombstone closure to prevent stale active listings"
-        )
-    elif review_state in {"merged", "closed", "abandoned"} and target_status in {
-        "open",
-        "in_progress",
-        "blocked",
-    }:
-        target_status = "closed"
-        reasons.append(
-            f"status -> closed: terminal review state ({review_state}) requires tombstone closure"
-        )
-
     if target_status == current_status:
-        return None, tuple(reasons)
-    if not reasons:
-        if current_status is None:
-            reasons.append(
-                f"status -> {target_status}: derive canonical status from legacy metadata"
-            )
-        else:
-            reasons.append(
-                f"status {current_status} -> {target_status}: normalize lifecycle status"
-            )
-    return target_status, tuple(reasons)
+        return None, ()
+    if current_status is None:
+        return (
+            target_status,
+            (f"status -> {target_status}: derive canonical status from legacy status aliases",),
+        )
+    return (
+        target_status,
+        (f"status {current_status} -> {target_status}: normalize lifecycle status",),
+    )
 
 
 def _resolve_epic_status_for_migration(
@@ -136,7 +114,7 @@ def _resolve_epic_status_for_migration(
     if "at:epic" not in labels:
         return None, ()
     current_status = lifecycle.normalize_status_value(issue.get("status"))
-    target_status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+    target_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
     if target_status not in lifecycle.CANONICAL_LIFECYCLE_STATUSES:
         return None, ()
     if target_status == current_status:
@@ -144,130 +122,12 @@ def _resolve_epic_status_for_migration(
     if current_status is None:
         return (
             target_status,
-            (f"status -> {target_status}: derive canonical status from legacy readiness labels",),
+            (f"status -> {target_status}: derive canonical status from legacy status aliases",),
         )
     return (
         target_status,
         (f"status {current_status} -> {target_status}: normalize legacy lifecycle status",),
     )
-
-
-def _normalize_changeset_labels_for_status(
-    issue: dict[str, object],
-    *,
-    target_status: str | None = None,
-) -> tuple[set[str], tuple[str, ...]]:
-    labels = _issue_labels(issue)
-    if "at:changeset" not in labels:
-        return labels, ()
-    status = (
-        target_status
-        or lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
-        or ""
-    )
-    desired = set(labels)
-    reasons: list[str] = []
-
-    def _drop(label: str, reason: str) -> None:
-        if label in desired:
-            desired.remove(label)
-            reasons.append(f"remove {label}: {reason}")
-
-    def _add(label: str, reason: str) -> None:
-        if label not in desired:
-            desired.add(label)
-            reasons.append(f"add {label}: {reason}")
-
-    review_state = _changeset_review_state(issue)
-
-    if status == "closed":
-        for label in ("cs:planned", "cs:ready", "cs:in_progress", "cs:blocked"):
-            _drop(label, "closed changesets should not carry active lifecycle labels")
-        if "cs:merged" in desired and "cs:abandoned" in desired:
-            if review_state in {"closed", "abandoned"}:
-                _drop("cs:merged", "closed review state prefers abandoned terminal")
-            else:
-                _drop("cs:abandoned", "merged terminal state takes precedence")
-        elif "cs:merged" not in desired and "cs:abandoned" not in desired:
-            if review_state == "merged":
-                _add("cs:merged", "merged review state requires terminal merged label")
-            elif review_state in {"closed", "abandoned"}:
-                _add(
-                    "cs:abandoned",
-                    "closed review state requires terminal abandoned label",
-                )
-        return desired, tuple(reasons)
-
-    if status == "blocked":
-        _add("cs:blocked", "blocked status requires cs:blocked marker")
-        for label in ("cs:merged", "cs:abandoned"):
-            _drop(label, "blocked changesets are not terminal")
-        for label in ("cs:planned", "cs:ready", "cs:in_progress"):
-            _drop(label, "blocked changesets should not carry active lifecycle labels")
-        return desired, tuple(reasons)
-
-    # Open/in-progress/hooked work uses issue status as source of truth.
-    for label in ("cs:ready", "cs:in_progress", "cs:planned"):
-        _drop(label, "status is authoritative for active lifecycle")
-    if status == "in_progress":
-        _drop("cs:blocked", "in_progress changesets are not blocked")
-    elif status == "open":
-        _drop("cs:blocked", "open changesets are not blocked")
-    for label in ("cs:merged", "cs:abandoned"):
-        _drop(label, "active changesets are not terminal")
-    return desired, tuple(reasons)
-
-
-def _normalize_executable_ready_labels_for_status(
-    issue: dict[str, object],
-    *,
-    target_status: str | None = None,
-) -> tuple[set[str], tuple[str, ...]]:
-    labels = _issue_labels(issue)
-    if "at:epic" not in labels:
-        return labels, ()
-    desired = set(labels)
-    reasons: list[str] = []
-    status = (
-        target_status
-        or lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
-        or ""
-    )
-    active = status in {"open", "in_progress"}
-    legacy_blocked = "at:draft" in labels
-
-    def _drop(label: str, reason: str) -> None:
-        if label in desired:
-            desired.remove(label)
-            reasons.append(f"remove {label}: {reason}")
-
-    def _add(label: str, reason: str) -> None:
-        if label not in desired:
-            desired.add(label)
-            reasons.append(f"add {label}: {reason}")
-
-    _drop(
-        "at:draft",
-        "draft readiness is now implied by deferred status, not an at:draft label",
-    )
-    if not active:
-        if status in {"deferred", "blocked", "closed"}:
-            _drop(
-                "at:ready",
-                f"{status} status is not executable under status-native lifecycle",
-            )
-        return desired, tuple(reasons)
-    if legacy_blocked:
-        _drop(
-            "at:ready",
-            "legacy at:draft blocked execution; preserve behavior while removing at:draft",
-        )
-    else:
-        _add(
-            "at:ready",
-            "legacy epic without at:draft was executable; preserve behavior explicitly",
-        )
-    return desired, tuple(reasons)
 
 
 def _workspace_branch_from_labels(labels: set[str]) -> str | None:
@@ -311,6 +171,17 @@ def _issue_integrated_sha(issue: dict[str, object]) -> str | None:
         if value and value.lower() != "null":
             return value
     return None
+
+
+def _is_merged_closed_changeset(issue: dict[str, object]) -> bool:
+    labels = _issue_labels(issue)
+    if "at:changeset" not in labels:
+        return False
+    if lifecycle.canonical_lifecycle_status(issue.get("status")) != "closed":
+        return False
+    if _issue_integrated_sha(issue):
+        return True
+    return _changeset_review_state(issue) == "merged"
 
 
 def _reconcile_preview_lines(
@@ -363,12 +234,8 @@ def _reconcile_preview_lines(
             lines.append(f"{changeset_id}: status=unknown integrated_sha=missing")
             continue
         status = str(issue.get("status") or "unknown")
-        labels = sorted(_issue_labels(issue))
         integrated_sha = _issue_integrated_sha(issue) or "missing"
-        lines.append(
-            f"{changeset_id}: status={status} labels={','.join(labels)} "
-            f"integrated_sha={integrated_sha}"
-        )
+        lines.append(f"{changeset_id}: status={status} integrated_sha={integrated_sha}")
     return tuple(lines)
 
 
@@ -388,46 +255,27 @@ def _gc_normalize_changeset_labels(
         if not isinstance(issue_id, str) or not issue_id.strip():
             continue
         issue_id = issue_id.strip()
-        labels = _issue_labels(issue)
         status_target, status_reasons = _resolve_changeset_status_for_migration(issue)
-        normalized_labels, reasons = _normalize_changeset_labels_for_status(
-            issue,
-            target_status=status_target,
-        )
-        if labels == normalized_labels and status_target is None:
+        if status_target is None:
             continue
-        add_labels = sorted(normalized_labels - labels)
-        remove_labels = sorted(labels - normalized_labels)
+        status_value = status_target
         current_status = lifecycle.normalize_status_value(issue.get("status")) or "missing"
-        if status_target:
-            details = [f"status: {current_status} -> {status_target}"]
-        else:
-            details = [f"status: {current_status}"]
+        details = [f"status: {current_status} -> {status_value}"]
         details.extend(status_reasons)
-        details.extend(reasons)
-        details.append(
-            f"add: {', '.join(add_labels) if add_labels else '(none)'}; "
-            f"remove: {', '.join(remove_labels) if remove_labels else '(none)'}"
-        )
 
         def _apply_normalize(
             bead_id: str = issue_id,
-            status_value: str | None = status_target,
-            add_values: list[str] = list(add_labels),
-            remove_values: list[str] = list(remove_labels),
+            status_value: str = status_value,
         ) -> None:
-            args = ["update", bead_id]
-            if status_value:
-                args.extend(["--status", status_value])
-            for label in add_values:
-                args.extend(["--add-label", label])
-            for label in remove_values:
-                args.extend(["--remove-label", label])
-            beads.run_bd_command(args, beads_root=beads_root, cwd=repo_root)
+            beads.run_bd_command(
+                ["update", bead_id, "--status", status_value],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
 
         actions.append(
             GcAction(
-                description=f"Normalize lifecycle metadata for changeset {issue_id}",
+                description=f"Normalize lifecycle status for changeset {issue_id}",
                 apply=_apply_normalize,
                 details=tuple(details),
             )
@@ -451,45 +299,24 @@ def _gc_normalize_executable_ready_labels(
         if not isinstance(issue_id, str) or not issue_id.strip():
             continue
         issue_id = issue_id.strip()
-        labels = _issue_labels(issue)
         status_target, status_reasons = _resolve_epic_status_for_migration(issue)
-        normalized_labels, reasons = _normalize_executable_ready_labels_for_status(
-            issue,
-            target_status=status_target,
-        )
-        if labels == normalized_labels and status_target is None:
+        if status_target is None:
             continue
-        add_labels = sorted(normalized_labels - labels)
-        remove_labels = sorted(labels - normalized_labels)
-        cmd_args = ["update", issue_id]
-        if status_target:
-            cmd_args.extend(["--status", status_target])
-        for label in add_labels:
-            cmd_args.extend(["--add-label", label])
-        for label in remove_labels:
-            cmd_args.extend(["--remove-label", label])
+        status_value = status_target
         current_status = lifecycle.normalize_status_value(issue.get("status")) or "missing"
-        if status_target:
-            details = [f"status: {current_status} -> {status_target}"]
-        else:
-            details = [f"status: {current_status}"]
+        details = [f"status: {current_status} -> {status_value}"]
         details.extend(status_reasons)
-        details.extend(reasons)
-        details.append(
-            f"add: {', '.join(add_labels) if add_labels else '(none)'}; "
-            f"remove: {', '.join(remove_labels) if remove_labels else '(none)'}"
-        )
 
-        def _apply_normalize(cmd: list[str] = list(cmd_args)) -> None:
+        def _apply_normalize(bead_id: str = issue_id, status_value: str = status_value) -> None:
             beads.run_bd_command(
-                cmd,
+                ["update", bead_id, "--status", status_value],
                 beads_root=beads_root,
                 cwd=repo_root,
             )
 
         actions.append(
             GcAction(
-                description=f"Normalize lifecycle metadata for epic {issue_id}",
+                description=f"Normalize lifecycle status for epic {issue_id}",
                 details=tuple(details),
                 apply=_apply_normalize,
             )
@@ -716,9 +543,6 @@ def _gc_resolved_epic_artifacts(
         status = str(epic.get("status") or "").strip().lower()
         if status not in {"closed", "done"}:
             continue
-        labels = _issue_labels(epic)
-        if "at:changeset" in labels and not ("cs:merged" in labels or "cs:abandoned" in labels):
-            continue
 
         description = epic.get("description")
         fields = beads.parse_description_fields(description if isinstance(description, str) else "")
@@ -880,7 +704,7 @@ def _gc_closed_workspace_branches_without_mapping(
         if status not in {"closed", "done"}:
             continue
         labels = _issue_labels(issue)
-        if "cs:merged" not in labels:
+        if not _is_merged_closed_changeset(issue):
             continue
         workspace_branch = _workspace_branch_from_labels(labels)
         if not workspace_branch:
