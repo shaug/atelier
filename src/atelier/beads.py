@@ -1976,9 +1976,9 @@ def list_epics(
 ) -> list[dict[str, object]]:
     """List epic beads for the epic pool.
 
-    Uses --label at:epic and --all to avoid default list caps and ensure full
-    enumeration. Startup, status, and related commands must use this for
-    deterministic epic pool counts.
+    Uses --label at:epic, --all, and --limit 0 to avoid default list caps and
+    ensure full enumeration. Startup, status, and related commands must use
+    this for deterministic epic pool counts.
 
     Args:
         beads_root: Root directory for the Beads planning store.
@@ -1990,7 +1990,7 @@ def list_epics(
     Returns:
         Epic issue payloads from Beads. Non-dict entries are discarded.
     """
-    args = ["list", "--label", "at:epic", "--all"]
+    args = ["list", "--label", "at:epic", "--all", "--limit", "0"]
     issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
     result = [i for i in issues if isinstance(i, dict)]
     if not include_closed:

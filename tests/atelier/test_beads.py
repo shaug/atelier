@@ -2137,8 +2137,8 @@ def test_list_child_changesets_uses_graph_inference() -> None:
     )
 
 
-def test_list_epics_uses_at_epic_and_all() -> None:
-    """Regression: list_epics must use --label at:epic --all to avoid default caps."""
+def test_list_epics_uses_at_epic_all_and_unbounded_limit() -> None:
+    """Regression: list_epics must bypass default caps with explicit limit."""
     with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
         beads.list_epics(beads_root=Path("/beads"), cwd=Path("/repo"), include_closed=True)
     called_args = run_json.call_args.args[0]
@@ -2146,6 +2146,8 @@ def test_list_epics_uses_at_epic_and_all() -> None:
     assert "--label" in called_args
     assert "at:epic" in called_args
     assert "--all" in called_args
+    assert "--limit" in called_args
+    assert "0" in called_args
 
 
 def test_list_epics_finds_epic_beyond_default_window() -> None:
@@ -2153,7 +2155,7 @@ def test_list_epics_finds_epic_beyond_default_window() -> None:
     epic = {"id": "at-epic", "status": "open", "labels": ["at:epic"]}
 
     def fake_run(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
-        if "at:epic" in args and "--all" in args:
+        if "at:epic" in args and "--all" in args and "--limit" in args and "0" in args:
             return [epic]
         return []
 
