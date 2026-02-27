@@ -4,31 +4,6 @@ from unittest.mock import patch
 from atelier.worker import changeset_state
 
 
-def test_find_invalid_changeset_labels_flags_subtask_only() -> None:
-    by_parent: dict[str, list[dict[str, object]]] = {
-        "at-epic": [
-            {"id": "at-epic.1", "labels": ["at:subtask", "cs:ready"]},
-            {"id": "at-epic.2", "labels": ["cs:unknown"]},
-            {"id": "at-epic.3", "labels": ["cs:ready"]},
-        ],
-        "at-epic.1": [],
-        "at-epic.2": [],
-        "at-epic.3": [],
-    }
-
-    with patch(
-        "atelier.worker.changeset_state.list_child_issues",
-        side_effect=lambda parent_id, **_: by_parent.get(parent_id, []),
-    ):
-        invalid = changeset_state.find_invalid_changeset_labels(
-            "at-epic",
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
-        )
-
-    assert invalid == ["at-epic.1"]
-
-
 def test_mark_changeset_blocked_adds_blocked_state_and_note() -> None:
     with patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command:
         changeset_state.mark_changeset_blocked(

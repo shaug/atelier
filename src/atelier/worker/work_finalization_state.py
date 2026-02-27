@@ -73,39 +73,6 @@ def send_planner_notification(
     )
 
 
-def send_invalid_changeset_labels_notification(
-    *,
-    epic_id: str,
-    invalid_changesets: list[str],
-    agent_id: str,
-    beads_root: Path,
-    repo_root: Path,
-    dry_run: bool,
-) -> str:
-    """Send invalid changeset labels notification.
-
-    Args:
-        epic_id: Value for `epic_id`.
-        invalid_changesets: Value for `invalid_changesets`.
-        agent_id: Value for `agent_id`.
-        beads_root: Value for `beads_root`.
-        repo_root: Value for `repo_root`.
-        dry_run: Value for `dry_run`.
-
-    Returns:
-        Function result.
-    """
-    return worker_queueing.send_invalid_changeset_labels_notification(
-        epic_id=epic_id,
-        invalid_changesets=invalid_changesets,
-        agent_id=agent_id,
-        beads_root=beads_root,
-        repo_root=repo_root,
-        dry_run=dry_run,
-        dry_run_log=dry_run_log,
-    )
-
-
 def send_no_ready_changesets(
     *,
     epic_id: str,
@@ -1341,24 +1308,6 @@ def list_child_issues(
     )
 
 
-def find_invalid_changeset_labels(root_id: str, *, beads_root: Path, repo_root: Path) -> list[str]:
-    """Find invalid changeset labels.
-
-    Args:
-        root_id: Value for `root_id`.
-        beads_root: Value for `beads_root`.
-        repo_root: Value for `repo_root`.
-
-    Returns:
-        Function result.
-    """
-    return worker_finalization_service.find_invalid_changeset_labels(
-        root_id,
-        beads_root=beads_root,
-        repo_root=repo_root,
-    )
-
-
 def changeset_parent_branch(
     issue: dict[str, object],
     *,
@@ -1700,7 +1649,6 @@ __all__ = [
     "changeset_work_branch",
     "close_completed_container_changesets",
     "epic_root_integrated_into_parent",
-    "find_invalid_changeset_labels",
     "handle_pushed_without_pr",
     "has_blocking_messages",
     "has_open_descendant_changesets",
@@ -1721,7 +1669,6 @@ __all__ = [
     "release_epic_assignment",
     "render_changeset_pr_body",
     "resolve_epic_id_for_changeset",
-    "send_invalid_changeset_labels_notification",
     "send_no_ready_changesets",
     "send_planner_notification",
     "set_changeset_review_pending_state",

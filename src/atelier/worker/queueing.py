@@ -82,36 +82,6 @@ def send_planner_notification(
     )
 
 
-def send_invalid_changeset_labels_notification(
-    *,
-    epic_id: str,
-    invalid_changesets: list[str],
-    agent_id: str,
-    beads_root: Path,
-    repo_root: Path,
-    dry_run: bool,
-    dry_run_log: EmitFn,
-) -> str:
-    detail = ", ".join(invalid_changesets[:5])
-    if len(invalid_changesets) > 5:
-        detail = f"{detail}, ..."
-    send_planner_notification(
-        subject=f"NEEDS-DECISION: Invalid changeset labels ({epic_id})",
-        body=(
-            "Found child work items with invalid labels: "
-            f"{', '.join(invalid_changesets)}.\n"
-            "Do not use at:subtask; changesets are inferred from graph (leaf work beads)."
-        ),
-        agent_id=agent_id,
-        thread_id=epic_id,
-        beads_root=beads_root,
-        repo_root=repo_root,
-        dry_run=dry_run,
-        dry_run_log=dry_run_log,
-    )
-    return detail
-
-
 def send_no_ready_changesets(
     *,
     epic_id: str,

@@ -189,13 +189,6 @@ class WorkerLifecycleAdapter:
             git_path=git_path,
         )
 
-    def find_invalid_changeset_labels(
-        self, root_id: str, *, beads_root: Path, repo_root: Path
-    ) -> list[str]:
-        return worker_work.find_invalid_changeset_labels(
-            root_id, beads_root=beads_root, repo_root=repo_root
-        )
-
     def lookup_pr_payload(self, repo_slug: str | None, branch: str) -> Issue | None:
         return worker_work.lookup_pr_payload(repo_slug, branch)
 
@@ -295,25 +288,6 @@ class WorkerLifecycleAdapter:
 
     def run_startup_contract(self, *, context: StartupContractContext) -> StartupContractResult:
         return worker_work.run_startup_contract(context=context)
-
-    def send_invalid_changeset_labels_notification(
-        self,
-        *,
-        epic_id: str,
-        invalid_changesets: list[str],
-        agent_id: str,
-        beads_root: Path,
-        repo_root: Path,
-        dry_run: bool,
-    ) -> str:
-        return worker_work.send_invalid_changeset_labels_notification(
-            epic_id=epic_id,
-            invalid_changesets=invalid_changesets,
-            agent_id=agent_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            dry_run=dry_run,
-        )
 
     def send_no_ready_changesets(
         self,

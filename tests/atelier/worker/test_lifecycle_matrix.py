@@ -78,16 +78,6 @@ class _FinalizeMatrixService(finalize_pipeline.FinalizePipelineService):
     def issue_labels(self, issue: dict[str, object]) -> set[str]:
         return {str(label) for label in issue.get("labels", [])}
 
-    def find_invalid_changeset_labels(self, epic_id: str) -> list[str]:
-        del epic_id
-        return []
-
-    def send_invalid_changeset_labels_notification(
-        self, *, epic_id: str, invalid_changesets: list[str], agent_id: str
-    ) -> str:
-        del epic_id, invalid_changesets, agent_id
-        return ""
-
     def has_open_descendant_changesets(self, changeset_id: str) -> bool:
         del changeset_id
         return False

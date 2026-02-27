@@ -22,7 +22,6 @@ from .work_finalization_state import (
     changeset_stack_integrity_preflight,
     changeset_waiting_on_review_or_signals,
     close_completed_container_changesets,
-    find_invalid_changeset_labels,
     handle_pushed_without_pr,
     has_blocking_messages,
     has_open_descendant_changesets,
@@ -35,7 +34,6 @@ from .work_finalization_state import (
     mark_changeset_in_progress,
     promote_planned_descendant_changesets,
     recover_premature_merged_changeset,
-    send_invalid_changeset_labels_notification,
     send_planner_notification,
     set_changeset_review_pending_state,
     update_changeset_review_from_pr,
@@ -52,23 +50,6 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
 
     def issue_labels(self, issue: dict[str, object]) -> set[str]:
         return issue_labels(issue)
-
-    def find_invalid_changeset_labels(self, epic_id: str) -> list[str]:
-        return find_invalid_changeset_labels(
-            epic_id, beads_root=self._beads_root, repo_root=self._repo_root
-        )
-
-    def send_invalid_changeset_labels_notification(
-        self, *, epic_id: str, invalid_changesets: list[str], agent_id: str
-    ) -> str:
-        return send_invalid_changeset_labels_notification(
-            epic_id=epic_id,
-            invalid_changesets=invalid_changesets,
-            agent_id=agent_id,
-            beads_root=self._beads_root,
-            repo_root=self._repo_root,
-            dry_run=False,
-        )
 
     def has_open_descendant_changesets(self, changeset_id: str) -> bool:
         return has_open_descendant_changesets(

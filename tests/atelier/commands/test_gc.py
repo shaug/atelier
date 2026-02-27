@@ -419,6 +419,65 @@ def test_gc_remove_at_changeset_label_orders_actions_deterministically() -> None
     ]
 
 
+def test_gc_remove_at_subtask_label_removes_deprecated_label() -> None:
+    issues = [
+        {"id": "at-456", "labels": ["at:subtask", "cs:ready"], "type": "task"},
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--label", "at:subtask", "--all"]:
+            return issues
+        return []
+
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        actions = gc_cmd._gc_remove_at_subtask_label(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+        assert len(actions) == 1
+        assert actions[0].description == "Remove deprecated at:subtask label from at-456"
+        actions[0].apply()
+
+    assert calls == [["update", "at-456", "--remove-label", "at:subtask"]]
+
+
+def test_gc_remove_at_subtask_label_orders_actions_deterministically() -> None:
+    issues = [
+        {"id": "at-200", "labels": ["at:subtask"], "type": "task"},
+        {"id": "at-100", "labels": ["at:subtask"], "type": "task"},
+    ]
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--label", "at:subtask", "--all"]:
+            return issues
+        return []
+
+    with patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json):
+        actions = gc_cmd._gc_remove_at_subtask_label(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert [action.description for action in actions] == [
+        "Remove deprecated at:subtask label from at-100",
+        "Remove deprecated at:subtask label from at-200",
+    ]
+
+
 def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
     project_root = Path("/project")
     repo_root = Path("/repo")
@@ -1042,6 +1101,10 @@ def test_gc_logs_action_lifecycle_in_dry_run() -> None:
         ),
         patch(
             "atelier.commands.gc._gc_remove_at_changeset_label",
+            return_value=[],
+        ),
+        patch(
+            "atelier.commands.gc._gc_remove_at_subtask_label",
             return_value=[],
         ),
         patch(

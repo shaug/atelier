@@ -11,10 +11,6 @@ from atelier.worker.models import FinalizeResult, PublishSignalDiagnostics
 class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
     def __init__(self) -> None:
         self.issue_labels_fn = lambda issue: set(issue.get("labels") or [])
-        self.find_invalid_changeset_labels_fn = lambda _epic_id: []
-        self.send_invalid_changeset_labels_notification_fn = (
-            lambda *, epic_id, invalid_changesets, agent_id: ""
-        )
         self.has_open_descendant_changesets_fn = lambda _changeset_id: False
         self.has_blocking_messages_fn = lambda *, thread_ids, started_at: False
         self.mark_changeset_children_in_progress_fn = lambda _changeset_id: None
@@ -68,18 +64,6 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
 
     def issue_labels(self, issue: dict[str, object]) -> set[str]:
         return self.issue_labels_fn(issue)
-
-    def find_invalid_changeset_labels(self, epic_id: str) -> list[str]:
-        return self.find_invalid_changeset_labels_fn(epic_id)
-
-    def send_invalid_changeset_labels_notification(
-        self, *, epic_id: str, invalid_changesets: list[str], agent_id: str
-    ) -> str:
-        return self.send_invalid_changeset_labels_notification_fn(
-            epic_id=epic_id,
-            invalid_changesets=invalid_changesets,
-            agent_id=agent_id,
-        )
 
     def has_open_descendant_changesets(self, changeset_id: str) -> bool:
         return self.has_open_descendant_changesets_fn(changeset_id)
@@ -287,38 +271,6 @@ def test_run_finalize_pipeline_missing_changeset_id() -> None:
 
     assert result.reason == "changeset_missing"
     assert result.continue_running is False
-
-
-def test_run_finalize_pipeline_blocks_on_invalid_labels(monkeypatch) -> None:
-    monkeypatch.setattr(
-        finalize_pipeline.beads,
-        "run_bd_json",
-        lambda *_args, **_kwargs: [{"id": "at-epic.1", "labels": []}],
-    )
-    service = _FinalizeServiceStub()
-    notified: list[dict[str, Any]] = []
-    service.find_invalid_changeset_labels_fn = lambda _epic_id: ["at-epic.2"]
-    service.send_invalid_changeset_labels_notification_fn = (
-        lambda *, epic_id, invalid_changesets, agent_id: (
-            notified.append(
-                {
-                    "epic_id": epic_id,
-                    "invalid_changesets": invalid_changesets,
-                    "agent_id": agent_id,
-                }
-            )
-            or "sent"
-        )
-    )
-
-    result = finalize_pipeline.run_finalize_pipeline(
-        context=_pipeline_context(),
-        service=service,
-    )
-
-    assert result.reason == "changeset_label_violation"
-    assert result.continue_running is False
-    assert len(notified) == 1
 
 
 def test_run_finalize_pipeline_waiting_on_review_returns_pending(monkeypatch) -> None:

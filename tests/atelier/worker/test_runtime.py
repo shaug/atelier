@@ -268,12 +268,12 @@ def test_build_worker_runtime_dependencies_wires_port_groups() -> None:
 
 
 def test_work_command_helpers_exposes_public_finalize_helpers() -> None:
-    helper = getattr(work_command_helpers, "find_invalid_changeset_labels")
+    helper = getattr(work_command_helpers, "finalize_changeset")
     assert callable(helper)
 
 
 def test_work_startup_runtime_does_not_expose_finalize_private_helpers() -> None:
-    assert not hasattr(work_startup_runtime, "_find_invalid_changeset_labels")
+    assert not hasattr(work_startup_runtime, "_finalize_changeset")
 
 
 def test_startup_service_no_eligible_summary_does_not_queue_message() -> None:

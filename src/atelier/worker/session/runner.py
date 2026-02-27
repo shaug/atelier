@@ -727,57 +727,6 @@ def run_worker_once(
                 agent_bead_id_required, selected_epic, beads_root=beads_root, cwd=repo_root
             )
         finishstep()
-        finishstep = control.step("Validate changeset labels", timings=timings, trace=trace)
-        try:
-            invalid_changesets = lifecycle.find_invalid_changeset_labels(
-                selected_epic, beads_root=beads_root, repo_root=repo_root
-            )
-        except SystemExit as exc:
-            detail = f"bd read failed (exit={exc.code})"
-            finishstep(extra=detail)
-            return finish(
-                _abort_startup_read_failure(
-                    beads=infra.beads,
-                    lifecycle=lifecycle,
-                    control=control,
-                    selected_epic=selected_epic,
-                    agent_id=agent.agent_id,
-                    agent_bead_id=agent_bead_id_required,
-                    beads_root=beads_root,
-                    repo_root=repo_root,
-                    dry_run=dry_run,
-                    stage="validate changeset labels",
-                    verification_issue_id=selected_epic,
-                    reason="changeset_label_validation_failed",
-                )
-            )
-        if invalid_changesets:
-            detail = lifecycle.send_invalid_changeset_labels_notification(
-                epic_id=selected_epic,
-                invalid_changesets=invalid_changesets,
-                agent_id=agent.agent_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                dry_run=dry_run,
-            )
-            finishstep(extra=f"invalid labels: {detail}")
-            if dry_run:
-                control.dry_run_log("Would release epic assignment and clear agent hook.")
-            else:
-                lifecycle.release_epic_assignment(
-                    selected_epic, beads_root=beads_root, repo_root=repo_root
-                )
-                infra.beads.clear_agent_hook(
-                    agent_bead_id_required, beads_root=beads_root, cwd=repo_root
-                )
-            return finish(
-                WorkerRunSummary(
-                    started=False,
-                    reason="changeset_label_violation",
-                    epic_id=selected_epic,
-                )
-            )
-        finishstep()
         finishstep = control.step("Select changeset", timings=timings, trace=trace)
         try:
             selected = select_changeset(

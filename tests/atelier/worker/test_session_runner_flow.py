@@ -117,7 +117,6 @@ def _build_runner_deps(
                 continue_running=False,
                 reason="done",
             ),
-            find_invalid_changeset_labels=lambda *args, **kwargs: [],
             lookup_pr_payload=lambda _repo_slug, _branch: None,
             mark_changeset_blocked=_noop,
             mark_changeset_in_progress=_noop,
@@ -128,7 +127,6 @@ def _build_runner_deps(
             resolve_epic_id_for_changeset=lambda _issue, **_kwargs: None,
             review_feedback_progressed=lambda _before, _after: False,
             run_startup_contract=run_startup_contract,
-            send_invalid_changeset_labels_notification=lambda **_kwargs: "sent",
             send_no_ready_changesets=_noop,
             send_planner_notification=_noop,
         ),
@@ -369,7 +367,6 @@ def test_run_worker_once_retries_after_claim_conflict() -> None:
     deps.lifecycle.run_startup_contract = Mock(side_effect=run_startup_contract)
     deps.infra.beads.claim_epic = Mock(side_effect=claim_epic)
     deps.infra.beads.run_bd_json = Mock(side_effect=run_bd_json)
-    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
 
     summary = runner.run_worker_once(
         SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
@@ -405,7 +402,6 @@ def test_run_worker_once_reclaims_stale_explicit_assignment_and_clears_old_hook(
         ),
         preview_agent=agent,
     )
-    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
     deps.infra.beads.find_agent_bead = Mock(
         side_effect=lambda agent_id, **_kwargs: (
             {"id": "at-previous-agent"} if agent_id == stale_assignee else {"id": "at-agent"}
@@ -442,52 +438,6 @@ def test_run_worker_once_reclaims_stale_explicit_assignment_and_clears_old_hook(
     ]
 
 
-def test_run_worker_once_releases_epic_when_label_validation_reads_fail() -> None:
-    agent = AgentHome(
-        name="worker",
-        agent_id="atelier/worker/codex/p4",
-        role="worker",
-        path=Path("/tmp/worker"),
-        session_key="p4",
-    )
-    deps = _build_runner_deps(
-        startup_result=StartupContractResult(
-            epic_id="at-epic",
-            changeset_id=None,
-            should_exit=False,
-            reason="selected_auto",
-        ),
-        preview_agent=agent,
-    )
-    deps.lifecycle.find_invalid_changeset_labels = Mock(side_effect=SystemExit(1))
-    deps.lifecycle.release_epic_assignment = Mock()
-    deps.lifecycle.send_planner_notification = Mock()
-
-    summary = runner.run_worker_once(
-        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
-        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p4"),
-        deps=deps,
-    )
-
-    assert summary.started is False
-    assert summary.reason == "changeset_label_validation_failed"
-    assert summary.epic_id == "at-epic"
-    deps.lifecycle.send_planner_notification.assert_called_once()
-    notification = deps.lifecycle.send_planner_notification.call_args.kwargs
-    assert "Startup state: Startup Beads state:" in str(notification.get("body"))
-    deps.lifecycle.release_epic_assignment.assert_called_once_with(
-        "at-epic",
-        beads_root=Path("/project/.atelier/.beads"),
-        repo_root=Path("/repo"),
-    )
-    deps.infra.beads.clear_agent_hook.assert_called_once_with(
-        "at-agent",
-        beads_root=Path("/project/.atelier/.beads"),
-        cwd=Path("/repo"),
-    )
-    assert not deps.control._die.called
-
-
 def test_run_worker_once_releases_epic_when_changeset_selection_reads_fail() -> None:
     agent = AgentHome(
         name="worker",
@@ -512,7 +462,6 @@ def test_run_worker_once_releases_epic_when_changeset_selection_reads_fail() -> 
         return []
 
     deps.infra.beads.run_bd_json = Mock(side_effect=run_bd_json)
-    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
     deps.lifecycle.release_epic_assignment = Mock()
     deps.lifecycle.send_planner_notification = Mock()
 
@@ -559,7 +508,6 @@ def test_run_worker_once_releases_epic_when_selected_changeset_read_fails() -> N
         preview_agent=agent,
     )
     deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
-    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
 
     def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
         if args[:2] == ["show", "at-epic.1"]:
@@ -567,7 +515,6 @@ def test_run_worker_once_releases_epic_when_selected_changeset_read_fails() -> N
         return []
 
     deps.infra.beads.run_bd_json = Mock(side_effect=run_bd_json)
-    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
     deps.lifecycle.release_epic_assignment = Mock()
     deps.lifecycle.send_planner_notification = Mock()
 
@@ -614,7 +561,6 @@ def test_run_worker_once_blocks_changeset_on_non_recoverable_worktree_prep_error
         preview_agent=agent,
     )
     deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
-    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
     deps.infra.beads.run_bd_json = Mock(
         side_effect=lambda args, **_kwargs: (
             [{"id": "at-epic.1", "title": "Changeset", "description": ""}]
@@ -679,7 +625,6 @@ def test_run_worker_once_reports_worker_template_load_failure_reason_code() -> N
         preview_agent=agent,
     )
     deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
-    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
     deps.infra.beads.run_bd_json = Mock(
         side_effect=lambda args, **_kwargs: (
             [{"id": "at-epic.1", "title": "Changeset", "description": ""}]
@@ -760,7 +705,6 @@ def test_run_worker_once_continues_after_review_pending_finalize() -> None:
         preview_agent=agent,
     )
     deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
-    deps.lifecycle.find_invalid_changeset_labels = lambda *_args, **_kwargs: []
     deps.infra.beads.run_bd_json = Mock(
         side_effect=lambda args, **_kwargs: (
             [{"id": "at-epic.1", "title": "Changeset", "description": ""}]
