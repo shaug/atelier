@@ -54,6 +54,7 @@ def test_parse_issue_boundary_derives_parent_from_parent_child_dependency() -> N
     [
         ({"dependency_type": "parent-child", "id": "at-1"}, "at-1"),
         ({"dependency_type": "parent_child", "issue": {"id": "at-1"}}, "at-1"),
+        ({"type": "parent-child", "depends_on_id": "at-1"}, "at-1"),
         ("at-1 (open, dependency_type=parent_child)", None),
     ],
 )
@@ -96,6 +97,24 @@ def test_parse_issue_boundary_supports_depends_on_dependency_shapes() -> None:
 
     assert boundary.parent_id == "at-parent"
     assert boundary.dependency_ids == ("at-1", "at-2", "at-3", "at-4")
+
+
+def test_parse_issue_boundary_excludes_type_parent_child_from_dependency_ids() -> None:
+    """Child beads may encode parent linkage as type=parent-child; must not block as dependency."""
+    issue = {
+        "id": "at-child",
+        "status": "open",
+        "labels": ["at:changeset"],
+        "parent": None,
+        "dependencies": [
+            {"type": "parent-child", "depends_on_id": "at-w7ze"},
+        ],
+    }
+
+    boundary = parse_issue_boundary(issue, source="test")
+
+    assert boundary.parent_id == "at-w7ze"
+    assert boundary.dependency_ids == ()
 
 
 def test_parse_issue_boundary_rejects_missing_issue_id() -> None:

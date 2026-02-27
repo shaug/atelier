@@ -296,6 +296,7 @@ def test_next_changeset_service_keeps_cross_epic_dependencies_blocked() -> None:
     [
         {"dependency_type": "parent-child", "id": "at-epic"},
         {"dependency_type": "parent-child", "issue": {"id": "at-epic"}},
+        {"type": "parent-child", "depends_on_id": "at-epic"},
         "at-epic (open, dependency_type=parent_child)",
     ],
 )
