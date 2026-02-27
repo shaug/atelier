@@ -27,9 +27,10 @@ create/edit deferred work.
 - Separate renames from behavioral changes.
 - Prefer additive-first changesets.
 - Keep changesets reviewable (~200–400 LOC; split when >800 LOC).
-- Avoid one-child decomposition by default. If a split would produce exactly one
-  child changeset, keep the epic as the executable changeset unless you record
-  explicit decomposition rationale.
+- Do not create one-child decompositions. If a split would produce exactly one
+  child changeset, keep the epic as the executable changeset.
+- Decision rule: split only when there are multiple executable/reviewable steps;
+  otherwise keep work in the parent bead.
 - Keep tests with the nearest production change.
 - Ask for an estimated LOC range per changeset and confirm approval when a
   changeset exceeds ~800 LOC (unless purely mechanical).
@@ -41,10 +42,10 @@ create/edit deferred work.
 
 1. For each changeset, create a bead with the script:
    - `python skills/plan-changesets/scripts/create_changeset.py --epic-id <epic_id> --title "<title>" --acceptance "<acceptance>" [--status deferred|open] [--description "<scope/guardrails>"] [--notes "<notes>"] [--beads-dir "<beads_dir>"] [--no-export]`
-1. If decomposition would produce exactly one child changeset, stop and either:
-   - keep the epic as the executable changeset, or
-   - record explicit decomposition rationale in epic/changeset notes before
-     creating the child.
+1. If decomposition would produce exactly one child changeset, stop and keep the
+   epic as the executable changeset.
+1. If multi-step execution is required, define at least two child changesets; a
+   one-child split is always a planning anti-pattern.
 1. Default new changesets to `status=deferred`; promote to `status=open` only
    via the explicit promotion flow.
 1. Capture an estimated LOC range and record it in notes.
@@ -58,7 +59,7 @@ create/edit deferred work.
 
 - Changeset beads exist under the epic with `at:changeset` labels.
 - Decomposition happened only when needed for scope/dependency/reviewability.
-- Any one-child decomposition has explicit rationale recorded in notes or
-  description.
+- No one-child decompositions exist; single-unit work remains on the parent epic
+  (`at:changeset`).
 - When auto-export is enabled and not opted out, each changeset gets its own
   exported external ticket link.

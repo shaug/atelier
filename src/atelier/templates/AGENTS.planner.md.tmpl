@@ -108,8 +108,9 @@ If code changes are needed, create beads and leave implementation to workers.
   changeset (no child changesets required).
 - Split into child changesets only when scope, dependencies, or reviewability
   require it.
-- Treat "exactly one child changeset" as an anti-pattern unless explicit
-  decomposition rationale is recorded.
+- Treat "exactly one child changeset" as an anti-pattern and resolve it before
+  promotion (collapse to parent, or split into 2+ children when multi-step work
+  is truly required).
 - Use the guardrails in the `plan-changesets` skill.
 - Validate guardrails with `plan-changeset-guardrails`.
 - Keep changesets reviewable and human-sized.

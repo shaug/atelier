@@ -17,10 +17,6 @@ from atelier.bd_invocation import with_bd_mode
 _LOC_TRIGGER = re.compile(r"\b(?:loc|estimate)\b", re.IGNORECASE)
 _NUMBER = re.compile(r"\b\d{2,5}\b")
 _APPROVAL = re.compile(r"\b(?:approve|approved|approval|sign[- ]?off|ok(?:ay)?)\b", re.IGNORECASE)
-_RATIONALE = re.compile(
-    r"\b(?:rationale|split because|split due to|reviewability|dependency|sequencing)\b",
-    re.IGNORECASE,
-)
 
 
 @dataclass(frozen=True)
@@ -165,17 +161,12 @@ def _evaluate_guardrails(
         elif len(child_changesets) == 1:
             child = child_changesets[0]
             child_id = _issue_id(child) or "(child)"
-            rationale_text = "\n".join((_text_blob(epic_issue), _text_blob(child)))
-            if _RATIONALE.search(rationale_text):
-                path_summary = (
-                    f"{epic_id}: one child changeset ({child_id}) with explicit rationale."
-                )
-            else:
-                path_summary = f"{epic_id}: one child changeset ({child_id}) without rationale."
-                violations.append(
-                    f"{epic_id}: one-child anti-pattern; add decomposition rationale "
-                    f"for {child_id} or keep the epic as the executable changeset."
-                )
+            path_summary = f"{epic_id}: one child changeset ({child_id}); actionable anti-pattern."
+            violations.append(
+                f"{epic_id}: one-child anti-pattern for {child_id}; collapse to the "
+                "epic as executable changeset or split into 2+ child changesets for "
+                "documented multi-step execution."
+            )
         else:
             path_summary = (
                 f"{epic_id}: multi-unit decomposition ({len(child_changesets)} children)."

@@ -20,8 +20,8 @@ description: >-
 - If a changeset exceeds the approval threshold (default 800 LOC), notes should
   include an explicit approval record.
 - Guardrails should be recorded in notes or description when exceptions apply.
-- Detect anti-pattern: an epic with exactly one child changeset and no
-  decomposition rationale.
+- Detect anti-pattern: an epic with exactly one child changeset. This is an
+  actionable violation, not informational.
 
 ## Steps
 
@@ -35,14 +35,16 @@ description: >-
 1. For each changeset, inspect description/notes:
    - Look for a LOC estimate (e.g., `loc`, `LOC`, `estimate`).
    - If a large estimate is found (>800), ensure approval is recorded.
-1. If an epic has exactly one child changeset, require explicit decomposition
-   rationale in the epic or child notes/description.
-1. Summarize any violations and send a message to the planner/overseer with
-   actionable fixes.
+1. If an epic has exactly one child changeset, report it as an actionable
+   violation and require remediation:
+   - collapse to the epic as executable changeset, or
+   - split into at least two child changesets for true multi-step execution.
+1. Summarize violations and send a message to the planner/overseer with concrete
+   remediation.
 1. Do not block planning; use messages and bead notes instead.
 
 ## Verification
 
 - Violations are reported with bead ids and missing guardrail details.
-- One-child anti-pattern warnings are reported when rationale is missing.
+- One-child anti-pattern violations are always reported when present.
 - No beads are blocked or re-labeled automatically.

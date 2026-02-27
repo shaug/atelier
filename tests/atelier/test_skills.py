@@ -203,11 +203,11 @@ def test_packaged_skill_docs_include_yaml_frontmatter() -> None:
         assert text.startswith("---\n"), f"{name} SKILL.md missing YAML frontmatter"
 
 
-def test_plan_changesets_skill_requires_rationale_for_one_child_split() -> None:
+def test_plan_changesets_skill_rejects_one_child_split() -> None:
     skill = skills.load_packaged_skills()["plan-changesets"]
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "one child changeset" in text
-    assert "decomposition rationale" in text
+    assert "always a planning anti-pattern" in text
     assert "Default new changesets to `status=deferred`" in text
 
 
@@ -216,14 +216,14 @@ def test_plan_changeset_guardrails_skill_mentions_checker_script() -> None:
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "scripts/check_guardrails.py" in text
     assert "one child changeset" in text
-    assert "decomposition rationale" in text
+    assert "actionable violation" in text
 
 
-def test_plan_promote_epic_skill_requires_one_child_rationale() -> None:
+def test_plan_promote_epic_skill_blocks_one_child_split() -> None:
     skill = skills.load_packaged_skills()["plan-promote-epic"]
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "exactly one child changeset" in text
-    assert "decomposition rationale" in text
+    assert "planning anti-pattern" in text
 
 
 def test_plan_create_epic_skill_captures_drafts_without_approval() -> None:

@@ -22,8 +22,8 @@ description: >-
 - Changeset guardrails have been validated (run `plan-changeset-guardrails`
   first).
 - Do not require child changesets when the epic itself is guardrail-sized.
-- If the epic has exactly one child changeset, explicit decomposition rationale
-  must be recorded before promotion.
+- Exactly one child changeset is a planning anti-pattern and must be resolved
+  before promotion.
 
 ## Steps
 
@@ -33,9 +33,10 @@ description: >-
    - Add `at:changeset` to the epic.
    - Keep execution state in status only (`deferred` now, `open` on promotion).
 1. If there is exactly one child changeset:
-   - Verify decomposition rationale is recorded in epic/child notes.
-   - If rationale is missing, keep the epic as executable changeset or add the
-     rationale before promotion.
+   - Do not promote until the anti-pattern is resolved.
+   - Resolve by either collapsing to the epic as executable changeset, or
+     decomposing into at least two child changesets for documented multi-step
+     execution needs.
 1. If the epic is not single-changeset sized, create only the minimum child
    changesets needed for execution and reviewability.
 1. Summarize the executable unit(s) for the user (child changesets or the epic
@@ -54,4 +55,4 @@ description: >-
   `open`.
 - If the epic has no child changesets, the epic is the executable leaf work unit
   (`at:changeset`) and status `open`.
-- Any one-child decomposition has explicit rationale in notes/description.
+- No one-child decomposition remains at promotion time.

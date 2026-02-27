@@ -56,7 +56,7 @@ def test_evaluate_guardrails_flags_one_child_without_rationale() -> None:
     assert any("one-child anti-pattern" in item for item in report.violations)
 
 
-def test_evaluate_guardrails_allows_one_child_with_rationale() -> None:
+def test_evaluate_guardrails_flags_one_child_even_with_rationale() -> None:
     module = _load_script_module()
     epic = {
         "id": "at-epic",
@@ -71,8 +71,8 @@ def test_evaluate_guardrails_allows_one_child_with_rationale() -> None:
         target_changesets=[child],
     )
 
-    assert "with explicit rationale" in str(report.path_summary)
-    assert not any("one-child anti-pattern" in item for item in report.violations)
+    assert "actionable anti-pattern" in str(report.path_summary)
+    assert any("one-child anti-pattern" in item for item in report.violations)
 
 
 def test_evaluate_guardrails_flags_large_changeset_without_approval() -> None:
