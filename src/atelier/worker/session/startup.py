@@ -98,6 +98,15 @@ def _is_terminal_explicit_issue(issue: dict[str, object]) -> bool:
     return lifecycle.is_closed_status(issue.get("status"))
 
 
+def _is_startup_reconciliation_candidate(issue: dict[str, object]) -> bool:
+    if not _is_executable_epic_identity(issue):
+        return False
+    claimability = worker_selection.evaluate_epic_claimability(issue)
+    if not claimability.claimable:
+        return False
+    return worker_selection.is_eligible_status(claimability.status, allow_hooked=True)
+
+
 def _dependency_ids(issue: dict[str, object]) -> tuple[str, ...] | None:
     try:
         boundary = parse_issue_boundary(issue, source="next_changeset_service:dependency_ids")
@@ -673,9 +682,12 @@ def run_startup_contract_service(
 
     issues = service.list_epics()
     reconciled_startup_state = False
-    for issue in issues:
+    reconciliation_candidates = [
+        issue for issue in issues if _is_startup_reconciliation_candidate(issue)
+    ]
+    for issue in reconciliation_candidates:
         epic_id = _issue_id(issue)
-        if epic_id is None or not _is_executable_epic_identity(issue):
+        if epic_id is None:
             continue
         reconciled, closed = reconcile_epic_merged_changesets(
             epic_id=epic_id,
