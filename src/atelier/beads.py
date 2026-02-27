@@ -3505,7 +3505,7 @@ def claim_epic(
         "--assignee",
         agent_id,
         "--status",
-        "hooked",
+        "in_progress",
         "--add-label",
         "at:hooked",
     ]

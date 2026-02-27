@@ -1731,7 +1731,7 @@ def test_claim_epic_updates_assignee_and_status() -> None:
     assert "update" in called_args
     assert "--assignee" in called_args
     assert "--status" in called_args
-    assert "hooked" in called_args
+    assert "in_progress" in called_args
 
 
 def test_claim_epic_allows_expected_takeover() -> None:

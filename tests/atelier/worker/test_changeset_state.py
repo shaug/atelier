@@ -86,7 +86,7 @@ def test_promote_planned_descendant_changesets_promotes_deferred_only() -> None:
 
 def test_mark_changeset_merged_reconciles_external_tickets() -> None:
     with (
-        patch("atelier.worker.changeset_state.beads.run_bd_command"),
+        patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
         patch(
             "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
         ) as reconcile,
@@ -97,8 +97,56 @@ def test_mark_changeset_merged_reconciles_external_tickets() -> None:
             repo_root=Path("/repo"),
         )
 
+    run_bd_command.assert_called_once_with(
+        [
+            "update",
+            "at-1.1",
+            "--status",
+            "closed",
+            "--add-label",
+            "cs:merged",
+            "--remove-label",
+            "cs:abandoned",
+        ],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
     reconcile.assert_called_once_with(
         "at-1.1",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
+def test_mark_changeset_abandoned_sets_terminal_marker_and_reconciles_external_tickets() -> None:
+    with (
+        patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
+        patch(
+            "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
+        ) as reconcile,
+    ):
+        changeset_state.mark_changeset_abandoned(
+            "at-1.2",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    run_bd_command.assert_called_once_with(
+        [
+            "update",
+            "at-1.2",
+            "--status",
+            "closed",
+            "--add-label",
+            "cs:abandoned",
+            "--remove-label",
+            "cs:merged",
+        ],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    reconcile.assert_called_once_with(
+        "at-1.2",
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
     )
