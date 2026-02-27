@@ -17,3 +17,5 @@ def test_worker_agents_template_contains_core_sections() -> None:
     assert "Messaging Rules" in content
     assert "Finish" in content
     assert "Do not look for more" in content
+    assert "Update changeset status and metadata." in content
+    assert "Update changeset metadata and labels." not in content
