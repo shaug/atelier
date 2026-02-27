@@ -1038,6 +1038,31 @@ def test_run_startup_contract_skips_unlabeled_ready_changeset_fallback() -> None
     assert result.reason == "no_eligible_epics"
 
 
+def test_run_startup_contract_ready_fallback_uses_parent_graph_identity() -> None:
+    issues = [{"id": "at-ready", "status": "open", "labels": ["at:epic"], "assignee": None}]
+
+    result = _run_startup(
+        list_epics=lambda: issues,
+        mode="prompt",
+        select_epic_prompt=lambda **_kwargs: None,
+        ready_changesets_global=lambda: [
+            {
+                "id": "leaf-work",
+                "parent": "at-ready",
+                "status": "open",
+                "issue_type": "task",
+                "labels": [],
+            }
+        ],
+        next_changeset=lambda **kwargs: (
+            {"id": "leaf-work"} if kwargs.get("epic_id") == "at-ready" else None
+        ),
+    )
+
+    assert result.reason == "selected_ready_changeset"
+    assert result.epic_id == "at-ready"
+
+
 def test_run_startup_contract_selects_auto_epic() -> None:
     issues = [{"id": "at-auto", "status": "open", "labels": ["at:epic"]}]
 

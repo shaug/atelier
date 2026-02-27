@@ -187,19 +187,29 @@ def select_epic_from_ready_changesets(
     known_epics: dict[str, dict[str, object]] = {
         str(issue_id): issue for issue in issues if (issue_id := issue.get("id")) is not None
     }
-    for changeset in sort_by_created_at(ready_changesets):
+
+    def resolve_candidate_epic_id(changeset: dict[str, object]) -> str | None:
         issue_id = changeset.get("id")
         if not isinstance(issue_id, str) or not issue_id:
-            continue
-        candidate = issue_id
+            return None
+
         parent_id = issue_parent_id(changeset)
         if parent_id and parent_id in known_epics:
-            candidate = parent_id
-        elif "." in issue_id:
+            return parent_id
+
+        if issue_id in known_epics:
+            return issue_id
+        if "." in issue_id:
             # Compatibility fallback for legacy dotted child identifiers.
             maybe_epic = issue_id.split(".", 1)[0]
             if maybe_epic in known_epics:
-                candidate = maybe_epic
+                return maybe_epic
+        return issue_id
+
+    for changeset in sort_by_created_at(ready_changesets):
+        candidate = resolve_candidate_epic_id(changeset)
+        if candidate is None:
+            continue
         candidate_issue = known_epics.get(candidate)
         source_issue = candidate_issue if candidate_issue is not None else changeset
         evaluation = evaluate_epic_claimability(source_issue)
