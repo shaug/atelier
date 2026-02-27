@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import subprocess
 from pathlib import Path
 
 
@@ -74,17 +73,22 @@ def test_render_epics_includes_blocker_list_for_blocked_bucket() -> None:
     assert "blockers: at-u9j [in_progress]" in rendered
 
 
-def test_run_bd_list_defaults_to_direct_mode(monkeypatch) -> None:
+def test_run_bd_list_uses_resolved_context(monkeypatch) -> None:
     module = _load_script()
-    captured: dict[str, list[str]] = {}
+    captured: dict[str, Path] = {}
 
-    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        captured["command"] = command
-        return subprocess.CompletedProcess(args=command, returncode=0, stdout="[]", stderr="")
-
-    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        module, "_resolve_context", lambda **_kwargs: (Path("/beads"), Path("/repo"))
+    )
+    monkeypatch.setattr(
+        module.planner_overview,
+        "list_epics",
+        lambda *, beads_root, repo_root: (
+            captured.update({"beads_root": beads_root, "repo_root": repo_root}) or [{"id": "at-1"}]
+        ),
+    )
 
     issues = module._run_bd_list(None)
 
-    assert issues == []
-    assert captured["command"] == ["bd", "list", "--label", "at:epic", "--json"]
+    assert issues == [{"id": "at-1"}]
+    assert captured == {"beads_root": Path("/beads"), "repo_root": Path("/repo")}

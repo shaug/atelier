@@ -4,47 +4,32 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
-from atelier import planner_overview
-from atelier.bd_invocation import with_bd_mode
+from atelier import config, planner_overview
+from atelier.commands.resolve import resolve_current_project_with_repo_root
 
 # Re-exported for tests that load this script directly.
 _status_bucket = planner_overview._status_bucket  # pyright: ignore[reportPrivateUsage]
 _render_epics = planner_overview.render_epics
 
 
+def _resolve_context(*, beads_dir: str | None) -> tuple[Path, Path]:
+    repo_env = os.environ.get("ATELIER_PROJECT", "").strip()
+    repo_root = Path(repo_env).resolve() if repo_env else Path.cwd()
+    beads_env = str(beads_dir or "").strip() or os.environ.get("BEADS_DIR", "").strip()
+    if beads_env:
+        return Path(beads_env).expanduser().resolve(), repo_root
+    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
+    project_data_dir = config.resolve_project_data_dir(project_root, project_config)
+    return config.resolve_beads_root(project_data_dir, repo_root), repo_root
+
+
 def _run_bd_list(beads_dir: str | None) -> list[dict[str, object]]:
-    env = dict(os.environ)
-    cmd = with_bd_mode("list", "--label", "at:epic", "--json", beads_dir=beads_dir, env=env)
-    if beads_dir:
-        env["BEADS_DIR"] = beads_dir
-    try:
-        result = subprocess.run(
-            cmd,
-            check=False,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-    except FileNotFoundError:
-        print("error: missing required command: bd", file=sys.stderr)
-        raise SystemExit(1)
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        print(f"error: failed to list epics: {detail}", file=sys.stderr)
-        raise SystemExit(1)
-    raw = (result.stdout or "").strip()
-    if not raw:
-        return []
-    payload = json.loads(raw)
-    if not isinstance(payload, list):
-        return []
-    return [item for item in payload if isinstance(item, dict)]
+    beads_root, repo_root = _resolve_context(beads_dir=beads_dir)
+    return planner_overview.list_epics(beads_root=beads_root, repo_root=repo_root)
 
 
 def main() -> None:

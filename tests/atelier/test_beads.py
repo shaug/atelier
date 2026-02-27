@@ -876,6 +876,90 @@ def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(
     assert "legacy SQLite data exists but Dolt backend is missing" in diagnostics[0]
 
 
+def test_run_bd_command_list_auto_migrates_recoverable_startup_state(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "beads.db").write_bytes(b"legacy")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    migrate = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--yes",
+        "--json",
+    ]
+    stats_calls = 0
+    calls: list[list[str]] = []
+    diagnostics: list[str] = []
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        nonlocal stats_calls
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "stats", "--json"]:
+            stats_calls += 1
+            if stats_calls == 1:
+                return exec_util.CommandResult(
+                    argv=request.argv,
+                    returncode=2,
+                    stdout="",
+                    stderr=(
+                        "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                        "doltdb.(*DoltDB).SetCrashOnFatalError"
+                    ),
+                )
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        if argv == db_stats:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        if argv == migrate:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"migrated":8}',
+                stderr="",
+            )
+        if argv == ["bd", "list", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="[]",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.bd_invocation.detect_bd_version", return_value=(0, 56, 1)),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.say", side_effect=diagnostics.append),
+    ):
+        result = beads.run_bd_command(["list", "--json"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert migrate in calls
+    assert calls[-1] == ["bd", "list", "--json"]
+    assert diagnostics == []
+
+
 def test_run_bd_command_prime_reports_skipped_healthy_dolt_diagnostic(
     tmp_path: Path,
 ) -> None:

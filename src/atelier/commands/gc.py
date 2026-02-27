@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .. import config
+from .. import beads, config
 from ..gc import GcAction
 from ..gc import agents as gc_agents
 from ..gc import hooks as gc_hooks
@@ -21,6 +21,7 @@ def gc(args: object) -> None:
     project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
+    beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
 
     stale_hours = getattr(args, "stale_hours", 24.0)
     try:
