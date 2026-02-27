@@ -18,6 +18,7 @@ def test_packaged_skills_include_core_set() -> None:
         "external-sync",
         "external-close",
         "beads",
+        "import-legacy-tickets",
         "claim-epic",
         "epic-claim",
         "epic-list",
@@ -65,6 +66,7 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "external-sync",
             "external-close",
             "beads",
+            "import-legacy-tickets",
             "claim-epic",
             "epic-claim",
             "epic-list",
@@ -96,6 +98,7 @@ def test_packaged_planning_skills_include_scripts() -> None:
     assert "scripts/create_changeset.py" in definitions["plan-changesets"].files
     assert "scripts/create_epic.py" in definitions["plan-create-epic"].files
     assert "scripts/refresh_overview.py" in definitions["planner-startup-check"].files
+    assert "scripts/import_legacy_tickets.py" in definitions["import-legacy-tickets"].files
     assert "scripts/send_message.py" in definitions["mail-send"].files
 
 

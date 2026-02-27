@@ -891,7 +891,18 @@ def _format_semver(version: tuple[int, int, int]) -> str:
     return f"{version[0]}.{version[1]}.{version[2]}"
 
 
+_STARTUP_AUTO_MIGRATION_TRIGGER_COMMANDS = frozenset(
+    {"blocked", "list", "prime", "ready", "show", "stats"}
+)
+
+
 def _is_startup_auto_migration_command(args: list[str]) -> bool:
+    if not args:
+        return False
+    return args[0].strip().lower() in _STARTUP_AUTO_MIGRATION_TRIGGER_COMMANDS
+
+
+def _should_emit_startup_auto_migration_diagnostic(args: list[str]) -> bool:
     if not args:
         return False
     return args[0].strip().lower() == "prime"
@@ -1770,7 +1781,7 @@ def run_bd_command(
         die(str(exc))
     _attempt_startup_auto_migration(args=args, beads_root=beads_root, cwd=cwd, env=env)
     _normalize_dolt_runtime_metadata_once(beads_root=beads_root)
-    if _is_startup_auto_migration_command(args):
+    if _should_emit_startup_auto_migration_diagnostic(args):
         _emit_startup_auto_migration_diagnostic(beads_root)
     preflight_error = _ensure_dolt_server_preflight(
         args=args,

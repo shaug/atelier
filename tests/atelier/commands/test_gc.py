@@ -1,5 +1,6 @@
 """Tests for gc command orchestration."""
 
+import subprocess
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +13,16 @@ import atelier.config as config
 import atelier.worktrees as worktrees
 
 
-def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
+@pytest.fixture(autouse=True)
+def _patch_gc_prime():
+    with patch(
+        "atelier.commands.gc.beads.run_bd_command",
+        return_value=subprocess.CompletedProcess(args=["bd", "prime"], returncode=0),
+    ) as mocked:
+        yield mocked
+
+
+def test_gc_reconcile_flag_runs_changeset_reconciliation(_patch_gc_prime) -> None:
     project_root = Path("/project")
     repo_root = Path("/repo")
     project_config = config.ProjectConfig()
@@ -65,6 +75,7 @@ def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
         in str(call.args[0])
         for call in say.call_args_list
     )
+    _patch_gc_prime.assert_called_once_with(["prime"], beads_root=Path("/beads"), cwd=repo_root)
 
 
 def test_gc_reconcile_flag_prompts_and_skips_without_confirmation() -> None:
