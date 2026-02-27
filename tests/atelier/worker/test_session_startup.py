@@ -997,6 +997,59 @@ def test_run_startup_contract_auto_reconciles_stale_merged_state_before_selectio
     assert list_epics_calls == 2
 
 
+def test_run_startup_contract_auto_reconciles_only_active_epics() -> None:
+    close_calls: list[tuple[str, str | None]] = []
+    selected = {
+        "id": "at-ready",
+        "status": "open",
+        "labels": ["at:epic"],
+        "assignee": None,
+        "created_at": "2026-02-21T00:00:00Z",
+    }
+    in_progress = {
+        "id": "at-in-progress",
+        "status": "in_progress",
+        "labels": ["at:epic"],
+        "assignee": None,
+        "created_at": "2026-02-22T00:00:00Z",
+    }
+    closed = {
+        "id": "at-closed",
+        "status": "closed",
+        "labels": ["at:epic"],
+        "assignee": None,
+        "created_at": "2026-02-01T00:00:00Z",
+    }
+    deferred = {
+        "id": "at-deferred",
+        "status": "deferred",
+        "labels": ["at:epic"],
+        "assignee": None,
+        "created_at": "2026-02-10T00:00:00Z",
+    }
+    non_executable = {
+        "id": "at-msg",
+        "status": "open",
+        "labels": ["at:message"],
+        "type": "task",
+        "created_at": "2026-02-11T00:00:00Z",
+    }
+
+    result = _run_startup(
+        list_epics=lambda: [closed, deferred, non_executable, selected, in_progress],
+        close_epic_if_complete=lambda epic_id, agent_bead_id: (
+            close_calls.append((epic_id, agent_bead_id)) or False
+        ),
+        next_changeset=lambda **kwargs: (
+            {"id": "at-ready.1"} if kwargs["epic_id"] == "at-ready" else None
+        ),
+    )
+
+    assert result.reason == "selected_auto"
+    assert result.epic_id == "at-ready"
+    assert close_calls == [("at-ready", None), ("at-in-progress", None)]
+
+
 def test_run_startup_contract_uses_ready_changeset_fallback() -> None:
     issues = [{"id": "at-other"}]
 

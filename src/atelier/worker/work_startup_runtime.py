@@ -566,7 +566,7 @@ class _StartupContractService(worker_startup.StartupContractService):
         return beads.list_epics(
             beads_root=self._beads_root,
             cwd=self._repo_root,
-            include_closed=True,
+            include_closed=False,
         )
 
     def show_issue(self, issue_id: str) -> dict[str, object] | None:

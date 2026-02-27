@@ -299,6 +299,26 @@ def test_startup_service_no_eligible_summary_does_not_queue_message() -> None:
     assert emitted[0] == "No eligible epics available."
 
 
+def test_startup_service_lists_only_non_closed_epics() -> None:
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    with patch(
+        "atelier.worker.work_startup_runtime.beads.list_epics",
+        return_value=[{"id": "at-1"}],
+    ) as list_epics:
+        issues = service.list_epics()
+
+    assert issues == [{"id": "at-1"}]
+    list_epics.assert_called_once_with(
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        include_closed=False,
+    )
+
+
 def test_startup_service_reports_planner_owned_executable_violations() -> None:
     emitted: list[str] = []
     issues = [
