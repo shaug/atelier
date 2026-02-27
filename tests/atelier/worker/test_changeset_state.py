@@ -9,7 +9,7 @@ def test_find_invalid_changeset_labels_flags_subtask_only() -> None:
         "at-epic": [
             {"id": "at-epic.1", "labels": ["at:subtask", "cs:ready"]},
             {"id": "at-epic.2", "labels": ["cs:unknown"]},
-            {"id": "at-epic.3", "labels": ["at:changeset", "cs:ready"]},
+            {"id": "at-epic.3", "labels": ["cs:ready"]},
         ],
         "at-epic.1": [],
         "at-epic.2": [],
@@ -51,22 +51,22 @@ def test_close_completed_container_changesets_closes_eligible_nodes() -> None:
         {
             "id": "at-1.1",
             "status": "done",
-            "labels": ["at:changeset", "cs:merged"],
+            "labels": ["cs:merged"],
         },
         {
             "id": "at-1.2",
             "status": "done",
-            "labels": ["at:changeset", "cs:abandoned"],
+            "labels": ["cs:abandoned"],
         },
         {
             "id": "at-1.3",
             "status": "open",
-            "labels": ["at:changeset", "cs:ready"],
+            "labels": ["cs:ready"],
         },
         {
             "id": "at-1.4",
             "status": "",
-            "labels": ["at:changeset", "cs:merged"],
+            "labels": ["cs:merged"],
         },
     ]
     with (
@@ -91,8 +91,8 @@ def test_close_completed_container_changesets_closes_eligible_nodes() -> None:
 
 def test_promote_planned_descendant_changesets_promotes_deferred_only() -> None:
     descendants = [
-        {"id": "at-1.1", "status": "deferred", "labels": ["at:changeset", "cs:planned"]},
-        {"id": "at-1.2", "status": "open", "labels": ["at:changeset", "cs:ready"]},
+        {"id": "at-1.1", "status": "deferred", "labels": ["cs:planned"]},
+        {"id": "at-1.2", "status": "open", "labels": ["cs:ready"]},
     ]
     with (
         patch(

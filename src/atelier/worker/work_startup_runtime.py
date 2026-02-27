@@ -117,6 +117,19 @@ class _NextChangesetService(worker_startup.NextChangesetService):
             include_closed=include_closed,
         )
 
+    def list_work_children(
+        self,
+        parent_id: str,
+        *,
+        include_closed: bool,
+    ) -> list[dict[str, object]]:
+        return beads.list_work_children(
+            parent_id,
+            beads_root=self._beads_root,
+            cwd=self._repo_root,
+            include_closed=include_closed,
+        )
+
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool:
         return is_changeset_in_progress(issue)
 
@@ -592,6 +605,19 @@ class _StartupContractService(worker_startup.StartupContractService):
         include_closed: bool,
     ) -> list[dict[str, object]]:
         return beads.list_descendant_changesets(
+            parent_id,
+            beads_root=self._beads_root,
+            cwd=self._repo_root,
+            include_closed=include_closed,
+        )
+
+    def list_work_children(
+        self,
+        parent_id: str,
+        *,
+        include_closed: bool,
+    ) -> list[dict[str, object]]:
+        return beads.list_work_children(
             parent_id,
             beads_root=self._beads_root,
             cwd=self._repo_root,

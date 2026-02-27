@@ -13,7 +13,7 @@ def test_parse_issue_boundary_normalizes_dependency_and_parent_fields() -> None:
     issue = {
         "id": "at-123",
         "status": "open",
-        "labels": ["at:changeset", "cs:ready", "cs:ready"],
+        "labels": ["cs:ready", "cs:ready"],
         "parent": {"id": "at-1"},
         "dependencies": [
             {"id": "at-2"},
@@ -28,14 +28,14 @@ def test_parse_issue_boundary_normalizes_dependency_and_parent_fields() -> None:
     assert boundary.status == "open"
     assert boundary.parent_id == "at-1"
     assert boundary.dependency_ids == ("at-2", "at-3")
-    assert boundary.labels == ("at:changeset", "cs:ready")
+    assert boundary.labels == ("cs:ready",)
 
 
 def test_parse_issue_boundary_derives_parent_from_parent_child_dependency() -> None:
     issue = {
         "id": "at-123",
         "status": "open",
-        "labels": ["at:changeset"],
+        "labels": [],
         "parent": None,
         "dependencies": [
             {"dependency_type": "parent-child", "id": "at-1"},
@@ -63,7 +63,7 @@ def test_parse_issue_boundary_handles_parent_child_dependency_variants(
     issue = {
         "id": "at-123",
         "status": "open",
-        "labels": ["at:changeset"],
+        "labels": [],
         "parent": None,
         "dependencies": [
             dependency_entry,
@@ -81,7 +81,7 @@ def test_parse_issue_boundary_supports_depends_on_dependency_shapes() -> None:
     issue = {
         "id": "at-123",
         "status": "open",
-        "labels": ["at:changeset"],
+        "labels": [],
         "parent": None,
         "dependencies": [
             {"depends_on_id": "at-1"},

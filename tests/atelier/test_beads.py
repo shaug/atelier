@@ -18,7 +18,9 @@ def test_beads_env_sets_beads_db() -> None:
     assert env["BEADS_DB"] == "/tmp/project/.beads/beads.db"
 
 
-def test_normalize_dolt_runtime_metadata_once_updates_legacy_fields(tmp_path: Path) -> None:
+def test_normalize_dolt_runtime_metadata_once_updates_legacy_fields(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
@@ -54,7 +56,9 @@ def test_normalize_dolt_runtime_metadata_once_updates_legacy_fields(tmp_path: Pa
     assert payload["dolt_database"] == "beads_at"
 
 
-def test_normalize_dolt_runtime_metadata_once_skips_invalid_json(tmp_path: Path) -> None:
+def test_normalize_dolt_runtime_metadata_once_skips_invalid_json(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     metadata_path = beads_root / "metadata.json"
@@ -71,7 +75,7 @@ def test_normalize_dolt_runtime_metadata_once_skips_invalid_json(tmp_path: Path)
 def test_run_bd_issue_records_validates_issues() -> None:
     with patch(
         "atelier.beads.run_bd_json",
-        return_value=[{"id": "at-1", "labels": ["at:changeset"], "status": "open"}],
+        return_value=[{"id": "at-1", "labels": [], "status": "open"}],
     ):
         records = beads.run_bd_issue_records(
             ["list"], beads_root=Path("/beads"), cwd=Path("/repo"), source="test"
@@ -84,7 +88,7 @@ def test_run_bd_issue_records_validates_issues() -> None:
 def test_run_bd_issue_records_rejects_invalid_payload() -> None:
     with patch(
         "atelier.beads.run_bd_json",
-        return_value=[{"labels": ["at:changeset"], "status": "open"}],
+        return_value=[{"labels": [], "status": "open"}],
     ):
         with pytest.raises(ValueError, match="invalid beads issue payload"):
             beads.run_bd_issue_records(
@@ -100,7 +104,9 @@ def test_run_bd_command_repairs_missing_store_and_retries(tmp_path: Path) -> Non
     cwd.mkdir(parents=True)
     calls: list[list[str]] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         calls.append(argv)
         if argv[:2] == ["bd", "prime"] and len(calls) == 1:
@@ -175,7 +181,9 @@ def test_run_bd_command_repairs_issue_prefix_without_jsonl_init(tmp_path: Path) 
     cwd.mkdir(parents=True)
     calls: list[list[str]] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         calls.append(argv)
         if argv[:2] == ["bd", "list"] and len(calls) == 1:
@@ -241,14 +249,18 @@ def test_run_bd_command_repairs_issue_prefix_without_jsonl_init(tmp_path: Path) 
     assert calls[-1] == ["bd", "list", "--json"]
 
 
-def test_run_bd_json_retries_embedded_backend_panic_with_explicit_db(tmp_path: Path) -> None:
+def test_run_bd_json_retries_embedded_backend_panic_with_explicit_db(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     cwd = tmp_path / "repo"
     cwd.mkdir()
     calls: list[list[str]] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         calls.append(argv)
         if argv == ["bd", "show", "at-1", "--json"]:
@@ -261,11 +273,18 @@ def test_run_bd_json_retries_embedded_backend_panic_with_explicit_db(tmp_path: P
                     "doltdb.(*DoltDB).SetCrashOnFatalError"
                 ),
             )
-        if argv == ["bd", "--db", str(beads_root / "beads.db"), "show", "at-1", "--json"]:
+        if argv == [
+            "bd",
+            "--db",
+            str(beads_root / "beads.db"),
+            "show",
+            "at-1",
+            "--json",
+        ]:
             return exec_util.CommandResult(
                 argv=request.argv,
                 returncode=0,
-                stdout='[{"id":"at-1","status":"open","labels":["at:changeset"]}]',
+                stdout='[{"id":"at-1","status":"open","labels":[]}]',
                 stderr="",
             )
         raise AssertionError(f"unexpected command: {argv}")
@@ -276,14 +295,16 @@ def test_run_bd_json_retries_embedded_backend_panic_with_explicit_db(tmp_path: P
     ):
         payload = beads.run_bd_json(["show", "at-1"], beads_root=beads_root, cwd=cwd)
 
-    assert payload == [{"id": "at-1", "status": "open", "labels": ["at:changeset"]}]
+    assert payload == [{"id": "at-1", "status": "open", "labels": []}]
     assert calls == [
         ["bd", "show", "at-1", "--json"],
         ["bd", "--db", str(beads_root / "beads.db"), "show", "at-1", "--json"],
     ]
 
 
-def test_run_bd_json_attempts_doctor_fix_after_repeated_embedded_panic(tmp_path: Path) -> None:
+def test_run_bd_json_attempts_doctor_fix_after_repeated_embedded_panic(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     cwd = tmp_path / "repo"
@@ -292,7 +313,9 @@ def test_run_bd_json_attempts_doctor_fix_after_repeated_embedded_panic(tmp_path:
     fallback = ["bd", "--db", str(beads_root / "beads.db"), "show", "at-1", "--json"]
     fallback_count = 0
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         nonlocal fallback_count
         argv = list(request.argv)
         calls.append(argv)
@@ -348,14 +371,18 @@ def test_run_bd_json_attempts_doctor_fix_after_repeated_embedded_panic(tmp_path:
     ]
 
 
-def test_run_bd_command_embedded_panic_guidance_mentions_doctor_retry(tmp_path: Path) -> None:
+def test_run_bd_command_embedded_panic_guidance_mentions_doctor_retry(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     cwd = tmp_path / "repo"
     cwd.mkdir()
     fallback = ["bd", "--db", str(beads_root / "beads.db"), "show", "at-1", "--json"]
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         if argv in (["bd", "show", "at-1", "--json"], fallback):
             return exec_util.CommandResult(
@@ -390,13 +417,17 @@ def test_run_bd_command_embedded_panic_guidance_mentions_doctor_retry(tmp_path: 
             beads.run_bd_command(["show", "at-1", "--json"], beads_root=beads_root, cwd=cwd)
 
 
-def test_run_bd_command_missing_store_guidance_mentions_beads_dir(tmp_path: Path) -> None:
+def test_run_bd_command_missing_store_guidance_mentions_beads_dir(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     cwd = tmp_path / "repo"
     cwd.mkdir()
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         return exec_util.CommandResult(
             argv=request.argv,
             returncode=1,
@@ -419,14 +450,18 @@ def test_run_bd_command_missing_store_guidance_mentions_beads_dir(tmp_path: Path
             beads.run_bd_command(["list", "--json"], beads_root=beads_root, cwd=cwd)
 
 
-def test_run_bd_command_preflight_recovers_dolt_server_before_command(tmp_path: Path) -> None:
+def test_run_bd_command_preflight_recovers_dolt_server_before_command(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     (beads_root / "dolt").mkdir(parents=True)
     cwd = tmp_path / "repo"
     cwd.mkdir()
     calls: list[list[str]] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         calls.append(argv)
         if argv == ["bd", "list", "--json"]:
@@ -466,7 +501,9 @@ def test_run_bd_command_retries_after_dolt_server_recovery(tmp_path: Path) -> No
     calls: list[list[str]] = []
     attempts = 0
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         nonlocal attempts
         argv = list(request.argv)
         calls.append(argv)
@@ -503,14 +540,18 @@ def test_run_bd_command_retries_after_dolt_server_recovery(tmp_path: Path) -> No
     assert restart.call_count == 1
 
 
-def test_run_bd_command_dolt_recovery_is_bounded_and_surfaces_failure(tmp_path: Path) -> None:
+def test_run_bd_command_dolt_recovery_is_bounded_and_surfaces_failure(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     (beads_root / "dolt").mkdir(parents=True)
     cwd = tmp_path / "repo"
     cwd.mkdir()
     calls: list[list[str]] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         calls.append(argv)
         if argv == ["bd", "show", "at-1", "--json"]:
@@ -552,7 +593,9 @@ def test_run_bd_command_dolt_recovery_is_bounded_and_surfaces_failure(tmp_path: 
     assert restart.call_count == 2
 
 
-def test_run_bd_command_covers_dolt_lifecycle_paths_across_projects(tmp_path: Path) -> None:
+def test_run_bd_command_covers_dolt_lifecycle_paths_across_projects(
+    tmp_path: Path,
+) -> None:
     healthy_beads_root = tmp_path / "healthy" / ".beads"
     recovering_beads_root = tmp_path / "recovering" / ".beads"
     failing_beads_root = tmp_path / "failing" / ".beads"
@@ -573,7 +616,9 @@ def test_run_bd_command_covers_dolt_lifecycle_paths_across_projects(tmp_path: Pa
     }
     restart_calls: list[Path] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         command_calls.append((request.cwd, argv))
         if argv != ["bd", "show", "at-1", "--json"]:
@@ -628,13 +673,17 @@ def test_run_bd_command_covers_dolt_lifecycle_paths_across_projects(tmp_path: Pa
     with (
         patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
         patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
-        patch("atelier.beads._probe_dolt_server_health", side_effect=fake_probe_dolt_server_health),
+        patch(
+            "atelier.beads._probe_dolt_server_health",
+            side_effect=fake_probe_dolt_server_health,
+        ),
         patch(
             "atelier.beads._restart_dolt_server_with_recovery",
             side_effect=fake_restart_dolt_server_with_recovery,
         ),
         patch(
-            "atelier.beads._startup_state_diagnostics", side_effect=fake_startup_state_diagnostics
+            "atelier.beads._startup_state_diagnostics",
+            side_effect=fake_startup_state_diagnostics,
         ),
         patch("atelier.beads.die", side_effect=fake_die),
     ):
@@ -684,7 +733,9 @@ def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
     cwd.mkdir()
     calls: list[list[str]] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         calls.append(argv)
         if argv == ["bd", "show", "at-2", "--json"]:
@@ -692,8 +743,8 @@ def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
                 argv=request.argv,
                 returncode=0,
                 stdout=(
-                    '[{"id":"at-2","status":"open","labels":["at:changeset"],'
-                    '"dependencies":["at-1"]}]'
+                    '[{"id":"at-2","status":"open","labels":[],'
+                    '"dependencies":["at-1"],"type":"task"}]'
                 ),
                 stderr="",
             )
@@ -701,7 +752,14 @@ def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
             return exec_util.CommandResult(
                 argv=request.argv,
                 returncode=0,
-                stdout='[{"id":"at-1","status":"in_progress","labels":["at:changeset"]}]',
+                stdout='[{"id":"at-1","status":"in_progress","labels":[],"type":"task"}]',
+                stderr="",
+            )
+        if argv == ["bd", "list", "--parent", "at-2", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="[]",
                 stderr="",
             )
         raise AssertionError(f"unexpected command: {argv}")
@@ -725,10 +783,14 @@ def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
                 cwd=cwd,
             )
 
-    assert calls == [["bd", "show", "at-2", "--json"], ["bd", "show", "at-1", "--json"]]
+    assert ["bd", "show", "at-2", "--json"] in calls
+    assert ["bd", "list", "--parent", "at-2", "--json"] in calls
+    assert ["bd", "show", "at-1", "--json"] in calls
 
 
-def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(tmp_path: Path) -> None:
+def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     (beads_root / "beads.db").write_bytes(b"legacy")
@@ -749,7 +811,9 @@ def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(tmp_path: 
     calls: list[list[str]] = []
     diagnostics: list[str] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         nonlocal stats_calls
         argv = list(request.argv)
         calls.append(argv)
@@ -812,7 +876,9 @@ def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(tmp_path: 
     assert "legacy SQLite data exists but Dolt backend is missing" in diagnostics[0]
 
 
-def test_run_bd_command_prime_reports_skipped_healthy_dolt_diagnostic(tmp_path: Path) -> None:
+def test_run_bd_command_prime_reports_skipped_healthy_dolt_diagnostic(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
     (beads_root / "beads.db").write_bytes(b"legacy")
@@ -823,7 +889,9 @@ def test_run_bd_command_prime_reports_skipped_healthy_dolt_diagnostic(tmp_path: 
     calls: list[list[str]] = []
     diagnostics: list[str] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         calls.append(argv)
         if argv == ["bd", "stats", "--json"] or argv == db_stats:
@@ -856,7 +924,9 @@ def test_run_bd_command_prime_reports_skipped_healthy_dolt_diagnostic(tmp_path: 
     assert "active Dolt issue count already covers legacy SQLite issue count" in diagnostics[0]
 
 
-def test_run_bd_command_prime_auto_migrates_insufficient_dolt_state(tmp_path: Path) -> None:
+def test_run_bd_command_prime_auto_migrates_insufficient_dolt_state(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
     (beads_root / "beads.db").write_bytes(b"legacy")
@@ -877,7 +947,9 @@ def test_run_bd_command_prime_auto_migrates_insufficient_dolt_state(tmp_path: Pa
     calls: list[list[str]] = []
     diagnostics: list[str] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         nonlocal stats_calls
         argv = list(request.argv)
         calls.append(argv)
@@ -934,7 +1006,9 @@ def test_run_bd_command_prime_auto_migrates_insufficient_dolt_state(tmp_path: Pa
     assert "active Dolt issue count (2) is below legacy SQLite issue count (4)" in diagnostics[0]
 
 
-def test_run_bd_command_prime_blocks_auto_migration_for_old_bd_version(tmp_path: Path) -> None:
+def test_run_bd_command_prime_blocks_auto_migration_for_old_bd_version(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     (beads_root / "beads.db").write_bytes(b"legacy")
@@ -944,7 +1018,9 @@ def test_run_bd_command_prime_blocks_auto_migration_for_old_bd_version(tmp_path:
     db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
     calls: list[list[str]] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         calls.append(argv)
         if argv == ["bd", "stats", "--json"]:
@@ -983,7 +1059,9 @@ def test_run_bd_command_prime_blocks_auto_migration_for_old_bd_version(tmp_path:
     assert not list((beads_root / "backups").glob("*.bak"))
 
 
-def test_run_bd_command_prime_blocks_when_migration_parity_fails(tmp_path: Path) -> None:
+def test_run_bd_command_prime_blocks_when_migration_parity_fails(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     (beads_root / "beads.db").write_bytes(b"legacy")
@@ -1003,7 +1081,9 @@ def test_run_bd_command_prime_blocks_when_migration_parity_fails(tmp_path: Path)
     stats_calls = 0
     calls: list[list[str]] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         nonlocal stats_calls
         argv = list(request.argv)
         calls.append(argv)
@@ -1083,7 +1163,9 @@ def test_run_bd_command_prime_reconciles_runtime_agent_metadata(
     show_calls = 0
     updated_descriptions: list[str] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         nonlocal stats_calls, show_calls
         argv = list(request.argv)
         if argv == ["bd", "stats", "--json"]:
@@ -1196,7 +1278,9 @@ def test_run_bd_command_prime_recreates_missing_runtime_agent_bead(
     stats_calls = 0
     create_calls: list[list[str]] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         nonlocal stats_calls
         argv = list(request.argv)
         if argv == ["bd", "stats", "--json"]:
@@ -1289,7 +1373,9 @@ def test_detect_startup_beads_state_reports_healthy_dolt(tmp_path: Path) -> None
 
     legacy_argv = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         if argv == ["bd", "stats", "--json"] or argv == legacy_argv:
             return exec_util.CommandResult(
@@ -1309,7 +1395,9 @@ def test_detect_startup_beads_state_reports_healthy_dolt(tmp_path: Path) -> None
     assert state.legacy_issue_total == 12
 
 
-def test_detect_startup_beads_state_reports_missing_dolt_with_legacy(tmp_path: Path) -> None:
+def test_detect_startup_beads_state_reports_missing_dolt_with_legacy(
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     (beads_root / "beads.db").write_bytes(b"")
@@ -1318,7 +1406,9 @@ def test_detect_startup_beads_state_reports_missing_dolt_with_legacy(tmp_path: P
 
     legacy_argv = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         if argv == ["bd", "stats", "--json"]:
             return exec_util.CommandResult(
@@ -1357,7 +1447,9 @@ def test_detect_startup_beads_state_reports_insufficient_dolt(tmp_path: Path) ->
 
     legacy_argv = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         if argv == ["bd", "stats", "--json"]:
             return exec_util.CommandResult(
@@ -1393,7 +1485,9 @@ def test_run_bd_command_allows_changeset_in_progress_when_dependencies_closed(
     cwd.mkdir()
     calls: list[list[str]] = []
 
-    def fake_run_with_runner(request: exec_util.CommandRequest) -> exec_util.CommandResult | None:
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
         argv = list(request.argv)
         calls.append(argv)
         if argv == ["bd", "show", "at-2", "--json"]:
@@ -1401,8 +1495,8 @@ def test_run_bd_command_allows_changeset_in_progress_when_dependencies_closed(
                 argv=request.argv,
                 returncode=0,
                 stdout=(
-                    '[{"id":"at-2","status":"open","labels":["at:changeset"],'
-                    '"dependencies":["at-1"]}]'
+                    '[{"id":"at-2","status":"open","labels":[],'
+                    '"dependencies":["at-1"],"type":"task"}]'
                 ),
                 stderr="",
             )
@@ -1410,7 +1504,14 @@ def test_run_bd_command_allows_changeset_in_progress_when_dependencies_closed(
             return exec_util.CommandResult(
                 argv=request.argv,
                 returncode=0,
-                stdout='[{"id":"at-1","status":"closed","labels":["at:changeset"]}]',
+                stdout='[{"id":"at-1","status":"closed","labels":[],"type":"task"}]',
+                stderr="",
+            )
+        if argv == ["bd", "list", "--parent", "at-2", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="[]",
                 stderr="",
             )
         if argv == ["bd", "update", "at-2", "--status", "in_progress"]:
@@ -1433,11 +1534,10 @@ def test_run_bd_command_allows_changeset_in_progress_when_dependencies_closed(
         )
 
     assert result.returncode == 0
-    assert calls == [
-        ["bd", "show", "at-2", "--json"],
-        ["bd", "show", "at-1", "--json"],
-        ["bd", "update", "at-2", "--status", "in_progress"],
-    ]
+    assert ["bd", "show", "at-2", "--json"] in calls
+    assert ["bd", "list", "--parent", "at-2", "--json"] in calls
+    assert ["bd", "show", "at-1", "--json"] in calls
+    assert ["bd", "update", "at-2", "--status", "in_progress"] in calls
 
 
 def test_ensure_agent_bead_returns_existing() -> None:
@@ -1463,7 +1563,13 @@ def test_find_agent_bead_uses_title_filter_and_exact_match() -> None:
         )
 
     assert result == {"id": "atelier-2", "title": "atelier/worker/codex/p123"}
-    assert seen["args"] == ["list", "--label", "at:agent", "--title", "atelier/worker/codex/p123"]
+    assert seen["args"] == [
+        "list",
+        "--label",
+        "at:agent",
+        "--title",
+        "atelier/worker/codex/p123",
+    ]
 
 
 def test_find_agent_bead_falls_back_to_description_agent_id() -> None:
@@ -1658,7 +1764,7 @@ def test_claim_epic_blocks_planner_owned_executable_work() -> None:
     issue = {
         "id": "atelier-9",
         "status": "open",
-        "labels": ["at:epic", "at:changeset", "at:ready"],
+        "labels": ["at:epic", "at:ready"],
         "assignee": "atelier/planner/codex/p111",
     }
 
@@ -1704,13 +1810,14 @@ def test_claim_epic_backfills_epic_label_for_standalone_changeset() -> None:
     issue = {
         "id": "at-legacy",
         "status": "open",
-        "labels": ["at:changeset", "at:ready"],
+        "labels": ["at:ready"],
         "assignee": None,
+        "type": "task",
     }
     updated = {
         "id": "at-legacy",
         "status": "in_progress",
-        "labels": ["at:changeset", "at:epic", "at:hooked", "at:ready"],
+        "labels": ["at:epic", "at:hooked", "at:ready"],
         "assignee": "agent",
     }
     show_calls = 0
@@ -1720,6 +1827,8 @@ def test_claim_epic_backfills_epic_label_for_standalone_changeset() -> None:
         if args and args[0] == "show":
             show_calls += 1
             return [issue] if show_calls == 1 else [updated]
+        if args[:2] == ["list", "--parent"]:
+            return []
         return [issue]
 
     with (
@@ -1996,14 +2105,15 @@ def test_mark_message_read_updates_labels() -> None:
 
 def test_list_descendant_changesets_walks_tree() -> None:
     calls: list[str] = []
+    work = lambda i: {"id": i, "labels": [], "type": "task"}
 
     def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         parent = args[2]
         calls.append(parent)
         if parent == "epic-1":
-            return [{"id": "epic-1.1"}, {"id": "epic-1.2"}]
+            return [work("epic-1.1"), work("epic-1.2")]
         if parent == "epic-1.1":
-            return [{"id": "epic-1.1.1"}]
+            return [work("epic-1.1.1")]
         return []
 
     with patch("atelier.beads.run_bd_json", side_effect=fake_json):
@@ -2011,15 +2121,20 @@ def test_list_descendant_changesets_walks_tree() -> None:
             "epic-1", beads_root=Path("/beads"), cwd=Path("/repo")
         )
 
-    assert [issue["id"] for issue in issues] == ["epic-1.1", "epic-1.2", "epic-1.1.1"]
-    assert calls == ["epic-1", "epic-1.1", "epic-1.2", "epic-1.1.1"]
+    ids = [issue["id"] for issue in issues]
+    assert set(ids) == {"epic-1.2", "epic-1.1.1"}
+    assert len(ids) == 2
+    assert set(calls) == {"epic-1", "epic-1.1", "epic-1.2", "epic-1.1.1"}
 
 
-def test_list_child_changesets_uses_changeset_label() -> None:
+def test_list_child_changesets_uses_graph_inference() -> None:
+    """list_child_changesets infers leaf work beads from graph."""
     with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
         beads.list_child_changesets("epic-1", beads_root=Path("/beads"), cwd=Path("/repo"))
-    called_args = run_json.call_args.args[0]
-    assert called_args == ["list", "--parent", "epic-1", "--label", "at:changeset"]
+    calls = [c.args[0] for c in run_json.call_args_list]
+    assert any(
+        args[:3] == ["list", "--parent", "epic-1"] and "--label" not in args for args in calls
+    )
 
 
 def test_list_epics_uses_at_epic_and_all() -> None:
@@ -2066,9 +2181,19 @@ def test_summarize_changesets_counts_and_ready() -> None:
 
 
 def test_epic_changeset_summary_ready_to_close() -> None:
+    def work(i: str, s: str = "open") -> dict:
+        closed_desc = "\npr_state: merged\n" if s == "closed" else ""
+        return {
+            "id": i,
+            "status": s,
+            "labels": [],
+            "type": "task",
+            "description": closed_desc,
+        }
+
     changesets = {
-        "epic-1": [{"id": "epic-1.1", "status": "closed"}],
-        "epic-1.1": [{"id": "epic-1.1.1", "status": "closed"}],
+        "epic-1": [work("epic-1.1", "closed")],
+        "epic-1.1": [work("epic-1.1.1", "closed")],
         "epic-1.1.1": [],
     }
 
@@ -2088,8 +2213,9 @@ def test_epic_changeset_summary_ready_to_close() -> None:
 
 
 def test_close_epic_if_complete_closes_and_clears_hook() -> None:
+    work = lambda i, s="open": {"id": i, "status": s, "labels": [], "type": "task"}
     changesets = {
-        "epic-1": [{"id": "epic-1.1", "status": "closed"}],
+        "epic-1": [work("epic-1.1", "closed")],
         "epic-1.1": [],
     }
 
@@ -2156,7 +2282,7 @@ def test_close_epic_if_complete_closes_standalone_changeset() -> None:
             return [
                 {
                     "id": "at-irs",
-                    "labels": ["at:changeset"],
+                    "labels": [],
                     "status": "closed",
                 }
             ]

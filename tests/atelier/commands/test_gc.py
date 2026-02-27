@@ -235,7 +235,7 @@ def test_gc_agent_homes_prunes_stale_session_agent_beads_deterministically() -> 
 
 
 def test_resolve_changeset_status_for_migration_maps_legacy_status_alias() -> None:
-    issue = {"id": "at-123", "status": "ready", "labels": ["at:changeset"]}
+    issue = {"id": "at-123", "status": "ready", "labels": ["at:changeset"], "type": "task"}
 
     target, reasons = gc_cmd._resolve_changeset_status_for_migration(issue)
 
@@ -249,16 +249,13 @@ def test_gc_normalize_changeset_labels_updates_legacy_status() -> None:
             "id": "at-123",
             "status": "ready",
             "labels": ["at:changeset"],
+            "type": "task",
         }
     ]
     calls: list[list[str]] = []
 
-    def fake_run_bd_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        if args[:4] == ["list", "--label", "at:changeset", "--all"]:
-            return issues
-        return []
+    def fake_list_all_changesets(*, beads_root: Path, cwd: Path, include_closed: bool) -> list:
+        return issues
 
     def fake_run_bd_command(
         args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
@@ -267,7 +264,9 @@ def test_gc_normalize_changeset_labels_updates_legacy_status() -> None:
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with (
-        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.commands.gc.beads.list_all_changesets", side_effect=fake_list_all_changesets
+        ),
         patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
     ):
         actions = gc_cmd._gc_normalize_changeset_labels(
@@ -288,14 +287,12 @@ def test_gc_normalize_changeset_labels_ignores_label_only_payloads() -> None:
         }
     ]
 
-    def fake_run_bd_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        if args[:4] == ["list", "--label", "at:changeset", "--all"]:
-            return issues
-        return []
+    def fake_list_all_changesets(*, beads_root: Path, cwd: Path, include_closed: bool) -> list:
+        return issues
 
-    with patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json):
+    with patch(
+        "atelier.commands.gc.beads.list_all_changesets", side_effect=fake_list_all_changesets
+    ):
         actions = gc_cmd._gc_normalize_changeset_labels(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
@@ -342,8 +339,65 @@ def test_gc_normalize_executable_ready_labels_updates_legacy_status() -> None:
 
 def test_gc_normalize_changeset_labels_orders_actions_deterministically() -> None:
     issues = [
-        {"id": "at-200", "status": "ready", "labels": ["at:changeset"]},
-        {"id": "at-100", "status": "ready", "labels": ["at:changeset"]},
+        {"id": "at-200", "status": "ready", "labels": ["at:changeset"], "type": "task"},
+        {"id": "at-100", "status": "ready", "labels": ["at:changeset"], "type": "task"},
+    ]
+
+    def fake_list_all_changesets(*, beads_root: Path, cwd: Path, include_closed: bool) -> list:
+        return issues
+
+    with patch(
+        "atelier.commands.gc.beads.list_all_changesets", side_effect=fake_list_all_changesets
+    ):
+        actions = gc_cmd._gc_normalize_changeset_labels(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert [action.description for action in actions] == [
+        "Normalize lifecycle status for changeset at-100",
+        "Normalize lifecycle status for changeset at-200",
+    ]
+
+
+def test_gc_remove_at_changeset_label_removes_deprecated_label() -> None:
+    issues = [
+        {"id": "at-123", "labels": ["at:changeset", "cs:ready"], "type": "task"},
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--label", "at:changeset", "--all"]:
+            return issues
+        return []
+
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        actions = gc_cmd._gc_remove_at_changeset_label(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+        assert len(actions) == 1
+        assert actions[0].description == "Remove deprecated at:changeset label from at-123"
+        actions[0].apply()
+
+    assert calls == [["update", "at-123", "--remove-label", "at:changeset"]]
+
+
+def test_gc_remove_at_changeset_label_orders_actions_deterministically() -> None:
+    issues = [
+        {"id": "at-200", "labels": ["at:changeset"], "type": "task"},
+        {"id": "at-100", "labels": ["at:changeset"], "type": "task"},
     ]
 
     def fake_run_bd_json(
@@ -354,14 +408,14 @@ def test_gc_normalize_changeset_labels_orders_actions_deterministically() -> Non
         return []
 
     with patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json):
-        actions = gc_cmd._gc_normalize_changeset_labels(
+        actions = gc_cmd._gc_remove_at_changeset_label(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
         )
 
     assert [action.description for action in actions] == [
-        "Normalize lifecycle status for changeset at-100",
-        "Normalize lifecycle status for changeset at-200",
+        "Remove deprecated at:changeset label from at-100",
+        "Remove deprecated at:changeset label from at-200",
     ]
 
 
@@ -863,7 +917,7 @@ def test_gc_closed_workspace_branches_without_mapping_prunes_integrated_root() -
         issue = {
             "id": "at-irs",
             "status": "closed",
-            "labels": ["at:changeset", "workspace:project-guardrail"],
+            "labels": ["workspace:project-guardrail"],
             "description": (
                 "workspace.root_branch: project-guardrail\n"
                 "workspace.parent_branch: main\n"
@@ -882,7 +936,7 @@ def test_gc_closed_workspace_branches_without_mapping_prunes_integrated_root() -
 
         with (
             patch(
-                "atelier.commands.gc.beads.run_bd_json",
+                "atelier.commands.gc.beads.list_all_changesets",
                 return_value=[issue],
             ),
             patch("atelier.commands.gc.git.git_default_branch", return_value="main"),
@@ -925,7 +979,7 @@ def test_gc_closed_workspace_branches_without_mapping_skips_not_integrated() -> 
         issue = {
             "id": "at-irs",
             "status": "closed",
-            "labels": ["at:changeset", "workspace:project-guardrail"],
+            "labels": ["workspace:project-guardrail"],
             "description": (
                 "workspace.root_branch: project-guardrail\n"
                 "workspace.parent_branch: main\n"
@@ -984,6 +1038,10 @@ def test_gc_logs_action_lifecycle_in_dry_run() -> None:
         ),
         patch(
             "atelier.commands.gc._gc_normalize_changeset_labels",
+            return_value=[],
+        ),
+        patch(
+            "atelier.commands.gc._gc_remove_at_changeset_label",
             return_value=[],
         ),
         patch(

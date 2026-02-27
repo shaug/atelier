@@ -68,6 +68,13 @@ class NextChangesetService(Protocol):
         include_closed: bool,
     ) -> list[dict[str, object]]: ...
 
+    def list_work_children(
+        self,
+        parent_id: str,
+        *,
+        include_closed: bool,
+    ) -> list[dict[str, object]]: ...
+
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool: ...
 
 
@@ -342,6 +349,13 @@ class StartupContractService(Protocol):
         include_closed: bool,
     ) -> list[dict[str, object]]: ...
 
+    def list_work_children(
+        self,
+        parent_id: str,
+        *,
+        include_closed: bool,
+    ) -> list[dict[str, object]]: ...
+
     def changeset_integration_signal(
         self,
         issue: dict[str, object],
@@ -448,9 +462,10 @@ def run_startup_contract_service(
         close_agent_bead_id: str | None,
     ) -> tuple[bool, bool]:
         candidates = service.list_descendant_changesets(epic_id, include_closed=True)
-        explicit_labels = worker_selection.issue_labels(issue)
-        if "at:changeset" in explicit_labels:
-            candidates = [issue, *candidates]
+        if not candidates:
+            work_children = service.list_work_children(epic_id, include_closed=True)
+            if not work_children:
+                candidates = [issue]
         reconciled_changeset = False
         seen_changesets: set[str] = set()
         for candidate in candidates:
@@ -458,9 +473,6 @@ def run_startup_contract_service(
             if changeset_id is None or changeset_id in seen_changesets:
                 continue
             seen_changesets.add(changeset_id)
-            labels = worker_selection.issue_labels(candidate)
-            if "at:changeset" not in labels:
-                continue
             if lifecycle.is_closed_status(candidate.get("status")):
                 continue
             integration_proven, integrated_sha = service.changeset_integration_signal(

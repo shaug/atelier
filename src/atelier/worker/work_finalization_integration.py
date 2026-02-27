@@ -41,8 +41,13 @@ def epic_ready_to_finalize(epic_id: str, *, beads_root: Path, repo_root: Path) -
     if not issues:
         return False
     issue = issues[0]
-    labels = issue_labels(issue)
-    if "at:changeset" in labels and lifecycle.is_closed_status(issue.get("status")):
+    work_children = beads.list_work_children(
+        epic_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+        include_closed=True,
+    )
+    if not work_children and lifecycle.is_closed_status(issue.get("status")):
         return True
     summary = beads.epic_changeset_summary(epic_id, beads_root=beads_root, cwd=repo_root)
     return summary.ready_to_close

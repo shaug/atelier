@@ -87,8 +87,10 @@ def _changeset_review_state(issue: dict[str, object]) -> str:
 def _resolve_changeset_status_for_migration(
     issue: dict[str, object],
 ) -> tuple[str | None, tuple[str, ...]]:
-    labels = _issue_labels(issue)
-    if "at:changeset" not in labels:
+    if not lifecycle.is_work_issue(
+        labels=_issue_labels(issue),
+        issue_type=lifecycle.issue_payload_type(issue),
+    ):
         return None, ()
     current_status = lifecycle.normalize_status_value(issue.get("status"))
     target_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
@@ -174,9 +176,6 @@ def _issue_integrated_sha(issue: dict[str, object]) -> str | None:
 
 
 def _is_merged_closed_changeset(issue: dict[str, object]) -> bool:
-    labels = _issue_labels(issue)
-    if "at:changeset" not in labels:
-        return False
     if lifecycle.canonical_lifecycle_status(issue.get("status")) != "closed":
         return False
     if _issue_integrated_sha(issue):
@@ -245,10 +244,10 @@ def _gc_normalize_changeset_labels(
     repo_root: Path,
 ) -> list[GcAction]:
     actions: list[GcAction] = []
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:changeset", "--all"],
+    issues = beads.list_all_changesets(
         beads_root=beads_root,
         cwd=repo_root,
+        include_closed=True,
     )
     for issue in sorted(issues, key=_issue_sort_key):
         issue_id = issue.get("id")
@@ -278,6 +277,43 @@ def _gc_normalize_changeset_labels(
                 description=f"Normalize lifecycle status for changeset {issue_id}",
                 apply=_apply_normalize,
                 details=tuple(details),
+            )
+        )
+    return actions
+
+
+def _gc_remove_at_changeset_label(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    """Remove deprecated at:changeset label; changeset role is inferred from graph."""
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:changeset", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in sorted(issues, key=_issue_sort_key):
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+
+        def _apply_remove(
+            bead_id: str = issue_id,
+        ) -> None:
+            beads.run_bd_command(
+                ["update", bead_id, "--remove-label", "at:changeset"],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+
+        actions.append(
+            GcAction(
+                description=f"Remove deprecated at:changeset label from {issue_id}",
+                apply=_apply_remove,
+                details=("changeset role inferred from graph",),
             )
         )
     return actions
@@ -687,10 +723,10 @@ def _gc_closed_workspace_branches_without_mapping(
 ) -> list[GcAction]:
     actions: list[GcAction] = []
     default_branch = git.git_default_branch(repo_root, git_path=git_path) or ""
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:changeset", "--all"],
+    issues = beads.list_all_changesets(
         beads_root=beads_root,
         cwd=repo_root,
+        include_closed=True,
     )
     for issue in issues:
         issue_id = issue.get("id")
@@ -1220,6 +1256,12 @@ def gc(args: object) -> None:
     actions: list[GcAction] = []
     actions.extend(
         _gc_normalize_changeset_labels(
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
+    actions.extend(
+        _gc_remove_at_changeset_label(
             beads_root=beads_root,
             repo_root=repo_root,
         )

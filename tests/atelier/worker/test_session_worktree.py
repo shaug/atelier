@@ -96,7 +96,7 @@ def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: 
         },
         {
             "id": "at-1my",
-            "labels": ["at:epic", "at:changeset"],
+            "labels": ["at:epic"],
             "description": "workspace.root_branch: feat/1my\n",
         },
     ]
@@ -113,10 +113,30 @@ def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: 
         include_closed: bool = False,
     ) -> list[dict[str, object]]:
         del beads_root, cwd, include_closed
-        return descendants_by_epic[parent_id]
+        return descendants_by_epic.get(parent_id, [])
+
+    work_children_by_parent = {
+        "at-gnc": [{"id": "at-gnc.1", "labels": [], "type": "task"}],
+        "at-1my": [{"id": "at-1my.1", "labels": [], "type": "task"}],
+        "at-gnc.1": [],
+        "at-1my.1": [],
+    }
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        if args[:2] == ["list", "--parent"] and len(args) >= 3:
+            parent = args[2]
+            return work_children_by_parent.get(parent, [])
+        if "at:epic" in args:
+            return epics
+        return []
 
     with (
-        patch("atelier.worker.session.worktree.beads.run_bd_json", return_value=epics),
+        patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
         patch(
             "atelier.worker.session.worktree.beads.list_descendant_changesets",
             side_effect=fake_descendants,
@@ -162,7 +182,6 @@ def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: 
         tmp_path,
         owner_by_changeset={
             "at-gnc.1": "at-gnc",
-            "at-1my": "at-1my",
             "at-1my.1": "at-1my",
         },
         epic_root_branches={
@@ -197,7 +216,7 @@ def test_prepare_worktrees_reconciles_epic_changeset_metadata_before_checkout() 
     epics = [
         {
             "id": "at-epic",
-            "labels": ["at:epic", "at:changeset"],
+            "labels": ["at:epic"],
             "description": "workspace.root_branch: feat/root\n",
         }
     ]
@@ -211,6 +230,8 @@ def test_prepare_worktrees_reconciles_epic_changeset_metadata_before_checkout() 
         del beads_root, cwd
         if args[:3] == ["list", "--label", "at:epic"]:
             return epics
+        if args[:2] == ["list", "--parent"] and len(args) >= 3 and args[2] == "at-epic":
+            return []
         if args[:1] == ["show"]:
             return [stale_issue]
         raise AssertionError(f"unexpected bd command: {args!r}")
@@ -285,7 +306,7 @@ def test_prepare_worktrees_blocks_ambiguous_epic_changeset_lineage_drift() -> No
     epics = [
         {
             "id": "at-epic",
-            "labels": ["at:epic", "at:changeset"],
+            "labels": ["at:epic"],
             "description": "workspace.root_branch: feat/root\n",
         }
     ]
@@ -299,6 +320,8 @@ def test_prepare_worktrees_blocks_ambiguous_epic_changeset_lineage_drift() -> No
         del beads_root, cwd
         if args[:3] == ["list", "--label", "at:epic"]:
             return epics
+        if args[:2] == ["list", "--parent"] and len(args) >= 3 and args[2] == "at-epic":
+            return []
         if args[:1] == ["show"]:
             return [drifted_issue]
         raise AssertionError(f"unexpected bd command: {args!r}")

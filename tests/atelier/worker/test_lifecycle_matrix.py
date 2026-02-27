@@ -262,7 +262,7 @@ def test_lifecycle_matrix_claim_selection_startup_and_overview(
     issue = {
         "id": "at-epic",
         "status": status,
-        "labels": ["at:epic", "at:changeset", "at:ready", "at:draft", "cs:planned"],
+        "labels": ["at:epic", "at:ready", "at:draft", "cs:planned"],
         "assignee": None,
     }
     planner_issue = dict(issue)
@@ -303,7 +303,7 @@ def test_lifecycle_matrix_finalize_ignores_terminal_labels_when_status_active(mo
     issue = {
         "id": "at-epic.1",
         "status": "in_progress",
-        "labels": ["at:changeset", "cs:abandoned", "cs:merged"],
+        "labels": ["cs:abandoned", "cs:merged"],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -343,8 +343,8 @@ def test_lifecycle_matrix_finalize_ignores_terminal_labels_when_status_active(mo
 
 
 def test_lifecycle_matrix_reconcile_ignores_terminal_labels_on_active_status() -> None:
-    issues = [{"id": "at-1.7", "status": "open", "labels": ["at:changeset", "cs:abandoned"]}]
-    with patch("atelier.worker.reconcile.beads.run_bd_json", return_value=issues):
+    issues = [{"id": "at-1.7", "status": "open", "labels": ["cs:abandoned"]}]
+    with patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=issues):
         candidates = reconcile.list_reconcile_epic_candidates(
             project_config=config.ProjectConfig(
                 project=config.ProjectSection(origin="https://github.com/org/repo"),

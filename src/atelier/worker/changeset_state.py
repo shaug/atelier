@@ -53,14 +53,7 @@ def find_invalid_changeset_labels(
 
 def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     beads.run_bd_command(
-        [
-            "update",
-            changeset_id,
-            "--add-label",
-            "at:changeset",
-            "--status",
-            "in_progress",
-        ],
+        ["update", changeset_id, "--status", "in_progress"],
         beads_root=beads_root,
         cwd=repo_root,
     )

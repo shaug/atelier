@@ -103,7 +103,6 @@ def test_create_reroute_epic_writes_diagnostics_and_open_status() -> None:
     assert created["id"] == "at-epic-9"
     assert "--label" in captured_args
     assert "at:epic" in captured_args
-    assert "at:changeset" in captured_args
     assert "--status" in captured_args
     assert captured_args[captured_args.index("--status") + 1] == "open"
     description = captured_args[captured_args.index("--description") + 1]

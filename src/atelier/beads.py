@@ -118,15 +118,27 @@ class _IssueTypesPayloadModel(BaseModel):
     def as_payload(self) -> dict[str, object]:
         return {
             "core_types": [
-                entry.model_dump(exclude_none=True) if isinstance(entry, _IssueTypeModel) else entry
+                (
+                    entry.model_dump(exclude_none=True)
+                    if isinstance(entry, _IssueTypeModel)
+                    else entry
+                )
                 for entry in self.core_types
             ],
             "custom_types": [
-                entry.model_dump(exclude_none=True) if isinstance(entry, _IssueTypeModel) else entry
+                (
+                    entry.model_dump(exclude_none=True)
+                    if isinstance(entry, _IssueTypeModel)
+                    else entry
+                )
                 for entry in self.custom_types
             ],
             "types": [
-                entry.model_dump(exclude_none=True) if isinstance(entry, _IssueTypeModel) else entry
+                (
+                    entry.model_dump(exclude_none=True)
+                    if isinstance(entry, _IssueTypeModel)
+                    else entry
+                )
                 for entry in self.types
             ],
         }
@@ -1699,7 +1711,29 @@ def _enforce_in_progress_dependency_gate(
                 "cannot set issue "
                 f"{issue_id} to in_progress: unable to evaluate dependencies ({error})"
             )
-        if issue is None or not _issue_has_label(issue, "at:changeset"):
+        if issue is None:
+            continue
+        if not lifecycle.is_work_issue(
+            labels=_issue_labels(issue),
+            issue_type=lifecycle.issue_payload_type(issue),
+        ):
+            continue
+        payload, _ = _raw_bd_json(
+            ["list", "--parent", issue_id],
+            beads_root=beads_root,
+            cwd=cwd,
+            env=env,
+        )
+        work_children = [
+            i
+            for i in (payload or [])
+            if isinstance(i, dict)
+            and lifecycle.is_work_issue(
+                labels=_issue_labels(i),
+                issue_type=lifecycle.issue_payload_type(i),
+            )
+        ]
+        if work_children:
             continue
         blockers = _blocking_dependency_states(
             issue,
@@ -2188,7 +2222,9 @@ def _issue_parent_id(issue: dict[str, object]) -> str | None:
     return boundary.parent_id
 
 
-def _evaluate_epic_claimability(issue: dict[str, object]) -> lifecycle.EpicClaimEvaluation:
+def _evaluate_epic_claimability(
+    issue: dict[str, object],
+) -> lifecycle.EpicClaimEvaluation:
     return lifecycle.evaluate_epic_claimability(
         status=issue.get("status"),
         labels=_issue_labels(issue),
@@ -2197,15 +2233,35 @@ def _evaluate_epic_claimability(issue: dict[str, object]) -> lifecycle.EpicClaim
     )
 
 
-def _is_standalone_changeset_without_epic_label(issue: dict[str, object]) -> bool:
+def _is_standalone_changeset_without_epic_label(
+    issue: dict[str, object],
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> bool:
     labels = _issue_labels(issue)
-    if "at:changeset" not in labels or "at:epic" in labels:
+    if "at:epic" in labels:
+        return False
+    if not lifecycle.is_work_issue(
+        labels=labels,
+        issue_type=lifecycle.issue_payload_type(issue),
+    ):
         return False
     try:
         boundary = parse_issue_boundary(issue, source="beads:claim_epic")
     except ValueError:
         return False
-    return boundary.parent_id is None
+    if boundary.parent_id is not None:
+        return False
+    issue_id = issue.get("id")
+    if not isinstance(issue_id, str) or not issue_id.strip():
+        return False
+    return not list_work_children(
+        issue_id.strip(),
+        beads_root=beads_root,
+        cwd=cwd,
+        include_closed=True,
+    )
 
 
 def _agent_role(agent_id: object) -> str | None:
@@ -2258,6 +2314,29 @@ def summarize_changesets(
     )
 
 
+def list_work_children(
+    parent_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    include_closed: bool = False,
+) -> list[dict[str, object]]:
+    """List direct child work beads for a parent."""
+    args = ["list", "--parent", parent_id]
+    if include_closed:
+        args.append("--all")
+    raw = run_bd_json(args, beads_root=beads_root, cwd=cwd)
+    return [
+        i
+        for i in raw
+        if isinstance(i, dict)
+        and lifecycle.is_work_issue(
+            labels=_issue_labels(i),
+            issue_type=lifecycle.issue_payload_type(i),
+        )
+    ]
+
+
 def list_child_changesets(
     parent_id: str,
     *,
@@ -2265,11 +2344,26 @@ def list_child_changesets(
     cwd: Path,
     include_closed: bool = False,
 ) -> list[dict[str, object]]:
-    """List direct child changesets for a parent issue."""
-    args = ["list", "--parent", parent_id, "--label", "at:changeset"]
-    if include_closed:
-        args.append("--all")
-    return run_bd_json(args, beads_root=beads_root, cwd=cwd)
+    """List direct child changesets (leaf work beads) for a parent issue."""
+    work_children = list_work_children(
+        parent_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        include_closed=include_closed,
+    )
+    result: list[dict[str, object]] = []
+    for c in work_children:
+        cid = c.get("id")
+        if not isinstance(cid, str) or not cid.strip():
+            continue
+        if not list_work_children(
+            cid.strip(),
+            beads_root=beads_root,
+            cwd=cwd,
+            include_closed=include_closed,
+        ):
+            result.append(c)
+    return result
 
 
 def list_descendant_changesets(
@@ -2279,28 +2373,74 @@ def list_descendant_changesets(
     cwd: Path,
     include_closed: bool = False,
 ) -> list[dict[str, object]]:
-    """List descendant changesets (children + deeper descendants)."""
+    """List descendant changesets (leaf work beads under parent)."""
     descendants: list[dict[str, object]] = []
     seen: set[str] = set()
     queue = [parent_id]
     while queue:
         current = queue.pop(0)
-        children = list_child_changesets(
+        work_children = list_work_children(
             current,
             beads_root=beads_root,
             cwd=cwd,
             include_closed=include_closed,
         )
-        for issue in children:
+        for issue in work_children:
             issue_id = issue.get("id")
-            if not isinstance(issue_id, str) or not issue_id:
+            if not isinstance(issue_id, str) or not issue_id.strip():
                 continue
-            if issue_id in seen:
+            if issue_id.strip() in seen:
                 continue
-            seen.add(issue_id)
-            descendants.append(issue)
-            queue.append(issue_id)
+            seen.add(issue_id.strip())
+            grandchild_work = list_work_children(
+                issue_id.strip(),
+                beads_root=beads_root,
+                cwd=cwd,
+                include_closed=include_closed,
+            )
+            if not grandchild_work:
+                descendants.append(issue)
+            queue.append(issue_id.strip())
     return descendants
+
+
+def list_all_changesets(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    include_closed: bool = False,
+) -> list[dict[str, object]]:
+    """List all changesets (leaf work beads) under epics."""
+    epics = list_epics(beads_root=beads_root, cwd=cwd, include_closed=include_closed)
+    seen: set[str] = set()
+    result: list[dict[str, object]] = []
+    for epic in epics:
+        eid = epic.get("id")
+        if not isinstance(eid, str) or not eid.strip():
+            continue
+        descendants = list_descendant_changesets(
+            eid.strip(),
+            beads_root=beads_root,
+            cwd=cwd,
+            include_closed=include_closed,
+        )
+        if descendants:
+            for d in descendants:
+                did = d.get("id")
+                if isinstance(did, str) and did.strip() and did.strip() not in seen:
+                    seen.add(did.strip())
+                    result.append(d)
+        else:
+            work_children = list_work_children(
+                eid.strip(),
+                beads_root=beads_root,
+                cwd=cwd,
+                include_closed=include_closed,
+            )
+            if not work_children and eid.strip() not in seen:
+                seen.add(eid.strip())
+                result.append(epic)
+    return result
 
 
 def _normalize_description(description: str | None) -> str:
@@ -3369,7 +3509,7 @@ def claim_epic(
         "--add-label",
         "at:hooked",
     ]
-    if _is_standalone_changeset_without_epic_label(issue):
+    if _is_standalone_changeset_without_epic_label(issue, beads_root=beads_root, cwd=cwd):
         update_args.extend(["--add-label", "at:epic"])
     run_bd_command(
         update_args,
@@ -3399,6 +3539,17 @@ def epic_changeset_summary(
         cwd=cwd,
         include_closed=True,
     )
+    if not changesets:
+        work_children = list_work_children(
+            epic_id,
+            beads_root=beads_root,
+            cwd=cwd,
+            include_closed=True,
+        )
+        if not work_children:
+            epic_issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+            if epic_issues:
+                changesets = epic_issues
     return summarize_changesets(changesets)
 
 
@@ -3415,10 +3566,13 @@ def close_epic_if_complete(
     if not issues:
         return False
     issue = issues[0]
-    labels = _issue_labels(issue)
-    is_standalone_changeset = "at:changeset" in labels and lifecycle.is_closed_status(
-        issue.get("status")
+    work_children = list_work_children(
+        epic_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        include_closed=True,
     )
+    is_standalone_changeset = not work_children and lifecycle.is_closed_status(issue.get("status"))
     summary = epic_changeset_summary(epic_id, beads_root=beads_root, cwd=cwd)
     if not is_standalone_changeset and not summary.ready_to_close:
         return False

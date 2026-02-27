@@ -193,16 +193,30 @@ def is_changeset_in_progress(issue: dict[str, object]) -> bool:
     return lifecycle.is_changeset_in_progress(issue.get("status"), issue_labels(issue))
 
 
-def is_changeset_ready(issue: dict[str, object]) -> bool:
+def is_changeset_ready(
+    issue: dict[str, object],
+    *,
+    has_work_children: bool = False,
+) -> bool:
     """Is changeset ready.
+
+    Call with has_work_children=False when issue is from list_descendant_changesets
+    (leaf work beads). Fails closed when has_work_children is unknown.
 
     Args:
         issue: Value for `issue`.
+        has_work_children: Whether the issue has child work beads.
 
     Returns:
         Function result.
     """
-    return lifecycle.is_changeset_ready(issue.get("status"), issue_labels(issue))
+    return lifecycle.is_changeset_ready(
+        issue.get("status"),
+        issue_labels(issue),
+        has_work_children=has_work_children,
+        issue_type=lifecycle.issue_payload_type(issue),
+        parent_id=issue_parent_id(issue),
+    )
 
 
 def changeset_review_state(issue: dict[str, object]) -> str | None:

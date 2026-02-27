@@ -19,6 +19,9 @@ class FakeStartupService:
         self._list_descendant_changesets = overrides.pop(
             "list_descendant_changesets", lambda _parent_id, include_closed: []
         )
+        self._list_work_children = overrides.pop(
+            "list_work_children", lambda _parent_id, include_closed: []
+        )
         self._changeset_integration_signal = overrides.pop(
             "changeset_integration_signal", lambda _issue, repo_slug, git_path: (False, None)
         )
@@ -111,6 +114,14 @@ class FakeStartupService:
         include_closed: bool,
     ) -> list[dict[str, object]]:
         return self._list_descendant_changesets(parent_id, include_closed=include_closed)
+
+    def list_work_children(
+        self,
+        parent_id: str,
+        *,
+        include_closed: bool,
+    ) -> list[dict[str, object]]:
+        return self._list_work_children(parent_id, include_closed=include_closed)
 
     def changeset_integration_signal(
         self,
@@ -413,12 +424,12 @@ def test_run_startup_contract_explicit_epic_no_actionable_reconciles_and_closes(
                 {
                     "id": "at-explicit.1",
                     "status": "closed",
-                    "labels": ["at:changeset", "cs:merged"],
+                    "labels": ["cs:merged"],
                 },
                 {
                     "id": "at-explicit.2",
                     "status": "closed",
-                    "labels": ["at:changeset", "cs:abandoned"],
+                    "labels": ["cs:abandoned"],
                 },
             ]
             if include_closed
@@ -460,7 +471,7 @@ def test_run_startup_contract_explicit_epic_reconciles_stale_in_progress_changes
                 {
                     "id": "at-explicit.1",
                     "status": "in_progress",
-                    "labels": ["at:changeset", "cs:in_progress"],
+                    "labels": ["cs:in_progress"],
                 }
             ]
             if include_closed
@@ -505,12 +516,12 @@ def test_run_startup_contract_explicit_epic_no_actionable_remains_non_terminal()
                 {
                     "id": "at-explicit.1",
                     "status": "closed",
-                    "labels": ["at:changeset", "cs:in_progress"],
+                    "labels": ["cs:in_progress"],
                 },
                 {
                     "id": "at-explicit.2",
                     "status": "open",
-                    "labels": ["at:changeset", "cs:ready"],
+                    "labels": ["cs:ready"],
                 },
             ]
             if include_closed
@@ -870,7 +881,12 @@ def test_run_startup_contract_claims_global_feedback_standalone_identity() -> No
         repo_slug="org/repo",
         list_epics=lambda: [],
         show_issue=lambda issue_id: (
-            {"id": "at-bmu", "status": "open", "labels": ["at:changeset", "at:ready"]}
+            {
+                "id": "at-bmu",
+                "status": "open",
+                "labels": ["at:epic", "at:ready"],
+                "type": "task",
+            }
             if issue_id == "at-bmu"
             else None
         ),
@@ -932,7 +948,7 @@ def test_run_startup_contract_auto_reconciles_stale_merged_state_before_selectio
                 {
                     "id": "at-stale.1",
                     "status": "in_progress",
-                    "labels": ["at:changeset", "cs:in_progress"],
+                    "labels": ["cs:in_progress"],
                 }
             ]
             if include_closed and parent_id == "at-stale"
@@ -966,7 +982,12 @@ def test_run_startup_contract_uses_ready_changeset_fallback() -> None:
         mode="prompt",
         select_epic_prompt=lambda **_kwargs: None,
         ready_changesets_global=lambda: [
-            {"id": "at-ready", "status": "open", "labels": ["at:changeset"]}
+            {
+                "id": "at-ready",
+                "status": "open",
+                "labels": [],
+                "type": "task",
+            }
         ],
         next_changeset=lambda **_kwargs: {"id": "at-ready"},
     )

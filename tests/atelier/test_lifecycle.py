@@ -42,15 +42,15 @@ def test_is_active_root_branch_owner_uses_status_and_labels() -> None:
 
 
 def test_is_changeset_ready_accepts_ready_label() -> None:
-    labels = {"at:changeset", "cs:ready"}
-    assert lifecycle.is_changeset_ready("open", labels) is True
+    labels = {"cs:ready"}
+    assert lifecycle.is_changeset_ready("open", labels, has_work_children=False) is True
 
 
 def test_is_changeset_ready_uses_status_authority_over_legacy_labels() -> None:
-    assert lifecycle.is_changeset_ready("open", {"at:changeset", "cs:planned"}) is True
-    assert lifecycle.is_changeset_ready("open", {"at:changeset", "cs:blocked"}) is True
-    assert lifecycle.is_changeset_ready("open", {"at:changeset", "cs:merged"}) is True
-    assert lifecycle.is_changeset_ready("open", {"at:changeset", "cs:abandoned"}) is True
+    assert lifecycle.is_changeset_ready("open", {"cs:planned"}, has_work_children=False) is True
+    assert lifecycle.is_changeset_ready("open", {"cs:blocked"}, has_work_children=False) is True
+    assert lifecycle.is_changeset_ready("open", {"cs:merged"}, has_work_children=False) is True
+    assert lifecycle.is_changeset_ready("open", {"cs:abandoned"}, has_work_children=False) is True
 
 
 def test_is_changeset_ready_rejects_non_changesets() -> None:
@@ -58,14 +58,15 @@ def test_is_changeset_ready_rejects_non_changesets() -> None:
 
 
 def test_is_changeset_ready_rejects_closed_status() -> None:
-    assert lifecycle.is_changeset_ready("closed", {"at:changeset"}) is False
-    assert lifecycle.is_changeset_ready("done", {"at:changeset"}) is False
+    assert lifecycle.is_changeset_ready("closed", {"cs:ready"}) is False
+    assert lifecycle.is_changeset_ready("done", {"cs:ready"}) is False
 
 
 def test_is_changeset_ready_allows_open_and_in_progress_changesets() -> None:
-    assert lifecycle.is_changeset_ready("open", {"at:changeset"}) is True
-    assert lifecycle.is_changeset_ready("in_progress", {"at:changeset"}) is True
-    assert lifecycle.is_changeset_ready("hooked", {"at:changeset"}) is True
+    labels = {"cs:ready"}
+    assert lifecycle.is_changeset_ready("open", labels, has_work_children=False) is True
+    assert lifecycle.is_changeset_ready("in_progress", labels, has_work_children=False) is True
+    assert lifecycle.is_changeset_ready("hooked", labels, has_work_children=False) is True
 
 
 def test_normalize_review_state_handles_invalid_values() -> None:
@@ -75,13 +76,14 @@ def test_normalize_review_state_handles_invalid_values() -> None:
 
 
 def test_in_review_candidate_prefers_live_state() -> None:
-    labels = {"at:changeset"}
+    labels = {"cs:ready"}
     assert (
         lifecycle.is_changeset_in_review_candidate(
             labels=labels,
             status="open",
             live_state="in-review",
             stored_review_state=None,
+            has_work_children=False,
         )
         is True
     )
@@ -91,6 +93,7 @@ def test_in_review_candidate_prefers_live_state() -> None:
             status="open",
             live_state="pushed",
             stored_review_state="in-review",
+            has_work_children=False,
         )
         is False
     )
@@ -108,25 +111,27 @@ def test_in_review_candidate_rejects_non_changesets_and_closed_items() -> None:
     )
     assert (
         lifecycle.is_changeset_in_review_candidate(
-            labels={"at:changeset", "cs:merged"},
+            labels={"cs:merged"},
             status="open",
             live_state=None,
             stored_review_state="in-review",
+            has_work_children=False,
         )
         is True
     )
     assert (
         lifecycle.is_changeset_in_review_candidate(
-            labels={"at:changeset"},
+            labels={"cs:ready"},
             status="open",
             live_state=None,
             stored_review_state="in-review",
+            has_work_children=False,
         )
         is True
     )
     assert (
         lifecycle.is_changeset_in_review_candidate(
-            labels={"at:changeset"},
+            labels={"cs:ready"},
             status="closed",
             live_state=None,
             stored_review_state="in-review",
@@ -153,18 +158,19 @@ def test_canonical_lifecycle_status_preserves_unknown_non_empty_status() -> None
 def test_is_work_issue_excludes_explicit_non_work_types_and_labels() -> None:
     assert (
         lifecycle.is_work_issue(
-            labels={"at:changeset", "at:message"},
+            labels={"cs:ready", "at:message"},
             issue_type="task",
         )
         is False
     )
     assert lifecycle.is_work_issue(labels=set(), issue_type="message") is False
-    assert lifecycle.is_work_issue(labels={"at:changeset"}, issue_type=None) is True
+    # cs:ready alone is not a work signal; requires at:epic or standard issue_type
+    assert lifecycle.is_work_issue(labels={"cs:ready"}, issue_type=None) is False
 
 
 def test_infer_work_role_top_level_leaf_is_epic_and_changeset() -> None:
     role = lifecycle.infer_work_role(
-        labels={"at:changeset"},
+        labels=set(),
         issue_type="task",
         parent_id=None,
         has_work_children=False,
@@ -178,7 +184,7 @@ def test_infer_work_role_top_level_leaf_is_epic_and_changeset() -> None:
 
 def test_infer_work_role_child_with_children_is_internal_work_node() -> None:
     role = lifecycle.infer_work_role(
-        labels={"at:changeset"},
+        labels=set(),
         issue_type="task",
         parent_id="at-epic",
         has_work_children=True,
@@ -193,7 +199,7 @@ def test_infer_work_role_child_with_children_is_internal_work_node() -> None:
 def test_evaluate_runnable_leaf_requires_leaf_status_and_dependencies() -> None:
     blocked = lifecycle.evaluate_runnable_leaf(
         status="open",
-        labels={"at:changeset"},
+        labels=set(),
         issue_type="task",
         parent_id="at-epic",
         has_work_children=False,
@@ -204,7 +210,7 @@ def test_evaluate_runnable_leaf_requires_leaf_status_and_dependencies() -> None:
 
     deferred = lifecycle.evaluate_runnable_leaf(
         status="deferred",
-        labels={"at:changeset"},
+        labels=set(),
         issue_type="task",
         parent_id="at-epic",
         has_work_children=False,
@@ -215,7 +221,7 @@ def test_evaluate_runnable_leaf_requires_leaf_status_and_dependencies() -> None:
 
     runnable = lifecycle.evaluate_runnable_leaf(
         status="open",
-        labels={"at:changeset"},
+        labels=set(),
         issue_type="task",
         parent_id="at-epic",
         has_work_children=False,

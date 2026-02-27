@@ -28,7 +28,7 @@ def test_evaluate_guardrails_accepts_single_unit_epic_path() -> None:
     module = _load_script_module()
     epic = {
         "id": "at-epic",
-        "labels": ["at:epic", "at:changeset"],
+        "labels": ["at:epic"],
         "description": "LOC estimate: 320",
     }
 
@@ -45,7 +45,7 @@ def test_evaluate_guardrails_accepts_single_unit_epic_path() -> None:
 def test_evaluate_guardrails_flags_one_child_without_rationale() -> None:
     module = _load_script_module()
     epic = {"id": "at-epic", "labels": ["at:epic"], "description": "Intent: ship parser update"}
-    child = {"id": "at-epic.1", "labels": ["at:changeset"], "description": "LOC estimate: 210"}
+    child = {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 210"}
 
     report = module._evaluate_guardrails(
         epic_issue=epic,
@@ -63,7 +63,7 @@ def test_evaluate_guardrails_allows_one_child_with_rationale() -> None:
         "labels": ["at:epic"],
         "notes": "Decomposition rationale: split due to dependency sequencing.",
     }
-    child = {"id": "at-epic.1", "labels": ["at:changeset"], "description": "LOC estimate: 260"}
+    child = {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 260"}
 
     report = module._evaluate_guardrails(
         epic_issue=epic,
@@ -79,7 +79,7 @@ def test_evaluate_guardrails_flags_large_changeset_without_approval() -> None:
     module = _load_script_module()
     child = {
         "id": "at-epic.1",
-        "labels": ["at:changeset"],
+        "labels": [],
         "description": "LOC estimate: 920\nGuardrails: data migration",
     }
 
@@ -96,8 +96,8 @@ def test_evaluate_guardrails_reports_multi_unit_decomposition() -> None:
     module = _load_script_module()
     epic = {"id": "at-epic", "labels": ["at:epic"]}
     children = [
-        {"id": "at-epic.1", "labels": ["at:changeset"], "description": "LOC estimate: 220"},
-        {"id": "at-epic.2", "labels": ["at:changeset"], "description": "LOC estimate: 240"},
+        {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 220"},
+        {"id": "at-epic.2", "labels": [], "description": "LOC estimate: 240"},
     ]
 
     report = module._evaluate_guardrails(

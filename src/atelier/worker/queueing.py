@@ -100,8 +100,7 @@ def send_invalid_changeset_labels_notification(
         body=(
             "Found child work items with invalid labels: "
             f"{', '.join(invalid_changesets)}.\n"
-            "All executable work items must be labeled at:changeset; "
-            "do not use at:subtask."
+            "Do not use at:subtask; changesets are inferred from graph (leaf work beads)."
         ),
         agent_id=agent_id,
         thread_id=epic_id,

@@ -91,7 +91,6 @@ def test_create_changeset_defaults_to_deferred_status(monkeypatch, tmp_path: Pat
 
     create_command = commands[0]
     assert create_command[:2] == ["create", "--parent"]
-    assert "at:changeset" in create_command
     assert "cs:planned" not in create_command
     assert "cs:ready" not in create_command
     assert commands[1] == ["update", "at-123", "--status", "deferred"]

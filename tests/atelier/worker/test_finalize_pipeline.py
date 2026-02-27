@@ -293,7 +293,7 @@ def test_run_finalize_pipeline_blocks_on_invalid_labels(monkeypatch) -> None:
     monkeypatch.setattr(
         finalize_pipeline.beads,
         "run_bd_json",
-        lambda *_args, **_kwargs: [{"id": "at-epic.1", "labels": ["at:changeset"]}],
+        lambda *_args, **_kwargs: [{"id": "at-epic.1", "labels": []}],
     )
     service = _FinalizeServiceStub()
     notified: list[dict[str, Any]] = []
@@ -325,7 +325,7 @@ def test_run_finalize_pipeline_waiting_on_review_returns_pending(monkeypatch) ->
     issue = {
         "id": "at-epic.1",
         "status": "in_progress",
-        "labels": ["at:changeset", "cs:in_progress"],
+        "labels": ["cs:in_progress"],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -350,7 +350,7 @@ def test_run_finalize_pipeline_waiting_on_review_uses_in_progress_status(monkeyp
     issue = {
         "id": "at-epic.1",
         "status": "in_progress",
-        "labels": ["at:changeset"],
+        "labels": [],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -374,7 +374,7 @@ def test_run_finalize_pipeline_waiting_on_review_uses_in_progress_status(monkeyp
 def test_run_finalize_pipeline_blocks_on_stack_integrity_preflight(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
-        "labels": ["at:changeset", "cs:in_progress"],
+        "labels": ["cs:in_progress"],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -419,7 +419,7 @@ def test_run_finalize_pipeline_keeps_closed_changeset_open_while_pr_active(
     issue = {
         "id": "at-epic.1",
         "status": "closed",
-        "labels": ["at:changeset", "cs:merged"],
+        "labels": ["cs:merged"],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -450,7 +450,7 @@ def test_run_finalize_pipeline_treats_closed_status_as_terminal_without_labels(m
     issue = {
         "id": "at-epic.1",
         "status": "closed",
-        "labels": ["at:changeset"],
+        "labels": [],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -477,7 +477,7 @@ def test_run_finalize_pipeline_closed_status_checks_integration_before_abandon(m
     issue = {
         "id": "at-epic.1",
         "status": "closed",
-        "labels": ["at:changeset"],
+        "labels": [],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -517,7 +517,7 @@ def test_run_finalize_pipeline_updates_missing_integrated_sha(monkeypatch) -> No
     issue = {
         "id": "at-epic.1",
         "status": "closed",
-        "labels": ["at:changeset", "cs:merged"],
+        "labels": ["cs:merged"],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -555,7 +555,7 @@ def test_run_finalize_pipeline_preserves_recorded_integrated_sha(monkeypatch) ->
     issue = {
         "id": "at-epic.1",
         "status": "closed",
-        "labels": ["at:changeset", "cs:merged"],
+        "labels": ["cs:merged"],
         "description": (
             "changeset.work_branch: feat/root-at-epic.1\nchangeset.integrated_sha: 1111111\n"
         ),
@@ -601,7 +601,7 @@ def test_run_finalize_pipeline_preserves_recorded_integrated_sha(monkeypatch) ->
 def test_run_finalize_pipeline_passes_ready_mode_to_pr_gate(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
-        "labels": ["at:changeset", "cs:in_progress"],
+        "labels": ["cs:in_progress"],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -637,7 +637,7 @@ def test_run_finalize_pipeline_passes_ready_mode_to_pr_gate(monkeypatch) -> None
 def test_run_finalize_pipeline_uses_diagnostic_pr_payload_before_create(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
-        "labels": ["at:changeset", "cs:in_progress"],
+        "labels": ["cs:in_progress"],
         "description": (
             "changeset.work_branch: feat/root-at-epic.1\n"
             "changeset.parent_branch: feat/parent\n"
@@ -688,7 +688,7 @@ def test_run_finalize_pipeline_uses_diagnostic_pr_payload_before_create(monkeypa
 def test_run_finalize_pipeline_blocks_when_pr_base_alignment_fails(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
-        "labels": ["at:changeset", "cs:in_progress"],
+        "labels": ["cs:in_progress"],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -727,7 +727,7 @@ def test_run_finalize_pipeline_blocks_when_pr_base_alignment_fails(monkeypatch) 
 def test_run_finalize_pipeline_aligns_pr_base_before_pending(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
-        "labels": ["at:changeset", "cs:in_progress"],
+        "labels": ["cs:in_progress"],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(

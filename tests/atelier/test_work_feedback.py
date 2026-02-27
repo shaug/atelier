@@ -12,7 +12,7 @@ def _issue(work_branch: str = "feat/test") -> dict[str, object]:
     return {
         "id": "at-123",
         "status": "in_progress",
-        "labels": ["at:changeset", "cs:in_progress"],
+        "labels": ["cs:in_progress"],
         "description": f"changeset.work_branch: {work_branch}\n",
     }
 

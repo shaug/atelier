@@ -337,24 +337,30 @@ def _summarize_pr(payload: dict[str, object] | None) -> dict[str, object] | None
 
 
 def _list_changesets(epic_id: str, *, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
-    return beads.run_bd_json(
-        ["list", "--parent", epic_id, "--label", "at:changeset"],
+    descendants = beads.list_descendant_changesets(
+        epic_id,
         beads_root=beads_root,
         cwd=repo_root,
+        include_closed=True,
     )
+    if not descendants:
+        work_children = beads.list_work_children(
+            epic_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=True,
+        )
+        if not work_children:
+            epic_issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
+            return epic_issues if epic_issues else []
+    return descendants
 
 
 def _list_ready_changesets(
     epic_id: str, *, beads_root: Path, repo_root: Path
 ) -> list[dict[str, object]]:
     return beads.run_bd_json(
-        [
-            "ready",
-            "--parent",
-            epic_id,
-            "--label",
-            "at:changeset",
-        ],
+        ["ready", "--parent", epic_id],
         beads_root=beads_root,
         cwd=repo_root,
     )
