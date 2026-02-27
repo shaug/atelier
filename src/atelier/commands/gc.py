@@ -248,6 +248,11 @@ def _normalize_executable_ready_labels_for_status(
 
     _drop("at:draft", "draft readiness is now implied by missing at:ready")
     if not active:
+        if status in {"deferred", "blocked", "closed"}:
+            _drop(
+                "at:ready",
+                f"{status} status is not executable under status-native lifecycle",
+            )
         return desired, tuple(reasons)
     if legacy_blocked:
         _drop(

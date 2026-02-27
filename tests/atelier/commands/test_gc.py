@@ -440,6 +440,21 @@ def test_normalize_executable_ready_labels_for_status_preserves_legacy_blocked()
     assert any("preserve behavior" in reason for reason in reasons)
 
 
+def test_normalize_executable_ready_labels_for_status_drops_ready_on_deferred() -> None:
+    issue = {
+        "id": "at-epic",
+        "labels": ["at:epic", "at:draft", "at:ready"],
+    }
+
+    normalized, reasons = gc_cmd._normalize_executable_ready_labels_for_status(
+        issue, target_status="deferred"
+    )
+
+    assert "at:draft" not in normalized
+    assert "at:ready" not in normalized
+    assert any("deferred status is not executable" in reason for reason in reasons)
+
+
 def test_gc_normalize_executable_ready_labels_updates_legacy_labels() -> None:
     issues = [
         {
