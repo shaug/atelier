@@ -42,7 +42,7 @@ def _issue_id(issue: dict[str, object]) -> str:
 
 
 def _list_eligible_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
-    issues = beads.run_bd_json(["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root)
+    issues = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=False)
     return [
         issue
         for issue in issues

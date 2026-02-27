@@ -45,8 +45,9 @@ Lifecycle authority:
 
 - canonical status + graph shape are the source of truth for decisions.
 - `at:epic` is identity/index metadata for epic discovery, not lifecycle state.
-- `cs:*` lifecycle labels are not execution gates. `cs:merged` and `cs:abandoned`
-  are used on closed changeset beads to indicate resolution/integration status.
+- `cs:*` lifecycle labels are not execution gates. `cs:merged` and
+  `cs:abandoned` are used on closed changeset beads to indicate
+  resolution/integration status.
 
 ## Layering
 

@@ -117,7 +117,7 @@ def _build_runner_deps(
                 continue_running=False,
                 reason="done",
             ),
-            find_invalid_changeset_labels=lambda **_kwargs: [],
+            find_invalid_changeset_labels=lambda *args, **kwargs: [],
             lookup_pr_payload=lambda _repo_slug, _branch: None,
             mark_changeset_blocked=_noop,
             mark_changeset_in_progress=_noop,
@@ -251,7 +251,7 @@ def test_run_worker_once_blocks_on_active_root_branch_conflict() -> None:
     deps.infra.beads.claim_epic = Mock(return_value={"id": "at-epic", "title": "Epic"})
 
     def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
-        if args == ["list", "--label", "at:epic"]:
+        if args == ["list", "--label", "at:epic", "--all"]:
             return [
                 {
                     "id": "at-owner",

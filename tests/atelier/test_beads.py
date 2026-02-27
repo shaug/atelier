@@ -2022,6 +2022,34 @@ def test_list_child_changesets_uses_changeset_label() -> None:
     assert called_args == ["list", "--parent", "epic-1", "--label", "at:changeset"]
 
 
+def test_list_epics_uses_at_epic_and_all() -> None:
+    """Regression: list_epics must use --label at:epic --all to avoid default caps."""
+    with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
+        beads.list_epics(beads_root=Path("/beads"), cwd=Path("/repo"), include_closed=True)
+    called_args = run_json.call_args.args[0]
+    assert "list" in called_args
+    assert "--label" in called_args
+    assert "at:epic" in called_args
+    assert "--all" in called_args
+
+
+def test_list_epics_finds_epic_beyond_default_window() -> None:
+    """Regression: high-churn store with non-epics exceeding default list window."""
+    epic = {"id": "at-epic", "status": "open", "labels": ["at:epic"]}
+
+    def fake_run(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if "at:epic" in args and "--all" in args:
+            return [epic]
+        return []
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_run):
+        result = beads.list_epics(
+            beads_root=Path("/beads"), cwd=Path("/repo"), include_closed=False
+        )
+    assert len(result) == 1
+    assert result[0]["id"] == "at-epic"
+
+
 def test_summarize_changesets_counts_and_ready() -> None:
     changesets = [
         {"status": "closed", "description": "pr_state: merged\n"},

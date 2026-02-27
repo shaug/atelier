@@ -1934,6 +1934,38 @@ def run_bd_issues(
     ]
 
 
+def list_epics(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    include_closed: bool = True,
+) -> list[dict[str, object]]:
+    """List epic beads for the epic pool.
+
+    Uses --label at:epic and --all to avoid default list caps and ensure full
+    enumeration. Startup, status, and related commands must use this for
+    deterministic epic pool counts.
+
+    Args:
+        beads_root: Root directory for the Beads planning store.
+        cwd: Working directory for bd commands.
+        include_closed: When True, include closed epics. When False, pass
+            --status open to limit to non-closed (when bd supports it) or
+            filter in Python.
+
+    Returns:
+        Epic issue payloads from Beads. Non-dict entries are discarded.
+    """
+    args = ["list", "--label", "at:epic", "--all"]
+    issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
+    result = [i for i in issues if isinstance(i, dict)]
+    if not include_closed:
+        result = [
+            i for i in result if lifecycle.canonical_lifecycle_status(i.get("status")) != "closed"
+        ]
+    return result
+
+
 def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
     """Return `bd prime --full` markdown without failing the caller."""
     env = beads_env(beads_root)
@@ -2851,7 +2883,14 @@ def list_epics_by_workspace_label(
 ) -> list[dict[str, object]]:
     """List epic beads with the workspace label."""
     return run_bd_json(
-        ["list", "--label", "at:epic", "--label", workspace_label(root_branch)],
+        [
+            "list",
+            "--label",
+            "at:epic",
+            "--label",
+            workspace_label(root_branch),
+            "--all",
+        ],
         beads_root=beads_root,
         cwd=cwd,
     )
@@ -2864,12 +2903,8 @@ def find_epics_by_root_branch(
     issues = list_epics_by_workspace_label(root_branch, beads_root=beads_root, cwd=cwd)
     if issues:
         return issues
-    issues = run_bd_json(
-        ["list", "--label", "at:epic"],
-        beads_root=beads_root,
-        cwd=cwd,
-    )
-    return [issue for issue in issues if extract_workspace_root_branch(issue) == root_branch]
+    all_epics = list_epics(beads_root=beads_root, cwd=cwd, include_closed=True)
+    return [i for i in all_epics if extract_workspace_root_branch(i) == root_branch]
 
 
 def update_workspace_root_branch(

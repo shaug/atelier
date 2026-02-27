@@ -50,9 +50,7 @@ def _mapping_ownership_from_beads(
 ) -> tuple[dict[str, str], dict[str, str]]:
     owner_by_changeset: dict[str, str] = {}
     epic_root_branches: dict[str, str] = {}
-    epic_issues = beads.run_bd_json(
-        ["list", "--label", "at:epic", "--all"], beads_root=beads_root, cwd=repo_root
-    )
+    epic_issues = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
     for issue in epic_issues:
         issue_id = issue.get("id")
         if not isinstance(issue_id, str):

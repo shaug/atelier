@@ -289,11 +289,7 @@ def _gc_normalize_executable_ready_labels(
     repo_root: Path,
 ) -> list[GcAction]:
     actions: list[GcAction] = []
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:epic", "--all"],
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
+    issues = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
     for issue in sorted(issues, key=_issue_sort_key):
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id.strip():
@@ -376,7 +372,7 @@ def _gc_hooks(
             "heartbeat_at": fields.get("heartbeat_at"),
         }
 
-    epics = beads.run_bd_json(["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root)
+    epics = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
 
     for agent_id, payload in agents.items():
         hook_bead = payload.get("hook_bead")
@@ -1003,7 +999,7 @@ def _gc_agent_homes(
     agent_issues = beads.run_bd_json(
         ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
     )
-    epics = beads.run_bd_json(["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root)
+    epics = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
     epics_by_id: dict[str, dict[str, object]] = {}
     epics_by_assignee: dict[str, list[dict[str, object]]] = {}
     for epic in epics:

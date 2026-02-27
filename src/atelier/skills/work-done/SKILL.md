@@ -21,7 +21,7 @@ description: >-
 1. Close any non-epic parent work nodes if its children are complete.
 1. Close the epic and clear the hook through the deterministic helper:
    - `python src/atelier/skills/work-done/scripts/close_epic.py --epic-id <epic_id> --agent-bead-id <agent_bead_id>`
-3. For explicit direct-close flows (skip readiness checks), use:
+1. For explicit direct-close flows (skip readiness checks), use:
    - `python src/atelier/skills/work-done/scripts/close_epic.py --epic-id <epic_id> --agent-bead-id <agent_bead_id> --direct-close`
 
 ## Verification

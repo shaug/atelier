@@ -998,3 +998,22 @@ def test_run_startup_contract_sends_needs_decision_when_no_eligible_epics() -> N
     assert result.should_exit is True
     assert result.reason == "no_eligible_epics"
     assert len(sent) == 1
+
+
+def test_no_eligible_summary_reports_true_epic_pool_counts() -> None:
+    """Regression: no-eligible summary must report counts from the true epic pool."""
+    epics = [
+        {"id": "at-e1", "status": "open", "labels": ["at:epic"], "assignee": "other"},
+        {"id": "at-e2", "status": "deferred", "labels": ["at:epic"], "assignee": None},
+    ]
+    sent: list[dict[str, Any]] = []
+
+    result = _run_startup(
+        send_needs_decision=lambda **kwargs: sent.append(kwargs),
+        list_epics=lambda: epics,
+    )
+
+    assert result.reason == "no_eligible_epics"
+    assert len(sent) == 1
+    issues = sent[0].get("issues") or []
+    assert len(issues) == 2

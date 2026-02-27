@@ -32,9 +32,7 @@ def status(args: object) -> None:
 
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
 
-    epic_issues = beads.run_bd_json(
-        ["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root
-    )
+    epic_issues = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
     agent_issues = beads.run_bd_json(
         ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
     )

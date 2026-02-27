@@ -18,12 +18,7 @@ def list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
     Returns:
         Epic issue payloads from Beads. Non-dict entries are discarded.
     """
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:epic"],
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
-    return [issue for issue in issues if isinstance(issue, dict)]
+    return beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=False)
 
 
 def render_epics(issues: list[dict[str, object]], *, show_drafts: bool) -> str:

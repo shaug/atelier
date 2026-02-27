@@ -89,7 +89,11 @@ def _find_active_root_branch_conflicts(
     beads_root: Path,
     repo_root: Path,
 ) -> list[dict[str, object]]:
-    issues = beads.run_bd_json(["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root)
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:epic", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
     owners = [
         issue for issue in issues if beads.extract_workspace_root_branch(issue) == root_branch
     ]
