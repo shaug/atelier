@@ -188,7 +188,11 @@ def select_epic_from_ready_changesets(
         if not isinstance(issue_id, str) or not issue_id:
             continue
         candidate = issue_id
-        if "." in issue_id:
+        parent_id = issue_parent_id(changeset)
+        if parent_id and parent_id in known_epics:
+            candidate = parent_id
+        elif "." in issue_id:
+            # Compatibility fallback for legacy dotted child identifiers.
             maybe_epic = issue_id.split(".", 1)[0]
             if maybe_epic in known_epics:
                 candidate = maybe_epic
