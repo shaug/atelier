@@ -412,8 +412,14 @@ def reconcile_blocked_merged_changesets(
         if integrated:
             dependency_finalized_cache[issue_id] = True
             return True
+        if "cs:abandoned" in labels:
+            dependency_finalized_cache[issue_id] = True
+            return True
         stored_state = _stored_review_state(issue)
         if stored_state in lifecycle.ACTIVE_REVIEW_STATES or stored_state in {"pushed", "merged"}:
+            dependency_finalized_cache[issue_id] = False
+            return False
+        if stored_state not in {"closed", "abandoned"}:
             dependency_finalized_cache[issue_id] = False
             return False
         dependency_finalized_cache[issue_id] = True

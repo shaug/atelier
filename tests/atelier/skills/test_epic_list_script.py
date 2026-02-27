@@ -20,7 +20,7 @@ def test_status_bucket_marks_open_epic_with_open_dependency_as_blocked() -> None
     issue = {
         "id": "at-a1",
         "status": "open",
-        "labels": ["at:epic", "at:ready"],
+        "labels": ["at:epic"],
         "dependencies": [{"id": "at-dep", "status": "open"}],
     }
 
@@ -34,7 +34,7 @@ def test_status_bucket_ignores_closed_dependency_for_open_epic() -> None:
     issue = {
         "id": "at-a1",
         "status": "open",
-        "labels": ["at:epic", "at:ready"],
+        "labels": ["at:epic"],
         "dependencies": [{"id": "at-dep", "status": "closed"}],
     }
 
@@ -43,11 +43,11 @@ def test_status_bucket_ignores_closed_dependency_for_open_epic() -> None:
     assert bucket == "open"
 
 
-def test_status_bucket_treats_missing_ready_as_draft() -> None:
+def test_status_bucket_treats_deferred_status_as_draft() -> None:
     module = _load_script()
     issue = {
         "id": "at-a1",
-        "status": "open",
+        "status": "deferred",
         "labels": ["at:epic"],
     }
 
@@ -62,7 +62,7 @@ def test_render_epics_includes_blocker_list_for_blocked_bucket() -> None:
         "id": "at-xfw",
         "title": "Channel URL input does not work",
         "status": "open",
-        "labels": ["at:epic", "at:ready"],
+        "labels": ["at:epic"],
         "description": "workspace.root_branch: test-branch",
         "dependencies": [{"id": "at-u9j", "status": "in_progress"}],
     }

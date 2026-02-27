@@ -8,7 +8,7 @@ description: >-
 
 ## Inputs
 
-- show_drafts: Optional boolean to include non-ready (implicit draft) epics.
+- show_drafts: Optional boolean to include deferred epics.
 - beads_dir: Optional Beads store path (defaults to repo .beads).
 
 ## Steps
@@ -39,4 +39,4 @@ The output must be:
 
 - Output includes each eligible epic id and title in the required format.
 - Closed epics are excluded.
-- Non-ready epics appear only when `show_drafts` is enabled.
+- Deferred epics appear only when `show_drafts` is enabled.

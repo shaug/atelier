@@ -52,7 +52,7 @@ def main() -> None:
     parser.add_argument(
         "--show-drafts",
         action="store_true",
-        help="include non-ready epics alongside active non-closed epics",
+        help="include deferred epics alongside active non-closed epics",
     )
     parser.add_argument(
         "--beads-dir",

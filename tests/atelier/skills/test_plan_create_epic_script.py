@@ -15,11 +15,11 @@ def _load_script_module():
         / "src"
         / "atelier"
         / "skills"
-        / "plan-changesets"
+        / "plan-create-epic"
         / "scripts"
-        / "create_changeset.py"
+        / "create_epic.py"
     )
-    spec = importlib.util.spec_from_file_location("create_changeset_script", script_path)
+    spec = importlib.util.spec_from_file_location("create_epic_script", script_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -27,7 +27,8 @@ def _load_script_module():
     return module
 
 
-def _configure_script_mocks(module, monkeypatch, tmp_path: Path) -> list[list[str]]:
+def test_create_epic_defaults_to_deferred_status(monkeypatch, tmp_path: Path) -> None:
+    module = _load_script_module()
     commands: list[list[str]] = []
     context = SimpleNamespace(
         project_dir=tmp_path / "project",
@@ -47,12 +48,12 @@ def _configure_script_mocks(module, monkeypatch, tmp_path: Path) -> list[list[st
         assert beads_root == context.beads_root
         assert cwd == context.project_dir
         if args and args[0] == "create":
-            assert allow_failure is False
             return subprocess.CompletedProcess(
-                args=args, returncode=0, stdout="at-123\n", stderr=""
+                args=args,
+                returncode=0,
+                stdout="at-epic-1\n",
+                stderr="",
             )
-        if args[:3] == ["update", "at-123", "--status"]:
-            assert allow_failure is True
         return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
@@ -66,65 +67,27 @@ def _configure_script_mocks(module, monkeypatch, tmp_path: Path) -> list[list[st
             message="auto-export disabled for test",
         ),
     )
-    return commands
-
-
-def test_create_changeset_defaults_to_deferred_status(monkeypatch, tmp_path: Path) -> None:
-    module = _load_script_module()
-    commands = _configure_script_mocks(module, monkeypatch, tmp_path)
-
     monkeypatch.setattr(
         sys,
         "argv",
         [
-            "create_changeset.py",
-            "--epic-id",
-            "at-epic",
+            "create_epic.py",
             "--title",
-            "Draft changeset",
+            "Lifecycle migration",
+            "--scope",
+            "Move readiness semantics to deferred/open statuses.",
             "--acceptance",
-            "Acceptance text",
+            "Planner transitions use status-only lifecycle.",
         ],
     )
 
     module.main()
 
-    create_command = commands[0]
-    assert create_command[:2] == ["create", "--parent"]
-    assert "at:changeset" in create_command
-    assert "cs:planned" not in create_command
-    assert "cs:ready" not in create_command
-    assert commands[1] == ["update", "at-123", "--status", "deferred"]
+    assert commands[0][0] == "create"
+    assert commands[1] == ["update", "at-epic-1", "--status", "deferred"]
 
 
-def test_create_changeset_accepts_open_status_override(monkeypatch, tmp_path: Path) -> None:
-    module = _load_script_module()
-    commands = _configure_script_mocks(module, monkeypatch, tmp_path)
-
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "create_changeset.py",
-            "--epic-id",
-            "at-epic",
-            "--title",
-            "Ready changeset",
-            "--acceptance",
-            "Acceptance text",
-            "--status",
-            "open",
-        ],
-    )
-
-    module.main()
-
-    create_command = commands[0]
-    assert "cs:ready" not in create_command
-    assert commands[1] == ["update", "at-123", "--status", "open"]
-
-
-def test_create_changeset_fails_closed_when_deferred_update_fails(
+def test_create_epic_fails_closed_when_deferred_update_fails(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -152,10 +115,10 @@ def test_create_changeset_fails_closed_when_deferred_update_fails(
             return subprocess.CompletedProcess(
                 args=args,
                 returncode=0,
-                stdout="at-123\n",
+                stdout="at-epic-1\n",
                 stderr="",
             )
-        if args[:3] == ["update", "at-123", "--status"]:
+        if args[:3] == ["update", "at-epic-1", "--status"]:
             assert allow_failure is True
             return subprocess.CompletedProcess(
                 args=args,
@@ -163,7 +126,7 @@ def test_create_changeset_fails_closed_when_deferred_update_fails(
                 stdout="",
                 stderr="simulated update failure",
             )
-        if args[:2] == ["close", "at-123"]:
+        if args[:2] == ["close", "at-epic-1"]:
             assert allow_failure is True
             return subprocess.CompletedProcess(
                 args=args,
@@ -183,13 +146,13 @@ def test_create_changeset_fails_closed_when_deferred_update_fails(
         sys,
         "argv",
         [
-            "create_changeset.py",
-            "--epic-id",
-            "at-epic",
+            "create_epic.py",
             "--title",
-            "Draft changeset",
+            "Lifecycle migration",
+            "--scope",
+            "Move readiness semantics to deferred/open statuses.",
             "--acceptance",
-            "Acceptance text",
+            "Planner transitions use status-only lifecycle.",
         ],
     )
 
@@ -198,11 +161,11 @@ def test_create_changeset_fails_closed_when_deferred_update_fails(
 
     assert excinfo.value.code == 1
     assert commands[0][0] == "create"
-    assert commands[1] == ["update", "at-123", "--status", "deferred"]
-    assert commands[2] == ["update", "at-123", "--status", "deferred"]
+    assert commands[1] == ["update", "at-epic-1", "--status", "deferred"]
+    assert commands[2] == ["update", "at-epic-1", "--status", "deferred"]
     assert commands[3] == [
         "close",
-        "at-123",
+        "at-epic-1",
         "--reason",
         "automatic fail-closed: unable to set deferred status after create",
     ]

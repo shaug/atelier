@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from . import beads
+from . import beads, lifecycle
 
 
 def list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
@@ -31,7 +31,7 @@ def render_epics(issues: list[dict[str, object]], *, show_drafts: bool) -> str:
 
     Args:
         issues: Beads epic issue payloads.
-        show_drafts: Include non-ready epics when true.
+        show_drafts: Include deferred epics when true.
 
     Returns:
         Deterministic plain-text listing grouped by epic state buckets.
@@ -129,29 +129,38 @@ def _blocking_dependencies(issue: dict[str, object]) -> list[str]:
         dep_id, status = _dependency_id_status(dep)
         if not dep_id:
             continue
-        if status in {"closed", "done"}:
+        canonical_status = lifecycle.canonical_lifecycle_status(status)
+        if canonical_status == "closed":
             continue
-        blockers.append(f"{dep_id} [{status or 'unknown'}]")
+        blockers.append(f"{dep_id} [{canonical_status or status or 'unknown'}]")
     return blockers
 
 
 def _status_bucket(issue: dict[str, object], *, show_drafts: bool) -> str | None:
-    status = _normalize_status(issue.get("status"))
-    if status in {"closed", "done"}:
-        return None
     labels = _labels(issue)
-    if "at:draft" in labels and "at:ready" in labels:
-        return "other"
-    if "at:ready" not in labels:
+    role = lifecycle.infer_work_role(
+        labels=labels,
+        issue_type=lifecycle.issue_payload_type(issue),
+        parent_id=issue.get("parent"),
+        has_work_children=False,
+    )
+    if not role.is_epic:
+        return None
+    status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+    if status == "closed":
+        return None
+    if status == "deferred":
         return "draft" if show_drafts else None
-    if _blocking_dependencies(issue):
+    if status in {"open", "in_progress"} and _blocking_dependencies(issue):
         return "blocked"
-    if status in {"blocked"}:
+    if status == "blocked":
         return "blocked"
-    if status in {"in_progress", "hooked"}:
+    if status == "in_progress":
         return "in_progress"
-    if status in {"", "open", "ready"}:
+    if status == "open":
         return "open"
+    if status is None:
+        return "draft" if show_drafts else None
     return "other"
 
 
@@ -163,7 +172,10 @@ def _sort_key(issue: dict[str, object]) -> tuple[str, str]:
 
 def _append_issue(lines: list[str], issue: dict[str, object]) -> None:
     issue_id = str(issue.get("id") or "").strip() or "(unknown)"
-    status = str(issue.get("status") or "unknown").strip() or "unknown"
+    labels = _labels(issue)
+    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+    raw_status = str(issue.get("status") or "unknown").strip() or "unknown"
+    status = canonical_status or raw_status
     title = str(issue.get("title") or "").strip() or "(untitled)"
     description = issue.get("description")
     fields = _parse_description_fields(description if isinstance(description, str) else None)

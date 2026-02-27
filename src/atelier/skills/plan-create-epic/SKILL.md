@@ -7,8 +7,8 @@ description: >-
 
 # Plan create epic
 
-When a concrete issue is identified, capture it as a draft epic immediately. Do
-not request approval to create or edit draft beads.
+When a concrete issue is identified, capture it as a deferred epic immediately.
+Do not request approval to create or edit deferred beads.
 
 ## Inputs
 
@@ -25,15 +25,17 @@ not request approval to create or edit draft beads.
 1. Create the epic with the script:
    - `python skills/plan-create-epic/scripts/create_epic.py --title "<title>" --scope "<scope>" --acceptance "<acceptance>" [--changeset-strategy "<changeset_strategy>"] [--design "<design>"] [--beads-dir "<beads_dir>"] [--no-export]`
 1. The script creates the bead, applies auto-export when enabled by project
-   config, and prints non-fatal retry instructions if export fails.
-1. If promotion is needed, use `plan-promote-epic`; promotion from `draft` to
-   `ready` is the approval gate.
+   config, sets status to `deferred`, and prints non-fatal retry instructions if
+   export fails.
+1. If promotion is needed, use `plan-promote-epic`; promotion from `deferred` to
+   `open` is the approval gate.
 1. Use `--notes` or `--append-notes` for addendums instead of rewriting the
    description.
 
 ## Verification
 
 - Epic is created with `at:epic` label.
+- Epic status is `deferred` until explicit promotion.
 - Acceptance criteria stored in the acceptance field.
 - When auto-export is enabled and not opted out, `external_tickets` is updated
   with `direction=exported` and `sync_mode=export`.
