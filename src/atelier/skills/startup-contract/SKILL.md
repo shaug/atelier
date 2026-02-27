@@ -29,8 +29,7 @@ description: >-
      identity/index metadata for epic discovery.
    - Keep only executable top-level work with status `open`/`in_progress` after
      status+graph evaluation.
-   - Do not treat `at:changeset`, `at:ready`, or `cs:*` labels as execution
-     gates.
+   - `cs:*` lifecycle labels are not execution gates.
    - In auto mode: pick the oldest ready epic; if none, pick the oldest
      unfinished epic already assigned to `agent_id`.
    - In prompt mode: list eligible epics and ask for an epic id.

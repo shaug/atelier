@@ -10,8 +10,10 @@ and downstream PRs are opening against the wrong base.
 
 ```bash
 bd list --label at:epic --status open
-bd list --parent <epic-id> --label at:changeset --status open
+bd list --parent <epic-id> --status open
 ```
+
+Changesets are leaf work beads (no work children) under the epic.
 
 1. For each dependency-linked changeset, inspect lineage fields:
 

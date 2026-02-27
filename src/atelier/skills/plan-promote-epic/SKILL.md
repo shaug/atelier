@@ -30,8 +30,8 @@ description: >-
 1. Show the epic and verify its status is `deferred`.
 1. List child changesets and confirm which are fully defined.
 1. If there are no child changesets and the epic is single-changeset sized:
-   - Add `at:changeset` to the epic for compatibility/indexing metadata.
    - Keep execution state in status only (`deferred` now, `open` on promotion).
+   - The epic is a changeset by graph inference (leaf in its own hierarchy).
 1. If there is exactly one child changeset:
    - Verify decomposition rationale is recorded in epic/child notes.
    - If rationale is missing, keep the epic as executable changeset or add the
@@ -53,5 +53,5 @@ description: >-
 - If the epic has child changesets, all fully-defined children are status
   `open`.
 - If the epic has no child changesets, the epic is the executable leaf work unit
-  (`at:changeset`) and status `open`.
+  (changeset by graph inference) and status `open`.
 - Any one-child decomposition has explicit rationale in notes/description.

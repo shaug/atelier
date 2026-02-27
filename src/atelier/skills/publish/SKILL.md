@@ -72,7 +72,7 @@ description: >-
 1. Enforce lifecycle protocol:
    - Use canonical lifecycle statuses:
      `deferred|open|in_progress|blocked|closed`.
-   - Treat `at:ready` and `cs:*` as non-authoritative metadata only.
+   - `cs:*` lifecycle labels are not execution gates.
    - For PR projects:
      - `pushed` without PR is only acceptable when PR strategy gates PR
        creation.

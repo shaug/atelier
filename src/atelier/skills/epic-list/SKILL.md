@@ -20,8 +20,9 @@ description: >-
      epic list pool.
 1. Do not rewrite the script output. Return it verbatim so the overseer sees a
    stable format.
-1. Do not apply execution gating from labels (`at:changeset`, `at:ready`,
-   `cs:*`); lifecycle buckets come from canonical status + dependency context.
+1. Do not apply execution gating from labels; `cs:*` lifecycle labels are not
+   execution gates. Lifecycle buckets come from canonical status + dependency
+   context.
 
 ## Required output format
 

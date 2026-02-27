@@ -209,7 +209,7 @@ def _build_epic_payloads(
                 "labels": labels,
                 "root_branch": root_branch,
                 "pr_strategy": fields.get("workspace.pr_strategy") or None,
-                "workspace_label": beads.workspace_label(root_branch) if root_branch else None,
+                "workspace_label": (beads.workspace_label(root_branch) if root_branch else None),
                 "worktree_path": worktree_path,
                 "worktree_relpath": worktree_relpath,
                 "hooked_by": hook_map.get(epic_id, []),

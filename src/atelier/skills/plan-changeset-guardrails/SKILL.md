@@ -31,7 +31,7 @@ description: >-
      `python3 scripts/check_guardrails.py --changeset-id <id> [--changeset-id <id> ...]`
 1. Resolve target changesets:
    - If `changeset_ids` is provided, validate those.
-   - Else list children of `epic_id` with `at:changeset`.
+   - Else list leaf work beads (changesets) under `epic_id`.
 1. For each changeset, inspect description/notes:
    - Look for a LOC estimate (e.g., `loc`, `LOC`, `estimate`).
    - If a large estimate is found (>800), ensure approval is recorded.

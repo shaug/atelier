@@ -31,8 +31,7 @@ during startup triage. Do not wait for approval to capture deferred work.
    - Do not reformat, summarize, or compress the list.
    - Epic discovery is indexed by the required `at:epic` label. Missing
      `at:epic` means the issue is outside the planner epic pool.
-   - Do not use `at:changeset`, `at:ready`, or `cs:*` labels as startup
-     lifecycle gates.
+   - `cs:*` lifecycle labels are not execution gates.
 
 ## Verification
 

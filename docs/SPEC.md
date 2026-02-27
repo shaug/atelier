@@ -30,23 +30,17 @@ stored in epic metadata as `workspace.root_branch` and labeled
 
 ### Changeset
 
-A changeset is a planned unit of work under an epic. Each changeset maps to a
-branch derived from the root branch:
+A changeset is a leaf work bead in an epic's progeny graph: any bead without a
+work child whose top-level parent (the epic) has `at:epic`. If an epic has no
+children, the epic is also a changeset. Each changeset maps to a branch derived
+from the root branch:
 
 ```
 <root_branch>-<changeset_id>
 ```
 
-Changesets track lifecycle intent using labels:
-
-- `cs:planned`, `cs:ready`, `cs:in_progress`, `cs:merged`, `cs:abandoned`
-
-Label semantics:
-
-- `cs:ready` indicates the changeset is fully defined and may be claimed when
-  unblocked.
-- Dependency-based runnability is derived from `bd ready` (graph state), not
-  from relabeling when blockers clear.
+Dependency-based runnability is derived from `bd ready` (graph state). `cs:*`
+lifecycle labels are not execution gates.
 
 ### Worktree
 
