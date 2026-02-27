@@ -33,7 +33,7 @@ def test_resolve_parent_lineage_uses_parent_child_hint_to_break_frontier_ties() 
             "changeset.root_branch: feat/at-kid\nchangeset.parent_branch: feat/at-kid\n"
         ),
         "dependencies": [
-            {"relation": "parent-child", "id": "at-kid.2"},
+            {"dependency_type": "parent-child", "id": "at-kid.2"},
             "at-kid.1",
             "at-kid.2",
         ],
@@ -49,6 +49,48 @@ def test_resolve_parent_lineage_uses_parent_child_hint_to_break_frontier_ties() 
     assert resolution.used_dependency_parent is True
     assert resolution.dependency_parent_id == "at-kid.2"
     assert resolution.effective_parent_branch == "feat/at-kid.2"
+
+
+def test_resolve_parent_lineage_parent_child_hint_supports_dependency_type() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/at-kid\nchangeset.parent_branch: feat/at-kid\n"
+        ),
+        "dependencies": [
+            {"dependency_type": "parent_child", "issue": {"id": "at-kid.2"}},
+            "at-kid.1",
+            "at-kid.2",
+        ],
+    }
+
+    resolution = dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch="feat/at-kid",
+        lookup_issue=lambda issue_id: {"description": f"changeset.work_branch: feat/{issue_id}\n"},
+    )
+
+    assert resolution.blocked is False
+    assert resolution.used_dependency_parent is True
+    assert resolution.dependency_parent_id == "at-kid.2"
+    assert resolution.effective_parent_branch == "feat/at-kid.2"
+
+
+def test_resolve_parent_lineage_ignores_parent_child_string_dependency_entries() -> None:
+    issue = {
+        "description": ("changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root\n"),
+        "dependencies": ["at-epic (open, dependency_type=parent_child)"],
+    }
+
+    resolution = dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch="feat/root",
+        lookup_issue=lambda _issue_id: None,
+    )
+
+    assert resolution.blocked is False
+    assert resolution.dependency_ids == ()
+    assert resolution.dependency_parent_id is None
+    assert resolution.effective_parent_branch == "feat/root"
 
 
 def test_resolve_parent_lineage_prefers_unique_transitive_frontier_dependency() -> None:

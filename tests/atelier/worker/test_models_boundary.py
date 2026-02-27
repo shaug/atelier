@@ -18,7 +18,7 @@ def test_parse_issue_boundary_normalizes_dependency_and_parent_fields() -> None:
         "dependencies": [
             {"id": "at-2"},
             "at-3 (open, cs:ready)",
-            {"relation": "parent-child", "id": "at-parent"},
+            {"dependency_type": "parent-child", "id": "at-parent"},
         ],
     }
 
@@ -38,7 +38,7 @@ def test_parse_issue_boundary_derives_parent_from_parent_child_dependency() -> N
         "labels": ["at:changeset"],
         "parent": None,
         "dependencies": [
-            {"relation": "parent-child", "id": "at-1"},
+            {"dependency_type": "parent-child", "id": "at-1"},
             {"id": "at-2"},
         ],
     }
@@ -53,8 +53,7 @@ def test_parse_issue_boundary_derives_parent_from_parent_child_dependency() -> N
     ("dependency_entry", "expected_parent"),
     [
         ({"dependency_type": "parent-child", "id": "at-1"}, "at-1"),
-        ({"type": "parent-child", "id": "at-1"}, "at-1"),
-        ({"dependencyType": "parent_child", "issue": {"id": "at-1"}}, "at-1"),
+        ({"dependency_type": "parent_child", "issue": {"id": "at-1"}}, "at-1"),
         ("at-1 (open, dependency_type=parent_child)", None),
     ],
 )

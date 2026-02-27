@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -10,6 +11,8 @@ from .worker.models_boundary import parse_issue_boundary
 
 Issue = dict[str, object]
 LookupIssueFn = Callable[[str], Issue | None]
+_PARENT_CHILD_KEY = "dependency_type"
+_PARENT_CHILD_PATTERN = re.compile(r"parent[\s_-]*child", re.IGNORECASE)
 
 
 def _normalize_branch(value: object) -> str | None:
@@ -26,10 +29,9 @@ def _dependency_parent_hint(issue: Issue) -> str | None:
     if not isinstance(dependencies, list):
         return None
     for entry in dependencies:
-        if not isinstance(entry, dict):
+        if not _is_parent_child_relation(entry):
             continue
-        relation = str(entry.get("relation") or "").strip().lower()
-        if relation != "parent-child":
+        if not isinstance(entry, dict):
             continue
         dep_id = str(entry.get("id") or "").strip()
         if dep_id:
@@ -42,14 +44,20 @@ def _dependency_parent_hint(issue: Issue) -> str | None:
     return None
 
 
+def _is_parent_child_relation(value: object) -> bool:
+    if isinstance(value, dict):
+        relation = value.get(_PARENT_CHILD_KEY)
+        return isinstance(relation, str) and bool(_PARENT_CHILD_PATTERN.search(relation.strip()))
+    return isinstance(value, str) and bool(_PARENT_CHILD_PATTERN.search(value))
+
+
 def _dependency_id_from_entry(entry: object) -> str | None:
+    if _is_parent_child_relation(entry):
+        return None
     if isinstance(entry, str):
         cleaned = entry.strip()
         return cleaned or None
     if not isinstance(entry, dict):
-        return None
-    relation = str(entry.get("relation") or "").strip().lower()
-    if relation == "parent-child":
         return None
     dep_id = str(entry.get("id") or "").strip()
     if dep_id:

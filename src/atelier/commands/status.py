@@ -11,9 +11,10 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .. import beads, config, dependency_lineage, git, messages, pr_strategy, prs, worktrees
+from .. import beads, config, git, messages, pr_strategy, prs, worktrees
 from ..io import die, say
 from ..worker import selection as worker_selection
+from ..worker.finalization import pr_gate as worker_pr_gate
 from .resolve import resolve_current_project_with_repo_root
 
 _FORMATS = {"table", "json"}
@@ -177,6 +178,7 @@ def _build_epic_payloads(
         changeset_details = _build_changeset_details(
             changesets,
             mapping=mapping,
+            beads_root=beads_root,
             repo_root=repo_root,
             repo_slug=repo_slug,
             pr_strategy_value=fields.get("workspace.pr_strategy"),
@@ -226,14 +228,42 @@ def _build_changeset_details(
     changesets: list[dict[str, object]],
     *,
     mapping: worktrees.WorktreeMapping | None,
+    beads_root: Path,
     repo_root: Path,
     repo_slug: str | None,
     pr_strategy_value: object,
 ) -> list[dict[str, object]]:
     details: list[dict[str, object]] = []
     strategy = pr_strategy.normalize_pr_strategy(pr_strategy_value)
-    branch_states: dict[str, str | None] = {}
     changesets_by_id: dict[str, dict[str, object]] = {}
+    payload_by_repo_branch: dict[tuple[str, str], dict[str, object] | None] = {}
+    payload_errors_by_repo_branch: dict[tuple[str, str], str | None] = {}
+
+    def lookup_pr_payload(branch_repo_slug: str | None, branch: str) -> dict[str, object] | None:
+        if not branch_repo_slug:
+            return None
+        cache_key = (branch_repo_slug, branch)
+        if cache_key in payload_by_repo_branch:
+            return payload_by_repo_branch[cache_key]
+        lookup = prs.lookup_github_pr_status(branch_repo_slug, branch)
+        payload = lookup.payload if lookup.found else None
+        error: str | None = None
+        if lookup.failed:
+            error = lookup.error or "unknown gh error"
+            if error.startswith("missing required command: gh"):
+                error = None
+        payload_by_repo_branch[cache_key] = payload
+        payload_errors_by_repo_branch[cache_key] = error
+        return payload
+
+    def lookup_pr_payload_diagnostic(
+        branch_repo_slug: str | None, branch: str
+    ) -> tuple[dict[str, object] | None, str | None]:
+        if not branch_repo_slug:
+            return None, None
+        payload = lookup_pr_payload(branch_repo_slug, branch)
+        return payload, payload_errors_by_repo_branch.get((branch_repo_slug, branch))
+
     for issue in changesets:
         issue_id = issue.get("id")
         if isinstance(issue_id, str) and issue_id:
@@ -243,17 +273,6 @@ def _build_changeset_details(
         if not isinstance(changeset_id, str) or not changeset_id:
             continue
         labels = _issue_labels(issue)
-        description = issue.get("description")
-        fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-        root_branch = fields.get("changeset.root_branch")
-        normalized_root = root_branch if isinstance(root_branch, str) else None
-        if normalized_root is None and mapping is not None:
-            normalized_root = mapping.root_branch
-        lineage = dependency_lineage.resolve_parent_lineage(
-            issue,
-            root_branch=normalized_root,
-            lookup_issue=changesets_by_id.get,
-        )
         branch = None
         if mapping is not None:
             branch = mapping.changesets.get(changeset_id)
@@ -262,14 +281,12 @@ def _build_changeset_details(
             pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{branch}")
         pr_payload = None
         if repo_slug and branch:
-            pr_payload = prs.read_github_pr_status(repo_slug, branch)
+            pr_payload = lookup_pr_payload(repo_slug, branch)
         review_requested = prs.has_review_requests(pr_payload)
         lifecycle = prs.lifecycle_state(
             pr_payload, pushed=pushed, review_requested=review_requested
         )
         merge_conflict = prs.default_branch_has_merge_conflict(pr_payload)
-        if branch:
-            branch_states[branch] = lifecycle
         details.append(
             {
                 "id": changeset_id,
@@ -281,53 +298,26 @@ def _build_changeset_details(
                 "lifecycle_state": lifecycle,
                 "merge_conflict": merge_conflict,
                 "pr": _summarize_pr(pr_payload),
-                "_lineage_parent_branch": lineage.effective_parent_branch,
-                "_lineage_dependency_parent_branch": lineage.dependency_parent_branch,
-                "_lineage_has_dependency": bool(lineage.dependency_ids),
-                "_lineage_root_branch": lineage.root_branch,
-                "_lineage_used_dependency_parent": lineage.used_dependency_parent,
-                "_lineage_blocked": lineage.blocked,
-                "_lineage_blocker_reason": lineage.blocker_reason,
-                "_lineage_diagnostic": lineage.diagnostics[0] if lineage.diagnostics else None,
+                "_issue": issue,
             }
         )
     for detail in details:
-        parent_branch = detail.pop("_lineage_parent_branch", None)
-        dependency_parent_branch = detail.pop("_lineage_dependency_parent_branch", None)
-        has_dependency_lineage = bool(detail.pop("_lineage_has_dependency", False))
-        root_branch = detail.pop("_lineage_root_branch", None)
-        used_dependency_parent = bool(detail.pop("_lineage_used_dependency_parent", False))
-        blocked_lineage = bool(detail.pop("_lineage_blocked", False))
-        blocker_reason = detail.pop("_lineage_blocker_reason", None)
-        lineage_diagnostic = detail.pop("_lineage_diagnostic", None)
-
-        if strategy == "sequential" and blocked_lineage:
-            suffix = str(blocker_reason or "dependency-parent-unresolved")
-            if isinstance(lineage_diagnostic, str) and lineage_diagnostic:
-                suffix = f"{suffix} ({lineage_diagnostic})"
+        issue = detail.pop("_issue", None)
+        if not isinstance(issue, dict):
             detail["pr_allowed"] = False
-            detail["pr_gate_reason"] = f"blocked:{suffix}"
+            detail["pr_gate_reason"] = "blocked:changeset-payload-missing"
             continue
-
-        parent_state = None
-        if strategy == "sequential" and has_dependency_lineage:
-            if isinstance(dependency_parent_branch, str):
-                parent_state = branch_states.get(dependency_parent_branch)
-        elif isinstance(parent_branch, str):
-            is_top_level_parent = (
-                isinstance(root_branch, str)
-                and parent_branch == root_branch
-                and not used_dependency_parent
-            )
-            if not is_top_level_parent:
-                parent_state = branch_states.get(parent_branch)
-
-        if strategy == "sequential" and has_dependency_lineage and parent_state is None:
-            detail["pr_allowed"] = False
-            detail["pr_gate_reason"] = "blocked:dependency-parent-state-unavailable"
-            continue
-
-        decision = pr_strategy.pr_strategy_decision(strategy, parent_state=parent_state)
+        decision = worker_pr_gate.changeset_pr_creation_decision(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=None,
+            branch_pr_strategy=strategy,
+            beads_root=beads_root,
+            lookup_pr_payload=lookup_pr_payload,
+            lookup_pr_payload_diagnostic=lookup_pr_payload_diagnostic,
+            lookup_dependency_issue=changesets_by_id.get,
+        )
         detail["pr_allowed"] = decision.allow_pr
         detail["pr_gate_reason"] = decision.reason
     return details
