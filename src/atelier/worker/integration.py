@@ -9,7 +9,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Iterator
 
-from .. import agents, beads, git, worktrees
+from .. import agents, beads, git, lifecycle, worktrees
 
 INTEGRATED_SHA_NOTE_PATTERN = re.compile(
     r"`?changeset\.integrated_sha`?\s*[:=]\s*([0-9a-fA-F]{7,40})\b",
@@ -17,6 +17,49 @@ INTEGRATED_SHA_NOTE_PATTERN = re.compile(
 )
 
 RunGitStatusFn = Callable[..., tuple[bool, str | None]]
+
+
+def _normalize_branch_field(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized or normalized.lower() == "null":
+        return None
+    return normalized
+
+
+def _root_integrated_into_parent(
+    *,
+    fields: dict[str, str],
+    repo_root: Path,
+    git_path: str | None = None,
+) -> tuple[bool, str | None]:
+    root_branch = _normalize_branch_field(fields.get("changeset.root_branch"))
+    if not root_branch:
+        return False, None
+    parent_branch = _normalize_branch_field(fields.get("changeset.parent_branch"))
+    workspace_parent = _normalize_branch_field(fields.get("workspace.parent_branch"))
+    if not parent_branch:
+        parent_branch = workspace_parent
+    if not parent_branch or parent_branch == root_branch:
+        default_branch = _normalize_branch_field(
+            git.git_default_branch(repo_root, git_path=git_path)
+        )
+        if default_branch:
+            parent_branch = default_branch
+    if not parent_branch or parent_branch == root_branch:
+        return False, None
+    root_ref = branch_ref_for_lookup(repo_root, root_branch, git_path=git_path)
+    parent_ref = branch_ref_for_lookup(repo_root, parent_branch, git_path=git_path)
+    if not root_ref or not parent_ref:
+        return False, None
+    is_ancestor = git.git_is_ancestor(repo_root, root_ref, parent_ref, git_path=git_path)
+    if is_ancestor is True:
+        return True, git.git_rev_parse(repo_root, root_ref, git_path=git_path)
+    fully_applied = git.git_branch_fully_applied(repo_root, parent_ref, root_ref, git_path=git_path)
+    if fully_applied is True:
+        return True, git.git_rev_parse(repo_root, root_ref, git_path=git_path)
+    return False, None
 
 
 def branch_ref_for_lookup(
@@ -120,17 +163,22 @@ def changeset_integration_signal(
                 if git.git_is_ancestor(repo_root, candidate_sha, ref, git_path=git_path) is True:
                     return True, candidate_sha
 
-    root_branch = fields.get("changeset.root_branch")
-    work_branch = fields.get("changeset.work_branch")
-    if repo_slug and work_branch and work_branch.strip().lower() != "null":
-        pr_payload = lookup_pr_payload(repo_slug, work_branch.strip())
+    root_branch = _normalize_branch_field(fields.get("changeset.root_branch"))
+    work_branch = _normalize_branch_field(fields.get("changeset.work_branch"))
+    if repo_slug and work_branch:
+        pr_payload = lookup_pr_payload(repo_slug, work_branch)
         if pr_payload and pr_payload.get("mergedAt"):
             return True, None
 
     if not root_branch or not work_branch:
         return False, None
-    if root_branch.strip().lower() == "null" or work_branch.strip().lower() == "null":
-        return False, None
+
+    review_state = lifecycle.normalize_review_state(fields.get("pr_state"))
+    if review_state in lifecycle.ACTIVE_REVIEW_STATES:
+        return _root_integrated_into_parent(fields=fields, repo_root=repo_root, git_path=git_path)
+    if root_branch == work_branch:
+        return _root_integrated_into_parent(fields=fields, repo_root=repo_root, git_path=git_path)
+
     root_ref = branch_ref_for_lookup(repo_root, root_branch, git_path=git_path)
     work_ref = branch_ref_for_lookup(repo_root, work_branch, git_path=git_path)
     if not root_ref or not work_ref:
@@ -138,11 +186,11 @@ def changeset_integration_signal(
 
     is_ancestor = git.git_is_ancestor(repo_root, work_ref, root_ref, git_path=git_path)
     if is_ancestor is True:
-        return True, git.git_rev_parse(repo_root, root_ref)
+        return True, git.git_rev_parse(repo_root, root_ref, git_path=git_path)
 
     fully_applied = git.git_branch_fully_applied(repo_root, root_ref, work_ref, git_path=git_path)
     if fully_applied is True:
-        return True, git.git_rev_parse(repo_root, root_ref)
+        return True, git.git_rev_parse(repo_root, root_ref, git_path=git_path)
     return False, None
 
 

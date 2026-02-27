@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+from atelier.worker import integration
 from atelier.worker.review import MergeConflictSelection, ReviewFeedbackSelection
 from atelier.worker.session import startup
 
@@ -517,6 +519,87 @@ def test_run_startup_contract_explicit_epic_reconciles_stale_in_progress_changes
     assert result.reason == "explicit_epic_completed"
     assert merged_ids == ["at-explicit.1"]
     assert integrated_updates == [("at-explicit.1", "abc1234")]
+    assert close_calls == [("at-explicit", "at-agent")]
+
+
+def test_run_startup_contract_explicit_epic_active_pr_does_not_reconcile_self_ancestor() -> None:
+    merged_ids: list[str] = []
+    integrated_updates: list[tuple[str, str]] = []
+    close_calls: list[tuple[str, str | None]] = []
+
+    def fake_is_ancestor(
+        _repo_root: Path,
+        ancestor: str,
+        descendant: str,
+        *,
+        git_path: str | None = None,
+    ) -> bool:
+        del git_path
+        if ancestor == "feat/root" and descendant == "feat/root":
+            return True
+        if ancestor == "feat/root" and descendant == "main":
+            return False
+        return False
+
+    with (
+        patch(
+            "atelier.worker.integration.branch_ref_for_lookup",
+            side_effect=lambda _r, branch, **_k: branch,
+        ),
+        patch("atelier.worker.integration.git.git_is_ancestor", side_effect=fake_is_ancestor),
+        patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
+    ):
+        result = _run_startup(
+            explicit_epic_id="at-explicit",
+            branch_pr=True,
+            repo_slug="org/repo",
+            agent_bead_id="at-agent",
+            show_issue=lambda _issue_id: {
+                "id": "at-explicit",
+                "status": "in_progress",
+                "assignee": "atelier/worker/codex/p100",
+                "labels": ["at:epic"],
+            },
+            next_changeset=lambda **_kwargs: None,
+            list_descendant_changesets=lambda _parent_id, include_closed: (
+                [
+                    {
+                        "id": "at-explicit.1",
+                        "status": "in_progress",
+                        "description": (
+                            "changeset.root_branch: feat/root\n"
+                            "changeset.parent_branch: main\n"
+                            "changeset.work_branch: feat/root\n"
+                            "pr_state: draft-pr\n"
+                        ),
+                        "labels": [],
+                    }
+                ]
+                if include_closed
+                else []
+            ),
+            changeset_integration_signal=lambda issue, repo_slug, git_path: (
+                integration.changeset_integration_signal(
+                    issue,
+                    repo_slug=repo_slug,
+                    repo_root=Path("/repo"),
+                    lookup_pr_payload=lambda _repo, _branch: {"mergedAt": None},
+                    git_path=git_path,
+                )
+            ),
+            mark_changeset_merged=lambda changeset_id: merged_ids.append(changeset_id),
+            update_changeset_integrated_sha=lambda changeset_id, integrated_sha: (
+                integrated_updates.append((changeset_id, integrated_sha))
+            ),
+            close_epic_if_complete=lambda epic_id, agent_bead_id: (
+                close_calls.append((epic_id, agent_bead_id)) or False
+            ),
+        )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_review_pending"
+    assert merged_ids == []
+    assert integrated_updates == []
     assert close_calls == [("at-explicit", "at-agent")]
 
 
