@@ -114,6 +114,7 @@ def test_auto_export_exports_when_enabled(monkeypatch) -> None:
         captured["tickets"] = tickets
 
     monkeypatch.setattr(auto_export.beads, "update_external_tickets", fake_update)
+    monkeypatch.setattr(auto_export.beads, "list_work_children", lambda *_, **__: [])
 
     result = auto_export.auto_export_issue("at-1", context=context)
 
@@ -169,7 +170,8 @@ def test_auto_export_adds_parent_cross_link_when_children_not_supported(monkeypa
             "id": "at-child",
             "parent": "at-parent",
             "title": "Child changeset",
-            "labels": ["at:changeset"],
+            "labels": [],
+            "type": "task",
             "description": "scope: child\n",
         },
         "at-parent": {
@@ -185,6 +187,7 @@ def test_auto_export_adds_parent_cross_link_when_children_not_supported(monkeypa
     monkeypatch.setattr(
         auto_export, "_load_issue", lambda issue_id, **_kwargs: issues.get(issue_id)
     )
+    monkeypatch.setattr(auto_export.beads, "list_work_children", lambda *_, **__: [])
 
     def fake_update(issue_id: str, tickets: list[ExternalTicketRef], **_kwargs: object) -> None:
         captured["issue_id"] = issue_id
@@ -226,7 +229,8 @@ def test_auto_export_creates_provider_child_ticket_when_supported(monkeypatch) -
             "id": "at-child",
             "parent": "at-parent",
             "title": "Child changeset",
-            "labels": ["at:changeset"],
+            "labels": [],
+            "type": "task",
             "description": "scope: child\n",
         },
         "at-parent": {
@@ -244,6 +248,7 @@ def test_auto_export_creates_provider_child_ticket_when_supported(monkeypatch) -
     monkeypatch.setattr(
         auto_export.beads, "update_external_tickets", lambda *_args, **_kwargs: None
     )
+    monkeypatch.setattr(auto_export.beads, "list_work_children", lambda *_, **__: [])
 
     result = auto_export.auto_export_issue("at-child", context=context)
 
@@ -265,6 +270,7 @@ def test_auto_export_failure_is_non_fatal_and_returns_retry(monkeypatch) -> None
 
     monkeypatch.setattr(auto_export, "_resolve_provider", lambda *_args, **_kwargs: provider)
     monkeypatch.setattr(auto_export, "_load_issue", lambda *_args, **_kwargs: issue)
+    monkeypatch.setattr(auto_export.beads, "list_work_children", lambda *_, **__: [])
 
     result = auto_export.auto_export_issue("at-1", context=context)
 

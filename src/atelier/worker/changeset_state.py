@@ -25,42 +25,9 @@ def list_child_issues(
     return beads.run_bd_json(args, beads_root=beads_root, cwd=repo_root)
 
 
-def find_invalid_changeset_labels(
-    root_id: str,
-    *,
-    beads_root: Path,
-    repo_root: Path,
-) -> list[str]:
-    invalid: list[str] = []
-    seen: set[str] = set()
-    queue = [root_id]
-    while queue:
-        current = queue.pop(0)
-        children = list_child_issues(
-            current, beads_root=beads_root, repo_root=repo_root, include_closed=True
-        )
-        for issue in children:
-            issue_id = issue.get("id")
-            if not isinstance(issue_id, str) or not issue_id or issue_id in seen:
-                continue
-            seen.add(issue_id)
-            queue.append(issue_id)
-            labels = issue_labels(issue)
-            if "at:subtask" in labels:
-                invalid.append(issue_id)
-    return invalid
-
-
 def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
     beads.run_bd_command(
-        [
-            "update",
-            changeset_id,
-            "--add-label",
-            "at:changeset",
-            "--status",
-            "in_progress",
-        ],
+        ["update", changeset_id, "--status", "in_progress"],
         beads_root=beads_root,
         cwd=repo_root,
     )

@@ -11,7 +11,7 @@ def test_partition_root_branch_conflicts_treats_hooked_as_active() -> None:
         {
             "id": "at-open",
             "status": "open",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "title": "Open epic",
         },
         {
@@ -23,7 +23,7 @@ def test_partition_root_branch_conflicts_treats_hooked_as_active() -> None:
         {
             "id": "at-closed",
             "status": "closed",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "title": "Closed epic",
         },
     ]
@@ -37,7 +37,7 @@ def test_partition_root_branch_conflicts_treats_hooked_as_active() -> None:
 def test_partition_root_branch_conflicts_excludes_current_owner() -> None:
     issues = [
         {"id": "at-current", "status": "hooked", "labels": ["at:epic", "at:hooked"]},
-        {"id": "at-other", "status": "in_progress", "labels": ["at:epic", "at:ready"]},
+        {"id": "at-other", "status": "in_progress", "labels": ["at:epic"]},
     ]
 
     blocking, reusable = root_branch.partition_root_branch_conflicts(
@@ -54,7 +54,7 @@ def test_prompt_root_branch_assume_yes_fails_when_active_owner_exists() -> None:
         {
             "id": "at-owner",
             "status": "hooked",
-            "labels": ["at:epic", "at:hooked", "at:ready"],
+            "labels": ["at:epic", "at:hooked"],
             "title": "Owner",
         }
     ]

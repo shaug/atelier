@@ -129,8 +129,6 @@ def main() -> None:
         args.epic_id,
         "--type",
         "task",
-        "--label",
-        "at:changeset",
         "--title",
         args.title,
         "--acceptance",

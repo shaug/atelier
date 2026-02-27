@@ -329,10 +329,6 @@ class WorkerLifecycleService(Protocol):
         git_path: str | None,
     ) -> FinalizeResult: ...
 
-    def find_invalid_changeset_labels(
-        self, root_id: str, *, beads_root: Path, repo_root: Path
-    ) -> list[str]: ...
-
     def lookup_pr_payload(self, repo_slug: str | None, branch: str) -> Issue | None: ...
 
     def mark_changeset_blocked(
@@ -393,17 +389,6 @@ class WorkerLifecycleService(Protocol):
     ) -> bool: ...
 
     def run_startup_contract(self, *, context: StartupContractContext) -> StartupContractResult: ...
-
-    def send_invalid_changeset_labels_notification(
-        self,
-        *,
-        epic_id: str,
-        invalid_changesets: list[str],
-        agent_id: str,
-        beads_root: Path,
-        repo_root: Path,
-        dry_run: bool,
-    ) -> str: ...
 
     def send_no_ready_changesets(
         self,

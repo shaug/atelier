@@ -133,10 +133,10 @@ def list_reconcile_epic_candidates(
     epic_root_integrated_into_parent: Callable[..., bool],
 ) -> dict[str, list[str]]:
     """Return merged changeset reconciliation candidates grouped by epic."""
-    all_changesets = beads.run_bd_json(
-        ["list", "--label", "at:changeset", "--all"],
+    all_changesets = beads.list_all_changesets(
         beads_root=beads_root,
         cwd=repo_root,
+        include_closed=True,
     )
     repo_slug = prs.github_repo_slug(
         project_config.project.origin or project_config.project.repo_url
@@ -243,10 +243,10 @@ def reconcile_blocked_merged_changesets(
     finalize_epic_if_complete: Callable[..., FinalizeResult],
 ) -> ReconcileResult:
     """Reconcile merged changesets, honoring dependency order."""
-    all_changesets = beads.run_bd_json(
-        ["list", "--label", "at:changeset", "--all"],
+    all_changesets = beads.list_all_changesets(
         beads_root=beads_root,
         cwd=repo_root,
+        include_closed=True,
     )
     scanned = 0
     actionable = 0
@@ -374,8 +374,19 @@ def reconcile_blocked_merged_changesets(
         if not issue:
             dependency_finalized_cache[issue_id] = False
             return False
-        labels = issue_labels(issue)
-        if "at:changeset" not in labels:
+        if not lifecycle.is_work_issue(
+            labels=issue_labels(issue),
+            issue_type=lifecycle.issue_payload_type(issue),
+        ):
+            dependency_finalized_cache[issue_id] = True
+            return True
+        work_children = beads.list_work_children(
+            issue_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=True,
+        )
+        if work_children:
             dependency_finalized_cache[issue_id] = True
             return True
         if _canonical_changeset_status(issue) != "closed":

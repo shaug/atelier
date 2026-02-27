@@ -104,12 +104,6 @@ class StackIntegrityCheck:
 class FinalizePipelineService(Protocol):
     def issue_labels(self, issue: Issue) -> set[str]: ...
 
-    def find_invalid_changeset_labels(self, epic_id: str) -> list[str]: ...
-
-    def send_invalid_changeset_labels_notification(
-        self, *, epic_id: str, invalid_changesets: list[str], agent_id: str
-    ) -> str: ...
-
     def has_open_descendant_changesets(self, changeset_id: str) -> bool: ...
 
     def has_blocking_messages(self, *, thread_ids: set[str], started_at: dt.datetime) -> bool: ...
@@ -235,14 +229,6 @@ def run_finalize_pipeline(
     if terminal_state is None and canonical_status == "closed":
         if review_state == "merged":
             terminal_state = "merged"
-    invalid_changesets = service.find_invalid_changeset_labels(epic_id)
-    if invalid_changesets:
-        service.send_invalid_changeset_labels_notification(
-            epic_id=epic_id,
-            invalid_changesets=invalid_changesets,
-            agent_id=agent_id,
-        )
-        return FinalizeResult(continue_running=False, reason="changeset_label_violation")
     if terminal_state is not None or canonical_status == "closed":
         if service.changeset_waiting_on_review_or_signals(issue, context=context):
             atelier_log.warning(

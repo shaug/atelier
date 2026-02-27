@@ -76,15 +76,17 @@ def test_status_json_summary() -> None:
             {
                 "id": "cs-1",
                 "status": "closed",
-                "labels": ["at:changeset"],
+                "labels": [],
                 "description": "pr_state: merged\n",
+                "type": "task",
             },
-            {"id": "cs-2", "status": "open", "labels": ["at:changeset"]},
+            {"id": "cs-2", "status": "open", "labels": [], "type": "task"},
             {
                 "id": "cs-3",
                 "status": "closed",
-                "labels": ["at:changeset"],
+                "labels": [],
                 "description": "pr_state: closed\n",
+                "type": "task",
             },
         ]
 
@@ -186,7 +188,7 @@ def test_status_includes_changeset_signals() -> None:
             "status": "open",
             "labels": ["at:epic"],
         }
-        changesets = [{"id": "cs-1", "title": "Changeset", "labels": ["at:changeset"]}]
+        changesets = [{"id": "cs-1", "title": "Changeset", "labels": [], "type": "task"}]
 
         def fake_run_bd_json(
             args: list[str], *, beads_root: Path, cwd: Path
@@ -198,7 +200,10 @@ def test_status_includes_changeset_signals() -> None:
             if args[:3] == ["list", "--label", "at:message"]:
                 return []
             if args and args[0] == "list" and "--parent" in args:
-                return list(changesets)
+                parent_id = args[args.index("--parent") + 1]
+                if parent_id == "epic-1":
+                    return list(changesets)
+                return []
             if args and args[0] == "ready" and "--parent" in args:
                 return []
             return []
@@ -258,7 +263,7 @@ def test_status_includes_changeset_signals() -> None:
 
 
 def test_build_changeset_details_scopes_pr_payload_cache_by_repo_slug() -> None:
-    changesets = [{"id": "cs-1", "title": "Changeset", "labels": ["at:changeset"]}]
+    changesets = [{"id": "cs-1", "title": "Changeset", "labels": [], "type": "task"}]
     mapping = WorktreeMapping(
         epic_id="epic-1",
         worktree_path="worktrees/epic-1",
@@ -337,19 +342,21 @@ def test_status_resolves_dependency_lineage_for_sequential_gate() -> None:
             {
                 "id": "cs-1",
                 "title": "Parent",
-                "labels": ["at:changeset"],
+                "labels": [],
                 "description": "changeset.work_branch: alpha-cs-1\n",
+                "type": "task",
             },
             {
                 "id": "cs-2",
                 "title": "Child",
-                "labels": ["at:changeset"],
+                "labels": [],
                 "description": (
                     "changeset.root_branch: alpha\n"
                     "changeset.parent_branch: alpha\n"
                     "changeset.work_branch: alpha-cs-2\n"
                 ),
                 "dependencies": ["cs-1"],
+                "type": "task",
             },
         ]
 
@@ -363,7 +370,10 @@ def test_status_resolves_dependency_lineage_for_sequential_gate() -> None:
             if args[:3] == ["list", "--label", "at:message"]:
                 return []
             if args and args[0] == "list" and "--parent" in args:
-                return list(changesets)
+                parent_id = args[args.index("--parent") + 1]
+                if parent_id == "epic-1":
+                    return list(changesets)
+                return []
             if args and args[0] == "ready" and "--parent" in args:
                 return []
             return []
@@ -445,19 +455,21 @@ def test_status_sequential_blocks_when_dependency_parent_pr_closed() -> None:
             {
                 "id": "cs-1",
                 "title": "Parent",
-                "labels": ["at:changeset"],
+                "labels": [],
                 "description": "changeset.work_branch: alpha-cs-1\n",
+                "type": "task",
             },
             {
                 "id": "cs-2",
                 "title": "Child",
-                "labels": ["at:changeset"],
+                "labels": [],
                 "description": (
                     "changeset.root_branch: alpha\n"
                     "changeset.parent_branch: alpha\n"
                     "changeset.work_branch: alpha-cs-2\n"
                 ),
                 "dependencies": ["cs-1"],
+                "type": "task",
             },
         ]
 
@@ -471,7 +483,10 @@ def test_status_sequential_blocks_when_dependency_parent_pr_closed() -> None:
             if args[:3] == ["list", "--label", "at:message"]:
                 return []
             if args and args[0] == "list" and "--parent" in args:
-                return list(changesets)
+                parent_id = args[args.index("--parent") + 1]
+                if parent_id == "epic-1":
+                    return list(changesets)
+                return []
             if args and args[0] == "ready" and "--parent" in args:
                 return []
             return []
@@ -563,19 +578,21 @@ def test_status_sequential_uses_dependency_frontier_for_non_top_level_changeset(
             {
                 "id": "cs-1",
                 "title": "Parent",
-                "labels": ["at:changeset"],
+                "labels": [],
                 "description": "changeset.work_branch: alpha-cs-1\n",
+                "type": "task",
             },
             {
                 "id": "cs-2",
                 "title": "Child",
-                "labels": ["at:changeset"],
+                "labels": [],
                 "description": (
                     "changeset.root_branch: alpha\n"
                     "changeset.parent_branch: legacy-parent\n"
                     "changeset.work_branch: alpha-cs-2\n"
                 ),
                 "dependencies": ["cs-1"],
+                "type": "task",
             },
         ]
 
@@ -589,7 +606,10 @@ def test_status_sequential_uses_dependency_frontier_for_non_top_level_changeset(
             if args[:3] == ["list", "--label", "at:message"]:
                 return []
             if args and args[0] == "list" and "--parent" in args:
-                return list(changesets)
+                parent_id = args[args.index("--parent") + 1]
+                if parent_id == "epic-1":
+                    return list(changesets)
+                return []
             if args and args[0] == "ready" and "--parent" in args:
                 return []
             return []
@@ -671,26 +691,29 @@ def test_status_sequential_collapses_transitive_duplicate_dependency_parents() -
             {
                 "id": "cs-1",
                 "title": "Ancestor",
-                "labels": ["at:changeset"],
+                "labels": [],
                 "description": "changeset.work_branch: alpha-cs-1\n",
+                "type": "task",
             },
             {
                 "id": "cs-2",
                 "title": "Frontier Parent",
-                "labels": ["at:changeset"],
+                "labels": [],
                 "description": "changeset.work_branch: alpha-cs-2\n",
                 "dependencies": ["cs-1"],
+                "type": "task",
             },
             {
                 "id": "cs-3",
                 "title": "Child",
-                "labels": ["at:changeset"],
+                "labels": [],
                 "description": (
                     "changeset.root_branch: alpha\n"
                     "changeset.parent_branch: alpha\n"
                     "changeset.work_branch: alpha-cs-3\n"
                 ),
                 "dependencies": ["cs-1", "cs-2"],
+                "type": "task",
             },
         ]
 
@@ -704,7 +727,10 @@ def test_status_sequential_collapses_transitive_duplicate_dependency_parents() -
             if args[:3] == ["list", "--label", "at:message"]:
                 return []
             if args and args[0] == "list" and "--parent" in args:
-                return list(changesets)
+                parent_id = args[args.index("--parent") + 1]
+                if parent_id == "epic-1":
+                    return list(changesets)
+                return []
             if args and args[0] == "ready" and "--parent" in args:
                 return []
             return []
@@ -792,30 +818,33 @@ def test_status_at_kid_dag_allows_only_frontier_changeset_after_parent_merge() -
             {
                 "id": "at-kid.1",
                 "title": "Parent",
-                "labels": ["at:changeset", "cs:merged"],
+                "labels": ["cs:merged"],
                 "description": "changeset.work_branch: feat/at-kid.1\n",
+                "type": "task",
             },
             {
                 "id": "at-kid.2",
                 "title": "Frontier",
-                "labels": ["at:changeset", "cs:in_progress"],
+                "labels": [],
                 "description": (
                     "changeset.root_branch: feat/at-kid\n"
                     "changeset.parent_branch: feat/at-kid\n"
                     "changeset.work_branch: feat/at-kid.2\n"
                 ),
                 "dependencies": ["at-kid.1"],
+                "type": "task",
             },
             {
                 "id": "at-kid.3",
                 "title": "Downstream",
-                "labels": ["at:changeset", "cs:in_progress"],
+                "labels": [],
                 "description": (
                     "changeset.root_branch: feat/at-kid\n"
                     "changeset.parent_branch: feat/at-kid\n"
                     "changeset.work_branch: feat/at-kid.3\n"
                 ),
                 "dependencies": ["at-kid.2"],
+                "type": "task",
             },
         ]
 
@@ -829,7 +858,10 @@ def test_status_at_kid_dag_allows_only_frontier_changeset_after_parent_merge() -
             if args[:3] == ["list", "--label", "at:message"]:
                 return []
             if args and args[0] == "list" and "--parent" in args:
-                return list(changesets)
+                parent_id = args[args.index("--parent") + 1]
+                if parent_id == "at-kid":
+                    return list(changesets)
+                return []
             if args and args[0] == "ready" and "--parent" in args:
                 return []
             return []
@@ -999,7 +1031,7 @@ def test_status_flags_planner_owned_executable_epic() -> None:
             "title": "Planner-owned",
             "status": "in_progress",
             "assignee": "atelier/planner/codex/p8",
-            "labels": ["at:epic", "at:changeset"],
+            "labels": ["at:epic"],
         }
 
         def fake_run_bd_json(

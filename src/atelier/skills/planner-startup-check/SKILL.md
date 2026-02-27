@@ -29,6 +29,9 @@ during startup triage. Do not wait for approval to capture deferred work.
    startup response:
    - `python3 skills/epic-list/scripts/list_epics.py --show-drafts`
    - Do not reformat, summarize, or compress the list.
+   - Epic discovery is indexed by the required `at:epic` label. Missing
+     `at:epic` means the issue is outside the planner epic pool.
+   - `cs:*` lifecycle labels are not execution gates.
 
 ## Verification
 
@@ -37,6 +40,8 @@ during startup triage. Do not wait for approval to capture deferred work.
 - Messages are summarized with explicit decisions or follow-up beads.
 - Active epic listing (draft/open/in-progress/blocked as available) is included
   in stable `epic-list` format.
+- Startup triage treats canonical status + dependency graph as lifecycle
+  authority after `at:epic` indexed discovery.
 
 ## On-demand refresh
 

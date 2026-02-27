@@ -19,7 +19,6 @@ from .work_finalization_state import (
     changeset_waiting_on_review_or_signals,
     changeset_work_branch,
     epic_root_integrated_into_parent,
-    find_invalid_changeset_labels,
     has_open_descendant_changesets,
     is_changeset_in_progress,
     is_changeset_ready,
@@ -29,7 +28,6 @@ from .work_finalization_state import (
     mark_changeset_in_progress,
     release_epic_assignment,
     resolve_epic_id_for_changeset,
-    send_invalid_changeset_labels_notification,
     send_no_ready_changesets,
     send_planner_notification,
 )
@@ -45,7 +43,6 @@ __all__ = [
     "finalize_changeset",
     "finalize_epic_if_complete",
     "finalize_terminal_changeset",
-    "find_invalid_changeset_labels",
     "has_open_descendant_changesets",
     "is_changeset_in_progress",
     "is_changeset_ready",
@@ -57,7 +54,6 @@ __all__ = [
     "reconcile_blocked_merged_changesets",
     "release_epic_assignment",
     "resolve_epic_id_for_changeset",
-    "send_invalid_changeset_labels_notification",
     "send_no_ready_changesets",
     "send_planner_notification",
 ]

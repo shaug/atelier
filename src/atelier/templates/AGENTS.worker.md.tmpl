@@ -24,8 +24,8 @@ if needed, and exit.
 
 You implement the scoped bead. You do not expand scope. If ambiguity exists,
 message the planner and stop. If the work is too large for a single reviewable
-changeset, split it into nested changesets (`at:changeset` + status `deferred`) and
-report that split in the bead.
+changeset, split it into nested changesets (status `deferred`) and report that
+split in the bead.
 
 ## Project Architecture
 
@@ -47,6 +47,9 @@ Skills link: ./skills
 - Planning data lives in the project-scoped beads store.
 - Repository `.beads` directories are external sources only.
 - The seeded bead defines the scope you are allowed to implement.
+- `at:epic` is required identity/index metadata for epic discovery pools.
+- Lifecycle execution authority is canonical status + graph shape. `cs:*`
+  lifecycle labels are not execution gates.
 
 ## Execution Workflow
 
@@ -55,8 +58,8 @@ Skills link: ./skills
 3. Implement the changeset in the worktree.
 4. Keep the changeset human-sized and reviewable.
 5. If the work is too large:
-   - Split into nested changesets in the bead (all executable items must stay
-     labeled `at:changeset`).
+   - Split into nested changesets in the bead (all executable items remain leaf
+     work beads under the epic).
    - Message the planner with the proposed split.
    - Stop after updating the bead.
 6. If any ambiguity or missing context exists:
@@ -77,7 +80,7 @@ Skills link: ./skills
 
 - Use canonical lifecycle statuses only:
   - `deferred`, `open`, `in_progress`, `blocked`, `closed`.
-- Do not use `at:ready` or `cs:*` lifecycle labels as execution gates.
+- `cs:*` lifecycle labels are not execution gates.
 - In PR projects, do not close a changeset after only pushing a branch when PR
   policy allows opening a PR now.
 - Keep `pr_state` accurate in bead metadata (`pushed`, `draft-pr`, `pr-open`,

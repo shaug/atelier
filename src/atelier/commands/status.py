@@ -32,9 +32,7 @@ def status(args: object) -> None:
 
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
 
-    epic_issues = beads.run_bd_json(
-        ["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root
-    )
+    epic_issues = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
     agent_issues = beads.run_bd_json(
         ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
     )
@@ -209,7 +207,7 @@ def _build_epic_payloads(
                 "labels": labels,
                 "root_branch": root_branch,
                 "pr_strategy": fields.get("workspace.pr_strategy") or None,
-                "workspace_label": beads.workspace_label(root_branch) if root_branch else None,
+                "workspace_label": (beads.workspace_label(root_branch) if root_branch else None),
                 "worktree_path": worktree_path,
                 "worktree_relpath": worktree_relpath,
                 "hooked_by": hook_map.get(epic_id, []),
@@ -339,24 +337,30 @@ def _summarize_pr(payload: dict[str, object] | None) -> dict[str, object] | None
 
 
 def _list_changesets(epic_id: str, *, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
-    return beads.run_bd_json(
-        ["list", "--parent", epic_id, "--label", "at:changeset"],
+    descendants = beads.list_descendant_changesets(
+        epic_id,
         beads_root=beads_root,
         cwd=repo_root,
+        include_closed=True,
     )
+    if not descendants:
+        work_children = beads.list_work_children(
+            epic_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=True,
+        )
+        if not work_children:
+            epic_issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
+            return epic_issues if epic_issues else []
+    return descendants
 
 
 def _list_ready_changesets(
     epic_id: str, *, beads_root: Path, repo_root: Path
 ) -> list[dict[str, object]]:
     return beads.run_bd_json(
-        [
-            "ready",
-            "--parent",
-            epic_id,
-            "--label",
-            "at:changeset",
-        ],
+        ["ready", "--parent", epic_id],
         beads_root=beads_root,
         cwd=repo_root,
     )

@@ -28,9 +28,12 @@ Graph role inference:
 
 - work identity excludes explicit special/non-work records (`at:message`,
   `at:agent`, `at:policy` and matching types).
-- epic role is inferred from top-level work nodes (no parent).
-- changeset role is inferred from leaf work nodes (no work children).
-- a top-level leaf node is both epic and changeset.
+- epic discovery/index queries require `at:epic`; this label is required
+  identity metadata for top-level epic pools.
+- epic role is inferred from top-level work nodes (no parent) with `at:epic`.
+- changeset role is inferred from leaf work nodes in an epic's progeny graph:
+  any bead without a work child whose top-level parent (the epic) has `at:epic`.
+  If an epic has no children, the epic is also a changeset.
 
 Runnable leaf evaluation:
 
@@ -41,7 +44,10 @@ Runnable leaf evaluation:
 Lifecycle authority:
 
 - canonical status + graph shape are the source of truth for decisions.
-- labels are informational identity metadata, not lifecycle execution gates.
+- `at:epic` is identity/index metadata for epic discovery, not lifecycle state.
+- `cs:*` lifecycle labels are not execution gates. `cs:merged` and
+  `cs:abandoned` are used on closed changeset beads to indicate
+  resolution/integration status.
 
 ## Layering
 

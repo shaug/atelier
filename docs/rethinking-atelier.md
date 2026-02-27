@@ -64,13 +64,16 @@ Responsibilities:
 - Close completed tasks and the epic.
 - Clear hook on completion.
 
-Epic completion rule:
+Epic completion rules:
 
-- When all changesets under an epic are either `cs:merged` or `cs:abandoned`,
-  evaluate whether any additional work needs to be defined. If not, close the
-  epic. If more work is required, create new changesets before closing. Status
-  output reports `ready_to_close` when no remaining changesets exist; use
-  `work-done` to close the epic and clear the hook.
+- When changesets close, they must be given the label `cs:merged` or
+  `cs:abandoned`.
+- A parent work bead can be closed when all its children are closed.
+- Before closing an epic work bead, evaluate whether any additional work needs
+  to be defined. If not, close the epic. If more work is required, create new
+  changesets before closing. Status output reports `ready_to_close` when no
+  remaining changesets exist; use `work-done` to close the epic and clear the
+  hook.
 
 ### Worker Selection Modes
 
@@ -180,13 +183,13 @@ Store the worktree path in the epic bead description:
 worktree_path: worktrees/at-abc12
 ```
 
-Changesets normally have a corresponding child bead under the epic. For
-single-unit work that fits guardrails, the epic itself may be the executable
-changeset (`at:changeset`) with no children. In PR-based workflows, each
-executable changeset maps to its own branch and PR, except epic-as-changeset
-work that runs on the root branch. Changesets are still modeled as branches, but
-parallel work requires separate worktrees per changeset session. The epic
-worktree remains a convenience view for the root branch.
+Changesets are leaf work beads in an epic's progeny graph. For single-unit work
+that fits guardrails, the epic itself may be the executable changeset (by graph
+inference) with no children. In PR-based workflows, each executable changeset
+maps to its own branch and PR, except epic-as-changeset work that runs on the
+root branch. Changesets are still modeled as branches, but parallel work
+requires separate worktrees per changeset session. The epic worktree remains a
+convenience view for the root branch.
 
 ## Changeset Branch Naming
 
@@ -315,6 +318,18 @@ Message beads are first-class; do not rely on generic comments plus inbox
 queries as a substitute. For bead-specific discussion, use a message bead with
 `thread: <bead-id>` in frontmatter.
 
+### Work Bead Hierarchy
+
+- **Work bead**: Any bead intended to be addressed by an Atelier worker.
+- **Epic work bead**: Work bead without a parent. Must be identified with the
+  `at:epic` label. No other beads must have this label.
+- **Changeset**: Bead under an epic work bead (inclusive of the epic) that has
+  no children. Only changesets are associated with committed code and, often,
+  PRs.
+- **Middle beads**: Beads between an epic and its changesets. There may be more
+  than two layers in an epic work bead's tree. Middle beads are neither epics
+  nor changesets but are still work beads and must be resolved.
+
 ### Recommended Bead Types and Labels
 
 Agent beads:
@@ -329,9 +344,8 @@ Epic beads (choose one):
 
 Draft epic state:
 
-- label: at:draft
-- status: open (not hooked)
-- workers must ignore epics with at:draft
+- status: deferred (planned work, not runnable)
+- promotion moves bead from `deferred` to `open`
 
 Task beads:
 
@@ -341,9 +355,11 @@ Subtask beads:
 
 - type: task + label at:subtask
 
-Changeset beads (required):
+Changeset beads:
 
-- type: task + label at:changeset
+- Changesets are leaf work beads (no work children) whose top-level parent has
+  `at:epic`. Changesets are not identified with a label (beyond the associated
+  epic's `at:epic` label); role is inferred from graph.
 
 Message beads:
 
@@ -398,13 +414,12 @@ Use these statuses consistently:
 ### Draft Epics (Planner Iteration)
 
 Planners may create epics ahead of time and iterate on breakdown without workers
-claiming them. Use the `at:draft` label to mark an epic as not ready for
-claiming. When ready, remove `at:draft` (optionally add `at:ready`).
+claiming them. Draft beads use `deferred` status. Promoting a bead moves it from
+`deferred` to `open`.
 
 Worker claim filters should require:
 
 - label `at:epic`
-- NOT label `at:draft`
 - `assignee` empty
 - `status=open`
 
@@ -490,17 +505,8 @@ via `github-prs` when the strategy allows it.
 Changesets move through a deterministic lifecycle, but PR states are computed
 from Git/PR data rather than stored as bead labels or description fields.
 
-Use `cs:` labels only for intent and non-derivable state:
-
-- **cs:planned**: changeset bead exists but no branch/PR yet.
-- **cs:ready**: ready to be claimed by a worker.
-- **cs:in_progress**: work underway (local commits allowed).
-- **cs:merged**: integrated/merged.
-- **cs:abandoned**: closed without integration.
-
-When a PR is merged or closed without merge, update labels to add
-`cs:merged`/`cs:abandoned` and clear active labels (`cs:ready`, `cs:planned`,
-`cs:in_progress`).
+When a PR is merged or closed without merge, close the bead and update labels to
+add `cs:merged`/`cs:abandoned`.
 
 PR-derived (computed) states:
 

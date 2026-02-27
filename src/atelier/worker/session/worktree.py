@@ -50,9 +50,7 @@ def _mapping_ownership_from_beads(
 ) -> tuple[dict[str, str], dict[str, str]]:
     owner_by_changeset: dict[str, str] = {}
     epic_root_branches: dict[str, str] = {}
-    epic_issues = beads.run_bd_json(
-        ["list", "--label", "at:epic", "--all"], beads_root=beads_root, cwd=repo_root
-    )
+    epic_issues = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
     for issue in epic_issues:
         issue_id = issue.get("id")
         if not isinstance(issue_id, str):
@@ -63,8 +61,13 @@ def _mapping_ownership_from_beads(
         root_branch = beads.extract_workspace_root_branch(issue)
         if root_branch:
             epic_root_branches[epic_id] = root_branch
-        labels = _issue_labels(issue)
-        if "at:changeset" in labels:
+        work_children = beads.list_work_children(
+            epic_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=True,
+        )
+        if not work_children:
             owner_by_changeset.setdefault(epic_id, epic_id)
         descendants = beads.list_descendant_changesets(
             epic_id,

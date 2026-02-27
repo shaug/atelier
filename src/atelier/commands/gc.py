@@ -87,8 +87,10 @@ def _changeset_review_state(issue: dict[str, object]) -> str:
 def _resolve_changeset_status_for_migration(
     issue: dict[str, object],
 ) -> tuple[str | None, tuple[str, ...]]:
-    labels = _issue_labels(issue)
-    if "at:changeset" not in labels:
+    if not lifecycle.is_work_issue(
+        labels=_issue_labels(issue),
+        issue_type=lifecycle.issue_payload_type(issue),
+    ):
         return None, ()
     current_status = lifecycle.normalize_status_value(issue.get("status"))
     target_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
@@ -174,9 +176,6 @@ def _issue_integrated_sha(issue: dict[str, object]) -> str | None:
 
 
 def _is_merged_closed_changeset(issue: dict[str, object]) -> bool:
-    labels = _issue_labels(issue)
-    if "at:changeset" not in labels:
-        return False
     if lifecycle.canonical_lifecycle_status(issue.get("status")) != "closed":
         return False
     if _issue_integrated_sha(issue):
@@ -245,10 +244,10 @@ def _gc_normalize_changeset_labels(
     repo_root: Path,
 ) -> list[GcAction]:
     actions: list[GcAction] = []
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:changeset", "--all"],
+    issues = beads.list_all_changesets(
         beads_root=beads_root,
         cwd=repo_root,
+        include_closed=True,
     )
     for issue in sorted(issues, key=_issue_sort_key):
         issue_id = issue.get("id")
@@ -283,17 +282,201 @@ def _gc_normalize_changeset_labels(
     return actions
 
 
+def _gc_remove_at_changeset_label(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    """Remove deprecated at:changeset label; changeset role is inferred from graph."""
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:changeset", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in sorted(issues, key=_issue_sort_key):
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+
+        def _apply_remove(
+            bead_id: str = issue_id,
+        ) -> None:
+            beads.run_bd_command(
+                ["update", bead_id, "--remove-label", "at:changeset"],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+
+        actions.append(
+            GcAction(
+                description=f"Remove deprecated at:changeset label from {issue_id}",
+                apply=_apply_remove,
+                details=("changeset role inferred from graph",),
+            )
+        )
+    return actions
+
+
+def _gc_remove_at_subtask_label(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    """Remove deprecated at:subtask label; subtask role is inferred from graph."""
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:subtask", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in sorted(issues, key=_issue_sort_key):
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+
+        def _apply_remove(
+            bead_id: str = issue_id,
+        ) -> None:
+            beads.run_bd_command(
+                ["update", bead_id, "--remove-label", "at:subtask"],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+
+        actions.append(
+            GcAction(
+                description=f"Remove deprecated at:subtask label from {issue_id}",
+                apply=_apply_remove,
+                details=("subtask role inferred from graph",),
+            )
+        )
+    return actions
+
+
+def _gc_remove_at_ready_label(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    """Remove deprecated at:ready label; readiness is inferred from open status."""
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:ready", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in sorted(issues, key=_issue_sort_key):
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+
+        def _apply_remove(
+            bead_id: str = issue_id,
+        ) -> None:
+            beads.run_bd_command(
+                ["update", bead_id, "--remove-label", "at:ready"],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+
+        actions.append(
+            GcAction(
+                description=f"Remove deprecated at:ready label from {issue_id}",
+                apply=_apply_remove,
+                details=("readiness inferred from open status",),
+            )
+        )
+    return actions
+
+
+def _gc_remove_at_draft_label(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    """Remove deprecated at:draft label; draft state is inferred from deferred status."""
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:draft", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in sorted(issues, key=_issue_sort_key):
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+
+        def _apply_remove(
+            bead_id: str = issue_id,
+        ) -> None:
+            beads.run_bd_command(
+                ["update", bead_id, "--remove-label", "at:draft"],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+
+        actions.append(
+            GcAction(
+                description=f"Remove deprecated at:draft label from {issue_id}",
+                apply=_apply_remove,
+                details=("draft state inferred from deferred status",),
+            )
+        )
+    return actions
+
+
+def _gc_remove_deprecated_cs_label(
+    *,
+    label: str,
+    beads_root: Path,
+    repo_root: Path,
+    detail: str,
+) -> list[GcAction]:
+    """Remove deprecated cs:* label; state is inferred from bead status."""
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", label, "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in sorted(issues, key=_issue_sort_key):
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+
+        def _apply_remove(
+            bead_id: str = issue_id,
+            lbl: str = label,
+        ) -> None:
+            beads.run_bd_command(
+                ["update", bead_id, "--remove-label", lbl],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+
+        actions.append(
+            GcAction(
+                description=f"Remove deprecated {label} label from {issue_id}",
+                apply=_apply_remove,
+                details=(detail,),
+            )
+        )
+    return actions
+
+
 def _gc_normalize_executable_ready_labels(
     *,
     beads_root: Path,
     repo_root: Path,
 ) -> list[GcAction]:
     actions: list[GcAction] = []
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:epic", "--all"],
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
+    issues = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
     for issue in sorted(issues, key=_issue_sort_key):
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id.strip():
@@ -376,7 +559,7 @@ def _gc_hooks(
             "heartbeat_at": fields.get("heartbeat_at"),
         }
 
-    epics = beads.run_bd_json(["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root)
+    epics = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
 
     for agent_id, payload in agents.items():
         hook_bead = payload.get("hook_bead")
@@ -691,10 +874,10 @@ def _gc_closed_workspace_branches_without_mapping(
 ) -> list[GcAction]:
     actions: list[GcAction] = []
     default_branch = git.git_default_branch(repo_root, git_path=git_path) or ""
-    issues = beads.run_bd_json(
-        ["list", "--label", "at:changeset", "--all"],
+    issues = beads.list_all_changesets(
         beads_root=beads_root,
         cwd=repo_root,
+        include_closed=True,
     )
     for issue in issues:
         issue_id = issue.get("id")
@@ -1003,7 +1186,7 @@ def _gc_agent_homes(
     agent_issues = beads.run_bd_json(
         ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
     )
-    epics = beads.run_bd_json(["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root)
+    epics = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
     epics_by_id: dict[str, dict[str, object]] = {}
     epics_by_assignee: dict[str, list[dict[str, object]]] = {}
     for epic in epics:
@@ -1228,6 +1411,44 @@ def gc(args: object) -> None:
             repo_root=repo_root,
         )
     )
+    actions.extend(
+        _gc_remove_at_changeset_label(
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
+    actions.extend(
+        _gc_remove_at_subtask_label(
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
+    actions.extend(
+        _gc_remove_at_ready_label(
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
+    actions.extend(
+        _gc_remove_at_draft_label(
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
+    for label, detail in [
+        ("cs:ready", "readiness inferred from open status"),
+        ("cs:in_progress", "progress inferred from in_progress status"),
+        ("cs:blocked", "block state inferred from blocked status"),
+        ("cs:planned", "planned state inferred from deferred status"),
+    ]:
+        actions.extend(
+            _gc_remove_deprecated_cs_label(
+                label=label,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                detail=detail,
+            )
+        )
     actions.extend(
         _gc_normalize_executable_ready_labels(
             beads_root=beads_root,

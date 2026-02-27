@@ -36,12 +36,16 @@ def _is_in_review_candidate(
     *,
     raw_issue: dict[str, object],
     live_state: str | None = None,
+    has_work_children: bool = False,
 ) -> bool:
     return lifecycle.is_changeset_in_review_candidate(
         labels=set(issue.labels),
         status=issue.status,
         live_state=live_state,
         stored_review_state=changeset_fields.review_state(raw_issue),
+        has_work_children=has_work_children,
+        issue_type=lifecycle.issue_payload_type(raw_issue),
+        parent_id=raw_issue.get("parent_id"),
     )
 
 
@@ -69,7 +73,12 @@ def _selection_candidates(
                 pushed=False,
                 review_requested=prs.has_review_requests(pr_payload),
             )
-        if not _is_in_review_candidate(issue, raw_issue=raw_issue, live_state=live_state):
+        if not _is_in_review_candidate(
+            issue,
+            raw_issue=raw_issue,
+            live_state=live_state,
+            has_work_children=False,
+        ):
             continue
         feedback_at = prs.latest_feedback_timestamp_with_inline_comments(pr_payload, repo=repo_slug)
         if not feedback_at:
@@ -119,13 +128,16 @@ def _records_for_epic_changesets(
     client = beads.create_client(beads_root=beads_root, cwd=repo_root)
     records = beads.parse_issue_records(descendants, source=f"{source}:descendants")
     epic_record = client.show_issue(epic_id, source=f"{source}:show_epic")
-    if (
-        epic_record is not None
-        and epic_record.issue.id == epic_id
-        and "at:changeset" in set(epic_record.issue.labels)
-        and all(record.issue.id != epic_id for record in records)
-    ):
-        records = [epic_record, *records]
+    if epic_record is not None and epic_record.issue.id == epic_id:
+        if not descendants and all(record.issue.id != epic_id for record in records):
+            work_children = beads.list_work_children(
+                epic_id,
+                beads_root=beads_root,
+                cwd=repo_root,
+                include_closed=False,
+            )
+            if not work_children:
+                records = [epic_record, *records]
     return client, records
 
 
@@ -151,7 +163,12 @@ def _conflict_selection_candidates(
             pushed=False,
             review_requested=review_requested,
         )
-        if not _is_in_review_candidate(issue, raw_issue=raw_issue, live_state=live_state):
+        if not _is_in_review_candidate(
+            issue,
+            raw_issue=raw_issue,
+            live_state=live_state,
+            has_work_children=False,
+        ):
             continue
         if prs.default_branch_has_merge_conflict(pr_payload) is not True:
             continue
@@ -222,8 +239,13 @@ def select_global_review_feedback_changeset(
     if not repo_slug:
         return None
     client = beads.create_client(beads_root=beads_root, cwd=repo_root)
-    records = client.issue_records(
-        ["list", "--label", "at:changeset"],
+    changesets = beads.list_all_changesets(
+        beads_root=beads_root,
+        cwd=repo_root,
+        include_closed=False,
+    )
+    records = beads.parse_issue_records(
+        changesets,
         source="select_global_review_feedback_changeset:list_changesets",
     )
     candidates = _selection_candidates(
@@ -275,8 +297,13 @@ def select_global_conflicted_changeset(
     if not repo_slug:
         return None
     client = beads.create_client(beads_root=beads_root, cwd=repo_root)
-    records = client.issue_records(
-        ["list", "--label", "at:changeset"],
+    changesets = beads.list_all_changesets(
+        beads_root=beads_root,
+        cwd=repo_root,
+        include_closed=False,
+    )
+    records = beads.parse_issue_records(
+        changesets,
         source="select_global_conflicted_changeset:list_changesets",
     )
     candidates = _conflict_selection_candidates(

@@ -72,7 +72,7 @@ def test_collect_workspace_root_branches_includes_hooked_active_labels(monkeypat
     payload = (
         '[{"id":"at-1","status":"hooked","labels":["at:epic","at:hooked"],'
         '"description":"workspace.root_branch: feat/hooked\\n"},'
-        '{"id":"at-2","status":"closed","labels":["at:epic","at:ready"],'
+        '{"id":"at-2","status":"closed","labels":["at:epic"],'
         '"description":"workspace.root_branch: feat/closed\\n"}]'
     )
     monkeypatch.setattr(

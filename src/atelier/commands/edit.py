@@ -37,9 +37,7 @@ def _select_epic_by_workspace(
         if not matches:
             die(f"no epic found for workspace {workspace_name!r}")
     else:
-        matches = beads.run_bd_json(
-            ["list", "--label", "at:epic"], beads_root=beads_root, cwd=repo_root
-        )
+        matches = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=False)
         matches = [
             issue
             for issue in matches

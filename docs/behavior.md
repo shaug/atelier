@@ -19,10 +19,11 @@ side effects inside the user's repo.
 
 - **Project**: Identified by the absolute path to a local enlistment. Project
   state lives under the Atelier data directory.
-- **Epic**: Top-level unit of intent that owns a workspace root branch.
-- **Changeset**: Executable unit under an epic. It is usually a child bead, but
-  guardrail-sized single-unit work may execute directly on the epic labeled
-  `at:changeset`.
+- **Epic**: Top-level unit of intent that owns a workspace root branch. Epic
+  discovery requires `at:epic` as identity/index metadata.
+- **Changeset**: Leaf work bead in an epic's progeny graph (any bead without a
+  work child whose top-level parent has `at:epic`). If an epic has no children,
+  the epic is also a changeset.
 - **PR base alignment**: Atelier resolves review PR bases from integration
   lineage rather than raw branch-cut ancestry.
   - Epic-integration PR workflows are unsupported. PR bases must not target
@@ -48,7 +49,9 @@ side effects inside the user's repo.
 - **Worktree path**: Stored as `worktree_path` in epic metadata once created.
 - **Lifecycle authority**: Execution lifecycle is status-native
   (`deferred|open|in_progress|blocked|closed`) and graph-native (leaf work +
-  dependency closure). `at:ready` and `cs:*` labels are not lifecycle gates.
+  dependency closure). `cs:*` lifecycle labels are not execution gates.
+  `cs:merged` and `cs:abandoned` are used on closed changeset beads to indicate
+  resolution/integration status.
 - **External tickets**: Linked via `external_tickets` in bead descriptions with
   provider labels like `ext:github`.
 

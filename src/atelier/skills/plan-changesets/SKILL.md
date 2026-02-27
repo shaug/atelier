@@ -56,7 +56,7 @@ create/edit deferred work.
 
 ## Verification
 
-- Changeset beads exist under the epic with `at:changeset` labels.
+- Changeset beads exist under the epic (leaf work beads in the epic's progeny).
 - Decomposition happened only when needed for scope/dependency/reviewability.
 - Any one-child decomposition has explicit rationale recorded in notes or
   description.

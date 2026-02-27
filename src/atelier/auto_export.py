@@ -7,7 +7,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import beads, config, external_registry, git, paths
+from . import beads, config, external_registry, git, lifecycle, paths
 from .external_providers import ExternalProvider, ExternalTicketCreateRequest
 from .external_tickets import ExternalTicketRef
 from .models import ProjectConfig
@@ -175,6 +175,7 @@ def auto_export_issue(
             title=title,
             body=body,
             parent_ticket=parent_ticket,
+            context=context,
         )
         exported_ticket = _exported_ticket_ref(created_ref, parent_ticket=parent_ticket)
         updated_tickets = _merge_tickets(existing, exported_ticket)
@@ -343,8 +344,9 @@ def _create_ticket_ref(
     title: str,
     body: str | None,
     parent_ticket: ExternalTicketRef | None,
+    context: AutoExportContext,
 ) -> ExternalTicketRef:
-    labels = _external_labels(issue)
+    labels = _external_labels(issue, context=context)
     if parent_ticket and provider.capabilities.supports_children:
         try:
             return provider.create_child_ticket(
@@ -367,13 +369,27 @@ def _create_ticket_ref(
     return record.ref
 
 
-def _external_labels(issue: dict[str, object]) -> tuple[str, ...]:
+def _external_labels(
+    issue: dict[str, object],
+    *,
+    context: AutoExportContext,
+) -> tuple[str, ...]:
     labels = {"atelier"}
     issue_labels = _issue_labels(issue)
     if "at:epic" in issue_labels:
         labels.add("epic")
-    if "at:changeset" in issue_labels:
-        labels.add("changeset")
+    if lifecycle.is_work_issue(
+        labels=issue_labels,
+        issue_type=lifecycle.issue_payload_type(issue),
+    ):
+        issue_id = str(issue.get("id") or "").strip()
+        if issue_id and not beads.list_work_children(
+            issue_id,
+            beads_root=context.beads_root,
+            cwd=context.project_dir,
+            include_closed=True,
+        ):
+            labels.add("changeset")
     return tuple(sorted(labels))
 
 

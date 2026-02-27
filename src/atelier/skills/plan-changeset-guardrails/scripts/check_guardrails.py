@@ -12,6 +12,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from atelier import beads
 from atelier.bd_invocation import with_bd_mode
 
 _LOC_TRIGGER = re.compile(r"\b(?:loc|estimate)\b", re.IGNORECASE)
@@ -114,19 +115,14 @@ def _load_issue(issue_id: str, *, beads_dir: str | None) -> dict[str, object] | 
 
 
 def _list_child_changesets(epic_id: str, *, beads_dir: str | None) -> list[dict[str, object]]:
-    children = _run_bd_json(
-        ["list", "--parent", epic_id, "--label", "at:changeset", "--json"],
-        beads_dir=beads_dir,
+    beads_root = Path(beads_dir).resolve() if beads_dir else Path.cwd() / ".beads"
+    cwd = Path.cwd()
+    return beads.list_child_changesets(
+        epic_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        include_closed=True,
     )
-    full_children: list[dict[str, object]] = []
-    for item in children:
-        child_id = _issue_id(item)
-        if not child_id:
-            continue
-        child_issue = _load_issue(child_id, beads_dir=beads_dir)
-        if child_issue is not None:
-            full_children.append(child_issue)
-    return full_children
 
 
 def _evaluate_guardrails(
@@ -153,15 +149,9 @@ def _evaluate_guardrails(
     if epic_issue is not None:
         epic_id = _issue_id(epic_issue) or "(epic)"
         if not child_changesets:
-            if "at:changeset" in _labels(epic_issue):
-                path_summary = (
-                    f"{epic_id}: compliant single-unit path (epic is the executable changeset)."
-                )
-            else:
-                path_summary = f"{epic_id}: no child changesets present."
-                violations.append(
-                    f"{epic_id}: no child changesets and epic is not labeled at:changeset."
-                )
+            path_summary = (
+                f"{epic_id}: compliant single-unit path (epic is the executable changeset)."
+            )
         elif len(child_changesets) == 1:
             child = child_changesets[0]
             child_id = _issue_id(child) or "(child)"
@@ -242,7 +232,7 @@ def main() -> None:
                 target_changesets.append(issue)
     elif child_changesets:
         target_changesets = child_changesets
-    elif epic_issue is not None and "at:changeset" in _labels(epic_issue):
+    elif epic_issue is not None and not child_changesets:
         target_changesets = [epic_issue]
 
     report = _evaluate_guardrails(

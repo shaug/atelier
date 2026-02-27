@@ -23,8 +23,8 @@ description: >-
 1. Update the description fields (`pr_url`, `pr_number`, `pr_state`,
    `review_owner`).
 1. Keep lifecycle status authoritative
-   (`deferred|open|in_progress|blocked|closed`); do not use `cs:*` labels as
-   publish/finalize gates.
+   (`deferred|open|in_progress|blocked|closed`). `cs:*` lifecycle labels are not
+   execution gates.
 1. Write the new description with `bd update <changeset_id> --body-file <path>`.
 
 ## Verification

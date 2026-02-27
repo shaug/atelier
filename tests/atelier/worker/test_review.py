@@ -11,7 +11,7 @@ def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
     issues = [
         {
             "id": "at-1.1",
-            "labels": ["at:changeset"],
+            "labels": [],
             "status": "in_progress",
             "description": (
                 "changeset.work_branch: feat/a\n"
@@ -21,7 +21,7 @@ def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
         },
         {
             "id": "at-1.2",
-            "labels": ["at:changeset"],
+            "labels": [],
             "status": "in_progress",
             "description": (
                 "changeset.work_branch: feat/b\n"
@@ -88,7 +88,7 @@ def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
 def test_select_review_feedback_changeset_includes_standalone_epic_changeset() -> None:
     epic_issue = {
         "id": "at-standalone",
-        "labels": ["at:epic", "at:changeset"],
+        "labels": ["at:epic"],
         "status": "in_progress",
         "description": "changeset.work_branch: feat/standalone\npr_state: in-review\n",
     }
@@ -100,6 +100,10 @@ def test_select_review_feedback_changeset_includes_standalone_epic_changeset() -
     with (
         patch(
             "atelier.worker.review.beads.list_descendant_changesets",
+            return_value=[],
+        ),
+        patch(
+            "atelier.worker.review.beads.list_work_children",
             return_value=[],
         ),
         patch(
@@ -143,7 +147,7 @@ def test_select_review_feedback_changeset_includes_standalone_epic_changeset() -
 def test_select_review_feedback_changeset_pr_160_closed_then_reopened_sequence() -> None:
     closed_issue = {
         "id": "at-1.60",
-        "labels": ["at:changeset"],
+        "labels": [],
         "status": "closed",
         "description": (
             "changeset.work_branch: feat/pr-160\n"
@@ -153,7 +157,7 @@ def test_select_review_feedback_changeset_pr_160_closed_then_reopened_sequence()
     }
     reopened_issue = {
         "id": "at-1.60",
-        "labels": ["at:changeset"],
+        "labels": [],
         "status": "in_progress",
         "description": (
             "changeset.work_branch: feat/pr-160\n"
@@ -209,7 +213,7 @@ def test_select_global_review_feedback_changeset_uses_resolver() -> None:
     issues = [
         {
             "id": "at-2.1",
-            "labels": ["at:changeset"],
+            "labels": [],
             "status": "in_progress",
             "description": "changeset.work_branch: feat/c\npr_state: in-review\n",
         }
@@ -221,8 +225,8 @@ def test_select_global_review_feedback_changeset_uses_resolver() -> None:
 
     with (
         patch(
-            "atelier.worker.review.beads.BeadsClient.issue_records",
-            return_value=issue_records,
+            "atelier.worker.review.beads.list_all_changesets",
+            return_value=issues,
         ),
         patch(
             "atelier.worker.review.beads.BeadsClient.show_issue",
@@ -263,7 +267,7 @@ def test_select_global_review_feedback_changeset_uses_resolver() -> None:
 
 
 def test_select_review_feedback_changeset_invalid_issue_payload_fails() -> None:
-    issues = [{"status": "in_progress", "labels": ["at:changeset"]}]
+    issues = [{"status": "in_progress", "labels": []}]
 
     with (
         patch(
@@ -285,7 +289,7 @@ def test_select_review_feedback_changeset_skips_when_no_unresolved_threads() -> 
     issues = [
         {
             "id": "at-1.1",
-            "labels": ["at:changeset"],
+            "labels": [],
             "status": "in_progress",
             "description": "changeset.work_branch: feat/a\npr_state: in-review\n",
         }
@@ -340,14 +344,14 @@ def test_select_conflicted_changeset_picks_oldest_conflict() -> None:
     issues = [
         {
             "id": "at-1.1",
-            "labels": ["at:changeset"],
+            "labels": [],
             "status": "in_progress",
             "description": "changeset.work_branch: feat/a\npr_state: in-review\n",
             "updated_at": "2026-02-20T12:00:00Z",
         },
         {
             "id": "at-1.2",
-            "labels": ["at:changeset"],
+            "labels": [],
             "status": "in_progress",
             "description": "changeset.work_branch: feat/b\npr_state: in-review\n",
             "updated_at": "2026-02-20T11:00:00Z",
@@ -396,7 +400,7 @@ def test_select_conflicted_changeset_picks_oldest_conflict() -> None:
 def test_select_conflicted_changeset_includes_standalone_epic_changeset() -> None:
     epic_issue = {
         "id": "at-standalone",
-        "labels": ["at:epic", "at:changeset"],
+        "labels": ["at:epic"],
         "status": "in_progress",
         "description": "changeset.work_branch: feat/standalone\npr_state: in-review\n",
         "updated_at": "2026-02-20T10:00:00Z",
@@ -409,6 +413,10 @@ def test_select_conflicted_changeset_includes_standalone_epic_changeset() -> Non
     with (
         patch(
             "atelier.worker.review.beads.list_descendant_changesets",
+            return_value=[],
+        ),
+        patch(
+            "atelier.worker.review.beads.list_work_children",
             return_value=[],
         ),
         patch(
@@ -443,7 +451,7 @@ def test_select_conflicted_changeset_skips_unknown_mergeability() -> None:
     issues = [
         {
             "id": "at-1.1",
-            "labels": ["at:changeset"],
+            "labels": [],
             "status": "in_progress",
             "description": "changeset.work_branch: feat/a\npr_state: in-review\n",
         }

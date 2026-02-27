@@ -196,16 +196,18 @@ def is_special_non_work_issue(*, labels: set[str], issue_type: object) -> bool:
 def is_work_issue(*, labels: set[str], issue_type: object) -> bool:
     """Return whether an issue should be treated as executable work.
 
+    Work identity is inferred from at:epic or issue type. Changeset role is
+    inferred from graph (leaf work bead).
+
     Args:
-        labels: Normalized issue labels.
-        issue_type: Raw issue type value.
+        labels: Normalized issue labels. issue_type: Raw issue type value.
 
     Returns:
         ``True`` when the issue is a work bead for planner/worker execution.
     """
     if is_special_non_work_issue(labels=labels, issue_type=issue_type):
         return False
-    if {"at:epic", "at:changeset"}.intersection(labels):
+    if "at:epic" in labels:
         return True
     issue_type_value = normalize_status_value(issue_type)
     return issue_type_value in WORK_ISSUE_TYPES
@@ -380,17 +382,44 @@ def is_changeset_in_progress(status: object, labels: set[str]) -> bool:
     return canonical_lifecycle_status(status) == "in_progress"
 
 
-def is_changeset_ready(status: object, labels: set[str]) -> bool:
-    """Return whether a changeset is runnable in legacy-compatible mode.
+def is_changeset_ready(
+    status: object,
+    labels: set[str],
+    *,
+    has_work_children: bool | None = None,
+    issue_type: object = None,
+    parent_id: object = None,
+) -> bool:
+    """Return whether a changeset is runnable based on graph role and status.
+
+    Changeset role is inferred from graph (leaf work bead),. When
+    has_work_children is unknown (None), fails closed (returns False).
 
     Args:
-        status: Raw issue status.
-        labels: Normalized issue labels.
+        status: Raw issue status. labels: Normalized issue labels.
+        has_work_children: Whether the issue has child work beads. Required for
+            graph inference; when None (unknown), returns False; when True,
+            returns False (not a leaf).
+        issue_type: Raw issue type (for work identity when has_work_children
+            provided).
+        parent_id: Raw parent id (for work identity when has_work_children
+            provided).
 
     Returns:
-        ``True`` when the issue is a changeset with active canonical status.
+        ``True`` when the issue is a leaf work bead with active canonical
+        status.
     """
-    if "at:changeset" not in labels:
+    if has_work_children is None:
+        return False
+    if has_work_children:
+        return False
+    role = infer_work_role(
+        labels=labels,
+        issue_type=issue_type or "task",
+        parent_id=parent_id,
+        has_work_children=False,
+    )
+    if not role.is_changeset:
         return False
     canonical_status = canonical_lifecycle_status(status)
     return canonical_status in ACTIVE_LIFECYCLE_STATUSES
@@ -402,19 +431,38 @@ def is_changeset_in_review_candidate(
     status: object,
     live_state: str | None = None,
     stored_review_state: str | None = None,
+    has_work_children: bool | None = None,
+    issue_type: object = None,
+    parent_id: object = None,
 ) -> bool:
     """Return whether review feedback should be checked for a changeset.
+
+    Changeset role is inferred from graph (leaf work bead) When
+    has_work_children is unknown, fails closed (returns False).
 
     Args:
         labels: Normalized issue labels.
         status: Raw issue status.
         live_state: Optional live PR lifecycle state.
         stored_review_state: Optional stored review state fallback.
+        has_work_children: Whether the issue has child work beads.
+        issue_type: Raw issue type (for work identity).
+        parent_id: Raw parent id (for work identity).
 
     Returns:
         ``True`` when the changeset is active and has an eligible review state.
     """
-    if "at:changeset" not in labels:
+    if has_work_children is None:
+        return False
+    if has_work_children:
+        return False
+    role = infer_work_role(
+        labels=labels,
+        issue_type=issue_type or "task",
+        parent_id=parent_id,
+        has_work_children=False,
+    )
+    if not role.is_changeset:
         return False
     if is_closed_status(status):
         return False
