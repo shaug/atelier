@@ -75,6 +75,49 @@ def test_normalize_review_state_handles_invalid_values() -> None:
     assert lifecycle.normalize_review_state(" In-Review ") == "in-review"
 
 
+def test_review_state_helpers_distinguish_integrated_from_closed() -> None:
+    assert lifecycle.is_integrated_review_state("merged") is True
+    assert lifecycle.is_integrated_review_state("closed") is False
+    assert lifecycle.is_terminal_review_without_integration("closed") is True
+    assert lifecycle.is_terminal_review_without_integration("merged") is False
+
+
+def test_dependency_issue_satisfied_requires_integrated_evidence_for_sequential() -> None:
+    assert (
+        lifecycle.dependency_issue_satisfied(
+            status="closed",
+            labels={"at:changeset"},
+            require_integrated=False,
+        )
+        is True
+    )
+    assert (
+        lifecycle.dependency_issue_satisfied(
+            status="closed",
+            labels={"at:changeset"},
+            require_integrated=True,
+        )
+        is False
+    )
+    assert (
+        lifecycle.dependency_issue_satisfied(
+            status="closed",
+            labels={"at:changeset", "cs:merged"},
+            require_integrated=True,
+        )
+        is True
+    )
+    assert (
+        lifecycle.dependency_issue_satisfied(
+            status="closed",
+            labels={"at:changeset"},
+            require_integrated=True,
+            review_state="merged",
+        )
+        is True
+    )
+
+
 def test_in_review_candidate_prefers_live_state() -> None:
     labels: set[str] = set()
     assert (

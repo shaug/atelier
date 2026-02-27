@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ... import lifecycle
+from ... import changeset_fields, lifecycle, pr_strategy
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
@@ -146,6 +146,14 @@ def _dependencies_satisfied(
     context: NextChangesetContext,
     service: NextChangesetService,
 ) -> bool:
+    require_integrated = False
+    try:
+        require_integrated = pr_strategy.normalize_pr_strategy(context.branch_pr_strategy) == (
+            "sequential"
+        )
+    except ValueError:
+        # Fail closed for unknown strategy values.
+        require_integrated = True
     dependency_ids = _dependency_ids(issue)
     if dependency_ids is None:
         return False
@@ -158,27 +166,13 @@ def _dependencies_satisfied(
                 dependency_cache[dependency_id] = blocker_issue
         if blocker_issue is None:
             return False
-        is_work_dependency = lifecycle.is_work_issue(
-            labels=worker_selection.issue_labels(blocker_issue),
-            issue_type=worker_selection.issue_type(blocker_issue),
-        )
-        if not is_work_dependency:
-            if _is_terminal(blocker_issue):
-                continue
-            return False
-        has_dependency_children = bool(
-            service.list_work_children(dependency_id, include_closed=True)
-        )
-        if has_dependency_children:
-            if _is_terminal(blocker_issue):
-                continue
-            return False
-        integrated, _ = service.changeset_integration_signal(
-            blocker_issue,
-            repo_slug=context.repo_slug,
-            git_path=context.git_path,
-        )
-        if integrated:
+        blocker_labels = worker_selection.issue_labels(blocker_issue)
+        if lifecycle.dependency_issue_satisfied(
+            status=blocker_issue.get("status"),
+            labels=blocker_labels,
+            require_integrated=require_integrated,
+            review_state=changeset_fields.review_state(blocker_issue),
+        ):
             continue
         return False
     return True
