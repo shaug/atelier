@@ -36,7 +36,7 @@ def worker_opening_prompt(
             "acceptance criteria; do not mention internal bead IDs."
         ),
         (
-            "When done, update beads state/labels for this changeset. If blocked,"
+            "When done, update beads status/metadata for this changeset. If blocked,"
             " send NEEDS-DECISION with details and exit."
         ),
     ]
@@ -77,7 +77,7 @@ def worker_opening_prompt(
                     "Use github-prs skill scripts list_review_threads.py and "
                     "reply_inline_thread.py for deterministic inline handling."
                 ),
-                ("Do not reset lifecycle labels to ready while feedback remains unaddressed."),
+                ("Do not mark this changeset complete while review feedback remains unaddressed."),
             ]
         )
         if review_pr_url:
