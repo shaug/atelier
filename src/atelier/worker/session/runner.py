@@ -462,6 +462,13 @@ def run_worker_once(
                 )
             agent_bead_id_required = agent_bead_id
         claim_conflict_excluded_epics: set[str] = set()
+        raw_excluded_epics = getattr(args, "implicit_excluded_epic_ids", ())
+        if isinstance(raw_excluded_epics, (list, tuple, set)):
+            claim_conflict_excluded_epics = {
+                str(epic_id).strip()
+                for epic_id in raw_excluded_epics
+                if isinstance(epic_id, str) and str(epic_id).strip()
+            }
         startup_result: StartupContractResult
         selected_epic: str
         epic_issue: dict[str, object]
