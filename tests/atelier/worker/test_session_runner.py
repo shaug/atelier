@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from atelier.worker.context import ChangesetSelectionContext
+from atelier.worker.models_boundary import parse_issue_boundary
 from atelier.worker.session import runner
 
 
@@ -84,3 +85,34 @@ def test_select_changeset_passes_resume_review_flag() -> None:
 
     assert selected.issue == {"id": "at-epic.1"}
     assert observed == [True]
+
+
+def test_select_changeset_keeps_startup_override_for_null_parent_id_payload() -> None:
+    calls: list[tuple[str, bool]] = []
+    override_issue = {"id": "at-epic.2", "parent_id": None, "parent": "at-epic"}
+
+    def resolve_epic(issue: dict[str, object]) -> str | None:
+        parent_id = parse_issue_boundary(issue, source="test").parent_id
+        issue_id = issue.get("id")
+        if parent_id:
+            return parent_id
+        return issue_id if isinstance(issue_id, str) else None
+
+    service = _FakeSelectionService(
+        show_issue=lambda issue_id: override_issue if issue_id == "at-epic.2" else None,
+        resolve_epic=resolve_epic,
+        next_changeset=lambda epic_id, *, resume_review: (
+            calls.append((epic_id, resume_review)) or {"id": "at-epic.1"}
+        ),
+    )
+
+    selected = runner.select_changeset(
+        context=ChangesetSelectionContext(
+            selected_epic="at-epic",
+            startup_changeset_id="at-epic.2",
+        ),
+        service=service,
+    )
+
+    assert selected.issue == override_issue
+    assert calls == []

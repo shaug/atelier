@@ -279,6 +279,15 @@ def parse_issue_boundary(raw_issue: dict[str, object], *, source: str) -> BeadsI
         else _clean_str(parent_from_payload)
     )
     if normalized_parent is None:
+        parent_from_parent = raw_issue.get("parent")
+        normalized_parent = (
+            _clean_str(parent_from_parent.get("id"))
+            if isinstance(parent_from_parent, dict)
+            else _clean_str(parent_from_parent)
+        )
+        if normalized_parent:
+            payload["parent_id"] = normalized_parent
+    if normalized_parent is None:
         parent_from_dependencies = _extract_parent_dependency_id(raw_issue.get("dependencies"))
         if parent_from_dependencies:
             payload["parent_id"] = parent_from_dependencies

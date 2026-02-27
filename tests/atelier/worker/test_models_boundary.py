@@ -49,6 +49,21 @@ def test_parse_issue_boundary_derives_parent_from_parent_child_dependency() -> N
     assert boundary.dependency_ids == ("at-2",)
 
 
+@pytest.mark.parametrize("parent_id", [None, "   "])
+def test_parse_issue_boundary_falls_back_to_parent_when_parent_id_empty(parent_id: object) -> None:
+    issue = {
+        "id": "at-123",
+        "status": "open",
+        "labels": [],
+        "parent_id": parent_id,
+        "parent": "at-epic",
+    }
+
+    boundary = parse_issue_boundary(issue, source="test")
+
+    assert boundary.parent_id == "at-epic"
+
+
 @pytest.mark.parametrize(
     ("dependency_entry", "expected_parent"),
     [
