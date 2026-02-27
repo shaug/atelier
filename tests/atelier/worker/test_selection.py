@@ -3,13 +3,13 @@ from atelier.worker import selection
 
 def test_filter_epics_uses_status_contract_for_unassigned_and_assigned() -> None:
     issues = [
-        {"id": "at-1", "status": "open", "labels": ["at:epic", "at:ready"], "assignee": None},
-        {"id": "at-2", "status": "open", "labels": ["at:epic", "at:draft"], "assignee": None},
+        {"id": "at-1", "status": "open", "labels": ["at:epic"], "assignee": None},
+        {"id": "at-2", "status": "deferred", "labels": ["at:epic"], "assignee": None},
         {"id": "at-4", "status": "open", "labels": ["at:epic"], "assignee": None},
         {
             "id": "at-3",
             "status": "in_progress",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "assignee": "worker/a",
         },
     ]
@@ -27,7 +27,7 @@ def test_filter_epics_uses_status_contract_for_unassigned_and_assigned() -> None
         skip_draft=True,
     )
 
-    assert [item["id"] for item in ready] == ["at-1", "at-2", "at-4"]
+    assert [item["id"] for item in ready] == ["at-1", "at-4"]
     assert [item["id"] for item in assigned] == ["at-3"]
 
 
@@ -83,14 +83,14 @@ def test_select_epic_auto_prefers_ready_before_assigned() -> None:
         {
             "id": "at-assigned",
             "status": "in_progress",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "assignee": "worker/1",
             "created_at": "2026-02-22T00:00:00+00:00",
         },
         {
             "id": "at-ready",
             "status": "open",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "assignee": None,
             "created_at": "2026-02-21T00:00:00+00:00",
         },
@@ -111,14 +111,14 @@ def test_select_epic_prompt_supports_assume_yes() -> None:
             "id": "at-ready",
             "status": "open",
             "title": "Ready epic",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "assignee": None,
         },
         {
             "id": "at-resume",
             "status": "in_progress",
             "title": "Resume epic",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "assignee": "worker/1",
             "updated_at": "2026-02-22T00:00:00+00:00",
         },
@@ -141,21 +141,21 @@ def test_stale_family_assigned_epics_reclaims_inactive_assignees_across_families
         {
             "id": "at-stale",
             "status": "in_progress",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "assignee": "atelier/worker/codex/p111",
             "created_at": "2026-02-20T00:00:00+00:00",
         },
         {
             "id": "at-active",
             "status": "in_progress",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "assignee": "atelier/worker/codex/p222",
             "created_at": "2026-02-21T00:00:00+00:00",
         },
         {
             "id": "at-other-family",
             "status": "in_progress",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "assignee": "atelier/worker/other/p333",
             "created_at": "2026-02-22T00:00:00+00:00",
         },
@@ -172,7 +172,7 @@ def test_stale_family_assigned_epics_reclaims_inactive_assignees_across_families
 
 def test_select_epic_from_ready_changesets_uses_epic_for_child_issue() -> None:
     issues = [
-        {"id": "at-epic", "status": "open", "labels": ["at:epic", "at:ready"], "assignee": None},
+        {"id": "at-epic", "status": "open", "labels": ["at:epic"], "assignee": None},
     ]
     ready_changesets = [
         {"id": "at-epic.1", "created_at": "2026-02-20T00:00:00+00:00"},
@@ -192,13 +192,13 @@ def test_filter_epics_skips_planner_owned_executable_issue() -> None:
         {
             "id": "at-planner",
             "status": "open",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "assignee": "atelier/planner/codex/p333",
         },
         {
             "id": "at-worker",
             "status": "open",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "assignee": None,
         },
     ]
@@ -217,7 +217,7 @@ def test_select_epic_from_ready_changesets_skips_planner_owned_epic() -> None:
     issues = [
         {
             "id": "at-epic",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
             "assignee": "atelier/planner/codex/p333",
         },
     ]

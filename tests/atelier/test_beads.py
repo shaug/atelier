@@ -1764,7 +1764,7 @@ def test_claim_epic_blocks_planner_owned_executable_work() -> None:
     issue = {
         "id": "atelier-9",
         "status": "open",
-        "labels": ["at:epic", "at:ready"],
+        "labels": ["at:epic"],
         "assignee": "atelier/planner/codex/p111",
     }
 
@@ -1786,7 +1786,7 @@ def test_claim_epic_rejects_planner_claimant_for_executable_work() -> None:
     issue = {
         "id": "atelier-9",
         "status": "open",
-        "labels": ["at:epic", "at:ready"],
+        "labels": ["at:epic"],
         "assignee": None,
     }
 
@@ -1810,14 +1810,14 @@ def test_claim_epic_backfills_epic_label_for_standalone_changeset() -> None:
     issue = {
         "id": "at-legacy",
         "status": "open",
-        "labels": ["at:ready"],
+        "labels": [],
         "assignee": None,
         "type": "task",
     }
     updated = {
         "id": "at-legacy",
         "status": "in_progress",
-        "labels": ["at:epic", "at:hooked", "at:ready"],
+        "labels": ["at:epic", "at:hooked"],
         "assignee": "agent",
     }
     show_calls = 0
@@ -1872,7 +1872,7 @@ def test_claim_epic_rejects_deferred_executable_work() -> None:
     issue = {
         "id": "at-legacy",
         "status": "deferred",
-        "labels": ["at:epic", "at:draft"],
+        "labels": ["at:epic"],
         "assignee": None,
     }
 

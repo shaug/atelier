@@ -252,7 +252,7 @@ def test_lifecycle_matrix_claim_selection_startup_and_overview(
     issue = {
         "id": "at-epic",
         "status": status,
-        "labels": ["at:epic", "at:ready", "at:draft", "cs:planned"],
+        "labels": ["at:epic", "cs:planned"],
         "assignee": None,
     }
     planner_issue = dict(issue)

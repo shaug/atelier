@@ -278,7 +278,7 @@ def test_work_startup_runtime_does_not_expose_finalize_private_helpers() -> None
 
 def test_startup_service_no_eligible_summary_does_not_queue_message() -> None:
     emitted: list[str] = []
-    issues = [{"id": "at-1", "status": "open", "labels": ["at:epic", "at:ready"]}]
+    issues = [{"id": "at-1", "status": "open", "labels": ["at:epic"]}]
     service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),

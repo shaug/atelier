@@ -135,7 +135,7 @@ def _context() -> startup.NextChangesetContext:
 
 
 def _epic() -> dict[str, object]:
-    return {"id": "at-epic", "status": "open", "labels": ["at:epic", "at:ready"]}
+    return {"id": "at-epic", "status": "open", "labels": ["at:epic"]}
 
 
 def test_next_changeset_service_blocks_stacked_dependency_until_blocker_terminal() -> None:
@@ -323,7 +323,7 @@ def test_next_changeset_service_selects_descendant_when_explicit_epic_dependency
     epic_changeset = {
         "id": "at-epic",
         "status": "open",
-        "labels": ["at:epic", "at:ready"],
+        "labels": ["at:epic"],
         "dependencies": ["at-epic.1"],
     }
     blocker = _changeset("at-epic.1", status="open", work_branch="feat/at-epic.1")
@@ -343,7 +343,7 @@ def test_next_changeset_service_selects_child_when_explicit_epic_has_dual_labels
     explicit_epic = {
         "id": "at-epic",
         "status": "open",
-        "labels": ["at:epic", "at:ready"],
+        "labels": ["at:epic"],
     }
     child = _changeset("at-epic.1", status="open", work_branch="feat/at-epic.1")
     service = FakeNextChangesetService(

@@ -270,7 +270,7 @@ def test_run_startup_contract_service_supports_typed_context() -> None:
         show_issue=lambda _issue_id: {
             "id": "at-explicit",
             "status": "open",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
         },
         next_changeset=lambda **_kwargs: {"id": "at-explicit.1"},
     )
@@ -288,7 +288,7 @@ def test_run_startup_contract_supports_explicit_epic() -> None:
         show_issue=lambda _issue_id: {
             "id": "at-explicit",
             "status": "open",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
         },
         next_changeset=lambda **_kwargs: {"id": "at-explicit.1"},
     )
@@ -312,7 +312,7 @@ def test_run_startup_contract_explicit_epic_prioritizes_review_feedback() -> Non
         show_issue=lambda _issue_id: {
             "id": "at-explicit",
             "status": "open",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
         },
         select_review_feedback_changeset=lambda **_kwargs: feedback,
     )
@@ -342,7 +342,7 @@ def test_run_startup_contract_explicit_epic_prioritizes_merge_conflict() -> None
         show_issue=lambda _issue_id: {
             "id": "at-explicit",
             "status": "open",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
         },
         select_conflicted_changeset=lambda **_kwargs: conflict,
         select_review_feedback_changeset=lambda **_kwargs: feedback,
@@ -360,7 +360,7 @@ def test_run_startup_contract_explicit_epic_completed_exits_cleanly() -> None:
         show_issue=lambda _issue_id: {
             "id": "at-explicit",
             "status": "closed",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
         },
         emit=lambda message: emitted.append(message),
     )
@@ -390,7 +390,7 @@ def test_run_startup_contract_explicit_epic_review_pending_exits_cleanly() -> No
             "id": "at-explicit",
             "status": "in_progress",
             "assignee": "atelier/worker/codex/p100",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
         },
         next_changeset=next_changeset,
         emit=lambda message: emitted.append(message),
@@ -416,7 +416,7 @@ def test_run_startup_contract_explicit_epic_no_actionable_reconciles_and_closes(
         show_issue=lambda _issue_id: {
             "id": "at-explicit",
             "status": "open",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
         },
         next_changeset=lambda **_kwargs: None,
         list_descendant_changesets=lambda _parent_id, include_closed: (
@@ -461,7 +461,7 @@ def test_run_startup_contract_explicit_epic_reconciles_stale_in_progress_changes
         show_issue=lambda _issue_id: {
             "id": "at-explicit",
             "status": "open",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
         },
         next_changeset=lambda **_kwargs: (_ for _ in ()).throw(
             AssertionError("next_changeset should not run after explicit merge reconciliation")
@@ -508,7 +508,7 @@ def test_run_startup_contract_explicit_epic_no_actionable_remains_non_terminal()
         show_issue=lambda _issue_id: {
             "id": "at-explicit",
             "status": "open",
-            "labels": ["at:epic", "at:ready"],
+            "labels": ["at:epic"],
         },
         next_changeset=lambda **_kwargs: None,
         list_descendant_changesets=lambda _parent_id, include_closed: (
@@ -590,7 +590,7 @@ def test_run_startup_contract_explicit_epic_assigned_exits_cleanly() -> None:
             "id": "at-explicit",
             "status": "hooked",
             "assignee": "atelier/worker/codex/p777",
-            "labels": ["at:epic", "at:ready", "at:hooked"],
+            "labels": ["at:epic", "at:hooked"],
         },
         stale_family_assigned_epics=stale_family_assigned_epics,
         next_changeset=next_changeset,
@@ -613,7 +613,7 @@ def test_run_startup_contract_reclaims_stale_explicit_epic_assignment() -> None:
         "id": "at-explicit",
         "status": "hooked",
         "assignee": "atelier/worker/codex/p777",
-        "labels": ["at:epic", "at:ready", "at:hooked"],
+        "labels": ["at:epic", "at:hooked"],
     }
 
     result = _run_startup(
@@ -671,7 +671,7 @@ def test_run_startup_contract_prioritizes_review_feedback() -> None:
             {
                 "id": "at-epic",
                 "status": "open",
-                "labels": ["at:epic", "at:ready"],
+                "labels": ["at:epic"],
                 "assignee": "atelier/worker/codex/p100",
             }
         ],
@@ -741,14 +741,14 @@ def test_run_startup_contract_skips_non_claimable_review_feedback_epic() -> None
             {
                 "id": "at-blocked",
                 "status": "open",
-                "labels": ["at:epic", "at:ready"],
+                "labels": ["at:epic"],
                 "assignee": "atelier/worker/codex/p999",
                 "created_at": "2026-02-20T00:00:00Z",
             },
             {
                 "id": "at-claimable",
                 "status": "open",
-                "labels": ["at:epic", "at:ready"],
+                "labels": ["at:epic"],
                 "assignee": None,
                 "created_at": "2026-02-21T00:00:00Z",
             },
@@ -809,7 +809,7 @@ def test_run_startup_contract_selects_stale_reclaimable_review_feedback() -> Non
     stale_issue = {
         "id": "at-stale",
         "status": "open",
-        "labels": ["at:epic", "at:ready"],
+        "labels": ["at:epic"],
         "assignee": "atelier/worker/codex/p099",
         "created_at": "2026-02-20T00:00:00Z",
     }
@@ -848,14 +848,14 @@ def test_run_startup_contract_skips_unclaimable_global_review_feedback() -> None
             {
                 "id": "at-blocked",
                 "status": "open",
-                "labels": ["at:epic", "at:ready"],
+                "labels": ["at:epic"],
                 "assignee": "atelier/planner/codex/p001",
                 "created_at": "2026-02-20T00:00:00Z",
             },
             {
                 "id": "at-claimable",
                 "status": "open",
-                "labels": ["at:epic", "at:ready"],
+                "labels": ["at:epic"],
                 "assignee": None,
                 "created_at": "2026-02-21T00:00:00Z",
             },
@@ -884,7 +884,7 @@ def test_run_startup_contract_claims_global_feedback_standalone_identity() -> No
             {
                 "id": "at-bmu",
                 "status": "open",
-                "labels": ["at:epic", "at:ready"],
+                "labels": ["at:epic"],
                 "type": "task",
             }
             if issue_id == "at-bmu"
@@ -922,14 +922,14 @@ def test_run_startup_contract_auto_reconciles_stale_merged_state_before_selectio
     stale_epic = {
         "id": "at-stale",
         "status": "open",
-        "labels": ["at:epic", "at:ready"],
+        "labels": ["at:epic"],
         "assignee": None,
         "created_at": "2026-02-20T00:00:00Z",
     }
     ready_epic = {
         "id": "at-ready",
         "status": "open",
-        "labels": ["at:epic", "at:ready"],
+        "labels": ["at:epic"],
         "assignee": None,
         "created_at": "2026-02-21T00:00:00Z",
     }
@@ -997,7 +997,7 @@ def test_run_startup_contract_uses_ready_changeset_fallback() -> None:
 
 
 def test_run_startup_contract_selects_auto_epic() -> None:
-    issues = [{"id": "at-auto", "status": "open", "labels": ["at:epic", "at:ready"]}]
+    issues = [{"id": "at-auto", "status": "open", "labels": ["at:epic"]}]
 
     result = _run_startup(
         list_epics=lambda: issues,

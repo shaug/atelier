@@ -11,8 +11,8 @@ def test_is_eligible_epic_status_accepts_core_active_states() -> None:
 
 def test_normalized_labels_handles_non_list_and_none_entries() -> None:
     assert lifecycle.normalized_labels(None) == set()
-    assert lifecycle.normalized_labels(["at:ready", None, " at:hooked "]) == {
-        "at:ready",
+    assert lifecycle.normalized_labels(["at:epic", None, " at:hooked "]) == {
+        "at:epic",
         "at:hooked",
     }
 
@@ -21,7 +21,7 @@ def test_is_active_root_branch_owner_uses_status_and_labels() -> None:
     assert (
         lifecycle.is_active_root_branch_owner(
             status="hooked",
-            labels={"at:epic", "at:ready"},
+            labels={"at:epic"},
         )
         is True
     )
@@ -35,7 +35,7 @@ def test_is_active_root_branch_owner_uses_status_and_labels() -> None:
     assert (
         lifecycle.is_active_root_branch_owner(
             status="closed",
-            labels={"at:epic", "at:ready", "at:hooked"},
+            labels={"at:epic", "at:hooked"},
         )
         is False
     )
@@ -231,11 +231,11 @@ def test_evaluate_runnable_leaf_requires_leaf_status_and_dependencies() -> None:
     assert runnable.reasons == ()
 
 
-def test_is_active_root_branch_owner_rejects_unknown_status_even_with_ready_label() -> None:
+def test_is_active_root_branch_owner_rejects_unknown_status_even_with_epic_label() -> None:
     assert (
         lifecycle.is_active_root_branch_owner(
             status="tombstone",
-            labels={"at:epic", "at:ready"},
+            labels={"at:epic"},
         )
         is False
     )

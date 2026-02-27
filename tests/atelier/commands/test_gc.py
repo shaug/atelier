@@ -478,6 +478,74 @@ def test_gc_remove_at_subtask_label_orders_actions_deterministically() -> None:
     ]
 
 
+def test_gc_remove_at_ready_label_removes_deprecated_label() -> None:
+    issues = [
+        {"id": "at-789", "labels": ["at:ready", "at:epic"], "type": "epic"},
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--label", "at:ready", "--all"]:
+            return issues
+        return []
+
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        actions = gc_cmd._gc_remove_at_ready_label(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+        assert len(actions) == 1
+        assert actions[0].description == "Remove deprecated at:ready label from at-789"
+        actions[0].apply()
+
+    assert calls == [["update", "at-789", "--remove-label", "at:ready"]]
+
+
+def test_gc_remove_at_draft_label_removes_deprecated_label() -> None:
+    issues = [
+        {"id": "at-321", "labels": ["at:draft", "at:epic"], "type": "epic"},
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--label", "at:draft", "--all"]:
+            return issues
+        return []
+
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        actions = gc_cmd._gc_remove_at_draft_label(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+        assert len(actions) == 1
+        assert actions[0].description == "Remove deprecated at:draft label from at-321"
+        actions[0].apply()
+
+    assert calls == [["update", "at-321", "--remove-label", "at:draft"]]
+
+
 def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
     project_root = Path("/project")
     repo_root = Path("/repo")
@@ -1105,6 +1173,14 @@ def test_gc_logs_action_lifecycle_in_dry_run() -> None:
         ),
         patch(
             "atelier.commands.gc._gc_remove_at_subtask_label",
+            return_value=[],
+        ),
+        patch(
+            "atelier.commands.gc._gc_remove_at_ready_label",
+            return_value=[],
+        ),
+        patch(
+            "atelier.commands.gc._gc_remove_at_draft_label",
             return_value=[],
         ),
         patch(

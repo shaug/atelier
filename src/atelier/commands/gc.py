@@ -356,6 +356,80 @@ def _gc_remove_at_subtask_label(
     return actions
 
 
+def _gc_remove_at_ready_label(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    """Remove deprecated at:ready label; readiness is inferred from open status."""
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:ready", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in sorted(issues, key=_issue_sort_key):
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+
+        def _apply_remove(
+            bead_id: str = issue_id,
+        ) -> None:
+            beads.run_bd_command(
+                ["update", bead_id, "--remove-label", "at:ready"],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+
+        actions.append(
+            GcAction(
+                description=f"Remove deprecated at:ready label from {issue_id}",
+                apply=_apply_remove,
+                details=("readiness inferred from open status",),
+            )
+        )
+    return actions
+
+
+def _gc_remove_at_draft_label(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    """Remove deprecated at:draft label; draft state is inferred from deferred status."""
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", "at:draft", "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in sorted(issues, key=_issue_sort_key):
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+
+        def _apply_remove(
+            bead_id: str = issue_id,
+        ) -> None:
+            beads.run_bd_command(
+                ["update", bead_id, "--remove-label", "at:draft"],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+
+        actions.append(
+            GcAction(
+                description=f"Remove deprecated at:draft label from {issue_id}",
+                apply=_apply_remove,
+                details=("draft state inferred from deferred status",),
+            )
+        )
+    return actions
+
+
 def _gc_normalize_executable_ready_labels(
     *,
     beads_root: Path,
@@ -1305,6 +1379,18 @@ def gc(args: object) -> None:
     )
     actions.extend(
         _gc_remove_at_subtask_label(
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
+    actions.extend(
+        _gc_remove_at_ready_label(
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
+    actions.extend(
+        _gc_remove_at_draft_label(
             beads_root=beads_root,
             repo_root=repo_root,
         )

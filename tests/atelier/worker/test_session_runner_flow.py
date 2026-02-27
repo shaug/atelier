@@ -255,7 +255,7 @@ def test_run_worker_once_blocks_on_active_root_branch_conflict() -> None:
                     "id": "at-owner",
                     "status": "hooked",
                     "title": "Owner epic",
-                    "labels": ["at:epic", "at:ready", "at:hooked"],
+                    "labels": ["at:epic", "at:hooked"],
                     "description": "workspace.root_branch: feat/root\n",
                 }
             ]
