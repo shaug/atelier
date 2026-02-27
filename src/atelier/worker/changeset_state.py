@@ -242,12 +242,11 @@ def close_completed_container_changesets(
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id:
             continue
-        labels = issue_labels(issue)
-        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
         if canonical_status != "closed":
             continue
         status = str(issue.get("status") or "").strip().lower()
-        if status in {"closed", "done"}:
+        if status == "closed":
             continue
         if has_open_descendant_changesets(issue_id):
             continue

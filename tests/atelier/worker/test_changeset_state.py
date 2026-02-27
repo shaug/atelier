@@ -50,18 +50,23 @@ def test_close_completed_container_changesets_closes_eligible_nodes() -> None:
     descendants = [
         {
             "id": "at-1.1",
-            "status": "",
+            "status": "done",
             "labels": ["at:changeset", "cs:merged"],
         },
         {
             "id": "at-1.2",
-            "status": "",
+            "status": "done",
             "labels": ["at:changeset", "cs:abandoned"],
         },
         {
             "id": "at-1.3",
             "status": "open",
             "labels": ["at:changeset", "cs:ready"],
+        },
+        {
+            "id": "at-1.4",
+            "status": "",
+            "labels": ["at:changeset", "cs:merged"],
         },
     ]
     with (

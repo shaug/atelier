@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from atelier import config, lifecycle
+from atelier import config, lifecycle, planner_overview
 from atelier.worker import finalize_pipeline, reconcile, selection
 from atelier.worker.session import startup
 
@@ -294,6 +294,9 @@ def test_lifecycle_matrix_claim_selection_startup_and_overview(
 
     # Planner overview uses this predicate for ownership-policy diagnostics.
     assert selection.has_planner_executable_assignee(planner_issue) is executable
+
+    rendered = planner_overview.render_epics([planner_issue], show_drafts=True)
+    assert (f"- {planner_issue['id']} [" in rendered) is executable
 
 
 def test_lifecycle_matrix_finalize_ignores_terminal_labels_when_status_active(monkeypatch) -> None:
