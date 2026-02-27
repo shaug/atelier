@@ -101,6 +101,7 @@ def sequential_stack_integrity_preflight(
     lookup_pr_payload: Callable[..., dict[str, object] | None],
     lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]]
     | None = None,
+    lookup_dependency_issue: Callable[[str], dict[str, object] | None] | None = None,
     reconcile_parent_review_state: Callable[..., None] | None = None,
 ) -> StackIntegrityPreflightResult:
     """Validate sequential parent-child PR integrity for dependency stacks."""
@@ -112,19 +113,22 @@ def sequential_stack_integrity_preflight(
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     issue_cache: dict[str, dict[str, object] | None] = {}
 
-    def lookup_dependency_issue(issue_id: str) -> dict[str, object] | None:
-        if beads_root is None:
-            return None
+    def lookup_dependency_issue_local(issue_id: str) -> dict[str, object] | None:
         if issue_id in issue_cache:
             return issue_cache[issue_id]
-        issues = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
-        issue_cache[issue_id] = issues[0] if issues else None
+        dependency_issue = None
+        if lookup_dependency_issue is not None:
+            dependency_issue = lookup_dependency_issue(issue_id)
+        if dependency_issue is None and beads_root is not None:
+            issues = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
+            dependency_issue = issues[0] if issues else None
+        issue_cache[issue_id] = dependency_issue
         return issue_cache[issue_id]
 
     lineage = dependency_lineage.resolve_parent_lineage(
         issue,
         root_branch=fields.get("changeset.root_branch"),
-        lookup_issue=lookup_dependency_issue,
+        lookup_issue=lookup_dependency_issue_local,
     )
     if not lineage.dependency_ids:
         return StackIntegrityPreflightResult(ok=True)
@@ -156,7 +160,7 @@ def sequential_stack_integrity_preflight(
 
     parent_branch = lineage.dependency_parent_branch
     parent_issue = (
-        lookup_dependency_issue(lineage.dependency_parent_id)
+        lookup_dependency_issue_local(lineage.dependency_parent_id)
         if lineage.dependency_parent_id
         else None
     )
@@ -286,24 +290,28 @@ def changeset_parent_lifecycle_state(
     git_path: str | None,
     beads_root: Path | None = None,
     lookup_pr_payload: Callable[..., dict[str, object] | None],
+    lookup_dependency_issue: Callable[[str], dict[str, object] | None] | None = None,
 ) -> str | None:
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     issue_cache: dict[str, dict[str, object] | None] = {}
 
-    def lookup_dependency_issue(issue_id: str) -> dict[str, object] | None:
-        if beads_root is None:
-            return None
+    def lookup_dependency_issue_local(issue_id: str) -> dict[str, object] | None:
         if issue_id in issue_cache:
             return issue_cache[issue_id]
-        issues = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
-        issue_cache[issue_id] = issues[0] if issues else None
+        dependency_issue = None
+        if lookup_dependency_issue is not None:
+            dependency_issue = lookup_dependency_issue(issue_id)
+        if dependency_issue is None and beads_root is not None:
+            issues = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
+            dependency_issue = issues[0] if issues else None
+        issue_cache[issue_id] = dependency_issue
         return issue_cache[issue_id]
 
     lineage = dependency_lineage.resolve_parent_lineage(
         issue,
         root_branch=fields.get("changeset.root_branch"),
-        lookup_issue=lookup_dependency_issue,
+        lookup_issue=lookup_dependency_issue_local,
     )
     normalized = lineage.effective_parent_branch
     if lineage.dependency_ids and lineage.dependency_parent_branch:
@@ -352,6 +360,9 @@ def changeset_pr_creation_decision(
     branch_pr_strategy: object,
     beads_root: Path | None = None,
     lookup_pr_payload: Callable[..., dict[str, object] | None],
+    lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]]
+    | None = None,
+    lookup_dependency_issue: Callable[[str], dict[str, object] | None] | None = None,
 ) -> pr_strategy.PrStrategyDecision:
     normalized_strategy = pr_strategy.normalize_pr_strategy(branch_pr_strategy)
     preflight = sequential_stack_integrity_preflight(
@@ -362,6 +373,8 @@ def changeset_pr_creation_decision(
         branch_pr_strategy=normalized_strategy,
         beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
+        lookup_pr_payload_diagnostic=lookup_pr_payload_diagnostic,
+        lookup_dependency_issue=lookup_dependency_issue,
     )
     if not preflight.ok:
         reason_suffix = preflight.reason or "dependency-parent-unresolved"
@@ -376,19 +389,22 @@ def changeset_pr_creation_decision(
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     issue_cache: dict[str, dict[str, object] | None] = {}
 
-    def lookup_dependency_issue(issue_id: str) -> dict[str, object] | None:
-        if beads_root is None:
-            return None
+    def lookup_dependency_issue_local(issue_id: str) -> dict[str, object] | None:
         if issue_id in issue_cache:
             return issue_cache[issue_id]
-        issues = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
-        issue_cache[issue_id] = issues[0] if issues else None
+        dependency_issue = None
+        if lookup_dependency_issue is not None:
+            dependency_issue = lookup_dependency_issue(issue_id)
+        if dependency_issue is None and beads_root is not None:
+            issues = beads.run_bd_json(["show", issue_id], beads_root=beads_root, cwd=repo_root)
+            dependency_issue = issues[0] if issues else None
+        issue_cache[issue_id] = dependency_issue
         return issue_cache[issue_id]
 
     lineage = dependency_lineage.resolve_parent_lineage(
         issue,
         root_branch=fields.get("changeset.root_branch"),
-        lookup_issue=lookup_dependency_issue,
+        lookup_issue=lookup_dependency_issue_local,
     )
     if normalized_strategy == "sequential" and lineage.blocked:
         reason_suffix = lineage.blocker_reason or "dependency-parent-unresolved"
@@ -422,6 +438,7 @@ def changeset_pr_creation_decision(
         git_path=git_path,
         beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
+        lookup_dependency_issue=lookup_dependency_issue,
     )
     if normalized_strategy == "sequential" and lineage.dependency_ids and parent_state is None:
         return pr_strategy.PrStrategyDecision(

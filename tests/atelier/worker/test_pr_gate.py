@@ -335,6 +335,31 @@ def test_changeset_pr_creation_decision_blocks_dependency_lineage_when_parent_st
     assert decision.reason == "blocked:dependency-parent-state-unavailable"
 
 
+def test_changeset_pr_creation_decision_ignores_parent_child_dependency_variants() -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-root\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": [
+            {"dependencyType": "parent_child", "issue": {"id": "at-epic"}},
+            "at-epic (open, dependency_type=parent_child)",
+        ],
+    }
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda *_args, **_kwargs: None,
+    )
+
+    assert decision.allow_pr is True
+    assert decision.reason == "no-parent"
+
+
 def test_changeset_pr_creation_decision_uses_dependency_frontier_parent_state(monkeypatch) -> None:
     issue = {
         "description": (
