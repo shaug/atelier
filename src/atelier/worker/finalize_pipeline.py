@@ -314,9 +314,11 @@ def run_finalize_pipeline(
                 terminal_state = "merged"
             else:
                 terminal_state = "abandoned"
-        service.mark_changeset_closed(changeset_id)
-        service.close_completed_container_changesets(epic_id)
-        return service.finalize_epic_if_complete(context=context)
+        return service.finalize_terminal_changeset(
+            context=context,
+            terminal_state=terminal_state,
+            integrated_sha=None,
+        )
     if branch_pr:
         integrity = service.stack_integrity_preflight(issue, context=context)
         if not integrity.ok:

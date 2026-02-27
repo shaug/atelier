@@ -413,7 +413,12 @@ def test_run_finalize_pipeline_treats_closed_status_as_terminal_without_labels(m
 
     service = _FinalizeServiceStub()
     closed: list[str] = []
+    finalized: list[tuple[str, str | None]] = []
     service.mark_changeset_closed_fn = lambda changeset_id: closed.append(changeset_id)
+    service.finalize_terminal_changeset_fn = lambda *, context, terminal_state, integrated_sha: (
+        finalized.append((terminal_state, integrated_sha))
+        or FinalizeResult(continue_running=True, reason="changeset_complete")
+    )
 
     result = finalize_pipeline.run_finalize_pipeline(
         context=_pipeline_context(),
@@ -422,7 +427,8 @@ def test_run_finalize_pipeline_treats_closed_status_as_terminal_without_labels(m
 
     assert result.reason == "changeset_complete"
     assert result.continue_running is True
-    assert closed == ["at-epic.1"]
+    assert closed == []
+    assert finalized == [("abandoned", None)]
 
 
 def test_run_finalize_pipeline_closed_status_checks_integration_before_abandon(monkeypatch) -> None:
@@ -444,8 +450,13 @@ def test_run_finalize_pipeline_closed_status_checks_integration_before_abandon(m
         "abc1234",
     )
     closed: list[str] = []
+    finalized: list[tuple[str, str | None]] = []
     updates: list[tuple[str, str]] = []
     service.mark_changeset_closed_fn = lambda changeset_id: closed.append(changeset_id)
+    service.finalize_terminal_changeset_fn = lambda *, context, terminal_state, integrated_sha: (
+        finalized.append((terminal_state, integrated_sha))
+        or FinalizeResult(continue_running=True, reason="changeset_complete")
+    )
     monkeypatch.setattr(
         finalize_pipeline.beads,
         "update_changeset_integrated_sha",
@@ -461,7 +472,8 @@ def test_run_finalize_pipeline_closed_status_checks_integration_before_abandon(m
 
     assert result.reason == "changeset_complete"
     assert result.continue_running is True
-    assert closed == ["at-epic.1"]
+    assert closed == []
+    assert finalized == [("merged", None)]
     assert updates == [("at-epic.1", "abc1234")]
 
 
@@ -483,6 +495,11 @@ def test_run_finalize_pipeline_updates_missing_integrated_sha(monkeypatch) -> No
         True,
         "abc1234",
     )
+    finalized: list[tuple[str, str | None]] = []
+    service.finalize_terminal_changeset_fn = lambda *, context, terminal_state, integrated_sha: (
+        finalized.append((terminal_state, integrated_sha))
+        or FinalizeResult(continue_running=True, reason="changeset_complete")
+    )
 
     updates: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -500,6 +517,7 @@ def test_run_finalize_pipeline_updates_missing_integrated_sha(monkeypatch) -> No
 
     assert result.reason == "changeset_complete"
     assert result.continue_running is True
+    assert finalized == [("merged", None)]
     assert updates == [("at-epic.1", "abc1234")]
 
 
@@ -523,6 +541,11 @@ def test_run_finalize_pipeline_preserves_recorded_integrated_sha(monkeypatch) ->
         True,
         "2222222",
     )
+    finalized: list[tuple[str, str | None]] = []
+    service.finalize_terminal_changeset_fn = lambda *, context, terminal_state, integrated_sha: (
+        finalized.append((terminal_state, integrated_sha))
+        or FinalizeResult(continue_running=True, reason="changeset_complete")
+    )
 
     updates: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -543,6 +566,7 @@ def test_run_finalize_pipeline_preserves_recorded_integrated_sha(monkeypatch) ->
 
     assert result.reason == "changeset_complete"
     assert result.continue_running is True
+    assert finalized == [("merged", None)]
     assert updates == []
     assert warnings == [
         "changeset=at-epic.1 finalize integrated SHA mismatch "
