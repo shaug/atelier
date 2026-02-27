@@ -214,14 +214,17 @@ def test_select_epic_from_ready_changesets_uses_epic_for_child_issue() -> None:
     assert selected == "at-epic"
 
 
-def test_select_epic_from_ready_changesets_uses_graph_parent_for_non_dotted_child_id() -> None:
+@pytest.mark.parametrize("parent_value", [{"id": "at-epic"}, "at-epic"])
+def test_select_epic_from_ready_changesets_uses_graph_parent_for_non_dotted_child_id(
+    parent_value: object,
+) -> None:
     issues = [
         {"id": "at-epic", "status": "open", "labels": ["at:epic"], "assignee": None},
     ]
     ready_changesets = [
         {
             "id": "cs-ready-1",
-            "parent": {"id": "at-epic"},
+            "parent": parent_value,
             "created_at": "2026-02-20T00:00:00+00:00",
         },
     ]
