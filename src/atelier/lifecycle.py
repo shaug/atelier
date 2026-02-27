@@ -245,6 +245,34 @@ def infer_work_role(
     )
 
 
+def is_executable_epic_identity(
+    *,
+    labels: set[str],
+    issue_type: object,
+    parent_id: object,
+) -> bool:
+    """Return whether an issue has executable epic identity.
+
+    Epic execution identity is strict: top-level work beads must also carry the
+    ``at:epic`` label.
+
+    Args:
+        labels: Normalized issue labels.
+        issue_type: Raw issue type value.
+        parent_id: Raw parent issue identifier.
+
+    Returns:
+        ``True`` when the issue is top-level work and includes ``at:epic``.
+    """
+    role = infer_work_role(
+        labels=labels,
+        issue_type=issue_type,
+        parent_id=parent_id,
+        has_work_children=False,
+    )
+    return role.is_epic and "at:epic" in labels
+
+
 def evaluate_runnable_leaf(
     *,
     status: object,
@@ -322,6 +350,8 @@ def evaluate_epic_claimability(
         reasons.append("not-work-bead")
     if not role.is_epic:
         reasons.append("not-top-level-work")
+    if "at:epic" not in labels:
+        reasons.append("missing-at:epic-label")
     if canonical_status not in ACTIVE_LIFECYCLE_STATUSES:
         reasons.append(f"status={canonical_status or 'missing'}")
     return EpicClaimEvaluation(

@@ -237,7 +237,12 @@ def test_next_changeset_service_accepts_issue_type_leaf_without_changeset_label(
     }
     service = FakeNextChangesetService(
         issues_by_id={
-            "at-epic": {"id": "at-epic", "status": "open", "issue_type": "epic", "labels": []},
+            "at-epic": {
+                "id": "at-epic",
+                "status": "open",
+                "issue_type": "epic",
+                "labels": ["at:epic"],
+            },
             issue_type_changeset["id"]: issue_type_changeset,
         },
         ready_changesets=[],

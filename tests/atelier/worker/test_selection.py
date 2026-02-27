@@ -33,7 +33,7 @@ def test_filter_epics_uses_status_contract_for_unassigned_and_assigned() -> None
     assert [item["id"] for item in assigned] == ["at-3"]
 
 
-def test_filter_epics_accepts_issue_type_identity_without_labels() -> None:
+def test_filter_epics_requires_at_epic_label_for_executable_identity() -> None:
     issues = [
         {
             "id": "at-typed-epic",
@@ -51,7 +51,32 @@ def test_filter_epics_accepts_issue_type_identity_without_labels() -> None:
         skip_draft=True,
     )
 
-    assert [item["id"] for item in ready] == ["at-typed-epic"]
+    assert ready == []
+
+
+def test_has_executable_identity_requires_at_epic_label() -> None:
+    assert (
+        selection.has_executable_identity(
+            {
+                "id": "at-epic",
+                "status": "open",
+                "issue_type": "epic",
+                "labels": ["at:epic"],
+            }
+        )
+        is True
+    )
+    assert (
+        selection.has_executable_identity(
+            {
+                "id": "at-unlabeled",
+                "status": "open",
+                "issue_type": "epic",
+                "labels": [],
+            }
+        )
+        is False
+    )
 
 
 def test_sort_by_created_at_orders_oldest_first() -> None:
@@ -306,6 +331,21 @@ def test_select_epic_from_ready_changesets_skips_planner_owned_epic() -> None:
         issues=issues,
         ready_changesets=ready_changesets,
         is_actionable=lambda issue_id: issue_id == "at-epic",
+    )
+
+    assert selected is None
+
+
+def test_select_epic_from_ready_changesets_skips_unlabeled_top_level_work() -> None:
+    issues: list[dict[str, object]] = []
+    ready_changesets = [
+        {"id": "at-unlabeled", "status": "open", "issue_type": "epic", "labels": []},
+    ]
+
+    selected = selection.select_epic_from_ready_changesets(
+        issues=issues,
+        ready_changesets=ready_changesets,
+        is_actionable=lambda issue_id: issue_id == "at-unlabeled",
     )
 
     assert selected is None

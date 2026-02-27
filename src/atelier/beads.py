@@ -3475,7 +3475,11 @@ def claim_epic(
         die(f"epic not found: {epic_id}")
     issue = issues[0]
     claimability = _evaluate_epic_claimability(issue)
-    is_executable_work = claimability.role.is_epic
+    is_executable_work = lifecycle.is_executable_epic_identity(
+        labels=_issue_labels(issue),
+        issue_type=lifecycle.issue_payload_type(issue),
+        parent_id=_issue_parent_id(issue),
+    )
     if is_executable_work and not claimability.claimable:
         detail = ", ".join(claimability.reasons)
         die(
