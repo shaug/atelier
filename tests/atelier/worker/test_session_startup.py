@@ -298,6 +298,29 @@ def test_run_startup_contract_supports_explicit_epic() -> None:
     assert result.reason == "explicit_epic"
 
 
+def test_run_startup_contract_rejects_explicit_issue_without_epic_label() -> None:
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "open",
+            "issue_type": "epic",
+            "labels": [],
+        },
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_not_executable"
+    assert result.epic_id == "at-explicit"
+    assert emitted == [
+        "Explicit epic at-explicit is not executable work; run without an epic id "
+        "to select a ready epic."
+    ]
+
+
 def test_run_startup_contract_explicit_epic_prioritizes_review_feedback() -> None:
     feedback = ReviewFeedbackSelection(
         epic_id="at-explicit",
@@ -985,7 +1008,7 @@ def test_run_startup_contract_uses_ready_changeset_fallback() -> None:
             {
                 "id": "at-ready",
                 "status": "open",
-                "labels": [],
+                "labels": ["at:epic"],
                 "type": "task",
             }
         ],
@@ -994,6 +1017,25 @@ def test_run_startup_contract_uses_ready_changeset_fallback() -> None:
 
     assert result.reason == "selected_ready_changeset"
     assert result.epic_id == "at-ready"
+
+
+def test_run_startup_contract_skips_unlabeled_ready_changeset_fallback() -> None:
+    result = _run_startup(
+        list_epics=lambda: [],
+        mode="prompt",
+        select_epic_prompt=lambda **_kwargs: None,
+        ready_changesets_global=lambda: [
+            {
+                "id": "at-unlabeled",
+                "status": "open",
+                "labels": [],
+                "type": "task",
+            }
+        ],
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "no_eligible_epics"
 
 
 def test_run_startup_contract_selects_auto_epic() -> None:
