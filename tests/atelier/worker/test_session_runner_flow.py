@@ -249,7 +249,7 @@ def test_run_worker_once_blocks_on_active_root_branch_conflict() -> None:
     deps.infra.beads.claim_epic = Mock(return_value={"id": "at-epic", "title": "Epic"})
 
     def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
-        if args == ["list", "--label", "at:epic", "--all"]:
+        if args == ["list", "--label", "at:epic", "--all", "--limit", "0"]:
             return [
                 {
                     "id": "at-owner",
