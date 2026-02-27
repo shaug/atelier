@@ -60,7 +60,11 @@ def has_planner_executable_assignee(issue: dict[str, object]) -> bool:
 
 def has_executable_identity(issue: dict[str, object]) -> bool:
     """Return whether an issue is top-level executable work identity."""
-    return evaluate_epic_claimability(issue).role.is_epic
+    return lifecycle.is_executable_epic_identity(
+        labels=issue_labels(issue),
+        issue_type=issue_type(issue),
+        parent_id=issue_parent_id(issue),
+    )
 
 
 def planner_owned_executable_issues(issues: list[dict[str, object]]) -> list[dict[str, object]]:

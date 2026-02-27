@@ -239,3 +239,41 @@ def test_is_active_root_branch_owner_rejects_unknown_status_even_with_epic_label
         )
         is False
     )
+
+
+def test_is_executable_epic_identity_requires_epic_label() -> None:
+    assert (
+        lifecycle.is_executable_epic_identity(
+            labels={"at:epic"},
+            issue_type="epic",
+            parent_id=None,
+        )
+        is True
+    )
+    assert (
+        lifecycle.is_executable_epic_identity(
+            labels=set(),
+            issue_type="epic",
+            parent_id=None,
+        )
+        is False
+    )
+
+
+def test_evaluate_epic_claimability_requires_epic_label() -> None:
+    unlabeled = lifecycle.evaluate_epic_claimability(
+        status="open",
+        labels=set(),
+        issue_type="epic",
+        parent_id=None,
+    )
+    assert unlabeled.claimable is False
+    assert "missing-at:epic-label" in unlabeled.reasons
+
+    labeled = lifecycle.evaluate_epic_claimability(
+        status="open",
+        labels={"at:epic"},
+        issue_type="epic",
+        parent_id=None,
+    )
+    assert labeled.claimable is True
