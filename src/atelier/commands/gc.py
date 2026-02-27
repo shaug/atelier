@@ -246,7 +246,10 @@ def _normalize_executable_ready_labels_for_status(
             desired.add(label)
             reasons.append(f"add {label}: {reason}")
 
-    _drop("at:draft", "draft readiness is now implied by missing at:ready")
+    _drop(
+        "at:draft",
+        "draft readiness is now implied by deferred status, not an at:draft label",
+    )
     if not active:
         if status in {"deferred", "blocked", "closed"}:
             _drop(
