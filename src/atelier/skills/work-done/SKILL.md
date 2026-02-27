@@ -16,7 +16,8 @@ description: >-
 
 1. Verify all changesets are complete:
    - `bd list --parent <epic_id> --label at:changeset`
-   - Ensure every changeset is `cs:merged` or `cs:abandoned`.
+   - Ensure every changeset has terminal status (`closed`) with terminal PR
+     signal (`merged` or `closed`).
 1. Close the epic and clear the hook through the deterministic helper:
    - `python src/atelier/skills/work-done/scripts/close_epic.py --epic-id <epic_id> --agent-bead-id <agent_bead_id>`
 1. For explicit direct-close flows (skip readiness checks), use:

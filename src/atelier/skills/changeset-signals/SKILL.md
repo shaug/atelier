@@ -35,7 +35,8 @@ description: >-
    - `merge_state_status=DIRTY` (or equivalent conflict signal): rebase/merge
      default branch, resolve conflicts, push, then refresh signals.
    - `merged`: close the changeset bead.
-   - `closed`: mark the changeset as `cs:abandoned`.
+   - `closed`: mark the changeset as abandoned by setting terminal status/PR
+     metadata (`status=closed`, `pr_state=closed`).
 
 ## Verification
 
