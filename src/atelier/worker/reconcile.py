@@ -26,9 +26,7 @@ def _normalized_labels(issue: dict[str, object]) -> set[str]:
 
 
 def _canonical_changeset_status(issue: dict[str, object]) -> str | None:
-    return lifecycle.canonical_lifecycle_status(
-        issue.get("status"), labels=_normalized_labels(issue)
-    )
+    return lifecycle.canonical_lifecycle_status(issue.get("status"))
 
 
 def _description_fields(issue: dict[str, object]) -> dict[str, str]:
@@ -106,18 +104,6 @@ def _reopen_changeset_for_review(
             changeset_id,
             "--status",
             "in_progress",
-            "--remove-label",
-            "cs:ready",
-            "--remove-label",
-            "cs:planned",
-            "--remove-label",
-            "cs:in_progress",
-            "--remove-label",
-            "cs:blocked",
-            "--remove-label",
-            "cs:merged",
-            "--remove-label",
-            "cs:abandoned",
             "--append-notes",
             (
                 "reconcile_reopened_for_review: "
@@ -412,9 +398,6 @@ def reconcile_blocked_merged_changesets(
         if integrated:
             dependency_finalized_cache[issue_id] = True
             return True
-        if "cs:abandoned" in labels:
-            dependency_finalized_cache[issue_id] = True
-            return True
         stored_state = _stored_review_state(issue)
         if stored_state in lifecycle.ACTIVE_REVIEW_STATES or stored_state in {"pushed", "merged"}:
             dependency_finalized_cache[issue_id] = False
@@ -474,34 +457,11 @@ def reconcile_blocked_merged_changesets(
                     )
                 continue
             if candidate.status in {"closed", "done"}:
-                if "cs:merged" not in issue_labels(candidate.issue):
-                    beads.run_bd_command(
-                        [
-                            "update",
-                            changeset_id,
-                            "--add-label",
-                            "cs:merged",
-                            "--remove-label",
-                            "cs:abandoned",
-                            "--remove-label",
-                            "cs:ready",
-                            "--remove-label",
-                            "cs:planned",
-                            "--remove-label",
-                            "cs:in_progress",
-                            "--remove-label",
-                            "cs:blocked",
-                            "--status",
-                            "closed",
-                        ],
-                        beads_root=beads_root,
-                        cwd=repo_root,
-                    )
-                    beads.reconcile_closed_issue_exported_github_tickets(
-                        changeset_id,
-                        beads_root=beads_root,
-                        cwd=repo_root,
-                    )
+                beads.reconcile_closed_issue_exported_github_tickets(
+                    changeset_id,
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                )
                 if candidate.integrated_sha:
                     beads.update_changeset_integrated_sha(
                         changeset_id,

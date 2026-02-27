@@ -70,8 +70,9 @@ description: >-
      integrate or merge.
    - If the integrated SHA cannot be determined, send `NEEDS-DECISION` and stop.
 1. Enforce lifecycle protocol:
-   - Use canonical state labels only:
-     `cs:planned|cs:ready|cs:in_progress|cs:blocked|cs:merged|cs:abandoned`.
+   - Use canonical lifecycle statuses:
+     `deferred|open|in_progress|blocked|closed`.
+   - Treat `at:ready` and `cs:*` as non-authoritative metadata only.
    - For PR projects:
      - `pushed` without PR is only acceptable when PR strategy gates PR
        creation.

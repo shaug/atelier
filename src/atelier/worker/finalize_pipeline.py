@@ -229,14 +229,9 @@ def run_finalize_pipeline(
         return FinalizeResult(continue_running=False, reason="changeset_not_found")
     issue = issues[0]
     labels = service.issue_labels(issue)
-    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
-    terminal_label_state: str | None = None
-    if "cs:merged" in labels:
-        terminal_label_state = "merged"
-    elif "cs:abandoned" in labels:
-        terminal_label_state = "abandoned"
+    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
     review_state = _stored_review_state(issue)
-    terminal_state = terminal_label_state
+    terminal_state: str | None = None
     if terminal_state is None and canonical_status == "closed":
         if review_state == "merged":
             terminal_state = "merged"
@@ -269,7 +264,7 @@ def run_finalize_pipeline(
                 for descendant in descendants
                 if isinstance((issue_id := descendant.get("id")), str)
                 and issue_id
-                and "cs:planned" in service.issue_labels(descendant)
+                and lifecycle.canonical_lifecycle_status(descendant.get("status")) == "deferred"
             }
             if planned_ids and service.has_blocking_messages(
                 thread_ids={changeset_id, epic_id, *planned_ids},

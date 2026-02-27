@@ -4,7 +4,7 @@ from unittest.mock import patch
 from atelier.worker import changeset_state
 
 
-def test_find_invalid_changeset_labels_flags_subtask_and_invalid_cs_labels() -> None:
+def test_find_invalid_changeset_labels_flags_subtask_only() -> None:
     by_parent: dict[str, list[dict[str, object]]] = {
         "at-epic": [
             {"id": "at-epic.1", "labels": ["at:subtask", "cs:ready"]},
@@ -27,7 +27,7 @@ def test_find_invalid_changeset_labels_flags_subtask_and_invalid_cs_labels() -> 
             valid_changeset_state_labels={"cs:ready", "cs:planned"},
         )
 
-    assert invalid == ["at-epic.1", "at-epic.2"]
+    assert invalid == ["at-epic.1"]
 
 
 def test_mark_changeset_blocked_adds_blocked_state_and_note() -> None:
@@ -84,10 +84,10 @@ def test_close_completed_container_changesets_closes_eligible_nodes() -> None:
     )
 
 
-def test_promote_planned_descendant_changesets_promotes_planned_only() -> None:
+def test_promote_planned_descendant_changesets_promotes_deferred_only() -> None:
     descendants = [
-        {"id": "at-1.1", "labels": ["at:changeset", "cs:planned"]},
-        {"id": "at-1.2", "labels": ["at:changeset", "cs:ready"]},
+        {"id": "at-1.1", "status": "deferred", "labels": ["at:changeset", "cs:planned"]},
+        {"id": "at-1.2", "status": "open", "labels": ["at:changeset", "cs:ready"]},
     ]
     with (
         patch(

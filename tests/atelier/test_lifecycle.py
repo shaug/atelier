@@ -96,7 +96,7 @@ def test_in_review_candidate_prefers_live_state() -> None:
     )
 
 
-def test_in_review_candidate_rejects_non_changesets_and_terminal_items() -> None:
+def test_in_review_candidate_rejects_non_changesets_and_closed_items() -> None:
     assert (
         lifecycle.is_changeset_in_review_candidate(
             labels={"at:epic"},
@@ -113,7 +113,16 @@ def test_in_review_candidate_rejects_non_changesets_and_terminal_items() -> None
             live_state=None,
             stored_review_state="in-review",
         )
-        is False
+        is True
+    )
+    assert (
+        lifecycle.is_changeset_in_review_candidate(
+            labels={"at:changeset"},
+            status="open",
+            live_state=None,
+            stored_review_state="in-review",
+        )
+        is True
     )
     assert (
         lifecycle.is_changeset_in_review_candidate(

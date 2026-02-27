@@ -46,13 +46,9 @@ side effects inside the user's repo.
 - **Worktree**: A per-epic git worktree checkout stored under the data
   directory. Worktree mappings live under `worktrees/.meta/`.
 - **Worktree path**: Stored as `worktree_path` in epic metadata once created.
-- **Changeset labels**: Changesets use `cs:planned`, `cs:ready`,
-  `cs:in_progress`, `cs:merged`, and `cs:abandoned` to capture non-derivable
-  lifecycle state.
-  - `cs:ready` means the changeset definition is complete and worker-executable
-    when dependencies are satisfied.
-  - Dependency/unblock readiness is determined by `bd ready`, not by
-    transitioning labels at dependency completion time.
+- **Lifecycle authority**: Execution lifecycle is status-native
+  (`deferred|open|in_progress|blocked|closed`) and graph-native (leaf work +
+  dependency closure). `at:ready` and `cs:*` labels are not lifecycle gates.
 - **External tickets**: Linked via `external_tickets` in bead descriptions with
   provider labels like `ext:github`.
 

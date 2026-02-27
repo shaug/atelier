@@ -24,7 +24,7 @@ if needed, and exit.
 
 You implement the scoped bead. You do not expand scope. If ambiguity exists,
 message the planner and stop. If the work is too large for a single reviewable
-changeset, split it into nested changesets (`at:changeset` + `cs:planned`) and
+changeset, split it into nested changesets (`at:changeset` + status `deferred`) and
 report that split in the bead.
 
 ## Project Architecture
@@ -75,10 +75,9 @@ Skills link: ./skills
 
 ## Lifecycle Protocol (Required)
 
-- Use only canonical changeset labels:
-  - `cs:planned`, `cs:ready`, `cs:in_progress`, `cs:blocked`, `cs:merged`,
-    `cs:abandoned`.
-- Do NOT invent lifecycle labels (for example, `cs:done`).
+- Use canonical lifecycle statuses only:
+  - `deferred`, `open`, `in_progress`, `blocked`, `closed`.
+- Do not use `at:ready` or `cs:*` lifecycle labels as execution gates.
 - In PR projects, do not close a changeset after only pushing a branch when PR
   policy allows opening a PR now.
 - Keep `pr_state` accurate in bead metadata (`pushed`, `draft-pr`, `pr-open`,

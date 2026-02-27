@@ -25,7 +25,7 @@ description: >-
 1. The script enforces worker liveness checks:
    - active worker recipient: create an `at:message` bead assigned to `to`
    - inactive worker recipient: create an unassigned executable reroute epic
-     (`at:epic` + `at:changeset` + `cs:ready`) with routing diagnostics
+     (`at:epic` + `at:changeset`, status `open`) with routing diagnostics
 
 ## Verification
 

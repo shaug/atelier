@@ -32,6 +32,7 @@ def find_invalid_changeset_labels(
     repo_root: Path,
     valid_changeset_state_labels: set[str],
 ) -> list[str]:
+    del valid_changeset_state_labels
     invalid: list[str] = []
     seen: set[str] = set()
     queue = [root_id]
@@ -47,16 +48,7 @@ def find_invalid_changeset_labels(
             seen.add(issue_id)
             queue.append(issue_id)
             labels = issue_labels(issue)
-            has_cs_label = any(label.startswith("cs:") for label in labels)
-            invalid_cs_labels = {
-                label
-                for label in labels
-                if label.startswith("cs:") and label not in valid_changeset_state_labels
-            }
-            if "at:subtask" in labels or (has_cs_label and "at:changeset" not in labels):
-                invalid.append(issue_id)
-                continue
-            if invalid_cs_labels:
+            if "at:subtask" in labels:
                 invalid.append(issue_id)
     return invalid
 
@@ -278,17 +270,13 @@ def promote_planned_descendant_changesets(
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id:
             continue
-        labels = issue_labels(issue)
-        if "cs:planned" not in labels:
+        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
+        if canonical_status != "deferred":
             continue
         beads.run_bd_command(
             [
                 "update",
                 issue_id,
-                "--add-label",
-                "cs:ready",
-                "--remove-label",
-                "cs:planned",
                 "--status",
                 "open",
             ],

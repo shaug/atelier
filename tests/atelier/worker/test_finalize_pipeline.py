@@ -324,6 +324,7 @@ def test_run_finalize_pipeline_blocks_on_invalid_labels(monkeypatch) -> None:
 def test_run_finalize_pipeline_waiting_on_review_returns_pending(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
+        "status": "in_progress",
         "labels": ["at:changeset", "cs:in_progress"],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
@@ -412,11 +413,12 @@ def test_run_finalize_pipeline_blocks_on_stack_integrity_preflight(monkeypatch) 
     assert notifications == ["NEEDS-DECISION: Stack integrity failed (at-epic.1)"]
 
 
-def test_run_finalize_pipeline_keeps_terminal_labeled_changeset_open_while_pr_active(
+def test_run_finalize_pipeline_keeps_closed_changeset_open_while_pr_active(
     monkeypatch,
 ) -> None:
     issue = {
         "id": "at-epic.1",
+        "status": "closed",
         "labels": ["at:changeset", "cs:merged"],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
@@ -514,6 +516,7 @@ def test_run_finalize_pipeline_closed_status_checks_integration_before_abandon(m
 def test_run_finalize_pipeline_updates_missing_integrated_sha(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
+        "status": "closed",
         "labels": ["at:changeset", "cs:merged"],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
@@ -551,6 +554,7 @@ def test_run_finalize_pipeline_updates_missing_integrated_sha(monkeypatch) -> No
 def test_run_finalize_pipeline_preserves_recorded_integrated_sha(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
+        "status": "closed",
         "labels": ["at:changeset", "cs:merged"],
         "description": (
             "changeset.work_branch: feat/root-at-epic.1\nchangeset.integrated_sha: 1111111\n"

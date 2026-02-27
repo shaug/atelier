@@ -1657,6 +1657,7 @@ def test_claim_epic_allows_expected_takeover() -> None:
 def test_claim_epic_blocks_planner_owned_executable_work() -> None:
     issue = {
         "id": "atelier-9",
+        "status": "open",
         "labels": ["at:epic", "at:changeset", "at:ready"],
         "assignee": "atelier/planner/codex/p111",
     }
@@ -1678,6 +1679,7 @@ def test_claim_epic_blocks_planner_owned_executable_work() -> None:
 def test_claim_epic_rejects_planner_claimant_for_executable_work() -> None:
     issue = {
         "id": "atelier-9",
+        "status": "open",
         "labels": ["at:epic", "at:ready"],
         "assignee": None,
     }
@@ -1699,9 +1701,15 @@ def test_claim_epic_rejects_planner_claimant_for_executable_work() -> None:
 
 
 def test_claim_epic_backfills_epic_label_for_standalone_changeset() -> None:
-    issue = {"id": "at-legacy", "labels": ["at:changeset", "at:ready"], "assignee": None}
+    issue = {
+        "id": "at-legacy",
+        "status": "open",
+        "labels": ["at:changeset", "at:ready"],
+        "assignee": None,
+    }
     updated = {
         "id": "at-legacy",
+        "status": "in_progress",
         "labels": ["at:changeset", "at:epic", "at:hooked", "at:ready"],
         "assignee": "agent",
     }
@@ -1752,7 +1760,12 @@ def test_claim_epic_rejects_executable_work_without_active_status() -> None:
 
 
 def test_claim_epic_rejects_deferred_executable_work() -> None:
-    issue = {"id": "at-legacy", "labels": ["at:epic", "at:draft"], "assignee": None}
+    issue = {
+        "id": "at-legacy",
+        "status": "deferred",
+        "labels": ["at:epic", "at:draft"],
+        "assignee": None,
+    }
 
     with (
         patch("atelier.beads.run_bd_json", return_value=[issue]),

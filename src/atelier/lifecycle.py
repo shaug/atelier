@@ -7,9 +7,6 @@ Canonical lifecycle semantics are defined by graph shape plus issue status:
 - changeset role is inferred from leaf work nodes (no work children)
 - top-level leaf work nodes are both epic and changeset
 - runnable work requires leaf role, active status, and satisfied dependencies
-
-Legacy labels remain transitional compatibility hints for stores that still
-carry `at:ready`/`cs:*` fields while migration is in progress.
 """
 
 from __future__ import annotations
@@ -48,7 +45,6 @@ _LEGACY_LABEL_STATUS_HINTS: tuple[tuple[str, str], ...] = (
     ("cs:ready", "open"),
     ("at:ready", "open"),
 )
-_ROOT_BRANCH_ACTIVE_LABELS = {"at:hooked", "cs:in_progress"}
 
 
 @dataclass(frozen=True)
@@ -302,7 +298,7 @@ def evaluate_runnable_leaf(
         parent_id=parent_id,
         has_work_children=has_work_children,
     )
-    canonical_status = canonical_lifecycle_status(status, labels=labels)
+    canonical_status = canonical_lifecycle_status(status)
     reasons: list[str] = []
     if not role.is_work:
         reasons.append("not-work-bead")
@@ -344,7 +340,7 @@ def evaluate_epic_claimability(
         parent_id=parent_id,
         has_work_children=False,
     )
-    canonical_status = canonical_lifecycle_status(status, labels=labels)
+    canonical_status = canonical_lifecycle_status(status)
     reasons: list[str] = []
     if not role.is_work:
         reasons.append("not-work-bead")
@@ -389,16 +385,10 @@ def is_active_root_branch_owner(*, status: object, labels: set[str]) -> bool:
     Returns:
         ``True`` when branch ownership should still block reuse.
     """
-    if TERMINAL_CHANGESET_LABELS.intersection(labels):
-        return False
-    canonical_status = canonical_lifecycle_status(status, labels=labels)
+    canonical_status = canonical_lifecycle_status(status)
     if canonical_status == "closed":
         return False
     if canonical_status in {"deferred", "open", "in_progress", "blocked"}:
-        return True
-    if _ROOT_BRANCH_ACTIVE_LABELS.intersection(labels):
-        return True
-    if canonical_status is None and "at:ready" in labels:
         return True
     return False
 
@@ -413,7 +403,7 @@ def is_changeset_in_progress(status: object, labels: set[str]) -> bool:
     Returns:
         ``True`` when canonical lifecycle status is ``in_progress``.
     """
-    return canonical_lifecycle_status(status, labels=labels) == "in_progress"
+    return canonical_lifecycle_status(status) == "in_progress"
 
 
 def is_changeset_ready(status: object, labels: set[str]) -> bool:
@@ -428,7 +418,7 @@ def is_changeset_ready(status: object, labels: set[str]) -> bool:
     """
     if "at:changeset" not in labels:
         return False
-    canonical_status = canonical_lifecycle_status(status, labels=labels)
+    canonical_status = canonical_lifecycle_status(status)
     return canonical_status in ACTIVE_LIFECYCLE_STATUSES
 
 
@@ -452,9 +442,7 @@ def is_changeset_in_review_candidate(
     """
     if "at:changeset" not in labels:
         return False
-    if TERMINAL_CHANGESET_LABELS.intersection(labels):
-        return False
-    if is_closed_status(status, labels=labels):
+    if is_closed_status(status):
         return False
     if live_state is not None:
         return live_state in ACTIVE_REVIEW_STATES
