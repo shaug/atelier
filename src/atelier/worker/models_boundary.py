@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 _DEPENDENCY_ID_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\b")
 _PARENT_CHILD_PATTERN = re.compile(r"parent[\s_-]*child", re.IGNORECASE)
-_PARENT_CHILD_KEYS = ("relation", "dependency_type", "dependencyType", "type")
+_PARENT_CHILD_KEY = "dependency_type"
 _DEPENDENCY_ID_KEYS = ("id", "depends_on_id", "dependsOnId")
 _DEPENDENCY_REF_KEYS = ("issue", "depends_on", "dependsOn")
 
@@ -23,10 +23,8 @@ def _clean_str(value: object) -> str | None:
 
 def _is_parent_child_relation(value: object) -> bool:
     if isinstance(value, dict):
-        return any(
-            isinstance(relation, str) and bool(_PARENT_CHILD_PATTERN.search(relation.strip()))
-            for relation in (value.get(key) for key in _PARENT_CHILD_KEYS)
-        )
+        relation = value.get(_PARENT_CHILD_KEY)
+        return isinstance(relation, str) and bool(_PARENT_CHILD_PATTERN.search(relation.strip()))
     return isinstance(value, str) and bool(_PARENT_CHILD_PATTERN.search(value))
 
 

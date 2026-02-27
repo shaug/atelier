@@ -341,7 +341,7 @@ def test_changeset_pr_creation_decision_ignores_parent_child_dependency_variants
             "changeset.parent_branch: feature-root\nchangeset.root_branch: feature-root\n"
         ),
         "dependencies": [
-            {"dependencyType": "parent_child", "issue": {"id": "at-epic"}},
+            {"dependency_type": "parent_child", "issue": {"id": "at-epic"}},
             "at-epic (open, dependency_type=parent_child)",
         ],
     }

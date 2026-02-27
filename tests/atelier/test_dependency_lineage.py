@@ -33,7 +33,7 @@ def test_resolve_parent_lineage_uses_parent_child_hint_to_break_frontier_ties() 
             "changeset.root_branch: feat/at-kid\nchangeset.parent_branch: feat/at-kid\n"
         ),
         "dependencies": [
-            {"relation": "parent-child", "id": "at-kid.2"},
+            {"dependency_type": "parent-child", "id": "at-kid.2"},
             "at-kid.1",
             "at-kid.2",
         ],
@@ -51,13 +51,13 @@ def test_resolve_parent_lineage_uses_parent_child_hint_to_break_frontier_ties() 
     assert resolution.effective_parent_branch == "feat/at-kid.2"
 
 
-def test_resolve_parent_lineage_parent_child_hint_supports_dependency_type_variants() -> None:
+def test_resolve_parent_lineage_parent_child_hint_supports_dependency_type() -> None:
     issue = {
         "description": (
             "changeset.root_branch: feat/at-kid\nchangeset.parent_branch: feat/at-kid\n"
         ),
         "dependencies": [
-            {"dependencyType": "parent_child", "issue": {"id": "at-kid.2"}},
+            {"dependency_type": "parent_child", "issue": {"id": "at-kid.2"}},
             "at-kid.1",
             "at-kid.2",
         ],
