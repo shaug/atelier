@@ -172,6 +172,12 @@ def gc(args: object) -> None:
             repo_root=repo_root,
         )
     )
+    actions.extend(
+        gc_labels.collect_backfill_epic_identity_labels(
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
     for label, detail in [
         ("at:changeset", "changeset role inferred from graph"),
         ("at:subtask", "subtask role inferred from graph"),

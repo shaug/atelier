@@ -11,7 +11,7 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .. import beads, config, git, messages, pr_strategy, prs, worktrees
+from .. import beads, config, git, lifecycle, messages, pr_strategy, prs, worktrees
 from ..io import die, say
 from ..worker import selection as worker_selection
 from ..worker.finalization import pr_gate as worker_pr_gate
@@ -51,6 +51,13 @@ def status(args: object) -> None:
         repo_slug=repo_slug,
         agent_index=agent_index,
     )
+    diagnostics = _build_identity_diagnostics(
+        beads.list_top_level_work_missing_epic_identity(
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=False,
+        )
+    )
     queues = _build_queue_payloads(
         beads_root=beads_root,
         repo_root=repo_root,
@@ -65,7 +72,7 @@ def status(args: object) -> None:
     )
     agents = sorted(agents, key=lambda item: str(item.get("agent_id") or ""))
 
-    counts = _status_counts(epics, agents, queues)
+    counts = _status_counts(epics, agents, queues, diagnostics=diagnostics)
     project_info = {
         "project_dir": str(project_root),
         "repo_root": str(repo_root),
@@ -78,13 +85,14 @@ def status(args: object) -> None:
         "epics": epics,
         "agents": agents,
         "queues": queues,
+        "diagnostics": diagnostics,
     }
 
     if format_value == "json":
         say(json.dumps(payload, indent=2, sort_keys=True))
         return
 
-    _render_status(project_info, counts, epics, agents, queues)
+    _render_status(project_info, counts, epics, agents, queues, diagnostics=diagnostics)
 
 
 def _build_agent_payloads(
@@ -449,6 +457,8 @@ def _status_counts(
     epics: list[dict[str, object]],
     agents: list[dict[str, object]],
     queues: list[dict[str, object]],
+    *,
+    diagnostics: dict[str, object],
 ) -> dict[str, object]:
     def _to_int(value: object) -> int:
         if isinstance(value, bool):
@@ -479,6 +489,11 @@ def _status_counts(
     ownership_policy_violations = sum(
         1 for epic in epics if bool(epic.get("ownership_policy_violation"))
     )
+    missing_epic_identity = diagnostics.get("missing_epic_identity")
+    if isinstance(missing_epic_identity, list):
+        missing_epic_identity_count = len(missing_epic_identity)
+    else:
+        missing_epic_identity_count = 0
     return {
         "epics": len(epics),
         "agents": len(agents),
@@ -487,6 +502,7 @@ def _status_counts(
         "changesets_ready": ready_changesets,
         "epics_reclaimable": reclaimable_epics,
         "ownership_policy_violations": ownership_policy_violations,
+        "missing_epic_identity": missing_epic_identity_count,
         "queues": len(queues),
         "queue_messages": queue_total,
         "queue_claimed": queue_claimed,
@@ -524,6 +540,8 @@ def _render_status(
     epics: list[dict[str, object]],
     agents: list[dict[str, object]],
     queues: list[dict[str, object]],
+    *,
+    diagnostics: dict[str, object],
 ) -> None:
     console = Console()
     overview = Table(title="Project Status", box=box.SIMPLE, show_header=False)
@@ -541,6 +559,10 @@ def _render_status(
     overview.add_row(
         "Ownership violations",
         _display_value(counts.get("ownership_policy_violations")),
+    )
+    overview.add_row(
+        "Identity gaps",
+        _display_value(counts.get("missing_epic_identity")),
     )
     overview.add_row("Queues", _display_value(counts.get("queues")))
     overview.add_row("Queued messages", _display_value(counts.get("queue_messages")))
@@ -587,6 +609,24 @@ def _render_status(
         console.print(table)
     else:
         console.print("No epics found.")
+
+    missing_epic_identity = diagnostics.get("missing_epic_identity")
+    if isinstance(missing_epic_identity, list) and missing_epic_identity:
+        table = Table(title="Identity Diagnostics", box=box.SIMPLE)
+        table.add_column("Issue", no_wrap=True)
+        table.add_column("Status", no_wrap=True)
+        table.add_column("Type", no_wrap=True)
+        table.add_column("Reason", overflow="fold")
+        for detail in missing_epic_identity:
+            if not isinstance(detail, dict):
+                continue
+            table.add_row(
+                _display_value(detail.get("id")),
+                _display_value(detail.get("status")),
+                _display_value(detail.get("issue_type")),
+                _display_value(detail.get("reason")),
+            )
+        console.print(table)
 
     if agents:
         table = Table(title="Agents", box=box.SIMPLE)
@@ -635,3 +675,22 @@ def _display_value(value: object) -> str:
     if isinstance(value, bool):
         return "yes" if value else "no"
     return str(value)
+
+
+def _build_identity_diagnostics(issues: list[dict[str, object]]) -> dict[str, object]:
+    missing_epic_identity: list[dict[str, object]] = []
+    for issue in issues:
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status")) or "unknown"
+        issue_type = lifecycle.normalize_status_value(lifecycle.issue_payload_type(issue)) or "work"
+        missing_epic_identity.append(
+            {
+                "id": issue_id.strip(),
+                "status": canonical_status,
+                "issue_type": issue_type,
+                "reason": "missing at:epic identity label on top-level work",
+            }
+        )
+    return {"missing_epic_identity": missing_epic_identity}

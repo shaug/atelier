@@ -382,6 +382,10 @@ def test_gc_logs_action_lifecycle_in_dry_run() -> None:
             return_value=[],
         ),
         patch(
+            "atelier.gc.labels.collect_backfill_epic_identity_labels",
+            return_value=[],
+        ),
+        patch(
             "atelier.gc.labels.collect_normalize_epic_labels",
             return_value=[],
         ),

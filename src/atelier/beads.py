@@ -2000,6 +2000,57 @@ def list_epics(
     return result
 
 
+def list_top_level_work_missing_epic_identity(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    include_closed: bool = True,
+) -> list[dict[str, object]]:
+    """List top-level work beads missing the required ``at:epic`` identity label.
+
+    Args:
+        beads_root: Root directory for the Beads planning store.
+        cwd: Working directory for bd commands.
+        include_closed: When False, omit terminal closed issues.
+
+    Returns:
+        Top-level work-bead payloads that do not carry ``at:epic`` identity
+        metadata, sorted by id for deterministic diagnostics/migration output.
+    """
+    issues = run_bd_json(["list", "--all", "--limit", "0"], beads_root=beads_root, cwd=cwd)
+    result: list[dict[str, object]] = []
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        labels = _issue_labels(issue)
+        if "at:epic" in labels:
+            continue
+        if not lifecycle.is_work_issue(
+            labels=labels,
+            issue_type=lifecycle.issue_payload_type(issue),
+        ):
+            continue
+        parent_id = _issue_parent_id(issue)
+        if parent_id is None:
+            parent = issue.get("parent")
+            if isinstance(parent, dict):
+                parent_id = _clean_text(parent.get("id"))
+            else:
+                parent_id = _clean_text(parent)
+        if parent_id is not None:
+            continue
+        if (
+            not include_closed
+            and lifecycle.canonical_lifecycle_status(issue.get("status")) == "closed"
+        ):
+            continue
+        result.append(issue)
+    return sorted(result, key=lambda issue: str(issue.get("id") or ""))
+
+
 def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
     """Return `bd prime --full` markdown without failing the caller."""
     env = beads_env(beads_root)

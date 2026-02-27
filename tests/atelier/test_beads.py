@@ -2167,6 +2167,49 @@ def test_list_epics_finds_epic_beyond_default_window() -> None:
     assert result[0]["id"] == "at-epic"
 
 
+def test_list_top_level_work_missing_epic_identity_finds_open_work_without_label() -> None:
+    issues = [
+        {"id": "at-cs-2", "status": "open", "labels": [], "type": "task"},
+        {"id": "at-cs-1", "status": "ready", "labels": ["at:changeset"], "type": "task"},
+        {"id": "at-epic", "status": "open", "labels": ["at:epic"], "type": "epic"},
+        {"id": "at-child", "status": "open", "labels": [], "type": "task", "parent": "at-epic"},
+        {"id": "at-msg", "status": "open", "labels": ["at:message"], "type": "message"},
+        {"id": "at-closed", "status": "closed", "labels": [], "type": "task"},
+    ]
+
+    with patch("atelier.beads.run_bd_json", return_value=issues):
+        result = beads.list_top_level_work_missing_epic_identity(
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            include_closed=False,
+        )
+
+    assert [issue["id"] for issue in result] == ["at-cs-1", "at-cs-2"]
+
+
+def test_list_top_level_work_missing_epic_identity_falls_back_to_parent_field() -> None:
+    issues = [
+        {
+            "id": "at-child",
+            "status": "open",
+            "labels": [],
+            "type": "task",
+            "parent_id": None,
+            "parent": "at-epic",
+        },
+        {"id": "at-standalone", "status": "open", "labels": [], "type": "task"},
+    ]
+
+    with patch("atelier.beads.run_bd_json", return_value=issues):
+        result = beads.list_top_level_work_missing_epic_identity(
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            include_closed=True,
+        )
+
+    assert [issue["id"] for issue in result] == ["at-standalone"]
+
+
 def test_summarize_changesets_counts_and_ready() -> None:
     changesets = [
         {"status": "closed", "description": "pr_state: merged\n"},

@@ -127,6 +127,61 @@ def test_gc_normalize_epic_labels_updates_legacy_status() -> None:
     assert calls == [["update", "at-epic", "--status", "in_progress"]]
 
 
+def test_gc_backfill_epic_identity_labels_adds_at_epic_for_top_level_work() -> None:
+    issues = [
+        {
+            "id": "at-legacy",
+            "status": "open",
+            "labels": ["at:changeset"],
+            "type": "task",
+        }
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch(
+            "atelier.beads.list_top_level_work_missing_epic_identity",
+            return_value=issues,
+        ),
+        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        actions = gc_labels.collect_backfill_epic_identity_labels(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+        assert len(actions) == 1
+        assert actions[0].description == "Backfill at:epic identity label on at-legacy"
+        actions[0].apply()
+
+    assert calls == [["update", "at-legacy", "--add-label", "at:epic"]]
+
+
+def test_gc_backfill_epic_identity_labels_orders_actions_deterministically() -> None:
+    issues = [
+        {"id": "at-200", "status": "open", "labels": [], "type": "task"},
+        {"id": "at-100", "status": "open", "labels": [], "type": "task"},
+    ]
+    with patch(
+        "atelier.beads.list_top_level_work_missing_epic_identity",
+        return_value=issues,
+    ):
+        actions = gc_labels.collect_backfill_epic_identity_labels(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert [action.description for action in actions] == [
+        "Backfill at:epic identity label on at-100",
+        "Backfill at:epic identity label on at-200",
+    ]
+
+
 def test_gc_remove_deprecated_label_removes_at_changeset() -> None:
     issues = [
         {"id": "at-123", "labels": ["at:changeset"], "type": "task"},

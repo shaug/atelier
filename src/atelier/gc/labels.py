@@ -183,3 +183,47 @@ def collect_normalize_epic_labels(
             )
         )
     return actions
+
+
+def collect_backfill_epic_identity_labels(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    """Backfill ``at:epic`` on top-level work beads missing identity metadata."""
+    actions: list[GcAction] = []
+    issues = beads.list_top_level_work_missing_epic_identity(
+        beads_root=beads_root,
+        cwd=repo_root,
+        include_closed=False,
+    )
+    for issue in sorted(issues, key=issue_sort_key):
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+        status = lifecycle.canonical_lifecycle_status(issue.get("status")) or "unknown"
+        issue_type = lifecycle.normalize_status_value(lifecycle.issue_payload_type(issue)) or "work"
+        details = (
+            "identity metadata missing: at:epic",
+            f"status: {status}",
+            f"type: {issue_type}",
+        )
+
+        def _apply_backfill(
+            bead_id: str = issue_id,
+        ) -> None:
+            beads.run_bd_command(
+                ["update", bead_id, "--add-label", "at:epic"],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+
+        actions.append(
+            GcAction(
+                description=f"Backfill at:epic identity label on {issue_id}",
+                details=details,
+                apply=_apply_backfill,
+            )
+        )
+    return actions

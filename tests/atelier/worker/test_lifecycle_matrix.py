@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from atelier import config, lifecycle, planner_overview
+from atelier import beads, config, lifecycle, planner_overview
 from atelier.worker import finalize_pipeline, reconcile, selection
 from atelier.worker.session import startup
 
@@ -330,6 +330,64 @@ def test_lifecycle_matrix_finalize_ignores_terminal_labels_when_status_active(mo
 
     assert result.reason == "changeset_review_pending"
     assert service.closed_ids == []
+
+
+def test_lifecycle_matrix_claim_backfills_epic_identity_for_hybrid_label_store(
+    monkeypatch,
+) -> None:
+    initial = {
+        "id": "at-legacy",
+        "status": "open",
+        "labels": ["at:changeset", "cs:planned"],
+        "assignee": None,
+        "type": "task",
+    }
+    updated = {
+        "id": "at-legacy",
+        "status": "in_progress",
+        "labels": ["at:changeset", "at:epic", "at:hooked"],
+        "assignee": "atelier/worker/codex/p100",
+        "type": "task",
+    }
+    show_calls = 0
+    run_args: list[list[str]] = []
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        nonlocal show_calls
+        if args and args[0] == "show":
+            show_calls += 1
+            return [initial] if show_calls == 1 else [updated]
+        if args[:2] == ["list", "--parent"]:
+            return []
+        return []
+
+    def fake_run_bd_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> None:
+        del beads_root, cwd, allow_failure
+        run_args.append(args)
+        return None
+
+    monkeypatch.setattr(beads, "run_bd_json", fake_run_bd_json)
+    monkeypatch.setattr(beads, "run_bd_command", fake_run_bd_command)
+    claimed = beads.claim_epic(
+        "at-legacy",
+        "atelier/worker/codex/p100",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+    assert claimed["labels"] == ["at:changeset", "at:epic", "at:hooked"]
+    assert run_args
+    assert run_args[0].count("--add-label") == 2
+    assert "at:epic" in run_args[0]
+    assert "at:hooked" in run_args[0]
 
 
 def test_lifecycle_matrix_reconcile_ignores_terminal_labels_on_active_status() -> None:

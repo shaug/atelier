@@ -1070,3 +1070,77 @@ def test_status_flags_planner_owned_executable_epic() -> None:
         epic_payload = payload["epics"][0]
         assert epic_payload["ownership_policy_violation"] is True
         assert epic_payload["ownership_policy_reason"] == "planner-owned executable work"
+
+
+def test_status_reports_missing_epic_identity_diagnostics() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        project_config = config.ProjectConfig.model_validate(
+            {"project": {"enlistment": str(repo_root), "origin": NORMALIZED_ORIGIN}}
+        )
+        epic = {"id": "epic-1", "title": "Epic", "status": "open", "labels": ["at:epic"]}
+        missing_identity = {
+            "id": "at-legacy",
+            "title": "Legacy top-level work",
+            "status": "open",
+            "labels": ["at:changeset"],
+            "type": "task",
+        }
+        child_without_label = {
+            "id": "at-legacy.1",
+            "title": "Child work",
+            "status": "open",
+            "labels": [],
+            "type": "task",
+            "parent": "epic-1",
+        }
+
+        def fake_run_bd_json(
+            args: list[str], *, beads_root: Path, cwd: Path
+        ) -> list[dict[str, object]]:
+            if args[:3] == ["list", "--label", "at:epic"]:
+                return [epic]
+            if args[:3] == ["list", "--label", "at:agent"]:
+                return []
+            if args[:3] == ["list", "--label", "at:message"]:
+                return []
+            if args[:3] == ["list", "--all", "--limit"]:
+                return [epic, missing_identity, child_without_label]
+            if args and args[0] in {"list", "ready"} and "--parent" in args:
+                return []
+            return []
+
+        with (
+            patch(
+                "atelier.commands.status.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, str(repo_root), repo_root),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_command",
+                return_value=DummyResult(),
+            ),
+            patch(
+                "atelier.commands.status.beads.run_bd_json",
+                side_effect=fake_run_bd_json,
+            ),
+        ):
+            buffer = io.StringIO()
+            with patch("sys.stdout", buffer):
+                status_cmd(SimpleNamespace(format="json"))
+
+        payload = json.loads(buffer.getvalue())
+        assert payload["counts"]["missing_epic_identity"] == 1
+        diagnostics = payload["diagnostics"]["missing_epic_identity"]
+        assert diagnostics == [
+            {
+                "id": "at-legacy",
+                "status": "open",
+                "issue_type": "task",
+                "reason": "missing at:epic identity label on top-level work",
+            }
+        ]
