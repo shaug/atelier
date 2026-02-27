@@ -471,7 +471,7 @@ def test_run_startup_contract_explicit_epic_reconciles_stale_in_progress_changes
                 {
                     "id": "at-explicit.1",
                     "status": "in_progress",
-                    "labels": ["cs:in_progress"],
+                    "labels": [],
                 }
             ]
             if include_closed
@@ -516,12 +516,12 @@ def test_run_startup_contract_explicit_epic_no_actionable_remains_non_terminal()
                 {
                     "id": "at-explicit.1",
                     "status": "closed",
-                    "labels": ["cs:in_progress"],
+                    "labels": [],
                 },
                 {
                     "id": "at-explicit.2",
                     "status": "open",
-                    "labels": ["cs:ready"],
+                    "labels": [],
                 },
             ]
             if include_closed
@@ -948,7 +948,7 @@ def test_run_startup_contract_auto_reconciles_stale_merged_state_before_selectio
                 {
                     "id": "at-stale.1",
                     "status": "in_progress",
-                    "labels": ["cs:in_progress"],
+                    "labels": [],
                 }
             ]
             if include_closed and parent_id == "at-stale"

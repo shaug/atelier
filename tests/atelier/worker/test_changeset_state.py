@@ -36,7 +36,7 @@ def test_close_completed_container_changesets_closes_eligible_nodes() -> None:
         {
             "id": "at-1.3",
             "status": "open",
-            "labels": ["cs:ready"],
+            "labels": [],
         },
         {
             "id": "at-1.4",
@@ -66,8 +66,8 @@ def test_close_completed_container_changesets_closes_eligible_nodes() -> None:
 
 def test_promote_planned_descendant_changesets_promotes_deferred_only() -> None:
     descendants = [
-        {"id": "at-1.1", "status": "deferred", "labels": ["cs:planned"]},
-        {"id": "at-1.2", "status": "open", "labels": ["cs:ready"]},
+        {"id": "at-1.1", "status": "deferred", "labels": []},
+        {"id": "at-1.2", "status": "open", "labels": []},
     ]
     with (
         patch(

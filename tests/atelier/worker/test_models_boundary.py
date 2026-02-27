@@ -13,11 +13,11 @@ def test_parse_issue_boundary_normalizes_dependency_and_parent_fields() -> None:
     issue = {
         "id": "at-123",
         "status": "open",
-        "labels": ["cs:ready", "cs:ready"],
+        "labels": ["at:epic", "at:epic"],
         "parent": {"id": "at-1"},
         "dependencies": [
             {"id": "at-2"},
-            "at-3 (open, cs:ready)",
+            "at-3 (open)",
             {"dependency_type": "parent-child", "id": "at-parent"},
         ],
     }
@@ -28,7 +28,7 @@ def test_parse_issue_boundary_normalizes_dependency_and_parent_fields() -> None:
     assert boundary.status == "open"
     assert boundary.parent_id == "at-1"
     assert boundary.dependency_ids == ("at-2", "at-3")
-    assert boundary.labels == ("cs:ready",)
+    assert boundary.labels == ("at:epic",)
 
 
 def test_parse_issue_boundary_derives_parent_from_parent_child_dependency() -> None:

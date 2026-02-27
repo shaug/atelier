@@ -430,6 +430,46 @@ def _gc_remove_at_draft_label(
     return actions
 
 
+def _gc_remove_deprecated_cs_label(
+    *,
+    label: str,
+    beads_root: Path,
+    repo_root: Path,
+    detail: str,
+) -> list[GcAction]:
+    """Remove deprecated cs:* label; state is inferred from bead status."""
+    actions: list[GcAction] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", label, "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in sorted(issues, key=_issue_sort_key):
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str) or not issue_id.strip():
+            continue
+        issue_id = issue_id.strip()
+
+        def _apply_remove(
+            bead_id: str = issue_id,
+            lbl: str = label,
+        ) -> None:
+            beads.run_bd_command(
+                ["update", bead_id, "--remove-label", lbl],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+
+        actions.append(
+            GcAction(
+                description=f"Remove deprecated {label} label from {issue_id}",
+                apply=_apply_remove,
+                details=(detail,),
+            )
+        )
+    return actions
+
+
 def _gc_normalize_executable_ready_labels(
     *,
     beads_root: Path,
@@ -1395,6 +1435,20 @@ def gc(args: object) -> None:
             repo_root=repo_root,
         )
     )
+    for label, detail in [
+        ("cs:ready", "readiness inferred from open status"),
+        ("cs:in_progress", "progress inferred from in_progress status"),
+        ("cs:blocked", "block state inferred from blocked status"),
+        ("cs:planned", "planned state inferred from deferred status"),
+    ]:
+        actions.extend(
+            _gc_remove_deprecated_cs_label(
+                label=label,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                detail=detail,
+            )
+        )
     actions.extend(
         _gc_normalize_executable_ready_labels(
             beads_root=beads_root,

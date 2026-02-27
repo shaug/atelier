@@ -283,7 +283,7 @@ def test_gc_normalize_changeset_labels_ignores_label_only_payloads() -> None:
     issues = [
         {
             "id": "at-123",
-            "labels": ["at:changeset", "cs:ready"],
+            "labels": ["at:changeset"],
         }
     ]
 
@@ -362,7 +362,7 @@ def test_gc_normalize_changeset_labels_orders_actions_deterministically() -> Non
 
 def test_gc_remove_at_changeset_label_removes_deprecated_label() -> None:
     issues = [
-        {"id": "at-123", "labels": ["at:changeset", "cs:ready"], "type": "task"},
+        {"id": "at-123", "labels": ["at:changeset"], "type": "task"},
     ]
     calls: list[list[str]] = []
 
@@ -421,7 +421,7 @@ def test_gc_remove_at_changeset_label_orders_actions_deterministically() -> None
 
 def test_gc_remove_at_subtask_label_removes_deprecated_label() -> None:
     issues = [
-        {"id": "at-456", "labels": ["at:subtask", "cs:ready"], "type": "task"},
+        {"id": "at-456", "labels": ["at:subtask"], "type": "task"},
     ]
     calls: list[list[str]] = []
 
@@ -544,6 +544,44 @@ def test_gc_remove_at_draft_label_removes_deprecated_label() -> None:
         actions[0].apply()
 
     assert calls == [["update", "at-321", "--remove-label", "at:draft"]]
+
+
+def test_gc_remove_deprecated_cs_label_removes_label() -> None:
+    for label in ("cs:ready", "cs:in_progress", "cs:blocked", "cs:planned"):
+        issues = [{"id": "at-1", "labels": [label, "at:epic"], "type": "task"}]
+        calls: list[list[str]] = []
+
+        def fake_run_bd_json(
+            args: list[str], *, beads_root: Path, cwd: Path
+        ) -> list[dict[str, object]]:
+            if len(args) >= 4 and args[1:4] == ["--label", label, "--all"]:
+                return issues
+            return []
+
+        def fake_run_bd_command(
+            args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+        ) -> object:
+            calls.append(args)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (
+            patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
+            patch(
+                "atelier.commands.gc.beads.run_bd_command",
+                side_effect=fake_run_bd_command,
+            ),
+        ):
+            actions = gc_cmd._gc_remove_deprecated_cs_label(
+                label=label,
+                beads_root=Path("/beads"),
+                repo_root=Path("/repo"),
+                detail="state inferred from status",
+            )
+            assert len(actions) == 1
+            assert actions[0].description == f"Remove deprecated {label} label from at-1"
+            actions[0].apply()
+
+        assert calls == [["update", "at-1", "--remove-label", label]]
 
 
 def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
@@ -1181,6 +1219,10 @@ def test_gc_logs_action_lifecycle_in_dry_run() -> None:
         ),
         patch(
             "atelier.commands.gc._gc_remove_at_draft_label",
+            return_value=[],
+        ),
+        patch(
+            "atelier.commands.gc._gc_remove_deprecated_cs_label",
             return_value=[],
         ),
         patch(

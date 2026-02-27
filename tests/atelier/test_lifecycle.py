@@ -41,8 +41,8 @@ def test_is_active_root_branch_owner_uses_status_and_labels() -> None:
     )
 
 
-def test_is_changeset_ready_accepts_ready_label() -> None:
-    labels = {"cs:ready"}
+def test_is_changeset_ready_accepts_active_status() -> None:
+    labels: set[str] = set()
     assert lifecycle.is_changeset_ready("open", labels, has_work_children=False) is True
 
 
@@ -54,16 +54,16 @@ def test_is_changeset_ready_uses_status_authority_over_legacy_labels() -> None:
 
 
 def test_is_changeset_ready_rejects_non_changesets() -> None:
-    assert lifecycle.is_changeset_ready("open", {"at:epic", "cs:ready"}) is False
+    assert lifecycle.is_changeset_ready("open", {"at:epic"}) is False
 
 
 def test_is_changeset_ready_rejects_closed_status() -> None:
-    assert lifecycle.is_changeset_ready("closed", {"cs:ready"}) is False
-    assert lifecycle.is_changeset_ready("done", {"cs:ready"}) is False
+    assert lifecycle.is_changeset_ready("closed", set()) is False
+    assert lifecycle.is_changeset_ready("done", set()) is False
 
 
 def test_is_changeset_ready_allows_open_and_in_progress_changesets() -> None:
-    labels = {"cs:ready"}
+    labels: set[str] = set()
     assert lifecycle.is_changeset_ready("open", labels, has_work_children=False) is True
     assert lifecycle.is_changeset_ready("in_progress", labels, has_work_children=False) is True
     assert lifecycle.is_changeset_ready("hooked", labels, has_work_children=False) is True
@@ -76,7 +76,7 @@ def test_normalize_review_state_handles_invalid_values() -> None:
 
 
 def test_in_review_candidate_prefers_live_state() -> None:
-    labels = {"cs:ready"}
+    labels: set[str] = set()
     assert (
         lifecycle.is_changeset_in_review_candidate(
             labels=labels,
@@ -121,7 +121,7 @@ def test_in_review_candidate_rejects_non_changesets_and_closed_items() -> None:
     )
     assert (
         lifecycle.is_changeset_in_review_candidate(
-            labels={"cs:ready"},
+            labels=set(),
             status="open",
             live_state=None,
             stored_review_state="in-review",
@@ -131,7 +131,7 @@ def test_in_review_candidate_rejects_non_changesets_and_closed_items() -> None:
     )
     assert (
         lifecycle.is_changeset_in_review_candidate(
-            labels={"cs:ready"},
+            labels=set(),
             status="closed",
             live_state=None,
             stored_review_state="in-review",
@@ -158,7 +158,7 @@ def test_canonical_lifecycle_status_preserves_unknown_non_empty_status() -> None
 def test_is_work_issue_excludes_explicit_non_work_types_and_labels() -> None:
     assert (
         lifecycle.is_work_issue(
-            labels={"cs:ready", "at:message"},
+            labels={"at:epic", "at:message"},
             issue_type="task",
         )
         is False

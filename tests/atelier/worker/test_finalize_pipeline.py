@@ -277,7 +277,7 @@ def test_run_finalize_pipeline_waiting_on_review_returns_pending(monkeypatch) ->
     issue = {
         "id": "at-epic.1",
         "status": "in_progress",
-        "labels": ["cs:in_progress"],
+        "labels": [],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -326,7 +326,7 @@ def test_run_finalize_pipeline_waiting_on_review_uses_in_progress_status(monkeyp
 def test_run_finalize_pipeline_blocks_on_stack_integrity_preflight(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
-        "labels": ["cs:in_progress"],
+        "labels": [],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -553,7 +553,7 @@ def test_run_finalize_pipeline_preserves_recorded_integrated_sha(monkeypatch) ->
 def test_run_finalize_pipeline_passes_ready_mode_to_pr_gate(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
-        "labels": ["cs:in_progress"],
+        "labels": [],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -589,7 +589,7 @@ def test_run_finalize_pipeline_passes_ready_mode_to_pr_gate(monkeypatch) -> None
 def test_run_finalize_pipeline_uses_diagnostic_pr_payload_before_create(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
-        "labels": ["cs:in_progress"],
+        "labels": [],
         "description": (
             "changeset.work_branch: feat/root-at-epic.1\n"
             "changeset.parent_branch: feat/parent\n"
@@ -640,7 +640,7 @@ def test_run_finalize_pipeline_uses_diagnostic_pr_payload_before_create(monkeypa
 def test_run_finalize_pipeline_blocks_when_pr_base_alignment_fails(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
-        "labels": ["cs:in_progress"],
+        "labels": [],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(
@@ -679,7 +679,7 @@ def test_run_finalize_pipeline_blocks_when_pr_base_alignment_fails(monkeypatch) 
 def test_run_finalize_pipeline_aligns_pr_base_before_pending(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
-        "labels": ["cs:in_progress"],
+        "labels": [],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
     }
     monkeypatch.setattr(

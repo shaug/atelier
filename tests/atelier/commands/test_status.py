@@ -825,7 +825,7 @@ def test_status_at_kid_dag_allows_only_frontier_changeset_after_parent_merge() -
             {
                 "id": "at-kid.2",
                 "title": "Frontier",
-                "labels": ["cs:in_progress"],
+                "labels": [],
                 "description": (
                     "changeset.root_branch: feat/at-kid\n"
                     "changeset.parent_branch: feat/at-kid\n"
@@ -837,7 +837,7 @@ def test_status_at_kid_dag_allows_only_frontier_changeset_after_parent_merge() -
             {
                 "id": "at-kid.3",
                 "title": "Downstream",
-                "labels": ["cs:in_progress"],
+                "labels": [],
                 "description": (
                     "changeset.root_branch: feat/at-kid\n"
                     "changeset.parent_branch: feat/at-kid\n"
