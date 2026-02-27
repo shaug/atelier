@@ -47,3 +47,15 @@ def test_pr_strategy_decision_sequential_allows_when_parent_merged() -> None:
     decision = pr_strategy.pr_strategy_decision("sequential", parent_state="merged")
     assert decision.allow_pr is True
     assert decision.reason == "parent:merged"
+
+
+def test_pr_strategy_decision_sequential_blocks_when_parent_closed() -> None:
+    decision = pr_strategy.pr_strategy_decision("sequential", parent_state="closed")
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:closed"
+
+
+def test_pr_strategy_decision_on_parent_approved_allows_closed_parent() -> None:
+    decision = pr_strategy.pr_strategy_decision("on-parent-approved", parent_state="closed")
+    assert decision.allow_pr is True
+    assert decision.reason == "parent:closed"
