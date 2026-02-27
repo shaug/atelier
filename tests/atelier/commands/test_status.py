@@ -1,3 +1,4 @@
+import importlib
 import io
 import json
 import tempfile
@@ -9,6 +10,8 @@ import atelier.config as config
 from atelier.commands import status as status_cmd
 from atelier.worktrees import WorktreeMapping
 from tests.atelier.helpers import NORMALIZED_ORIGIN, RAW_ORIGIN, DummyResult
+
+status_module = importlib.import_module("atelier.commands.status")
 
 
 def _lookup_status_payload(payload_fn):
@@ -242,6 +245,64 @@ def test_status_includes_changeset_signals() -> None:
         assert details[0]["pr_allowed"] is True
         assert details[0]["pr_gate_reason"] == "no-parent"
         assert details[0]["pr"]["merge_state_status"] == "DIRTY"
+
+
+def test_build_changeset_details_scopes_pr_payload_cache_by_repo_slug() -> None:
+    changesets = [{"id": "cs-1", "title": "Changeset", "labels": ["at:changeset"]}]
+    mapping = WorktreeMapping(
+        epic_id="epic-1",
+        worktree_path="worktrees/epic-1",
+        root_branch="alpha",
+        changesets={"cs-1": "shared-branch"},
+        changeset_worktrees={},
+    )
+    lookup_calls: list[tuple[str, str]] = []
+
+    def fake_lookup(repo: str, branch: str, refresh: bool = False) -> SimpleNamespace:
+        _ = refresh
+        lookup_calls.append((repo, branch))
+        return SimpleNamespace(
+            found=True,
+            payload={"repo": repo, "state": "OPEN", "isDraft": False},
+            failed=False,
+            error=None,
+        )
+
+    def fake_decision(*_args, **kwargs):
+        payload = kwargs["lookup_pr_payload"]("org/dependency-repo", "shared-branch")
+        assert payload is not None
+        assert payload.get("repo") == "org/dependency-repo"
+        return SimpleNamespace(allow_pr=True, reason="no-parent")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        with (
+            patch("atelier.commands.status.git.git_ref_exists", return_value=True),
+            patch(
+                "atelier.commands.status.prs.lookup_github_pr_status",
+                side_effect=fake_lookup,
+            ),
+            patch(
+                "atelier.commands.status.worker_pr_gate.changeset_pr_creation_decision",
+                side_effect=fake_decision,
+            ),
+        ):
+            details = status_module._build_changeset_details(
+                changesets,
+                mapping=mapping,
+                beads_root=root / ".beads",
+                repo_root=root,
+                repo_slug="org/repo",
+                pr_strategy_value="sequential",
+            )
+
+    assert len(details) == 1
+    assert details[0]["pr_allowed"] is True
+    assert details[0]["pr_gate_reason"] == "no-parent"
+    assert lookup_calls == [
+        ("org/repo", "shared-branch"),
+        ("org/dependency-repo", "shared-branch"),
+    ]
 
 
 def test_status_resolves_dependency_lineage_for_sequential_gate() -> None:

@@ -236,14 +236,15 @@ def _build_changeset_details(
     details: list[dict[str, object]] = []
     strategy = pr_strategy.normalize_pr_strategy(pr_strategy_value)
     changesets_by_id: dict[str, dict[str, object]] = {}
-    payload_by_branch: dict[str, dict[str, object] | None] = {}
-    payload_errors_by_branch: dict[str, str | None] = {}
+    payload_by_repo_branch: dict[tuple[str, str], dict[str, object] | None] = {}
+    payload_errors_by_repo_branch: dict[tuple[str, str], str | None] = {}
 
     def lookup_pr_payload(branch_repo_slug: str | None, branch: str) -> dict[str, object] | None:
         if not branch_repo_slug:
             return None
-        if branch in payload_by_branch:
-            return payload_by_branch[branch]
+        cache_key = (branch_repo_slug, branch)
+        if cache_key in payload_by_repo_branch:
+            return payload_by_repo_branch[cache_key]
         lookup = prs.lookup_github_pr_status(branch_repo_slug, branch)
         payload = lookup.payload if lookup.found else None
         error: str | None = None
@@ -251,15 +252,17 @@ def _build_changeset_details(
             error = lookup.error or "unknown gh error"
             if error.startswith("missing required command: gh"):
                 error = None
-        payload_by_branch[branch] = payload
-        payload_errors_by_branch[branch] = error
+        payload_by_repo_branch[cache_key] = payload
+        payload_errors_by_repo_branch[cache_key] = error
         return payload
 
     def lookup_pr_payload_diagnostic(
         branch_repo_slug: str | None, branch: str
     ) -> tuple[dict[str, object] | None, str | None]:
+        if not branch_repo_slug:
+            return None, None
         payload = lookup_pr_payload(branch_repo_slug, branch)
-        return payload, payload_errors_by_branch.get(branch)
+        return payload, payload_errors_by_repo_branch.get((branch_repo_slug, branch))
 
     for issue in changesets:
         issue_id = issue.get("id")
