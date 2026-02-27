@@ -205,29 +205,28 @@ def collect_closed_workspace_branches_without_mapping(
         status = str(issue.get("status") or "").strip().lower()
         if status not in {"closed", "done"}:
             continue
-        labels = issue_labels(issue)
         if not is_merged_closed_changeset(issue):
-            continue
-        workspace_branch = workspace_branch_from_labels(labels)
-        if not workspace_branch:
             continue
         mapping_path = worktrees.mapping_path(project_dir, issue_id.strip())
         if mapping_path.exists():
             continue
 
+        labels = issue_labels(issue)
+        workspace_branch = workspace_branch_from_labels(labels)
         description = issue.get("description")
         fields = beads.parse_description_fields(description if isinstance(description, str) else "")
         root_branch = normalize_branch(fields.get("workspace.root_branch"))
         if not root_branch:
             root_branch = normalize_branch(fields.get("changeset.root_branch"))
         if not root_branch:
-            root_branch = normalize_branch(workspace_branch)
+            root_branch = workspace_branch
+        work_branch = normalize_branch(fields.get("changeset.work_branch"))
         parent_branch = normalize_branch(fields.get("workspace.parent_branch"))
         if not parent_branch:
             parent_branch = normalize_branch(fields.get("changeset.parent_branch"))
-        if not parent_branch or parent_branch == root_branch:
+        if not parent_branch or (root_branch and parent_branch == root_branch):
             parent_branch = normalize_branch(default_branch) or parent_branch
-        if not root_branch or not parent_branch:
+        if not parent_branch:
             continue
 
         target_local, target_remote = branch_lookup_ref(repo_root, parent_branch, git_path=git_path)
@@ -235,7 +234,6 @@ def collect_closed_workspace_branches_without_mapping(
         if not target_ref:
             continue
 
-        work_branch = normalize_branch(fields.get("changeset.work_branch"))
         candidate_values = [root_branch, work_branch, workspace_branch]
         candidate_branches = {value for value in candidate_values if value}
         prunable_branches = {
@@ -264,8 +262,8 @@ def collect_closed_workspace_branches_without_mapping(
 
         description_text = f"Prune closed workspace branches for {issue_id.strip()}"
         details = (
-            f"workspace branch: {workspace_branch}",
-            f"root branch: {root_branch}",
+            f"workspace branch: {workspace_branch or '(none)'}",
+            f"root branch: {root_branch or '(none)'}",
             f"work branch: {work_branch or '(none)'}",
             f"integration target: {target_ref}",
             f"branches to prune: {', '.join(sorted(prunable_branches))}",
