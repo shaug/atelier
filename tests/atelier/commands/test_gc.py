@@ -257,6 +257,19 @@ def test_normalize_changeset_labels_for_status_uses_status_authority() -> None:
     assert any("status is authoritative" in reason for reason in reasons)
 
 
+def test_normalize_changeset_labels_for_status_drops_planned_on_open() -> None:
+    issue = {
+        "id": "at-123",
+        "status": "open",
+        "labels": ["at:changeset", "cs:planned"],
+    }
+
+    normalized, reasons = gc_cmd._normalize_changeset_labels_for_status(issue)
+
+    assert "cs:planned" not in normalized
+    assert any("status is authoritative" in reason for reason in reasons)
+
+
 def test_normalize_changeset_labels_for_status_drops_terminal_labels_on_blocked() -> None:
     issue = {
         "id": "at-123",
@@ -324,6 +337,81 @@ def test_gc_normalize_changeset_labels_updates_legacy_labels() -> None:
     assert calls == [["update", "at-123", "--remove-label", "cs:ready"]]
 
 
+def test_gc_normalize_changeset_labels_derives_canonical_status_from_legacy_labels() -> None:
+    issues = [
+        {
+            "id": "at-123",
+            "labels": ["at:changeset", "cs:ready"],
+        }
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--label", "at:changeset", "--all"]:
+            return issues
+        return []
+
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        actions = gc_cmd._gc_normalize_changeset_labels(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+        assert len(actions) == 1
+        actions[0].apply()
+
+    assert calls == [["update", "at-123", "--status", "open", "--remove-label", "cs:ready"]]
+
+
+def test_gc_normalize_changeset_labels_closes_terminal_tombstone_records() -> None:
+    issues = [
+        {
+            "id": "at-123",
+            "status": "open",
+            "labels": ["at:changeset", "cs:merged"],
+            "description": "pr_state: merged\n",
+        }
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--label", "at:changeset", "--all"]:
+            return issues
+        return []
+
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        actions = gc_cmd._gc_normalize_changeset_labels(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+        assert len(actions) == 1
+        assert any("tombstone closure" in detail for detail in actions[0].details)
+        actions[0].apply()
+
+    assert calls == [["update", "at-123", "--status", "closed"]]
+
+
 def test_normalize_executable_ready_labels_for_status_backfills_ready() -> None:
     issue = {
         "id": "at-epic",
@@ -350,6 +438,21 @@ def test_normalize_executable_ready_labels_for_status_preserves_legacy_blocked()
     assert "at:draft" not in normalized
     assert "at:ready" not in normalized
     assert any("preserve behavior" in reason for reason in reasons)
+
+
+def test_normalize_executable_ready_labels_for_status_drops_ready_on_deferred() -> None:
+    issue = {
+        "id": "at-epic",
+        "labels": ["at:epic", "at:draft", "at:ready"],
+    }
+
+    normalized, reasons = gc_cmd._normalize_executable_ready_labels_for_status(
+        issue, target_status="deferred"
+    )
+
+    assert "at:draft" not in normalized
+    assert "at:ready" not in normalized
+    assert any("deferred status is not executable" in reason for reason in reasons)
 
 
 def test_gc_normalize_executable_ready_labels_updates_legacy_labels() -> None:
@@ -387,6 +490,67 @@ def test_gc_normalize_executable_ready_labels_updates_legacy_labels() -> None:
         actions[0].apply()
 
     assert calls == [["update", "at-epic", "--add-label", "at:ready"]]
+
+
+def test_gc_normalize_executable_ready_labels_derives_status_from_legacy_labels() -> None:
+    issues = [
+        {
+            "id": "at-epic",
+            "labels": ["at:epic", "at:ready"],
+        }
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--label", "at:epic", "--all"]:
+            return issues
+        return []
+
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        actions = gc_cmd._gc_normalize_executable_ready_labels(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+        assert len(actions) == 1
+        actions[0].apply()
+
+    assert calls == [["update", "at-epic", "--status", "open"]]
+
+
+def test_gc_normalize_changeset_labels_orders_actions_deterministically() -> None:
+    issues = [
+        {"id": "at-200", "labels": ["at:changeset", "cs:ready"]},
+        {"id": "at-100", "labels": ["at:changeset", "cs:ready"]},
+    ]
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--label", "at:changeset", "--all"]:
+            return issues
+        return []
+
+    with patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json):
+        actions = gc_cmd._gc_normalize_changeset_labels(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert [action.description for action in actions] == [
+        "Normalize lifecycle metadata for changeset at-100",
+        "Normalize lifecycle metadata for changeset at-200",
+    ]
 
 
 def test_gc_reconcile_flag_runs_changeset_reconciliation() -> None:
