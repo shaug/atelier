@@ -1,3 +1,5 @@
+import pytest
+
 from atelier.worker import selection
 
 
@@ -176,6 +178,83 @@ def test_select_epic_from_ready_changesets_uses_epic_for_child_issue() -> None:
     ]
     ready_changesets = [
         {"id": "at-epic.1", "created_at": "2026-02-20T00:00:00+00:00"},
+    ]
+
+    selected = selection.select_epic_from_ready_changesets(
+        issues=issues,
+        ready_changesets=ready_changesets,
+        is_actionable=lambda issue_id: issue_id == "at-epic",
+    )
+
+    assert selected == "at-epic"
+
+
+def test_select_epic_from_ready_changesets_uses_graph_parent_for_non_dotted_child_id() -> None:
+    issues = [
+        {"id": "at-epic", "status": "open", "labels": ["at:epic"], "assignee": None},
+    ]
+    ready_changesets = [
+        {
+            "id": "cs-ready-1",
+            "parent": {"id": "at-epic"},
+            "created_at": "2026-02-20T00:00:00+00:00",
+        },
+    ]
+
+    selected = selection.select_epic_from_ready_changesets(
+        issues=issues,
+        ready_changesets=ready_changesets,
+        is_actionable=lambda issue_id: issue_id == "at-epic",
+    )
+
+    assert selected == "at-epic"
+
+
+def test_select_epic_from_ready_changesets_supports_mixed_child_id_formats() -> None:
+    issues = [
+        {"id": "at-epic-a", "status": "open", "labels": ["at:epic"], "assignee": None},
+        {"id": "at-epic-b", "status": "open", "labels": ["at:epic"], "assignee": None},
+    ]
+    ready_changesets = [
+        {
+            "id": "at-epic-b.1",
+            "created_at": "2026-02-20T00:00:00+00:00",
+        },
+        {
+            "id": "cs-a1",
+            "parent": {"id": "at-epic-a"},
+            "created_at": "2026-02-21T00:00:00+00:00",
+        },
+    ]
+
+    selected = selection.select_epic_from_ready_changesets(
+        issues=issues,
+        ready_changesets=ready_changesets,
+        is_actionable=lambda issue_id: issue_id == "at-epic-a",
+    )
+
+    assert selected == "at-epic-a"
+
+
+@pytest.mark.parametrize(
+    "parent_dependency",
+    [
+        {"dependency_type": "parent-child", "depends_on_id": "at-epic"},
+        {"type": "parent-child", "depends_on_id": "at-epic"},
+    ],
+)
+def test_select_epic_from_ready_changesets_reads_parent_from_parent_child_dependency_shapes(
+    parent_dependency: object,
+) -> None:
+    issues = [
+        {"id": "at-epic", "status": "open", "labels": ["at:epic"], "assignee": None},
+    ]
+    ready_changesets = [
+        {
+            "id": "cs-ready-1",
+            "dependencies": [parent_dependency],
+            "created_at": "2026-02-20T00:00:00+00:00",
+        },
     ]
 
     selected = selection.select_epic_from_ready_changesets(
