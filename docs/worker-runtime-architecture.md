@@ -41,7 +41,7 @@ Runnable leaf evaluation:
 Lifecycle authority:
 
 - canonical status + graph shape are the source of truth for decisions.
-- `at:ready` and `cs:*` labels are not used as execution gates.
+- labels are informational identity metadata, not lifecycle execution gates.
 
 ## Layering
 
