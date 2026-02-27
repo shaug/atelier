@@ -16,8 +16,12 @@ description: >-
 1. Run the formatter script:
    - `python3 scripts/list_epics.py` (or
      `python3 scripts/list_epics.py --show-drafts`)
+   - Epic discovery is indexed by `at:epic`; this required label defines the
+     epic list pool.
 1. Do not rewrite the script output. Return it verbatim so the overseer sees a
    stable format.
+1. Do not apply execution gating from labels (`at:changeset`, `at:ready`,
+   `cs:*`); lifecycle buckets come from canonical status + dependency context.
 
 ## Required output format
 
@@ -40,3 +44,5 @@ The output must be:
 - Output includes each eligible epic id and title in the required format.
 - Closed epics are excluded.
 - Deferred epics appear only when `show_drafts` is enabled.
+- Issues without `at:epic` are intentionally excluded from this indexed epic
+  listing.

@@ -22,8 +22,10 @@ description: >-
    - `bd prime`
 1. List epics when a user needs to choose work:
    - `bd list --label at:epic --status open`
+   - `at:epic` is required identity/index metadata for epic discovery.
 1. Find ready changesets for an epic:
    - `bd ready --parent <epic-id> --label at:changeset`
+   - `at:changeset` is compatibility/index metadata for planned work units.
 1. Show issue details when needed:
    - `bd show <issue-id>`
 1. When creating new issues, prefer explicit fields:
@@ -38,5 +40,7 @@ description: >-
 - Beads is the source of truth for intent and sequencing. Execution metadata
   should live in Atelier's project store and be derived from git/PR state rather
   than custom Beads schema.
+- Lifecycle authority is canonical status + graph shape. Do not use
+  `at:changeset`, `at:ready`, or `cs:*` labels as execution gates.
 - Use labels and description fields according to
   [references/beads-conventions.md](references/beads-conventions.md).

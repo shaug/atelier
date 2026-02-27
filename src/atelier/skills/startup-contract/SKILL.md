@@ -25,8 +25,12 @@ description: >-
    - Check inbox/queue (message beads) and handle any messages; stop if a
      message requires action before claiming new work.
 1. If still idle:
-   - List eligible epics (`bd list --label at:epic`) and keep only executable
-     top-level work with status `open`/`in_progress`.
+   - List eligible epics (`bd list --label at:epic`). `at:epic` is required
+     identity/index metadata for epic discovery.
+   - Keep only executable top-level work with status `open`/`in_progress` after
+     status+graph evaluation.
+   - Do not treat `at:changeset`, `at:ready`, or `cs:*` labels as execution
+     gates.
    - In auto mode: pick the oldest ready epic; if none, pick the oldest
      unfinished epic already assigned to `agent_id`.
    - In prompt mode: list eligible epics and ask for an epic id.
@@ -37,3 +41,5 @@ description: >-
 
 - Hook is set for the active epic.
 - Messages are marked read when processed.
+- Epic eligibility decisions remain status+graph based after `at:epic` indexed
+  discovery.

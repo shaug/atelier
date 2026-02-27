@@ -30,7 +30,7 @@ description: >-
 1. Show the epic and verify its status is `deferred`.
 1. List child changesets and confirm which are fully defined.
 1. If there are no child changesets and the epic is single-changeset sized:
-   - Add `at:changeset` to the epic.
+   - Add `at:changeset` to the epic for compatibility/indexing metadata.
    - Keep execution state in status only (`deferred` now, `open` on promotion).
 1. If there is exactly one child changeset:
    - Verify decomposition rationale is recorded in epic/child notes.

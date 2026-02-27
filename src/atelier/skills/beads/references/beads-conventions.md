@@ -5,8 +5,10 @@ projects. Stick to core Beads fields so existing Beads repos remain compatible.
 
 ## Labels
 
-- `at:epic` for workspace epics
-- `at:changeset` for changeset tasks
+- `at:epic` for workspace epics. This is required identity/index metadata for
+  epic discovery queries (`bd list --label at:epic`).
+- `at:changeset` for changeset tasks and compatibility indexing; top-level
+  guardrail-sized epics may carry both `at:epic` and `at:changeset`.
 - do not use `at:subtask` for executable work; nested units remain
   `at:changeset`
 - `at:hooked` for epics claimed by an agent
@@ -21,6 +23,9 @@ projects. Stick to core Beads fields so existing Beads repos remain compatible.
 - Use `deferred` for planned/draft work and `open` for executable work.
 - Promotion is a status transition (`deferred -> open`), not a lifecycle-label
   mutation.
+- Lifecycle authority is canonical status + graph semantics; labels are not
+  execution gates.
+- Do not use `at:ready` or `cs:*` labels as lifecycle gates.
 - If custom statuses are not supported, represent `hooked` / `pinned` as labels
   and keep status at `open`.
 

@@ -34,7 +34,7 @@ Do not request approval to create or edit deferred beads.
 
 ## Verification
 
-- Epic is created with `at:epic` label.
+- Epic is created with `at:epic` label (required for epic discovery/indexing).
 - Epic status is `deferred` until explicit promotion.
 - Acceptance criteria stored in the acceptance field.
 - When auto-export is enabled and not opted out, `external_tickets` is updated
