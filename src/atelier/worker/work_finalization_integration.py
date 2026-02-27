@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import agents, beads
+from .. import agents, beads, lifecycle
 from ..io import die, say
 from ..worker import finalize as worker_finalize
 from ..worker import integration_service as worker_integration_service
@@ -42,7 +42,7 @@ def epic_ready_to_finalize(epic_id: str, *, beads_root: Path, repo_root: Path) -
         return False
     issue = issues[0]
     labels = issue_labels(issue)
-    if "at:changeset" in labels and ("cs:merged" in labels or "cs:abandoned" in labels):
+    if "at:changeset" in labels and lifecycle.is_closed_status(issue.get("status")):
         return True
     summary = beads.epic_changeset_summary(epic_id, beads_root=beads_root, cwd=repo_root)
     return summary.ready_to_close

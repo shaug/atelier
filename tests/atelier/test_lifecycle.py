@@ -142,20 +142,12 @@ def test_canonical_lifecycle_status_maps_legacy_status_values() -> None:
     assert lifecycle.canonical_lifecycle_status("done") == "closed"
 
 
-def test_canonical_lifecycle_status_uses_legacy_label_hints() -> None:
-    assert lifecycle.canonical_lifecycle_status(None, labels={"at:changeset", "cs:planned"}) == (
-        "deferred"
-    )
-    assert lifecycle.canonical_lifecycle_status(None, labels={"at:changeset", "cs:ready"}) == (
-        "open"
-    )
-    assert lifecycle.canonical_lifecycle_status(None, labels={"at:changeset", "cs:merged"}) == (
-        "closed"
-    )
+def test_canonical_lifecycle_status_returns_none_for_missing_status() -> None:
+    assert lifecycle.canonical_lifecycle_status(None) is None
 
 
 def test_canonical_lifecycle_status_preserves_unknown_non_empty_status() -> None:
-    assert lifecycle.canonical_lifecycle_status("tombstone", labels={"at:ready"}) == "tombstone"
+    assert lifecycle.canonical_lifecycle_status("tombstone") == "tombstone"
 
 
 def test_is_work_issue_excludes_explicit_non_work_types_and_labels() -> None:

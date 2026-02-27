@@ -234,78 +234,21 @@ def test_gc_agent_homes_prunes_stale_session_agent_beads_deterministically() -> 
     ]
 
 
-def test_normalize_changeset_labels_for_status_uses_status_authority() -> None:
-    issue = {
-        "id": "at-123",
-        "status": "in_progress",
-        "labels": [
-            "at:changeset",
-            "cs:planned",
-            "cs:ready",
-            "cs:in_progress",
-            "cs:blocked",
-        ],
-    }
+def test_resolve_changeset_status_for_migration_maps_legacy_status_alias() -> None:
+    issue = {"id": "at-123", "status": "ready", "labels": ["at:changeset"]}
 
-    normalized, reasons = gc_cmd._normalize_changeset_labels_for_status(issue)
+    target, reasons = gc_cmd._resolve_changeset_status_for_migration(issue)
 
-    assert "cs:planned" not in normalized
-    assert "cs:ready" not in normalized
-    assert "cs:in_progress" not in normalized
-    assert "cs:blocked" not in normalized
-    assert "at:changeset" in normalized
-    assert any("status is authoritative" in reason for reason in reasons)
+    assert target == "open"
+    assert any("normalize lifecycle status" in reason for reason in reasons)
 
 
-def test_normalize_changeset_labels_for_status_drops_planned_on_open() -> None:
-    issue = {
-        "id": "at-123",
-        "status": "open",
-        "labels": ["at:changeset", "cs:planned"],
-    }
-
-    normalized, reasons = gc_cmd._normalize_changeset_labels_for_status(issue)
-
-    assert "cs:planned" not in normalized
-    assert any("status is authoritative" in reason for reason in reasons)
-
-
-def test_normalize_changeset_labels_for_status_drops_terminal_labels_on_blocked() -> None:
-    issue = {
-        "id": "at-123",
-        "status": "blocked",
-        "labels": ["at:changeset", "cs:blocked", "cs:merged", "cs:abandoned"],
-    }
-
-    normalized, reasons = gc_cmd._normalize_changeset_labels_for_status(issue)
-
-    assert "cs:blocked" in normalized
-    assert "cs:merged" not in normalized
-    assert "cs:abandoned" not in normalized
-    assert any("not terminal" in reason for reason in reasons)
-
-
-def test_normalize_changeset_labels_for_status_adds_terminal_from_review_state() -> None:
-    issue = {
-        "id": "at-123",
-        "status": "closed",
-        "labels": ["at:changeset"],
-        "description": "pr_state: merged\n",
-    }
-
-    normalized, reasons = gc_cmd._normalize_changeset_labels_for_status(issue)
-
-    assert "cs:merged" in normalized
-    assert "cs:abandoned" not in normalized
-    assert any("requires terminal merged label" in reason for reason in reasons)
-
-
-def test_gc_normalize_changeset_labels_updates_legacy_labels() -> None:
+def test_gc_normalize_changeset_labels_updates_legacy_status() -> None:
     issues = [
         {
             "id": "at-123",
-            "status": "open",
-            "labels": ["at:changeset", "cs:ready"],
+            "status": "ready",
+            "labels": ["at:changeset"],
         }
     ]
     calls: list[list[str]] = []
@@ -334,17 +277,16 @@ def test_gc_normalize_changeset_labels_updates_legacy_labels() -> None:
         assert len(actions) == 1
         actions[0].apply()
 
-    assert calls == [["update", "at-123", "--remove-label", "cs:ready"]]
+    assert calls == [["update", "at-123", "--status", "open"]]
 
 
-def test_gc_normalize_changeset_labels_derives_canonical_status_from_legacy_labels() -> None:
+def test_gc_normalize_changeset_labels_ignores_label_only_payloads() -> None:
     issues = [
         {
             "id": "at-123",
             "labels": ["at:changeset", "cs:ready"],
         }
     ]
-    calls: list[list[str]] = []
 
     def fake_run_bd_json(
         args: list[str], *, beads_root: Path, cwd: Path
@@ -353,113 +295,19 @@ def test_gc_normalize_changeset_labels_derives_canonical_status_from_legacy_labe
             return issues
         return []
 
-    def fake_run_bd_command(
-        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ) -> object:
-        calls.append(args)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    with (
-        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
-    ):
+    with patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json):
         actions = gc_cmd._gc_normalize_changeset_labels(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
         )
-        assert len(actions) == 1
-        actions[0].apply()
-
-    assert calls == [["update", "at-123", "--status", "open", "--remove-label", "cs:ready"]]
+        assert actions == []
 
 
-def test_gc_normalize_changeset_labels_closes_terminal_tombstone_records() -> None:
-    issues = [
-        {
-            "id": "at-123",
-            "status": "open",
-            "labels": ["at:changeset", "cs:merged"],
-            "description": "pr_state: merged\n",
-        }
-    ]
-    calls: list[list[str]] = []
-
-    def fake_run_bd_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        if args[:4] == ["list", "--label", "at:changeset", "--all"]:
-            return issues
-        return []
-
-    def fake_run_bd_command(
-        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ) -> object:
-        calls.append(args)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    with (
-        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
-    ):
-        actions = gc_cmd._gc_normalize_changeset_labels(
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
-        )
-        assert len(actions) == 1
-        assert any("tombstone closure" in detail for detail in actions[0].details)
-        actions[0].apply()
-
-    assert calls == [["update", "at-123", "--status", "closed"]]
-
-
-def test_normalize_executable_ready_labels_for_status_backfills_ready() -> None:
-    issue = {
-        "id": "at-epic",
-        "status": "open",
-        "labels": ["at:epic"],
-    }
-
-    normalized, reasons = gc_cmd._normalize_executable_ready_labels_for_status(issue)
-
-    assert "at:ready" in normalized
-    assert "at:draft" not in normalized
-    assert any("preserve behavior explicitly" in reason for reason in reasons)
-
-
-def test_normalize_executable_ready_labels_for_status_preserves_legacy_blocked() -> None:
-    issue = {
-        "id": "at-epic",
-        "status": "open",
-        "labels": ["at:epic", "at:draft", "at:ready"],
-    }
-
-    normalized, reasons = gc_cmd._normalize_executable_ready_labels_for_status(issue)
-
-    assert "at:draft" not in normalized
-    assert "at:ready" not in normalized
-    assert any("preserve behavior" in reason for reason in reasons)
-
-
-def test_normalize_executable_ready_labels_for_status_drops_ready_on_deferred() -> None:
-    issue = {
-        "id": "at-epic",
-        "labels": ["at:epic", "at:draft", "at:ready"],
-    }
-
-    normalized, reasons = gc_cmd._normalize_executable_ready_labels_for_status(
-        issue, target_status="deferred"
-    )
-
-    assert "at:draft" not in normalized
-    assert "at:ready" not in normalized
-    assert any("deferred status is not executable" in reason for reason in reasons)
-
-
-def test_gc_normalize_executable_ready_labels_updates_legacy_labels() -> None:
+def test_gc_normalize_executable_ready_labels_updates_legacy_status() -> None:
     issues = [
         {
             "id": "at-epic",
-            "status": "open",
+            "status": "hooked",
             "labels": ["at:epic"],
         }
     ]
@@ -489,49 +337,13 @@ def test_gc_normalize_executable_ready_labels_updates_legacy_labels() -> None:
         assert len(actions) == 1
         actions[0].apply()
 
-    assert calls == [["update", "at-epic", "--add-label", "at:ready"]]
-
-
-def test_gc_normalize_executable_ready_labels_derives_status_from_legacy_labels() -> None:
-    issues = [
-        {
-            "id": "at-epic",
-            "labels": ["at:epic", "at:ready"],
-        }
-    ]
-    calls: list[list[str]] = []
-
-    def fake_run_bd_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        if args[:4] == ["list", "--label", "at:epic", "--all"]:
-            return issues
-        return []
-
-    def fake_run_bd_command(
-        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ) -> object:
-        calls.append(args)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    with (
-        patch("atelier.commands.gc.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.commands.gc.beads.run_bd_command", side_effect=fake_run_bd_command),
-    ):
-        actions = gc_cmd._gc_normalize_executable_ready_labels(
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
-        )
-        assert len(actions) == 1
-        actions[0].apply()
-
-    assert calls == [["update", "at-epic", "--status", "open"]]
+    assert calls == [["update", "at-epic", "--status", "in_progress"]]
 
 
 def test_gc_normalize_changeset_labels_orders_actions_deterministically() -> None:
     issues = [
-        {"id": "at-200", "labels": ["at:changeset", "cs:ready"]},
-        {"id": "at-100", "labels": ["at:changeset", "cs:ready"]},
+        {"id": "at-200", "status": "ready", "labels": ["at:changeset"]},
+        {"id": "at-100", "status": "ready", "labels": ["at:changeset"]},
     ]
 
     def fake_run_bd_json(
@@ -548,8 +360,8 @@ def test_gc_normalize_changeset_labels_orders_actions_deterministically() -> Non
         )
 
     assert [action.description for action in actions] == [
-        "Normalize lifecycle metadata for changeset at-100",
-        "Normalize lifecycle metadata for changeset at-200",
+        "Normalize lifecycle status for changeset at-100",
+        "Normalize lifecycle status for changeset at-200",
     ]
 
 
@@ -1051,12 +863,13 @@ def test_gc_closed_workspace_branches_without_mapping_prunes_integrated_root() -
         issue = {
             "id": "at-irs",
             "status": "closed",
-            "labels": ["at:changeset", "cs:merged", "workspace:project-guardrail"],
+            "labels": ["at:changeset", "workspace:project-guardrail"],
             "description": (
                 "workspace.root_branch: project-guardrail\n"
                 "workspace.parent_branch: main\n"
                 "changeset.root_branch: project-guardrail\n"
                 "changeset.work_branch: project-guardrail-at-irs\n"
+                "pr_state: merged\n"
             ),
         }
         refs = {
@@ -1112,11 +925,12 @@ def test_gc_closed_workspace_branches_without_mapping_skips_not_integrated() -> 
         issue = {
             "id": "at-irs",
             "status": "closed",
-            "labels": ["at:changeset", "cs:merged", "workspace:project-guardrail"],
+            "labels": ["at:changeset", "workspace:project-guardrail"],
             "description": (
                 "workspace.root_branch: project-guardrail\n"
                 "workspace.parent_branch: main\n"
                 "changeset.root_branch: project-guardrail\n"
+                "pr_state: merged\n"
             ),
         }
         refs = {

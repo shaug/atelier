@@ -36,15 +36,6 @@ from .work_runtime_common import (
     parse_issue_time,
 )
 
-_VALID_CHANGESET_STATE_LABELS = {
-    "cs:planned",
-    "cs:ready",
-    "cs:in_progress",
-    "cs:blocked",
-    "cs:merged",
-    "cs:abandoned",
-}
-
 
 def send_planner_notification(
     *,
@@ -1288,8 +1279,7 @@ def is_changeset_recovery_candidate(
     Returns:
         ``True`` when recovery should re-run finalize logic.
     """
-    labels = issue_labels(issue)
-    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"), labels=labels)
+    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
     if canonical_status != "blocked":
         return False
     work_branch = changeset_work_branch(issue)
@@ -1352,7 +1342,6 @@ def find_invalid_changeset_labels(root_id: str, *, beads_root: Path, repo_root: 
         root_id,
         beads_root=beads_root,
         repo_root=repo_root,
-        valid_changeset_state_labels=_VALID_CHANGESET_STATE_LABELS,
     )
 
 

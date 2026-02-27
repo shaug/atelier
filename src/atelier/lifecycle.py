@@ -23,7 +23,6 @@ CANONICAL_LIFECYCLE_STATUSES = {
     "closed",
 }
 ACTIVE_LIFECYCLE_STATUSES = {"open", "in_progress"}
-TERMINAL_CHANGESET_LABELS = {"cs:merged", "cs:abandoned"}
 SPECIAL_NON_WORK_LABELS = {"at:message", "at:agent", "at:policy"}
 SPECIAL_NON_WORK_TYPES = {"message", "agent", "policy"}
 WORK_ISSUE_TYPES = {"epic", "task", "bug", "feature"}
@@ -34,17 +33,6 @@ _LEGACY_STATUS_ALIASES = {
     "hooked": "in_progress",
     "done": "closed",
 }
-_LEGACY_LABEL_STATUS_HINTS: tuple[tuple[str, str], ...] = (
-    ("cs:merged", "closed"),
-    ("cs:abandoned", "closed"),
-    ("cs:blocked", "blocked"),
-    ("cs:in_progress", "in_progress"),
-    ("at:hooked", "in_progress"),
-    ("cs:planned", "deferred"),
-    ("at:draft", "deferred"),
-    ("cs:ready", "open"),
-    ("at:ready", "open"),
-)
 
 
 @dataclass(frozen=True)
@@ -158,20 +146,11 @@ def normalize_status_value(status: object) -> str | None:
     return cleaned.lower()
 
 
-def _legacy_status_hint_from_labels(labels: set[str]) -> str | None:
-    for label, status in _LEGACY_LABEL_STATUS_HINTS:
-        if label in labels:
-            return status
-    return None
-
-
-def canonical_lifecycle_status(status: object, *, labels: set[str] | None = None) -> str | None:
-    """Resolve canonical lifecycle status with legacy compatibility.
+def canonical_lifecycle_status(status: object) -> str | None:
+    """Resolve canonical lifecycle status.
 
     Args:
         status: Raw issue status.
-        labels: Optional normalized labels used for transitional backfill when
-            status is missing or legacy-only.
 
     Returns:
         Canonical lifecycle status (`deferred`, `open`, `in_progress`,
@@ -183,24 +162,19 @@ def canonical_lifecycle_status(status: object, *, labels: set[str] | None = None
         return normalized
     if normalized in _LEGACY_STATUS_ALIASES:
         return _LEGACY_STATUS_ALIASES[normalized]
-    if normalized is None and labels:
-        hint = _legacy_status_hint_from_labels(labels)
-        if hint is not None:
-            return hint
     return normalized
 
 
-def is_closed_status(status: object, *, labels: set[str] | None = None) -> bool:
+def is_closed_status(status: object) -> bool:
     """Return whether status is terminal under canonical lifecycle semantics.
 
     Args:
         status: Raw issue status.
-        labels: Optional labels used for transitional compatibility.
 
     Returns:
         ``True`` when status resolves to canonical ``closed``.
     """
-    return canonical_lifecycle_status(status, labels=labels) == "closed"
+    return canonical_lifecycle_status(status) == "closed"
 
 
 def is_special_non_work_issue(*, labels: set[str], issue_type: object) -> bool:

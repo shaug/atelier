@@ -102,13 +102,11 @@ def find_invalid_changeset_labels(
     *,
     beads_root: Path,
     repo_root: Path,
-    valid_changeset_state_labels: set[str],
 ) -> list[str]:
     return worker_changeset_state.find_invalid_changeset_labels(
         root_id,
         beads_root=beads_root,
         repo_root=repo_root,
-        valid_changeset_state_labels=valid_changeset_state_labels,
     )
 
 

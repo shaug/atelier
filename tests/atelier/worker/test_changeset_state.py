@@ -24,7 +24,6 @@ def test_find_invalid_changeset_labels_flags_subtask_only() -> None:
             "at-epic",
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
-            valid_changeset_state_labels={"cs:ready", "cs:planned"},
         )
 
     assert invalid == ["at-epic.1"]
@@ -41,7 +40,8 @@ def test_mark_changeset_blocked_adds_blocked_state_and_note() -> None:
 
     args = run_bd_command.call_args.args[0]
     assert args[0:2] == ["update", "at-1"]
-    assert "cs:blocked" in args
+    assert "--status" in args
+    assert "blocked" in args
     assert "--append-notes" in args
     assert "missing integration" in args[-1]
 

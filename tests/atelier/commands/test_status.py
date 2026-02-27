@@ -73,9 +73,19 @@ def test_status_json_summary() -> None:
             ),
         }
         changesets = [
-            {"id": "cs-1", "labels": ["at:changeset", "cs:merged"]},
-            {"id": "cs-2", "labels": ["at:changeset"]},
-            {"id": "cs-3", "labels": ["at:changeset", "cs:abandoned"]},
+            {
+                "id": "cs-1",
+                "status": "closed",
+                "labels": ["at:changeset"],
+                "description": "pr_state: merged\n",
+            },
+            {"id": "cs-2", "status": "open", "labels": ["at:changeset"]},
+            {
+                "id": "cs-3",
+                "status": "closed",
+                "labels": ["at:changeset"],
+                "description": "pr_state: closed\n",
+            },
         ]
 
         def fake_run_bd_json(
