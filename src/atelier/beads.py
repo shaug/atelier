@@ -1964,6 +1964,41 @@ def close_issue(
     return result
 
 
+def mark_issue_in_progress(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> ExternalTicketReconcileResult:
+    """Set a Beads issue to in-progress and reconcile reopened tickets.
+
+    Args:
+        issue_id: Bead identifier to move into the in-progress state.
+        beads_root: Path to the Beads data directory.
+        cwd: Working directory for `bd` invocation.
+
+    Returns:
+        Reconciliation result for exported GitHub tickets reopened because the
+        issue became active again.
+
+    Raises:
+        ValueError: If ``issue_id`` is empty after trimming whitespace.
+    """
+    cleaned_issue_id = issue_id.strip()
+    if not cleaned_issue_id:
+        raise ValueError("issue_id must not be empty")
+    run_bd_command(
+        ["update", cleaned_issue_id, "--status", "in_progress"],
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+    return reconcile_reopened_issue_exported_github_tickets(
+        cleaned_issue_id,
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+
+
 def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
     """Run a bd command with --json and return parsed output."""
     cmd = list(args)
@@ -3827,8 +3862,8 @@ def close_epic_if_complete(
             continue
         candidate_id = candidate.get("id")
         if isinstance(candidate_id, str) and candidate_id.strip():
-            run_bd_command(
-                ["update", candidate_id.strip(), "--status", "in_progress"],
+            mark_issue_in_progress(
+                candidate_id.strip(),
                 beads_root=beads_root,
                 cwd=cwd,
             )

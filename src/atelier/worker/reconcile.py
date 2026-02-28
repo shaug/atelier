@@ -282,8 +282,8 @@ def reconcile_blocked_merged_changesets(
             issue,
             active_pr_lifecycle=True,
         ):
-            beads.run_bd_command(
-                ["update", changeset_id, "--status", "in_progress"],
+            beads.mark_issue_in_progress(
+                changeset_id,
                 beads_root=beads_root,
                 cwd=repo_root,
             )

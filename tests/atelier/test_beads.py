@@ -2507,7 +2507,7 @@ def test_close_epic_if_complete_reopens_active_pr_descendant() -> None:
 
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads.run_bd_command") as run_bd_command,
+        patch("atelier.beads.mark_issue_in_progress") as mark_issue_in_progress,
         patch("atelier.beads.close_issue") as close_issue,
         patch("atelier.beads.clear_agent_hook") as clear_hook,
     ):
@@ -2519,8 +2519,8 @@ def test_close_epic_if_complete_reopens_active_pr_descendant() -> None:
         )
 
     assert result is False
-    run_bd_command.assert_called_once_with(
-        ["update", "epic-1.1", "--status", "in_progress"],
+    mark_issue_in_progress.assert_called_once_with(
+        "epic-1.1",
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
     )
@@ -2580,7 +2580,7 @@ def test_close_epic_if_complete_reopens_active_pr_standalone_changeset() -> None
 
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_json),
-        patch("atelier.beads.run_bd_command") as run_bd_command,
+        patch("atelier.beads.mark_issue_in_progress") as mark_issue_in_progress,
         patch("atelier.beads.close_issue") as close_issue,
         patch("atelier.beads.clear_agent_hook") as clear_hook,
     ):
@@ -2592,8 +2592,8 @@ def test_close_epic_if_complete_reopens_active_pr_standalone_changeset() -> None
         )
 
     assert result is False
-    run_bd_command.assert_called_once_with(
-        ["update", "at-irs", "--status", "in_progress"],
+    mark_issue_in_progress.assert_called_once_with(
+        "at-irs",
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
     )
@@ -2658,6 +2658,29 @@ def test_close_issue_skips_reconcile_when_close_fails_with_allow_failure() -> No
         allow_failure=True,
     )
     reconcile.assert_not_called()
+
+
+def test_mark_issue_in_progress_runs_update_and_reconciles_reopen() -> None:
+    with (
+        patch("atelier.beads.run_bd_command") as run_command,
+        patch("atelier.beads.reconcile_reopened_issue_exported_github_tickets") as reconcile,
+    ):
+        beads.mark_issue_in_progress(
+            "at-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    run_command.assert_called_once_with(
+        ["update", "at-1", "--status", "in_progress"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    reconcile.assert_called_once_with(
+        "at-1",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
 
 
 def test_update_changeset_review_updates_description() -> None:
