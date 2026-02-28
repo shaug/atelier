@@ -300,20 +300,24 @@ def run_finalize_pipeline(
             )
             return FinalizeResult(continue_running=False, reason="changeset_pr_status_query_failed")
     if terminal_state is not None or canonical_status == "closed":
-        if service.changeset_waiting_on_review_or_signals(issue, context=context):
+        active_pr_lifecycle = service.changeset_waiting_on_review_or_signals(issue, context=context)
+        if beads.close_transition_has_active_pr_lifecycle(
+            issue,
+            active_pr_lifecycle=active_pr_lifecycle,
+        ):
             atelier_log.warning(
                 "changeset="
                 f"{changeset_id} finalize suppressed terminal close while PR lifecycle "
                 "remains active"
             )
-            service.mark_changeset_blocked(
-                changeset_id, reason="closed changeset has active PR lifecycle"
-            )
+            service.mark_changeset_in_progress(changeset_id)
             service.send_planner_notification(
                 subject=f"NEEDS-DECISION: Closed changeset has active PR lifecycle ({changeset_id})",
                 body=(
                     "Changeset status is closed but live PR lifecycle is still active "
                     "(draft/open/in-review/approved or gated pushed).\n"
+                    "Automatic recovery set status back to `in_progress` to prevent "
+                    "premature closure side effects.\n"
                     "Action: reconcile changeset lifecycle and PR state before retrying finalize."
                 ),
                 agent_id=agent_id,

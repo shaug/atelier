@@ -121,6 +121,10 @@ def test_promote_planned_descendant_changesets_promotes_deferred_only() -> None:
 
 def test_mark_changeset_merged_reconciles_external_tickets() -> None:
     with (
+        patch(
+            "atelier.worker.changeset_state.beads.run_bd_json",
+            return_value=[{"id": "at-1.1", "description": "pr_state: merged\n"}],
+        ),
         patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
         patch(
             "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
@@ -155,6 +159,10 @@ def test_mark_changeset_merged_reconciles_external_tickets() -> None:
 
 def test_mark_changeset_abandoned_sets_terminal_marker_and_reconciles_external_tickets() -> None:
     with (
+        patch(
+            "atelier.worker.changeset_state.beads.run_bd_json",
+            return_value=[{"id": "at-1.2", "description": "pr_state: closed\n"}],
+        ),
         patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
         patch(
             "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
@@ -185,3 +193,53 @@ def test_mark_changeset_abandoned_sets_terminal_marker_and_reconciles_external_t
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
     )
+
+
+def test_mark_changeset_merged_reopens_when_pr_lifecycle_is_active() -> None:
+    with (
+        patch(
+            "atelier.worker.changeset_state.beads.run_bd_json",
+            return_value=[{"id": "at-1.3", "description": "pr_state: in-review\n"}],
+        ),
+        patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
+        patch(
+            "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
+        ) as reconcile,
+    ):
+        changeset_state.mark_changeset_merged(
+            "at-1.3",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    run_bd_command.assert_called_once_with(
+        ["update", "at-1.3", "--status", "in_progress"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    reconcile.assert_not_called()
+
+
+def test_mark_changeset_abandoned_reopens_when_pr_lifecycle_is_active() -> None:
+    with (
+        patch(
+            "atelier.worker.changeset_state.beads.run_bd_json",
+            return_value=[{"id": "at-1.4", "description": "pr_state: draft-pr\n"}],
+        ),
+        patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
+        patch(
+            "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
+        ) as reconcile,
+    ):
+        changeset_state.mark_changeset_abandoned(
+            "at-1.4",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    run_bd_command.assert_called_once_with(
+        ["update", "at-1.4", "--status", "in_progress"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    reconcile.assert_not_called()

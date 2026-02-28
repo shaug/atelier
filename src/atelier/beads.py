@@ -3623,6 +3623,42 @@ def epic_changeset_summary(
     return summarize_changesets(changesets)
 
 
+def close_transition_has_active_pr_lifecycle(
+    issue_payload: dict[str, object],
+    *,
+    beads_root: Path | None = None,
+    cwd: Path | None = None,
+    active_pr_lifecycle: bool | None = None,
+) -> bool:
+    """Return whether close-state transition must be blocked by active PR lifecycle.
+
+    Args:
+        issue_payload: Candidate issue payload.
+        beads_root: Optional Beads store path used to hydrate missing description
+            metadata.
+        cwd: Optional working directory used with ``beads_root`` lookups.
+        active_pr_lifecycle: Optional caller-provided lifecycle signal. When
+            provided, this value is authoritative.
+
+    Returns:
+        ``True`` when the issue has active PR lifecycle state and must not
+        transition to closed.
+    """
+    if active_pr_lifecycle is not None:
+        return bool(active_pr_lifecycle)
+    candidate = issue_payload
+    description = candidate.get("description")
+    if not isinstance(description, str) and beads_root is not None and cwd is not None:
+        issue_id = candidate.get("id")
+        if isinstance(issue_id, str) and issue_id.strip():
+            detailed = run_bd_json(["show", issue_id.strip()], beads_root=beads_root, cwd=cwd)
+            if detailed and isinstance(detailed[0], dict):
+                candidate = detailed[0]
+                description = candidate.get("description")
+    review = changesets.parse_review_metadata(description if isinstance(description, str) else "")
+    return lifecycle.is_active_pr_lifecycle_state(review.pr_state)
+
+
 def close_epic_if_complete(
     epic_id: str,
     agent_bead_id: str | None,
@@ -3632,20 +3668,6 @@ def close_epic_if_complete(
     confirm: Callable[[ChangesetSummary], bool] | None = None,
 ) -> bool:
     """Close an epic and clear hook if all changesets are complete."""
-
-    def issue_has_active_pr_lifecycle(issue_payload: dict[str, object]) -> bool:
-        description = issue_payload.get("description")
-        if not isinstance(description, str):
-            issue_id = issue_payload.get("id")
-            if isinstance(issue_id, str) and issue_id.strip():
-                detailed = run_bd_json(["show", issue_id.strip()], beads_root=beads_root, cwd=cwd)
-                if detailed and isinstance(detailed[0], dict):
-                    issue_payload = detailed[0]
-                    description = issue_payload.get("description")
-        review = changesets.parse_review_metadata(
-            description if isinstance(description, str) else ""
-        )
-        return lifecycle.is_active_pr_lifecycle_state(review.pr_state)
 
     issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
     if not issues:
@@ -3669,7 +3691,11 @@ def close_epic_if_complete(
     for candidate in changeset_candidates:
         if lifecycle.canonical_lifecycle_status(candidate.get("status")) != "closed":
             continue
-        if not issue_has_active_pr_lifecycle(candidate):
+        if not close_transition_has_active_pr_lifecycle(
+            candidate,
+            beads_root=beads_root,
+            cwd=cwd,
+        ):
             continue
         candidate_id = candidate.get("id")
         if isinstance(candidate_id, str) and candidate_id.strip():

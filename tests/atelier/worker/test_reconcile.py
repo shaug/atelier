@@ -224,6 +224,7 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
     logs: list[str] = []
     with (
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]),
+        patch("atelier.worker.reconcile.beads.run_bd_command") as run_bd_command,
         patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
         patch(
             "atelier.worker.reconcile.prs.read_github_pr_status",
@@ -258,8 +259,13 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
 
     assert result.scanned == 1
     assert result.actionable == 1
-    assert result.reconciled == 0
-    assert result.failed == 1
+    assert result.reconciled == 1
+    assert result.failed == 0
+    run_bd_command.assert_called_once_with(
+        ["update", "at-1.9", "--status", "in_progress"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
     assert any(
         "reconcile anomaly: at-1.9 -> epic=at-1 closed+active-pr-lifecycle" in line for line in logs
     )

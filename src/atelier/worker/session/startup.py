@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ... import changeset_fields, lifecycle, pr_strategy
+from ... import beads, changeset_fields, lifecycle, pr_strategy
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
@@ -519,6 +519,8 @@ def run_startup_contract_service(
     queue_only = context.queue_only
     dry_run = context.dry_run
     assume_yes = context.assume_yes
+    beads_root = context.beads_root
+    repo_root = context.repo_root
     repo_slug = context.repo_slug
     branch_pr = context.branch_pr
     branch_pr_strategy = context.branch_pr_strategy
@@ -555,6 +557,15 @@ def run_startup_contract_service(
                 git_path=git_path,
             ):
                 if lifecycle.is_closed_status(candidate.get("status")):
+                    if beads.close_transition_has_active_pr_lifecycle(
+                        candidate,
+                        active_pr_lifecycle=True,
+                    ):
+                        beads.run_bd_command(
+                            ["update", changeset_id, "--status", "in_progress"],
+                            beads_root=beads_root,
+                            cwd=repo_root,
+                        )
                     service.emit(
                         "Startup diagnostics: closed changeset has active PR lifecycle "
                         f"(decision-required): {changeset_id}"

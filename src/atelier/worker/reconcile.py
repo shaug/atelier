@@ -269,8 +269,8 @@ def reconcile_blocked_merged_changesets(
             continue
         actionable += 1
         drift_anomaly_ids.add(changeset_id)
-        failed += 1
         if dry_run:
+            failed += 1
             if log:
                 log(
                     "reconcile dry-run anomaly: "
@@ -278,6 +278,22 @@ def reconcile_blocked_merged_changesets(
                     f"closed+active-pr-lifecycle(state={drift_state})"
                 )
             continue
+        if beads.close_transition_has_active_pr_lifecycle(
+            issue,
+            active_pr_lifecycle=True,
+        ):
+            beads.run_bd_command(
+                ["update", changeset_id, "--status", "in_progress"],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+            reconciled += 1
+            if log:
+                log(
+                    "reconcile recovery: "
+                    f"{changeset_id} -> epic={epic_id} restored to in_progress "
+                    "after closed+active-pr-lifecycle drift"
+                )
         if log:
             log(
                 "reconcile anomaly: "

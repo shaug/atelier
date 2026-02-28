@@ -673,6 +673,57 @@ def test_run_startup_contract_explicit_epic_active_pr_skips_auto_merge_reconcile
     )
 
 
+def test_run_startup_contract_explicit_epic_closed_active_pr_reopens_changeset() -> None:
+    close_calls: list[tuple[str, str | None]] = []
+    emitted: list[str] = []
+
+    with patch("atelier.worker.session.startup.beads.run_bd_command") as run_bd_command:
+        result = _run_startup(
+            explicit_epic_id="at-explicit",
+            branch_pr=True,
+            repo_slug="org/repo",
+            agent_bead_id="at-agent",
+            show_issue=lambda _issue_id: {
+                "id": "at-explicit",
+                "status": "in_progress",
+                "assignee": "atelier/worker/codex/p100",
+                "labels": ["at:epic"],
+            },
+            next_changeset=lambda **_kwargs: None,
+            list_descendant_changesets=lambda _parent_id, include_closed: (
+                [
+                    {
+                        "id": "at-explicit.1",
+                        "status": "closed",
+                        "description": "pr_state: closed\n",
+                        "labels": [],
+                    }
+                ]
+                if include_closed
+                else []
+            ),
+            changeset_waiting_on_review_or_signals=lambda *_args, **_kwargs: True,
+            close_epic_if_complete=lambda epic_id, agent_bead_id: (
+                close_calls.append((epic_id, agent_bead_id)) or False
+            ),
+            emit=lambda message: emitted.append(message),
+        )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_review_pending"
+    assert close_calls == [("at-explicit", "at-agent")]
+    run_bd_command.assert_called_once_with(
+        ["update", "at-explicit.1", "--status", "in_progress"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    assert any(
+        "Startup diagnostics: closed changeset has active PR lifecycle "
+        "(decision-required): at-explicit.1" in line
+        for line in emitted
+    )
+
+
 def test_run_startup_contract_explicit_epic_no_actionable_remains_non_terminal() -> None:
     merged_ids: list[str] = []
     close_calls: list[tuple[str, str | None]] = []

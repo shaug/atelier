@@ -25,17 +25,6 @@ def list_child_issues(
     return beads.run_bd_json(args, beads_root=beads_root, cwd=repo_root)
 
 
-def _changeset_review_state(issue: dict[str, object]) -> str | None:
-    description = issue.get("description")
-    text = description if isinstance(description, str) else ""
-    fields = beads.parse_description_fields(text)
-    return lifecycle.normalize_review_state(fields.get("pr_state"))
-
-
-def _issue_has_active_pr_lifecycle(issue: dict[str, object]) -> bool:
-    return lifecycle.is_active_pr_lifecycle_state(_changeset_review_state(issue))
-
-
 def _load_changeset_issue(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> dict[str, object] | None:
@@ -54,13 +43,19 @@ def _close_guard_allows(
     beads_root: Path,
     repo_root: Path,
     issue: dict[str, object] | None = None,
+    active_pr_lifecycle: bool | None = None,
 ) -> bool:
     candidate = issue
     if candidate is None or "description" not in candidate:
         candidate = _load_changeset_issue(changeset_id, beads_root=beads_root, repo_root=repo_root)
     if candidate is None:
         return True
-    if not _issue_has_active_pr_lifecycle(candidate):
+    if not beads.close_transition_has_active_pr_lifecycle(
+        candidate,
+        beads_root=beads_root,
+        cwd=repo_root,
+        active_pr_lifecycle=active_pr_lifecycle,
+    ):
         return True
     mark_changeset_in_progress(changeset_id, beads_root=beads_root, repo_root=repo_root)
     return False
@@ -95,6 +90,8 @@ def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Pat
 
 
 def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+    if not _close_guard_allows(changeset_id, beads_root=beads_root, repo_root=repo_root):
+        return
     beads.run_bd_command(
         [
             "update",
@@ -117,6 +114,8 @@ def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Pat
 
 
 def mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+    if not _close_guard_allows(changeset_id, beads_root=beads_root, repo_root=repo_root):
+        return
     beads.run_bd_command(
         [
             "update",
