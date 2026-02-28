@@ -454,6 +454,7 @@ def changeset_base_branch(
     repo_root: Path,
     git_path: str | None,
     lookup_pr_payload_fn: Callable[[str | None, str], dict[str, object] | None] = lookup_pr_payload,
+    update_metadata: bool = True,
 ) -> str | None:
     """Changeset base branch.
 
@@ -507,7 +508,12 @@ def changeset_base_branch(
     if normalized_strategy == "sequential":
         if integration_parent_branch:
             changeset_id = issue.get("id")
-            if beads_root is not None and isinstance(changeset_id, str) and changeset_id:
+            if (
+                update_metadata
+                and beads_root is not None
+                and isinstance(changeset_id, str)
+                and changeset_id
+            ):
                 root_base = (
                     git.git_rev_parse(repo_root, root_branch, git_path=git_path)
                     if root_branch
@@ -550,7 +556,12 @@ def changeset_base_branch(
         ):
             return None
         changeset_id = issue.get("id")
-        if beads_root is not None and isinstance(changeset_id, str) and changeset_id:
+        if (
+            update_metadata
+            and beads_root is not None
+            and isinstance(changeset_id, str)
+            and changeset_id
+        ):
             root_base = (
                 git.git_rev_parse(repo_root, root_branch, git_path=git_path)
                 if root_branch
@@ -574,7 +585,8 @@ def changeset_base_branch(
             )
         return integration_parent_branch
     if (
-        beads_root is not None
+        update_metadata
+        and beads_root is not None
         and lineage.used_dependency_parent
         and lineage.dependency_parent_branch
     ):
@@ -608,7 +620,12 @@ def changeset_base_branch(
     if collapsed_parent_normalized and integration_parent_branch:
         parent_branch = integration_parent_branch
         changeset_id = issue.get("id")
-        if beads_root is not None and isinstance(changeset_id, str) and changeset_id:
+        if (
+            update_metadata
+            and beads_root is not None
+            and isinstance(changeset_id, str)
+            and changeset_id
+        ):
             root_base = (
                 git.git_rev_parse(repo_root, root_branch, git_path=git_path)
                 if root_branch
@@ -639,7 +656,12 @@ def changeset_base_branch(
             git_path=git_path,
         ):
             changeset_id = issue.get("id")
-            if beads_root is not None and isinstance(changeset_id, str) and changeset_id:
+            if (
+                update_metadata
+                and beads_root is not None
+                and isinstance(changeset_id, str)
+                and changeset_id
+            ):
                 root_base = (
                     git.git_rev_parse(repo_root, root_branch, git_path=git_path)
                     if root_branch
@@ -1196,9 +1218,10 @@ def changeset_stack_integrity_preflight(
             issue,
             branch_pr_strategy=normalized_strategy,
             repo_slug=repo_slug,
-            beads_root=None,
+            beads_root=beads_root,
             repo_root=repo_root,
             git_path=git_path,
+            update_metadata=False,
         )
     )
     if resolved_base_branch == integration_parent_branch:
