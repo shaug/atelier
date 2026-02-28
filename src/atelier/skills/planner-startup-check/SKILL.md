@@ -22,6 +22,9 @@ during startup triage. Do not wait for approval to capture deferred work.
 1. List queued messages (if queues are enabled) and offer to claim them.
 1. Summarize each message and extract actionable issues.
 1. Create or update deferred beads immediately for actionable issues.
+1. If startup triage adds a new changeset under an active epic, immediately
+   prompt the operator for ready-now vs deferred-default and record the
+   readiness outcome in notes/status.
 1. Capture required decisions from the overseer only when a real blocker exists
    (for example, promotion from deferred to open).
 1. Mark messages as read when addressed.
@@ -37,6 +40,8 @@ during startup triage. Do not wait for approval to capture deferred work.
 
 - Inbox and queue are processed before planning work starts.
 - Actionable issues are captured as deferred work without waiting for approval.
+- New changesets created under active epics have an immediate readiness decision
+  prompt and a recorded readiness outcome in notes/status.
 - Messages are summarized with explicit decisions or follow-up beads.
 - Active epic listing (draft/open/in-progress/blocked as available) is included
   in stable `epic-list` format.

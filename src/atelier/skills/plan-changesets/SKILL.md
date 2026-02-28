@@ -14,6 +14,11 @@ Capture new executable work immediately as deferred changesets
 (`status=deferred`) when issues are actionable. Do not wait for approval to
 create/edit deferred work.
 
+When a new changeset is created under an active epic (`open`, `in_progress`, or
+`blocked`), immediately prompt the operator to decide whether that changeset
+should be ready now. If the operator explicitly chooses ready-now, set
+`--status open`; otherwise keep the safe default `--status deferred`.
+
 ## Inputs
 
 - epic_id: Parent epic bead id.
@@ -40,7 +45,13 @@ create/edit deferred work.
 ## Steps
 
 1. For each changeset, create a bead with the script:
-   - `python skills/plan-changesets/scripts/create_changeset.py --epic-id <epic_id> --title "<title>" --acceptance "<acceptance>" [--status deferred|open] [--description "<scope/guardrails>"] [--notes "<notes>"] [--beads-dir "<beads_dir>"] [--no-export]`
+   - `python skills/plan-changesets/scripts/create_changeset.py --epic-id <epic_id> --title "<title>" --acceptance "<acceptance>" [--status deferred|open] [--ready-source operator|cli_override] [--description "<scope/guardrails>"] [--notes "<notes>"] [--beads-dir "<beads_dir>"] [--no-export]`
+1. For active epics, ask the operator immediately whether each new changeset
+   should be ready now. Record the outcome in notes/status:
+   - ready-now decision: use `--status open --ready-source operator`
+   - explicit non-interactive override to open: use `--status open` (records
+     `cli_override`)
+   - no explicit ready-now decision: keep `--status deferred` (safe default)
 1. If decomposition would produce exactly one child changeset, stop and either:
    - keep the epic as the executable changeset, or
    - record explicit decomposition rationale in epic/changeset notes before
@@ -60,5 +71,8 @@ create/edit deferred work.
 - Decomposition happened only when needed for scope/dependency/reviewability.
 - Any one-child decomposition has explicit rationale recorded in notes or
   description.
+- New changesets under active epics include a recorded readiness outcome in
+  notes and status (`open` only with explicit ready-now decision; otherwise
+  deferred by default).
 - When auto-export is enabled and not opted out, each changeset gets its own
   exported external ticket link.

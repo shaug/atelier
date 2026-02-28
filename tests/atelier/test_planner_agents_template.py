@@ -29,3 +29,5 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "concrete issue, create or update a deferred bead immediately" in content
     assert "Create or update deferred beads immediately" in content
     assert "Capture first, then ask only for decisions" in content
+    assert "immediately prompt the operator to choose ready-now vs" in content
+    assert "record the outcome in notes/status" in content

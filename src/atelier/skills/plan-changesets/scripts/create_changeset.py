@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from dataclasses import replace
@@ -18,10 +19,11 @@ def _bootstrap_source_import() -> None:
 
 _bootstrap_source_import()
 
-from atelier import auto_export, beads  # noqa: E402
+from atelier import auto_export, beads, lifecycle  # noqa: E402
 
 _STATUS_UPDATE_ATTEMPTS = 2
 _FAIL_CLOSED_REASON = "automatic fail-closed: unable to set deferred status after create"
+_ACTIVE_EPIC_STATUSES = frozenset({"open", "in_progress", "blocked"})
 
 
 def _command_detail(result: subprocess.CompletedProcess[str]) -> str:
@@ -85,6 +87,105 @@ def _apply_status_with_fail_closed(
     raise SystemExit(1)
 
 
+def _decode_single_issue(payload: str) -> dict[str, object] | None:
+    raw = payload.strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, list):
+        for item in parsed:
+            if isinstance(item, dict):
+                return item
+    return None
+
+
+def _active_epic_status(*, epic_id: str, beads_root: Path, cwd: Path) -> str | None:
+    result = beads.run_bd_command(
+        ["show", epic_id, "--json"],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
+    if result.returncode != 0:
+        return None
+    issue = _decode_single_issue(result.stdout or "")
+    if issue is None:
+        return None
+    canonical = lifecycle.canonical_lifecycle_status(issue.get("status"))
+    if canonical in _ACTIVE_EPIC_STATUSES:
+        return canonical
+    return None
+
+
+def _readiness_note(
+    *,
+    epic_id: str,
+    epic_status: str,
+    status: str,
+    ready_source: str,
+) -> str:
+    if status == "open":
+        if ready_source == "operator":
+            return (
+                "Readiness decision: operator selected ready-now during "
+                f"changeset capture under active epic {epic_id} "
+                f"[{epic_status}]; set status=open immediately."
+            )
+        return (
+            "Readiness decision: explicit CLI override set status=open during "
+            f"changeset capture under active epic {epic_id} "
+            f"[{epic_status}] without operator ready-now confirmation."
+        )
+    return (
+        "Readiness decision: no explicit ready-now decision during changeset "
+        f"capture under active epic {epic_id} [{epic_status}]; "
+        "kept status=deferred by default."
+    )
+
+
+def _record_active_epic_readiness(
+    *,
+    issue_id: str,
+    epic_id: str,
+    status: str,
+    ready_source: str,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    epic_status = _active_epic_status(epic_id=epic_id, beads_root=beads_root, cwd=cwd)
+    if epic_status is None:
+        return
+
+    beads.run_bd_command(
+        [
+            "update",
+            issue_id,
+            "--append-notes",
+            _readiness_note(
+                epic_id=epic_id,
+                epic_status=epic_status,
+                status=status,
+                ready_source=ready_source,
+            ),
+        ],
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+    if status == "deferred":
+        print(
+            "prompt operator immediately: "
+            f"{issue_id} remains deferred under active epic {epic_id} [{epic_status}]. "
+            "Ask whether to promote it to open now; default stays deferred until "
+            "an explicit ready-now decision.",
+            file=sys.stderr,
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epic-id", required=True, help="Parent epic bead id")
@@ -95,6 +196,12 @@ def main() -> None:
         choices=("deferred", "open"),
         default="deferred",
         help="Lifecycle status to set after create",
+    )
+    parser.add_argument(
+        "--ready-source",
+        choices=("operator", "cli_override"),
+        default="",
+        help=("Readiness source for status=open (operator decision vs explicit CLI override)"),
     )
     parser.add_argument(
         "--description",
@@ -122,6 +229,9 @@ def main() -> None:
     beads_dir = str(args.beads_dir).strip()
     if beads_dir:
         context = replace(context, beads_root=Path(beads_dir))
+    if args.ready_source and args.status != "open":
+        parser.error("--ready-source is only valid with --status open")
+    ready_source = args.ready_source or "cli_override"
 
     create_args = [
         "create",
@@ -165,6 +275,14 @@ def main() -> None:
             beads_root=context.beads_root,
             cwd=context.project_dir,
         )
+    _record_active_epic_readiness(
+        issue_id=issue_id,
+        epic_id=args.epic_id,
+        status=args.status,
+        ready_source=ready_source,
+        beads_root=context.beads_root,
+        cwd=context.project_dir,
+    )
 
     print(issue_id)
 

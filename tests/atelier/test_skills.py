@@ -212,6 +212,8 @@ def test_plan_changesets_skill_requires_rationale_for_one_child_split() -> None:
     assert "one child changeset" in text
     assert "decomposition rationale" in text
     assert "Default new changesets to `status=deferred`" in text
+    assert "immediately prompt the operator" in text
+    assert "safe default" in text
 
 
 def test_plan_changeset_guardrails_skill_mentions_checker_script() -> None:
@@ -241,6 +243,8 @@ def test_planner_startup_check_skill_captures_drafts_without_approval() -> None:
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "Create or update deferred beads immediately" in text
     assert "Do not wait for approval to capture deferred work." in text
+    assert "new changeset under an active epic" in text
+    assert "readiness outcome in notes/status" in text
 
 
 def test_workspace_skill_state_accepts_legacy_underscore_metadata_keys() -> None:
