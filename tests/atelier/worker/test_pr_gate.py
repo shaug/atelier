@@ -301,6 +301,90 @@ def test_changeset_pr_creation_decision_blocks_on_ambiguous_dependency_lineage(
     assert decision.reason.startswith("blocked:dependency-lineage-ambiguous")
 
 
+def test_changeset_pr_creation_decision_blocks_when_non_parent_dependency_not_integrated(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-root\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": ["at-epic.1", "at-epic.2"],
+    }
+
+    def _show_issue(args: list[str], **_kwargs) -> list[dict[str, object]]:
+        if args == ["show", "at-epic.1"]:
+            return [{"id": "at-epic.1", "description": "changeset.work_branch: feature-parent-1\n"}]
+        if args == ["show", "at-epic.2"]:
+            return [
+                {
+                    "id": "at-epic.2",
+                    "description": "changeset.work_branch: feature-parent-2\n",
+                    "dependencies": ["at-epic.1"],
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(pr_gate.beads, "run_bd_json", _show_issue)
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+
+    def _lookup(_repo_slug: str, branch: str) -> dict[str, object] | None:
+        if branch == "feature-parent-1":
+            return {"state": "OPEN", "isDraft": False}
+        if branch == "feature-parent-2":
+            return {"state": "MERGED", "mergedAt": "2026-02-28T00:00:00Z", "isDraft": False}
+        return None
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=_lookup,
+    )
+
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:dependency-not-integrated"
+
+
+def test_changeset_pr_creation_decision_allows_ambiguous_join_when_all_dependencies_integrated(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-root\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": ["at-epic.1", "at-epic.2"],
+    }
+
+    def _show_issue(args: list[str], **_kwargs) -> list[dict[str, object]]:
+        if args == ["show", "at-epic.1"]:
+            return [{"description": "changeset.work_branch: feature-parent-1\n"}]
+        if args == ["show", "at-epic.2"]:
+            return [{"description": "changeset.work_branch: feature-parent-2\n"}]
+        return []
+
+    monkeypatch.setattr(pr_gate.beads, "run_bd_json", _show_issue)
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda *_args, **_kwargs: {
+            "state": "MERGED",
+            "mergedAt": "2026-02-28T00:00:00Z",
+            "isDraft": False,
+        },
+    )
+
+    assert decision.allow_pr is True
+    assert decision.reason == "no-parent"
+
+
 def test_changeset_pr_creation_decision_blocks_dependency_lineage_when_parent_state_missing(
     monkeypatch,
 ) -> None:
@@ -597,6 +681,37 @@ def test_attempt_create_pr_uses_body_file_for_markdown(monkeypatch) -> None:
     body_path = observed["body_path"]
     assert isinstance(body_path, Path)
     assert not body_path.exists()
+
+
+def test_attempt_create_pr_passes_repo_slug_to_base_resolver(monkeypatch) -> None:
+    observed_repo_slug: list[str] = []
+
+    monkeypatch.setattr(
+        pr_gate.exec,
+        "try_run_command",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="created", stderr=""),
+    )
+
+    def resolve_base(_issue, *, repo_slug: str | None, **_kwargs) -> str | None:
+        if repo_slug is not None:
+            observed_repo_slug.append(repo_slug)
+        return "main"
+
+    created, detail = pr_gate.attempt_create_pr(
+        repo_slug="org/repo",
+        issue={"title": "Example"},
+        work_branch="feature/work",
+        is_draft=True,
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+        changeset_base_branch=resolve_base,
+        render_changeset_pr_body=lambda _issue: "Body",
+    )
+
+    assert created is True
+    assert detail == "created"
+    assert observed_repo_slug == ["org/repo"]
 
 
 def test_handle_pushed_without_pr_ready_mode_sets_pr_open_fallback(monkeypatch) -> None:
