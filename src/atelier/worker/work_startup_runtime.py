@@ -24,7 +24,7 @@ from .work_finalization_runtime import (
     is_changeset_recovery_candidate,
     resolve_epic_id_for_changeset,
 )
-from .work_finalization_state import mark_changeset_merged
+from .work_finalization_state import mark_changeset_in_progress, mark_changeset_merged
 from .work_runtime_common import (
     dry_run_log,
     filter_epics,
@@ -672,6 +672,13 @@ class _StartupContractService(worker_startup.StartupContractService):
 
     def mark_changeset_merged(self, changeset_id: str) -> None:
         mark_changeset_merged(
+            changeset_id,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
+        )
+
+    def mark_changeset_in_progress(self, changeset_id: str) -> None:
+        mark_changeset_in_progress(
             changeset_id,
             beads_root=self._beads_root,
             repo_root=self._repo_root,

@@ -2956,6 +2956,125 @@ def test_reconcile_closed_issue_exported_github_tickets_skips_policy_opt_outs() 
     update_external.assert_not_called()
 
 
+def test_reconcile_reopened_issue_exported_github_tickets_reopens_and_updates() -> None:
+    ticket_json = json.dumps(
+        [
+            {
+                "provider": "github",
+                "id": "179",
+                "url": "https://api.github.com/repos/acme/widgets/issues/179",
+                "relation": "primary",
+                "direction": "exported",
+                "sync_mode": "export",
+                "state": "closed",
+                "parent_id": "174",
+            }
+        ]
+    )
+    issue = {
+        "id": "at-4kv",
+        "status": "in_progress",
+        "description": f"external_tickets: {ticket_json}\n",
+    }
+    refreshed = beads.ExternalTicketRef(
+        provider="github",
+        ticket_id="179",
+        url="https://github.com/acme/widgets/issues/179",
+        state="open",
+        raw_state="open",
+        state_updated_at="2026-02-25T22:00:00Z",
+        parent_id="200",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_update(
+        issue_id: str,
+        tickets: list[beads.ExternalTicketRef],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> dict[str, object]:
+        captured["issue_id"] = issue_id
+        captured["tickets"] = tickets
+        return {}
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[issue]),
+        patch("atelier.beads.update_external_tickets", side_effect=fake_update),
+        patch(
+            "atelier.github_issues_provider.GithubIssuesProvider.reopen_ticket",
+            return_value=refreshed,
+        ),
+    ):
+        result = beads.reconcile_reopened_issue_exported_github_tickets(
+            "at-4kv",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result.stale_exported_github_tickets == 1
+    assert result.reconciled_tickets == 1
+    assert result.updated is True
+    assert result.needs_decision_notes == tuple()
+    assert captured["issue_id"] == "at-4kv"
+    updated_tickets = captured["tickets"]
+    assert isinstance(updated_tickets, list)
+    assert updated_tickets[0].state == "open"
+    assert updated_tickets[0].state_updated_at == "2026-02-25T22:00:00Z"
+    assert updated_tickets[0].parent_id == "200"
+    assert updated_tickets[0].last_synced_at is not None
+
+
+def test_reconcile_reopened_issue_exported_github_tickets_adds_note_on_missing_repo() -> None:
+    ticket_json = json.dumps(
+        [
+            {
+                "provider": "github",
+                "id": "180",
+                "relation": "primary",
+                "direction": "exported",
+                "sync_mode": "export",
+                "state": "closed",
+            }
+        ]
+    )
+    issue = {
+        "id": "at-4kv",
+        "status": "open",
+        "description": f"external_tickets: {ticket_json}\n",
+    }
+    notes: list[str] = []
+
+    def fake_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> None:
+        if "--append-notes" in args:
+            notes.append(args[-1])
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[issue]),
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
+        patch("atelier.beads.update_external_tickets") as update_external,
+    ):
+        result = beads.reconcile_reopened_issue_exported_github_tickets(
+            "at-4kv",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result.stale_exported_github_tickets == 1
+    assert result.reconciled_tickets == 0
+    assert result.updated is False
+    assert result.needs_decision_notes
+    assert any("missing repo slug" in note for note in result.needs_decision_notes)
+    assert any(note.startswith("external_reopen_pending:") for note in notes)
+    update_external.assert_not_called()
+
+
 def test_merge_description_preserving_metadata_keeps_external_tickets() -> None:
     existing = (
         'scope: old\nexternal_tickets: [{"provider":"github","id":"174","direction":"export"}]\n'

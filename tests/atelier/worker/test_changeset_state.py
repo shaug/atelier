@@ -119,6 +119,31 @@ def test_promote_planned_descendant_changesets_promotes_deferred_only() -> None:
     run_bd_command.assert_called_once()
 
 
+def test_mark_changeset_in_progress_reconciles_reopened_external_tickets() -> None:
+    with (
+        patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
+        patch(
+            "atelier.worker.changeset_state.beads.reconcile_reopened_issue_exported_github_tickets"
+        ) as reconcile,
+    ):
+        changeset_state.mark_changeset_in_progress(
+            "at-1.5",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    run_bd_command.assert_called_once_with(
+        ["update", "at-1.5", "--status", "in_progress"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    reconcile.assert_called_once_with(
+        "at-1.5",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
 def test_mark_changeset_merged_reconciles_external_tickets() -> None:
     with (
         patch(

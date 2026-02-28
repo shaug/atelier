@@ -292,3 +292,36 @@ def test_close_ticket_uses_issue_close_command(monkeypatch: pytest.MonkeyPatch) 
             "Closed because local bead is complete.",
         ]
     ]
+
+
+def test_reopen_ticket_uses_issue_reopen_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = GithubIssuesProvider(repo="org/repo")
+    captured_commands: list[list[str]] = []
+
+    def fake_run(cmd: list[str]) -> str:
+        captured_commands.append(cmd)
+        return ""
+
+    monkeypatch.setattr("atelier.github_issues_provider._run", fake_run)
+    monkeypatch.setattr("atelier.github_issues_provider._require_gh", lambda: None)
+    monkeypatch.setattr(GithubIssuesProvider, "sync_state", lambda self, ref: ref)
+
+    ref = ExternalTicketRef(provider="github", ticket_id="44")
+    updated = provider.reopen_ticket(
+        ref,
+        comment="Reopened because local bead resumed active work.",
+    )
+
+    assert updated == ref
+    assert captured_commands == [
+        [
+            "gh",
+            "issue",
+            "reopen",
+            "44",
+            "--repo",
+            "org/repo",
+            "--comment",
+            "Reopened because local bead resumed active work.",
+        ]
+    ]

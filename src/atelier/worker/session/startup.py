@@ -440,6 +440,8 @@ class StartupContractService(Protocol):
 
     def mark_changeset_merged(self, changeset_id: str) -> None: ...
 
+    def mark_changeset_in_progress(self, changeset_id: str) -> None: ...
+
     def update_changeset_integrated_sha(self, changeset_id: str, integrated_sha: str) -> None: ...
 
     def close_epic_if_complete(self, epic_id: str, agent_bead_id: str | None) -> bool: ...
@@ -561,11 +563,13 @@ def run_startup_contract_service(
                         candidate,
                         active_pr_lifecycle=True,
                     ):
-                        beads.run_bd_command(
-                            ["update", changeset_id, "--status", "in_progress"],
-                            beads_root=beads_root,
-                            cwd=repo_root,
-                        )
+                        if dry_run:
+                            service.dry_run_log(
+                                "Would recover closed changeset with active PR lifecycle "
+                                f"to in_progress: {changeset_id}"
+                            )
+                        else:
+                            service.mark_changeset_in_progress(changeset_id)
                     service.emit(
                         "Startup diagnostics: closed changeset has active PR lifecycle "
                         f"(decision-required): {changeset_id}"

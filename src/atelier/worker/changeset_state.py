@@ -67,6 +67,11 @@ def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root
         beads_root=beads_root,
         cwd=repo_root,
     )
+    beads.reconcile_reopened_issue_exported_github_tickets(
+        changeset_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
 
 
 def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
