@@ -29,6 +29,39 @@ def test_changeset_pr_creation_decision_on_ready_blocks_when_parent_only_pushed(
     assert decision.reason == "blocked:pushed"
 
 
+def test_changeset_pr_creation_decision_parallel_ignores_sequential_dependency_gates(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-root\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": ["at-epic.1", "at-epic.2"],
+    }
+
+    def _show_issue(args: list[str], **_kwargs) -> list[dict[str, object]]:
+        if args == ["show", "at-epic.1"]:
+            return [{"description": "changeset.work_branch: feature-parent-1\n"}]
+        if args == ["show", "at-epic.2"]:
+            return [{"description": "changeset.work_branch: feature-parent-2\n"}]
+        return []
+
+    monkeypatch.setattr(pr_gate.beads, "run_bd_json", _show_issue)
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="parallel",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda *_args, **_kwargs: None,
+    )
+
+    assert decision.allow_pr is True
+    assert decision.reason == "strategy:parallel"
+
+
 def test_handle_pushed_without_pr_returns_review_pending_when_strategy_blocks(
     monkeypatch,
 ) -> None:
