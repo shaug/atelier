@@ -138,6 +138,48 @@ def test_changeset_integration_signal_active_pr_state_allows_parent_integration(
     assert integrated_sha == "rootsha"
 
 
+def test_changeset_integration_signal_active_pr_state_uses_work_to_root_for_stacked_changesets() -> (
+    None
+):
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/work\n"
+            "pr_state: pr-open\n"
+        )
+    }
+
+    def fake_is_ancestor(
+        _repo_root: Path,
+        ancestor: str,
+        descendant: str,
+        *,
+        git_path: str | None = None,
+    ) -> bool:
+        del git_path
+        return ancestor == "feat/work" and descendant == "feat/root"
+
+    with (
+        patch(
+            "atelier.worker.integration.branch_ref_for_lookup",
+            side_effect=lambda _r, branch, **_k: branch,
+        ),
+        patch("atelier.worker.integration.git.git_is_ancestor", side_effect=fake_is_ancestor),
+        patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.worker.integration.git.git_rev_parse", return_value="rootsha"),
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug="org/repo",
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: {"mergedAt": None},
+        )
+
+    assert ok is True
+    assert integrated_sha == "rootsha"
+
+
 def test_cleanup_epic_branches_and_worktrees_invokes_git_actions() -> None:
     mapping = worktrees.WorktreeMapping(
         epic_id="at-1",

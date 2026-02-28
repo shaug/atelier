@@ -9,7 +9,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Iterator
 
-from .. import agents, beads, git, lifecycle, worktrees
+from .. import agents, beads, git, worktrees
 
 INTEGRATED_SHA_NOTE_PATTERN = re.compile(
     r"`?changeset\.integrated_sha`?\s*[:=]\s*([0-9a-fA-F]{7,40})\b",
@@ -173,9 +173,6 @@ def changeset_integration_signal(
     if not root_branch or not work_branch:
         return False, None
 
-    review_state = lifecycle.normalize_review_state(fields.get("pr_state"))
-    if review_state in lifecycle.ACTIVE_REVIEW_STATES:
-        return _root_integrated_into_parent(fields=fields, repo_root=repo_root, git_path=git_path)
     if root_branch == work_branch:
         return _root_integrated_into_parent(fields=fields, repo_root=repo_root, git_path=git_path)
 
