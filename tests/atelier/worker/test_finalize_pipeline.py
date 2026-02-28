@@ -365,7 +365,7 @@ def test_run_finalize_pipeline_blocks_on_stack_integrity_preflight(monkeypatch) 
     assert notifications == ["NEEDS-DECISION: Stack integrity failed (at-epic.1)"]
 
 
-def test_run_finalize_pipeline_keeps_closed_changeset_open_while_pr_active(
+def test_run_finalize_pipeline_blocks_closed_changeset_while_pr_active(
     monkeypatch,
 ) -> None:
     issue = {
@@ -381,21 +381,66 @@ def test_run_finalize_pipeline_keeps_closed_changeset_open_while_pr_active(
     )
 
     service = _FinalizeServiceStub()
-    marks: list[str] = []
-    closed: list[str] = []
+    blocked_reasons: list[str] = []
+    notifications: list[str] = []
     service.changeset_waiting_on_review_or_signals_fn = lambda _issue, *, context: True
-    service.mark_changeset_in_progress_fn = lambda changeset_id: marks.append(changeset_id)
-    service.mark_changeset_closed_fn = lambda changeset_id: closed.append(changeset_id)
+    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked_reasons.append(
+        reason
+    )
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("subject"))
+    )
 
     result = finalize_pipeline.run_finalize_pipeline(
         context=_pipeline_context(),
         service=service,
     )
 
-    assert result.reason == "changeset_review_pending"
-    assert result.continue_running is True
-    assert marks == ["at-epic.1"]
-    assert closed == []
+    assert result.reason == "changeset_closed_pr_lifecycle_active"
+    assert result.continue_running is False
+    assert blocked_reasons == ["closed changeset has active PR lifecycle"]
+    assert notifications == ["NEEDS-DECISION: Closed changeset has active PR lifecycle (at-epic.1)"]
+
+
+def test_run_finalize_pipeline_blocks_closed_changeset_when_pr_lookup_is_ambiguous(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "closed",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+
+    service = _FinalizeServiceStub()
+    blocked_reasons: list[str] = []
+    notifications: list[str] = []
+    service.lookup_pr_payload_fn = lambda _repo_slug, _branch: None
+    service.lookup_pr_payload_diagnostic_fn = lambda _repo_slug, _branch: (
+        None,
+        "ambiguous PR lookup for head branch 'feat/root-at-epic.1': multiple open PRs (#228, #244)",
+    )
+    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked_reasons.append(
+        reason
+    )
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("subject"))
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(repo_slug="org/repo"),
+        service=service,
+    )
+
+    assert result.reason == "changeset_pr_status_query_failed"
+    assert result.continue_running is False
+    assert blocked_reasons == ["closed changeset PR lifecycle query failed"]
+    assert notifications == ["NEEDS-DECISION: PR status query failed (at-epic.1)"]
 
 
 def test_run_finalize_pipeline_treats_closed_status_as_terminal_without_labels(monkeypatch) -> None:

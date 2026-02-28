@@ -83,6 +83,56 @@ def test_lookup_github_pr_status_reports_found_payload() -> None:
     assert result.error is None
 
 
+def test_lookup_github_pr_status_prefers_open_pr_over_newer_closed_pr() -> None:
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch(
+            "atelier.prs._run_json",
+            side_effect=[
+                [
+                    {
+                        "number": 228,
+                        "state": "CLOSED",
+                        "updatedAt": "2026-02-25T00:00:00Z",
+                    },
+                    {
+                        "number": 244,
+                        "state": "OPEN",
+                        "updatedAt": "2026-02-24T00:00:00Z",
+                    },
+                ],
+                {"number": 244, "state": "OPEN", "isDraft": False},
+            ],
+        ),
+    ):
+        result = prs.lookup_github_pr_status("org/repo", "feature/test")
+
+    assert result.outcome == "found"
+    assert result.payload == {"number": 244, "state": "OPEN", "isDraft": False}
+    assert result.error is None
+
+
+def test_lookup_github_pr_status_reports_ambiguous_multiple_open_prs() -> None:
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch(
+            "atelier.prs._run_json",
+            return_value=[
+                {"number": 228, "state": "OPEN"},
+                {"number": 244, "state": "OPEN"},
+            ],
+        ) as run_json,
+    ):
+        result = prs.lookup_github_pr_status("org/repo", "feature/test")
+
+    assert result.outcome == "error"
+    assert result.payload is None
+    assert result.error == (
+        "ambiguous PR lookup for head branch 'feature/test': multiple open PRs (#228, #244)"
+    )
+    run_json.assert_called_once()
+
+
 def test_lookup_github_pr_status_reports_query_errors() -> None:
     with (
         patch("atelier.prs._gh_available", return_value=True),

@@ -222,13 +222,47 @@ def run_finalize_pipeline(
     if not issues:
         return FinalizeResult(continue_running=False, reason="changeset_not_found")
     issue = issues[0]
-    labels = service.issue_labels(issue)
     canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
     review_state = _stored_review_state(issue)
+    description = issue.get("description")
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
+    raw_work_branch = fields.get("changeset.work_branch")
+    work_branch = raw_work_branch.strip() if isinstance(raw_work_branch, str) else ""
+    if work_branch.lower() == "null":
+        work_branch = ""
     terminal_state: str | None = None
     if terminal_state is None and canonical_status == "closed":
         if review_state == "merged":
             terminal_state = "merged"
+    if canonical_status == "closed" and branch_pr and repo_slug and work_branch:
+        closed_pr_lookup_error: str | None = None
+        if service.lookup_pr_payload(repo_slug, work_branch) is None:
+            payload_check, closed_pr_lookup_error = service.lookup_pr_payload_diagnostic(
+                repo_slug, work_branch
+            )
+            if payload_check is not None:
+                closed_pr_lookup_error = None
+        if closed_pr_lookup_error:
+            atelier_log.warning(
+                "changeset="
+                f"{changeset_id} finalize closed-state PR status lookup failed "
+                f"branch={work_branch}: {closed_pr_lookup_error}"
+            )
+            service.mark_changeset_blocked(
+                changeset_id, reason="closed changeset PR lifecycle query failed"
+            )
+            service.send_planner_notification(
+                subject=f"NEEDS-DECISION: PR status query failed ({changeset_id})",
+                body=(
+                    "Unable to validate lifecycle for a closed changeset because "
+                    f"GitHub PR status lookup failed for branch `{work_branch}`.\n"
+                    f"Error: {closed_pr_lookup_error}\n"
+                    "Action: resolve GitHub access/query issues and rerun worker finalize."
+                ),
+                agent_id=agent_id,
+                thread_id=changeset_id,
+            )
+            return FinalizeResult(continue_running=False, reason="changeset_pr_status_query_failed")
     if terminal_state is not None or canonical_status == "closed":
         if service.changeset_waiting_on_review_or_signals(issue, context=context):
             atelier_log.warning(
@@ -236,8 +270,22 @@ def run_finalize_pipeline(
                 f"{changeset_id} finalize suppressed terminal close while PR lifecycle "
                 "remains active"
             )
-            service.mark_changeset_in_progress(changeset_id)
-            return FinalizeResult(continue_running=True, reason="changeset_review_pending")
+            service.mark_changeset_blocked(
+                changeset_id, reason="closed changeset has active PR lifecycle"
+            )
+            service.send_planner_notification(
+                subject=f"NEEDS-DECISION: Closed changeset has active PR lifecycle ({changeset_id})",
+                body=(
+                    "Changeset status is closed but live PR lifecycle is still active "
+                    "(draft/open/in-review/approved or gated pushed).\n"
+                    "Action: reconcile changeset lifecycle and PR state before retrying finalize."
+                ),
+                agent_id=agent_id,
+                thread_id=changeset_id,
+            )
+            return FinalizeResult(
+                continue_running=False, reason="changeset_closed_pr_lifecycle_active"
+            )
         if service.has_open_descendant_changesets(changeset_id):
             descendants = beads.list_descendant_changesets(
                 changeset_id,
@@ -354,10 +402,7 @@ def run_finalize_pipeline(
     ):
         return FinalizeResult(continue_running=True, reason="changeset_review_pending")
 
-    description = issue.get("description")
-    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    work_branch = fields.get("changeset.work_branch")
-    if not work_branch or work_branch.strip().lower() == "null":
+    if not work_branch:
         service.mark_changeset_blocked(
             changeset_id, reason="missing changeset.work_branch metadata"
         )
@@ -368,7 +413,6 @@ def run_finalize_pipeline(
             thread_id=changeset_id,
         )
         return FinalizeResult(continue_running=False, reason="changeset_blocked_missing_metadata")
-    work_branch = work_branch.strip()
     pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path)
     pr_payload = None
     pr_lookup_error: str | None = None

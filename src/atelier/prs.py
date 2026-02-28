@@ -170,7 +170,36 @@ def _split_repo_slug(repo: str) -> tuple[str, str]:
     return owner, name
 
 
-def _find_latest_pr_number(repo: str, head: str) -> int | None:
+@dataclass(frozen=True)
+class _HeadBranchPrCandidate:
+    number: int
+    state: str | None
+    updated_at: datetime | None
+    closed_at: datetime | None
+    merged_at: datetime | None
+
+
+def _parse_head_branch_candidate(entry: object) -> _HeadBranchPrCandidate | None:
+    if not isinstance(entry, dict):
+        return None
+    raw_number = entry.get("number")
+    if not isinstance(raw_number, int):
+        return None
+    raw_state = entry.get("state")
+    state = None
+    if isinstance(raw_state, str):
+        normalized = raw_state.strip().upper()
+        state = normalized or None
+    return _HeadBranchPrCandidate(
+        number=raw_number,
+        state=state,
+        updated_at=parse_timestamp(entry.get("updatedAt")),
+        closed_at=parse_timestamp(entry.get("closedAt")),
+        merged_at=parse_timestamp(entry.get("mergedAt")),
+    )
+
+
+def _list_head_branch_pr_candidates(repo: str, head: str) -> list[_HeadBranchPrCandidate]:
     payload = _run_json(
         [
             "gh",
@@ -183,19 +212,48 @@ def _find_latest_pr_number(repo: str, head: str) -> int | None:
             "--state",
             "all",
             "--json",
-            "number",
+            "number,state,updatedAt,closedAt,mergedAt",
         ]
     )
     if not payload:
-        return None
+        return []
     if not isinstance(payload, list):
         raise RuntimeError("Unexpected gh output for PR list")
-    numbers = sorted(
-        entry["number"]
-        for entry in payload
-        if isinstance(entry, dict) and isinstance(entry.get("number"), int)
+    candidates: list[_HeadBranchPrCandidate] = []
+    for entry in payload:
+        candidate = _parse_head_branch_candidate(entry)
+        if candidate is not None:
+            candidates.append(candidate)
+    return candidates
+
+
+def _candidate_sort_key(candidate: _HeadBranchPrCandidate) -> tuple[int, datetime, int]:
+    timestamp = candidate.updated_at or candidate.closed_at or candidate.merged_at
+    has_timestamp = 1 if timestamp is not None else 0
+    return (
+        has_timestamp,
+        timestamp or datetime.min.replace(tzinfo=timezone.utc),
+        candidate.number,
     )
-    return numbers[-1] if numbers else None
+
+
+def _find_latest_pr_number(repo: str, head: str) -> int | None:
+    candidates = _list_head_branch_pr_candidates(repo, head)
+    if not candidates:
+        return None
+    open_candidates = sorted(
+        [candidate for candidate in candidates if candidate.state == "OPEN"],
+        key=lambda candidate: candidate.number,
+    )
+    if len(open_candidates) == 1:
+        return open_candidates[0].number
+    if len(open_candidates) > 1:
+        candidate_numbers = ", ".join(f"#{candidate.number}" for candidate in open_candidates)
+        raise RuntimeError(
+            f"ambiguous PR lookup for head branch {head!r}: multiple open PRs ({candidate_numbers})"
+        )
+    candidates.sort(key=_candidate_sort_key)
+    return candidates[-1].number
 
 
 def lookup_github_pr_status(repo: str, head: str, *, refresh: bool = False) -> GithubPrLookup:
