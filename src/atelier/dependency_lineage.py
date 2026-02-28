@@ -11,7 +11,7 @@ from .worker.models_boundary import parse_issue_boundary
 
 Issue = dict[str, object]
 LookupIssueFn = Callable[[str], Issue | None]
-_PARENT_CHILD_KEYS = ("dependency_type", "type")
+_PARENT_CHILD_KEYS = ("relation", "dependency_type", "dependencyType", "type")
 _PARENT_CHILD_PATTERN = re.compile(r"parent[\s_-]*child", re.IGNORECASE)
 
 

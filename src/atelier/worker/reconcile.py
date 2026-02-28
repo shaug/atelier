@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import beads, changesets, config, git, lifecycle, prs
+from .. import beads, config, git, lifecycle, prs
 from .models import FinalizeResult, ReconcileResult
 
 
@@ -88,37 +88,6 @@ def _review_drift_state(
     if live_state in lifecycle.ACTIVE_REVIEW_STATES:
         return live_state
     return None
-
-
-def _reopen_changeset_for_review(
-    *,
-    changeset_id: str,
-    review_state: str,
-    beads_root: Path,
-    repo_root: Path,
-) -> None:
-    timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
-    beads.run_bd_command(
-        [
-            "update",
-            changeset_id,
-            "--status",
-            "in_progress",
-            "--append-notes",
-            (
-                "reconcile_reopened_for_review: "
-                f"{timestamp} state={review_state} source=closed_changeset_pr_drift"
-            ),
-        ],
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
-    beads.update_changeset_review(
-        changeset_id,
-        changesets.ReviewMetadata(pr_state=review_state),
-        beads_root=beads_root,
-        cwd=repo_root,
-    )
 
 
 def list_reconcile_epic_candidates(
@@ -256,7 +225,7 @@ def reconcile_blocked_merged_changesets(
     repo_slug = prs.github_repo_slug(
         project_config.project.origin or project_config.project.repo_url
     )
-    reopened_drift_ids: set[str] = set()
+    drift_anomaly_ids: set[str] = set()
     for issue in all_changesets:
         changeset_id = issue.get("id")
         if not isinstance(changeset_id, str) or not changeset_id.strip():
@@ -284,24 +253,23 @@ def reconcile_blocked_merged_changesets(
                 log(f"reconcile error: {changeset_id} (unable to resolve epic)")
             continue
         actionable += 1
-        reopened_drift_ids.add(changeset_id)
+        drift_anomaly_ids.add(changeset_id)
+        failed += 1
         if dry_run:
-            reconciled += 1
             if log:
                 log(
-                    "reconcile dry-run: "
-                    f"{changeset_id} -> epic={epic_id} reopen(state={drift_state})"
+                    "reconcile dry-run anomaly: "
+                    f"{changeset_id} -> epic={epic_id} "
+                    f"closed+active-pr-lifecycle(state={drift_state})"
                 )
             continue
-        _reopen_changeset_for_review(
-            changeset_id=changeset_id,
-            review_state=drift_state,
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
-        reconciled += 1
         if log:
-            log(f"reconcile reopened: {changeset_id} -> epic={epic_id} (state={drift_state})")
+            log(
+                "reconcile anomaly: "
+                f"{changeset_id} -> epic={epic_id} "
+                f"closed+active-pr-lifecycle(state={drift_state}) "
+                "decision-required"
+            )
 
     candidates: dict[str, ReconcileCandidate] = {}
     for issue in all_changesets:
@@ -309,7 +277,7 @@ def reconcile_blocked_merged_changesets(
         if not isinstance(changeset_id, str) or not changeset_id.strip():
             continue
         changeset_id = changeset_id.strip()
-        if changeset_id in reopened_drift_ids:
+        if changeset_id in drift_anomaly_ids:
             continue
         if changeset_filter is not None and changeset_id not in changeset_filter:
             continue
@@ -389,9 +357,6 @@ def reconcile_blocked_merged_changesets(
         if work_children:
             dependency_finalized_cache[issue_id] = True
             return True
-        if _canonical_changeset_status(issue) != "closed":
-            dependency_finalized_cache[issue_id] = False
-            return False
         if (
             _review_drift_state(
                 issue,
@@ -409,15 +374,8 @@ def reconcile_blocked_merged_changesets(
         if integrated:
             dependency_finalized_cache[issue_id] = True
             return True
-        stored_state = _stored_review_state(issue)
-        if stored_state in lifecycle.ACTIVE_REVIEW_STATES or stored_state in {"pushed", "merged"}:
-            dependency_finalized_cache[issue_id] = False
-            return False
-        if stored_state not in {"closed", "abandoned"}:
-            dependency_finalized_cache[issue_id] = False
-            return False
-        dependency_finalized_cache[issue_id] = True
-        return True
+        dependency_finalized_cache[issue_id] = False
+        return False
 
     remaining = set(candidates)
     reconciled_ids: set[str] = set()

@@ -11,7 +11,7 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .. import beads, config, git, messages, pr_strategy, prs, worktrees
+from .. import beads, config, git, lifecycle, messages, pr_strategy, prs, worktrees
 from ..io import die, say
 from ..worker import selection as worker_selection
 from ..worker.finalization import pr_gate as worker_pr_gate
@@ -281,7 +281,7 @@ def _build_changeset_details(
         if repo_slug and branch:
             pr_payload = lookup_pr_payload(repo_slug, branch)
         review_requested = prs.has_review_requests(pr_payload)
-        lifecycle = prs.lifecycle_state(
+        lifecycle_state = prs.lifecycle_state(
             pr_payload, pushed=pushed, review_requested=review_requested
         )
         merge_conflict = prs.default_branch_has_merge_conflict(pr_payload)
@@ -293,7 +293,7 @@ def _build_changeset_details(
                 "branch": branch,
                 "pushed": pushed,
                 "review_requested": review_requested,
-                "lifecycle_state": lifecycle,
+                "lifecycle_state": lifecycle_state,
                 "merge_conflict": merge_conflict,
                 "pr": _summarize_pr(pr_payload),
                 "_issue": issue,
@@ -318,6 +318,11 @@ def _build_changeset_details(
         )
         detail["pr_allowed"] = decision.allow_pr
         detail["pr_gate_reason"] = decision.reason
+        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
+        active_pr_states = {"pushed", "draft-pr", "pr-open", "in-review", "approved"}
+        if canonical_status == "closed" and detail.get("lifecycle_state") in active_pr_states:
+            detail["pr_allowed"] = False
+            detail["pr_gate_reason"] = "blocked:closed-changeset-pr-lifecycle-active"
     return details
 
 

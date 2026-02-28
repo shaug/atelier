@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 _DEPENDENCY_ID_PATTERN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\b")
 _PARENT_CHILD_PATTERN = re.compile(r"parent[\s_-]*child", re.IGNORECASE)
-_PARENT_CHILD_KEYS = ("dependency_type", "type")
+_PARENT_CHILD_KEYS = ("relation", "dependency_type", "dependencyType", "type")
 _DEPENDENCY_ID_KEYS = ("id", "depends_on_id", "dependsOnId")
 _DEPENDENCY_REF_KEYS = ("issue", "depends_on", "dependsOn")
 

@@ -788,6 +788,78 @@ def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
     assert ["bd", "show", "at-1", "--json"] in calls
 
 
+def test_run_bd_command_allows_in_progress_when_dependency_integrated_but_not_closed(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "show", "at-2", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout=(
+                    '[{"id":"at-2","status":"open","labels":[],'
+                    '"dependencies":["at-1"],"type":"task"}]'
+                ),
+                stderr="",
+            )
+        if argv == ["bd", "show", "at-1", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout=(
+                    '[{"id":"at-1","status":"in_progress","labels":[],'
+                    '"description":"changeset.work_branch: feat/at-1\\n","type":"task"}]'
+                ),
+                stderr="",
+            )
+        if argv == ["bd", "list", "--parent", "at-2", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="[]",
+                stderr="",
+            )
+        if argv == ["bd", "update", "at-2", "--status", "in_progress"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="updated\n",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.git.git_origin_url", return_value="git@github.com:org/repo.git"),
+        patch(
+            "atelier.beads.prs.read_github_pr_status",
+            return_value={"state": "MERGED", "mergedAt": "2026-02-28T00:00:00Z"},
+        ),
+    ):
+        result = beads.run_bd_command(
+            ["update", "at-2", "--status", "in_progress"],
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+
+    assert result.returncode == 0
+    assert ["bd", "show", "at-2", "--json"] in calls
+    assert ["bd", "list", "--parent", "at-2", "--json"] in calls
+    assert ["bd", "show", "at-1", "--json"] in calls
+    assert ["bd", "update", "at-2", "--status", "in_progress"] in calls
+
+
 def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(
     tmp_path: Path,
 ) -> None:

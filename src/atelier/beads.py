@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import bd_invocation, changesets, exec, lifecycle, messages
+from . import bd_invocation, changesets, exec, git, lifecycle, messages, prs
 from . import log as atelier_log
 from .external_tickets import (
     ExternalTicketRef,
@@ -1671,6 +1671,60 @@ def _issue_has_label(issue: dict[str, object], label: str) -> bool:
     return False
 
 
+def _normalize_branch_for_gate(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or cleaned.lower() == "null":
+        return None
+    return cleaned
+
+
+def _branch_ref_for_gate(repo_root: Path, branch: str) -> str | None:
+    if git.git_ref_exists(repo_root, f"refs/heads/{branch}"):
+        return branch
+    if git.git_ref_exists(repo_root, f"refs/remotes/origin/{branch}"):
+        return f"origin/{branch}"
+    return None
+
+
+def _repo_slug_for_gate(repo_root: Path) -> str | None:
+    origin_raw = git.git_origin_url(repo_root)
+    if not origin_raw:
+        return None
+    normalized_origin = git.normalize_origin_url(origin_raw)
+    return prs.github_repo_slug(normalized_origin)
+
+
+def _changeset_integrated_for_gate(issue: dict[str, object], *, repo_root: Path) -> bool:
+    description = issue.get("description")
+    fields = parse_description_fields(description if isinstance(description, str) else "")
+    integrated_sha = _normalize_branch_for_gate(fields.get("changeset.integrated_sha"))
+    if integrated_sha and git.git_rev_parse(repo_root, integrated_sha):
+        return True
+
+    work_branch = _normalize_branch_for_gate(fields.get("changeset.work_branch"))
+    if work_branch:
+        repo_slug = _repo_slug_for_gate(repo_root)
+    else:
+        repo_slug = None
+    if repo_slug and work_branch:
+        pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+        if pr_payload and pr_payload.get("mergedAt"):
+            return True
+
+    root_branch = _normalize_branch_for_gate(fields.get("changeset.root_branch"))
+    if not root_branch or not work_branch:
+        return False
+    root_ref = _branch_ref_for_gate(repo_root, root_branch)
+    work_ref = _branch_ref_for_gate(repo_root, work_branch)
+    if not root_ref or not work_ref:
+        return False
+    if git.git_is_ancestor(repo_root, work_ref, root_ref) is True:
+        return True
+    return git.git_branch_fully_applied(repo_root, root_ref, work_ref) is True
+
+
 def _blocking_dependency_states(
     issue: dict[str, object],
     *,
@@ -1695,6 +1749,11 @@ def _blocking_dependency_states(
             continue
         status = str(dependency_issue.get("status") or "").strip().lower()
         if status in _TERMINAL_DEPENDENCY_STATUSES:
+            continue
+        if lifecycle.is_work_issue(
+            labels=_issue_labels(dependency_issue),
+            issue_type=lifecycle.issue_payload_type(dependency_issue),
+        ) and _changeset_integrated_for_gate(dependency_issue, repo_root=cwd):
             continue
         blockers.append(f"{dependency_id}({status or 'unknown'})")
     return tuple(blockers)

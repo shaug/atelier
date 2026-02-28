@@ -174,6 +174,31 @@ def test_resolve_parent_lineage_parent_child_hint_supports_dependency_type() -> 
     assert resolution.effective_parent_branch == "feat/at-kid.2"
 
 
+def test_resolve_parent_lineage_parent_child_hint_supports_relation_variants() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/at-kid\nchangeset.parent_branch: feat/at-kid\n"
+        ),
+        "dependencies": [
+            {"relation": "parent-child", "id": "at-kid.2"},
+            {"dependencyType": "parent_child", "issue": {"id": "at-kid.2"}},
+            "at-kid.1",
+            "at-kid.2",
+        ],
+    }
+
+    resolution = dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch="feat/at-kid",
+        lookup_issue=lambda issue_id: {"description": f"changeset.work_branch: feat/{issue_id}\n"},
+    )
+
+    assert resolution.blocked is False
+    assert resolution.used_dependency_parent is True
+    assert resolution.dependency_parent_id == "at-kid.2"
+    assert resolution.effective_parent_branch == "feat/at-kid.2"
+
+
 def test_resolve_parent_lineage_ignores_parent_child_string_dependency_entries() -> None:
     issue = {
         "description": ("changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root\n"),

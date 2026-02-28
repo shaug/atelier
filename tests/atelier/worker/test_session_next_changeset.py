@@ -14,12 +14,16 @@ class FakeNextChangesetService:
         descendants: list[dict[str, object]],
         review_handoff_by_id: dict[str, bool] | None = None,
         waiting_by_id: dict[str, bool] | None = None,
+        integrated_by_id: dict[str, bool] | None = None,
+        work_children_by_id: dict[str, list[dict[str, object]]] | None = None,
     ) -> None:
         self._issues_by_id = issues_by_id
         self._ready_changesets = ready_changesets
         self._descendants = descendants
         self._review_handoff_by_id = review_handoff_by_id or {}
         self._waiting_by_id = waiting_by_id or {}
+        self._integrated_by_id = integrated_by_id or {}
+        self._work_children_by_id = work_children_by_id or {}
 
     def show_issue(self, issue_id: str) -> dict[str, object] | None:
         return self._issues_by_id.get(issue_id)
@@ -92,6 +96,28 @@ class FakeNextChangesetService:
         del parent_id, include_closed
         return list(self._descendants)
 
+    def list_work_children(
+        self,
+        parent_id: str,
+        *,
+        include_closed: bool,
+    ) -> list[dict[str, object]]:
+        del include_closed
+        return list(self._work_children_by_id.get(parent_id, []))
+
+    def changeset_integration_signal(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        git_path: str | None,
+    ) -> tuple[bool, str | None]:
+        del repo_slug, git_path
+        issue_id = issue.get("id")
+        if not isinstance(issue_id, str):
+            return False, None
+        return self._integrated_by_id.get(issue_id, False), None
+
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool:
         return str(issue.get("status") or "").strip().lower() == "in_progress"
 
@@ -157,6 +183,29 @@ def test_next_changeset_service_blocks_stacked_dependency_until_blocker_terminal
     selected = startup.next_changeset_service(context=_context(), service=service)
 
     assert selected is None
+
+
+def test_next_changeset_service_allows_downstream_when_dependency_is_integrated() -> None:
+    blocker = _changeset("at-epic.1", status="in_progress", work_branch="feat/at-epic.1")
+    downstream = _changeset(
+        "at-epic.2",
+        dependencies=["at-epic.1"],
+        parent_branch="feat/at-epic.1",
+        work_branch="feat/at-epic.2",
+    )
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), blocker["id"]: blocker, downstream["id"]: downstream},
+        ready_changesets=[],
+        descendants=[blocker, downstream],
+        review_handoff_by_id={"at-epic.1": True},
+        waiting_by_id={"at-epic.1": True},
+        integrated_by_id={"at-epic.1": True},
+    )
+
+    selected = startup.next_changeset_service(context=_context(), service=service)
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.2"
 
 
 def test_next_changeset_service_blocks_when_review_handoff_evidence_missing() -> None:
@@ -299,6 +348,8 @@ def test_next_changeset_service_keeps_cross_epic_dependencies_blocked() -> None:
 @pytest.mark.parametrize(
     "parent_dependency",
     [
+        {"relation": "parent-child", "id": "at-epic"},
+        {"dependencyType": "parent-child", "issue": {"id": "at-epic"}},
         {"dependency_type": "parent-child", "id": "at-epic"},
         {"dependency_type": "parent-child", "issue": {"id": "at-epic"}},
         {"type": "parent-child", "depends_on_id": "at-epic"},

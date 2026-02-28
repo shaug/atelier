@@ -75,6 +75,14 @@ class NextChangesetService(Protocol):
         include_closed: bool,
     ) -> list[dict[str, object]]: ...
 
+    def changeset_integration_signal(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        git_path: str | None,
+    ) -> tuple[bool, str | None]: ...
+
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool: ...
 
 
@@ -138,7 +146,6 @@ def _dependencies_satisfied(
     context: NextChangesetContext,
     service: NextChangesetService,
 ) -> bool:
-    del context
     dependency_ids = _dependency_ids(issue)
     if dependency_ids is None:
         return False
@@ -151,7 +158,27 @@ def _dependencies_satisfied(
                 dependency_cache[dependency_id] = blocker_issue
         if blocker_issue is None:
             return False
-        if _is_terminal(blocker_issue):
+        is_work_dependency = lifecycle.is_work_issue(
+            labels=worker_selection.issue_labels(blocker_issue),
+            issue_type=worker_selection.issue_type(blocker_issue),
+        )
+        if not is_work_dependency:
+            if _is_terminal(blocker_issue):
+                continue
+            return False
+        has_dependency_children = bool(
+            service.list_work_children(dependency_id, include_closed=True)
+        )
+        if has_dependency_children:
+            if _is_terminal(blocker_issue):
+                continue
+            return False
+        integrated, _ = service.changeset_integration_signal(
+            blocker_issue,
+            repo_slug=context.repo_slug,
+            git_path=context.git_path,
+        )
+        if integrated:
             continue
         return False
     return True
@@ -373,6 +400,16 @@ class StartupContractService(Protocol):
         git_path: str | None,
     ) -> tuple[bool, str | None]: ...
 
+    def changeset_waiting_on_review_or_signals(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        branch_pr: bool,
+        branch_pr_strategy: object,
+        git_path: str | None,
+    ) -> bool: ...
+
     def mark_changeset_merged(self, changeset_id: str) -> None: ...
 
     def update_changeset_integrated_sha(self, changeset_id: str, integrated_sha: str) -> None: ...
@@ -483,6 +520,17 @@ def run_startup_contract_service(
                 continue
             seen_changesets.add(changeset_id)
             if lifecycle.is_closed_status(candidate.get("status")):
+                if service.changeset_waiting_on_review_or_signals(
+                    candidate,
+                    repo_slug=repo_slug,
+                    branch_pr=branch_pr,
+                    branch_pr_strategy=branch_pr_strategy,
+                    git_path=git_path,
+                ):
+                    service.emit(
+                        "Startup diagnostics: closed changeset has active PR lifecycle "
+                        f"(decision-required): {changeset_id}"
+                    )
                 continue
             integration_proven, integrated_sha = service.changeset_integration_signal(
                 candidate,
