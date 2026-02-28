@@ -332,6 +332,7 @@ def test_create_changeset_uses_new_child_id_when_create_output_is_noisy(
 
 def test_create_changeset_fails_when_create_does_not_add_new_child(
     monkeypatch,
+    capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
     module = _load_script_module()
@@ -396,7 +397,97 @@ def test_create_changeset_fails_when_create_does_not_add_new_child(
     with pytest.raises(SystemExit) as excinfo:
         module.main()
 
+    captured = capsys.readouterr()
     assert excinfo.value.code == 1
+    assert "create output excerpt" in captured.err
+    assert "stdout='at-201'" in captured.err
+    assert "stderr='<empty>'" in captured.err
+    assert all(not (command and command[0] == "update") for command in commands)
+    assert all(not (command and command[0] == "close") for command in commands)
+    assert export_calls == []
+
+
+def test_create_changeset_fails_when_create_adds_multiple_new_children(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    commands: list[list[str]] = []
+    list_calls = 0
+    export_calls: list[str] = []
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+
+    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+
+    def fake_run_bd(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal list_calls
+        commands.append(args)
+        assert beads_root == context.beads_root
+        assert cwd == context.project_dir
+        if args[:2] == ["list", "--parent"]:
+            list_calls += 1
+            if list_calls == 1:
+                return subprocess.CompletedProcess(
+                    args=args,
+                    returncode=0,
+                    stdout='[{"id":"at-200"}]',
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout='[{"id":"at-200"},{"id":"at-201"},{"id":"at-202"}]',
+                stderr="",
+            )
+        if args and args[0] == "create":
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout="created changesets",
+                stderr="warning: duplicate create output",
+            )
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: export_calls.append(issue_id),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_changeset.py",
+            "--epic-id",
+            "at-epic",
+            "--title",
+            "Ambiguous new children",
+            "--acceptance",
+            "Acceptance text",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert "ambiguous child ids" in captured.err
+    assert "at-201, at-202" in captured.err
+    assert "create output excerpt" in captured.err
+    assert "stdout='created changesets'" in captured.err
+    assert "stderr='warning: duplicate create output'" in captured.err
     assert all(not (command and command[0] == "update") for command in commands)
     assert all(not (command and command[0] == "close") for command in commands)
     assert export_calls == []
