@@ -119,7 +119,15 @@ def _sync_child_workspace_parent_branch(
         return
     if root_branch_value and normalized_epic_parent == root_branch_value:
         return
-    issues = beads.run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=repo_root)
+    try:
+        issues = beads.run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=repo_root)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        control.say(
+            "Skipped workspace.parent_branch alignment for "
+            f"{changeset_id}: unable to read metadata from beads (bd show exit {code})"
+        )
+        return
     if not issues:
         return
     current_parent = _extract_workspace_parent_branch(issues[0])
