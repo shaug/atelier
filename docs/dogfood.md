@@ -37,7 +37,8 @@ source of truth and that changesets remain reviewable.
 
 - Beads contain full intent, constraints, and acceptance criteria.
 - Changesets stay human-sized unless explicitly approved.
-- One-child decomposition is avoided unless rationale is explicitly recorded.
+- One-child decomposition is treated as a planning anti-pattern; keep work in
+  the parent epic unless there are 2+ executable child changesets.
 - Worker never expands scope; ambiguities are surfaced via messages.
 - Planner does not auto-promote epics without user approval.
 
