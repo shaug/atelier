@@ -408,6 +408,9 @@ def test_collect_closed_workspace_branches_without_mapping_prunes_integrated_roo
                 "pr_state: merged\n"
             ),
         }
+        changeset_worktree = project_dir / "worktrees" / "at-irs"
+        changeset_worktree.mkdir(parents=True, exist_ok=True)
+        (changeset_worktree / ".git").write_text("gitdir: /tmp/wt", encoding="utf-8")
         refs = {
             "refs/heads/main",
             "refs/remotes/origin/main",
@@ -446,8 +449,125 @@ def test_collect_closed_workspace_branches_without_mapping_prunes_integrated_roo
             assert len(actions) == 1
             actions[0].apply()
 
+        assert commands[0] == ["worktree", "remove", str(changeset_worktree)]
         assert ["push", "origin", "--delete", "project-guardrail"] in commands
         assert ["branch", "-D", "project-guardrail"] in commands
+
+
+def test_collect_closed_workspace_branches_prunes_worktree_without_branch_refs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        issue = {
+            "id": "at-irs",
+            "status": "closed",
+            "labels": ["workspace:project-guardrail"],
+            "description": (
+                "workspace.root_branch: project-guardrail\n"
+                "workspace.parent_branch: main\n"
+                "changeset.root_branch: project-guardrail\n"
+                "changeset.work_branch: project-guardrail-at-irs\n"
+                "pr_state: merged\n"
+            ),
+        }
+        changeset_worktree = project_dir / "worktrees" / "at-irs"
+        changeset_worktree.mkdir(parents=True, exist_ok=True)
+        (changeset_worktree / ".git").write_text("gitdir: /tmp/wt", encoding="utf-8")
+        refs = {
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+        }
+        commands: list[list[str]] = []
+
+        with (
+            patch(
+                "atelier.beads.list_all_changesets",
+                return_value=[issue],
+            ),
+            patch("atelier.git.git_default_branch", return_value="main"),
+            patch(
+                "atelier.git.git_ref_exists",
+                side_effect=lambda repo, ref, git_path=None: ref in refs,
+            ),
+            patch("atelier.git.git_is_ancestor", return_value=True),
+            patch("atelier.git.git_branch_fully_applied", return_value=False),
+            patch("atelier.git.git_current_branch", return_value="main"),
+            patch(
+                "atelier.gc.worktrees.run_git_gc_command",
+                side_effect=lambda args, repo_root=None, git_path=None: (
+                    commands.append(args),
+                    (True, ""),
+                )[1],
+            ),
+        ):
+            actions = gc_worktrees.collect_closed_workspace_branches_without_mapping(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+            )
+            assert len(actions) == 1
+            actions[0].apply()
+
+        assert commands == [["worktree", "remove", str(changeset_worktree)]]
+
+
+def test_collect_closed_workspace_branches_without_mapping_emits_dry_run_skip_reason() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        issue = {
+            "id": "at-irs",
+            "status": "closed",
+            "labels": ["workspace:project-guardrail"],
+            "description": (
+                "workspace.root_branch: project-guardrail\n"
+                "workspace.parent_branch: main\n"
+                "changeset.root_branch: project-guardrail\n"
+                "changeset.work_branch: project-guardrail-at-irs\n"
+                "pr_state: merged\n"
+            ),
+        }
+        refs = {
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+        }
+
+        with (
+            patch(
+                "atelier.beads.list_all_changesets",
+                return_value=[issue],
+            ),
+            patch("atelier.git.git_default_branch", return_value="main"),
+            patch(
+                "atelier.git.git_ref_exists",
+                side_effect=lambda repo, ref, git_path=None: ref in refs,
+            ),
+            patch("atelier.git.git_is_ancestor", return_value=True),
+            patch("atelier.git.git_branch_fully_applied", return_value=False),
+        ):
+            actions = gc_worktrees.collect_closed_workspace_branches_without_mapping(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+                dry_run=True,
+            )
+
+        assert len(actions) == 1
+        assert actions[0].description == "Skip closed workspace cleanup for at-irs"
+        assert (
+            "skip reason: conventional changeset worktree path missing; no branch refs to prune"
+        ) in actions[0].details
+        assert "changeset worktree: worktrees/at-irs" in actions[0].details
 
 
 def test_collect_closed_workspace_branches_without_mapping_skips_not_integrated() -> None:

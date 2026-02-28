@@ -239,6 +239,7 @@ def gc(args: object) -> None:
             beads_root=beads_root,
             repo_root=repo_root,
             git_path=config.resolve_git_path(project_config),
+            dry_run=dry_run,
         )
     )
     actions.extend(
