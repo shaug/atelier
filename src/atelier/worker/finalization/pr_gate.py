@@ -575,19 +575,32 @@ def attempt_create_pr(
     issue: dict[str, object],
     work_branch: str,
     is_draft: bool,
+    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
     changeset_base_branch: Callable[..., str | None],
     render_changeset_pr_body: Callable[[dict[str, object]], str],
 ) -> tuple[bool, str]:
-    base_branch = changeset_base_branch(
-        issue,
-        repo_slug=repo_slug,
-        beads_root=beads_root,
-        repo_root=repo_root,
-        git_path=git_path,
-    )
+    try:
+        base_branch = changeset_base_branch(
+            issue,
+            branch_pr_strategy=branch_pr_strategy,
+            repo_slug=repo_slug,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            git_path=git_path,
+        )
+    except TypeError as exc:
+        if "branch_pr_strategy" not in str(exc):
+            raise
+        base_branch = changeset_base_branch(
+            issue,
+            repo_slug=repo_slug,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            git_path=git_path,
+        )
     if not base_branch:
         return False, "missing PR base branch metadata"
     title = str(issue.get("title") or "").strip() or work_branch
@@ -627,6 +640,7 @@ def attempt_create_draft_pr(
     repo_slug: str,
     issue: dict[str, object],
     work_branch: str,
+    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
@@ -639,6 +653,7 @@ def attempt_create_draft_pr(
         issue=issue,
         work_branch=work_branch,
         is_draft=True,
+        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         repo_root=repo_root,
         git_path=git_path,
@@ -726,6 +741,7 @@ def handle_pushed_without_pr(
                 issue=issue,
                 work_branch=work_branch,
                 is_draft=create_as_draft,
+                branch_pr_strategy=branch_pr_strategy,
                 beads_root=beads_root,
                 repo_root=repo_root,
                 git_path=git_path,

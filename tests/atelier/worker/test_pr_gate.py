@@ -749,6 +749,43 @@ def test_attempt_create_pr_passes_repo_slug_to_base_resolver(monkeypatch) -> Non
     assert observed_repo_slug == ["org/repo"]
 
 
+def test_attempt_create_pr_passes_strategy_to_base_resolver(monkeypatch) -> None:
+    observed_strategies: list[str] = []
+
+    monkeypatch.setattr(
+        pr_gate.exec,
+        "try_run_command",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="created", stderr=""),
+    )
+
+    def resolve_base(
+        _issue,
+        *,
+        branch_pr_strategy: object | None = None,
+        **_kwargs,
+    ) -> str | None:
+        if isinstance(branch_pr_strategy, str):
+            observed_strategies.append(branch_pr_strategy)
+        return "main"
+
+    created, detail = pr_gate.attempt_create_pr(
+        repo_slug="org/repo",
+        issue={"title": "Example"},
+        work_branch="feature/work",
+        is_draft=True,
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+        changeset_base_branch=resolve_base,
+        render_changeset_pr_body=lambda _issue: "Body",
+    )
+
+    assert created is True
+    assert detail == "created"
+    assert observed_strategies == ["sequential"]
+
+
 def test_handle_pushed_without_pr_ready_mode_sets_pr_open_fallback(monkeypatch) -> None:
     issue = {
         "description": (
