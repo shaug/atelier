@@ -1,3 +1,5 @@
+import pytest
+
 from atelier import pr_strategy
 
 
@@ -47,3 +49,23 @@ def test_pr_strategy_decision_sequential_allows_when_parent_merged() -> None:
     decision = pr_strategy.pr_strategy_decision("sequential", parent_state="merged")
     assert decision.allow_pr is True
     assert decision.reason == "parent:merged"
+
+
+@pytest.mark.parametrize(
+    ("strategy", "parent_state", "allow_pr", "reason"),
+    [
+        ("parallel", "closed", True, "strategy:parallel"),
+        ("parallel", "pr-open", True, "strategy:parallel"),
+        ("on-ready", "pushed", False, "blocked:pushed"),
+        ("on-ready", "pr-open", True, "parent:pr-open"),
+    ],
+)
+def test_pr_strategy_decision_preserves_parallel_and_on_ready_behavior(
+    strategy: str,
+    parent_state: str,
+    allow_pr: bool,
+    reason: str,
+) -> None:
+    decision = pr_strategy.pr_strategy_decision(strategy, parent_state=parent_state)
+    assert decision.allow_pr is allow_pr
+    assert decision.reason == reason

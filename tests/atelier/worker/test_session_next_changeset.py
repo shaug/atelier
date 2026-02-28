@@ -208,6 +208,69 @@ def test_next_changeset_service_allows_downstream_when_dependency_is_integrated(
     assert selected["id"] == "at-epic.2"
 
 
+def test_next_changeset_service_blocks_join_dependency_until_all_integrated() -> None:
+    dependency_one = _changeset("at-epic.1", status="closed", work_branch="feat/at-epic.1")
+    dependency_two = _changeset(
+        "at-epic.2",
+        status="closed",
+        dependencies=["at-epic.1"],
+        work_branch="feat/at-epic.2",
+    )
+    downstream = _changeset(
+        "at-epic.3",
+        dependencies=["at-epic.1", "at-epic.2"],
+        parent_branch="feat/at-epic.2",
+        work_branch="feat/at-epic.3",
+    )
+    service = FakeNextChangesetService(
+        issues_by_id={
+            "at-epic": _epic(),
+            dependency_one["id"]: dependency_one,
+            dependency_two["id"]: dependency_two,
+            downstream["id"]: downstream,
+        },
+        ready_changesets=[],
+        descendants=[dependency_one, dependency_two, downstream],
+        integrated_by_id={"at-epic.2": True},
+    )
+
+    selected = startup.next_changeset_service(context=_context(), service=service)
+
+    assert selected is None
+
+
+def test_next_changeset_service_allows_join_dependency_once_all_integrated() -> None:
+    dependency_one = _changeset("at-epic.1", status="closed", work_branch="feat/at-epic.1")
+    dependency_two = _changeset(
+        "at-epic.2",
+        status="closed",
+        dependencies=["at-epic.1"],
+        work_branch="feat/at-epic.2",
+    )
+    downstream = _changeset(
+        "at-epic.3",
+        dependencies=["at-epic.1", "at-epic.2"],
+        parent_branch="feat/at-epic.2",
+        work_branch="feat/at-epic.3",
+    )
+    service = FakeNextChangesetService(
+        issues_by_id={
+            "at-epic": _epic(),
+            dependency_one["id"]: dependency_one,
+            dependency_two["id"]: dependency_two,
+            downstream["id"]: downstream,
+        },
+        ready_changesets=[],
+        descendants=[dependency_one, dependency_two, downstream],
+        integrated_by_id={"at-epic.1": True, "at-epic.2": True},
+    )
+
+    selected = startup.next_changeset_service(context=_context(), service=service)
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.3"
+
+
 def test_next_changeset_service_blocks_when_review_handoff_evidence_missing() -> None:
     blocker = _changeset("at-epic.1", work_branch="feat/at-epic.1")
     downstream = _changeset(

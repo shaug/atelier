@@ -365,6 +365,51 @@ def test_run_finalize_pipeline_blocks_on_stack_integrity_preflight(monkeypatch) 
     assert notifications == ["NEEDS-DECISION: Stack integrity failed (at-epic.1)"]
 
 
+def test_run_finalize_pipeline_blocks_when_dependency_not_integrated(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+
+    service = _FinalizeServiceStub()
+    blocked_reasons: list[str] = []
+    planner_messages: list[tuple[str, str]] = []
+    service.stack_integrity_preflight_fn = lambda _issue, *, context: (
+        finalize_pipeline.StackIntegrityCheck(
+            ok=False,
+            reason="dependency-not-integrated",
+            edge="at-epic.1 -> at-epic.0 (feat/parent)",
+            detail="dependencies missing integrated evidence: at-epic.0",
+            remediation="Wait until every declared dependency shows integrated evidence.",
+        )
+    )
+    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked_reasons.append(
+        reason
+    )
+    service.send_planner_notification_fn = lambda **kwargs: planner_messages.append(
+        (str(kwargs.get("subject")), str(kwargs.get("body")))
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_stack_integrity_failed"
+    assert result.continue_running is False
+    assert blocked_reasons == ["sequential stack integrity failed: dependency-not-integrated"]
+    assert planner_messages
+    subject, body = planner_messages[0]
+    assert subject == "NEEDS-DECISION: Stack integrity failed (at-epic.1)"
+    assert "dependencies missing integrated evidence: at-epic.0" in body
+
+
 def test_run_finalize_pipeline_blocks_closed_changeset_while_pr_active(
     monkeypatch,
 ) -> None:
