@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -11,9 +12,33 @@ from ...io import confirm, select
 from ...models import ProjectConfig
 from ..errors import ValidationFailedError
 
-ProviderChooser = Callable[[str, Sequence[str], str | None], str]
-ConfirmChoice = Callable[[str, bool], bool]
-ResolveProvider = Callable[..., external_registry.PlannerProviderResolution]
+
+class ProviderChooser(Protocol):
+    """Typed collaborator contract for provider selection prompts."""
+
+    def __call__(self, text: str, choices: Sequence[str], default: str | None = None, /) -> str: ...
+
+
+class ConfirmChoice(Protocol):
+    """Typed collaborator contract for yes/no prompts."""
+
+    def __call__(self, prompt: str, default: bool = False) -> bool: ...
+
+
+class ResolveProvider(Protocol):
+    """Typed collaborator contract for planner-provider resolution."""
+
+    def __call__(
+        self,
+        project_config: ProjectConfig,
+        repo_root: Path,
+        *,
+        agent_name: str,
+        project_data_dir: Path | None = None,
+        agent_home: Path | None = None,
+        interactive: bool = True,
+        chooser: ProviderChooser | None = None,
+    ) -> external_registry.PlannerProviderResolution: ...
 
 
 class ResolveExternalProviderRequest(BaseModel):

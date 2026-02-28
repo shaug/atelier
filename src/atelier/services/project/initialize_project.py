@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from pydantic import BaseModel, ConfigDict
 
@@ -17,8 +16,13 @@ from ..errors import (
     ServiceFailure,
     UnexpectedStateError,
 )
-from .compose_project_config import ComposeProjectConfigRequest, ComposeProjectConfigService
+from .compose_project_config import (
+    BuildProjectConfig,
+    ComposeProjectConfigRequest,
+    ComposeProjectConfigService,
+)
 from .resolve_external_provider import (
+    ConfirmChoice,
     ProviderChooser,
     ResolveExternalProviderRequest,
     ResolveExternalProviderService,
@@ -26,8 +30,6 @@ from .resolve_external_provider import (
 )
 
 PolicyIssue = dict[str, object]
-ConfirmChoice = Callable[[str, bool], bool]
-BuildProjectConfig = Callable[..., ProjectConfig]
 
 
 @dataclass(frozen=True)

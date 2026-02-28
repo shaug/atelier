@@ -48,6 +48,17 @@ init/config collaborators using `Callable[..., ...]` are replaced with explicit
 typed contracts** (for example `Protocol` interfaces or concrete collaborator
 types).
 
+CS4 collaborator contract rules for service-tier expansion:
+
+- Collaborator injection points must use named typed contracts (`Protocol` or
+  explicit concrete types), not broad `Callable[..., ...]`.
+- Contracts must declare concrete argument and return shapes, including
+  keyword-only options where applicable.
+- Service tests should use typed fakes/stubs matching those contracts rather
+  than variadic `*args`/`**kwargs` callable bags.
+- New service slices (CS5+) should follow the same contract style before moving
+  orchestration logic out of command/session controllers.
+
 ## Why this decision
 
 - Pilot extraction improved controller clarity at the command boundary.
