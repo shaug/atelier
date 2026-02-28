@@ -175,6 +175,22 @@ def _dependencies_satisfied(
             issue_type=worker_selection.issue_type(blocker_issue),
         ):
             continue
+        if require_integrated:
+            integrated, blocker_pr_state = service.changeset_integration_signal(
+                blocker_issue,
+                repo_slug=context.repo_slug,
+                git_path=context.git_path,
+            )
+            if integrated:
+                continue
+            if lifecycle.dependency_issue_satisfied(
+                status=blocker_issue.get("status"),
+                labels=blocker_labels,
+                require_integrated=True,
+                review_state=blocker_pr_state,
+                issue_type=worker_selection.issue_type(blocker_issue),
+            ):
+                continue
         return False
     return True
 
