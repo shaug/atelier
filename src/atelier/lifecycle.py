@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 ACTIVE_REVIEW_STATES = {"draft-pr", "pr-open", "in-review", "approved"}
+ACTIVE_PR_LIFECYCLE_STATES = {"pushed", *ACTIVE_REVIEW_STATES}
 INTEGRATED_REVIEW_STATES = {"merged"}
 TERMINAL_UNINTEGRATED_REVIEW_STATES = {"closed"}
 
@@ -97,6 +98,19 @@ def normalize_review_state(value: object) -> str | None:
     if lowered == "null":
         return None
     return lowered
+
+
+def is_active_pr_lifecycle_state(review_state: object) -> bool:
+    """Return whether a PR lifecycle state is still actively in flight.
+
+    Args:
+        review_state: Raw review lifecycle state.
+
+    Returns:
+        ``True`` when the lifecycle state indicates ongoing publish/review work.
+    """
+    normalized = normalize_review_state(review_state)
+    return normalized in ACTIVE_PR_LIFECYCLE_STATES
 
 
 def is_integrated_review_state(review_state: object) -> bool:

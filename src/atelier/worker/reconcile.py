@@ -88,7 +88,7 @@ def _review_drift_state(
     if _canonical_changeset_status(issue) != "closed":
         return None
     stored_state = _stored_review_state(issue)
-    if stored_state in lifecycle.ACTIVE_REVIEW_STATES:
+    if lifecycle.is_active_pr_lifecycle_state(stored_state):
         return stored_state
     live_state = _live_review_state(
         issue,
@@ -96,7 +96,7 @@ def _review_drift_state(
         repo_root=repo_root,
         git_path=git_path,
     )
-    if live_state in lifecycle.ACTIVE_REVIEW_STATES:
+    if lifecycle.is_active_pr_lifecycle_state(live_state):
         return live_state
     return None
 

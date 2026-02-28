@@ -3632,6 +3632,21 @@ def close_epic_if_complete(
     confirm: Callable[[ChangesetSummary], bool] | None = None,
 ) -> bool:
     """Close an epic and clear hook if all changesets are complete."""
+
+    def issue_has_active_pr_lifecycle(issue_payload: dict[str, object]) -> bool:
+        description = issue_payload.get("description")
+        if not isinstance(description, str):
+            issue_id = issue_payload.get("id")
+            if isinstance(issue_id, str) and issue_id.strip():
+                detailed = run_bd_json(["show", issue_id.strip()], beads_root=beads_root, cwd=cwd)
+                if detailed and isinstance(detailed[0], dict):
+                    issue_payload = detailed[0]
+                    description = issue_payload.get("description")
+        review = changesets.parse_review_metadata(
+            description if isinstance(description, str) else ""
+        )
+        return lifecycle.is_active_pr_lifecycle_state(review.pr_state)
+
     issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
     if not issues:
         return False
@@ -3642,6 +3657,30 @@ def close_epic_if_complete(
         cwd=cwd,
         include_closed=True,
     )
+    changeset_candidates = list_descendant_changesets(
+        epic_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        include_closed=True,
+    )
+    if not changeset_candidates and not work_children:
+        changeset_candidates = [issue]
+    active_lifecycle_detected = False
+    for candidate in changeset_candidates:
+        if lifecycle.canonical_lifecycle_status(candidate.get("status")) != "closed":
+            continue
+        if not issue_has_active_pr_lifecycle(candidate):
+            continue
+        candidate_id = candidate.get("id")
+        if isinstance(candidate_id, str) and candidate_id.strip():
+            run_bd_command(
+                ["update", candidate_id.strip(), "--status", "in_progress"],
+                beads_root=beads_root,
+                cwd=cwd,
+            )
+        active_lifecycle_detected = True
+    if active_lifecycle_detected:
+        return False
     is_standalone_changeset = not work_children and lifecycle.is_closed_status(issue.get("status"))
     summary = epic_changeset_summary(epic_id, beads_root=beads_root, cwd=cwd)
     if not is_standalone_changeset and not summary.ready_to_close:

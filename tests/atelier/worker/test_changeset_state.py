@@ -27,21 +27,25 @@ def test_close_completed_container_changesets_closes_eligible_nodes() -> None:
             "id": "at-1.1",
             "status": "done",
             "labels": ["cs:merged"],
+            "description": "",
         },
         {
             "id": "at-1.2",
             "status": "done",
             "labels": ["cs:abandoned"],
+            "description": "",
         },
         {
             "id": "at-1.3",
             "status": "open",
             "labels": [],
+            "description": "",
         },
         {
             "id": "at-1.4",
             "status": "",
             "labels": ["cs:merged"],
+            "description": "",
         },
     ]
     with (
@@ -60,6 +64,37 @@ def test_close_completed_container_changesets_closes_eligible_nodes() -> None:
 
     assert closed == ["at-1.1"]
     mark_closed.assert_called_once_with(
+        "at-1.1", beads_root=Path("/beads"), repo_root=Path("/repo")
+    )
+
+
+def test_close_completed_container_changesets_reopens_active_pr_changeset() -> None:
+    descendants = [
+        {
+            "id": "at-1.1",
+            "status": "done",
+            "labels": ["cs:merged"],
+            "description": "pr_state: pr-open\n",
+        }
+    ]
+    with (
+        patch(
+            "atelier.worker.changeset_state.beads.list_descendant_changesets",
+            return_value=descendants,
+        ),
+        patch("atelier.worker.changeset_state.mark_changeset_closed") as mark_closed,
+        patch("atelier.worker.changeset_state.mark_changeset_in_progress") as mark_in_progress,
+    ):
+        closed = changeset_state.close_completed_container_changesets(
+            "at-1",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            has_open_descendant_changesets=lambda _issue_id: False,
+        )
+
+    assert closed == []
+    mark_closed.assert_not_called()
+    mark_in_progress.assert_called_once_with(
         "at-1.1", beads_root=Path("/beads"), repo_root=Path("/repo")
     )
 

@@ -547,18 +547,25 @@ def run_startup_contract_service(
             if changeset_id is None or changeset_id in seen_changesets:
                 continue
             seen_changesets.add(changeset_id)
-            if lifecycle.is_closed_status(candidate.get("status")):
-                if service.changeset_waiting_on_review_or_signals(
-                    candidate,
-                    repo_slug=repo_slug,
-                    branch_pr=branch_pr,
-                    branch_pr_strategy=branch_pr_strategy,
-                    git_path=git_path,
-                ):
+            if service.changeset_waiting_on_review_or_signals(
+                candidate,
+                repo_slug=repo_slug,
+                branch_pr=branch_pr,
+                branch_pr_strategy=branch_pr_strategy,
+                git_path=git_path,
+            ):
+                if lifecycle.is_closed_status(candidate.get("status")):
                     service.emit(
                         "Startup diagnostics: closed changeset has active PR lifecycle "
                         f"(decision-required): {changeset_id}"
                     )
+                else:
+                    service.emit(
+                        "Startup diagnostics: changeset has active PR lifecycle "
+                        f"(auto-close deferred): {changeset_id}"
+                    )
+                continue
+            if lifecycle.is_closed_status(candidate.get("status")):
                 continue
             integration_proven, integrated_sha = service.changeset_integration_signal(
                 candidate,

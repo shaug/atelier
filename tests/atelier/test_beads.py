@@ -2487,6 +2487,47 @@ def test_close_epic_if_complete_respects_confirm() -> None:
     close_issue.assert_not_called()
 
 
+def test_close_epic_if_complete_reopens_active_pr_descendant() -> None:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:2] == ["show", "epic-1"]:
+            return [{"id": "epic-1", "labels": ["at:epic"], "status": "in_progress"}]
+        if args[:2] == ["list", "--parent"] and args[2] == "epic-1":
+            return [
+                {
+                    "id": "epic-1.1",
+                    "status": "closed",
+                    "description": "pr_state: draft-pr\n",
+                    "labels": [],
+                    "type": "task",
+                }
+            ]
+        if args[:2] == ["list", "--parent"] and args[2] == "epic-1.1":
+            return []
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command") as run_bd_command,
+        patch("atelier.beads.close_issue") as close_issue,
+        patch("atelier.beads.clear_agent_hook") as clear_hook,
+    ):
+        result = beads.close_epic_if_complete(
+            "epic-1",
+            "agent-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result is False
+    run_bd_command.assert_called_once_with(
+        ["update", "epic-1.1", "--status", "in_progress"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    close_issue.assert_not_called()
+    clear_hook.assert_not_called()
+
+
 def test_close_epic_if_complete_closes_standalone_changeset() -> None:
     def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args[:2] == ["show", "at-irs"]:
@@ -2520,6 +2561,44 @@ def test_close_epic_if_complete_closes_standalone_changeset() -> None:
         cwd=Path("/repo"),
     )
     clear_hook.assert_called_once()
+
+
+def test_close_epic_if_complete_reopens_active_pr_standalone_changeset() -> None:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:2] == ["show", "at-irs"]:
+            return [
+                {
+                    "id": "at-irs",
+                    "labels": [],
+                    "status": "closed",
+                    "description": "pr_state: in-review\n",
+                }
+            ]
+        if args[:2] == ["list", "--parent"]:
+            return []
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command") as run_bd_command,
+        patch("atelier.beads.close_issue") as close_issue,
+        patch("atelier.beads.clear_agent_hook") as clear_hook,
+    ):
+        result = beads.close_epic_if_complete(
+            "at-irs",
+            "agent-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result is False
+    run_bd_command.assert_called_once_with(
+        ["update", "at-irs", "--status", "in_progress"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    close_issue.assert_not_called()
+    clear_hook.assert_not_called()
 
 
 def test_close_issue_runs_close_and_reconciles_on_success() -> None:

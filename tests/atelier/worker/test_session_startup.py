@@ -624,6 +624,55 @@ def test_run_startup_contract_explicit_epic_active_pr_does_not_reconcile_self_an
     assert close_calls == [("at-explicit", "at-agent")]
 
 
+def test_run_startup_contract_explicit_epic_active_pr_skips_auto_merge_reconcile() -> None:
+    merged_ids: list[str] = []
+    close_calls: list[tuple[str, str | None]] = []
+    emitted: list[str] = []
+
+    result = _run_startup(
+        explicit_epic_id="at-explicit",
+        branch_pr=True,
+        repo_slug="org/repo",
+        agent_bead_id="at-agent",
+        show_issue=lambda _issue_id: {
+            "id": "at-explicit",
+            "status": "in_progress",
+            "assignee": "atelier/worker/codex/p100",
+            "labels": ["at:epic"],
+        },
+        next_changeset=lambda **_kwargs: None,
+        list_descendant_changesets=lambda _parent_id, include_closed: (
+            [
+                {
+                    "id": "at-explicit.1",
+                    "status": "in_progress",
+                    "description": "pr_state: in-review\n",
+                    "labels": [],
+                }
+            ]
+            if include_closed
+            else []
+        ),
+        changeset_waiting_on_review_or_signals=lambda *_args, **_kwargs: True,
+        changeset_integration_signal=lambda _issue, repo_slug, git_path: (True, "abc1234"),
+        mark_changeset_merged=lambda changeset_id: merged_ids.append(changeset_id),
+        close_epic_if_complete=lambda epic_id, agent_bead_id: (
+            close_calls.append((epic_id, agent_bead_id)) or False
+        ),
+        emit=lambda message: emitted.append(message),
+    )
+
+    assert result.should_exit is True
+    assert result.reason == "explicit_epic_review_pending"
+    assert merged_ids == []
+    assert close_calls == [("at-explicit", "at-agent")]
+    assert any(
+        "Startup diagnostics: changeset has active PR lifecycle (auto-close deferred): at-explicit.1"
+        in line
+        for line in emitted
+    )
+
+
 def test_run_startup_contract_explicit_epic_no_actionable_remains_non_terminal() -> None:
     merged_ids: list[str] = []
     close_calls: list[tuple[str, str | None]] = []
