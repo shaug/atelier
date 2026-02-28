@@ -77,7 +77,7 @@ def test_dispatch_message_reroutes_when_worker_inactive() -> None:
     create_message.assert_not_called()
 
 
-def test_create_reroute_epic_writes_diagnostics_and_open_status() -> None:
+def test_create_reroute_epic_writes_diagnostics_without_status_flag() -> None:
     module = _load_script_module()
     captured_args: list[str] = []
 
@@ -103,8 +103,7 @@ def test_create_reroute_epic_writes_diagnostics_and_open_status() -> None:
     assert created["id"] == "at-epic-9"
     assert "--label" in captured_args
     assert "at:epic" in captured_args
-    assert "--status" in captured_args
-    assert captured_args[captured_args.index("--status") + 1] == "open"
+    assert "--status" not in captured_args
     description = captured_args[captured_args.index("--description") + 1]
     assert "routing.decision: rerouted_inactive_worker" in description
     assert "routing.inactive_worker: atelier/worker/codex/p22" in description

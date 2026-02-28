@@ -108,8 +108,6 @@ def _create_reroute_epic(
             "epic",
             "--label",
             "at:epic",
-            "--status",
-            "open",
             "--title",
             title,
             "--acceptance",
