@@ -411,6 +411,7 @@ Deliverables:
 
 - compare pilot complexity/testability before vs after
 - decide whether to extend pattern to worker startup and/or finalization
+- publish decision record: `docs/service-tier-pilot-decision.md`
 
 Exit criteria:
 
