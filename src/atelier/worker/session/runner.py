@@ -873,6 +873,7 @@ def run_worker_once(
                     changeset_parent_branch=parent_branch_for_changeset or "",
                     allow_parent_branch_override=allow_parent_branch_override,
                     git_path=git_path,
+                    epic_parent_branch=parent_branch_value or "",
                 ),
                 control=control,
             )

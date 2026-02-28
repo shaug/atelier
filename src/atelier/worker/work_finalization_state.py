@@ -370,9 +370,7 @@ def _resolve_workspace_parent_branch(
         return resolved_workspace_parent
     if beads_root is None:
         return ""
-    if not root_branch or not parent_branch:
-        return ""
-    if root_branch != parent_branch:
+    if not root_branch:
         return ""
     epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
     if not epic_id:
@@ -506,6 +504,12 @@ def changeset_base_branch(
         else None
     )
     if normalized_strategy == "sequential":
+        if not integration_parent_branch:
+            integration_parent_branch = _resolve_non_root_default_branch(
+                root_branch=root_branch,
+                repo_root=repo_root,
+                git_path=git_path,
+            )
         if integration_parent_branch:
             changeset_id = issue.get("id")
             if (

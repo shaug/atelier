@@ -28,6 +28,7 @@ class WorktreePreparationContext:
     changeset_parent_branch: str
     allow_parent_branch_override: bool
     git_path: str | None
+    epic_parent_branch: str = ""
 
 
 class WorktreePreparationControl(Protocol):
@@ -93,6 +94,60 @@ def _normalize_branch(value: object) -> str | None:
     if not normalized or normalized.lower() == "null":
         return None
     return normalized
+
+
+def _extract_workspace_parent_branch(issue: dict[str, object]) -> str | None:
+    description = issue.get("description")
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
+    return _normalize_branch(fields.get("workspace.parent_branch"))
+
+
+def _sync_child_workspace_parent_branch(
+    *,
+    selected_epic: str,
+    changeset_id: str,
+    root_branch_value: str,
+    epic_parent_branch: str,
+    beads_root: Path,
+    repo_root: Path,
+    control: WorktreePreparationControl,
+) -> None:
+    if not changeset_id or changeset_id == selected_epic:
+        return
+    normalized_epic_parent = _normalize_branch(epic_parent_branch)
+    if not normalized_epic_parent:
+        return
+    if root_branch_value and normalized_epic_parent == root_branch_value:
+        return
+    try:
+        issues = beads.run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=repo_root)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        control.say(
+            "Skipped workspace.parent_branch alignment for "
+            f"{changeset_id}: unable to read metadata from beads (bd show exit {code})"
+        )
+        return
+    if not issues:
+        return
+    current_parent = _extract_workspace_parent_branch(issues[0])
+    if current_parent == normalized_epic_parent:
+        return
+    if current_parent and current_parent != root_branch_value:
+        control.say(
+            "Skipped workspace.parent_branch alignment for "
+            f"{changeset_id}: preserving existing non-root value {current_parent!r} "
+            f"instead of epic parent {normalized_epic_parent!r}"
+        )
+        return
+    beads.update_workspace_parent_branch(
+        changeset_id,
+        normalized_epic_parent,
+        beads_root=beads_root,
+        cwd=repo_root,
+        allow_override=bool(current_parent and current_parent == root_branch_value),
+    )
+    control.say(f"Aligned workspace.parent_branch for {changeset_id}: {normalized_epic_parent}")
 
 
 def _reconcile_epic_changeset_lineage(
@@ -189,6 +244,7 @@ def prepare_worktrees(
     changeset_parent_branch = context.changeset_parent_branch
     allow_parent_branch_override = context.allow_parent_branch_override
     git_path = context.git_path
+    epic_parent_branch = context.epic_parent_branch
     epic_worktree_path: Path | None = None
     changeset_worktree_path: Path | None = None
     branch: str | None = None
@@ -302,6 +358,15 @@ def prepare_worktrees(
         root_branch=root_branch_value,
         parent_branch=changeset_parent_branch,
         git_path=git_path,
+    )
+    _sync_child_workspace_parent_branch(
+        selected_epic=selected_epic,
+        changeset_id=changeset_id,
+        root_branch_value=root_branch_value,
+        epic_parent_branch=epic_parent_branch,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        control=control,
     )
     if changeset_id:
         root_base = git.git_rev_parse(changeset_worktree_path, root_branch_value, git_path=git_path)
