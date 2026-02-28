@@ -62,6 +62,30 @@ def _root_integrated_into_parent(
     return False, None
 
 
+def _integration_target_branches(
+    fields: dict[str, str],
+    *,
+    repo_root: Path,
+    git_path: str | None = None,
+) -> list[str]:
+    root_branch = _normalize_branch_field(fields.get("changeset.root_branch"))
+    candidates: list[str] = []
+
+    def add_candidate(value: object) -> None:
+        normalized = _normalize_branch_field(value)
+        if not normalized:
+            return
+        if root_branch and normalized == root_branch:
+            return
+        if normalized not in candidates:
+            candidates.append(normalized)
+
+    add_candidate(fields.get("changeset.parent_branch"))
+    add_candidate(fields.get("workspace.parent_branch"))
+    add_candidate(git.git_default_branch(repo_root, git_path=git_path))
+    return candidates
+
+
 def branch_ref_for_lookup(
     repo_root: Path, branch: str, *, git_path: str | None = None
 ) -> str | None:
@@ -122,6 +146,7 @@ def changeset_integration_signal(
     repo_root: Path,
     lookup_pr_payload: Callable[[str | None, str], dict[str, object] | None],
     git_path: str | None = None,
+    require_target_branch_proof: bool = False,
 ) -> tuple[bool, str | None]:
     description = issue.get("description")
     description_text = description if isinstance(description, str) else ""
@@ -137,6 +162,66 @@ def changeset_integration_signal(
         integrated_sha_candidates.extend(
             match.group(1) for match in INTEGRATED_SHA_NOTE_PATTERN.finditer(combined_text)
         )
+    root_branch = _normalize_branch_field(fields.get("changeset.root_branch"))
+    work_branch = _normalize_branch_field(fields.get("changeset.work_branch"))
+
+    if require_target_branch_proof:
+        target_refs: list[str] = []
+        for target_branch in _integration_target_branches(
+            fields,
+            repo_root=repo_root,
+            git_path=git_path,
+        ):
+            ref = branch_ref_for_lookup(repo_root, target_branch, git_path=git_path)
+            if ref and ref not in target_refs:
+                target_refs.append(ref)
+        source_branches: list[str] = []
+        for branch in (work_branch, root_branch):
+            if branch and branch not in source_branches:
+                source_branches.append(branch)
+        source_refs: list[str] = []
+        for source_branch in source_branches:
+            source_ref = branch_ref_for_lookup(repo_root, source_branch, git_path=git_path)
+            if source_ref and source_ref not in source_refs:
+                source_refs.append(source_ref)
+        if integrated_sha_candidates and target_refs:
+            for candidate in reversed(integrated_sha_candidates):
+                candidate_sha = git.git_rev_parse(repo_root, candidate, git_path=git_path)
+                if not candidate_sha:
+                    continue
+                if source_refs and not any(
+                    git.git_is_ancestor(repo_root, candidate_sha, source_ref, git_path=git_path)
+                    is True
+                    for source_ref in source_refs
+                ):
+                    continue
+                for ref in target_refs:
+                    if (
+                        git.git_is_ancestor(repo_root, candidate_sha, ref, git_path=git_path)
+                        is True
+                    ):
+                        return True, candidate_sha
+        if not target_refs or not source_refs:
+            return False, None
+        for source_ref in source_refs:
+            source_sha = git.git_rev_parse(repo_root, source_ref, git_path=git_path)
+            for target_ref in target_refs:
+                if (
+                    git.git_is_ancestor(repo_root, source_ref, target_ref, git_path=git_path)
+                    is True
+                ):
+                    return True, source_sha
+                if (
+                    git.git_branch_fully_applied(
+                        repo_root, target_ref, source_ref, git_path=git_path
+                    )
+                    is True
+                ):
+                    return True, source_sha
+        if repo_slug and work_branch:
+            lookup_pr_payload(repo_slug, work_branch)
+        return False, None
+
     candidate_refs: list[str] = []
     for key in (
         "changeset.root_branch",
@@ -163,8 +248,6 @@ def changeset_integration_signal(
                 if git.git_is_ancestor(repo_root, candidate_sha, ref, git_path=git_path) is True:
                     return True, candidate_sha
 
-    root_branch = _normalize_branch_field(fields.get("changeset.root_branch"))
-    work_branch = _normalize_branch_field(fields.get("changeset.work_branch"))
     if repo_slug and work_branch:
         pr_payload = lookup_pr_payload(repo_slug, work_branch)
         if pr_payload and pr_payload.get("mergedAt"):

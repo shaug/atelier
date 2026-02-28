@@ -97,9 +97,14 @@ class _FinalizeMatrixService(finalize_pipeline.FinalizePipelineService):
         del changeset_id
 
     def changeset_integration_signal(
-        self, issue: dict[str, object], *, repo_slug: str | None, git_path: str | None
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        git_path: str | None,
+        require_target_branch_proof: bool = False,
     ) -> tuple[bool, str | None]:
-        del issue, repo_slug, git_path
+        del issue, repo_slug, git_path, require_target_branch_proof
         return False, None
 
     def recover_premature_merged_changeset(

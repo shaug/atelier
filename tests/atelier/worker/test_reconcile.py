@@ -244,6 +244,47 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
     )
 
 
+def test_reconcile_reports_closed_merged_like_without_integration_proof() -> None:
+    issue = {
+        "id": "at-1.4",
+        "status": "closed",
+        "labels": ["cs:merged"],
+        "description": "pr_state: merged\n",
+    }
+    project = config.ProjectConfig(
+        project=config.ProjectSection(origin="https://github.com/org/repo"),
+        branch=config.BranchConfig(pr=False),
+    )
+    logs: list[str] = []
+    with patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[issue]):
+        result = reconcile.reconcile_blocked_merged_changesets(
+            agent_id="worker/1",
+            agent_bead_id="at-agent",
+            project_config=project,
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            dry_run=False,
+            log=logs.append,
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            changeset_integration_signal=lambda *_args, **_kwargs: (False, None),
+            issue_dependency_ids=lambda _issue: tuple(),
+            issue_labels=lambda issue: {str(label) for label in issue.get("labels", [])},
+            finalize_changeset=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("finalize should not run when merge proof is missing")
+            ),
+            finalize_epic_if_complete=lambda **_kwargs: FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        )
+
+    assert result.scanned == 1
+    assert result.actionable == 1
+    assert result.reconciled == 0
+    assert result.failed == 1
+    assert any("closed+merged-like-without-integration-proof" in line for line in logs)
+
+
 def test_reconcile_dependency_without_terminal_review_or_merge_blocks_finalize() -> None:
     project = config.ProjectConfig(
         project=config.ProjectSection(origin="https://github.com/org/repo"),
@@ -306,6 +347,81 @@ def test_reconcile_dependency_without_terminal_review_or_merge_blocks_finalize()
 
     assert result.reconciled == 0
     assert result.failed == 1
+    assert any("blocked by dependencies: at-1.1" in line for line in logs)
+
+
+def test_reconcile_closed_dependency_requires_strict_integration_proof() -> None:
+    project = config.ProjectConfig(
+        project=config.ProjectSection(origin="https://github.com/org/repo"),
+        branch=config.BranchConfig(pr=False),
+    )
+    candidate = {
+        "id": "at-1.2",
+        "status": "blocked",
+        "labels": [],
+        "type": "task",
+    }
+    dependency = {
+        "id": "at-1.1",
+        "status": "closed",
+        "labels": [],
+        "description": "changeset.work_branch: feat/at-1.1\n",
+        "type": "task",
+    }
+
+    def list_all_changesets(*, beads_root, cwd, include_closed):
+        return [candidate]
+
+    def run_bd_json(args: list[str], **_kwargs):
+        if args[:2] == ["show", "at-1.1"]:
+            return [dependency]
+        if args[:3] == ["list", "--parent", "at-1.1"]:
+            return []
+        return []
+
+    calls: list[tuple[str, bool]] = []
+    logs: list[str] = []
+
+    def integration_signal(issue, **kwargs):
+        strict = bool(kwargs.get("require_target_branch_proof"))
+        calls.append((str(issue.get("id")), strict))
+        if issue.get("id") == "at-1.2":
+            return True, "abc1234"
+        if issue.get("id") == "at-1.1":
+            return (False, None) if strict else (True, "dep1234")
+        return False, None
+
+    with (
+        patch(
+            "atelier.worker.reconcile.beads.list_all_changesets", side_effect=list_all_changesets
+        ),
+        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
+        patch("atelier.worker.reconcile.beads.update_changeset_integrated_sha"),
+    ):
+        result = reconcile.reconcile_blocked_merged_changesets(
+            agent_id="worker/1",
+            agent_bead_id="at-agent",
+            project_config=project,
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            dry_run=False,
+            log=logs.append,
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            changeset_integration_signal=integration_signal,
+            issue_dependency_ids=lambda issue: ("at-1.1",) if issue.get("id") == "at-1.2" else (),
+            issue_labels=lambda issue: {str(label) for label in issue.get("labels", [])},
+            finalize_changeset=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("finalize should not run when closed dependency proof is missing")
+            ),
+            finalize_epic_if_complete=lambda **_kwargs: FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        )
+
+    assert result.reconciled == 0
+    assert result.failed == 1
+    assert ("at-1.1", True) in calls
     assert any("blocked by dependencies: at-1.1" in line for line in logs)
 
 

@@ -69,6 +69,37 @@ def _persist_integrated_sha(
     )
 
 
+def _block_missing_merged_integration(
+    *,
+    changeset_id: str,
+    work_branch: str,
+    agent_id: str,
+    service: "FinalizePipelineService",
+) -> FinalizeResult:
+    service.mark_changeset_blocked(
+        changeset_id,
+        reason="missing integration signal for merged terminal state",
+    )
+    service.send_planner_notification(
+        subject=f"NEEDS-DECISION: Missing integration signal ({changeset_id})",
+        body=(
+            "Changeset resolved to merged terminal state but no integration proof "
+            "against the target branch was found.\n"
+            "Required proof: `changeset.integrated_sha` reachable from the target branch, "
+            "or branch ancestry/patch-equivalence into the target branch.\n"
+            f"Work branch: `{work_branch}`\n"
+            "Action: integrate the branch and rerun finalize, or close as "
+            "`abandoned`/`superseded` when integration is intentionally absent."
+        ),
+        agent_id=agent_id,
+        thread_id=changeset_id,
+    )
+    return FinalizeResult(
+        continue_running=False,
+        reason="changeset_blocked_missing_integration",
+    )
+
+
 @dataclass(frozen=True)
 class FinalizePipelineContext:
     changeset_id: str
@@ -115,7 +146,12 @@ class FinalizePipelineService(Protocol):
     def promote_planned_descendant_changesets(self, changeset_id: str) -> None: ...
 
     def changeset_integration_signal(
-        self, issue: Issue, *, repo_slug: str | None, git_path: str | None
+        self,
+        issue: Issue,
+        *,
+        repo_slug: str | None,
+        git_path: str | None,
+        require_target_branch_proof: bool = False,
     ) -> tuple[bool, str | None]: ...
 
     def recover_premature_merged_changeset(
@@ -315,7 +351,10 @@ def run_finalize_pipeline(
             return FinalizeResult(continue_running=True, reason="changeset_children_pending")
         if terminal_state == "merged":
             integration_proven, integrated_sha = service.changeset_integration_signal(
-                issue, repo_slug=repo_slug, git_path=git_path
+                issue,
+                repo_slug=repo_slug,
+                git_path=git_path,
+                require_target_branch_proof=True,
             )
             if not integration_proven:
                 recovered = service.recover_premature_merged_changeset(
@@ -324,21 +363,11 @@ def run_finalize_pipeline(
                 )
                 if recovered is not None:
                     return recovered
-                service.mark_changeset_blocked(
-                    changeset_id, reason="missing integration signal for merged terminal state"
-                )
-                service.send_planner_notification(
-                    subject=(f"NEEDS-DECISION: Missing integration signal ({changeset_id})"),
-                    body=(
-                        "Changeset resolved to merged terminal state but no integration signal "
-                        "(changeset.integrated_sha or merged PR) was found."
-                    ),
+                return _block_missing_merged_integration(
+                    changeset_id=changeset_id,
+                    work_branch=work_branch,
                     agent_id=agent_id,
-                    thread_id=changeset_id,
-                )
-                return FinalizeResult(
-                    continue_running=False,
-                    reason="changeset_blocked_missing_integration",
+                    service=service,
                 )
             _persist_integrated_sha(
                 issue=issue,
@@ -349,7 +378,10 @@ def run_finalize_pipeline(
             )
         if terminal_state is None:
             integration_proven, integrated_sha = service.changeset_integration_signal(
-                issue, repo_slug=repo_slug, git_path=git_path
+                issue,
+                repo_slug=repo_slug,
+                git_path=git_path,
+                require_target_branch_proof=True,
             )
             if integration_proven:
                 _persist_integrated_sha(
@@ -457,9 +489,19 @@ def run_finalize_pipeline(
             pr_payload=pr_payload,
             pushed=pushed,
         )
-        _integration_ok, integrated_sha = service.changeset_integration_signal(
-            issue, repo_slug=None, git_path=git_path
+        integration_ok, integrated_sha = service.changeset_integration_signal(
+            issue,
+            repo_slug=repo_slug,
+            git_path=git_path,
+            require_target_branch_proof=True,
         )
+        if not integration_ok:
+            return _block_missing_merged_integration(
+                changeset_id=changeset_id,
+                work_branch=work_branch,
+                agent_id=agent_id,
+                service=service,
+            )
         return service.finalize_terminal_changeset(
             context=context,
             terminal_state="merged",
@@ -473,7 +515,10 @@ def run_finalize_pipeline(
             pushed=pushed,
         )
         integration_ok, integrated_sha = service.changeset_integration_signal(
-            issue, repo_slug=repo_slug, git_path=git_path
+            issue,
+            repo_slug=repo_slug,
+            git_path=git_path,
+            require_target_branch_proof=True,
         )
         return service.finalize_terminal_changeset(
             context=context,
@@ -482,7 +527,10 @@ def run_finalize_pipeline(
         )
     if branch_pr and pushed and not pr_payload:
         integration_ok, integrated_sha = service.changeset_integration_signal(
-            issue, repo_slug=repo_slug, git_path=git_path
+            issue,
+            repo_slug=repo_slug,
+            git_path=git_path,
+            require_target_branch_proof=True,
         )
         if integration_ok:
             return service.finalize_terminal_changeset(

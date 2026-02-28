@@ -85,12 +85,14 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
         *,
         repo_slug: str | None,
         git_path: str | None,
+        require_target_branch_proof: bool = False,
     ) -> tuple[bool, str | None]:
         return changeset_integration_signal(
             issue,
             repo_slug=repo_slug,
             repo_root=self._repo_root,
             git_path=git_path,
+            require_target_branch_proof=require_target_branch_proof,
         )
 
     def recover_premature_merged_changeset(
