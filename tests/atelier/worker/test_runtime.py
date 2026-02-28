@@ -172,7 +172,7 @@ def test_run_worker_sessions_auto_skips_local_epic_failure_and_continues() -> No
         if calls == 1:
             return WorkerRunSummary(
                 started=False,
-                reason="changeset_publish_pending",
+                reason="changeset_stack_integrity_failed",
                 epic_id="at-fail",
             )
         return WorkerRunSummary(started=False, reason="no_eligible_epics")
@@ -193,7 +193,7 @@ def test_run_worker_sessions_auto_skips_local_epic_failure_and_continues() -> No
     assert seen_excluded == [(), ("at-fail",)]
     assert emitted[0] == (
         "Skipping failed epic and continuing implicit selection: "
-        "at-fail (changeset_publish_pending)"
+        "at-fail (changeset_stack_integrity_failed)"
     )
     assert (
         emitted[-1] == "Terminal outcome: taxonomy=no_work_global, summary_reason=no_eligible_epics"
@@ -212,7 +212,7 @@ def test_run_worker_sessions_auto_fails_when_local_failure_repeats_same_epic() -
         seen_excluded.append(tuple(getattr(args, "implicit_excluded_epic_ids", ())))
         return WorkerRunSummary(
             started=False,
-            reason="changeset_publish_pending",
+            reason="changeset_stack_integrity_failed",
             epic_id="at-fail",
         )
 
@@ -234,11 +234,78 @@ def test_run_worker_sessions_auto_fails_when_local_failure_repeats_same_epic() -
     assert seen_excluded[:2] == [(), ("at-fail",)]
     assert emitted[0] == (
         "Skipping failed epic and continuing implicit selection: "
-        "at-fail (changeset_publish_pending)"
+        "at-fail (changeset_stack_integrity_failed)"
     )
     assert emitted[-1] == (
-        "Terminal outcome: taxonomy=fail_closed, summary_reason=changeset_publish_pending, "
+        "Terminal outcome: taxonomy=fail_closed, summary_reason=changeset_stack_integrity_failed, "
         "epic=at-fail"
+    )
+
+
+def test_run_worker_sessions_explicit_stack_integrity_failure_is_fail_closed() -> None:
+    emitted: list[str] = []
+
+    with pytest.raises(SystemExit) as raised:
+        runtime.run_worker_sessions(
+            args=type("Args", (), {"queue": False, "epic_id": "at-explicit"})(),
+            mode="auto",
+            run_mode="default",
+            dry_run=False,
+            session_key="sess",
+            run_worker_once=lambda *_args, **_kwargs: WorkerRunSummary(
+                started=False,
+                reason="changeset_stack_integrity_failed",
+                epic_id="at-explicit",
+            ),
+            report_worker_summary=lambda _summary, _dry: None,
+            watch_interval_seconds=lambda: 5,
+            dry_run_log=lambda _message: None,
+            emit=emitted.append,
+        )
+
+    assert raised.value.code == 1
+    assert emitted[-1] == (
+        "Terminal outcome: taxonomy=fail_closed, "
+        "summary_reason=changeset_stack_integrity_failed, epic=at-explicit"
+    )
+
+
+def test_run_worker_sessions_implicit_resets_epic_id_across_retries() -> None:
+    emitted: list[str] = []
+    seen_epic_ids: list[object] = []
+    calls = 0
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del mode, dry_run, session_key
+        nonlocal calls
+        calls += 1
+        seen_epic_ids.append(getattr(args, "epic_id", None))
+        if calls == 1:
+            setattr(args, "epic_id", "at-fail")
+            return WorkerRunSummary(
+                started=False,
+                reason="changeset_stack_integrity_failed",
+                epic_id="at-fail",
+            )
+        return WorkerRunSummary(started=False, reason="no_eligible_epics")
+
+    runtime.run_worker_sessions(
+        args=type("Args", (), {"queue": False, "epic_id": None})(),
+        mode="auto",
+        run_mode="default",
+        dry_run=False,
+        session_key="sess",
+        run_worker_once=run_once,
+        report_worker_summary=lambda _summary, _dry: None,
+        watch_interval_seconds=lambda: 5,
+        dry_run_log=lambda _message: None,
+        emit=emitted.append,
+    )
+
+    assert seen_epic_ids == [None, None]
+    assert emitted[0] == (
+        "Skipping failed epic and continuing implicit selection: "
+        "at-fail (changeset_stack_integrity_failed)"
     )
 
 
