@@ -15,9 +15,22 @@
 
 ### Complexity signal (init/controller boundary)
 
+Snapshot basis (immutable SHAs):
+
+- Pre-pilot snapshot: `297a6979ecf6b0de231a4a9481b888ed34c9a841`.
+
+- Post-pilot snapshot: `cad69e58ec3c18d29d993e9e2d32f3b4728ec757`.
+
+- Recompute with:
+
+  - `git show <sha>:src/atelier/commands/init.py | wc -l`
+  - `git show <sha>:src/atelier/commands/init.py | rg '^\s*if\b' | wc -l`
+
 - `src/atelier/commands/init.py` lines: 213 before, 107 after.
+
 - `if` branches in `src/atelier/commands/init.py`: 19 before, 1 after.
-- Service modules in pilot path: 0 before, 3 after.
+
+- Service modules in pilot path (excluding `__init__.py`): 0 before, 3 after.
 
 ### Testability signal
 
@@ -32,6 +45,9 @@
 
 ### Bounded-scope signal
 
+- Snapshot basis (immutable SHAs): `297a6979ecf6b0de231a4a9481b888ed34c9a841`
+  (pre-pilot) to `cad69e58ec3c18d29d993e9e2d32f3b4728ec757` (post-pilot),
+  measured via `git diff --numstat <pre_sha>..<post_sha>`.
 - CS2 changed 8 files and ~794 LOC total (adds + deletes), remaining under the
   explicit ~800 LOC split guardrail.
 - No broad refactor landed outside the init/config pilot boundary.
