@@ -3819,7 +3819,10 @@ def close_transition_has_active_pr_lifecycle(
                 candidate = detailed[0]
                 description = candidate.get("description")
     review = changesets.parse_review_metadata(description if isinstance(description, str) else "")
-    return lifecycle.is_active_pr_lifecycle_state(review.pr_state)
+    review_state = lifecycle.normalize_review_state(review.pr_state)
+    if review_state == "pushed":
+        return lifecycle.canonical_lifecycle_status(candidate.get("status")) == "closed"
+    return lifecycle.is_active_pr_lifecycle_state(review_state)
 
 
 def close_epic_if_complete(
@@ -3829,6 +3832,7 @@ def close_epic_if_complete(
     beads_root: Path,
     cwd: Path,
     confirm: Callable[[ChangesetSummary], bool] | None = None,
+    dry_run: bool = False,
 ) -> bool:
     """Close an epic and clear hook if all changesets are complete."""
 
@@ -3861,7 +3865,7 @@ def close_epic_if_complete(
         ):
             continue
         candidate_id = candidate.get("id")
-        if isinstance(candidate_id, str) and candidate_id.strip():
+        if not dry_run and isinstance(candidate_id, str) and candidate_id.strip():
             mark_issue_in_progress(
                 candidate_id.strip(),
                 beads_root=beads_root,

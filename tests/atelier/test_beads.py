@@ -2528,6 +2528,44 @@ def test_close_epic_if_complete_reopens_active_pr_descendant() -> None:
     clear_hook.assert_not_called()
 
 
+def test_close_epic_if_complete_dry_run_skips_active_pr_recovery_mutation() -> None:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:2] == ["show", "epic-1"]:
+            return [{"id": "epic-1", "labels": ["at:epic"], "status": "in_progress"}]
+        if args[:2] == ["list", "--parent"] and args[2] == "epic-1":
+            return [
+                {
+                    "id": "epic-1.1",
+                    "status": "closed",
+                    "description": "pr_state: draft-pr\n",
+                    "labels": [],
+                    "type": "task",
+                }
+            ]
+        if args[:2] == ["list", "--parent"] and args[2] == "epic-1.1":
+            return []
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.mark_issue_in_progress") as mark_issue_in_progress,
+        patch("atelier.beads.close_issue") as close_issue,
+        patch("atelier.beads.clear_agent_hook") as clear_hook,
+    ):
+        result = beads.close_epic_if_complete(
+            "epic-1",
+            "agent-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            dry_run=True,
+        )
+
+    assert result is False
+    mark_issue_in_progress.assert_not_called()
+    close_issue.assert_not_called()
+    clear_hook.assert_not_called()
+
+
 def test_close_epic_if_complete_closes_standalone_changeset() -> None:
     def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args[:2] == ["show", "at-irs"]:
@@ -2599,6 +2637,24 @@ def test_close_epic_if_complete_reopens_active_pr_standalone_changeset() -> None
     )
     close_issue.assert_not_called()
     clear_hook.assert_not_called()
+
+
+def test_close_transition_has_active_pr_lifecycle_treats_pushed_as_active_when_closed() -> None:
+    assert (
+        beads.close_transition_has_active_pr_lifecycle(
+            {"status": "closed", "description": "pr_state: pushed\n"}
+        )
+        is True
+    )
+
+
+def test_close_transition_has_active_pr_lifecycle_treats_pushed_as_inactive_when_open() -> None:
+    assert (
+        beads.close_transition_has_active_pr_lifecycle(
+            {"status": "in_progress", "description": "pr_state: pushed\n"}
+        )
+        is False
+    )
 
 
 def test_close_issue_runs_close_and_reconciles_on_success() -> None:

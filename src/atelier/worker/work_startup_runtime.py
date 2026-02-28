@@ -553,9 +553,10 @@ def handle_queue_before_claim(
 class _StartupContractService(worker_startup.StartupContractService):
     """Concrete startup-contract service implementation for worker runtime."""
 
-    def __init__(self, *, beads_root: Path, repo_root: Path) -> None:
+    def __init__(self, *, beads_root: Path, repo_root: Path, dry_run: bool = False) -> None:
         self._beads_root = beads_root
         self._repo_root = repo_root
+        self._dry_run = dry_run
 
     def handle_queue_before_claim(
         self,
@@ -699,6 +700,7 @@ class _StartupContractService(worker_startup.StartupContractService):
             agent_bead_id,
             beads_root=self._beads_root,
             cwd=self._repo_root,
+            dry_run=self._dry_run,
         )
 
     def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None:
@@ -823,7 +825,11 @@ def run_startup_contract(
     Returns:
         Function result.
     """
-    service = _StartupContractService(beads_root=context.beads_root, repo_root=context.repo_root)
+    service = _StartupContractService(
+        beads_root=context.beads_root,
+        repo_root=context.repo_root,
+        dry_run=context.dry_run,
+    )
     return worker_startup.run_startup_contract_service(context=context, service=service)
 
 
