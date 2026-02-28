@@ -184,12 +184,12 @@ def changeset_integration_signal(
             source_ref = branch_ref_for_lookup(repo_root, source_branch, git_path=git_path)
             if source_ref and source_ref not in source_refs:
                 source_refs.append(source_ref)
-        if integrated_sha_candidates and target_refs and source_refs:
+        if integrated_sha_candidates and target_refs:
             for candidate in reversed(integrated_sha_candidates):
                 candidate_sha = git.git_rev_parse(repo_root, candidate, git_path=git_path)
                 if not candidate_sha:
                     continue
-                if not any(
+                if source_refs and not any(
                     git.git_is_ancestor(repo_root, candidate_sha, source_ref, git_path=git_path)
                     is True
                     for source_ref in source_refs
