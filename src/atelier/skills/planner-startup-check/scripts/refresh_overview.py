@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from atelier import beads, config, planner_overview
+from atelier import beads, config, lifecycle, planner_overview
 from atelier.commands.resolve import resolve_current_project_with_repo_root
 
 
@@ -23,6 +23,65 @@ def _queue_claim_state(issue: dict[str, object]) -> str:
     if isinstance(claimed_by, str) and claimed_by.strip():
         return f"claimed by {claimed_by.strip()}"
     return "unclaimed"
+
+
+def _deferred_descendant_changesets(
+    epics: list[dict[str, object]],
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[tuple[dict[str, object], list[dict[str, object]]]]:
+    groups: list[tuple[dict[str, object], list[dict[str, object]]]] = []
+    for epic in sorted(epics, key=_issue_sort_key):
+        epic_status = lifecycle.canonical_lifecycle_status(epic.get("status"))
+        if epic_status not in {"open", "in_progress"}:
+            continue
+        epic_id = str(epic.get("id") or "").strip()
+        if not epic_id:
+            continue
+        descendants = beads.list_descendant_changesets(
+            epic_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=False,
+        )
+        deferred = [
+            issue
+            for issue in descendants
+            if lifecycle.canonical_lifecycle_status(issue.get("status")) == "deferred"
+        ]
+        if deferred:
+            groups.append((epic, sorted(deferred, key=_issue_sort_key)))
+    return groups
+
+
+def _append_deferred_changeset_summary(
+    lines: list[str],
+    epics: list[dict[str, object]],
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
+    groups = _deferred_descendant_changesets(
+        epics,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+    if not groups:
+        lines.append("No deferred changesets under open/in-progress epics.")
+        return
+
+    lines.append("Deferred changesets under open/in-progress epics:")
+    for epic, deferred in groups:
+        epic_id = str(epic.get("id") or "").strip() or "(unknown)"
+        epic_status = lifecycle.canonical_lifecycle_status(epic.get("status")) or "unknown"
+        epic_title = str(epic.get("title") or "").strip() or "(untitled)"
+        lines.append(f"- {epic_id} [{epic_status}] {epic_title}")
+        for issue in deferred:
+            issue_id = str(issue.get("id") or "").strip() or "(unknown)"
+            issue_status = lifecycle.canonical_lifecycle_status(issue.get("status")) or "unknown"
+            issue_title = str(issue.get("title") or "").strip() or "(untitled)"
+            lines.append(f"  - {issue_id} [{issue_status}] {issue_title}")
 
 
 def _resolve_agent_id(requested_agent_id: str | None) -> str:
@@ -76,6 +135,12 @@ def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path
         lines.append("No queued messages.")
 
     epics = planner_overview.list_epics(beads_root=beads_root, repo_root=repo_root)
+    _append_deferred_changeset_summary(
+        lines,
+        epics,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
     lines.extend(planner_overview.render_epics(epics, show_drafts=True).splitlines())
     return "\n".join(lines)
 
