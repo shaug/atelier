@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ... import lifecycle, pr_strategy
+from ... import changeset_fields, lifecycle, pr_strategy
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
@@ -163,6 +163,7 @@ def _dependencies_satisfied(
             status=blocker_issue.get("status"),
             labels=blocker_labels,
             require_integrated=require_integrated,
+            review_state=changeset_fields.review_state(blocker_issue),
         ):
             continue
         return False
