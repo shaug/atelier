@@ -73,6 +73,7 @@ def _select_planner_session(
     agent_spec: agents.AgentSpec,
     project_enlistment: str,
     planner_branch: str,
+    planner_workspace_uid: str | None,
     saved_session_id: str | None,
     new_session: bool,
 ) -> _PlannerSessionSelection:
@@ -88,7 +89,11 @@ def _select_planner_session(
             session_id=None,
             reason=f"{agent_spec.display_name} resume is unavailable for planner sessions",
         )
-    matches = sessions.find_codex_sessions(project_enlistment, planner_branch)
+    matches = sessions.find_codex_sessions(
+        project_enlistment,
+        planner_branch,
+        planner_workspace_uid,
+    )
     if saved_session_id:
         if any(item.session_id == saved_session_id for item in matches):
             return _PlannerSessionSelection(
@@ -638,12 +643,14 @@ def run_planner(args: object) -> None:
             sync_monitor.start()
             finish(f"every {sync_service.settings.interval_seconds}s")
             _report_timings(timings, trace=trace)
+            planner_workspace_uid: str | None = None
             opening_prompt = ""
             if agent_spec.name == "codex":
+                planner_workspace_uid = f"planner-{agent.name}"
                 opening_prompt = workspace.workspace_session_identifier(
                     project_enlistment,
                     planner_branch,
-                    f"planner-{agent.name}",
+                    planner_workspace_uid,
                 )
             try:
                 say(f"Starting {agent_spec.display_name} session")
@@ -654,6 +661,7 @@ def run_planner(args: object) -> None:
                     agent_spec=agent_spec,
                     project_enlistment=project_enlistment,
                     planner_branch=planner_branch,
+                    planner_workspace_uid=planner_workspace_uid,
                     saved_session_id=saved_planner_session_id,
                     new_session=new_session_requested,
                 )

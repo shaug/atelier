@@ -375,7 +375,7 @@ def test_plan_uses_latest_match_when_saved_pointer_is_absent(tmp_path: Path) -> 
         patch(
             "atelier.commands.plan.sessions.find_codex_sessions",
             return_value=matches,
-        ),
+        ) as find_sessions,
         patch("atelier.commands.plan.codex.run_codex_command", side_effect=fake_run_codex_command),
         patch("atelier.commands.plan.beads.update_issue_description_fields") as update_fields,
     ):
@@ -387,6 +387,11 @@ def test_plan_uses_latest_match_when_saved_pointer_is_absent(tmp_path: Path) -> 
         {plan_cmd._PLANNER_SESSION_ID_FIELD: session_id},
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
+    )
+    find_sessions.assert_called_once_with(
+        "/repo",
+        "main-planner-planner",
+        "planner-planner",
     )
 
 
