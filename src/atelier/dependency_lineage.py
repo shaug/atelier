@@ -15,6 +15,13 @@ _PARENT_CHILD_KEYS = ("dependency_type", "type")
 _PARENT_CHILD_PATTERN = re.compile(r"parent[\s_-]*child", re.IGNORECASE)
 
 
+def _normalize_issue_id(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def _normalize_branch(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -22,6 +29,24 @@ def _normalize_branch(value: object) -> str | None:
     if not cleaned or cleaned.lower() == "null":
         return None
     return cleaned
+
+
+def _explicit_parent_id(issue: Issue) -> str | None:
+    parent = issue.get("parent")
+    if isinstance(parent, dict):
+        return _normalize_issue_id(parent.get("id"))
+    return _normalize_issue_id(parent)
+
+
+def _issue_heritage_id(issue: Issue) -> str | None:
+    explicit_parent = _explicit_parent_id(issue)
+    if explicit_parent:
+        return explicit_parent
+    try:
+        boundary = parse_issue_boundary(issue, source="dependency_lineage:issue_heritage")
+    except ValueError:
+        return None
+    return _normalize_issue_id(boundary.parent_id)
 
 
 def _dependency_parent_hint(issue: Issue) -> str | None:
@@ -209,9 +234,17 @@ def resolve_parent_lineage(
     explicit_parent = _normalize_branch(changeset_fields.parent_branch(issue))
     dependency_ids = _dependency_ids(issue)
     dependency_parent_hint = _dependency_parent_hint(issue)
+    heritage_parent_id = _explicit_parent_id(issue)
+    if (
+        heritage_parent_id is None
+        and dependency_parent_hint
+        and dependency_parent_hint not in dependency_ids
+    ):
+        heritage_parent_id = dependency_parent_hint
 
     diagnostics: list[str] = []
     dependency_candidates: dict[str, str] = {}
+    dependency_candidate_heritage: dict[str, str | None] = {}
     missing_dependencies: list[str] = []
     missing_branches: list[str] = []
 
@@ -225,26 +258,47 @@ def resolve_parent_lineage(
             missing_branches.append(dependency_id)
             continue
         dependency_candidates[dependency_id] = work_branch
+        dependency_candidate_heritage[dependency_id] = _issue_heritage_id(dependency_issue)
+
+    lineage_candidates = dict(dependency_candidates)
+    if heritage_parent_id and heritage_parent_id not in dependency_candidates:
+        scoped_candidates = {
+            dependency_id: branch
+            for dependency_id, branch in dependency_candidates.items()
+            if dependency_candidate_heritage.get(dependency_id) == heritage_parent_id
+        }
+        if scoped_candidates:
+            excluded = sorted(set(dependency_candidates) - set(scoped_candidates))
+            if excluded:
+                diagnostics.append(
+                    "excluded non-heritage dependency blockers from lineage: " + ", ".join(excluded)
+                )
+            lineage_candidates = scoped_candidates
+        elif dependency_candidates:
+            lineage_candidates = {}
+            diagnostics.append(
+                f"epic heritage {heritage_parent_id} has no dependency lineage candidates"
+            )
 
     dependency_parent_id: str | None = None
     dependency_parent_branch: str | None = None
-    if dependency_parent_hint and dependency_parent_hint in dependency_candidates:
+    if dependency_parent_hint and dependency_parent_hint in lineage_candidates:
         dependency_parent_id = dependency_parent_hint
-        dependency_parent_branch = dependency_candidates[dependency_parent_hint]
-    elif len(dependency_candidates) == 1:
-        dependency_parent_id, dependency_parent_branch = next(iter(dependency_candidates.items()))
-    elif len(dependency_candidates) > 1:
-        candidate_ids = tuple(dependency_candidates)
+        dependency_parent_branch = lineage_candidates[dependency_parent_hint]
+    elif len(lineage_candidates) == 1:
+        dependency_parent_id, dependency_parent_branch = next(iter(lineage_candidates.items()))
+    elif len(lineage_candidates) > 1:
+        candidate_ids = tuple(lineage_candidates)
         frontier_ids = _transitive_dependency_frontier(
             candidate_ids, lookup_issue=lookup_cached_issue
         )
         if len(frontier_ids) == 1:
             dependency_parent_id = frontier_ids[0]
-            dependency_parent_branch = dependency_candidates[dependency_parent_id]
+            dependency_parent_branch = lineage_candidates[dependency_parent_id]
         else:
-            unresolved_ids = sorted(frontier_ids) if frontier_ids else sorted(dependency_candidates)
+            unresolved_ids = sorted(frontier_ids) if frontier_ids else sorted(lineage_candidates)
             dependency_pairs = ", ".join(
-                f"{issue_id}->{dependency_candidates[issue_id]}" for issue_id in unresolved_ids
+                f"{issue_id}->{lineage_candidates[issue_id]}" for issue_id in unresolved_ids
             )
             diagnostics.append(f"ambiguous dependency parent branches: {dependency_pairs}")
 
@@ -272,7 +326,7 @@ def resolve_parent_lineage(
             used_dependency_parent = True
         else:
             blocked = True
-            if len(dependency_candidates) > 1:
+            if len(lineage_candidates) > 1:
                 blocker_reason = "dependency-lineage-ambiguous"
             else:
                 blocker_reason = "dependency-parent-unresolved"

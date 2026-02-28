@@ -365,6 +365,78 @@ def test_changeset_base_branch_keeps_downstream_stacked_on_frontier_dependency(
     assert base == "feat/at-kid.2"
 
 
+def test_changeset_base_branch_scopes_lineage_to_epic_heritage_at_join_node(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.3",
+        "parent": "at-epic",
+        "description": (
+            "changeset.root_branch: feat/at-epic\n"
+            "changeset.parent_branch: feat/at-epic\n"
+            "changeset.work_branch: feat/at-epic.3\n"
+            "workspace.parent_branch: main\n"
+        ),
+        "dependencies": ["at-epic.2", "at-other.9"],
+    }
+
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [
+                {
+                    "parent": "at-epic",
+                    "description": "changeset.work_branch: feat/at-epic.2\n",
+                }
+            ]
+            if args == ["show", "at-epic.2"]
+            else (
+                [
+                    {
+                        "parent": "at-other",
+                        "description": "changeset.work_branch: feat/at-other.9\n",
+                    }
+                ]
+                if args == ["show", "at-other.9"]
+                else []
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "branch_ref_for_lookup",
+        lambda _repo_root, branch, **_kwargs: branch,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_is_ancestor",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_branch_fully_applied",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_rev_parse",
+        lambda _repo_root, ref, **_kwargs: f"{ref}-sha",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_branch_metadata",
+        lambda *_args, **_kwargs: {},
+    )
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert base == "feat/at-epic.2"
+
+
 def test_align_existing_pr_base_rebases_and_retargets(monkeypatch) -> None:
     issue = {
         "description": (
