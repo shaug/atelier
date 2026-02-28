@@ -175,10 +175,25 @@ def changeset_integration_signal(
             ref = branch_ref_for_lookup(repo_root, target_branch, git_path=git_path)
             if ref and ref not in target_refs:
                 target_refs.append(ref)
-        if integrated_sha_candidates and target_refs:
+        source_branches: list[str] = []
+        for branch in (work_branch, root_branch):
+            if branch and branch not in source_branches:
+                source_branches.append(branch)
+        source_refs: list[str] = []
+        for source_branch in source_branches:
+            source_ref = branch_ref_for_lookup(repo_root, source_branch, git_path=git_path)
+            if source_ref and source_ref not in source_refs:
+                source_refs.append(source_ref)
+        if integrated_sha_candidates and target_refs and source_refs:
             for candidate in reversed(integrated_sha_candidates):
                 candidate_sha = git.git_rev_parse(repo_root, candidate, git_path=git_path)
                 if not candidate_sha:
+                    continue
+                if not any(
+                    git.git_is_ancestor(repo_root, candidate_sha, source_ref, git_path=git_path)
+                    is True
+                    for source_ref in source_refs
+                ):
                     continue
                 for ref in target_refs:
                     if (
@@ -188,14 +203,7 @@ def changeset_integration_signal(
                         return True, candidate_sha
         if not target_refs or not work_branch:
             return False, None
-        source_branches: list[str] = []
-        for branch in (work_branch, root_branch):
-            if branch and branch not in source_branches:
-                source_branches.append(branch)
-        for source_branch in source_branches:
-            source_ref = branch_ref_for_lookup(repo_root, source_branch, git_path=git_path)
-            if not source_ref:
-                continue
+        for source_ref in source_refs:
             source_sha = git.git_rev_parse(repo_root, source_ref, git_path=git_path)
             for target_ref in target_refs:
                 if (

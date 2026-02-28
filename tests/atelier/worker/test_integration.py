@@ -120,6 +120,63 @@ def test_changeset_integration_signal_accepts_patch_equivalent_branch_to_target(
     assert integrated_sha == "worksha"
 
 
+def test_changeset_integration_signal_strict_sha_requires_source_reachability() -> None:
+    issue = {
+        "description": (
+            "changeset.integrated_sha: abcdef1234567890abcdef1234567890abcdef12\n"
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/work\n"
+        )
+    }
+
+    def fake_branch_ref_for_lookup(
+        _repo_root: Path, branch: str, *, git_path: str | None = None
+    ) -> str | None:
+        del git_path
+        mapping = {
+            "main": "origin/main",
+            "feat/work": "feat/work",
+            "feat/root": "feat/root",
+        }
+        return mapping.get(branch)
+
+    def fake_is_ancestor(
+        _repo_root: Path,
+        ancestor: str,
+        descendant: str,
+        *,
+        git_path: str | None = None,
+    ) -> bool:
+        del git_path
+        if ancestor == "abcdef1234567890abcdef1234567890abcdef12" and descendant == "origin/main":
+            return True
+        return False
+
+    with (
+        patch(
+            "atelier.worker.integration.branch_ref_for_lookup",
+            side_effect=fake_branch_ref_for_lookup,
+        ),
+        patch(
+            "atelier.worker.integration.git.git_rev_parse",
+            return_value="abcdef1234567890abcdef1234567890abcdef12",
+        ),
+        patch("atelier.worker.integration.git.git_is_ancestor", side_effect=fake_is_ancestor),
+        patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug=None,
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: None,
+            require_target_branch_proof=True,
+        )
+
+    assert ok is False
+    assert integrated_sha is None
+
+
 def test_changeset_integration_signal_rejects_unproven_integrated_sha() -> None:
     issue = {
         "description": (

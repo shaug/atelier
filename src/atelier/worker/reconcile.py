@@ -398,8 +398,13 @@ def reconcile_blocked_merged_changesets(
         ):
             dependency_finalized_cache[issue_id] = False
             return False
+        status = _canonical_changeset_status(issue)
         integrated, _ = changeset_integration_signal(
-            issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            require_target_branch_proof=status == "closed",
         )
         if integrated:
             dependency_finalized_cache[issue_id] = True
