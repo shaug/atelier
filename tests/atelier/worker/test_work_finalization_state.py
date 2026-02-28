@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from atelier.worker import work_finalization_state
 
 
@@ -102,6 +104,73 @@ def test_changeset_base_branch_normalizes_collapsed_parent_to_default(monkeypatc
     assert base == "main"
     assert updates
     assert updates[0]["parent_branch"] == "main"
+
+
+@pytest.mark.parametrize(
+    "legacy_parent_branch",
+    [
+        "scott/migrate-lifecycle-to-graph-nat-at-o1y4.1",
+        "scott/enforce-sequential-dag-depende-at-qc4b.5",
+        "scott/enforce-sequential-dag-depende-at-qc4b.3",
+    ],
+)
+def test_changeset_base_branch_sequential_always_uses_epic_parent_branch(
+    monkeypatch, legacy_parent_branch: str
+) -> None:
+    issue = {
+        "id": "at-qc4b.8",
+        "description": (
+            "changeset.root_branch: scott/enforce-sequential-dag-depende\n"
+            f"changeset.parent_branch: {legacy_parent_branch}\n"
+            "changeset.work_branch: scott/enforce-sequential-dag-depende-at-qc4b.8\n"
+            "workspace.parent_branch: main\n"
+        ),
+    }
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        branch_pr_strategy="sequential",
+        beads_root=None,
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert base == "main"
+
+
+def test_changeset_base_branch_non_sequential_keeps_stacked_parent(monkeypatch) -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: feat/parent\n"
+            "workspace.parent_branch: main\n"
+        )
+    }
+    monkeypatch.setattr(
+        work_finalization_state,
+        "branch_ref_for_lookup",
+        lambda _repo_root, branch, **_kwargs: branch,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_is_ancestor",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_branch_fully_applied",
+        lambda *_args, **_kwargs: False,
+    )
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        branch_pr_strategy="on-ready",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert base == "feat/parent"
 
 
 def test_changeset_base_branch_rejects_root_base_without_non_root_fallback(monkeypatch) -> None:
@@ -873,3 +942,93 @@ def test_changeset_stack_integrity_preflight_reconciles_parent_review_metadata(
 
     assert preflight.ok is True
     assert observed_states == ["pr-open"]
+
+
+def test_changeset_stack_integrity_preflight_fails_closed_when_sequential_base_mismatch(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: feat/root\n"
+            "workspace.parent_branch: main\n"
+        ),
+    }
+    monkeypatch.setattr(
+        work_finalization_state.worker_pr_gate,
+        "sequential_stack_integrity_preflight",
+        lambda *_args, **_kwargs: (
+            work_finalization_state.worker_pr_gate.StackIntegrityPreflightResult(ok=True)
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "changeset_base_branch",
+        lambda *_args, **_kwargs: "feat/parent",
+    )
+
+    preflight = work_finalization_state.changeset_stack_integrity_preflight(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+    )
+
+    assert preflight.ok is False
+    assert preflight.reason == "sequential-base-policy-mismatch"
+
+
+def test_changeset_stack_integrity_preflight_resolves_epic_parent_without_metadata_writes(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-qc4b.8",
+        "description": ("changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root\n"),
+    }
+    metadata_updates: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        work_finalization_state.worker_pr_gate,
+        "sequential_stack_integrity_preflight",
+        lambda *_args, **_kwargs: (
+            work_finalization_state.worker_pr_gate.StackIntegrityPreflightResult(ok=True)
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "resolve_epic_id_for_changeset",
+        lambda *_args, **_kwargs: "at-qc4b",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "workspace.parent_branch: release/2026.03\n"}]
+            if args == ["show", "at-qc4b"]
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_branch_metadata",
+        lambda *_args, **kwargs: metadata_updates.append(kwargs),
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_default_branch",
+        lambda *_args, **_kwargs: "main",
+    )
+
+    preflight = work_finalization_state.changeset_stack_integrity_preflight(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+    )
+
+    assert preflight.ok is True
+    assert metadata_updates == []

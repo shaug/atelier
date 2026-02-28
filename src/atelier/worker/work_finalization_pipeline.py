@@ -232,6 +232,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
             beads_root=self._beads_root,
             repo_root=self._repo_root,
             git_path=context.git_path,
+            branch_pr_strategy=context.branch_pr_strategy,
         )
 
     def update_changeset_review_from_pr(
