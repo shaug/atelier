@@ -130,6 +130,20 @@ class _NextChangesetService(worker_startup.NextChangesetService):
             include_closed=include_closed,
         )
 
+    def changeset_integration_signal(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        git_path: str | None,
+    ) -> tuple[bool, str | None]:
+        return changeset_integration_signal(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=self._repo_root,
+            git_path=git_path,
+        )
+
     def is_changeset_in_progress(self, issue: dict[str, object]) -> bool:
         return is_changeset_in_progress(issue)
 
@@ -635,6 +649,24 @@ class _StartupContractService(worker_startup.StartupContractService):
             issue,
             repo_slug=repo_slug,
             repo_root=self._repo_root,
+            git_path=git_path,
+        )
+
+    def changeset_waiting_on_review_or_signals(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        branch_pr: bool,
+        branch_pr_strategy: object,
+        git_path: str | None,
+    ) -> bool:
+        return changeset_waiting_on_review_or_signals(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=self._repo_root,
+            branch_pr=branch_pr,
+            branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
         )
 

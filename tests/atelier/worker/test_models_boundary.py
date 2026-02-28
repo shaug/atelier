@@ -67,6 +67,8 @@ def test_parse_issue_boundary_falls_back_to_parent_when_parent_id_empty(parent_i
 @pytest.mark.parametrize(
     ("dependency_entry", "expected_parent"),
     [
+        ({"relation": "parent-child", "id": "at-1"}, "at-1"),
+        ({"dependencyType": "parent_child", "issue": {"id": "at-1"}}, "at-1"),
         ({"dependency_type": "parent-child", "id": "at-1"}, "at-1"),
         ({"dependency_type": "parent_child", "issue": {"id": "at-1"}}, "at-1"),
         ({"type": "parent-child", "depends_on_id": "at-1"}, "at-1"),

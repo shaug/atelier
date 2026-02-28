@@ -60,6 +60,34 @@ def test_changeset_integration_signal_uses_merged_pr_signal() -> None:
     assert integrated_sha is None
 
 
+def test_changeset_integration_signal_rejects_unproven_integrated_sha() -> None:
+    issue = {
+        "description": (
+            "changeset.integrated_sha: abcdef1234567\n"
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/work\n"
+        )
+    }
+
+    with (
+        patch(
+            "atelier.worker.integration.git.git_rev_parse",
+            return_value="abcdef1234567",
+        ),
+        patch("atelier.worker.integration.branch_ref_for_lookup", return_value=None),
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug=None,
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: None,
+        )
+
+    assert ok is False
+    assert integrated_sha is None
+
+
 def test_changeset_integration_signal_active_pr_state_requires_parent_integration() -> None:
     issue = {
         "description": (

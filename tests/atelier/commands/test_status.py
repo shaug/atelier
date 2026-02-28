@@ -262,6 +262,89 @@ def test_status_includes_changeset_signals() -> None:
         assert details[0]["pr"]["merge_state_status"] == "DIRTY"
 
 
+def test_status_blocks_pr_allowed_for_closed_changeset_with_active_pr_lifecycle() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        project_config = config.ProjectConfig.model_validate(
+            {"project": {"enlistment": str(repo_root), "origin": "github.com/org/repo"}}
+        )
+        epic = {
+            "id": "epic-1",
+            "title": "Epic",
+            "status": "open",
+            "labels": ["at:epic"],
+        }
+        changesets = [
+            {
+                "id": "cs-1",
+                "title": "Closed but still open in PR",
+                "status": "closed",
+                "labels": [],
+                "description": "changeset.work_branch: alpha-cs-1\n",
+                "type": "task",
+            }
+        ]
+
+        def fake_run_bd_json(
+            args: list[str], *, beads_root: Path, cwd: Path
+        ) -> list[dict[str, object]]:
+            if args[:3] == ["list", "--label", "at:epic"]:
+                return [epic]
+            if args[:3] == ["list", "--label", "at:agent"]:
+                return []
+            if args[:3] == ["list", "--label", "at:message"]:
+                return []
+            if args and args[0] == "list" and "--parent" in args:
+                parent_id = args[args.index("--parent") + 1]
+                if parent_id == "epic-1":
+                    return list(changesets)
+                return []
+            if args and args[0] == "ready" and "--parent" in args:
+                return []
+            return []
+
+        def fake_load_mapping(path: Path) -> WorktreeMapping | None:
+            if path.name == "epic-1.json":
+                return WorktreeMapping(
+                    epic_id="epic-1",
+                    worktree_path="worktrees/epic-1",
+                    root_branch="alpha",
+                    changesets={"cs-1": "alpha-cs-1"},
+                    changeset_worktrees={},
+                )
+            return None
+
+        with (
+            patch(
+                "atelier.commands.status.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, str(repo_root), repo_root),
+            ),
+            patch("atelier.commands.status.beads.run_bd_command", return_value=DummyResult()),
+            patch("atelier.commands.status.beads.run_bd_json", side_effect=fake_run_bd_json),
+            patch("atelier.commands.status.worktrees.load_mapping", side_effect=fake_load_mapping),
+            patch("atelier.commands.status.git.git_ref_exists", return_value=True),
+            patch(
+                "atelier.commands.status.prs.lookup_github_pr_status",
+                side_effect=_lookup_status_payload(
+                    lambda _repo, _branch: {"state": "OPEN", "isDraft": False}
+                ),
+            ),
+        ):
+            buffer = io.StringIO()
+            with patch("sys.stdout", buffer):
+                status_cmd(SimpleNamespace(format="json"))
+
+        payload = json.loads(buffer.getvalue())
+        detail = payload["epics"][0]["changeset_details"][0]
+        assert detail["pr_allowed"] is False
+        assert detail["pr_gate_reason"] == "blocked:closed-changeset-pr-lifecycle-active"
+
+
 def test_build_changeset_details_scopes_pr_payload_cache_by_repo_slug() -> None:
     changesets = [{"id": "cs-1", "title": "Changeset", "labels": [], "type": "task"}]
     mapping = WorktreeMapping(

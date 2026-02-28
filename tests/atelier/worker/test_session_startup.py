@@ -27,6 +27,10 @@ class FakeStartupService:
         self._changeset_integration_signal = overrides.pop(
             "changeset_integration_signal", lambda _issue, repo_slug, git_path: (False, None)
         )
+        self._changeset_waiting_on_review_or_signals = overrides.pop(
+            "changeset_waiting_on_review_or_signals",
+            lambda _issue, repo_slug, branch_pr, branch_pr_strategy, git_path: False,
+        )
         self._mark_changeset_merged = overrides.pop(
             "mark_changeset_merged", lambda _changeset_id: None
         )
@@ -133,6 +137,23 @@ class FakeStartupService:
         git_path: str | None,
     ) -> tuple[bool, str | None]:
         return self._changeset_integration_signal(issue, repo_slug=repo_slug, git_path=git_path)
+
+    def changeset_waiting_on_review_or_signals(
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        branch_pr: bool,
+        branch_pr_strategy: object,
+        git_path: str | None,
+    ) -> bool:
+        return self._changeset_waiting_on_review_or_signals(
+            issue,
+            repo_slug=repo_slug,
+            branch_pr=branch_pr,
+            branch_pr_strategy=branch_pr_strategy,
+            git_path=git_path,
+        )
 
     def mark_changeset_merged(self, changeset_id: str) -> None:
         self._mark_changeset_merged(changeset_id)

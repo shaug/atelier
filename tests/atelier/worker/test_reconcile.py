@@ -189,7 +189,7 @@ def test_reconcile_blocked_merged_changesets_reconciles_non_terminal_merge_signa
     assert result.failed == 0
 
 
-def test_reconcile_blocked_merged_changesets_reopens_closed_review_drift() -> None:
+def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() -> None:
     drift_issue = {
         "id": "at-1.9",
         "status": "closed",
@@ -213,8 +213,6 @@ def test_reconcile_blocked_merged_changesets_reopens_closed_review_drift() -> No
                 "reviewDecision": None,
             },
         ),
-        patch("atelier.worker.reconcile.beads.run_bd_command") as run_bd_command,
-        patch("atelier.worker.reconcile.beads.update_changeset_review") as update_review,
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -239,11 +237,11 @@ def test_reconcile_blocked_merged_changesets_reopens_closed_review_drift() -> No
 
     assert result.scanned == 1
     assert result.actionable == 1
-    assert result.reconciled == 1
-    assert result.failed == 0
-    assert run_bd_command.call_count == 1
-    assert update_review.call_count == 1
-    assert any("reconcile reopened: at-1.9 -> epic=at-1" in line for line in logs)
+    assert result.reconciled == 0
+    assert result.failed == 1
+    assert any(
+        "reconcile anomaly: at-1.9 -> epic=at-1 closed+active-pr-lifecycle" in line for line in logs
+    )
 
 
 def test_reconcile_dependency_without_terminal_review_or_merge_blocks_finalize() -> None:
@@ -281,6 +279,7 @@ def test_reconcile_dependency_without_terminal_review_or_merge_blocks_finalize()
             "atelier.worker.reconcile.beads.list_all_changesets", side_effect=list_all_changesets
         ),
         patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
+        patch("atelier.worker.reconcile.beads.update_changeset_integrated_sha"),
     ):
         result = reconcile.reconcile_blocked_merged_changesets(
             agent_id="worker/1",
@@ -308,6 +307,71 @@ def test_reconcile_dependency_without_terminal_review_or_merge_blocks_finalize()
     assert result.reconciled == 0
     assert result.failed == 1
     assert any("blocked by dependencies: at-1.1" in line for line in logs)
+
+
+def test_reconcile_dependency_with_integrated_signal_allows_finalize() -> None:
+    project = config.ProjectConfig(
+        project=config.ProjectSection(origin="https://github.com/org/repo"),
+        branch=config.BranchConfig(pr=False),
+    )
+    candidate = {
+        "id": "at-1.2",
+        "status": "blocked",
+        "labels": [],
+        "type": "task",
+    }
+    dependency = {
+        "id": "at-1.1",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/at-1.1\n",
+        "type": "task",
+    }
+
+    def list_all_changesets(*, beads_root, cwd, include_closed):
+        return [candidate]
+
+    def run_bd_json(args: list[str], **_kwargs):
+        if args[:2] == ["show", "at-1.1"]:
+            return [dependency]
+        if args[:3] == ["list", "--parent", "at-1.1"]:
+            return []
+        return []
+
+    finalized: list[str] = []
+    with (
+        patch(
+            "atelier.worker.reconcile.beads.list_all_changesets", side_effect=list_all_changesets
+        ),
+        patch("atelier.worker.reconcile.beads.run_bd_json", side_effect=run_bd_json),
+        patch("atelier.worker.reconcile.beads.update_changeset_integrated_sha"),
+    ):
+        result = reconcile.reconcile_blocked_merged_changesets(
+            agent_id="worker/1",
+            agent_bead_id="at-agent",
+            project_config=project,
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            dry_run=False,
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            changeset_integration_signal=lambda issue, **_kwargs: (
+                (True, "abc1234") if issue.get("id") in {"at-1.1", "at-1.2"} else (False, None)
+            ),
+            issue_dependency_ids=lambda issue: ("at-1.1",) if issue.get("id") == "at-1.2" else (),
+            issue_labels=lambda issue: {str(label) for label in issue.get("labels", [])},
+            finalize_changeset=lambda **kwargs: (
+                finalized.append(str(kwargs["changeset_id"]))
+                or FinalizeResult(continue_running=True, reason="changeset_complete")
+            ),
+            finalize_epic_if_complete=lambda **_kwargs: FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        )
+
+    assert result.reconciled == 1
+    assert result.failed == 0
+    assert finalized == ["at-1.2"]
 
 
 def test_reconcile_dependency_with_abandoned_label_requires_review_metadata() -> None:

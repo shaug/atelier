@@ -175,7 +175,6 @@ def changeset_integration_signal(
 
     if root_branch == work_branch:
         return _root_integrated_into_parent(fields=fields, repo_root=repo_root, git_path=git_path)
-
     root_ref = branch_ref_for_lookup(repo_root, root_branch, git_path=git_path)
     work_ref = branch_ref_for_lookup(repo_root, work_branch, git_path=git_path)
     if not root_ref or not work_ref:

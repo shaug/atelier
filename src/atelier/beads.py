@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import bd_invocation, changesets, exec, lifecycle, messages
+from . import bd_invocation, changesets, exec, git, lifecycle, messages, prs
 from . import log as atelier_log
 from .external_tickets import (
     ExternalTicketRef,
@@ -1671,6 +1671,32 @@ def _issue_has_label(issue: dict[str, object], label: str) -> bool:
     return False
 
 
+def _repo_slug_for_gate(repo_root: Path) -> str | None:
+    origin_raw = git.git_origin_url(repo_root)
+    if not origin_raw:
+        return None
+    normalized_origin = git.normalize_origin_url(origin_raw)
+    return prs.github_repo_slug(normalized_origin)
+
+
+def _changeset_integrated_for_gate(issue: dict[str, object], *, repo_root: Path) -> bool:
+    from .worker import integration as worker_integration
+
+    def _lookup_pr_payload(repo: str | None, head: str) -> dict[str, object] | None:
+        if repo is None:
+            return None
+        return prs.read_github_pr_status(repo, head)
+
+    repo_slug = _repo_slug_for_gate(repo_root)
+    integrated, _integrated_sha = worker_integration.changeset_integration_signal(
+        issue,
+        repo_slug=repo_slug,
+        repo_root=repo_root,
+        lookup_pr_payload=_lookup_pr_payload,
+    )
+    return integrated
+
+
 def _blocking_dependency_states(
     issue: dict[str, object],
     *,
@@ -1695,6 +1721,11 @@ def _blocking_dependency_states(
             continue
         status = str(dependency_issue.get("status") or "").strip().lower()
         if status in _TERMINAL_DEPENDENCY_STATUSES:
+            continue
+        if lifecycle.is_work_issue(
+            labels=_issue_labels(dependency_issue),
+            issue_type=lifecycle.issue_payload_type(dependency_issue),
+        ) and _changeset_integrated_for_gate(dependency_issue, repo_root=cwd):
             continue
         blockers.append(f"{dependency_id}({status or 'unknown'})")
     return tuple(blockers)
