@@ -51,6 +51,7 @@ NON_WATCH_EXIT_REASON_FAIL_CLOSED = "fail_closed"
 
 _EXPLICIT_NO_WORK_REASONS = {"explicit_epic_not_actionable", "explicit_epic_completed"}
 _GLOBAL_NO_WORK_REASONS = {"no_eligible_epics"}
+_IMPLICIT_FAIL_CLOSED_REASONS = {"missing_agent_bead", "no_epic_selected", "dry_run"}
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,25 @@ def _terminal_outcome_detail(summary: WorkerRunSummary, outcome: NonWatchExitOut
     if summary.changeset_id:
         parts.append(f"changeset={summary.changeset_id}")
     return ": ".join((parts[0], ", ".join(parts[1:])))
+
+
+def _should_skip_failed_implicit_epic(
+    *,
+    summary: WorkerRunSummary,
+    explicit_epic_requested: bool,
+    excluded_epics: set[str],
+) -> bool:
+    """Return whether non-watch loops should skip this local epic failure."""
+    if summary.started or explicit_epic_requested:
+        return False
+    if summary.reason in _EXPLICIT_NO_WORK_REASONS or summary.reason in _GLOBAL_NO_WORK_REASONS:
+        return False
+    if summary.reason in _IMPLICIT_FAIL_CLOSED_REASONS:
+        return False
+    epic_id = summary.epic_id
+    if not epic_id or epic_id in excluded_epics:
+        return False
+    return True
 
 
 class WorkerLifecycleAdapter:
@@ -422,7 +442,9 @@ def run_worker_sessions(
     emit: Callable[[str], None],
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> None:
-    explicit_epic_requested = bool(str(getattr(args, "epic_id", "")).strip())
+    epic_id_value = getattr(args, "epic_id", None)
+    explicit_epic_requested = isinstance(epic_id_value, str) and bool(epic_id_value.strip())
+    excluded_implicit_epics: set[str] = set()
 
     if bool(getattr(args, "queue", False)):
         summary = run_worker_once(args, mode=mode, dry_run=dry_run, session_key=session_key)
@@ -431,11 +453,25 @@ def run_worker_sessions(
 
     if dry_run:
         while True:
+            if not explicit_epic_requested:
+                setattr(args, "implicit_excluded_epic_ids", tuple(sorted(excluded_implicit_epics)))
             summary = run_worker_once(args, mode=mode, dry_run=True, session_key=session_key)
             report_worker_summary(summary, True)
             if summary.started:
                 if run_mode == "once":
                     return
+                continue
+            if _should_skip_failed_implicit_epic(
+                summary=summary,
+                explicit_epic_requested=explicit_epic_requested,
+                excluded_epics=excluded_implicit_epics,
+            ):
+                epic_id = str(summary.epic_id)
+                excluded_implicit_epics.add(epic_id)
+                dry_run_log(
+                    "Skipping failed epic and continuing implicit selection: "
+                    f"{epic_id} ({summary.reason})"
+                )
                 continue
             if summary.reason == "no_ready_changesets":
                 if run_mode == "watch":
@@ -458,11 +494,25 @@ def run_worker_sessions(
         return
 
     while True:
+        if not explicit_epic_requested:
+            setattr(args, "implicit_excluded_epic_ids", tuple(sorted(excluded_implicit_epics)))
         summary = run_worker_once(args, mode=mode, dry_run=False, session_key=session_key)
         report_worker_summary(summary, False)
         if summary.started:
             if run_mode == "once":
                 return
+            continue
+        if _should_skip_failed_implicit_epic(
+            summary=summary,
+            explicit_epic_requested=explicit_epic_requested,
+            excluded_epics=excluded_implicit_epics,
+        ):
+            epic_id = str(summary.epic_id)
+            excluded_implicit_epics.add(epic_id)
+            emit(
+                "Skipping failed epic and continuing implicit selection: "
+                f"{epic_id} ({summary.reason})"
+            )
             continue
         if summary.reason == "no_ready_changesets":
             if run_mode == "watch":
