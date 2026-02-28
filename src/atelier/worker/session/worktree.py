@@ -126,6 +126,11 @@ def _sync_child_workspace_parent_branch(
     if current_parent == normalized_epic_parent:
         return
     if current_parent and current_parent != root_branch_value:
+        control.say(
+            "Skipped workspace.parent_branch alignment for "
+            f"{changeset_id}: preserving existing non-root value {current_parent!r} "
+            f"instead of epic parent {normalized_epic_parent!r}"
+        )
         return
     beads.update_workspace_parent_branch(
         changeset_id,
