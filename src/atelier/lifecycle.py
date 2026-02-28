@@ -213,6 +213,7 @@ def dependency_issue_satisfied(
     require_integrated: bool,
     review_state: object | None = None,
     issue_type: object | None = None,
+    has_work_children: bool | None = None,
 ) -> bool:
     """Return whether a dependency issue satisfies lifecycle gating.
 
@@ -223,6 +224,9 @@ def dependency_issue_satisfied(
             (sequential contract).
         review_state: Optional dependency review lifecycle state.
         issue_type: Optional dependency issue type for unlabeled role hints.
+        has_work_children: Optional graph-shape evidence for whether the
+            dependency has child work items. When provided, leaf shape is
+            authoritative for changeset role inference.
 
     Returns:
         ``True`` when the dependency is acceptable under the selected contract.
@@ -232,9 +236,20 @@ def dependency_issue_satisfied(
     if not require_integrated:
         return True
     issue_type_value = normalize_status_value(issue_type)
-    is_changeset = "at:changeset" in labels or bool(TERMINAL_CHANGESET_LABELS.intersection(labels))
-    if not is_changeset and issue_type_value in WORK_ISSUE_TYPES and "at:epic" not in labels:
-        is_changeset = True
+    if has_work_children is None:
+        is_changeset = "at:changeset" in labels or bool(
+            TERMINAL_CHANGESET_LABELS.intersection(labels)
+        )
+        if not is_changeset and issue_type_value in WORK_ISSUE_TYPES and "at:epic" not in labels:
+            is_changeset = True
+    else:
+        is_changeset = False
+        if not has_work_children:
+            is_changeset = "at:changeset" in labels or bool(
+                TERMINAL_CHANGESET_LABELS.intersection(labels)
+            )
+            if not is_changeset:
+                is_changeset = is_work_issue(labels=labels, issue_type=issue_type_value)
     if not is_changeset:
         return True
     if "cs:merged" in labels:

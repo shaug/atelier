@@ -118,6 +118,29 @@ def test_dependency_issue_satisfied_requires_integrated_evidence_for_sequential(
     )
 
 
+def test_dependency_issue_satisfied_treats_non_leaf_work_dependency_as_non_changeset() -> None:
+    assert (
+        lifecycle.dependency_issue_satisfied(
+            status="closed",
+            labels=set(),
+            require_integrated=True,
+            issue_type="task",
+            has_work_children=True,
+        )
+        is True
+    )
+    assert (
+        lifecycle.dependency_issue_satisfied(
+            status="closed",
+            labels=set(),
+            require_integrated=True,
+            issue_type="task",
+            has_work_children=False,
+        )
+        is False
+    )
+
+
 def test_in_review_candidate_prefers_live_state() -> None:
     labels: set[str] = set()
     assert (

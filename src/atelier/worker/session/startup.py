@@ -143,6 +143,8 @@ def _dependencies_satisfied(
     issue: dict[str, object],
     epic_changesets_by_id: dict[str, dict[str, object]],
     dependency_cache: dict[str, dict[str, object] | None],
+    work_parent_ids: set[str],
+    dependency_children_cache: dict[str, bool],
     context: NextChangesetContext,
     service: NextChangesetService,
 ) -> bool:
@@ -167,12 +169,21 @@ def _dependencies_satisfied(
         if blocker_issue is None:
             return False
         blocker_labels = worker_selection.issue_labels(blocker_issue)
+        has_work_children = dependency_children_cache.get(dependency_id)
+        if has_work_children is None:
+            has_work_children = dependency_id in work_parent_ids
+            if not has_work_children:
+                has_work_children = bool(
+                    service.list_work_children(dependency_id, include_closed=True)
+                )
+            dependency_children_cache[dependency_id] = has_work_children
         if lifecycle.dependency_issue_satisfied(
             status=blocker_issue.get("status"),
             labels=blocker_labels,
             require_integrated=require_integrated,
             review_state=changeset_fields.review_state(blocker_issue),
             issue_type=worker_selection.issue_type(blocker_issue),
+            has_work_children=has_work_children,
         ):
             continue
         if require_integrated:
@@ -189,6 +200,7 @@ def _dependencies_satisfied(
                 require_integrated=True,
                 review_state=blocker_pr_state,
                 issue_type=worker_selection.issue_type(blocker_issue),
+                has_work_children=has_work_children,
             ):
                 continue
         return False
@@ -258,6 +270,8 @@ def next_changeset_service(
             issue=issue,
             epic_changesets_by_id=explicit_descendants_by_id,
             dependency_cache={},
+            work_parent_ids=explicit_work_parent_ids,
+            dependency_children_cache={},
             context=context,
             service=service,
         )
@@ -303,6 +317,7 @@ def next_changeset_service(
     work_parent_ids = _work_parent_ids(descendants)
     changesets: list[dict[str, object]] = []
     dependency_cache: dict[str, dict[str, object] | None] = {}
+    dependency_children_cache: dict[str, bool] = {}
     for issue in descendants:
         issue_id = _issue_id(issue)
         if issue_id is None:
@@ -311,6 +326,8 @@ def next_changeset_service(
             issue=issue,
             epic_changesets_by_id=descendants_by_id,
             dependency_cache=dependency_cache,
+            work_parent_ids=work_parent_ids,
+            dependency_children_cache=dependency_children_cache,
             context=context,
             service=service,
         )
