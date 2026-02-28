@@ -329,6 +329,95 @@ def test_run_finalize_pipeline_waiting_on_review_uses_in_progress_status(monkeyp
     assert result.continue_running is True
 
 
+def test_run_finalize_pipeline_requires_planner_promotion_for_deferred_children(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "closed",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "list_descendant_changesets",
+        lambda *_args, **_kwargs: [
+            {"id": "at-epic.1.1", "status": "deferred"},
+            {"id": "at-epic.1.2", "status": "open"},
+        ],
+    )
+
+    service = _FinalizeServiceStub()
+    service.has_open_descendant_changesets_fn = lambda _changeset_id: True
+    marked: list[str] = []
+    notifications: list[str] = []
+    service.mark_changeset_children_in_progress_fn = lambda changeset_id: marked.append(
+        changeset_id
+    )
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("subject"))
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_children_require_planner_promotion"
+    assert result.continue_running is False
+    assert marked == ["at-epic.1"]
+    assert notifications == ["NEEDS-DECISION: Descendant promotion required (at-epic.1)"]
+
+
+def test_run_finalize_pipeline_descendant_children_pending_without_promotion(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "closed",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "list_descendant_changesets",
+        lambda *_args, **_kwargs: [
+            {"id": "at-epic.1.2", "status": "open"},
+        ],
+    )
+
+    service = _FinalizeServiceStub()
+    service.has_open_descendant_changesets_fn = lambda _changeset_id: True
+    marked: list[str] = []
+    notifications: list[str] = []
+    service.mark_changeset_children_in_progress_fn = lambda changeset_id: marked.append(
+        changeset_id
+    )
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("subject"))
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_children_pending"
+    assert result.continue_running is False
+    assert marked == ["at-epic.1"]
+    assert notifications == []
+
+
 def test_run_finalize_pipeline_blocks_merged_pr_without_integration_proof(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",

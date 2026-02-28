@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ... import beads, changeset_fields, lifecycle, pr_strategy
+from ... import changeset_fields, lifecycle, pr_strategy
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
@@ -104,15 +104,6 @@ def _is_terminal(issue: dict[str, object]) -> bool:
 
 def _is_terminal_explicit_issue(issue: dict[str, object]) -> bool:
     return lifecycle.is_closed_status(issue.get("status"))
-
-
-def _is_startup_reconciliation_candidate(issue: dict[str, object]) -> bool:
-    if not _is_executable_epic_identity(issue):
-        return False
-    claimability = worker_selection.evaluate_epic_claimability(issue)
-    if not claimability.claimable:
-        return False
-    return worker_selection.is_eligible_status(claimability.status, allow_hooked=True)
 
 
 def _dependency_ids(issue: dict[str, object]) -> tuple[str, ...] | None:
@@ -438,14 +429,6 @@ class StartupContractService(Protocol):
         git_path: str | None,
     ) -> bool: ...
 
-    def mark_changeset_merged(self, changeset_id: str) -> None: ...
-
-    def mark_changeset_in_progress(self, changeset_id: str) -> None: ...
-
-    def update_changeset_integrated_sha(self, changeset_id: str, integrated_sha: str) -> None: ...
-
-    def close_epic_if_complete(self, epic_id: str, agent_bead_id: str | None) -> bool: ...
-
     def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None: ...
 
     def stale_family_assigned_epics(
@@ -521,8 +504,6 @@ def run_startup_contract_service(
     queue_only = context.queue_only
     dry_run = context.dry_run
     assume_yes = context.assume_yes
-    beads_root = context.beads_root
-    repo_root = context.repo_root
     repo_slug = context.repo_slug
     branch_pr = context.branch_pr
     branch_pr_strategy = context.branch_pr_strategy
@@ -532,69 +513,6 @@ def run_startup_contract_service(
     excluded_epics = {
         str(epic_id).strip() for epic_id in context.excluded_epic_ids if str(epic_id).strip()
     }
-
-    def reconcile_epic_merged_changesets(
-        *,
-        epic_id: str,
-        issue: dict[str, object],
-        close_agent_bead_id: str | None,
-    ) -> tuple[bool, bool]:
-        candidates = service.list_descendant_changesets(epic_id, include_closed=True)
-        if not candidates:
-            work_children = service.list_work_children(epic_id, include_closed=True)
-            if not work_children:
-                candidates = [issue]
-        reconciled_changeset = False
-        seen_changesets: set[str] = set()
-        for candidate in candidates:
-            changeset_id = _issue_id(candidate)
-            if changeset_id is None or changeset_id in seen_changesets:
-                continue
-            seen_changesets.add(changeset_id)
-            if service.changeset_waiting_on_review_or_signals(
-                candidate,
-                repo_slug=repo_slug,
-                branch_pr=branch_pr,
-                branch_pr_strategy=branch_pr_strategy,
-                git_path=git_path,
-            ):
-                if lifecycle.is_closed_status(candidate.get("status")):
-                    if beads.close_transition_has_active_pr_lifecycle(
-                        candidate,
-                        active_pr_lifecycle=True,
-                    ):
-                        if dry_run:
-                            service.dry_run_log(
-                                "Would recover closed changeset with active PR lifecycle "
-                                f"to in_progress: {changeset_id}"
-                            )
-                        else:
-                            service.mark_changeset_in_progress(changeset_id)
-                    service.emit(
-                        "Startup diagnostics: closed changeset has active PR lifecycle "
-                        f"(decision-required): {changeset_id}"
-                    )
-                else:
-                    service.emit(
-                        "Startup diagnostics: changeset has active PR lifecycle "
-                        f"(auto-close deferred): {changeset_id}"
-                    )
-                continue
-            if lifecycle.is_closed_status(candidate.get("status")):
-                continue
-            integration_proven, integrated_sha = service.changeset_integration_signal(
-                candidate,
-                repo_slug=repo_slug,
-                git_path=git_path,
-            )
-            if not integration_proven:
-                continue
-            service.mark_changeset_merged(changeset_id)
-            reconciled_changeset = True
-            if integrated_sha and integrated_sha.strip():
-                service.update_changeset_integrated_sha(changeset_id, integrated_sha.strip())
-        closed = service.close_epic_if_complete(epic_id, close_agent_bead_id)
-        return reconciled_changeset, closed
 
     """Apply startup-contract skill ordering to select the next epic."""
     selected_epic: str | None = None
@@ -679,28 +597,6 @@ def run_startup_contract_service(
                     should_exit=True,
                     reason="explicit_epic_assigned",
                 )
-        explicit_reconciled, explicit_closed = reconcile_epic_merged_changesets(
-            epic_id=selected_epic,
-            issue=explicit_issue,
-            close_agent_bead_id=agent_bead_id,
-        )
-        if explicit_reconciled:
-            refreshed_explicit_issue = service.show_issue(selected_epic)
-            if refreshed_explicit_issue is not None:
-                explicit_issue = refreshed_explicit_issue
-                claimability = worker_selection.evaluate_epic_claimability(explicit_issue)
-                status = claimability.status
-        if explicit_closed or _is_terminal_explicit_issue(explicit_issue):
-            service.emit(
-                f"Explicit epic {selected_epic} is completed; run without an epic id to "
-                "select new ready work."
-            )
-            return StartupContractResult(
-                epic_id=selected_epic,
-                changeset_id=None,
-                should_exit=True,
-                reason="explicit_epic_completed",
-            )
         if branch_pr and repo_slug:
             explicit_conflict = service.select_conflicted_changeset(
                 epic_id=selected_epic,
@@ -779,23 +675,6 @@ def run_startup_contract_service(
         )
 
     issues = service.list_epics()
-    reconciled_startup_state = False
-    reconciliation_candidates = [
-        issue for issue in issues if _is_startup_reconciliation_candidate(issue)
-    ]
-    for issue in reconciliation_candidates:
-        epic_id = _issue_id(issue)
-        if epic_id is None:
-            continue
-        reconciled, closed = reconcile_epic_merged_changesets(
-            epic_id=epic_id,
-            issue=issue,
-            close_agent_bead_id=None,
-        )
-        if reconciled or closed:
-            reconciled_startup_state = True
-    if reconciled_startup_state:
-        issues = service.list_epics()
     actionable_cache: dict[str, bool] = {}
     review_feedback_ownership_blockers: set[str] = set()
 

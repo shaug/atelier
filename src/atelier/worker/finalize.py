@@ -140,7 +140,6 @@ def finalize_terminal_changeset(
     repo_root: Path,
     mark_changeset_merged: Callable[[str], None],
     mark_changeset_abandoned: Callable[[str], None],
-    close_completed_container_changesets: Callable[[str], list[str]],
     finalize_epic_if_complete: Callable[[], FinalizeResult],
 ) -> FinalizeResult:
     if terminal_state == "merged":
@@ -157,5 +156,4 @@ def finalize_terminal_changeset(
         mark_changeset_abandoned(changeset_id)
     else:
         raise ValueError(f"unsupported terminal changeset state: {terminal_state!r}")
-    close_completed_container_changesets(epic_id)
     return finalize_epic_if_complete()

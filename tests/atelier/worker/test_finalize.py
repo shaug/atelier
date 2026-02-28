@@ -7,7 +7,6 @@ from atelier.worker.models import FinalizeResult
 
 def test_finalize_terminal_changeset_merged_updates_integrated_sha() -> None:
     merged: list[str] = []
-    closed: list[str] = []
 
     with patch("atelier.worker.finalize.beads.update_changeset_integrated_sha") as update_sha:
         result = finalize.finalize_terminal_changeset(
@@ -19,7 +18,6 @@ def test_finalize_terminal_changeset_merged_updates_integrated_sha() -> None:
             repo_root=Path("/repo"),
             mark_changeset_merged=lambda issue_id: merged.append(issue_id),
             mark_changeset_abandoned=lambda issue_id: None,
-            close_completed_container_changesets=lambda epic_id: closed.append(epic_id),
             finalize_epic_if_complete=lambda: FinalizeResult(
                 continue_running=True, reason="changeset_complete"
             ),
@@ -27,7 +25,6 @@ def test_finalize_terminal_changeset_merged_updates_integrated_sha() -> None:
 
     assert result.reason == "changeset_complete"
     assert merged == ["at-1.1"]
-    assert closed == ["at-1"]
     update_sha.assert_called_once()
 
 

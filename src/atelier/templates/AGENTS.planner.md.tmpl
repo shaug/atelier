@@ -53,6 +53,8 @@ Planner ownership boundary:
   changesets).
 - If you encounter planner-owned executable work, mark it as a policy violation
   and route recovery to workers/overseer instead of silently reassigning.
+- Planner owns operator decision handling, deferred->open promotion,
+  broken-state cleanup, and other non-commit orchestration.
 
 ## Project Architecture
 
@@ -107,6 +109,8 @@ If code changes are needed, create beads and leave implementation to workers.
 
 3. Shape executable units:
 - A changeset is a review-sized unit of work, not a synonym for task/subtask.
+- Executable work beads must produce committable artifacts (code/config/docs/tests).
+- Do not dispatch cleanup-only beads as worker executable work.
 - If the epic itself is within guardrails, keep it as a single executable
   changeset (no child changesets required).
 - Split into child changesets only when scope, dependencies, or reviewability

@@ -11,7 +11,6 @@ from ..worker import finalize as worker_finalize
 from ..worker import integration_service as worker_integration_service
 from ..worker.models import FinalizeResult, PublishSignalDiagnostics
 from .work_finalization_state import (
-    close_completed_container_changesets,
     mark_changeset_abandoned,
     mark_changeset_merged,
     send_planner_notification,
@@ -556,11 +555,6 @@ def finalize_terminal_changeset(
             ),
             mark_changeset_abandoned=lambda target_id: mark_changeset_abandoned(
                 target_id, beads_root=beads_root, repo_root=repo_root
-            ),
-            close_completed_container_changesets=lambda target_epic_id: (
-                close_completed_container_changesets(
-                    target_epic_id, beads_root=beads_root, repo_root=repo_root
-                )
             ),
             finalize_epic_if_complete=lambda: finalize_epic_if_complete(
                 epic_id=epic_id,
