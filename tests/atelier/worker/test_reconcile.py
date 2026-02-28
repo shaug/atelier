@@ -244,6 +244,47 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
     )
 
 
+def test_reconcile_reports_closed_merged_like_without_integration_proof() -> None:
+    issue = {
+        "id": "at-1.4",
+        "status": "closed",
+        "labels": ["cs:merged"],
+        "description": "pr_state: merged\n",
+    }
+    project = config.ProjectConfig(
+        project=config.ProjectSection(origin="https://github.com/org/repo"),
+        branch=config.BranchConfig(pr=False),
+    )
+    logs: list[str] = []
+    with patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[issue]):
+        result = reconcile.reconcile_blocked_merged_changesets(
+            agent_id="worker/1",
+            agent_bead_id="at-agent",
+            project_config=project,
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            dry_run=False,
+            log=logs.append,
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            changeset_integration_signal=lambda *_args, **_kwargs: (False, None),
+            issue_dependency_ids=lambda _issue: tuple(),
+            issue_labels=lambda issue: {str(label) for label in issue.get("labels", [])},
+            finalize_changeset=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("finalize should not run when merge proof is missing")
+            ),
+            finalize_epic_if_complete=lambda **_kwargs: FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        )
+
+    assert result.scanned == 1
+    assert result.actionable == 1
+    assert result.reconciled == 0
+    assert result.failed == 1
+    assert any("closed+merged-like-without-integration-proof" in line for line in logs)
+
+
 def test_reconcile_dependency_without_terminal_review_or_merge_blocks_finalize() -> None:
     project = config.ProjectConfig(
         project=config.ProjectSection(origin="https://github.com/org/repo"),

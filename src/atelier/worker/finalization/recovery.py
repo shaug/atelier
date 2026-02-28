@@ -83,9 +83,15 @@ def recover_premature_merged_changeset(
         )
         return FinalizeResult(continue_running=True, reason="changeset_review_pending")
     if pr_state == "merged":
-        _integration_ok, integrated_sha = changeset_integration_signal(
-            issue, repo_slug=None, repo_root=repo_root, git_path=git_path
+        integration_ok, integrated_sha = changeset_integration_signal(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            require_target_branch_proof=True,
         )
+        if not integration_ok:
+            return None
         return finalize_terminal_changeset(
             changeset_id=changeset_id,
             epic_id=epic_id,
@@ -107,7 +113,11 @@ def recover_premature_merged_changeset(
         )
     if pr_state == "closed":
         integration_ok, integrated_sha = changeset_integration_signal(
-            issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            require_target_branch_proof=True,
         )
         return finalize_terminal_changeset(
             changeset_id=changeset_id,

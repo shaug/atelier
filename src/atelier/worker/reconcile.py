@@ -49,6 +49,17 @@ def _stored_review_state(issue: dict[str, object]) -> str | None:
     return lifecycle.normalize_review_state(_description_fields(issue).get("pr_state"))
 
 
+def _claims_merged_closure(issue: dict[str, object]) -> bool:
+    if _canonical_changeset_status(issue) != "closed":
+        return False
+    labels = _normalized_labels(issue)
+    if "cs:abandoned" in labels:
+        return False
+    if "cs:merged" in labels:
+        return True
+    return _stored_review_state(issue) == "merged"
+
+
 def _live_review_state(
     issue: dict[str, object],
     *,
@@ -136,7 +147,11 @@ def list_reconcile_epic_candidates(
             if status not in {"open", "in_progress", "blocked", "closed"}:
                 continue
             integration_proven, integrated_sha = changeset_integration_signal(
-                issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
+                issue,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                git_path=git_path,
+                require_target_branch_proof=status == "closed",
             )
             if not integration_proven:
                 continue
@@ -299,9 +314,24 @@ def reconcile_blocked_merged_changesets(
             continue
         scanned += 1
         integration_proven, integrated_sha = changeset_integration_signal(
-            issue, repo_slug=repo_slug, repo_root=repo_root, git_path=git_path
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            require_target_branch_proof=status == "closed",
         )
         if not integration_proven:
+            if status == "closed" and _claims_merged_closure(issue):
+                actionable += 1
+                failed += 1
+                if log:
+                    log(
+                        "reconcile anomaly: "
+                        f"{changeset_id} -> epic={epic_id} "
+                        "closed+merged-like-without-integration-proof "
+                        "(classify abandoned/superseded or restore integration evidence)"
+                    )
+                continue
             if log:
                 log(f"reconcile skip: {changeset_id} (no integration signal)")
             continue

@@ -59,6 +59,7 @@ def changeset_integration_signal(
     repo_root: Path,
     lookup_pr_payload: Callable[[str | None, str], dict[str, object] | None],
     git_path: str | None = None,
+    require_target_branch_proof: bool = False,
 ) -> tuple[bool, str | None]:
     return worker_integration.changeset_integration_signal(
         issue,
@@ -66,6 +67,7 @@ def changeset_integration_signal(
         repo_root=repo_root,
         lookup_pr_payload=lookup_pr_payload,
         git_path=git_path,
+        require_target_branch_proof=require_target_branch_proof,
     )
 
 

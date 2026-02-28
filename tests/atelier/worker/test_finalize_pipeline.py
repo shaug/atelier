@@ -81,8 +81,14 @@ class _FinalizeServiceStub(finalize_pipeline.FinalizePipelineService):
         self.promote_planned_descendant_changesets_fn(changeset_id)
 
     def changeset_integration_signal(
-        self, issue: dict[str, object], *, repo_slug: str | None, git_path: str | None
+        self,
+        issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        git_path: str | None,
+        require_target_branch_proof: bool = False,
     ) -> tuple[bool, str | None]:
+        del require_target_branch_proof
         return self.changeset_integration_signal_fn(issue, repo_slug=repo_slug, git_path=git_path)
 
     def recover_premature_merged_changeset(
@@ -321,6 +327,55 @@ def test_run_finalize_pipeline_waiting_on_review_uses_in_progress_status(monkeyp
 
     assert result.reason == "changeset_review_pending"
     assert result.continue_running is True
+
+
+def test_run_finalize_pipeline_blocks_merged_pr_without_integration_proof(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+
+    service = _FinalizeServiceStub()
+    service.lookup_pr_payload_fn = lambda _repo_slug, _branch: {
+        "number": 88,
+        "state": "MERGED",
+        "mergedAt": "2026-02-28T00:00:00Z",
+        "isDraft": False,
+    }
+    service.changeset_integration_signal_fn = lambda _issue, *, repo_slug, git_path: (False, None)
+    blocked_reasons: list[str] = []
+    notifications: list[str] = []
+    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked_reasons.append(
+        reason
+    )
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("subject"))
+    )
+    service.finalize_terminal_changeset_fn = lambda **_kwargs: (_ for _ in ()).throw(
+        AssertionError("terminal finalize must not run without integration proof")
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(repo_slug="org/repo"),
+        service=service,
+    )
+
+    assert result.reason == "changeset_blocked_missing_integration"
+    assert result.continue_running is False
+    assert blocked_reasons == ["missing integration signal for merged terminal state"]
+    assert notifications == ["NEEDS-DECISION: Missing integration signal (at-epic.1)"]
 
 
 def test_run_finalize_pipeline_blocks_on_stack_integrity_preflight(monkeypatch) -> None:

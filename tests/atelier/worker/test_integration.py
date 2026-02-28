@@ -45,19 +45,79 @@ def test_changeset_integration_signal_uses_integrated_sha_from_notes() -> None:
     assert integrated_sha == "abcdef1234567890abcdef1234567890abcdef12"
 
 
-def test_changeset_integration_signal_uses_merged_pr_signal() -> None:
+def test_changeset_integration_signal_rejects_merged_pr_without_branch_proof() -> None:
     issue = {
-        "description": ("changeset.root_branch: feat/root\nchangeset.work_branch: feat/work\n")
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/work\n"
+        )
     }
-    ok, integrated_sha = integration.changeset_integration_signal(
-        issue,
-        repo_slug="org/repo",
-        repo_root=Path("/repo"),
-        lookup_pr_payload=lambda _repo, _branch: {"mergedAt": "2026-02-20T00:00:00Z"},
-    )
+
+    with (
+        patch("atelier.worker.integration.branch_ref_for_lookup", return_value=None),
+        patch("atelier.worker.integration.git.git_rev_parse", return_value=None),
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug="org/repo",
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: {"mergedAt": "2026-02-20T00:00:00Z"},
+            require_target_branch_proof=True,
+        )
+
+    assert ok is False
+    assert integrated_sha is None
+
+
+def test_changeset_integration_signal_accepts_patch_equivalent_branch_to_target() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/work\n"
+        )
+    }
+
+    def fake_branch_ref_for_lookup(
+        _repo_root: Path, branch: str, *, git_path: str | None = None
+    ) -> str | None:
+        del git_path
+        mapping = {
+            "main": "origin/main",
+            "feat/work": "feat/work",
+            "feat/root": "feat/root",
+        }
+        return mapping.get(branch)
+
+    def fake_branch_fully_applied(
+        _repo_root: Path, target: str, source: str, *, git_path: str | None = None
+    ) -> bool:
+        del git_path
+        return target == "origin/main" and source == "feat/work"
+
+    with (
+        patch(
+            "atelier.worker.integration.branch_ref_for_lookup",
+            side_effect=fake_branch_ref_for_lookup,
+        ),
+        patch("atelier.worker.integration.git.git_is_ancestor", return_value=False),
+        patch(
+            "atelier.worker.integration.git.git_branch_fully_applied",
+            side_effect=fake_branch_fully_applied,
+        ),
+        patch("atelier.worker.integration.git.git_rev_parse", return_value="worksha"),
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug=None,
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: None,
+            require_target_branch_proof=True,
+        )
 
     assert ok is True
-    assert integrated_sha is None
+    assert integrated_sha == "worksha"
 
 
 def test_changeset_integration_signal_rejects_unproven_integrated_sha() -> None:
@@ -125,6 +185,7 @@ def test_changeset_integration_signal_active_pr_state_requires_parent_integratio
             repo_slug="org/repo",
             repo_root=Path("/repo"),
             lookup_pr_payload=lambda _repo, _branch: {"mergedAt": None},
+            require_target_branch_proof=True,
         )
 
     assert ok is False
@@ -160,13 +221,14 @@ def test_changeset_integration_signal_active_pr_state_allows_parent_integration(
             repo_slug="org/repo",
             repo_root=Path("/repo"),
             lookup_pr_payload=lambda _repo, _branch: {"mergedAt": None},
+            require_target_branch_proof=True,
         )
 
     assert ok is True
     assert integrated_sha == "rootsha"
 
 
-def test_changeset_integration_signal_active_pr_state_uses_work_to_root_for_stacked_changesets() -> (
+def test_changeset_integration_signal_active_pr_state_uses_work_to_target_for_stacked_changesets() -> (
     None
 ):
     issue = {
@@ -186,7 +248,7 @@ def test_changeset_integration_signal_active_pr_state_uses_work_to_root_for_stac
         git_path: str | None = None,
     ) -> bool:
         del git_path
-        return ancestor == "feat/work" and descendant == "feat/root"
+        return ancestor == "feat/work" and descendant == "main"
 
     with (
         patch(
@@ -202,6 +264,7 @@ def test_changeset_integration_signal_active_pr_state_uses_work_to_root_for_stac
             repo_slug="org/repo",
             repo_root=Path("/repo"),
             lookup_pr_payload=lambda _repo, _branch: {"mergedAt": None},
+            require_target_branch_proof=True,
         )
 
     assert ok is True
