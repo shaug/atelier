@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 ACTIVE_REVIEW_STATES = {"draft-pr", "pr-open", "in-review", "approved"}
+INTEGRATED_REVIEW_STATES = {"merged"}
+TERMINAL_UNINTEGRATED_REVIEW_STATES = {"closed"}
 
 CANONICAL_LIFECYCLE_STATUSES = {
     "deferred",
@@ -23,6 +25,7 @@ CANONICAL_LIFECYCLE_STATUSES = {
     "closed",
 }
 ACTIVE_LIFECYCLE_STATUSES = {"open", "in_progress"}
+TERMINAL_CHANGESET_LABELS = {"cs:merged", "cs:abandoned"}
 SPECIAL_NON_WORK_LABELS = {"at:message", "at:agent", "at:policy"}
 SPECIAL_NON_WORK_TYPES = {"message", "agent", "policy"}
 WORK_ISSUE_TYPES = {"epic", "task", "bug", "feature"}
@@ -94,6 +97,32 @@ def normalize_review_state(value: object) -> str | None:
     if lowered == "null":
         return None
     return lowered
+
+
+def is_integrated_review_state(review_state: object) -> bool:
+    """Return whether a review state carries integration evidence.
+
+    Args:
+        review_state: Raw review lifecycle state.
+
+    Returns:
+        ``True`` when the state proves the dependency merged/integrated.
+    """
+    normalized = normalize_review_state(review_state)
+    return normalized in INTEGRATED_REVIEW_STATES
+
+
+def is_terminal_review_without_integration(review_state: object) -> bool:
+    """Return whether a review state is terminal but not integrated.
+
+    Args:
+        review_state: Raw review lifecycle state.
+
+    Returns:
+        ``True`` when the state is terminal closed-without-merge evidence.
+    """
+    normalized = normalize_review_state(review_state)
+    return normalized in TERMINAL_UNINTEGRATED_REVIEW_STATES
 
 
 def normalized_labels(raw_labels: object) -> set[str]:
@@ -175,6 +204,57 @@ def is_closed_status(status: object) -> bool:
         ``True`` when status resolves to canonical ``closed``.
     """
     return canonical_lifecycle_status(status) == "closed"
+
+
+def dependency_issue_satisfied(
+    *,
+    status: object,
+    labels: set[str],
+    require_integrated: bool,
+    review_state: object | None = None,
+    issue_type: object | None = None,
+    has_work_children: bool | None = None,
+) -> bool:
+    """Return whether a dependency issue satisfies lifecycle gating.
+
+    Args:
+        status: Raw dependency issue status.
+        labels: Normalized dependency issue labels.
+        require_integrated: Whether dependencies must carry integration evidence
+            (sequential contract).
+        review_state: Optional dependency review lifecycle state.
+        issue_type: Optional dependency issue type for unlabeled role hints.
+        has_work_children: Optional graph-shape evidence for whether the
+            dependency has child work items. When provided, leaf shape is
+            authoritative for changeset role inference.
+
+    Returns:
+        ``True`` when the dependency is acceptable under the selected contract.
+    """
+    if not is_closed_status(status):
+        return False
+    if not require_integrated:
+        return True
+    issue_type_value = normalize_status_value(issue_type)
+    if has_work_children is None:
+        is_changeset = "at:changeset" in labels or bool(
+            TERMINAL_CHANGESET_LABELS.intersection(labels)
+        )
+        if not is_changeset and issue_type_value in WORK_ISSUE_TYPES and "at:epic" not in labels:
+            is_changeset = True
+    else:
+        is_changeset = False
+        if not has_work_children:
+            is_changeset = "at:changeset" in labels or bool(
+                TERMINAL_CHANGESET_LABELS.intersection(labels)
+            )
+            if not is_changeset:
+                is_changeset = is_work_issue(labels=labels, issue_type=issue_type_value)
+    if not is_changeset:
+        return True
+    if "cs:merged" in labels:
+        return True
+    return is_integrated_review_state(review_state)
 
 
 def is_special_non_work_issue(*, labels: set[str], issue_type: object) -> bool:

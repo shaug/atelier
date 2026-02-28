@@ -69,3 +69,15 @@ def test_pr_strategy_decision_preserves_parallel_and_on_ready_behavior(
     decision = pr_strategy.pr_strategy_decision(strategy, parent_state=parent_state)
     assert decision.allow_pr is allow_pr
     assert decision.reason == reason
+
+
+def test_pr_strategy_decision_sequential_blocks_when_parent_closed() -> None:
+    decision = pr_strategy.pr_strategy_decision("sequential", parent_state="closed")
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:closed"
+
+
+def test_pr_strategy_decision_on_parent_approved_allows_closed_parent() -> None:
+    decision = pr_strategy.pr_strategy_decision("on-parent-approved", parent_state="closed")
+    assert decision.allow_pr is True
+    assert decision.reason == "parent:closed"

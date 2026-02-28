@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from . import lifecycle
+
 PR_STRATEGY_VALUES = (
     "sequential",
     "on-ready",
@@ -89,7 +91,7 @@ def pr_strategy_decision(strategy: object, *, parent_state: str | None) -> PrStr
             allow_pr=False,
             reason=f"blocked:{parent_state_normalized}",
         )
-    if parent_state_normalized in {"merged", "closed"}:
+    if lifecycle.is_integrated_review_state(parent_state_normalized):
         return PrStrategyDecision(
             strategy=normalized,
             parent_state=parent_state_normalized,

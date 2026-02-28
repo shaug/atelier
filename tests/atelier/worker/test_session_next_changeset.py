@@ -127,12 +127,15 @@ def _changeset(
     *,
     dependencies: list[object] | None = None,
     parent_branch: str | None = None,
+    pr_state: str | None = None,
     work_branch: str | None = None,
     status: str = "open",
 ) -> dict[str, object]:
     fields: list[str] = []
     if parent_branch is not None:
         fields.append(f"changeset.parent_branch: {parent_branch}")
+    if pr_state is not None:
+        fields.append(f"pr_state: {pr_state}")
     if work_branch is not None:
         fields.append(f"changeset.work_branch: {work_branch}")
     description = "\n".join(fields)
@@ -150,12 +153,12 @@ def _changeset(
     return payload
 
 
-def _context() -> startup.NextChangesetContext:
+def _context(*, strategy: str = "sequential") -> startup.NextChangesetContext:
     return startup.NextChangesetContext(
         epic_id="at-epic",
         repo_slug="org/repo",
         branch_pr=True,
-        branch_pr_strategy="sequential",
+        branch_pr_strategy=strategy,
         git_path="git",
     )
 
@@ -494,6 +497,122 @@ def test_next_changeset_service_blocks_depends_on_id_payload_dependency() -> Non
     selected = startup.next_changeset_service(context=_context(), service=service)
 
     assert selected is None
+
+
+def test_next_changeset_service_sequential_blocks_closed_dependency_without_merge_signal() -> None:
+    blocker = _changeset("at-epic.1", status="closed", work_branch="feat/at-epic.1")
+    downstream = _changeset(
+        "at-epic.2",
+        dependencies=["at-epic.1"],
+        parent_branch="feat/at-epic.1",
+        work_branch="feat/at-epic.2",
+    )
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), blocker["id"]: blocker, downstream["id"]: downstream},
+        ready_changesets=[{"id": "at-epic.2", "status": "open", "labels": ["at:changeset"]}],
+        descendants=[blocker, downstream],
+    )
+
+    selected = startup.next_changeset_service(
+        context=_context(strategy="sequential"), service=service
+    )
+
+    assert selected is None
+
+
+def test_next_changeset_service_sequential_accepts_closed_dependency_with_merged_label() -> None:
+    blocker = _changeset("at-epic.1", status="closed", work_branch="feat/at-epic.1")
+    blocker["labels"] = ["at:changeset", "cs:merged"]
+    downstream = _changeset(
+        "at-epic.2",
+        dependencies=["at-epic.1"],
+        parent_branch="feat/at-epic.1",
+        work_branch="feat/at-epic.2",
+    )
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), blocker["id"]: blocker, downstream["id"]: downstream},
+        ready_changesets=[{"id": "at-epic.2", "status": "open", "labels": ["at:changeset"]}],
+        descendants=[blocker, downstream],
+    )
+
+    selected = startup.next_changeset_service(
+        context=_context(strategy="sequential"), service=service
+    )
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.2"
+
+
+def test_next_changeset_service_sequential_accepts_closed_dependency_with_merged_pr_state() -> None:
+    blocker = _changeset(
+        "at-epic.1",
+        status="closed",
+        work_branch="feat/at-epic.1",
+        pr_state="merged",
+    )
+    downstream = _changeset(
+        "at-epic.2",
+        dependencies=["at-epic.1"],
+        parent_branch="feat/at-epic.1",
+        work_branch="feat/at-epic.2",
+    )
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), blocker["id"]: blocker, downstream["id"]: downstream},
+        ready_changesets=[{"id": "at-epic.2", "status": "open", "labels": ["at:changeset"]}],
+        descendants=[blocker, downstream],
+    )
+
+    selected = startup.next_changeset_service(
+        context=_context(strategy="sequential"), service=service
+    )
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.2"
+
+
+def test_next_changeset_service_sequential_allows_closed_non_leaf_dependency() -> None:
+    blocker = _changeset("at-epic.1", status="closed", work_branch="feat/at-epic.1")
+    downstream = _changeset(
+        "at-epic.2",
+        dependencies=["at-epic.1"],
+        parent_branch="feat/at-epic.1",
+        work_branch="feat/at-epic.2",
+    )
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), blocker["id"]: blocker, downstream["id"]: downstream},
+        ready_changesets=[{"id": "at-epic.2", "status": "open", "labels": ["at:changeset"]}],
+        descendants=[blocker, downstream],
+        work_children_by_id={"at-epic.1": [_changeset("at-epic.1.1", status="closed")]},
+    )
+
+    selected = startup.next_changeset_service(
+        context=_context(strategy="sequential"), service=service
+    )
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.2"
+
+
+def test_next_changeset_service_non_sequential_keeps_closed_dependency_terminal() -> None:
+    blocker = _changeset("at-epic.1", status="closed", work_branch="feat/at-epic.1")
+    downstream = _changeset(
+        "at-epic.2",
+        dependencies=["at-epic.1"],
+        parent_branch="feat/at-epic.1",
+        work_branch="feat/at-epic.2",
+    )
+    service = FakeNextChangesetService(
+        issues_by_id={"at-epic": _epic(), blocker["id"]: blocker, downstream["id"]: downstream},
+        ready_changesets=[{"id": "at-epic.2", "status": "open", "labels": ["at:changeset"]}],
+        descendants=[blocker, downstream],
+    )
+
+    selected = startup.next_changeset_service(
+        context=_context(strategy="on-ready"), service=service
+    )
+
+    assert selected is not None
+    assert selected["id"] == "at-epic.2"
 
 
 def test_next_changeset_service_rehydrates_sparse_ready_candidates() -> None:
