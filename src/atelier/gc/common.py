@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 
 from .. import beads, changesets, git, lifecycle
@@ -75,11 +76,38 @@ def normalize_branch(value: object) -> str | None:
 
 
 def try_show_issue(issue_id: str, *, beads_root: Path, cwd: Path) -> dict[str, object] | None:
-    try:
-        records = beads.run_bd_issue_records(
-            ["show", issue_id], beads_root=beads_root, cwd=cwd, source="gc.try_show_issue"
+    result = beads.run_bd_command(
+        ["show", issue_id, "--json"],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        if not detail:
+            detail = f"bd show exited with code {result.returncode}"
+        log_warning(
+            f"gc issue lookup failed for {issue_id!r}: {detail}; treating mapping as unresolved"
         )
+        return None
+    raw = result.stdout.strip() if result.stdout else ""
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        log_warning(f"gc issue lookup returned invalid JSON for {issue_id!r}; skipping")
+        return None
+    if isinstance(payload, dict):
+        issues: list[dict[str, object]] = [payload]
+    elif isinstance(payload, list):
+        issues = [entry for entry in payload if isinstance(entry, dict)]
+    else:
+        return None
+    try:
+        records = beads.parse_issue_records(issues, source="gc.try_show_issue")
     except ValueError:
+        log_warning(f"gc issue lookup returned invalid issue payload for {issue_id!r}; skipping")
         return None
     if records:
         return records[0].raw

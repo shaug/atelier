@@ -1,7 +1,9 @@
 """Tests for gc.common."""
 
 import datetime as dt
+import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import atelier.gc.common as gc_common
 
@@ -69,3 +71,44 @@ def test_coerce_float_parses_numeric_values() -> None:
     assert gc_common.coerce_float(None) is None
     assert gc_common.coerce_float("") is None
     assert gc_common.coerce_float("invalid") is None
+
+
+def test_try_show_issue_returns_none_when_bd_show_fails() -> None:
+    with (
+        patch(
+            "atelier.gc.common.beads.run_bd_command",
+            return_value=subprocess.CompletedProcess(
+                args=["bd", "show", "missing", "--json"],
+                returncode=1,
+                stdout='{"error":"no issues found matching the provided IDs"}',
+                stderr='Error fetching missing: no issue found matching "missing"',
+            ),
+        ) as run_bd_command,
+        patch("atelier.gc.common.log_warning") as log_warning,
+    ):
+        result = gc_common.try_show_issue("missing", beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert result is None
+    run_bd_command.assert_called_once_with(
+        ["show", "missing", "--json"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_failure=True,
+    )
+    log_warning.assert_called_once()
+
+
+def test_try_show_issue_returns_issue_payload_on_success() -> None:
+    payload = {"id": "at-123", "title": "Issue", "status": "open", "labels": []}
+    with patch(
+        "atelier.gc.common.beads.run_bd_command",
+        return_value=subprocess.CompletedProcess(
+            args=["bd", "show", "at-123", "--json"],
+            returncode=0,
+            stdout='{"id":"at-123","title":"Issue","status":"open","labels":[]}',
+            stderr="",
+        ),
+    ):
+        result = gc_common.try_show_issue("at-123", beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert result == payload
