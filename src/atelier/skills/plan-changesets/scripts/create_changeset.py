@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from dataclasses import replace
@@ -18,10 +19,11 @@ def _bootstrap_source_import() -> None:
 
 _bootstrap_source_import()
 
-from atelier import auto_export, beads  # noqa: E402
+from atelier import auto_export, beads, lifecycle  # noqa: E402
 
 _STATUS_UPDATE_ATTEMPTS = 2
 _FAIL_CLOSED_REASON = "automatic fail-closed: unable to set deferred status after create"
+_ACTIVE_EPIC_STATUSES = frozenset({"open", "in_progress", "blocked"})
 
 
 def _command_detail(result: subprocess.CompletedProcess[str]) -> str:
@@ -83,6 +85,87 @@ def _apply_status_with_fail_closed(
         file=sys.stderr,
     )
     raise SystemExit(1)
+
+
+def _decode_single_issue(payload: str) -> dict[str, object] | None:
+    raw = payload.strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, list):
+        for item in parsed:
+            if isinstance(item, dict):
+                return item
+    return None
+
+
+def _active_epic_status(*, epic_id: str, beads_root: Path, cwd: Path) -> str | None:
+    result = beads.run_bd_command(
+        ["show", epic_id, "--json"],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
+    if result.returncode != 0:
+        return None
+    issue = _decode_single_issue(result.stdout or "")
+    if issue is None:
+        return None
+    canonical = lifecycle.canonical_lifecycle_status(issue.get("status"))
+    if canonical in _ACTIVE_EPIC_STATUSES:
+        return canonical
+    return None
+
+
+def _readiness_note(*, epic_id: str, epic_status: str, status: str) -> str:
+    if status == "open":
+        return (
+            "Readiness decision: operator selected ready-now during changeset "
+            f"capture under active epic {epic_id} [{epic_status}]; "
+            "set status=open immediately."
+        )
+    return (
+        "Readiness decision: no explicit ready-now decision during changeset "
+        f"capture under active epic {epic_id} [{epic_status}]; "
+        "kept status=deferred by default."
+    )
+
+
+def _record_active_epic_readiness(
+    *,
+    issue_id: str,
+    epic_id: str,
+    status: str,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    epic_status = _active_epic_status(epic_id=epic_id, beads_root=beads_root, cwd=cwd)
+    if epic_status is None:
+        return
+
+    beads.run_bd_command(
+        [
+            "update",
+            issue_id,
+            "--append-notes",
+            _readiness_note(epic_id=epic_id, epic_status=epic_status, status=status),
+        ],
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+    if status == "deferred":
+        print(
+            "prompt operator immediately: "
+            f"{issue_id} remains deferred under active epic {epic_id} [{epic_status}]. "
+            "Ask whether to promote it to open now; default stays deferred until "
+            "an explicit ready-now decision.",
+            file=sys.stderr,
+        )
 
 
 def main() -> None:
@@ -165,6 +248,13 @@ def main() -> None:
             beads_root=context.beads_root,
             cwd=context.project_dir,
         )
+    _record_active_epic_readiness(
+        issue_id=issue_id,
+        epic_id=args.epic_id,
+        status=args.status,
+        beads_root=context.beads_root,
+        cwd=context.project_dir,
+    )
 
     print(issue_id)
 

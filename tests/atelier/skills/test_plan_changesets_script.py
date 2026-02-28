@@ -206,3 +206,241 @@ def test_create_changeset_fails_closed_when_deferred_update_fails(
         "automatic fail-closed: unable to set deferred status after create",
     ]
     assert export_calls == []
+
+
+def test_create_changeset_records_deferred_readiness_note_for_active_epic(
+    monkeypatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_script_module()
+    commands: list[list[str]] = []
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+
+    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+
+    def fake_run_bd(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        assert beads_root == context.beads_root
+        assert cwd == context.project_dir
+        if args and args[0] == "create":
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout="at-123\n", stderr=""
+            )
+        if args[:3] == ["update", "at-123", "--status"]:
+            assert allow_failure is True
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+        if args[:2] == ["show", "at-epic"]:
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout='[{"id":"at-epic","status":"open"}]',
+                stderr="",
+            )
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: module.auto_export.AutoExportResult(
+            status="skipped",
+            issue_id=issue_id,
+            provider=None,
+            message="auto-export disabled for test",
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_changeset.py",
+            "--epic-id",
+            "at-epic",
+            "--title",
+            "Draft changeset",
+            "--acceptance",
+            "Acceptance text",
+        ],
+    )
+
+    module.main()
+    output = capsys.readouterr()
+
+    assert [
+        "update",
+        "at-123",
+        "--append-notes",
+        (
+            "Readiness decision: no explicit ready-now decision during changeset "
+            "capture under active epic at-epic [open]; kept status=deferred by "
+            "default."
+        ),
+    ] in commands
+    assert "prompt operator immediately" in output.err
+    assert "at-123 remains deferred under active epic at-epic [open]" in output.err
+
+
+def test_create_changeset_records_open_readiness_note_for_active_epic(
+    monkeypatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_script_module()
+    commands: list[list[str]] = []
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+
+    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+
+    def fake_run_bd(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        assert beads_root == context.beads_root
+        assert cwd == context.project_dir
+        if args and args[0] == "create":
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout="at-123\n", stderr=""
+            )
+        if args[:3] == ["update", "at-123", "--status"]:
+            assert allow_failure is True
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+        if args[:2] == ["show", "at-epic"]:
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout='[{"id":"at-epic","status":"in_progress"}]',
+                stderr="",
+            )
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: module.auto_export.AutoExportResult(
+            status="skipped",
+            issue_id=issue_id,
+            provider=None,
+            message="auto-export disabled for test",
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_changeset.py",
+            "--epic-id",
+            "at-epic",
+            "--title",
+            "Ready changeset",
+            "--acceptance",
+            "Acceptance text",
+            "--status",
+            "open",
+        ],
+    )
+
+    module.main()
+    output = capsys.readouterr()
+
+    assert [
+        "update",
+        "at-123",
+        "--append-notes",
+        (
+            "Readiness decision: operator selected ready-now during changeset "
+            "capture under active epic at-epic [in_progress]; set status=open "
+            "immediately."
+        ),
+    ] in commands
+    assert "prompt operator immediately" not in output.err
+
+
+def test_create_changeset_skips_readiness_note_for_inactive_epic(
+    monkeypatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_script_module()
+    commands: list[list[str]] = []
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+
+    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+
+    def fake_run_bd(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        assert beads_root == context.beads_root
+        assert cwd == context.project_dir
+        if args and args[0] == "create":
+            return subprocess.CompletedProcess(
+                args=args, returncode=0, stdout="at-123\n", stderr=""
+            )
+        if args[:3] == ["update", "at-123", "--status"]:
+            assert allow_failure is True
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+        if args[:2] == ["show", "at-epic"]:
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout='[{"id":"at-epic","status":"deferred"}]',
+                stderr="",
+            )
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
+    monkeypatch.setattr(
+        module.auto_export,
+        "auto_export_issue",
+        lambda issue_id, *, context: module.auto_export.AutoExportResult(
+            status="skipped",
+            issue_id=issue_id,
+            provider=None,
+            message="auto-export disabled for test",
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_changeset.py",
+            "--epic-id",
+            "at-epic",
+            "--title",
+            "Draft changeset",
+            "--acceptance",
+            "Acceptance text",
+        ],
+    )
+
+    module.main()
+    output = capsys.readouterr()
+
+    assert ["show", "at-epic", "--json"] in commands
+    assert not any(command[:3] == ["update", "at-123", "--append-notes"] for command in commands)
+    assert "prompt operator immediately" not in output.err
