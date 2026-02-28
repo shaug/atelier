@@ -138,6 +138,111 @@ def test_changeset_base_branch_sequential_always_uses_epic_parent_branch(
     assert base == "main"
 
 
+def test_changeset_base_branch_sequential_uses_default_when_workspace_parent_is_missing(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.2",
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: feat/parent\n"
+            "changeset.work_branch: feat/work\n"
+        ),
+    }
+    updates: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        work_finalization_state,
+        "resolve_epic_id_for_changeset",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_default_branch",
+        lambda *_args, **_kwargs: "main",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_rev_parse",
+        lambda _repo_root, ref, **_kwargs: f"{ref}-sha",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_branch_metadata",
+        lambda *_args, **kwargs: updates.append(kwargs),
+    )
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert base == "main"
+    assert updates
+    assert updates[-1]["parent_branch"] == "main"
+    assert updates[-1]["parent_base"] == "main-sha"
+
+
+def test_changeset_base_branch_sequential_resolves_epic_parent_for_noncollapsed_lineage(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.2",
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: feat/parent\n"
+            "changeset.work_branch: feat/work\n"
+        ),
+    }
+    updates: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        work_finalization_state,
+        "resolve_epic_id_for_changeset",
+        lambda *_args, **_kwargs: "at-epic",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "workspace.parent_branch: release/2026.03\n"}]
+            if args == ["show", "at-epic"]
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_default_branch",
+        lambda *_args, **_kwargs: "main",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_rev_parse",
+        lambda _repo_root, ref, **_kwargs: f"{ref}-sha",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_branch_metadata",
+        lambda *_args, **kwargs: updates.append(kwargs),
+    )
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert base == "release/2026.03"
+    assert updates
+    assert updates[-1]["parent_branch"] == "release/2026.03"
+    assert updates[-1]["parent_base"] == "release/2026.03-sha"
+
+
 def test_changeset_base_branch_non_sequential_keeps_stacked_parent(monkeypatch) -> None:
     issue = {
         "description": (
