@@ -27,7 +27,9 @@
   and orchestration seams (`tests/atelier/services/project/test_services.py`, 2
   tests).
 - The service layer now accepts injectable collaborators for orchestration,
-  which reduces the need to drive full CLI flows to exercise failure paths.
+  reducing the need to drive full CLI flows to exercise failure paths, but some
+  collaborators are still typed with broad `Callable[..., ...]` signatures that
+  need stricter contracts before expansion.
 
 ### Bounded-scope signal
 
@@ -42,6 +44,11 @@ Decision: **expand with adjustment**.
 We should extend the service-tier pattern beyond init/config, but do it in
 ordered, bounded slices and address pilot gaps while expanding.
 
+Expansion gate: **do not extend the pattern to startup/finalization flows until
+init/config collaborators using `Callable[..., ...]` are replaced with explicit
+typed contracts** (for example `Protocol` interfaces or concrete collaborator
+types).
+
 ## Why this decision
 
 - Pilot extraction improved controller clarity at the command boundary.
@@ -50,11 +57,30 @@ ordered, bounded slices and address pilot gaps while expanding.
 - Remaining gaps are manageable in follow-on scoped changesets.
 - Baseline service observability (start/success/failure + duration) is not yet
   standardized.
-- Service dependency typing still uses broad callable signatures in places.
+- Service dependency typing still uses broad callable signatures in places; this
+  is a hard gate to expansion, not an optional follow-up.
 
 ## Next changeset scopes
 
-### CS4 candidate: worker startup orchestration service
+### CS4 candidate: typed-collaborator hardening for init/config services
+
+Target: existing pilot services only.
+
+- Replace broad `Callable[..., ...]` collaborator typing in init/config service
+  modules with explicit typed contracts (`Protocol` or concrete collaborator
+  types).
+- Keep existing behavior and test outcomes unchanged while tightening
+  boundaries.
+- Add/adjust focused service tests that validate typed boundary behavior.
+
+Guardrails:
+
+- Do not introduce worker startup/finalization service extraction here.
+- Keep scope to init/config pilot files plus tests directly required for
+  contract hardening.
+- Keep diff reviewable; split if expected size exceeds ~800 LOC.
+
+### CS5 candidate: worker startup orchestration service
 
 Target: startup flow only.
 
@@ -72,7 +98,7 @@ Guardrails:
 - Keep CLI/runtime behavior compatibility for existing startup paths.
 - Keep diff reviewable; split if expected size exceeds ~800 LOC.
 
-### CS5 candidate: worker finalization orchestration service
+### CS6 candidate: worker finalization orchestration service
 
 Target: finalize/publish orchestration only, after CS4 lands.
 
