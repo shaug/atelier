@@ -151,7 +151,136 @@ def test_collect_resolved_epic_artifacts_skips_when_not_integrated() -> None:
                 assume_yes=False,
             )
 
-        assert actions == []
+        assert len(actions) == 1
+        assert actions[0].description == "Skip resolved epic artifact cleanup for at-epic"
+        assert actions[0].report_only is True
+        assert "branches blocked by integration check: feat/root" in actions[0].details
+
+
+def test_collect_resolved_epic_artifacts_allows_explicit_abandoned_cleanup() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        epic_id = "at-epic"
+        mapping_path = worktrees.mapping_path(project_dir, epic_id)
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_path,
+            worktrees.WorktreeMapping(
+                epic_id=epic_id,
+                worktree_path=f"worktrees/{epic_id}",
+                root_branch="feat/root",
+                changesets={},
+                changeset_worktrees={},
+            ),
+        )
+        epic_worktree = project_dir / "worktrees" / epic_id
+        epic_worktree.mkdir(parents=True, exist_ok=True)
+        (epic_worktree / ".git").write_text("gitdir: /tmp/a", encoding="utf-8")
+        epic_issue = {
+            "id": epic_id,
+            "status": "closed",
+            "labels": ["at:epic", "cs:abandoned"],
+            "description": "workspace.parent_branch: main\n",
+        }
+        refs = {
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+            "refs/heads/feat/root",
+            "refs/remotes/origin/feat/root",
+        }
+
+        with (
+            patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
+            patch("atelier.git.git_default_branch", return_value="main"),
+            patch(
+                "atelier.git.git_ref_exists",
+                side_effect=lambda repo, ref, git_path=None: ref in refs,
+            ),
+            patch("atelier.git.git_is_ancestor", return_value=False),
+            patch("atelier.git.git_branch_fully_applied", return_value=False),
+            patch("atelier.git.git_status_porcelain", return_value=[]),
+            patch("atelier.git.git_current_branch", return_value="main"),
+            patch("atelier.gc.worktrees.run_git_gc_command", return_value=(True, "")),
+        ):
+            actions = gc_worktrees.collect_resolved_epic_artifacts(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+                assume_yes=False,
+            )
+
+        assert len(actions) == 1
+        assert actions[0].description == "Prune explicitly abandoned epic artifacts for at-epic"
+        assert actions[0].report_only is False
+        assert "integration override labels: cs:abandoned" in actions[0].details
+        assert "non-integrated branches allowed by override: feat/root" in actions[0].details
+
+
+def test_collect_resolved_epic_artifacts_reports_drift_for_closed_merged_state() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        epic_id = "at-epic"
+        mapping_path = worktrees.mapping_path(project_dir, epic_id)
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_path,
+            worktrees.WorktreeMapping(
+                epic_id=epic_id,
+                worktree_path=f"worktrees/{epic_id}",
+                root_branch="feat/root",
+                changesets={},
+                changeset_worktrees={},
+            ),
+        )
+        epic_worktree = project_dir / "worktrees" / epic_id
+        epic_worktree.mkdir(parents=True, exist_ok=True)
+        (epic_worktree / ".git").write_text("gitdir: /tmp/a", encoding="utf-8")
+        epic_issue = {
+            "id": epic_id,
+            "status": "closed",
+            "labels": ["at:epic", "cs:merged"],
+            "description": "workspace.parent_branch: main\npr_state: merged\n",
+        }
+        refs = {
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+            "refs/heads/feat/root",
+            "refs/remotes/origin/feat/root",
+        }
+
+        with (
+            patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
+            patch("atelier.git.git_default_branch", return_value="main"),
+            patch(
+                "atelier.git.git_ref_exists",
+                side_effect=lambda repo, ref, git_path=None: ref in refs,
+            ),
+            patch("atelier.git.git_is_ancestor", return_value=False),
+            patch("atelier.git.git_branch_fully_applied", return_value=False),
+        ):
+            actions = gc_worktrees.collect_resolved_epic_artifacts(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+                assume_yes=False,
+            )
+
+        assert len(actions) == 2
+        assert actions[0].description == "Skip resolved epic artifact cleanup for at-epic"
+        assert actions[0].report_only is True
+        assert actions[1].description == "Detect closed/merged lifecycle drift for at-epic"
+        assert actions[1].report_only is True
+        assert "state markers: label cs:merged, pr_state=merged" in actions[1].details
 
 
 def test_collect_resolved_epic_artifacts_continues_when_mapping_epic_missing() -> None:

@@ -429,3 +429,66 @@ def test_gc_logs_action_lifecycle_in_dry_run() -> None:
     assert any("gc start" in message for message in debug_messages)
     assert any("gc action queued description=Test action" in message for message in debug_messages)
     assert any("gc action dry-run description=Test action" in message for message in debug_messages)
+
+
+def test_gc_report_only_actions_log_skip_without_confirmation() -> None:
+    project_root = Path("/project")
+    repo_root = Path("/repo")
+    project_config = config.ProjectConfig()
+    report_action = gc_cmd.GcAction(
+        description="Skip resolved epic artifact cleanup for at-epic",
+        apply=lambda: (_ for _ in ()).throw(AssertionError("report-only action must not run")),
+        report_only=True,
+    )
+
+    with (
+        patch(
+            "atelier.commands.gc.resolve_current_project_with_repo_root",
+            return_value=(project_root, project_config, "/repo", repo_root),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_project_data_dir",
+            return_value=Path("/data"),
+        ),
+        patch(
+            "atelier.commands.gc.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.gc.labels.collect_normalize_changeset_labels", return_value=[]),
+        patch("atelier.gc.labels.collect_remove_deprecated_label", return_value=[]),
+        patch("atelier.gc.labels.collect_normalize_epic_labels", return_value=[]),
+        patch("atelier.gc.hooks.collect_hooks", return_value=[]),
+        patch("atelier.gc.worktrees.collect_orphan_worktrees", return_value=[]),
+        patch(
+            "atelier.gc.worktrees.collect_resolved_epic_artifacts",
+            return_value=[report_action],
+        ),
+        patch(
+            "atelier.gc.worktrees.collect_closed_workspace_branches_without_mapping",
+            return_value=[],
+        ),
+        patch("atelier.gc.messages.collect_message_claims", return_value=[]),
+        patch("atelier.gc.messages.collect_message_retention", return_value=[]),
+        patch("atelier.gc.agents.collect_agent_homes", return_value=[]),
+        patch("atelier.commands.gc.confirm") as confirm,
+        patch("atelier.commands.gc.say") as say,
+    ):
+        gc_cmd.gc(
+            SimpleNamespace(
+                stale_hours=24.0,
+                stale_if_missing_heartbeat=False,
+                dry_run=True,
+                reconcile=False,
+                yes=False,
+            )
+        )
+
+    confirm.assert_not_called()
+    assert any(
+        "Skipped: Skip resolved epic artifact cleanup for at-epic" in str(call.args[0])
+        for call in say.call_args_list
+    )
+    assert not any(
+        "Would: Skip resolved epic artifact cleanup for at-epic" in str(call.args[0])
+        for call in say.call_args_list
+    )

@@ -272,6 +272,10 @@ def gc(args: object) -> None:
         say(f"GC action: {action.description}")
         for detail in action.details:
             say(f"- {detail}")
+        if action.report_only:
+            say(f"Skipped: {action.description}")
+            log_debug(f"gc action report-only description={action.description}")
+            continue
         if dry_run:
             say(f"Would: {action.description}")
             log_debug(f"gc action dry-run description={action.description}")

@@ -9,7 +9,9 @@ from ..io import die, say, select
 from .common import (
     branch_integrated_into_target,
     branch_lookup_ref,
+    changeset_review_state,
     is_merged_closed_changeset,
+    issue_integrated_sha,
     issue_labels,
     log_debug,
     normalize_branch,
@@ -18,6 +20,16 @@ from .common import (
     workspace_branch_from_labels,
 )
 from .models import GcAction
+
+ABANDONED_EPIC_CLEANUP_LABELS = {"cs:abandoned", "cs:superseded"}
+
+
+def _noop_gc_action() -> None:
+    return None
+
+
+def _cleanup_override_labels(labels: set[str]) -> set[str]:
+    return {label for label in labels if label in ABANDONED_EPIC_CLEANUP_LABELS}
 
 
 def collect_resolved_epic_artifacts(
@@ -46,6 +58,15 @@ def collect_resolved_epic_artifacts(
         status = str(epic.get("status") or "").strip().lower()
         if status not in {"closed", "done"}:
             continue
+        labels = issue_labels(epic)
+        cleanup_override_labels = _cleanup_override_labels(labels)
+        merged_markers: list[str] = []
+        if "cs:merged" in labels:
+            merged_markers.append("label cs:merged")
+        review_state = changeset_review_state(epic)
+        if review_state == "merged":
+            merged_markers.append("pr_state=merged")
+        has_integrated_sha = issue_integrated_sha(epic) is not None
 
         description = epic.get("description")
         fields = beads.parse_description_fields(description if isinstance(description, str) else "")
@@ -68,12 +89,45 @@ def collect_resolved_epic_artifacts(
             for branch in branches
             if branch and branch != parent_branch and branch != default_branch
         }
-        if any(
-            not branch_integrated_into_target(
+        non_integrated_branches = sorted(
+            branch
+            for branch in prunable_branches
+            if not branch_integrated_into_target(
                 repo_root, branch=branch, target_ref=target_ref, git_path=git_path
             )
-            for branch in prunable_branches
-        ):
+        )
+        if non_integrated_branches and not cleanup_override_labels:
+            non_integrated_summary = ", ".join(non_integrated_branches)
+            skip_details = (
+                f"integration target: {target_ref}",
+                f"branches blocked by integration check: {non_integrated_summary}",
+                "skip reason: closed epic cleanup keeps branch/worktree pruning safe by default",
+                "recovery: add label cs:abandoned to request explicit cleanup confirmation",
+            )
+            actions.append(
+                GcAction(
+                    description=f"Skip resolved epic artifact cleanup for {epic_id}",
+                    apply=_noop_gc_action,
+                    details=skip_details,
+                    report_only=True,
+                )
+            )
+            if merged_markers and not has_integrated_sha:
+                marker_summary = ", ".join(merged_markers)
+                drift_details = (
+                    f"state markers: {marker_summary}",
+                    f"integration target: {target_ref}",
+                    f"branches blocked by integration check: {non_integrated_summary}",
+                    "planner follow-up: reconcile closed+merged metadata against branch reality",
+                )
+                actions.append(
+                    GcAction(
+                        description=(f"Detect closed/merged lifecycle drift for {epic_id}"),
+                        apply=_noop_gc_action,
+                        details=drift_details,
+                        report_only=True,
+                    )
+                )
             continue
 
         relpaths = {
@@ -102,18 +156,28 @@ def collect_resolved_epic_artifacts(
             continue
 
         description_text = f"Prune resolved epic artifacts for {epic_id}"
+        if non_integrated_branches and cleanup_override_labels:
+            description_text = f"Prune explicitly abandoned epic artifacts for {epic_id}"
         changeset_worktree_summary = ", ".join(sorted(mapping.changeset_worktrees.values()))
         if not changeset_worktree_summary:
             changeset_worktree_summary = "(none)"
         branch_summary = ", ".join(sorted(prunable_branches))
         if not branch_summary:
             branch_summary = "(none)"
-        details = (
+        details_list = [
             f"epic worktree: {mapping.worktree_path}",
             f"changeset worktrees: {changeset_worktree_summary}",
             f"branches to prune: {branch_summary}",
             f"integration target: {target_ref}",
-        )
+        ]
+        if non_integrated_branches and cleanup_override_labels:
+            details_list.append(
+                f"integration override labels: {', '.join(sorted(cleanup_override_labels))}"
+            )
+            details_list.append(
+                f"non-integrated branches allowed by override: {', '.join(non_integrated_branches)}"
+            )
+        details = tuple(details_list)
 
         def _apply_cleanup(
             epic_value: str = epic_id,
