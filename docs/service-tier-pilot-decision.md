@@ -24,8 +24,7 @@
 - Existing init command integration tests remained in place
   (`tests/atelier/commands/test_init.py`, 13 tests).
 - New service-level tests were added for request validation, failure mapping,
-  and orchestration seams (`tests/atelier/services/project/test_services.py`, 2
-  tests).
+  and orchestration seams (`tests/atelier/services/project/test_services.py`).
 - The service layer now accepts injectable collaborators for orchestration,
   reducing the need to drive full CLI flows to exercise failure paths, but some
   collaborators are still typed with broad `Callable[..., ...]` signatures that
@@ -116,6 +115,6 @@ Guardrails:
 
 ## Stop/adjust fallback criteria
 
-If CS4 cannot preserve startup behavior with clear service contracts, pause
-expansion and run an "adjust only" pass focused on dependency typing and
+If CS4 cannot preserve init/config pilot behavior with clear service contracts,
+pause expansion and run an "adjust only" pass focused on dependency typing and
 observability patterns before attempting CS5.
