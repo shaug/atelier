@@ -122,12 +122,24 @@ def _active_epic_status(*, epic_id: str, beads_root: Path, cwd: Path) -> str | N
     return None
 
 
-def _readiness_note(*, epic_id: str, epic_status: str, status: str) -> str:
+def _readiness_note(
+    *,
+    epic_id: str,
+    epic_status: str,
+    status: str,
+    ready_source: str,
+) -> str:
     if status == "open":
+        if ready_source == "operator":
+            return (
+                "Readiness decision: operator selected ready-now during "
+                f"changeset capture under active epic {epic_id} "
+                f"[{epic_status}]; set status=open immediately."
+            )
         return (
-            "Readiness decision: operator selected ready-now during changeset "
-            f"capture under active epic {epic_id} [{epic_status}]; "
-            "set status=open immediately."
+            "Readiness decision: explicit CLI override set status=open during "
+            f"changeset capture under active epic {epic_id} "
+            f"[{epic_status}] without operator ready-now confirmation."
         )
     return (
         "Readiness decision: no explicit ready-now decision during changeset "
@@ -141,6 +153,7 @@ def _record_active_epic_readiness(
     issue_id: str,
     epic_id: str,
     status: str,
+    ready_source: str,
     beads_root: Path,
     cwd: Path,
 ) -> None:
@@ -153,7 +166,12 @@ def _record_active_epic_readiness(
             "update",
             issue_id,
             "--append-notes",
-            _readiness_note(epic_id=epic_id, epic_status=epic_status, status=status),
+            _readiness_note(
+                epic_id=epic_id,
+                epic_status=epic_status,
+                status=status,
+                ready_source=ready_source,
+            ),
         ],
         beads_root=beads_root,
         cwd=cwd,
@@ -178,6 +196,12 @@ def main() -> None:
         choices=("deferred", "open"),
         default="deferred",
         help="Lifecycle status to set after create",
+    )
+    parser.add_argument(
+        "--ready-source",
+        choices=("operator", "cli_override"),
+        default="",
+        help=("Readiness source for status=open (operator decision vs explicit CLI override)"),
     )
     parser.add_argument(
         "--description",
@@ -205,6 +229,9 @@ def main() -> None:
     beads_dir = str(args.beads_dir).strip()
     if beads_dir:
         context = replace(context, beads_root=Path(beads_dir))
+    if args.ready_source and args.status != "open":
+        parser.error("--ready-source is only valid with --status open")
+    ready_source = args.ready_source or "cli_override"
 
     create_args = [
         "create",
@@ -252,6 +279,7 @@ def main() -> None:
         issue_id=issue_id,
         epic_id=args.epic_id,
         status=args.status,
+        ready_source=ready_source,
         beads_root=context.beads_root,
         cwd=context.project_dir,
     )
