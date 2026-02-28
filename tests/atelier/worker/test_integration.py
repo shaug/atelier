@@ -120,6 +120,47 @@ def test_changeset_integration_signal_accepts_patch_equivalent_branch_to_target(
     assert integrated_sha == "worksha"
 
 
+def test_changeset_integration_signal_strict_mode_accepts_root_proof_without_work_branch() -> None:
+    issue = {"description": ("changeset.root_branch: feat/root\nchangeset.parent_branch: main\n")}
+
+    def fake_branch_ref_for_lookup(
+        _repo_root: Path, branch: str, *, git_path: str | None = None
+    ) -> str | None:
+        del git_path
+        mapping = {"main": "origin/main", "feat/root": "feat/root"}
+        return mapping.get(branch)
+
+    def fake_is_ancestor(
+        _repo_root: Path,
+        ancestor: str,
+        descendant: str,
+        *,
+        git_path: str | None = None,
+    ) -> bool:
+        del git_path
+        return ancestor == "feat/root" and descendant == "origin/main"
+
+    with (
+        patch(
+            "atelier.worker.integration.branch_ref_for_lookup",
+            side_effect=fake_branch_ref_for_lookup,
+        ),
+        patch("atelier.worker.integration.git.git_is_ancestor", side_effect=fake_is_ancestor),
+        patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.worker.integration.git.git_rev_parse", return_value="rootsha"),
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug=None,
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: None,
+            require_target_branch_proof=True,
+        )
+
+    assert ok is True
+    assert integrated_sha == "rootsha"
+
+
 def test_changeset_integration_signal_strict_sha_requires_source_reachability() -> None:
     issue = {
         "description": (

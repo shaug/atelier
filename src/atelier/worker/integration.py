@@ -201,7 +201,7 @@ def changeset_integration_signal(
                         is True
                     ):
                         return True, candidate_sha
-        if not target_refs or not work_branch:
+        if not target_refs or not source_refs:
             return False, None
         for source_ref in source_refs:
             source_sha = git.git_rev_parse(repo_root, source_ref, git_path=git_path)
