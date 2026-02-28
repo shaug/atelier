@@ -3880,6 +3880,8 @@ def close_epic_if_complete(
         return False
     if confirm is not None and not confirm(summary):
         return False
+    if dry_run:
+        return False
     close_issue(
         epic_id,
         beads_root=beads_root,

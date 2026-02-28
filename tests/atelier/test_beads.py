@@ -2566,6 +2566,39 @@ def test_close_epic_if_complete_dry_run_skips_active_pr_recovery_mutation() -> N
     clear_hook.assert_not_called()
 
 
+def test_close_epic_if_complete_dry_run_skips_close_mutation() -> None:
+    work = lambda i, s="open": {"id": i, "status": s, "labels": [], "type": "task"}
+    changesets = {
+        "epic-1": [work("epic-1.1", "closed")],
+        "epic-1.1": [],
+    }
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:2] == ["show", "epic-1"]:
+            return [{"id": "epic-1", "labels": ["at:epic"]}]
+        if args[:2] == ["list", "--parent"]:
+            return changesets.get(args[2], [])
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.close_issue") as close_issue,
+        patch("atelier.beads.clear_agent_hook") as clear_hook,
+    ):
+        result = beads.close_epic_if_complete(
+            "epic-1",
+            "agent-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            confirm=lambda _summary: True,
+            dry_run=True,
+        )
+
+    assert result is False
+    close_issue.assert_not_called()
+    clear_hook.assert_not_called()
+
+
 def test_close_epic_if_complete_closes_standalone_changeset() -> None:
     def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args[:2] == ["show", "at-irs"]:
