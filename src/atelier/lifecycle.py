@@ -212,6 +212,7 @@ def dependency_issue_satisfied(
     labels: set[str],
     require_integrated: bool,
     review_state: object | None = None,
+    issue_type: object | None = None,
 ) -> bool:
     """Return whether a dependency issue satisfies lifecycle gating.
 
@@ -221,6 +222,7 @@ def dependency_issue_satisfied(
         require_integrated: Whether dependencies must carry integration evidence
             (sequential contract).
         review_state: Optional dependency review lifecycle state.
+        issue_type: Optional dependency issue type for unlabeled role hints.
 
     Returns:
         ``True`` when the dependency is acceptable under the selected contract.
@@ -229,7 +231,10 @@ def dependency_issue_satisfied(
         return False
     if not require_integrated:
         return True
+    issue_type_value = normalize_status_value(issue_type)
     is_changeset = "at:changeset" in labels or bool(TERMINAL_CHANGESET_LABELS.intersection(labels))
+    if not is_changeset and issue_type_value in WORK_ISSUE_TYPES and "at:epic" not in labels:
+        is_changeset = True
     if not is_changeset:
         return True
     if "cs:merged" in labels:

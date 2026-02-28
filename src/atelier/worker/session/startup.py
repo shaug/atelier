@@ -172,6 +172,7 @@ def _dependencies_satisfied(
             labels=blocker_labels,
             require_integrated=require_integrated,
             review_state=changeset_fields.review_state(blocker_issue),
+            issue_type=worker_selection.issue_type(blocker_issue),
         ):
             continue
         return False
