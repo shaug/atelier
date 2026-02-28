@@ -309,6 +309,41 @@ def test_run_worker_sessions_implicit_resets_epic_id_across_retries() -> None:
     )
 
 
+def test_run_worker_sessions_implicit_retries_do_not_mutate_caller_args() -> None:
+    args = type("Args", (), {"queue": False, "epic_id": None})()
+    calls = 0
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del mode, dry_run, session_key
+        nonlocal calls
+        calls += 1
+        setattr(args, "epic_id", "at-fail")
+        setattr(args, "implicit_excluded_epic_ids", ("at-overwritten",))
+        if calls == 1:
+            return WorkerRunSummary(
+                started=False,
+                reason="changeset_stack_integrity_failed",
+                epic_id="at-fail",
+            )
+        return WorkerRunSummary(started=False, reason="no_eligible_epics")
+
+    runtime.run_worker_sessions(
+        args=args,
+        mode="auto",
+        run_mode="default",
+        dry_run=False,
+        session_key="sess",
+        run_worker_once=run_once,
+        report_worker_summary=lambda _summary, _dry: None,
+        watch_interval_seconds=lambda: 5,
+        dry_run_log=lambda _message: None,
+        emit=lambda _message: None,
+    )
+
+    assert getattr(args, "epic_id", None) is None
+    assert not hasattr(args, "implicit_excluded_epic_ids")
+
+
 def test_classify_non_watch_exit_outcome_is_deterministic() -> None:
     explicit_success = runtime.classify_non_watch_exit_outcome(
         WorkerRunSummary(started=False, reason="explicit_epic_completed"),

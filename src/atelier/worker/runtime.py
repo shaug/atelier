@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -481,13 +482,19 @@ def run_worker_sessions(
     explicit_epic_requested = explicit_epic_id is not None
     excluded_implicit_epics: set[str] = set()
 
-    def prepare_iteration_args() -> None:
+    def build_iteration_args() -> object:
+        iteration_args = copy.copy(args)
         if explicit_epic_requested:
-            setattr(args, "epic_id", explicit_epic_id)
-            return
+            setattr(iteration_args, "epic_id", explicit_epic_id)
+            return iteration_args
         # Guard against accidental explicit-mode carryover across implicit retries.
-        setattr(args, "epic_id", None)
-        setattr(args, "implicit_excluded_epic_ids", tuple(sorted(excluded_implicit_epics)))
+        setattr(iteration_args, "epic_id", None)
+        setattr(
+            iteration_args,
+            "implicit_excluded_epic_ids",
+            tuple(sorted(excluded_implicit_epics)),
+        )
+        return iteration_args
 
     def log_continuation_decision(
         decision: ImplicitContinuationDecision, *, summary: WorkerRunSummary
@@ -500,14 +507,19 @@ def run_worker_sessions(
         )
 
     if bool(getattr(args, "queue", False)):
-        summary = run_worker_once(args, mode=mode, dry_run=dry_run, session_key=session_key)
+        iteration_args = build_iteration_args()
+        summary = run_worker_once(
+            iteration_args, mode=mode, dry_run=dry_run, session_key=session_key
+        )
         report_worker_summary(summary, dry_run)
         return
 
     if dry_run:
         while True:
-            prepare_iteration_args()
-            summary = run_worker_once(args, mode=mode, dry_run=True, session_key=session_key)
+            iteration_args = build_iteration_args()
+            summary = run_worker_once(
+                iteration_args, mode=mode, dry_run=True, session_key=session_key
+            )
             report_worker_summary(summary, True)
             if summary.started:
                 if run_mode == "once":
@@ -548,8 +560,8 @@ def run_worker_sessions(
         return
 
     while True:
-        prepare_iteration_args()
-        summary = run_worker_once(args, mode=mode, dry_run=False, session_key=session_key)
+        iteration_args = build_iteration_args()
+        summary = run_worker_once(iteration_args, mode=mode, dry_run=False, session_key=session_key)
         report_worker_summary(summary, False)
         if summary.started:
             if run_mode == "once":
