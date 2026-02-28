@@ -68,6 +68,34 @@ class TestFindCodexSession:
 
             assert session == "session-exact"
 
+    def test_uses_stable_path_tiebreak_when_timestamps_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            sessions = home / ".codex" / "sessions"
+            sessions.mkdir(parents=True)
+
+            target = "atelier:01TEST:feat-demo"
+            alpha = sessions / "session-alpha.json"
+            beta = sessions / "session-beta.json"
+
+            alpha.write_text(
+                json.dumps({"messages": [{"role": "user", "content": target}]}),
+                encoding="utf-8",
+            )
+            beta.write_text(
+                json.dumps({"messages": [{"role": "user", "content": target}]}),
+                encoding="utf-8",
+            )
+
+            now = os.path.getmtime(alpha)
+            os.utime(alpha, (now, now))
+            os.utime(beta, (now, now))
+
+            with patch("atelier.sessions.Path.home", return_value=home):
+                session = sessions_mod.find_codex_session("01TEST", "feat-demo")
+
+            assert session == "session-alpha"
+
     def test_returns_session_id_from_jsonl_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)

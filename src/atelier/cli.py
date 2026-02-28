@@ -503,6 +503,13 @@ def plan_command(
             help="accept defaults for interactive choices",
         ),
     ] = False,
+    new_session: Annotated[
+        bool,
+        typer.Option(
+            "--new-session",
+            help="always start a fresh planner session instead of resuming",
+        ),
+    ] = False,
     trace: Annotated[
         bool,
         typer.Option(
@@ -513,7 +520,13 @@ def plan_command(
 ) -> None:
     """Start a planner session."""
     plan_cmd.run_planner(
-        SimpleNamespace(epic_id=epic_id, reconcile=reconcile, yes=yes, trace=trace)
+        SimpleNamespace(
+            epic_id=epic_id,
+            reconcile=reconcile,
+            yes=yes,
+            new_session=new_session,
+            trace=trace,
+        )
     )
 
 

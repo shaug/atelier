@@ -473,6 +473,17 @@ Options:
 Start a planner session for epics. Planner sessions run in a dedicated worktree
 and use the agent runtime for interactive planning.
 
+By default, Atelier resumes an existing planner session when possible:
+
+- If `planner_session.id` is saved on the planner agent bead and still exists
+  for this planner workspace, Atelier resumes that exact session id.
+- If no saved pointer exists, Atelier resumes the most recent matching planner
+  session.
+- If a saved pointer is stale or missing, Atelier starts a fresh session and
+  clears the stale pointer.
+
+Use `--new-session` to bypass resume lookup and always start fresh.
+
 Planner sessions automatically sync their planner worktree to the configured
 default branch at startup, then continue periodic freshness checks while the
 session is active. Sync metadata is recorded on the planner agent bead under
@@ -487,6 +498,7 @@ atelier plan
 Options:
 
 - `--epic-id`: Plan against an existing epic id.
+- `--new-session`: Always start a fresh planner session (skip resume lookup).
 - In an active planner session, run
   `python3 skills/planner-startup-check/scripts/refresh_overview.py` to refresh
   the same read-only startup overview on demand.
