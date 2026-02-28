@@ -234,7 +234,7 @@ def resolve_parent_lineage(
     explicit_parent = _normalize_branch(changeset_fields.parent_branch(issue))
     dependency_ids = _dependency_ids(issue)
     dependency_parent_hint = _dependency_parent_hint(issue)
-    heritage_parent_id = _explicit_parent_id(issue)
+    heritage_parent_id = _issue_heritage_id(issue)
     if (
         heritage_parent_id is None
         and dependency_parent_hint

@@ -86,6 +86,41 @@ def test_resolve_parent_lineage_scopes_lineage_to_epic_heritage() -> None:
     assert resolution.effective_parent_branch == "feat/at-epic.2"
 
 
+def test_resolve_parent_lineage_scopes_lineage_with_parent_id_only_payload() -> None:
+    issue = {
+        "id": "at-epic.3",
+        "parent_id": "at-epic",
+        "description": (
+            "changeset.root_branch: feat/at-epic\nchangeset.parent_branch: feat/at-epic\n"
+        ),
+        "dependencies": ["at-epic.2", "at-other.9"],
+    }
+    lookup = {
+        "at-epic.2": {
+            "id": "at-epic.2",
+            "parent": "at-epic",
+            "description": "changeset.work_branch: feat/at-epic.2\n",
+        },
+        "at-other.9": {
+            "id": "at-other.9",
+            "parent": "at-other",
+            "description": "changeset.work_branch: feat/at-other.9\n",
+        },
+    }
+
+    resolution = dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch="feat/at-epic",
+        lookup_issue=lookup.get,
+    )
+
+    assert resolution.blocked is False
+    assert resolution.dependency_ids == ("at-epic.2", "at-other.9")
+    assert resolution.used_dependency_parent is True
+    assert resolution.dependency_parent_id == "at-epic.2"
+    assert resolution.effective_parent_branch == "feat/at-epic.2"
+
+
 def test_resolve_parent_lineage_fails_closed_when_heritage_has_no_lineage_candidate() -> None:
     issue = {
         "id": "at-epic.3",
