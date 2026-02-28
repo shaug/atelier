@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from dataclasses import replace
@@ -22,6 +23,7 @@ from atelier import auto_export, beads  # noqa: E402
 
 _STATUS_UPDATE_ATTEMPTS = 2
 _FAIL_CLOSED_REASON = "automatic fail-closed: unable to set deferred status after create"
+_ISSUE_ID_PATTERN = re.compile(r"\b[a-zA-Z][a-zA-Z0-9_-]*-[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*\b")
 
 
 def _command_detail(result: subprocess.CompletedProcess[str]) -> str:
@@ -29,6 +31,63 @@ def _command_detail(result: subprocess.CompletedProcess[str]) -> str:
     if stderr:
         return stderr
     return (result.stdout or "").strip()
+
+
+def _list_child_issue_ids(*, epic_id: str, beads_root: Path, cwd: Path) -> set[str]:
+    issues = beads.run_bd_json(["list", "--parent", epic_id], beads_root=beads_root, cwd=cwd)
+    ids: set[str] = set()
+    for issue in issues:
+        issue_id = issue.get("id")
+        if isinstance(issue_id, str):
+            cleaned = issue_id.strip()
+            if cleaned:
+                ids.add(cleaned)
+    return ids
+
+
+def _extract_issue_ids_from_output(raw_output: str) -> list[str]:
+    seen: set[str] = set()
+    issue_ids: list[str] = []
+    for match in _ISSUE_ID_PATTERN.findall(raw_output):
+        if match in seen:
+            continue
+        issue_ids.append(match)
+        seen.add(match)
+    return issue_ids
+
+
+def _resolve_created_issue_id(
+    *,
+    epic_id: str,
+    create_output: str,
+    existing_child_ids: set[str],
+    beads_root: Path,
+    cwd: Path,
+) -> str:
+    current_child_ids = _list_child_issue_ids(epic_id=epic_id, beads_root=beads_root, cwd=cwd)
+    newly_created_ids = sorted(current_child_ids - existing_child_ids)
+    if len(newly_created_ids) == 1:
+        return newly_created_ids[0]
+
+    output_issue_ids = _extract_issue_ids_from_output(create_output)
+    created_candidates = [
+        issue_id for issue_id in output_issue_ids if issue_id in newly_created_ids
+    ]
+    if len(created_candidates) == 1:
+        return created_candidates[0]
+
+    if not newly_created_ids:
+        print(
+            "error: create did not produce a new child issue id; refusing to mutate existing changesets",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "error: create returned ambiguous child ids; refusing to mutate existing changesets "
+            f"({', '.join(newly_created_ids)})",
+            file=sys.stderr,
+        )
+    raise SystemExit(1)
 
 
 def _apply_status_with_fail_closed(
@@ -141,15 +200,23 @@ def main() -> None:
     if args.no_export:
         create_args.extend(["--label", "ext:no-export"])
 
+    existing_child_ids = _list_child_issue_ids(
+        epic_id=args.epic_id,
+        beads_root=context.beads_root,
+        cwd=context.project_dir,
+    )
     result = beads.run_bd_command(
         create_args,
         beads_root=context.beads_root,
         cwd=context.project_dir,
     )
-    issue_id = (result.stdout or "").strip()
-    if not issue_id:
-        print("error: failed to create changeset bead", file=sys.stderr)
-        raise SystemExit(1)
+    issue_id = _resolve_created_issue_id(
+        epic_id=args.epic_id,
+        create_output=(result.stdout or ""),
+        existing_child_ids=existing_child_ids,
+        beads_root=context.beads_root,
+        cwd=context.project_dir,
+    )
 
     _apply_status_with_fail_closed(
         issue_id=issue_id,
