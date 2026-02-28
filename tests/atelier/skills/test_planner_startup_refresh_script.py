@@ -38,7 +38,7 @@ def test_render_startup_overview_reports_empty_sections(monkeypatch) -> None:
         "Planner startup overview",
         "No unread messages.",
         "No queued messages.",
-        "No deferred changesets under open/in-progress epics.",
+        "No deferred changesets under open/in-progress/blocked epics.",
         "Epics by state:",
         "- (none)",
     ]
@@ -81,6 +81,10 @@ def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatc
                 {"id": "at-1.1", "title": "First deferred", "status": "deferred"},
                 {"id": "at-1.3", "title": "Ready now", "status": "open"},
             ]
+        if parent_id == "at-2":
+            return [
+                {"id": "at-2.1", "title": "Blocked epic child", "status": "deferred"},
+            ]
         return []
 
     monkeypatch.setattr(module.beads, "list_inbox_messages", _fake_list_inbox_messages)
@@ -91,7 +95,11 @@ def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatc
     monkeypatch.setattr(
         module.planner_overview,
         "list_epics",
-        lambda **_kwargs: [{"id": "at-1", "title": "Epic one", "status": "open"}],
+        lambda **_kwargs: [
+            {"id": "at-1", "title": "Epic one", "status": "open"},
+            {"id": "at-2", "title": "Epic blocked", "status": "blocked"},
+            {"id": "at-3", "title": "Epic closed", "status": "closed"},
+        ],
     )
     monkeypatch.setattr(
         module.planner_overview,
@@ -113,10 +121,12 @@ def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatc
         "Queued messages:",
         "- at-q-1 [planner] First | claim: unclaimed",
         "- at-q-2 [planner] Second | claim: claimed by atelier/worker/agent",
-        "Deferred changesets under open/in-progress epics:",
+        "Deferred changesets under open/in-progress/blocked epics:",
         "- at-1 [open] Epic one",
         "  - at-1.1 [deferred] First deferred",
         "  - at-1.2 [deferred] Second deferred",
+        "- at-2 [blocked] Epic blocked",
+        "  - at-2.1 [deferred] Blocked epic child",
         "Epics by state:",
         "Open epics:",
         "- at-1 [open] Example",
@@ -135,5 +145,13 @@ def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatc
                 "cwd": Path("/repo"),
                 "include_closed": False,
             },
-        )
+        ),
+        (
+            "at-2",
+            {
+                "beads_root": Path("/beads"),
+                "cwd": Path("/repo"),
+                "include_closed": False,
+            },
+        ),
     ]

@@ -34,7 +34,7 @@ def _deferred_descendant_changesets(
     groups: list[tuple[dict[str, object], list[dict[str, object]]]] = []
     for epic in sorted(epics, key=_issue_sort_key):
         epic_status = lifecycle.canonical_lifecycle_status(epic.get("status"))
-        if epic_status not in {"open", "in_progress"}:
+        if epic_status not in {"open", "in_progress", "blocked"}:
             continue
         epic_id = str(epic.get("id") or "").strip()
         if not epic_id:
@@ -68,10 +68,10 @@ def _append_deferred_changeset_summary(
         repo_root=repo_root,
     )
     if not groups:
-        lines.append("No deferred changesets under open/in-progress epics.")
+        lines.append("No deferred changesets under open/in-progress/blocked epics.")
         return
 
-    lines.append("Deferred changesets under open/in-progress epics:")
+    lines.append("Deferred changesets under open/in-progress/blocked epics:")
     for epic, deferred in groups:
         epic_id = str(epic.get("id") or "").strip() or "(unknown)"
         epic_status = lifecycle.canonical_lifecycle_status(epic.get("status")) or "unknown"
