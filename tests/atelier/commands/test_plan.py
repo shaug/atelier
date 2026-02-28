@@ -8,6 +8,7 @@ import atelier.codex as codex
 import atelier.commands.plan as plan_cmd
 import atelier.external_registry as external_registry
 import atelier.planner_sync as planner_sync
+import atelier.sessions as sessions_mod
 import atelier.worktrees as worktrees
 from atelier.agent_home import AgentHome
 from atelier.config import ProjectConfig
@@ -35,6 +36,20 @@ class _DummyPlannerSyncMonitor:
 
     def stop(self) -> None:
         self.stopped = True
+
+
+@pytest.fixture(autouse=True)
+def _stub_session_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(plan_cmd.sessions, "find_codex_sessions", lambda *_a, **_k: ())
+
+
+@pytest.fixture(autouse=True)
+def _stub_bd_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Result:
+        stdout = ""
+        returncode = 0
+
+    monkeypatch.setattr(plan_cmd.beads, "run_bd_command", lambda *_a, **_k: _Result())
 
 
 def test_trace_flag_defaults_to_disabled_even_when_legacy_env_is_set(
@@ -148,6 +163,361 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         "planner-planner",
         root_branch="main-planner-planner",
         git_path="git",
+    )
+
+
+def test_plan_resumes_saved_planner_session_by_default(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "worktrees" / "planner"
+    agent = AgentHome(
+        name="planner",
+        agent_id="atelier/planner/planner",
+        role="planner",
+        path=Path("/project/agents/planner"),
+    )
+    captured_cmd: list[str] = []
+
+    def fake_run_codex_command(cmd, *, cwd: Path | None, env: dict | None):
+        captured_cmd[:] = list(cmd)
+        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+
+    saved = "sess-saved"
+    matches = (
+        sessions_mod.CodexSessionMatch(saved, Path("/tmp/a.jsonl"), 200.0),
+        sessions_mod.CodexSessionMatch("sess-newer", Path("/tmp/b.jsonl"), 300.0),
+    )
+
+    with (
+        patch(
+            "atelier.commands.plan.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.plan.agent_home.resolve_agent_home", return_value=agent),
+        patch("atelier.commands.plan.agent_home.cleanup_agent_home"),
+        patch(
+            "atelier.commands.plan.beads.ensure_agent_bead",
+            return_value={
+                "id": "at-agent",
+                "description": f"{plan_cmd._PLANNER_SESSION_ID_FIELD}: {saved}\n",
+            },
+        ),
+        patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
+        patch("atelier.commands.plan.worktrees.ensure_git_worktree", return_value=worktree_path),
+        patch(
+            "atelier.commands.plan.sessions.find_codex_sessions",
+            return_value=matches,
+        ),
+        patch("atelier.commands.plan.codex.run_codex_command", side_effect=fake_run_codex_command),
+        patch("atelier.commands.plan.beads.update_issue_description_fields") as update_fields,
+        patch("atelier.commands.plan.say") as say,
+    ):
+        plan_cmd.run_planner(SimpleNamespace(epic_id=None))
+
+    assert captured_cmd[-2:] == ["resume", saved]
+    assert any("resume sess-saved" in str(call.args[0]) for call in say.call_args_list)
+    update_fields.assert_not_called()
+
+
+def test_plan_stale_saved_session_starts_fresh_and_clears_pointer(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "worktrees" / "planner"
+    agent = AgentHome(
+        name="planner",
+        agent_id="atelier/planner/planner",
+        role="planner",
+        path=Path("/project/agents/planner"),
+    )
+    captured_cmd: list[str] = []
+    stale = "sess-stale"
+
+    def fake_run_codex_command(cmd, *, cwd: Path | None, env: dict | None):
+        captured_cmd[:] = list(cmd)
+        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+
+    matches = (sessions_mod.CodexSessionMatch("sess-other", Path("/tmp/other.jsonl"), 500.0),)
+
+    with (
+        patch(
+            "atelier.commands.plan.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.plan.agent_home.resolve_agent_home", return_value=agent),
+        patch("atelier.commands.plan.agent_home.cleanup_agent_home"),
+        patch(
+            "atelier.commands.plan.beads.ensure_agent_bead",
+            return_value={
+                "id": "at-agent",
+                "description": f"{plan_cmd._PLANNER_SESSION_ID_FIELD}: {stale}\n",
+            },
+        ),
+        patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
+        patch("atelier.commands.plan.worktrees.ensure_git_worktree", return_value=worktree_path),
+        patch(
+            "atelier.commands.plan.sessions.find_codex_sessions",
+            return_value=matches,
+        ),
+        patch("atelier.commands.plan.codex.run_codex_command", side_effect=fake_run_codex_command),
+        patch("atelier.commands.plan.beads.update_issue_description_fields") as update_fields,
+        patch("atelier.commands.plan.say") as say,
+    ):
+        plan_cmd.run_planner(SimpleNamespace(epic_id=None))
+
+    assert "resume" not in captured_cmd
+    assert any("stale or missing" in str(call.args[0]) for call in say.call_args_list)
+    assert update_fields.call_count == 1
+    update_fields.assert_called_with(
+        "at-agent",
+        {plan_cmd._PLANNER_SESSION_ID_FIELD: None},
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
+def test_plan_uses_latest_match_when_saved_pointer_is_absent(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "worktrees" / "planner"
+    agent = AgentHome(
+        name="planner",
+        agent_id="atelier/planner/planner",
+        role="planner",
+        path=Path("/project/agents/planner"),
+    )
+    captured_cmd: list[str] = []
+    session_id = "sess-latest"
+    matches = (sessions_mod.CodexSessionMatch(session_id, Path("/tmp/latest.jsonl"), 500.0),)
+
+    def fake_run_codex_command(cmd, *, cwd: Path | None, env: dict | None):
+        captured_cmd[:] = list(cmd)
+        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+
+    with (
+        patch(
+            "atelier.commands.plan.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.plan.agent_home.resolve_agent_home", return_value=agent),
+        patch("atelier.commands.plan.agent_home.cleanup_agent_home"),
+        patch(
+            "atelier.commands.plan.beads.ensure_agent_bead",
+            return_value={"id": "at-agent", "description": ""},
+        ),
+        patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
+        patch("atelier.commands.plan.worktrees.ensure_git_worktree", return_value=worktree_path),
+        patch(
+            "atelier.commands.plan.sessions.find_codex_sessions",
+            return_value=matches,
+        ),
+        patch("atelier.commands.plan.codex.run_codex_command", side_effect=fake_run_codex_command),
+        patch("atelier.commands.plan.beads.update_issue_description_fields") as update_fields,
+    ):
+        plan_cmd.run_planner(SimpleNamespace(epic_id=None))
+
+    assert captured_cmd[-2:] == ["resume", session_id]
+    update_fields.assert_called_once_with(
+        "at-agent",
+        {plan_cmd._PLANNER_SESSION_ID_FIELD: session_id},
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+
+def test_plan_new_session_flag_bypasses_resume_lookup(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "worktrees" / "planner"
+    agent = AgentHome(
+        name="planner",
+        agent_id="atelier/planner/planner",
+        role="planner",
+        path=Path("/project/agents/planner"),
+    )
+    captured_cmd: list[str] = []
+
+    def fake_run_codex_command(cmd, *, cwd: Path | None, env: dict | None):
+        captured_cmd[:] = list(cmd)
+        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+
+    with (
+        patch(
+            "atelier.commands.plan.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.plan.agent_home.resolve_agent_home", return_value=agent),
+        patch("atelier.commands.plan.agent_home.cleanup_agent_home"),
+        patch(
+            "atelier.commands.plan.beads.ensure_agent_bead",
+            return_value={
+                "id": "at-agent",
+                "description": f"{plan_cmd._PLANNER_SESSION_ID_FIELD}: sess-saved\n",
+            },
+        ),
+        patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
+        patch("atelier.commands.plan.worktrees.ensure_git_worktree", return_value=worktree_path),
+        patch(
+            "atelier.commands.plan.sessions.find_codex_sessions",
+            return_value=(sessions_mod.CodexSessionMatch("sess-other", Path("/tmp/x"), 100.0),),
+        ) as find_sessions,
+        patch("atelier.commands.plan.codex.run_codex_command", side_effect=fake_run_codex_command),
+        patch("atelier.commands.plan.say") as say,
+    ):
+        plan_cmd.run_planner(SimpleNamespace(epic_id=None, new_session=True))
+
+    assert "resume" not in captured_cmd
+    find_sessions.assert_not_called()
+    assert any("--new-session requested" in str(call.args[0]) for call in say.call_args_list)
+
+
+def test_plan_persists_new_session_id_when_available(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "worktrees" / "planner"
+    agent = AgentHome(
+        name="planner",
+        agent_id="atelier/planner/planner",
+        role="planner",
+        path=Path("/project/agents/planner"),
+    )
+    new_session_id = "sess-new"
+
+    def fake_run_codex_command(cmd, *, cwd: Path | None, env: dict | None):
+        return codex.CodexRunResult(returncode=0, session_id=new_session_id, resume_command=None)
+
+    with (
+        patch(
+            "atelier.commands.plan.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.plan.agent_home.resolve_agent_home", return_value=agent),
+        patch("atelier.commands.plan.agent_home.cleanup_agent_home"),
+        patch(
+            "atelier.commands.plan.beads.ensure_agent_bead",
+            return_value={"id": "at-agent", "description": ""},
+        ),
+        patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
+        patch("atelier.commands.plan.worktrees.ensure_git_worktree", return_value=worktree_path),
+        patch("atelier.commands.plan.codex.run_codex_command", side_effect=fake_run_codex_command),
+        patch("atelier.commands.plan.beads.update_issue_description_fields") as update_fields,
+    ):
+        plan_cmd.run_planner(SimpleNamespace(epic_id=None))
+
+    update_fields.assert_called_once_with(
+        "at-agent",
+        {plan_cmd._PLANNER_SESSION_ID_FIELD: new_session_id},
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
     )
 
 

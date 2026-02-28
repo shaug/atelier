@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from .. import (
     agent_home,
@@ -21,6 +22,7 @@ from .. import (
     planner_sync,
     policy,
     prompting,
+    sessions,
     skills,
     templates,
     workspace,
@@ -35,6 +37,88 @@ def _issue_sort_key(issue: dict[str, object]) -> tuple[str, str]:
     issue_id = str(issue.get("id") or "").strip()
     title = str(issue.get("title") or "").strip()
     return (issue_id, title)
+
+
+_PLANNER_SESSION_ID_FIELD = "planner_session.id"
+
+_PlannerSessionMode = Literal["resume", "fresh"]
+
+
+@dataclass(frozen=True)
+class _PlannerSessionSelection:
+    mode: _PlannerSessionMode
+    session_id: str | None
+    reason: str
+    clear_saved_pointer: bool = False
+
+
+def _clean_session_id(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or cleaned.lower() == "null":
+        return None
+    return cleaned
+
+
+def _saved_planner_session_id(agent_bead: dict[str, object]) -> str | None:
+    description = agent_bead.get("description")
+    text = description if isinstance(description, str) else ""
+    fields = beads.parse_description_fields(text)
+    return _clean_session_id(fields.get(_PLANNER_SESSION_ID_FIELD))
+
+
+def _select_planner_session(
+    *,
+    agent_spec: agents.AgentSpec,
+    project_enlistment: str,
+    planner_branch: str,
+    saved_session_id: str | None,
+    new_session: bool,
+) -> _PlannerSessionSelection:
+    if new_session:
+        return _PlannerSessionSelection(
+            mode="fresh",
+            session_id=None,
+            reason="--new-session requested",
+        )
+    if agent_spec.name != "codex" or agent_spec.resume_subcommand is None:
+        return _PlannerSessionSelection(
+            mode="fresh",
+            session_id=None,
+            reason=f"{agent_spec.display_name} resume is unavailable for planner sessions",
+        )
+    matches = sessions.find_codex_sessions(project_enlistment, planner_branch)
+    if saved_session_id:
+        if any(item.session_id == saved_session_id for item in matches):
+            return _PlannerSessionSelection(
+                mode="resume",
+                session_id=saved_session_id,
+                reason="saved planner session id",
+            )
+        return _PlannerSessionSelection(
+            mode="fresh",
+            session_id=None,
+            reason=f"saved planner session {saved_session_id} is stale or missing",
+            clear_saved_pointer=True,
+        )
+    if matches:
+        return _PlannerSessionSelection(
+            mode="resume",
+            session_id=matches[0].session_id,
+            reason="most recent matching planner session",
+        )
+    return _PlannerSessionSelection(
+        mode="fresh",
+        session_id=None,
+        reason="no matching planner session found",
+    )
+
+
+def _planner_session_mode_line(selection: _PlannerSessionSelection) -> str:
+    if selection.mode == "resume" and selection.session_id:
+        return f"Planner session mode: resume {selection.session_id} ({selection.reason})."
+    return f"Planner session mode: start new ({selection.reason})."
 
 
 def _list_inbox_messages(
@@ -300,6 +384,7 @@ def run_planner(args: object) -> None:
     """Start a planning session for Beads epics and changesets."""
     timings: list[tuple[str, float]] = []
     trace = _trace_enabled(getattr(args, "trace", False))
+    new_session_requested = bool(getattr(args, "new_session", False))
     project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
@@ -325,6 +410,7 @@ def run_planner(args: object) -> None:
             agent_bead_id = str(agent_bead.get("id") or "").strip()
             if not agent_bead_id:
                 die("failed to determine planner agent bead id")
+            saved_planner_session_id = _saved_planner_session_id(agent_bead)
             finish()
             if bool(getattr(args, "reconcile", False)):
                 finish = _step("Reconcile blocked changesets", timings=timings, trace=trace)
@@ -564,14 +650,57 @@ def run_planner(args: object) -> None:
                 start_cmd, start_cwd = agent_spec.build_start_command(
                     agent.path, agent_options, opening_prompt
                 )
+                selection = _select_planner_session(
+                    agent_spec=agent_spec,
+                    project_enlistment=project_enlistment,
+                    planner_branch=planner_branch,
+                    saved_session_id=saved_planner_session_id,
+                    new_session=new_session_requested,
+                )
+                say(_planner_session_mode_line(selection))
+                if selection.clear_saved_pointer and saved_planner_session_id:
+                    beads.update_issue_description_fields(
+                        agent_bead_id,
+                        {_PLANNER_SESSION_ID_FIELD: None},
+                        beads_root=beads_root,
+                        cwd=repo_root,
+                    )
+                launch_cmd, launch_cwd = start_cmd, start_cwd
+                if selection.mode == "resume" and selection.session_id:
+                    resume = agent_spec.build_resume_command(
+                        agent.path,
+                        agent_options,
+                        selection.session_id,
+                    )
+                    if resume is not None:
+                        launch_cmd, launch_cwd = resume
+                    else:
+                        say(
+                            "Planner session mode: start new "
+                            "(resume command unavailable for this agent)."
+                        )
                 if agent_spec.name == "codex":
-                    result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
+                    result = codex.run_codex_command(launch_cmd, cwd=launch_cwd, env=env)
                     if result is None:
-                        die(f"missing required command: {start_cmd[0]}")
+                        die(f"missing required command: {launch_cmd[0]}")
                     if result.returncode != 0:
-                        die(f"command failed: {' '.join(start_cmd)}")
+                        die(f"command failed: {' '.join(launch_cmd)}")
+                    active_session_id = _clean_session_id(result.session_id)
+                    if active_session_id is None and selection.mode == "resume":
+                        active_session_id = selection.session_id
+                    if active_session_id:
+                        say(f"Planner session id: {active_session_id}")
+                        if active_session_id != saved_planner_session_id:
+                            beads.update_issue_description_fields(
+                                agent_bead_id,
+                                {_PLANNER_SESSION_ID_FIELD: active_session_id},
+                                beads_root=beads_root,
+                                cwd=repo_root,
+                            )
+                    else:
+                        say("Planner session id: unavailable.")
                 else:
-                    exec.run_command(start_cmd, cwd=start_cwd, env=env)
+                    exec.run_command(launch_cmd, cwd=launch_cwd, env=env)
             finally:
                 sync_monitor.stop()
     finally:

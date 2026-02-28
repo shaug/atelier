@@ -2,9 +2,19 @@
 
 import json
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 from .workspace import workspace_session_identifier
+
+
+@dataclass(frozen=True)
+class CodexSessionMatch:
+    """Resolved Codex session candidate for a workspace."""
+
+    session_id: str
+    path: Path
+    modified_at: float
 
 
 def read_first_user_message(path: Path) -> str | None:
@@ -267,11 +277,39 @@ def find_codex_session(
         >>> find_codex_session(\"/repo\", \"feat/demo\") is None or True
         True
     """
+    matches = find_codex_sessions(
+        project_enlistment,
+        workspace_branch,
+        workspace_uid,
+    )
+    if not matches:
+        return None
+    return matches[0].session_id
+
+
+def find_codex_sessions(
+    project_enlistment: str,
+    workspace_branch: str,
+    workspace_uid: str | None = None,
+) -> tuple[CodexSessionMatch, ...]:
+    """Find Codex sessions matching a workspace in deterministic order.
+
+    Ordering uses newest transcript first, then lexicographic path order when
+    timestamps tie.
+
+    Args:
+        project_enlistment: Absolute path to the local enlistment.
+        workspace_branch: Workspace branch name.
+        workspace_uid: Unique workspace instance identifier.
+
+    Returns:
+        Tuple of matching session candidates.
+    """
     sessions_root = Path.home() / ".codex" / "sessions"
     if not sessions_root.exists():
-        return None
+        return ()
     target = workspace_session_identifier(project_enlistment, workspace_branch, workspace_uid)
-    matches: list[tuple[float, Path, str | None]] = []
+    matches: list[CodexSessionMatch] = []
     for path in sessions_root.rglob("*"):
         if path.suffix not in {".json", ".jsonl"}:
             continue
@@ -281,10 +319,7 @@ def find_codex_session(
             mtime = path.stat().st_mtime
         except OSError:
             continue
-        session_id = read_session_id(path)
-        matches.append((mtime, path, session_id))
-    if not matches:
-        return None
-    matches.sort(key=lambda item: item[0], reverse=True)
-    _, path, session_id = matches[0]
-    return session_id or path.stem
+        session_id = read_session_id(path) or path.stem
+        matches.append(CodexSessionMatch(session_id=session_id, path=path, modified_at=mtime))
+    matches.sort(key=lambda item: (-item.modified_at, str(item.path)))
+    return tuple(matches)
