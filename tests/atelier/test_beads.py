@@ -771,6 +771,7 @@ def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
     with (
         patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
         patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads._repo_slug_for_gate", return_value=None),
         patch("atelier.beads.die", side_effect=fake_die),
     ):
         with pytest.raises(
@@ -858,6 +859,30 @@ def test_run_bd_command_allows_in_progress_when_dependency_integrated_but_not_cl
     assert ["bd", "list", "--parent", "at-2", "--json"] in calls
     assert ["bd", "show", "at-1", "--json"] in calls
     assert ["bd", "update", "at-2", "--status", "in_progress"] in calls
+
+
+def test_changeset_integrated_for_gate_uses_worker_integration_signal() -> None:
+    issue = {"id": "at-1", "description": "changeset.work_branch: feat/at-1\n"}
+    repo_root = Path("/repo")
+
+    with (
+        patch("atelier.beads._repo_slug_for_gate", return_value="org/repo"),
+        patch(
+            "atelier.worker.integration.changeset_integration_signal",
+            return_value=(True, "abc1234"),
+        ) as integration_signal,
+    ):
+        integrated = beads._changeset_integrated_for_gate(  # pyright: ignore[reportPrivateUsage]
+            issue,
+            repo_root=repo_root,
+        )
+
+    assert integrated is True
+    integration_signal.assert_called_once()
+    assert integration_signal.call_args.args == (issue,)
+    assert integration_signal.call_args.kwargs["repo_slug"] == "org/repo"
+    assert integration_signal.call_args.kwargs["repo_root"] == repo_root
+    assert callable(integration_signal.call_args.kwargs["lookup_pr_payload"])
 
 
 def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(
