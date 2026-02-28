@@ -236,6 +236,116 @@ def test_changeset_base_branch_uses_integration_parent_for_integrated_join_depen
     assert updates[-1]["parent_base"] == "main-sha"
 
 
+def test_changeset_base_branch_blocks_join_default_fallback_without_explicit_heritage_parent(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": ("changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root\n"),
+        "dependencies": ["at-epic.1", "at-epic.2"],
+    }
+
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "changeset.work_branch: feat/at-epic.1\n"}]
+            if args == ["show", "at-epic.1"]
+            else (
+                [{"description": "changeset.work_branch: feat/at-epic.2\n"}]
+                if args == ["show", "at-epic.2"]
+                else []
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state.worker_integration_service,
+        "changeset_integration_signal",
+        lambda *_args, **_kwargs: (True, "abc1234"),
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_default_branch",
+        lambda *_args, **_kwargs: "main",
+    )
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        repo_slug="org/repo",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert base is None
+
+
+def test_changeset_base_branch_uses_same_dependency_integration_signal_as_pr_gate(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: feat/root\n"
+            "workspace.parent_branch: main\n"
+        ),
+        "dependencies": ["at-epic.1", "at-epic.2"],
+    }
+    observed_repo_slugs: list[str | None] = []
+    observed_lookup_payloads: list[dict[str, object] | None] = []
+
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "changeset.work_branch: feat/at-epic.1\n"}]
+            if args == ["show", "at-epic.1"]
+            else (
+                [{"description": "changeset.work_branch: feat/at-epic.2\n"}]
+                if args == ["show", "at-epic.2"]
+                else []
+            )
+        ),
+    )
+
+    def fake_lookup(repo_slug: str | None, branch: str) -> dict[str, object] | None:
+        return {"repo_slug": repo_slug or "", "branch": branch}
+
+    def fake_integration_signal(
+        _issue: dict[str, object],
+        *,
+        repo_slug: str | None,
+        repo_root: Path,
+        lookup_pr_payload,
+        git_path: str | None,
+    ) -> tuple[bool, str | None]:
+        del repo_root, git_path
+        observed_repo_slugs.append(repo_slug)
+        observed_lookup_payloads.append(lookup_pr_payload(repo_slug, "feature/dependency"))
+        return True, "abc1234"
+
+    monkeypatch.setattr(
+        work_finalization_state.worker_integration_service,
+        "changeset_integration_signal",
+        fake_integration_signal,
+    )
+
+    base = work_finalization_state.changeset_base_branch(
+        issue,
+        repo_slug="org/repo",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+        lookup_pr_payload_fn=fake_lookup,
+    )
+
+    assert base == "main"
+    assert observed_repo_slugs == ["org/repo", "org/repo"]
+    assert observed_lookup_payloads == [
+        {"repo_slug": "org/repo", "branch": "feature/dependency"},
+        {"repo_slug": "org/repo", "branch": "feature/dependency"},
+    ]
+
+
 def test_changeset_base_branch_keeps_stacked_parent_before_integration(monkeypatch) -> None:
     issue = {
         "description": (

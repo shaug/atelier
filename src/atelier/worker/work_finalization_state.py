@@ -418,9 +418,11 @@ def _lookup_no_pr_payload(_repo_slug: str | None, _branch: str) -> dict[str, obj
 def _dependencies_integrated(
     dependency_ids: tuple[str, ...],
     *,
+    repo_slug: str | None,
     beads_root: Path | None,
     repo_root: Path,
     git_path: str | None,
+    lookup_pr_payload_fn: Callable[[str | None, str], dict[str, object] | None],
 ) -> bool:
     if beads_root is None:
         return False
@@ -433,9 +435,9 @@ def _dependencies_integrated(
         dependency_issue = dependency_issues[0]
         integrated, _ = worker_integration_service.changeset_integration_signal(
             dependency_issue,
-            repo_slug=None,
+            repo_slug=repo_slug,
             repo_root=repo_root,
-            lookup_pr_payload=_lookup_no_pr_payload,
+            lookup_pr_payload=lookup_pr_payload_fn,
             git_path=git_path,
         )
         if not integrated:
@@ -446,9 +448,11 @@ def _dependencies_integrated(
 def changeset_base_branch(
     issue: dict[str, object],
     *,
+    repo_slug: str | None = None,
     beads_root: Path | None = None,
     repo_root: Path,
     git_path: str | None,
+    lookup_pr_payload_fn: Callable[[str | None, str], dict[str, object] | None] = lookup_pr_payload,
 ) -> str | None:
     """Changeset base branch.
 
@@ -483,8 +487,10 @@ def changeset_base_branch(
     if workspace_parent_branch and root_branch and workspace_parent_branch == root_branch:
         workspace_parent_branch = ""
     default_parent_branch = ""
-    if not workspace_parent_branch and (
-        not parent_branch or (root_branch and parent_branch == root_branch)
+    if (
+        not lineage.blocked
+        and not workspace_parent_branch
+        and (not parent_branch or (root_branch and parent_branch == root_branch))
     ):
         default_parent_branch = _resolve_non_root_default_branch(
             root_branch=root_branch,
@@ -498,9 +504,11 @@ def changeset_base_branch(
             and integration_parent_branch
             and _dependencies_integrated(
                 lineage.dependency_ids,
+                repo_slug=repo_slug,
                 beads_root=beads_root,
                 repo_root=repo_root,
                 git_path=git_path,
+                lookup_pr_payload_fn=lookup_pr_payload_fn,
             )
         ):
             return None
@@ -679,9 +687,11 @@ def align_existing_pr_base(
 
     expected_base = changeset_base_branch(
         issue,
+        repo_slug=repo_slug,
         beads_root=beads_root,
         repo_root=repo_root,
         git_path=git_path,
+        lookup_pr_payload_fn=lookup_pr_payload,
     )
     expected_branch = _normalize_branch(expected_base)
     if not expected_branch:

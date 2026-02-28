@@ -582,7 +582,11 @@ def attempt_create_pr(
     render_changeset_pr_body: Callable[[dict[str, object]], str],
 ) -> tuple[bool, str]:
     base_branch = changeset_base_branch(
-        issue, beads_root=beads_root, repo_root=repo_root, git_path=git_path
+        issue,
+        repo_slug=repo_slug,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        git_path=git_path,
     )
     if not base_branch:
         return False, "missing PR base branch metadata"
