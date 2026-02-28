@@ -11,6 +11,7 @@ from typing import Iterator
 
 from ... import beads, changesets, dependency_lineage, exec, git, pr_strategy, prs
 from ... import log as atelier_log
+from .. import integration as worker_integration
 from ..models import FinalizeResult
 
 
@@ -31,6 +32,7 @@ class StackIntegrityPreflightResult:
     edge: str | None = None
     detail: str | None = None
     remediation: str | None = None
+    dependencies_integrated: bool = False
 
 
 _STACK_INTEGRITY_REMEDIATIONS: dict[str, str] = {
@@ -57,6 +59,9 @@ _STACK_INTEGRITY_REMEDIATIONS: dict[str, str] = {
     ),
     "dependency-parent-metadata-reconcile-failed": (
         "Repair parent review metadata and rerun finalize."
+    ),
+    "dependency-not-integrated": (
+        "Wait until every declared dependency shows integrated evidence, then rerun finalize."
     ),
 }
 
@@ -88,6 +93,55 @@ def _normalize_branch(value: object) -> str | None:
     if not cleaned or cleaned.lower() == "null":
         return None
     return cleaned
+
+
+def _dependency_integrated(
+    dependency_issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+    lookup_pr_payload: Callable[..., dict[str, object] | None],
+) -> bool:
+    integrated, _ = worker_integration.changeset_integration_signal(
+        dependency_issue,
+        repo_slug=repo_slug,
+        repo_root=repo_root,
+        lookup_pr_payload=lookup_pr_payload,
+        git_path=git_path,
+    )
+    return integrated
+
+
+def _dependency_integration_diagnostics(
+    dependency_ids: tuple[str, ...],
+    *,
+    lookup_dependency_issue: Callable[[str], dict[str, object] | None],
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+    lookup_pr_payload: Callable[..., dict[str, object] | None],
+) -> tuple[bool, tuple[str, ...]]:
+    unresolved: list[str] = []
+    for dependency_id in dependency_ids:
+        dependency_issue = lookup_dependency_issue(dependency_id)
+        if dependency_issue is None:
+            unresolved.append(f"{dependency_id}(unavailable)")
+            continue
+        if _dependency_integrated(
+            dependency_issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            lookup_pr_payload=lookup_pr_payload,
+        ):
+            continue
+        unresolved.append(dependency_id)
+    return not unresolved, tuple(unresolved)
+
+
+def _dependency_id_from_unresolved(token: str) -> str:
+    return token.split("(", 1)[0].strip()
 
 
 def sequential_stack_integrity_preflight(
@@ -133,11 +187,40 @@ def sequential_stack_integrity_preflight(
     if not lineage.dependency_ids:
         return StackIntegrityPreflightResult(ok=True)
 
+    dependencies_integrated, unresolved_dependency_ids = _dependency_integration_diagnostics(
+        lineage.dependency_ids,
+        lookup_dependency_issue=lookup_dependency_issue_local,
+        repo_slug=repo_slug,
+        repo_root=repo_root,
+        git_path=git_path,
+        lookup_pr_payload=lookup_pr_payload,
+    )
+    if dependencies_integrated:
+        return StackIntegrityPreflightResult(ok=True, dependencies_integrated=True)
+
     edge = _dependency_edge(
         issue=issue,
         parent_id=lineage.dependency_parent_id,
         parent_branch=lineage.dependency_parent_branch,
     )
+    unresolved_dependency_set = {
+        _dependency_id_from_unresolved(token) for token in unresolved_dependency_ids
+    }
+    unresolved_non_parent = (
+        bool(unresolved_dependency_set)
+        and lineage.dependency_parent_id is not None
+        and lineage.dependency_parent_id not in unresolved_dependency_set
+    )
+    if unresolved_non_parent:
+        reason = "dependency-not-integrated"
+        detail = "dependencies missing integrated evidence: " + ", ".join(unresolved_dependency_ids)
+        return StackIntegrityPreflightResult(
+            ok=False,
+            reason=reason,
+            edge=edge,
+            detail=detail,
+            remediation=_remediation_for_stack_reason(reason),
+        )
     if lineage.blocked or not lineage.dependency_parent_branch:
         reason = lineage.blocker_reason or "dependency-parent-unresolved"
         detail = lineage.diagnostics[0] if lineage.diagnostics else None
@@ -406,6 +489,12 @@ def changeset_pr_creation_decision(
         root_branch=fields.get("changeset.root_branch"),
         lookup_issue=lookup_dependency_issue_local,
     )
+    if (
+        normalized_strategy == "sequential"
+        and preflight.dependencies_integrated
+        and (lineage.blocked or not lineage.dependency_parent_branch)
+    ):
+        return pr_strategy.pr_strategy_decision(normalized_strategy, parent_state=None)
     if normalized_strategy == "sequential" and lineage.blocked:
         reason_suffix = lineage.blocker_reason or "dependency-parent-unresolved"
         if lineage.diagnostics:
