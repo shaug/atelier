@@ -30,8 +30,8 @@ description: >-
    - Tests executed (if any). If none, state why.
 1. Render ticket references from bead metadata:
    - `python3 <ticket_section_script> --changeset-id <changeset_id> --repo-path <repo_path>`
-   - If output is non-empty, include it as the `## Tickets` section.
-   - If output is empty, remove the `## Tickets` section entirely.
+   - Always include the rendered `## Tickets` section.
+   - If no ticket refs resolve, render `- None`.
 1. Produce:
    - PR title (clear, imperative).
    - PR body (filled template).
@@ -49,4 +49,4 @@ description: >-
 
 - PR title is concise and matches the changeset scope.
 - Template sections are populated or explicitly marked as not applicable.
-- `## Tickets` is present only when external tickets are linked.
+- `## Tickets` is always present.
