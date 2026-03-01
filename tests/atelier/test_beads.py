@@ -13,6 +13,27 @@ import atelier.beads as beads
 from atelier import exec as exec_util
 
 
+@pytest.fixture(autouse=True)
+def _redirect_virtual_beads_issue_locks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Keep synthetic /beads tests writable while preserving real lock semantics."""
+    virtual_root = Path("/beads")
+    redirected_root = tmp_path / "virtual-beads-store"
+    redirected_root.mkdir(parents=True, exist_ok=True)
+    original_lock_path = beads._issue_write_lock_path  # pyright: ignore[reportPrivateUsage]
+
+    def redirected_lock_path(*, issue_id: str, beads_root: Path) -> Path:
+        if beads_root == virtual_root:
+            return original_lock_path(issue_id=issue_id, beads_root=redirected_root)
+        return original_lock_path(issue_id=issue_id, beads_root=beads_root)
+
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCK_STATE", {})
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCAL_LOCKS", {})
+    monkeypatch.setattr(beads, "_issue_write_lock_path", redirected_lock_path)
+
+
 def test_beads_env_sets_beads_db() -> None:
     env = beads.beads_env(Path("/tmp/project/.beads"))
 
@@ -2386,6 +2407,80 @@ def test_update_issue_description_fields_serializes_concurrent_writers() -> None
     assert not errors
     assert "hook_bead: epic-1" in state["description"]
     assert "pr_state: in-review" in state["description"]
+
+
+def test_issue_write_lock_releases_global_guard_before_file_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class _TrackingLock:
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self.held = False
+
+        def acquire(self, blocking: bool = True, timeout: float = -1.0) -> bool:
+            if timeout < 0:
+                acquired = self._lock.acquire(blocking)
+            else:
+                acquired = self._lock.acquire(blocking, timeout)
+            if acquired:
+                self.held = True
+            return acquired
+
+        def release(self) -> None:
+            self.held = False
+            self._lock.release()
+
+        def __enter__(self) -> "_TrackingLock":
+            self.acquire()
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            self.release()
+
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    guard = _TrackingLock()
+    saw_guard_during_acquire: list[bool] = []
+
+    def fake_acquire(handle: object) -> None:
+        del handle
+        saw_guard_during_acquire.append(guard.held)
+
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCK_STATE_GUARD", guard)
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCK_STATE", {})
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCAL_LOCKS", {})
+    monkeypatch.setattr(beads, "_acquire_issue_file_lock", fake_acquire)
+
+    with beads._issue_write_lock("issue-1", beads_root=beads_root):  # pyright: ignore[reportPrivateUsage]
+        pass
+
+    assert saw_guard_during_acquire == [False]
+
+
+def test_issue_write_lock_fails_closed_on_file_lock_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    key = beads._issue_write_lock_key(  # pyright: ignore[reportPrivateUsage]
+        issue_id="issue-1", beads_root=beads_root
+    )
+
+    def fail_acquire(handle: object) -> None:
+        del handle
+        raise OSError("boom")
+
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCK_STATE", {})
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCAL_LOCKS", {})
+    monkeypatch.setattr(beads, "_acquire_issue_file_lock", fail_acquire)
+
+    with pytest.raises(RuntimeError, match="failed to acquire issue write lock for issue-1"):
+        with beads._issue_write_lock("issue-1", beads_root=beads_root):  # pyright: ignore[reportPrivateUsage]
+            pytest.fail("context body should not execute on lock acquisition failure")
+
+    assert key not in beads._ISSUE_WRITE_LOCK_STATE  # pyright: ignore[reportPrivateUsage]
 
 
 def test_update_changeset_branch_metadata_skips_base_overwrite_by_default() -> None:

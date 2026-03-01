@@ -143,6 +143,21 @@ def _release_issue_file_lock(handle: TextIO) -> None:
         return
 
 
+def _open_issue_file_lock(*, issue_id: str, beads_root: Path) -> TextIO:
+    lock_path = _issue_write_lock_path(issue_id=issue_id, beads_root=beads_root)
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = lock_path.open("a+", encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"failed to open issue write lock for {issue_id}") from exc
+    try:
+        _acquire_issue_file_lock(handle)
+    except OSError as exc:
+        handle.close()
+        raise RuntimeError(f"failed to acquire issue write lock for {issue_id}") from exc
+    return handle
+
+
 @contextmanager
 def _issue_write_lock(issue_id: str, *, beads_root: Path) -> Iterator[None]:
     """Serialize multi-step Beads writes for a single issue across workers."""
@@ -161,6 +176,7 @@ def _issue_write_lock(issue_id: str, *, beads_root: Path) -> Iterator[None]:
     to_release: TextIO | None = None
     try:
         current_ident = threading.get_ident()
+        needs_file_lock = False
         with _ISSUE_WRITE_LOCK_STATE_GUARD:
             existing = _ISSUE_WRITE_LOCK_STATE.get(key)
             if existing is not None:
@@ -169,14 +185,14 @@ def _issue_write_lock(issue_id: str, *, beads_root: Path) -> Iterator[None]:
                     raise RuntimeError("issue write lock owner mismatch")
                 _ISSUE_WRITE_LOCK_STATE[key] = (depth + 1, handle, owner_ident)
             else:
-                handle: TextIO | None = None
-                lock_path = _issue_write_lock_path(issue_id=issue_id, beads_root=beads_root)
-                try:
-                    lock_path.parent.mkdir(parents=True, exist_ok=True)
-                    handle = lock_path.open("a+", encoding="utf-8")
-                    _acquire_issue_file_lock(handle)
-                except OSError:
-                    handle = None
+                needs_file_lock = True
+        if needs_file_lock:
+            handle = _open_issue_file_lock(issue_id=issue_id, beads_root=beads_root)
+            with _ISSUE_WRITE_LOCK_STATE_GUARD:
+                active = _ISSUE_WRITE_LOCK_STATE.get(key)
+                if active is not None:
+                    handle.close()
+                    raise RuntimeError("issue write lock state unexpectedly set")
                 _ISSUE_WRITE_LOCK_STATE[key] = (1, handle, current_ident)
         yield
     finally:
