@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .. import agent_home, agents, beads, branching, config, git, prs
+from .. import log as atelier_log
 from .. import root_branch as root_branch_module
 from ..config import ProjectConfig
 from ..models import BranchHistory, BranchPrMode, BranchSquashMessage
@@ -63,6 +65,15 @@ class NonWatchExitOutcome:
     summary_reason: str
 
 
+@dataclass(frozen=True)
+class ImplicitContinuationDecision:
+    """Describe whether to continue implicit epic selection after a failure."""
+
+    should_continue: bool
+    reason: str
+    epic_id: str | None = None
+
+
 def classify_non_watch_exit_outcome(
     summary: WorkerRunSummary, *, explicit_epic_requested: bool
 ) -> NonWatchExitOutcome:
@@ -105,18 +116,40 @@ def _should_skip_failed_implicit_epic(
     summary: WorkerRunSummary,
     explicit_epic_requested: bool,
     excluded_epics: set[str],
-) -> bool:
+) -> ImplicitContinuationDecision:
     """Return whether non-watch loops should skip this local epic failure."""
     if summary.started or explicit_epic_requested:
-        return False
+        return ImplicitContinuationDecision(
+            should_continue=False,
+            reason="explicit_or_started",
+        )
     if summary.reason in _EXPLICIT_NO_WORK_REASONS or summary.reason in _GLOBAL_NO_WORK_REASONS:
-        return False
+        return ImplicitContinuationDecision(
+            should_continue=False,
+            reason="no_work_terminal_reason",
+        )
     if summary.reason in _IMPLICIT_FAIL_CLOSED_REASONS:
-        return False
+        return ImplicitContinuationDecision(
+            should_continue=False,
+            reason="implicit_fail_closed_reason",
+        )
     epic_id = summary.epic_id
-    if not epic_id or epic_id in excluded_epics:
-        return False
-    return True
+    if not epic_id:
+        return ImplicitContinuationDecision(
+            should_continue=False,
+            reason="missing_epic_id",
+        )
+    if epic_id in excluded_epics:
+        return ImplicitContinuationDecision(
+            should_continue=False,
+            reason="epic_already_excluded",
+            epic_id=epic_id,
+        )
+    return ImplicitContinuationDecision(
+        should_continue=True,
+        reason="skip_failed_implicit_epic",
+        epic_id=epic_id,
+    )
 
 
 class WorkerLifecycleAdapter:
@@ -443,30 +476,73 @@ def run_worker_sessions(
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> None:
     epic_id_value = getattr(args, "epic_id", None)
-    explicit_epic_requested = isinstance(epic_id_value, str) and bool(epic_id_value.strip())
+    explicit_epic_id = (
+        epic_id_value.strip() if isinstance(epic_id_value, str) and epic_id_value.strip() else None
+    )
+    explicit_epic_requested = explicit_epic_id is not None
     excluded_implicit_epics: set[str] = set()
 
+    def build_iteration_args() -> object:
+        try:
+            # Deep-clone args so nested mutable fields cannot leak across loop iterations.
+            iteration_args = copy.deepcopy(args)
+        except (TypeError, copy.Error) as exc:
+            # Preserve behavior for uncommon non-deepcopyable args objects, but keep a
+            # diagnostic breadcrumb when we must fall back to shallow copy semantics.
+            atelier_log.debug(
+                "Falling back to shallow args copy after deepcopy failure: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            iteration_args = copy.copy(args)
+        if explicit_epic_requested:
+            setattr(iteration_args, "epic_id", explicit_epic_id)
+            return iteration_args
+        # Guard against accidental explicit-mode carryover across implicit retries.
+        setattr(iteration_args, "epic_id", None)
+        setattr(
+            iteration_args,
+            "implicit_excluded_epic_ids",
+            tuple(sorted(excluded_implicit_epics)),
+        )
+        return iteration_args
+
+    def log_continuation_decision(
+        decision: ImplicitContinuationDecision, *, summary: WorkerRunSummary
+    ) -> None:
+        atelier_log.debug(
+            "worker continuation decision "
+            f"explicit_epic_requested={explicit_epic_requested} "
+            f"decision={decision.reason} summary_reason={summary.reason} "
+            f"epic={summary.epic_id or 'none'} changeset={summary.changeset_id or 'none'}"
+        )
+
     if bool(getattr(args, "queue", False)):
-        summary = run_worker_once(args, mode=mode, dry_run=dry_run, session_key=session_key)
+        iteration_args = build_iteration_args()
+        summary = run_worker_once(
+            iteration_args, mode=mode, dry_run=dry_run, session_key=session_key
+        )
         report_worker_summary(summary, dry_run)
         return
 
     if dry_run:
         while True:
-            if not explicit_epic_requested:
-                setattr(args, "implicit_excluded_epic_ids", tuple(sorted(excluded_implicit_epics)))
-            summary = run_worker_once(args, mode=mode, dry_run=True, session_key=session_key)
+            iteration_args = build_iteration_args()
+            summary = run_worker_once(
+                iteration_args, mode=mode, dry_run=True, session_key=session_key
+            )
             report_worker_summary(summary, True)
             if summary.started:
                 if run_mode == "once":
                     return
                 continue
-            if _should_skip_failed_implicit_epic(
+            decision = _should_skip_failed_implicit_epic(
                 summary=summary,
                 explicit_epic_requested=explicit_epic_requested,
                 excluded_epics=excluded_implicit_epics,
-            ):
-                epic_id = str(summary.epic_id)
+            )
+            log_continuation_decision(decision, summary=summary)
+            if decision.should_continue:
+                epic_id = str(decision.epic_id)
                 excluded_implicit_epics.add(epic_id)
                 dry_run_log(
                     "Skipping failed epic and continuing implicit selection: "
@@ -494,20 +570,21 @@ def run_worker_sessions(
         return
 
     while True:
-        if not explicit_epic_requested:
-            setattr(args, "implicit_excluded_epic_ids", tuple(sorted(excluded_implicit_epics)))
-        summary = run_worker_once(args, mode=mode, dry_run=False, session_key=session_key)
+        iteration_args = build_iteration_args()
+        summary = run_worker_once(iteration_args, mode=mode, dry_run=False, session_key=session_key)
         report_worker_summary(summary, False)
         if summary.started:
             if run_mode == "once":
                 return
             continue
-        if _should_skip_failed_implicit_epic(
+        decision = _should_skip_failed_implicit_epic(
             summary=summary,
             explicit_epic_requested=explicit_epic_requested,
             excluded_epics=excluded_implicit_epics,
-        ):
-            epic_id = str(summary.epic_id)
+        )
+        log_continuation_decision(decision, summary=summary)
+        if decision.should_continue:
+            epic_id = str(decision.epic_id)
             excluded_implicit_epics.add(epic_id)
             emit(
                 "Skipping failed epic and continuing implicit selection: "

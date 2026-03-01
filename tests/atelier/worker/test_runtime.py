@@ -172,7 +172,7 @@ def test_run_worker_sessions_auto_skips_local_epic_failure_and_continues() -> No
         if calls == 1:
             return WorkerRunSummary(
                 started=False,
-                reason="changeset_publish_pending",
+                reason="changeset_stack_integrity_failed",
                 epic_id="at-fail",
             )
         return WorkerRunSummary(started=False, reason="no_eligible_epics")
@@ -193,7 +193,7 @@ def test_run_worker_sessions_auto_skips_local_epic_failure_and_continues() -> No
     assert seen_excluded == [(), ("at-fail",)]
     assert emitted[0] == (
         "Skipping failed epic and continuing implicit selection: "
-        "at-fail (changeset_publish_pending)"
+        "at-fail (changeset_stack_integrity_failed)"
     )
     assert (
         emitted[-1] == "Terminal outcome: taxonomy=no_work_global, summary_reason=no_eligible_epics"
@@ -212,7 +212,7 @@ def test_run_worker_sessions_auto_fails_when_local_failure_repeats_same_epic() -
         seen_excluded.append(tuple(getattr(args, "implicit_excluded_epic_ids", ())))
         return WorkerRunSummary(
             started=False,
-            reason="changeset_publish_pending",
+            reason="changeset_stack_integrity_failed",
             epic_id="at-fail",
         )
 
@@ -234,12 +234,189 @@ def test_run_worker_sessions_auto_fails_when_local_failure_repeats_same_epic() -
     assert seen_excluded[:2] == [(), ("at-fail",)]
     assert emitted[0] == (
         "Skipping failed epic and continuing implicit selection: "
-        "at-fail (changeset_publish_pending)"
+        "at-fail (changeset_stack_integrity_failed)"
     )
     assert emitted[-1] == (
-        "Terminal outcome: taxonomy=fail_closed, summary_reason=changeset_publish_pending, "
+        "Terminal outcome: taxonomy=fail_closed, summary_reason=changeset_stack_integrity_failed, "
         "epic=at-fail"
     )
+
+
+def test_run_worker_sessions_explicit_stack_integrity_failure_is_fail_closed() -> None:
+    emitted: list[str] = []
+
+    with pytest.raises(SystemExit) as raised:
+        runtime.run_worker_sessions(
+            args=type("Args", (), {"queue": False, "epic_id": "at-explicit"})(),
+            mode="auto",
+            run_mode="default",
+            dry_run=False,
+            session_key="sess",
+            run_worker_once=lambda *_args, **_kwargs: WorkerRunSummary(
+                started=False,
+                reason="changeset_stack_integrity_failed",
+                epic_id="at-explicit",
+            ),
+            report_worker_summary=lambda _summary, _dry: None,
+            watch_interval_seconds=lambda: 5,
+            dry_run_log=lambda _message: None,
+            emit=emitted.append,
+        )
+
+    assert raised.value.code == 1
+    assert emitted[-1] == (
+        "Terminal outcome: taxonomy=fail_closed, "
+        "summary_reason=changeset_stack_integrity_failed, epic=at-explicit"
+    )
+
+
+def test_run_worker_sessions_implicit_resets_epic_id_across_retries() -> None:
+    emitted: list[str] = []
+    seen_epic_ids: list[object] = []
+    calls = 0
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del mode, dry_run, session_key
+        nonlocal calls
+        calls += 1
+        seen_epic_ids.append(getattr(args, "epic_id", None))
+        if calls == 1:
+            setattr(args, "epic_id", "at-fail")
+            return WorkerRunSummary(
+                started=False,
+                reason="changeset_stack_integrity_failed",
+                epic_id="at-fail",
+            )
+        return WorkerRunSummary(started=False, reason="no_eligible_epics")
+
+    runtime.run_worker_sessions(
+        args=type("Args", (), {"queue": False, "epic_id": None})(),
+        mode="auto",
+        run_mode="default",
+        dry_run=False,
+        session_key="sess",
+        run_worker_once=run_once,
+        report_worker_summary=lambda _summary, _dry: None,
+        watch_interval_seconds=lambda: 5,
+        dry_run_log=lambda _message: None,
+        emit=emitted.append,
+    )
+
+    assert seen_epic_ids == [None, None]
+    assert emitted[0] == (
+        "Skipping failed epic and continuing implicit selection: "
+        "at-fail (changeset_stack_integrity_failed)"
+    )
+
+
+def test_run_worker_sessions_implicit_retries_do_not_mutate_caller_args() -> None:
+    args = type("Args", (), {})()
+    args.queue = False
+    args.epic_id = None
+    args.nested = {"seen": []}
+    calls = 0
+    seen_nested: list[tuple[int, ...]] = []
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del mode, dry_run, session_key
+        nonlocal calls
+        calls += 1
+        setattr(args, "epic_id", "at-fail")
+        setattr(args, "implicit_excluded_epic_ids", ("at-overwritten",))
+        nested = getattr(args, "nested")
+        nested["seen"].append(calls)
+        seen_nested.append(tuple(nested["seen"]))
+        if calls == 1:
+            return WorkerRunSummary(
+                started=False,
+                reason="changeset_stack_integrity_failed",
+                epic_id="at-fail",
+            )
+        return WorkerRunSummary(started=False, reason="no_eligible_epics")
+
+    runtime.run_worker_sessions(
+        args=args,
+        mode="auto",
+        run_mode="default",
+        dry_run=False,
+        session_key="sess",
+        run_worker_once=run_once,
+        report_worker_summary=lambda _summary, _dry: None,
+        watch_interval_seconds=lambda: 5,
+        dry_run_log=lambda _message: None,
+        emit=lambda _message: None,
+    )
+
+    assert getattr(args, "epic_id", None) is None
+    assert not hasattr(args, "implicit_excluded_epic_ids")
+    assert args.nested == {"seen": []}
+    assert seen_nested == [(1,), (2,)]
+
+
+def test_run_worker_sessions_deepcopy_type_error_falls_back_with_debug_log() -> None:
+    class Args:
+        def __init__(self) -> None:
+            self.queue = False
+            self.epic_id = None
+
+        def __deepcopy__(self, memo: object) -> object:
+            del memo
+            raise TypeError("not deepcopyable")
+
+    original_args = Args()
+    seen_ids: list[int] = []
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del mode, dry_run, session_key
+        seen_ids.append(id(args))
+        return WorkerRunSummary(started=False, reason="no_eligible_epics")
+
+    with patch("atelier.worker.runtime.atelier_log.debug") as debug_log:
+        runtime.run_worker_sessions(
+            args=original_args,
+            mode="auto",
+            run_mode="default",
+            dry_run=False,
+            session_key="sess",
+            run_worker_once=run_once,
+            report_worker_summary=lambda _summary, _dry: None,
+            watch_interval_seconds=lambda: 5,
+            dry_run_log=lambda _message: None,
+            emit=lambda _message: None,
+        )
+
+    assert len(seen_ids) == 1
+    assert any(
+        "Falling back to shallow args copy after deepcopy failure" in str(call.args[0])
+        for call in debug_log.call_args_list
+    )
+
+
+def test_run_worker_sessions_deepcopy_unexpected_error_bubbles() -> None:
+    class Args:
+        def __init__(self) -> None:
+            self.queue = False
+            self.epic_id = None
+
+        def __deepcopy__(self, memo: object) -> object:
+            del memo
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        runtime.run_worker_sessions(
+            args=Args(),
+            mode="auto",
+            run_mode="default",
+            dry_run=False,
+            session_key="sess",
+            run_worker_once=lambda *_args, **_kwargs: WorkerRunSummary(
+                started=False, reason="no_eligible_epics"
+            ),
+            report_worker_summary=lambda _summary, _dry: None,
+            watch_interval_seconds=lambda: 5,
+            dry_run_log=lambda _message: None,
+            emit=lambda _message: None,
+        )
 
 
 def test_classify_non_watch_exit_outcome_is_deterministic() -> None:
