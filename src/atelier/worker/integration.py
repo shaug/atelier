@@ -232,11 +232,29 @@ def changeset_integration_signal(
     work_branch = _normalize_branch_field(fields.get("changeset.work_branch"))
 
     if require_target_branch_proof:
+        pr_merged = False
+        pr_base_branch: str | None = None
+        if repo_slug and work_branch:
+            pr_payload = lookup_pr_payload(repo_slug, work_branch)
+            if isinstance(pr_payload, dict):
+                pr_base_branch = _normalize_branch_field(pr_payload.get("baseRefName"))
+                merged_at = pr_payload.get("mergedAt")
+                if isinstance(merged_at, str):
+                    pr_merged = bool(merged_at.strip())
+                elif merged_at is not None:
+                    pr_merged = True
         target_branches = _integration_target_branches(
             fields,
             repo_root=repo_root,
             git_path=git_path,
         )
+        if (
+            pr_base_branch
+            and pr_base_branch != root_branch
+            and pr_base_branch not in target_branches
+        ):
+            # Prefer authoritative remote PR base branch when available.
+            target_branches.insert(0, pr_base_branch)
         target_refs = _target_refs_for_branches(
             repo_root,
             target_branches,
@@ -309,6 +327,20 @@ def changeset_integration_signal(
             proven, integrated_sha = prove_against_targets(refreshed_target_refs)
             if proven:
                 return True, integrated_sha
+        if pr_merged and integrated_sha_candidates:
+            # Merged PR state plus a resolvable recorded integration SHA is
+            # treated as canonical terminal evidence.
+            for candidate in reversed(integrated_sha_candidates):
+                candidate_sha = git.git_rev_parse(repo_root, candidate, git_path=git_path)
+                if not candidate_sha:
+                    continue
+                if source_refs and not any(
+                    git.git_is_ancestor(repo_root, candidate_sha, source_ref, git_path=git_path)
+                    is True
+                    for source_ref in source_refs
+                ):
+                    continue
+                return True, candidate_sha
         if repo_slug and work_branch:
             lookup_pr_payload(repo_slug, work_branch)
         return False, None
