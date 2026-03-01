@@ -333,8 +333,15 @@ def changeset_integration_signal(
             # treated as canonical terminal evidence.
             for candidate in reversed(integrated_sha_candidates):
                 candidate_sha = git.git_rev_parse(repo_root, candidate, git_path=git_path)
-                if candidate_sha:
-                    return True, candidate_sha
+                if not candidate_sha:
+                    continue
+                if source_refs and not any(
+                    git.git_is_ancestor(repo_root, candidate_sha, source_ref, git_path=git_path)
+                    is True
+                    for source_ref in source_refs
+                ):
+                    continue
+                return True, candidate_sha
         if repo_slug and work_branch:
             lookup_pr_payload(repo_slug, work_branch)
         return False, None
