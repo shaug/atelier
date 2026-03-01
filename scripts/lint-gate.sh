@@ -67,6 +67,10 @@ run_shellcheck_publish_scripts() {
   (cd "${repo_root}" && "${SHELLCHECK_CMD[@]}" -x src/atelier/skills/publish/scripts/*.sh)
 }
 
+run_hotspot_guardrails() {
+  (cd "${repo_root}" && python3 scripts/hotspot_complexity_report.py --check)
+}
+
 run_staged_python_gate() {
   local -a staged_python_files=("$@")
   if [[ ${#staged_python_files[@]} -eq 0 ]]; then
@@ -91,6 +95,7 @@ run_full_gate() {
   run_ruff_check .
   run_ruff_format_check .
   run_shellcheck_publish_scripts
+  run_hotspot_guardrails
   run_pyright
 }
 
