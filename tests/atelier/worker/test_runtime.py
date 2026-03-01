@@ -579,6 +579,37 @@ def test_startup_service_lists_only_non_closed_epics() -> None:
     )
 
 
+def test_next_changeset_service_passes_beads_root_to_review_waiting_gate() -> None:
+    issue = {"id": "at-1.2"}
+    service = work_startup_runtime._NextChangesetService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    with patch(
+        "atelier.worker.work_startup_runtime.changeset_waiting_on_review_or_signals",
+        return_value=True,
+    ) as waiting:
+        result = service.changeset_waiting_on_review_or_signals(
+            issue,
+            repo_slug="org/repo",
+            branch_pr=True,
+            branch_pr_strategy="sequential",
+            git_path="git",
+        )
+
+    assert result is True
+    waiting.assert_called_once_with(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        branch_pr=True,
+        branch_pr_strategy="sequential",
+        git_path="git",
+        beads_root=Path("/beads"),
+    )
+
+
 def test_startup_service_reports_planner_owned_executable_violations() -> None:
     emitted: list[str] = []
     issues = [

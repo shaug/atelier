@@ -677,6 +677,50 @@ def test_changeset_pr_creation_decision_blocks_when_dependency_parent_pr_missing
     assert decision.reason.startswith("blocked:dependency-parent-pr-missing")
 
 
+def test_changeset_pr_creation_decision_blocks_when_dependency_parent_only_pushed_with_stale_pr_signal(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: legacy-parent\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": ["at-epic.1"],
+    }
+
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [
+                {
+                    "description": (
+                        "changeset.work_branch: active-parent\n"
+                        "pr_url: https://github.com/org/repo/pull/11\n"
+                        "pr_number: 11\n"
+                        "pr_state: pushed\n"
+                    )
+                }
+            ]
+            if args == ["show", "at-epic.1"]
+            else []
+        ),
+    )
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda *_args, **_kwargs: None,
+    )
+
+    assert decision.allow_pr is False
+    assert decision.reason.startswith("blocked:dependency-parent-pr-missing")
+
+
 def test_sequential_stack_integrity_preflight_reconciles_stale_parent_review_metadata(
     monkeypatch,
 ) -> None:
