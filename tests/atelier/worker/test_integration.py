@@ -538,6 +538,129 @@ def test_changeset_integration_signal_strict_sha_requires_source_reachability() 
     assert integrated_sha is None
 
 
+def test_changeset_integration_signal_strict_sha_allows_target_only_with_merged_pr() -> None:
+    issue = {
+        "description": (
+            "changeset.integrated_sha: abcdef1234567890abcdef1234567890abcdef12\n"
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/work\n"
+        )
+    }
+
+    def fake_branch_ref_for_lookup(
+        _repo_root: Path, branch: str, *, git_path: str | None = None
+    ) -> str | None:
+        del git_path
+        mapping = {
+            "main": "origin/main",
+            "feat/work": "feat/work",
+            "feat/root": "feat/root",
+        }
+        return mapping.get(branch)
+
+    def fake_is_ancestor(
+        _repo_root: Path,
+        ancestor: str,
+        descendant: str,
+        *,
+        git_path: str | None = None,
+    ) -> bool:
+        del git_path
+        return (
+            ancestor == "abcdef1234567890abcdef1234567890abcdef12" and descendant == "origin/main"
+        )
+
+    with (
+        patch(
+            "atelier.worker.integration.branch_ref_for_lookup",
+            side_effect=fake_branch_ref_for_lookup,
+        ),
+        patch(
+            "atelier.worker.integration.git.git_rev_parse",
+            return_value="abcdef1234567890abcdef1234567890abcdef12",
+        ),
+        patch("atelier.worker.integration.git.git_is_ancestor", side_effect=fake_is_ancestor),
+        patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug="org/repo",
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: {
+                "baseRefName": "main",
+                "mergedAt": "2026-03-01T00:00:00Z",
+            },
+            require_target_branch_proof=True,
+        )
+
+    assert ok is True
+    assert integrated_sha == "abcdef1234567890abcdef1234567890abcdef12"
+
+
+def test_changeset_integration_signal_strict_mode_uses_pr_base_branch_target() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: release\n"
+            "changeset.work_branch: feat/work\n"
+        )
+    }
+
+    def fake_branch_ref_for_lookup(
+        _repo_root: Path, branch: str, *, git_path: str | None = None
+    ) -> str | None:
+        del git_path
+        mapping = {
+            "main": "origin/main",
+            "feat/work": "feat/work",
+            "feat/root": "feat/root",
+        }
+        return mapping.get(branch)
+
+    def fake_is_ancestor(
+        _repo_root: Path,
+        ancestor: str,
+        descendant: str,
+        *,
+        git_path: str | None = None,
+    ) -> bool:
+        del git_path
+        return ancestor == "feat/work" and descendant == "origin/main"
+
+    def fake_rev_parse(_repo_root: Path, ref: str, *, git_path: str | None = None) -> str | None:
+        del git_path
+        mapping = {
+            "feat/work": "worksha",
+            "feat/root": "rootsha",
+        }
+        return mapping.get(ref)
+
+    with (
+        patch(
+            "atelier.worker.integration.branch_ref_for_lookup",
+            side_effect=fake_branch_ref_for_lookup,
+        ),
+        patch("atelier.worker.integration.git.git_default_branch", return_value=None),
+        patch("atelier.worker.integration.git.git_is_ancestor", side_effect=fake_is_ancestor),
+        patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.worker.integration.git.git_rev_parse", side_effect=fake_rev_parse),
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug="org/repo",
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: {
+                "baseRefName": "main",
+                "mergedAt": None,
+            },
+            require_target_branch_proof=True,
+        )
+
+    assert ok is True
+    assert integrated_sha == "worksha"
+
+
 def test_changeset_integration_signal_strict_sha_allows_target_only_when_source_refs_missing() -> (
     None
 ):
