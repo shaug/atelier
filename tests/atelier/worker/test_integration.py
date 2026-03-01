@@ -129,6 +129,62 @@ def test_changeset_integration_signal_strict_mode_uses_origin_target_ref() -> No
     refresh_refs.assert_not_called()
 
 
+def test_changeset_integration_signal_strict_mode_rejects_local_only_target_proof() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/work\n"
+        )
+    }
+
+    def fake_ref_exists(_repo_root: Path, ref: str, *, git_path: str | None = None) -> bool:
+        del git_path
+        return ref in {
+            "refs/heads/feat/root",
+            "refs/heads/feat/work",
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+        }
+
+    def fake_is_ancestor(
+        _repo_root: Path,
+        ancestor: str,
+        descendant: str,
+        *,
+        git_path: str | None = None,
+    ) -> bool:
+        del git_path
+        return ancestor == "feat/work" and descendant == "main"
+
+    def fake_rev_parse(_repo_root: Path, ref: str, *, git_path: str | None = None) -> str | None:
+        del git_path
+        mapping = {
+            "feat/work": "worksha",
+            "feat/root": "rootsha",
+        }
+        return mapping.get(ref)
+
+    with (
+        patch("atelier.worker.integration.git.git_ref_exists", side_effect=fake_ref_exists),
+        patch("atelier.worker.integration.git.git_default_branch", return_value="main"),
+        patch("atelier.worker.integration.git.git_is_ancestor", side_effect=fake_is_ancestor),
+        patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.worker.integration.git.git_rev_parse", side_effect=fake_rev_parse),
+        patch("atelier.worker.integration._refresh_origin_refs", return_value=False),
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug=None,
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: None,
+            require_target_branch_proof=True,
+        )
+
+    assert ok is False
+    assert integrated_sha is None
+
+
 def test_changeset_integration_signal_strict_mode_retries_after_fetch_refresh() -> None:
     issue = {
         "description": (

@@ -97,11 +97,19 @@ def _target_refs_for_branch(
         return []
 
     remote_ref = f"origin/{normalized}"
+    if resolved == remote_ref:
+        return [remote_ref]
+
     refs: list[str] = []
-    if resolved == normalized or resolved == remote_ref:
-        refs.append(remote_ref)
-        if normalized not in refs:
-            refs.append(normalized)
+    if resolved == normalized:
+        remote_exists = git.git_ref_exists(
+            repo_root,
+            f"refs/remotes/{remote_ref}",
+            git_path=git_path,
+        )
+        if remote_exists:
+            return [remote_ref]
+        refs.append(normalized)
         return refs
 
     refs.append(resolved)
