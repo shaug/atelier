@@ -108,6 +108,27 @@ ______________________________________________________________________
 
 Do not add hidden behavior or implicit defaults.
 
+### Concurrency-Safe External Writes
+
+When code writes local external state that can be touched by multiple agents or
+processes, it must be designed to avoid corruption by default.
+
+- Prefer atomic write primitives where available (for example: temp-file + fsync + atomic rename, atomic ref updates, or compare-and-swap style updates).
+- If atomic writes are not available, require explicit read-after-write
+  verification and bounded retries before reporting success.
+- Make write operations idempotent where practical so retries do not duplicate
+  side effects.
+- Fail closed on uncertainty (verification mismatch, partial write, stale
+  precondition, lock contention timeout) and preserve the previous known-good
+  state.
+- Never treat best-effort writes as success when persistence cannot be
+  confirmed.
+- Apply this policy to representative external-state targets, including:
+  - project-scoped Beads state
+  - worktree metadata and mapping files
+  - branch refs and ref-like coordination state
+  - runtime lock, lease, heartbeat, and queue claim files
+
 ### Code Shape & Module Boundaries
 
 - Keep modules cognitively scoped:
