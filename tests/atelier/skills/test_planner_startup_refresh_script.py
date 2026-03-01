@@ -36,8 +36,10 @@ def test_render_startup_overview_reports_empty_sections(monkeypatch) -> None:
 
     assert rendered.splitlines() == [
         "Planner startup overview",
+        "- Beads root: /beads",
         "No unread messages.",
         "No queued messages.",
+        "- Total epics: 0",
         "No deferred changesets under open/in-progress/blocked epics.",
         "Epics by state:",
         "- (none)",
@@ -115,12 +117,14 @@ def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatc
 
     assert rendered.splitlines() == [
         "Planner startup overview",
+        "- Beads root: /beads",
         "Unread messages:",
         "- at-msg-1 Alpha",
         "- at-msg-2 Beta",
         "Queued messages:",
         "- at-q-1 [planner] First | claim: unclaimed",
         "- at-q-2 [planner] Second | claim: claimed by atelier/worker/agent",
+        "- Total epics: 3",
         "Deferred changesets under open/in-progress/blocked epics:",
         "- at-1 [open] Epic one",
         "  - at-1.1 [deferred] First deferred",
@@ -195,8 +199,10 @@ def test_render_startup_overview_caps_deferred_epic_scan(monkeypatch) -> None:
     assert scanned_epics == ["at-1"]
     assert rendered.splitlines() == [
         "Planner startup overview",
+        "- Beads root: /beads",
         "No unread messages.",
         "No queued messages.",
+        "- Total epics: 3",
         "Deferred changesets under open/in-progress/blocked epics:",
         "- at-1 [open] Epic one",
         "  - at-1.1 [deferred] Deferred child",
@@ -204,3 +210,30 @@ def test_render_startup_overview_caps_deferred_epic_scan(monkeypatch) -> None:
         "Epics by state:",
         "- at-1 [open] Example",
     ]
+
+
+def test_main_emits_override_warning(monkeypatch, capsys, tmp_path: Path) -> None:
+    module = _load_script()
+    beads_root = tmp_path / "override-beads"
+    beads_root.mkdir()
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_context",
+        lambda **_kwargs: (beads_root, Path("/repo"), "warning: override mismatch"),
+    )
+    monkeypatch.setattr(
+        module,
+        "_render_startup_overview",
+        lambda *_args, **_kwargs: "Planner startup overview",
+    )
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        ["refresh_overview.py", "--agent-id", "atelier/planner/example"],
+    )
+
+    module.main()
+
+    captured = capsys.readouterr()
+    assert "warning: override mismatch" in captured.err

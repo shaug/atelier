@@ -11,7 +11,7 @@ description: >-
 - agent_id: Stable identity string (e.g. atelier/worker/alice).
 - agent_bead_id: Bead id for the agent.
 - mode: prompt|auto (defaults to auto for idle startup).
-- beads_dir: Optional Beads store path (defaults to repo .beads).
+- beads_dir: Optional Beads store path (defaults to project-scoped Beads root).
 - queue: Optional message queue name to check when idle.
 
 ## Steps

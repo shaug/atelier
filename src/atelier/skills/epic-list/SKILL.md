@@ -9,7 +9,7 @@ description: >-
 ## Inputs
 
 - show_drafts: Optional boolean to include deferred epics.
-- beads_dir: Optional Beads store path (defaults to repo .beads).
+- beads_dir: Optional Beads store path (defaults to project-scoped Beads root).
 
 ## Steps
 
@@ -47,3 +47,5 @@ The output must be:
 - Deferred epics appear only when `show_drafts` is enabled.
 - Issues without `at:epic` are intentionally excluded from this indexed epic
   listing.
+- If `--beads-dir` is explicitly set to a non-project store, the script emits a
+  warning with both resolved paths.

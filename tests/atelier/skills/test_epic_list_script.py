@@ -78,7 +78,9 @@ def test_run_bd_list_uses_resolved_context(monkeypatch) -> None:
     captured: dict[str, Path] = {}
 
     monkeypatch.setattr(
-        module, "_resolve_context", lambda **_kwargs: (Path("/beads"), Path("/repo"))
+        module,
+        "_resolve_context",
+        lambda **_kwargs: (Path("/beads"), Path("/repo"), None),
     )
     monkeypatch.setattr(
         module.planner_overview,
@@ -92,3 +94,27 @@ def test_run_bd_list_uses_resolved_context(monkeypatch) -> None:
 
     assert issues == [{"id": "at-1"}]
     assert captured == {"beads_root": Path("/beads"), "repo_root": Path("/repo")}
+
+
+def test_main_emits_override_warning(monkeypatch, capsys, tmp_path: Path) -> None:
+    module = _load_script()
+    beads_root = tmp_path / "override-beads"
+    beads_root.mkdir()
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_context",
+        lambda **_kwargs: (beads_root, Path("/repo"), "warning: override mismatch"),
+    )
+    monkeypatch.setattr(module.planner_overview, "list_epics", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        module,
+        "_render_epics",
+        lambda _issues, *, show_drafts: "Epics by state:\n- (none)",
+    )
+    monkeypatch.setattr(module.sys, "argv", ["list_epics.py"])
+
+    module.main()
+
+    captured = capsys.readouterr()
+    assert "warning: override mismatch" in captured.err

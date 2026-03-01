@@ -153,6 +153,7 @@ def _no_eligible_epics_summary(
     *,
     agent_id: str,
     mode: str,
+    beads_root: Path,
     issues: list[dict[str, object]],
 ) -> list[str]:
     """Build a concise no-eligible-epics startup summary.
@@ -180,6 +181,7 @@ def _no_eligible_epics_summary(
         "No eligible epics available.",
         f"- Agent: {agent_id}",
         f"- Mode: {mode}",
+        f"- Beads root: {beads_root}",
         f"- Total epics: {len(issues)}",
         f"- Ready epics: {len(ready)}",
         f"- Assigned epics: {len(assigned)}",
@@ -798,7 +800,12 @@ class _StartupContractService(worker_startup.StartupContractService):
         issues: list[dict[str, object]],
         dry_run: bool,
     ) -> None:
-        lines = _no_eligible_epics_summary(agent_id=agent_id, mode=mode, issues=issues)
+        lines = _no_eligible_epics_summary(
+            agent_id=agent_id,
+            mode=mode,
+            beads_root=self._beads_root,
+            issues=issues,
+        )
         if dry_run:
             for line in lines:
                 dry_run_log(line)

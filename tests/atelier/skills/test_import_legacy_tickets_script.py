@@ -58,7 +58,7 @@ def test_main_runs_prime_and_reports_skipped_status(monkeypatch, capsys, tmp_pat
     repo_root = tmp_path / "repo"
     beads_root.mkdir()
     repo_root.mkdir()
-    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (beads_root, repo_root))
+    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (beads_root, repo_root, None))
     monkeypatch.setattr(
         module.beads,
         "detect_startup_beads_state",
@@ -115,7 +115,7 @@ def test_main_reports_migrated_when_recoverable_state_is_resolved(
     repo_root = tmp_path / "repo"
     beads_root.mkdir()
     repo_root.mkdir()
-    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (beads_root, repo_root))
+    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (beads_root, repo_root, None))
     monkeypatch.setattr(
         module.beads,
         "detect_startup_beads_state",
@@ -135,3 +135,44 @@ def test_main_reports_migrated_when_recoverable_state_is_resolved(
     assert output[0] == (
         "Beads startup auto-upgrade migrated: legacy SQLite data exists but Dolt backend is missing"
     )
+
+
+def test_main_emits_override_warning(monkeypatch, capsys, tmp_path: Path) -> None:
+    module = _load_script()
+    beads_root = tmp_path / "override-beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    state = _state(
+        classification="startup_state_unknown",
+        migration_eligible=False,
+        has_dolt_store=True,
+        has_legacy_sqlite=False,
+        dolt_issue_total=1,
+        legacy_issue_total=None,
+        reason="legacy_sqlite_missing",
+    )
+    state_reads = iter([state, state])
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_context",
+        lambda **_kwargs: (beads_root, repo_root, "warning: override mismatch"),
+    )
+    monkeypatch.setattr(
+        module.beads,
+        "detect_startup_beads_state",
+        lambda **_kwargs: next(state_reads),
+    )
+    monkeypatch.setattr(module.beads, "run_bd_command", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module.beads,
+        "format_startup_beads_diagnostics",
+        lambda _state: "classification=startup_state_unknown",
+    )
+    monkeypatch.setattr(module.sys, "argv", ["import_legacy_tickets.py"])
+
+    module.main()
+
+    captured = capsys.readouterr()
+    assert "warning: override mismatch" in captured.err
