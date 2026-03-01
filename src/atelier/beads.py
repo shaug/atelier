@@ -248,6 +248,9 @@ class StartupBeadsState:
     dolt_issue_total: int | None
     legacy_issue_total: int | None
     reason: str
+    backend: str | None = None
+    dolt_count_source: str = "unavailable"
+    legacy_count_source: str = "unavailable"
     dolt_detail: str | None = None
     legacy_detail: str | None = None
 
@@ -256,16 +259,19 @@ class StartupBeadsState:
         details = [
             f"classification={self.classification}",
             "migration_eligible=" + ("yes" if self.migration_eligible else "no"),
+            "configured_backend=" + (self.backend if self.backend else "unspecified"),
             "dolt_store=" + ("present" if self.has_dolt_store else "missing"),
             "legacy_sqlite=" + ("present" if self.has_legacy_sqlite else "missing"),
             "dolt_issue_total="
             + (str(self.dolt_issue_total) if self.dolt_issue_total is not None else "unavailable"),
+            f"dolt_count_source={self.dolt_count_source}",
             "legacy_issue_total="
             + (
                 str(self.legacy_issue_total)
                 if self.legacy_issue_total is not None
                 else "unavailable"
             ),
+            f"legacy_count_source={self.legacy_count_source}",
             f"reason={self.reason}",
         ]
         if self.dolt_detail:
@@ -460,6 +466,27 @@ def _startup_dolt_store_exists(beads_root: Path) -> bool:
         if candidate.is_dir():
             return True
     return False
+
+
+def _configured_beads_backend(beads_root: Path) -> str | None:
+    metadata_path = beads_root / "metadata.json"
+    try:
+        raw = metadata_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not raw.strip():
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    backend_value = payload.get("backend")
+    if not isinstance(backend_value, str):
+        return None
+    backend = backend_value.strip().lower()
+    return backend or None
 
 
 def _extract_total_issues(payload: object) -> int | None:
@@ -740,8 +767,10 @@ def detect_startup_beads_state(*, beads_root: Path, cwd: Path) -> StartupBeadsSt
         A deterministic state classification with migration eligibility flags
         and diagnostics payload fields.
     """
-    has_legacy_sqlite = (beads_root / "beads.db").exists()
+    has_legacy_sqlite = (beads_root / "beads.db").is_file()
     has_dolt_store = _startup_dolt_store_exists(beads_root)
+    configured_backend = _configured_beads_backend(beads_root)
+    dolt_backend_expected = configured_backend in {None, "dolt"}
     if not beads_root.exists():
         return StartupBeadsState(
             classification=_BEADS_STARTUP_UNKNOWN,
@@ -751,6 +780,7 @@ def detect_startup_beads_state(*, beads_root: Path, cwd: Path) -> StartupBeadsSt
             dolt_issue_total=None,
             legacy_issue_total=None,
             reason="beads_root_missing",
+            backend=configured_backend,
         )
 
     env = beads_env(beads_root)
@@ -766,6 +796,51 @@ def detect_startup_beads_state(*, beads_root: Path, cwd: Path) -> StartupBeadsSt
             env=env,
         )
 
+    if dolt_issue_total is None:
+        dolt_count_source = "unavailable"
+    elif has_dolt_store:
+        dolt_count_source = "bd_stats_dolt_store"
+    elif dolt_backend_expected:
+        dolt_count_source = "bd_stats_without_dolt_store"
+    else:
+        dolt_count_source = "bd_stats_non_dolt_backend"
+
+    if legacy_issue_total is None:
+        legacy_count_source = "unavailable"
+    else:
+        legacy_count_source = "bd_stats_legacy_sqlite"
+
+    legacy_has_data = bool(legacy_issue_total and legacy_issue_total > 0)
+    common_state = {
+        "has_dolt_store": has_dolt_store,
+        "has_legacy_sqlite": has_legacy_sqlite,
+        "dolt_issue_total": dolt_issue_total,
+        "legacy_issue_total": legacy_issue_total,
+        "backend": configured_backend,
+        "dolt_count_source": dolt_count_source,
+        "legacy_count_source": legacy_count_source,
+        "dolt_detail": dolt_detail,
+        "legacy_detail": legacy_detail,
+    }
+
+    if not has_dolt_store:
+        if legacy_has_data and dolt_backend_expected:
+            return StartupBeadsState(
+                classification=_BEADS_STARTUP_MISSING_DOLT,
+                migration_eligible=True,
+                reason="legacy_sqlite_has_data_while_dolt_is_unavailable",
+                **common_state,
+            )
+        reason = "dolt_store_missing_without_recoverable_legacy_data"
+        if configured_backend and configured_backend != "dolt":
+            reason = "dolt_store_missing_for_non_dolt_backend"
+        return StartupBeadsState(
+            classification=_BEADS_STARTUP_UNKNOWN,
+            migration_eligible=False,
+            reason=reason,
+            **common_state,
+        )
+
     if dolt_issue_total is not None:
         if (
             has_legacy_sqlite
@@ -775,49 +850,28 @@ def detect_startup_beads_state(*, beads_root: Path, cwd: Path) -> StartupBeadsSt
             return StartupBeadsState(
                 classification=_BEADS_STARTUP_INSUFFICIENT_DOLT,
                 migration_eligible=True,
-                has_dolt_store=has_dolt_store,
-                has_legacy_sqlite=has_legacy_sqlite,
-                dolt_issue_total=dolt_issue_total,
-                legacy_issue_total=legacy_issue_total,
                 reason="legacy_issue_total_exceeds_dolt_issue_total",
-                dolt_detail=dolt_detail,
-                legacy_detail=legacy_detail,
+                **common_state,
             )
         return StartupBeadsState(
             classification=_BEADS_STARTUP_HEALTHY,
             migration_eligible=False,
-            has_dolt_store=has_dolt_store,
-            has_legacy_sqlite=has_legacy_sqlite,
-            dolt_issue_total=dolt_issue_total,
-            legacy_issue_total=legacy_issue_total,
             reason="dolt_issue_total_is_healthy",
-            dolt_detail=dolt_detail,
-            legacy_detail=legacy_detail,
+            **common_state,
         )
 
-    legacy_has_data = bool(legacy_issue_total and legacy_issue_total > 0)
-    if legacy_has_data and (not has_dolt_store or _is_embedded_backend_panic(dolt_detail or "")):
+    if legacy_has_data and _is_embedded_backend_panic(dolt_detail or ""):
         return StartupBeadsState(
             classification=_BEADS_STARTUP_MISSING_DOLT,
             migration_eligible=True,
-            has_dolt_store=has_dolt_store,
-            has_legacy_sqlite=has_legacy_sqlite,
-            dolt_issue_total=dolt_issue_total,
-            legacy_issue_total=legacy_issue_total,
             reason="legacy_sqlite_has_data_while_dolt_is_unavailable",
-            dolt_detail=dolt_detail,
-            legacy_detail=legacy_detail,
+            **common_state,
         )
     return StartupBeadsState(
         classification=_BEADS_STARTUP_UNKNOWN,
         migration_eligible=False,
-        has_dolt_store=has_dolt_store,
-        has_legacy_sqlite=has_legacy_sqlite,
-        dolt_issue_total=dolt_issue_total,
-        legacy_issue_total=legacy_issue_total,
         reason="insufficient_signals_for_classification",
-        dolt_detail=dolt_detail,
-        legacy_detail=legacy_detail,
+        **common_state,
     )
 
 
