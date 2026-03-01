@@ -701,6 +701,7 @@ class _StartupContractService(worker_startup.StartupContractService):
             beads_root=self._beads_root,
             cwd=self._repo_root,
             dry_run=self._dry_run,
+            dry_run_log=self.dry_run_log if self._dry_run else None,
         )
 
     def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None:

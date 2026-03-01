@@ -2572,6 +2572,7 @@ def test_close_epic_if_complete_dry_run_skips_close_mutation() -> None:
         "epic-1": [work("epic-1.1", "closed")],
         "epic-1.1": [],
     }
+    dry_run_lines: list[str] = []
 
     def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args[:2] == ["show", "epic-1"]:
@@ -2592,9 +2593,11 @@ def test_close_epic_if_complete_dry_run_skips_close_mutation() -> None:
             cwd=Path("/repo"),
             confirm=lambda _summary: True,
             dry_run=True,
+            dry_run_log=dry_run_lines.append,
         )
 
     assert result is False
+    assert dry_run_lines == ["Would close epic epic-1 and clear hook agent-1."]
     close_issue.assert_not_called()
     clear_hook.assert_not_called()
 

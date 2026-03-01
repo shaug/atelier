@@ -3833,6 +3833,7 @@ def close_epic_if_complete(
     cwd: Path,
     confirm: Callable[[ChangesetSummary], bool] | None = None,
     dry_run: bool = False,
+    dry_run_log: Callable[[str], None] | None = None,
 ) -> bool:
     """Close an epic and clear hook if all changesets are complete."""
 
@@ -3881,6 +3882,11 @@ def close_epic_if_complete(
     if confirm is not None and not confirm(summary):
         return False
     if dry_run:
+        if dry_run_log is not None:
+            if agent_bead_id:
+                dry_run_log(f"Would close epic {epic_id} and clear hook {agent_bead_id}.")
+            else:
+                dry_run_log(f"Would close epic {epic_id}.")
         return False
     close_issue(
         epic_id,
