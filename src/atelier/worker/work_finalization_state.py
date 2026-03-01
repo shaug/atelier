@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -114,12 +115,15 @@ def release_epic_assignment(epic_id: str, *, beads_root: Path, repo_root: Path) 
     Returns:
         Function result.
     """
+    expected_assignee = os.environ.get("ATELIER_AGENT_ID")
+    expected_assignee = expected_assignee.strip() if isinstance(expected_assignee, str) else ""
     issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
     if not issues:
         return
     issue = issues[0]
-    assignee_value = issue.get("assignee")
-    expected_assignee = assignee_value if isinstance(assignee_value, str) else ""
+    if not expected_assignee:
+        assignee_value = issue.get("assignee")
+        expected_assignee = assignee_value if isinstance(assignee_value, str) else ""
     beads.release_epic_assignment(
         epic_id,
         beads_root=beads_root,
