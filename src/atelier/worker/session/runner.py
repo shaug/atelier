@@ -628,6 +628,7 @@ def run_worker_once(
             suggested_root_branch = infra.branching.suggest_root_branch(
                 str(epic_issue.get("title") or selected_epic),
                 project_config.branch.prefix,
+                bead_id=selected_epic,
             )
             if dry_run:
                 control.dry_run_log("Root branch missing; would prompt for root branch selection.")
@@ -638,6 +639,7 @@ def run_worker_once(
                 root_branch_value = infra.root_branch.prompt_root_branch(
                     title=str(epic_issue.get("title") or selected_epic),
                     branch_prefix=project_config.branch.prefix,
+                    epic_id=selected_epic,
                     beads_root=beads_root,
                     repo_root=repo_root,
                     assume_yes=assume_yes,

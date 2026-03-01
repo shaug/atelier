@@ -18,11 +18,34 @@ def slugify_title(title: str) -> str:
     return slug
 
 
-def suggest_root_branch(title: str, prefix: str, *, max_len: int = 30) -> str:
-    """Suggest a root branch name from the title and prefix."""
+def _truncate_slug_for_suffix(slug: str, suffix: str, max_len: int) -> str:
+    """Trim title slug while reserving room for a trailing uniqueness suffix."""
+    if not max_len:
+        return slug
+    if not suffix:
+        return slug[:max_len].rstrip("-")
+    # Reserve ``-<suffix>`` at the end so truncation never drops uniqueness.
+    max_slug_len = max_len - len(suffix) - 1
+    if max_slug_len <= 0:
+        return ""
+    return slug[:max_slug_len].rstrip("-")
+
+
+def suggest_root_branch(
+    title: str,
+    prefix: str,
+    *,
+    bead_id: str | None = None,
+    max_len: int = 30,
+) -> str:
+    """Suggest a root branch name from title, optional bead id, and prefix."""
     slug = slugify_title(title)
-    if max_len and len(slug) > max_len:
-        slug = slug[:max_len].rstrip("-")
+    suffix = slugify_title(bead_id or "")
+    if max_len and suffix and len(suffix) > max_len:
+        suffix = suffix[-max_len:]
+    slug = _truncate_slug_for_suffix(slug, suffix, max_len)
+    if suffix:
+        slug = f"{slug}-{suffix}" if slug else suffix
     if prefix and slug and not slug.startswith(prefix):
         return f"{prefix}{slug}"
     return slug
