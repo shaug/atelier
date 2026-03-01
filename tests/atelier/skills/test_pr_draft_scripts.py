@@ -24,13 +24,14 @@ def _load_script_module():
     return module
 
 
-def test_render_tickets_section_omits_when_no_external_tickets() -> None:
+def test_render_tickets_section_renders_none_when_no_external_tickets() -> None:
     module = _load_script_module()
     issue = {"description": "scope: test only"}
 
     section = module.render_ticket_section(issue)
 
-    assert section == ""
+    assert "## Tickets" in section
+    assert "- None" in section
 
 
 def test_render_tickets_section_formats_fixes_and_addresses() -> None:
@@ -49,6 +50,21 @@ def test_render_tickets_section_formats_fixes_and_addresses() -> None:
     assert "## Tickets" in section
     assert "- Fixes #204" in section
     assert "- Addresses ABC-181" in section
+
+
+def test_render_tickets_section_includes_explicit_github_refs() -> None:
+    module = _load_script_module()
+    issue = {
+        "description": (
+            "scope: test\nnotes: Addresses #310 and fixes https://github.com/org/repo/issues/311\n"
+        )
+    }
+
+    section = module.render_ticket_section(issue)
+
+    assert "## Tickets" in section
+    assert "- Addresses #310" in section
+    assert "- Fixes #311" in section
 
 
 def test_load_issue_defaults_to_direct_mode(monkeypatch, tmp_path: Path) -> None:

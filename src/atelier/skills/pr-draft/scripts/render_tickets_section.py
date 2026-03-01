@@ -8,96 +8,17 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from atelier.bd_invocation import with_bd_mode
-
-
-@dataclass(frozen=True)
-class TicketRef:
-    """Minimal external ticket reference used for PR ticket lines."""
-
-    provider: str
-    ticket_id: str
-    relation: str | None = None
-
-
-def parse_description_fields(description: str | None) -> dict[str, str]:
-    """Parse key/value fields from a bead description."""
-    fields: dict[str, str] = {}
-    if not description:
-        return fields
-    for line in description.splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        key = key.strip()
-        if not key:
-            continue
-        fields[key] = value.strip()
-    return fields
-
-
-def parse_external_tickets(description: str | None) -> list[TicketRef]:
-    """Parse external ticket references from a bead description."""
-    fields = parse_description_fields(description)
-    raw = fields.get("external_tickets")
-    if not raw or raw.lower() == "null":
-        return []
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(payload, list):
-        return []
-    tickets: list[TicketRef] = []
-    for entry in payload:
-        if not isinstance(entry, dict):
-            continue
-        provider = str(entry.get("provider") or "").strip().lower()
-        ticket_id = str(entry.get("id") or entry.get("ticket_id") or "").strip()
-        relation = str(entry.get("relation") or "").strip().lower() or None
-        if not provider or not ticket_id:
-            continue
-        tickets.append(TicketRef(provider=provider, ticket_id=ticket_id, relation=relation))
-    return tickets
-
-
-def format_ticket_reference(ticket: TicketRef) -> str:
-    """Format the ticket identifier for a PR body."""
-    if ticket.provider == "github":
-        if ticket.ticket_id.startswith("#"):
-            return ticket.ticket_id
-        if ticket.ticket_id.isdigit():
-            return f"#{ticket.ticket_id}"
-    return ticket.ticket_id
-
-
-def ticket_action_verb(ticket: TicketRef) -> str:
-    """Resolve the ticket verb for a PR line."""
-    if ticket.relation == "context":
-        return "Addresses"
-    return "Fixes"
+from atelier.worker import publish as worker_publish
 
 
 def render_ticket_section(issue: dict[str, object]) -> str:
     """Render markdown for the PR ``Tickets`` section."""
-    description = issue.get("description")
-    tickets = parse_external_tickets(description if isinstance(description, str) else None)
-    lines: list[str] = []
-    seen: set[tuple[str, str]] = set()
-    for ticket in tickets:
-        reference = format_ticket_reference(ticket).strip()
-        if not reference:
-            continue
-        dedupe_key = (ticket.provider, reference.lower())
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        lines.append(f"- {ticket_action_verb(ticket)} {reference}")
+    lines = worker_publish.render_pr_ticket_lines(issue)
     if not lines:
-        return ""
+        lines = ["- None"]
     return "\n".join(["## Tickets", *lines])
 
 
