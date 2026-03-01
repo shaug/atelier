@@ -325,6 +325,49 @@ def test_run_bd_json_retries_embedded_backend_panic_with_explicit_db(
     ]
 
 
+def test_run_bd_json_read_only_returns_payload_without_error() -> None:
+    with patch(
+        "atelier.beads.run_bd_command",
+        return_value=CompletedProcess(
+            args=["bd", "show", "at-1", "--json"],
+            returncode=0,
+            stdout='[{"id":"at-1","status":"open","labels":[]}]',
+            stderr="",
+        ),
+    ):
+        payload, error = beads.run_bd_json_read_only(
+            ["show", "at-1"],
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert payload == [{"id": "at-1", "status": "open", "labels": []}]
+    assert error is None
+
+
+def test_run_bd_json_read_only_includes_command_and_stream_details_on_failure() -> None:
+    with patch(
+        "atelier.beads.run_bd_command",
+        return_value=CompletedProcess(
+            args=["bd", "list", "--parent", "at-1", "--json"],
+            returncode=1,
+            stdout="db timeout",
+            stderr="TLS timeout",
+        ),
+    ):
+        payload, error = beads.run_bd_json_read_only(
+            ["list", "--parent", "at-1"],
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert payload == []
+    assert error is not None
+    assert "command failed: bd list --parent at-1 --json (exit 1)" in error
+    assert "stderr: TLS timeout" in error
+    assert "stdout: db timeout" in error
+
+
 def test_run_bd_json_attempts_doctor_fix_after_repeated_embedded_panic(
     tmp_path: Path,
 ) -> None:

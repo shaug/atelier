@@ -381,6 +381,7 @@ def select_global_review_feedback_changeset(
         repo_slug=repo_slug,
         beads_root=beads_root,
         repo_root=repo_root,
+        emit_diagnostic=say,
         resolve_epic_id_for_changeset=(
             lambda issue: (
                 resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
@@ -411,6 +412,7 @@ def select_global_conflicted_changeset(
         repo_slug=repo_slug,
         beads_root=beads_root,
         repo_root=repo_root,
+        emit_diagnostic=say,
         resolve_epic_id_for_changeset=(
             lambda issue: (
                 resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
