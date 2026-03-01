@@ -149,12 +149,12 @@ def _open_issue_file_lock(*, issue_id: str, beads_root: Path) -> TextIO:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         handle = lock_path.open("a+", encoding="utf-8")
     except OSError as exc:
-        raise RuntimeError(f"failed to open issue write lock for {issue_id}") from exc
+        die(f"failed to open issue write lock for {issue_id}: {exc}")
     try:
         _acquire_issue_file_lock(handle)
     except OSError as exc:
         handle.close()
-        raise RuntimeError(f"failed to acquire issue write lock for {issue_id}") from exc
+        die(f"failed to acquire issue write lock for {issue_id}: {exc}")
     return handle
 
 

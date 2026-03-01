@@ -2476,9 +2476,13 @@ def test_issue_write_lock_fails_closed_on_file_lock_error(
     monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCAL_LOCKS", {})
     monkeypatch.setattr(beads, "_acquire_issue_file_lock", fail_acquire)
 
-    with pytest.raises(RuntimeError, match="failed to acquire issue write lock for issue-1"):
-        with beads._issue_write_lock("issue-1", beads_root=beads_root):  # pyright: ignore[reportPrivateUsage]
-            pytest.fail("context body should not execute on lock acquisition failure")
+    def fake_die(message: str, code: int = 1) -> None:
+        raise RuntimeError(f"{code}:{message}")
+
+    with patch("atelier.beads.die", side_effect=fake_die):
+        with pytest.raises(RuntimeError, match="1:failed to acquire issue write lock for issue-1"):
+            with beads._issue_write_lock("issue-1", beads_root=beads_root):  # pyright: ignore[reportPrivateUsage]
+                pytest.fail("context body should not execute on lock acquisition failure")
 
     assert key not in beads._ISSUE_WRITE_LOCK_STATE  # pyright: ignore[reportPrivateUsage]
 
