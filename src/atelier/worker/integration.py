@@ -9,7 +9,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Iterator
 
-from .. import agents, beads, git, worktrees
+from .. import agents, beads, exec, git, worktrees
 
 INTEGRATED_SHA_NOTE_PATTERN = re.compile(
     r"`?changeset\.integrated_sha`?\s*[:=]\s*([0-9a-fA-F]{7,40})\b",
@@ -84,6 +84,72 @@ def _integration_target_branches(
     add_candidate(fields.get("workspace.parent_branch"))
     add_candidate(git.git_default_branch(repo_root, git_path=git_path))
     return candidates
+
+
+def _target_refs_for_branch(
+    repo_root: Path,
+    branch: str,
+    *,
+    git_path: str | None = None,
+    require_remote_tracking: bool = False,
+) -> list[str]:
+    normalized = branch.strip()
+    if not normalized:
+        return []
+    resolved = branch_ref_for_lookup(repo_root, normalized, git_path=git_path)
+    if not resolved:
+        return []
+
+    remote_ref = f"origin/{normalized}"
+    if resolved == remote_ref:
+        return [remote_ref]
+
+    refs: list[str] = []
+    if resolved == normalized:
+        remote_exists = git.git_ref_exists(
+            repo_root,
+            f"refs/remotes/{remote_ref}",
+            git_path=git_path,
+        )
+        if remote_exists:
+            return [remote_ref]
+        if require_remote_tracking:
+            return []
+        refs.append(normalized)
+        return refs
+
+    refs.append(resolved)
+    return refs
+
+
+def _target_refs_for_branches(
+    repo_root: Path,
+    branches: list[str],
+    *,
+    git_path: str | None = None,
+    require_remote_tracking: bool = False,
+) -> list[str]:
+    refs: list[str] = []
+    for branch in branches:
+        for ref in _target_refs_for_branch(
+            repo_root,
+            branch,
+            git_path=git_path,
+            require_remote_tracking=require_remote_tracking,
+        ):
+            if ref not in refs:
+                refs.append(ref)
+    return refs
+
+
+def _refresh_origin_refs(repo_root: Path, *, git_path: str | None = None) -> bool:
+    result = exec.try_run_command(
+        git.git_command(
+            ["-C", str(repo_root), "fetch", "--no-tags", "origin"],
+            git_path=git_path,
+        )
+    )
+    return bool(result and result.returncode == 0)
 
 
 def branch_ref_for_lookup(
@@ -166,58 +232,83 @@ def changeset_integration_signal(
     work_branch = _normalize_branch_field(fields.get("changeset.work_branch"))
 
     if require_target_branch_proof:
-        target_refs: list[str] = []
-        for target_branch in _integration_target_branches(
+        target_branches = _integration_target_branches(
             fields,
             repo_root=repo_root,
             git_path=git_path,
-        ):
-            ref = branch_ref_for_lookup(repo_root, target_branch, git_path=git_path)
-            if ref and ref not in target_refs:
-                target_refs.append(ref)
+        )
+        target_refs = _target_refs_for_branches(
+            repo_root,
+            target_branches,
+            git_path=git_path,
+            require_remote_tracking=True,
+        )
         source_branches: list[str] = []
         for branch in (work_branch, root_branch):
             if branch and branch not in source_branches:
                 source_branches.append(branch)
-        source_refs: list[str] = []
-        for source_branch in source_branches:
-            source_ref = branch_ref_for_lookup(repo_root, source_branch, git_path=git_path)
-            if source_ref and source_ref not in source_refs:
-                source_refs.append(source_ref)
-        if integrated_sha_candidates and target_refs:
-            for candidate in reversed(integrated_sha_candidates):
-                candidate_sha = git.git_rev_parse(repo_root, candidate, git_path=git_path)
-                if not candidate_sha:
-                    continue
-                if source_refs and not any(
-                    git.git_is_ancestor(repo_root, candidate_sha, source_ref, git_path=git_path)
-                    is True
-                    for source_ref in source_refs
-                ):
-                    continue
-                for ref in target_refs:
+
+        def source_refs_for_branches() -> list[str]:
+            refs: list[str] = []
+            for source_branch in source_branches:
+                source_ref = branch_ref_for_lookup(repo_root, source_branch, git_path=git_path)
+                if source_ref and source_ref not in refs:
+                    refs.append(source_ref)
+            return refs
+
+        source_refs = source_refs_for_branches()
+
+        def prove_against_targets(current_target_refs: list[str]) -> tuple[bool, str | None]:
+            if integrated_sha_candidates and current_target_refs:
+                for candidate in reversed(integrated_sha_candidates):
+                    candidate_sha = git.git_rev_parse(repo_root, candidate, git_path=git_path)
+                    if not candidate_sha:
+                        continue
+                    if source_refs and not any(
+                        git.git_is_ancestor(repo_root, candidate_sha, source_ref, git_path=git_path)
+                        is True
+                        for source_ref in source_refs
+                    ):
+                        continue
+                    for ref in current_target_refs:
+                        if (
+                            git.git_is_ancestor(repo_root, candidate_sha, ref, git_path=git_path)
+                            is True
+                        ):
+                            return True, candidate_sha
+            if not current_target_refs or not source_refs:
+                return False, None
+            for source_ref in source_refs:
+                source_sha = git.git_rev_parse(repo_root, source_ref, git_path=git_path)
+                for target_ref in current_target_refs:
                     if (
-                        git.git_is_ancestor(repo_root, candidate_sha, ref, git_path=git_path)
+                        git.git_is_ancestor(repo_root, source_ref, target_ref, git_path=git_path)
                         is True
                     ):
-                        return True, candidate_sha
-        if not target_refs or not source_refs:
+                        return True, source_sha
+                    if (
+                        git.git_branch_fully_applied(
+                            repo_root, target_ref, source_ref, git_path=git_path
+                        )
+                        is True
+                    ):
+                        return True, source_sha
             return False, None
-        for source_ref in source_refs:
-            source_sha = git.git_rev_parse(repo_root, source_ref, git_path=git_path)
-            for target_ref in target_refs:
-                if (
-                    git.git_is_ancestor(repo_root, source_ref, target_ref, git_path=git_path)
-                    is True
-                ):
-                    return True, source_sha
-                if (
-                    git.git_branch_fully_applied(
-                        repo_root, target_ref, source_ref, git_path=git_path
-                    )
-                    is True
-                ):
-                    return True, source_sha
+
+        proven, integrated_sha = prove_against_targets(target_refs)
+        if proven:
+            return True, integrated_sha
+        if target_branches and _refresh_origin_refs(repo_root, git_path=git_path):
+            refreshed_target_refs = _target_refs_for_branches(
+                repo_root,
+                target_branches,
+                git_path=git_path,
+                require_remote_tracking=True,
+            )
+            source_refs = source_refs_for_branches()
+            proven, integrated_sha = prove_against_targets(refreshed_target_refs)
+            if proven:
+                return True, integrated_sha
         if repo_slug and work_branch:
             lookup_pr_payload(repo_slug, work_branch)
         return False, None
