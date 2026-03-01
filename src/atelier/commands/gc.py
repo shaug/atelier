@@ -239,6 +239,7 @@ def gc(args: object) -> None:
             beads_root=beads_root,
             repo_root=repo_root,
             git_path=config.resolve_git_path(project_config),
+            dry_run=dry_run,
         )
     )
     actions.extend(
@@ -272,13 +273,15 @@ def gc(args: object) -> None:
         say(f"GC action: {action.description}")
         for detail in action.details:
             say(f"- {detail}")
+        if dry_run:
+            prefix = "Report" if action.report_only else "Would"
+            say(f"{prefix}: {action.description}")
+            log_mode = "report-only" if action.report_only else "dry-run"
+            log_debug(f"gc action {log_mode} description={action.description}")
+            continue
         if action.report_only:
             say(f"Skipped: {action.description}")
             log_debug(f"gc action report-only description={action.description}")
-            continue
-        if dry_run:
-            say(f"Would: {action.description}")
-            log_debug(f"gc action dry-run description={action.description}")
             continue
         if yes or confirm(f"{action.description}?", default=False):
             say(f"Running: {action.description}")

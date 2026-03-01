@@ -263,6 +263,7 @@ def collect_closed_workspace_branches_without_mapping(
     beads_root: Path,
     repo_root: Path,
     git_path: str,
+    dry_run: bool = False,
 ) -> list[GcAction]:
     actions: list[GcAction] = []
     default_branch = git.git_default_branch(repo_root, git_path=git_path) or ""
@@ -280,9 +281,21 @@ def collect_closed_workspace_branches_without_mapping(
             continue
         if not is_merged_closed_changeset(issue):
             continue
-        mapping_path = worktrees.mapping_path(project_dir, issue_id.strip())
+        issue_key = issue_id.strip()
+        mapping_path = worktrees.mapping_path(project_dir, issue_key)
         if mapping_path.exists():
             continue
+        changeset_worktree_relpath = worktrees.changeset_worktree_relpath(issue_key)
+        changeset_worktree = project_dir / changeset_worktree_relpath
+        has_conventional_worktree = (
+            changeset_worktree.exists() and (changeset_worktree / ".git").exists()
+        )
+        worktree_skip_reason = ""
+        if not has_conventional_worktree:
+            if changeset_worktree.exists():
+                worktree_skip_reason = "conventional path exists but is not a git worktree"
+            else:
+                worktree_skip_reason = "conventional changeset worktree path missing"
 
         labels = issue_labels(issue)
         workspace_branch = workspace_branch_from_labels(labels)
@@ -330,21 +343,54 @@ def collect_closed_workspace_branches_without_mapping(
             if local_ref or remote_ref:
                 has_prunable_branch_ref = True
                 break
-        if not has_prunable_branch_ref:
+        if not has_conventional_worktree and not has_prunable_branch_ref:
+            if dry_run:
+                actions.append(
+                    GcAction(
+                        description=f"Skip closed workspace cleanup for {issue_key}",
+                        apply=lambda: None,
+                        details=(
+                            (f"skip reason: {worktree_skip_reason}; no branch refs to prune"),
+                            f"changeset worktree: {changeset_worktree_relpath}",
+                            f"branches considered: {', '.join(sorted(prunable_branches))}",
+                            f"integration target: {target_ref}",
+                        ),
+                        report_only=True,
+                    )
+                )
             continue
 
-        description_text = f"Prune closed workspace branches for {issue_id.strip()}"
+        description_text = f"Prune closed workspace artifacts for {issue_key}"
+        if has_conventional_worktree:
+            worktree_detail = f"changeset worktree: {changeset_worktree_relpath}"
+        else:
+            worktree_detail = (
+                f"changeset worktree: {changeset_worktree_relpath} (skip: {worktree_skip_reason})"
+            )
         details = (
             f"workspace branch: {workspace_branch or '(none)'}",
             f"root branch: {root_branch or '(none)'}",
             f"work branch: {work_branch or '(none)'}",
+            worktree_detail,
             f"integration target: {target_ref}",
             f"branches to prune: {', '.join(sorted(prunable_branches))}",
         )
 
         def _apply_cleanup(
+            changeset_worktree_path: Path | None = (
+                changeset_worktree if has_conventional_worktree else None
+            ),
             branches_to_prune: list[str] = sorted(prunable_branches),
         ) -> None:
+            if changeset_worktree_path is not None:
+                log_debug(f"removing changeset worktree path={changeset_worktree_path}")
+                ok, detail = run_git_gc_command(
+                    ["worktree", "remove", str(changeset_worktree_path)],
+                    repo_root=repo_root,
+                    git_path=git_path,
+                )
+                if not ok:
+                    die(detail)
             current_branch = git.git_current_branch(repo_root, git_path=git_path)
             for branch in branches_to_prune:
                 local_ref, remote_ref = branch_lookup_ref(repo_root, branch, git_path=git_path)
