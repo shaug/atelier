@@ -1959,7 +1959,12 @@ def test_ensure_issue_prefix_updates_when_mismatched() -> None:
 
 def test_claim_epic_updates_assignee_and_status() -> None:
     issue = {"id": "atelier-9", "labels": [], "assignee": None}
-    updated = {"id": "atelier-9", "labels": ["at:hooked"], "assignee": "agent"}
+    updated = {
+        "id": "atelier-9",
+        "status": "in_progress",
+        "labels": ["at:hooked"],
+        "assignee": "agent",
+    }
 
     def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args and args[0] == "show":
@@ -1986,7 +1991,12 @@ def test_claim_epic_updates_assignee_and_status() -> None:
 
 def test_claim_epic_allows_expected_takeover() -> None:
     issue = {"id": "atelier-9", "labels": [], "assignee": "agent-old"}
-    updated = {"id": "atelier-9", "labels": ["at:hooked"], "assignee": "agent-new"}
+    updated = {
+        "id": "atelier-9",
+        "status": "in_progress",
+        "labels": ["at:hooked"],
+        "assignee": "agent-new",
+    }
     show_calls = 0
 
     def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
@@ -2014,6 +2024,76 @@ def test_claim_epic_allows_expected_takeover() -> None:
     commands = [call.args[0] for call in run_command.call_args_list]
     assert any(cmd[:3] == ["update", "atelier-9", "--claim"] for cmd in commands)
     release_claim.assert_called_once()
+
+
+def test_claim_epic_retries_until_hooked_state_visible() -> None:
+    issue = {"id": "atelier-9", "status": "open", "labels": ["at:epic"], "assignee": None}
+    incomplete = {"id": "atelier-9", "status": "open", "labels": ["at:epic"], "assignee": "agent"}
+    complete = {
+        "id": "atelier-9",
+        "status": "in_progress",
+        "labels": ["at:epic", "at:hooked"],
+        "assignee": "agent",
+    }
+    show_calls = 0
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        nonlocal show_calls
+        if args and args[0] == "show":
+            show_calls += 1
+            if show_calls == 1:
+                return [issue]
+            if show_calls == 2:
+                return [incomplete]
+            return [complete]
+        return [issue]
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch(
+            "atelier.beads.run_bd_command", return_value=CompletedProcess([], 0, "", "")
+        ) as run_command,
+    ):
+        beads.claim_epic(
+            "atelier-9",
+            "agent",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    commands = [call.args[0] for call in run_command.call_args_list]
+    update_commands = [cmd for cmd in commands if "--status" in cmd and "in_progress" in cmd]
+    assert len(update_commands) == 2
+
+
+def test_claim_epic_fails_closed_when_hook_state_not_applied() -> None:
+    issue = {"id": "atelier-9", "status": "open", "labels": ["at:epic"], "assignee": None}
+    incomplete = {"id": "atelier-9", "status": "open", "labels": ["at:epic"], "assignee": "agent"}
+    show_calls = 0
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        nonlocal show_calls
+        if args and args[0] == "show":
+            show_calls += 1
+            if show_calls == 1:
+                return [issue]
+            return [incomplete]
+        return [issue]
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command", return_value=CompletedProcess([], 0, "", "")),
+        patch("atelier.beads.die", side_effect=RuntimeError("die called")) as die_fn,
+    ):
+        with pytest.raises(RuntimeError, match="die called"):
+            beads.claim_epic(
+                "atelier-9",
+                "agent",
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )
+
+    assert "expected status=in_progress and label at:hooked" in str(die_fn.call_args.args[0])
 
 
 def test_release_epic_assignment_skips_when_assignee_no_longer_matches() -> None:

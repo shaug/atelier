@@ -3847,6 +3847,17 @@ def claim_epic(
     allow_takeover_from: str | None = None,
 ) -> dict[str, object]:
     """Claim an epic by assigning it to the agent."""
+
+    def _claim_is_complete(candidate: dict[str, object], *, claimant: str) -> bool:
+        assignee = candidate.get("assignee")
+        status = str(candidate.get("status") or "").strip().lower()
+        return (
+            isinstance(assignee, str)
+            and assignee == claimant
+            and status == "in_progress"
+            and "at:hooked" in _issue_labels(candidate)
+        )
+
     issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
     if not issues:
         die(f"epic not found: {epic_id}")
@@ -3921,19 +3932,26 @@ def claim_epic(
     update_args = ["update", epic_id, "--status", "in_progress", "--add-label", "at:hooked"]
     if _is_standalone_changeset_without_epic_label(issue, beads_root=beads_root, cwd=cwd):
         update_args.extend(["--add-label", "at:epic"])
-    run_bd_command(
-        update_args,
-        beads_root=beads_root,
-        cwd=cwd,
-        allow_failure=True,
-    )
-    refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
-    if refreshed:
+    for attempt in range(2):
+        run_bd_command(
+            update_args,
+            beads_root=beads_root,
+            cwd=cwd,
+            allow_failure=True,
+        )
+        refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+        if not refreshed:
+            continue
         updated = refreshed[0]
         assignee = updated.get("assignee")
         if assignee != agent_id:
             die(f"epic {epic_id} claim failed; already assigned")
-        return updated
+        if _claim_is_complete(updated, claimant=agent_id):
+            return updated
+        if attempt == 0:
+            continue
+        die(f"epic {epic_id} claim failed; expected status=in_progress and label at:hooked")
+    die(f"epic {epic_id} claim failed; unable to verify claimed state")
     return issue
 
 
