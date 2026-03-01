@@ -195,6 +195,7 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
             branch_pr=context.branch_pr,
             branch_pr_strategy=context.branch_pr_strategy,
             git_path=context.git_path,
+            beads_root=self._beads_root,
         )
 
     def lookup_pr_payload(self, repo_slug: str | None, branch: str) -> dict[str, object] | None:

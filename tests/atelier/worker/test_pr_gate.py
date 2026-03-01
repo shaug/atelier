@@ -62,6 +62,82 @@ def test_changeset_pr_creation_decision_parallel_ignores_sequential_dependency_g
     assert decision.reason == "strategy:parallel"
 
 
+def test_changeset_pr_creation_decision_allows_when_parent_pr_merged(monkeypatch) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-parent\nchangeset.root_branch: feature-root\n"
+        )
+    }
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        lookup_pr_payload=lambda _repo_slug, branch: (
+            {"state": "CLOSED", "mergedAt": "2026-03-01T00:00:00Z"}
+            if branch == "feature-parent"
+            else None
+        ),
+    )
+
+    assert decision.allow_pr is True
+    assert decision.reason == "parent:merged"
+
+
+def test_changeset_pr_creation_decision_allows_when_parent_pr_closed(monkeypatch) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-parent\nchangeset.root_branch: feature-root\n"
+        )
+    }
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="on-parent-approved",
+        lookup_pr_payload=lambda _repo_slug, branch: (
+            {"state": "CLOSED", "closedAt": "2026-03-01T00:00:00Z"}
+            if branch == "feature-parent"
+            else None
+        ),
+    )
+
+    assert decision.allow_pr is True
+    assert decision.reason == "parent:closed"
+
+
+def test_changeset_pr_creation_decision_blocks_when_dependency_parent_unresolved(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: feature-root\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": ["at-epic.1"],
+    }
+
+    monkeypatch.setattr(pr_gate.beads, "run_bd_json", lambda *_args, **_kwargs: [])
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda *_args, **_kwargs: None,
+    )
+
+    assert decision.allow_pr is False
+    assert decision.reason.startswith("blocked:dependency-parent-unresolved")
+
+
 def test_handle_pushed_without_pr_returns_review_pending_when_strategy_blocks(
     monkeypatch,
 ) -> None:
@@ -578,6 +654,50 @@ def test_changeset_pr_creation_decision_blocks_when_dependency_parent_pr_missing
                         "pr_url: https://github.com/org/repo/pull/11\n"
                         "pr_number: 11\n"
                         "pr_state: pr-open\n"
+                    )
+                }
+            ]
+            if args == ["show", "at-epic.1"]
+            else []
+        ),
+    )
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda *_args, **_kwargs: None,
+    )
+
+    assert decision.allow_pr is False
+    assert decision.reason.startswith("blocked:dependency-parent-pr-missing")
+
+
+def test_changeset_pr_creation_decision_blocks_when_dependency_parent_only_pushed_with_stale_pr_signal(
+    monkeypatch,
+) -> None:
+    issue = {
+        "description": (
+            "changeset.parent_branch: legacy-parent\nchangeset.root_branch: feature-root\n"
+        ),
+        "dependencies": ["at-epic.1"],
+    }
+
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [
+                {
+                    "description": (
+                        "changeset.work_branch: active-parent\n"
+                        "pr_url: https://github.com/org/repo/pull/11\n"
+                        "pr_number: 11\n"
+                        "pr_state: pushed\n"
                     )
                 }
             ]
