@@ -431,15 +431,11 @@ def test_gc_logs_action_lifecycle_in_dry_run() -> None:
     assert any("gc action dry-run description=Test action" in message for message in debug_messages)
 
 
-def test_gc_report_only_actions_log_skip_without_confirmation() -> None:
+def test_gc_renders_report_only_actions_in_dry_run() -> None:
     project_root = Path("/project")
     repo_root = Path("/repo")
     project_config = config.ProjectConfig()
-    report_action = gc_cmd.GcAction(
-        description="Skip resolved epic artifact cleanup for at-epic",
-        apply=lambda: (_ for _ in ()).throw(AssertionError("report-only action must not run")),
-        report_only=True,
-    )
+    action = gc_cmd.GcAction(description="Diagnostic action", apply=lambda: None, report_only=True)
 
     with (
         patch(
@@ -454,24 +450,36 @@ def test_gc_report_only_actions_log_skip_without_confirmation() -> None:
             "atelier.commands.gc.config.resolve_beads_root",
             return_value=Path("/beads"),
         ),
-        patch("atelier.gc.labels.collect_normalize_changeset_labels", return_value=[]),
-        patch("atelier.gc.labels.collect_remove_deprecated_label", return_value=[]),
-        patch("atelier.gc.labels.collect_normalize_epic_labels", return_value=[]),
+        patch(
+            "atelier.gc.labels.collect_normalize_changeset_labels",
+            return_value=[],
+        ),
+        patch(
+            "atelier.gc.labels.collect_remove_deprecated_label",
+            return_value=[],
+        ),
+        patch(
+            "atelier.gc.labels.collect_normalize_epic_labels",
+            return_value=[],
+        ),
         patch("atelier.gc.hooks.collect_hooks", return_value=[]),
         patch("atelier.gc.worktrees.collect_orphan_worktrees", return_value=[]),
         patch(
             "atelier.gc.worktrees.collect_resolved_epic_artifacts",
-            return_value=[report_action],
+            return_value=[],
         ),
         patch(
             "atelier.gc.worktrees.collect_closed_workspace_branches_without_mapping",
             return_value=[],
         ),
         patch("atelier.gc.messages.collect_message_claims", return_value=[]),
-        patch("atelier.gc.messages.collect_message_retention", return_value=[]),
+        patch(
+            "atelier.gc.messages.collect_message_retention",
+            return_value=[action],
+        ),
         patch("atelier.gc.agents.collect_agent_homes", return_value=[]),
-        patch("atelier.commands.gc.confirm") as confirm,
         patch("atelier.commands.gc.say") as say,
+        patch("atelier.commands.gc.log_debug") as log_debug,
     ):
         gc_cmd.gc(
             SimpleNamespace(
@@ -483,12 +491,11 @@ def test_gc_report_only_actions_log_skip_without_confirmation() -> None:
             )
         )
 
-    confirm.assert_not_called()
+    messages = [str(call.args[0]) for call in say.call_args_list]
+    assert "Report: Diagnostic action" in messages
+    assert "Would: Diagnostic action" not in messages
+    debug_messages = [str(call.args[0]) for call in log_debug.call_args_list]
     assert any(
-        "Skipped: Skip resolved epic artifact cleanup for at-epic" in str(call.args[0])
-        for call in say.call_args_list
-    )
-    assert not any(
-        "Would: Skip resolved epic artifact cleanup for at-epic" in str(call.args[0])
-        for call in say.call_args_list
+        "gc action report-only description=Diagnostic action" in message
+        for message in debug_messages
     )

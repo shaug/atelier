@@ -355,6 +355,7 @@ def collect_closed_workspace_branches_without_mapping(
                             f"branches considered: {', '.join(sorted(prunable_branches))}",
                             f"integration target: {target_ref}",
                         ),
+                        report_only=True,
                     )
                 )
             continue

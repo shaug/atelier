@@ -278,8 +278,10 @@ def gc(args: object) -> None:
             log_debug(f"gc action report-only description={action.description}")
             continue
         if dry_run:
-            say(f"Would: {action.description}")
-            log_debug(f"gc action dry-run description={action.description}")
+            prefix = "Report" if action.report_only else "Would"
+            say(f"{prefix}: {action.description}")
+            log_mode = "report-only" if action.report_only else "dry-run"
+            log_debug(f"gc action {log_mode} description={action.description}")
             continue
         if yes or confirm(f"{action.description}?", default=False):
             say(f"Running: {action.description}")

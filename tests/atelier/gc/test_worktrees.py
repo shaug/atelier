@@ -568,6 +568,7 @@ def test_collect_closed_workspace_branches_without_mapping_emits_dry_run_skip_re
             "skip reason: conventional changeset worktree path missing; no branch refs to prune"
         ) in actions[0].details
         assert "changeset worktree: worktrees/at-irs" in actions[0].details
+        assert actions[0].report_only is True
 
 
 def test_collect_closed_workspace_branches_without_mapping_skips_not_integrated() -> None:
