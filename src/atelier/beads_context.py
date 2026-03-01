@@ -47,14 +47,36 @@ def resolve_skill_beads_context(
     Returns:
         Resolved Beads context. Defaults to the project-scoped Beads root and
         emits an override warning only when an explicit non-project override is
-        supplied.
+        supplied. If project resolution fails and ``--beads-dir`` is explicit,
+        the override is used as a recovery path.
     """
-    project_root, project_config, repo_root = _resolve_project_context(repo_dir=repo_dir)
+    beads_dir_value = str(beads_dir or "").strip()
+    override_root = Path(beads_dir_value).expanduser().resolve() if beads_dir_value else None
+    try:
+        project_root, project_config, repo_root = _resolve_project_context(repo_dir=repo_dir)
+    except Exception as exc:
+        if override_root is None:
+            raise
+        repo_dir_value = str(repo_dir or "").strip()
+        repo_root = (
+            Path(repo_dir_value).expanduser().resolve() if repo_dir_value else Path.cwd().resolve()
+        )
+        warning = (
+            "warning: project-scoped Beads resolution failed; using explicit --beads-dir "
+            "override.\n"
+            f"override_beads_root={override_root}\n"
+            f"project_resolution_error={type(exc).__name__}: {exc}"
+        )
+        return BeadsContext(
+            beads_root=override_root,
+            project_beads_root=override_root,
+            repo_root=repo_root,
+            override_warning=warning,
+        )
+
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     project_beads_root = config.resolve_beads_root(project_data_dir, repo_root)
-
-    beads_dir_value = str(beads_dir or "").strip()
-    if not beads_dir_value:
+    if override_root is None:
         return BeadsContext(
             beads_root=project_beads_root,
             project_beads_root=project_beads_root,
@@ -62,7 +84,6 @@ def resolve_skill_beads_context(
             override_warning=None,
         )
 
-    override_root = Path(beads_dir_value).expanduser().resolve()
     warning = None
     if override_root != project_beads_root:
         warning = (

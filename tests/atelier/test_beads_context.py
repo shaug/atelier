@@ -97,3 +97,44 @@ def test_resolve_skill_beads_context_warns_for_explicit_non_project_override(
     assert context.override_warning is not None
     assert str(project_beads_root) in context.override_warning
     assert str(override_beads_root) in context.override_warning
+
+
+def test_resolve_skill_beads_context_uses_explicit_override_when_project_resolution_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    override_beads_root = repo_root / ".beads"
+    override_beads_root.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        beads_context,
+        "_resolve_project_context",
+        lambda *, repo_dir: (_ for _ in ()).throw(RuntimeError("broken project config")),
+    )
+
+    context = beads_context.resolve_skill_beads_context(
+        beads_dir=str(override_beads_root),
+        repo_dir=str(repo_root),
+    )
+
+    assert context.beads_root == override_beads_root
+    assert context.project_beads_root == override_beads_root
+    assert context.repo_root == repo_root.resolve()
+    assert context.override_warning is not None
+    assert "project-scoped Beads resolution failed" in context.override_warning
+    assert str(override_beads_root) in context.override_warning
+    assert "RuntimeError: broken project config" in context.override_warning
+
+
+def test_resolve_skill_beads_context_raises_without_explicit_override_when_project_resolution_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        beads_context,
+        "_resolve_project_context",
+        lambda *, repo_dir: (_ for _ in ()).throw(RuntimeError("broken project config")),
+    )
+
+    with pytest.raises(RuntimeError, match="broken project config"):
+        beads_context.resolve_skill_beads_context(beads_dir=None)
