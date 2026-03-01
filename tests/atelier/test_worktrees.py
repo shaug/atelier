@@ -533,3 +533,30 @@ def test_ensure_changeset_branch_concurrent_writers_preserve_all_entries() -> No
         assert mapping is not None
         assert mapping.changesets["epic.1"] == "feat/root-epic.1"
         assert mapping.changesets["epic.2"] == "feat/root-epic.2"
+
+
+def test_worktree_state_lock_nested_project_dirs_acquire_each_file_lock() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_a = Path(tmp) / "project-a"
+        project_b = Path(tmp) / "project-b"
+        acquired_lock_paths: list[Path] = []
+        released_lock_paths: list[Path] = []
+
+        def fake_acquire(handle: object) -> None:
+            acquired_lock_paths.append(Path(str(getattr(handle, "name"))))
+
+        def fake_release(handle: object) -> None:
+            released_lock_paths.append(Path(str(getattr(handle, "name"))))
+
+        with (
+            patch("atelier.worktrees._acquire_file_lock", side_effect=fake_acquire),
+            patch("atelier.worktrees._release_file_lock", side_effect=fake_release),
+        ):
+            with worktrees.worktree_state_lock(project_a):
+                with worktrees.worktree_state_lock(project_b):
+                    pass
+
+        expected_a = worktrees._state_lock_path(project_a)  # pyright: ignore[reportPrivateUsage]
+        expected_b = worktrees._state_lock_path(project_b)  # pyright: ignore[reportPrivateUsage]
+        assert acquired_lock_paths == [expected_a, expected_b]
+        assert released_lock_paths == [expected_b, expected_a]

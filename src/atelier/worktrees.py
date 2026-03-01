@@ -26,9 +26,9 @@ _STATE_LOCK_DIRNAME = ".locks"
 _STATE_LOCK_FILENAME = "worktrees-state.lock"
 
 _STATE_LOCK_GUARD = threading.Lock()
-_STATE_LOCK_HANDLES: dict[int, TextIO] = {}
-_STATE_LOCK_DEPTH: dict[int, int] = {}
-_STATE_LOCAL_LOCK = threading.RLock()
+_STATE_LOCK_HANDLES: dict[tuple[int, str], TextIO] = {}
+_STATE_LOCK_DEPTH: dict[tuple[int, str], int] = {}
+_STATE_LOCAL_LOCKS: dict[str, threading.RLock] = {}
 
 
 @dataclass(frozen=True)
@@ -60,6 +60,24 @@ def _state_lock_path(project_dir: Path) -> Path:
     return meta_root / _STATE_LOCK_DIRNAME / _STATE_LOCK_FILENAME
 
 
+def _state_lock_key(project_dir: Path) -> str:
+    lock_path = _state_lock_path(project_dir)
+    try:
+        return str(lock_path.resolve())
+    except OSError:
+        return str(lock_path)
+
+
+def _state_local_lock(project_dir: Path) -> threading.RLock:
+    key = _state_lock_key(project_dir)
+    with _STATE_LOCK_GUARD:
+        lock = _STATE_LOCAL_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _STATE_LOCAL_LOCKS[key] = lock
+        return lock
+
+
 def _acquire_file_lock(handle: TextIO) -> None:
     if fcntl is None:  # pragma: no cover - no-op on unsupported platforms
         return
@@ -77,14 +95,17 @@ def worktree_state_lock(project_dir: Path) -> Iterator[None]:
     """Serialize worktree metadata writes across threads/processes."""
     lock_path = _state_lock_path(project_dir)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-
+    local_lock = _state_local_lock(project_dir)
+    lock_key = _state_lock_key(project_dir)
     thread_id = threading.get_ident()
-    _STATE_LOCAL_LOCK.acquire()
+    state_key = (thread_id, lock_key)
+
+    local_lock.acquire()
     handle: TextIO | None = None
     try:
         with _STATE_LOCK_GUARD:
-            current_depth = _STATE_LOCK_DEPTH.get(thread_id, 0)
-            _STATE_LOCK_DEPTH[thread_id] = current_depth + 1
+            current_depth = _STATE_LOCK_DEPTH.get(state_key, 0)
+            _STATE_LOCK_DEPTH[state_key] = current_depth + 1
             if current_depth == 0:
                 handle = lock_path.open("a+", encoding="utf-8")
         if handle is not None:
@@ -93,27 +114,27 @@ def worktree_state_lock(project_dir: Path) -> Iterator[None]:
             except OSError as exc:
                 handle.close()
                 with _STATE_LOCK_GUARD:
-                    _STATE_LOCK_DEPTH.pop(thread_id, None)
+                    _STATE_LOCK_DEPTH.pop(state_key, None)
                 die(f"failed to acquire worktree state lock: {exc}")
             with _STATE_LOCK_GUARD:
-                _STATE_LOCK_HANDLES[thread_id] = handle
+                _STATE_LOCK_HANDLES[state_key] = handle
         yield
     finally:
         release_handle: TextIO | None = None
         with _STATE_LOCK_GUARD:
-            depth = _STATE_LOCK_DEPTH.get(thread_id, 0)
+            depth = _STATE_LOCK_DEPTH.get(state_key, 0)
             if depth <= 1:
-                _STATE_LOCK_DEPTH.pop(thread_id, None)
-                release_handle = _STATE_LOCK_HANDLES.pop(thread_id, None)
+                _STATE_LOCK_DEPTH.pop(state_key, None)
+                release_handle = _STATE_LOCK_HANDLES.pop(state_key, None)
             else:
-                _STATE_LOCK_DEPTH[thread_id] = depth - 1
+                _STATE_LOCK_DEPTH[state_key] = depth - 1
         if release_handle is not None:
             try:
                 _release_file_lock(release_handle)
             except OSError:
                 pass
             release_handle.close()
-        _STATE_LOCAL_LOCK.release()
+        local_lock.release()
 
 
 def load_mapping(path: Path) -> WorktreeMapping | None:
