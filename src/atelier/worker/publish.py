@@ -18,8 +18,18 @@ _GITHUB_REFERENCE_RE = re.compile(
     ),
     re.IGNORECASE,
 )
-_EXPLICIT_GITHUB_ACTION_RE = re.compile(
-    r"\b(?P<action>fix(?:es|ed|ing)?|close(?:s|d)?|resolve(?:s|d)?|address(?:es|ed|ing)?)\b",
+_EXPLICIT_GITHUB_CLAUSE_RE = re.compile(
+    (
+        r"\b(?P<action>fix(?:es|ed|ing)?|close(?:s|d)?|resolve(?:s|d)?|"
+        r"address(?:es|ed|ing)?)\b"
+        r"(?:\s+(?:issue|issues|ticket|tickets|bug|bugs)\b)?"
+        r"\s*(?::|-)?\s*"
+        r"(?P<references>"
+        r"(?:https://(?:api\.)?github\.com/(?:repos/)?[^/\s]+/[^/\s]+/issues/\d+\b|#\d+\b)"
+        r"(?:\s*(?:,|and|&)\s*"
+        r"(?:https://(?:api\.)?github\.com/(?:repos/)?[^/\s]+/[^/\s]+/issues/\d+\b|#\d+\b))*"
+        r")"
+    ),
     re.IGNORECASE,
 )
 
@@ -92,17 +102,10 @@ def parse_explicit_github_references(description: str | None) -> list[tuple[str,
         return []
 
     references: list[tuple[str, str]] = []
-    action_matches = list(_EXPLICIT_GITHUB_ACTION_RE.finditer(description))
-    for index, match in enumerate(action_matches):
+    for match in _EXPLICIT_GITHUB_CLAUSE_RE.finditer(description):
         action_token = match.group("action").lower()
         action = "Addresses" if action_token.startswith("address") else "Fixes"
-        segment_start = match.end()
-        segment_end = (
-            action_matches[index + 1].start()
-            if index + 1 < len(action_matches)
-            else len(description)
-        )
-        segment = description[segment_start:segment_end]
+        segment = match.group("references")
         for reference_match in _GITHUB_REFERENCE_RE.finditer(segment):
             number = reference_match.group("url_number") or reference_match.group("short_number")
             if not number:

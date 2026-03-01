@@ -67,6 +67,24 @@ def test_render_tickets_section_includes_explicit_github_refs() -> None:
     assert "- Fixes #311" in section
 
 
+def test_render_tickets_section_ignores_numbered_prose_after_action_token() -> None:
+    module = _load_script_module()
+    issue = {
+        "description": (
+            "scope: test\n"
+            "notes: Fixes rollout confusion by documenting Step #1 and Step #2.\n"
+            "notes: Addresses #918 for tracking.\n"
+        )
+    }
+
+    section = module.render_ticket_section(issue)
+
+    assert "## Tickets" in section
+    assert "- Addresses #918" in section
+    assert "#1" not in section
+    assert "#2" not in section
+
+
 def test_load_issue_defaults_to_direct_mode(monkeypatch, tmp_path: Path) -> None:
     module = _load_script_module()
     captured: dict[str, list[str]] = {}

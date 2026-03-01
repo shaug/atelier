@@ -89,3 +89,22 @@ def test_render_changeset_pr_body_dedupes_and_prefers_fixes_action() -> None:
 
     assert body.count("#512") == 1
     assert "- Fixes #512" in body
+
+
+def test_render_changeset_pr_body_ignores_numbered_prose_after_action_token() -> None:
+    issue = {
+        "title": "Clarify rollout steps",
+        "description": (
+            "scope: tighten deploy docs\n"
+            "notes: Fixes rollout confusion by documenting Step #1 and Step #2.\n"
+            "notes: Addresses #901 for the tracking issue.\n"
+        ),
+    }
+    fields = {"scope": "Clarify rollout documentation."}
+
+    body = publish.render_changeset_pr_body(issue, fields=fields)
+
+    assert "## Tickets" in body
+    assert "- Addresses #901" in body
+    assert "#1" not in body
+    assert "#2" not in body
