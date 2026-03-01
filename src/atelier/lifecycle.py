@@ -7,6 +7,8 @@ Canonical lifecycle semantics are defined by graph shape plus issue status:
 - changeset role is inferred from leaf work nodes (no work children)
 - top-level leaf work nodes are both epic and changeset
 - runnable work requires leaf role, active status, and satisfied dependencies
+- executable work is expected to produce committable artifacts; planner-owned
+  cleanup/orchestration should not be modeled as worker-executable work
 """
 
 from __future__ import annotations
@@ -291,7 +293,8 @@ def is_work_issue(*, labels: set[str], issue_type: object) -> bool:
     """Return whether an issue should be treated as executable work.
 
     Work identity is inferred from at:epic or issue type. Changeset role is
-    inferred from graph (leaf work bead).
+    inferred from graph (leaf work bead). Planner-owned cleanup-only operations
+    should be modeled outside executable work-bead flows.
 
     Args:
         labels: Normalized issue labels. issue_type: Raw issue type value.

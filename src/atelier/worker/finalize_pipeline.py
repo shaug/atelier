@@ -141,10 +141,6 @@ class FinalizePipelineService(Protocol):
 
     def mark_changeset_children_in_progress(self, changeset_id: str) -> None: ...
 
-    def close_completed_container_changesets(self, epic_id: str) -> list[str]: ...
-
-    def promote_planned_descendant_changesets(self, changeset_id: str) -> None: ...
-
     def changeset_integration_signal(
         self,
         issue: Issue,
@@ -345,14 +341,30 @@ def run_finalize_pipeline(
                 started_at=started_at,
             ):
                 service.mark_changeset_children_in_progress(changeset_id)
-                service.close_completed_container_changesets(epic_id)
                 return FinalizeResult(
                     continue_running=False, reason="changeset_children_planning_blocked"
                 )
-            service.promote_planned_descendant_changesets(changeset_id)
+            if planned_ids:
+                service.mark_changeset_children_in_progress(changeset_id)
+                service.send_planner_notification(
+                    subject=f"NEEDS-DECISION: Descendant promotion required ({changeset_id})",
+                    body=(
+                        "Worker finalize detected deferred child changesets under the claimed "
+                        "changeset.\n"
+                        "Planner owns deferred->open promotion and sequencing decisions.\n"
+                        f"Deferred descendants: {', '.join(sorted(planned_ids))}\n"
+                        "Action: planner should review scope split, promote the next child "
+                        "changeset, then dispatch a new worker run."
+                    ),
+                    agent_id=agent_id,
+                    thread_id=changeset_id,
+                )
+                return FinalizeResult(
+                    continue_running=False,
+                    reason="changeset_children_require_planner_promotion",
+                )
             service.mark_changeset_children_in_progress(changeset_id)
-            service.close_completed_container_changesets(epic_id)
-            return FinalizeResult(continue_running=True, reason="changeset_children_pending")
+            return FinalizeResult(continue_running=False, reason="changeset_children_pending")
         if terminal_state == "merged":
             integration_proven, integrated_sha = service.changeset_integration_signal(
                 issue,

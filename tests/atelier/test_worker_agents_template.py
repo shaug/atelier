@@ -18,4 +18,6 @@ def test_worker_agents_template_contains_core_sections() -> None:
     assert "Finish" in content
     assert "Do not look for more" in content
     assert "Update changeset status and metadata." in content
+    assert "committable artifacts (code/config/docs/tests)" in content
+    assert "Do not mutate sibling/unclaimed work-bead lifecycle state." in content
     assert "Update changeset metadata and labels." not in content

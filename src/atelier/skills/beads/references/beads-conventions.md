@@ -17,8 +17,11 @@ projects. Stick to core Beads fields so existing Beads repos remain compatible.
 - Prefer Beads core statuses plus planning status (`deferred`, `open`,
   `in_progress`, `blocked`, `closed`).
 - Use `deferred` for planned/draft work and `open` for executable work.
+- Treat executable work beads as committable artifact work
+  (code/config/docs/tests), not cleanup-only orchestration.
 - Promotion is a status transition (`deferred -> open`), not a lifecycle-label
   mutation.
+- Planner owns promotion and non-commit cleanup/orchestration transitions.
 - Lifecycle authority is canonical status + graph semantics; labels are not
   execution gates. `cs:*` lifecycle labels are not execution gates. `cs:merged`
   and `cs:abandoned` are used on closed changeset beads to indicate

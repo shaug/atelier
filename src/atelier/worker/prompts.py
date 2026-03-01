@@ -28,6 +28,14 @@ def worker_opening_prompt(
         f"Epic: {epic_id}",
         f"Changeset: {summary}",
         (
+            "Role boundary: implement only committable changeset artifacts "
+            "(code/config/docs/tests) for the assigned changeset."
+        ),
+        (
+            "Do not promote, clean up, or otherwise mutate sibling/unclaimed "
+            "work beads; planner owns non-commit orchestration."
+        ),
+        (
             "If this project uses PR review and PR creation is allowed now, create "
             "or update the PR during finalize."
         ),
@@ -36,8 +44,9 @@ def worker_opening_prompt(
             "acceptance criteria; do not mention internal bead IDs."
         ),
         (
-            "When done, update beads status/metadata for this changeset. If blocked,"
-            " send NEEDS-DECISION with details and exit."
+            "When done, update beads status/metadata for this changeset and required "
+            "ancestor lifecycle state only. If blocked, send NEEDS-DECISION with "
+            "details and exit."
         ),
     ]
     if merge_conflict:

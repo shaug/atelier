@@ -21,7 +21,6 @@ from .work_finalization_state import (
     changeset_integration_signal,
     changeset_stack_integrity_preflight,
     changeset_waiting_on_review_or_signals,
-    close_completed_container_changesets,
     handle_pushed_without_pr,
     has_blocking_messages,
     has_open_descendant_changesets,
@@ -32,7 +31,6 @@ from .work_finalization_state import (
     mark_changeset_children_in_progress,
     mark_changeset_closed,
     mark_changeset_in_progress,
-    promote_planned_descendant_changesets,
     recover_premature_merged_changeset,
     send_planner_notification,
     set_changeset_review_pending_state,
@@ -66,16 +64,6 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
 
     def mark_changeset_children_in_progress(self, changeset_id: str) -> None:
         mark_changeset_children_in_progress(
-            changeset_id, beads_root=self._beads_root, repo_root=self._repo_root
-        )
-
-    def close_completed_container_changesets(self, epic_id: str) -> list[str]:
-        return close_completed_container_changesets(
-            epic_id, beads_root=self._beads_root, repo_root=self._repo_root
-        )
-
-    def promote_planned_descendant_changesets(self, changeset_id: str) -> None:
-        promote_planned_descendant_changesets(
             changeset_id, beads_root=self._beads_root, repo_root=self._repo_root
         )
 

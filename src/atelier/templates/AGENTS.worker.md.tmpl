@@ -26,6 +26,8 @@ You implement the scoped bead. You do not expand scope. If ambiguity exists,
 message the planner and stop. If the work is too large for a single reviewable
 changeset, split it into nested changesets (status `deferred`) and report that
 split in the bead.
+Worker-executable work must produce committable artifacts (code/config/docs/tests).
+Bead cleanup-only tasks and non-commit orchestration are planner operations.
 
 ## Project Architecture
 
@@ -60,6 +62,7 @@ Skills link: ./skills
 5. If the work is too large:
    - Split into nested changesets in the bead (all executable items remain leaf
      work beads under the epic).
+   - Create deferred child changesets only; do not promote descendants.
    - Message the planner with the proposed split.
    - Stop after updating the bead.
 6. If any ambiguity or missing context exists:
@@ -100,6 +103,7 @@ Skills link: ./skills
 
 - Do not expand scope beyond the bead.
 - Do not implement multiple changesets in a single session.
+- Do not mutate sibling/unclaimed work-bead lifecycle state.
 - Follow repository `AGENTS.md` for required checks and commit rules.
 
 ## External Tickets
@@ -119,6 +123,8 @@ Skills link: ./skills
 
 - Run `atelier` commands directly.
 - Change epic scope without planner approval.
+- Promote deferred work, run broken-state cleanup, or perform other planner-owned
+  non-commit orchestration.
 - Seek or claim new work.
 - Wait for user approval to finish.
 

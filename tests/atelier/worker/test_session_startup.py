@@ -34,9 +34,6 @@ class FakeStartupService:
         self._mark_changeset_merged = overrides.pop(
             "mark_changeset_merged", lambda _changeset_id: None
         )
-        self._mark_changeset_in_progress = overrides.pop(
-            "mark_changeset_in_progress", lambda _changeset_id: None
-        )
         self._update_changeset_integrated_sha = overrides.pop(
             "update_changeset_integrated_sha", lambda _changeset_id, _integrated_sha: None
         )
@@ -160,9 +157,6 @@ class FakeStartupService:
 
     def mark_changeset_merged(self, changeset_id: str) -> None:
         self._mark_changeset_merged(changeset_id)
-
-    def mark_changeset_in_progress(self, changeset_id: str) -> None:
-        self._mark_changeset_in_progress(changeset_id)
 
     def update_changeset_integrated_sha(self, changeset_id: str, integrated_sha: str) -> None:
         self._update_changeset_integrated_sha(changeset_id, integrated_sha)
@@ -458,66 +452,49 @@ def test_run_startup_contract_explicit_epic_review_pending_exits_cleanly() -> No
     ]
 
 
-def test_run_startup_contract_explicit_epic_no_actionable_reconciles_and_closes() -> None:
+def test_run_startup_contract_explicit_epic_no_actionable_exits_without_reconciliation() -> None:
     emitted: list[str] = []
-    close_calls: list[tuple[str, str | None]] = []
 
     result = _run_startup(
         explicit_epic_id="at-explicit",
-        agent_bead_id="at-agent",
         show_issue=lambda _issue_id: {
             "id": "at-explicit",
             "status": "open",
             "labels": ["at:epic"],
         },
         next_changeset=lambda **_kwargs: None,
-        list_descendant_changesets=lambda _parent_id, include_closed: (
-            [
-                {
-                    "id": "at-explicit.1",
-                    "status": "closed",
-                    "labels": ["cs:merged"],
-                },
-                {
-                    "id": "at-explicit.2",
-                    "status": "closed",
-                    "labels": ["cs:abandoned"],
-                },
-            ]
-            if include_closed
-            else []
-        ),
-        close_epic_if_complete=lambda epic_id, agent_bead_id: (
-            close_calls.append((epic_id, agent_bead_id)) or True
-        ),
         emit=lambda message: emitted.append(message),
     )
 
     assert result.should_exit is True
-    assert result.reason == "explicit_epic_completed"
+    assert result.reason == "explicit_epic_not_actionable"
     assert result.epic_id == "at-explicit"
-    assert close_calls == [("at-explicit", "at-agent")]
     assert emitted == [
-        "Explicit epic at-explicit is completed; run without an epic id to select new ready work."
+        "Explicit epic at-explicit has no actionable ready changesets; run without an epic id to "
+        "select available work."
     ]
 
 
-def test_run_startup_contract_explicit_epic_reconciles_stale_in_progress_changeset() -> None:
+def test_run_startup_contract_explicit_epic_does_not_reconcile_stale_in_progress_changeset() -> (
+    None
+):
     merged_ids: list[str] = []
     integrated_updates: list[tuple[str, str]] = []
-    close_calls: list[tuple[str, str | None]] = []
+    next_changeset_calls = 0
+
+    def next_changeset(**_kwargs: Any) -> dict[str, object] | None:
+        nonlocal next_changeset_calls
+        next_changeset_calls += 1
+        return None
 
     result = _run_startup(
         explicit_epic_id="at-explicit",
-        agent_bead_id="at-agent",
         show_issue=lambda _issue_id: {
             "id": "at-explicit",
             "status": "open",
             "labels": ["at:epic"],
         },
-        next_changeset=lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("next_changeset should not run after explicit merge reconciliation")
-        ),
+        next_changeset=next_changeset,
         list_descendant_changesets=lambda _parent_id, include_closed: (
             [
                 {
@@ -537,22 +514,18 @@ def test_run_startup_contract_explicit_epic_reconciles_stale_in_progress_changes
         update_changeset_integrated_sha=lambda changeset_id, integrated_sha: (
             integrated_updates.append((changeset_id, integrated_sha))
         ),
-        close_epic_if_complete=lambda epic_id, agent_bead_id: (
-            close_calls.append((epic_id, agent_bead_id)) or True
-        ),
     )
 
     assert result.should_exit is True
-    assert result.reason == "explicit_epic_completed"
-    assert merged_ids == ["at-explicit.1"]
-    assert integrated_updates == [("at-explicit.1", "abc1234")]
-    assert close_calls == [("at-explicit", "at-agent")]
+    assert result.reason == "explicit_epic_not_actionable"
+    assert merged_ids == []
+    assert integrated_updates == []
+    assert next_changeset_calls == 1
 
 
 def test_run_startup_contract_explicit_epic_active_pr_does_not_reconcile_self_ancestor() -> None:
     merged_ids: list[str] = []
     integrated_updates: list[tuple[str, str]] = []
-    close_calls: list[tuple[str, str | None]] = []
 
     def fake_is_ancestor(
         _repo_root: Path,
@@ -618,167 +591,16 @@ def test_run_startup_contract_explicit_epic_active_pr_does_not_reconcile_self_an
             update_changeset_integrated_sha=lambda changeset_id, integrated_sha: (
                 integrated_updates.append((changeset_id, integrated_sha))
             ),
-            close_epic_if_complete=lambda epic_id, agent_bead_id: (
-                close_calls.append((epic_id, agent_bead_id)) or False
-            ),
         )
 
     assert result.should_exit is True
     assert result.reason == "explicit_epic_review_pending"
     assert merged_ids == []
     assert integrated_updates == []
-    assert close_calls == [("at-explicit", "at-agent")]
-
-
-def test_run_startup_contract_explicit_epic_active_pr_skips_auto_merge_reconcile() -> None:
-    merged_ids: list[str] = []
-    close_calls: list[tuple[str, str | None]] = []
-    emitted: list[str] = []
-
-    result = _run_startup(
-        explicit_epic_id="at-explicit",
-        branch_pr=True,
-        repo_slug="org/repo",
-        agent_bead_id="at-agent",
-        show_issue=lambda _issue_id: {
-            "id": "at-explicit",
-            "status": "in_progress",
-            "assignee": "atelier/worker/codex/p100",
-            "labels": ["at:epic"],
-        },
-        next_changeset=lambda **_kwargs: None,
-        list_descendant_changesets=lambda _parent_id, include_closed: (
-            [
-                {
-                    "id": "at-explicit.1",
-                    "status": "in_progress",
-                    "description": "pr_state: in-review\n",
-                    "labels": [],
-                }
-            ]
-            if include_closed
-            else []
-        ),
-        changeset_waiting_on_review_or_signals=lambda *_args, **_kwargs: True,
-        changeset_integration_signal=lambda _issue, repo_slug, git_path: (True, "abc1234"),
-        mark_changeset_merged=lambda changeset_id: merged_ids.append(changeset_id),
-        close_epic_if_complete=lambda epic_id, agent_bead_id: (
-            close_calls.append((epic_id, agent_bead_id)) or False
-        ),
-        emit=lambda message: emitted.append(message),
-    )
-
-    assert result.should_exit is True
-    assert result.reason == "explicit_epic_review_pending"
-    assert merged_ids == []
-    assert close_calls == [("at-explicit", "at-agent")]
-    assert any(
-        "Startup diagnostics: changeset has active PR lifecycle (auto-close deferred): at-explicit.1"
-        in line
-        for line in emitted
-    )
-
-
-def test_run_startup_contract_explicit_epic_closed_active_pr_reopens_changeset() -> None:
-    close_calls: list[tuple[str, str | None]] = []
-    emitted: list[str] = []
-    reopened: list[str] = []
-
-    result = _run_startup(
-        explicit_epic_id="at-explicit",
-        branch_pr=True,
-        repo_slug="org/repo",
-        agent_bead_id="at-agent",
-        show_issue=lambda _issue_id: {
-            "id": "at-explicit",
-            "status": "in_progress",
-            "assignee": "atelier/worker/codex/p100",
-            "labels": ["at:epic"],
-        },
-        next_changeset=lambda **_kwargs: None,
-        list_descendant_changesets=lambda _parent_id, include_closed: (
-            [
-                {
-                    "id": "at-explicit.1",
-                    "status": "closed",
-                    "description": "pr_state: closed\n",
-                    "labels": [],
-                }
-            ]
-            if include_closed
-            else []
-        ),
-        changeset_waiting_on_review_or_signals=lambda *_args, **_kwargs: True,
-        mark_changeset_in_progress=lambda changeset_id: reopened.append(changeset_id),
-        close_epic_if_complete=lambda epic_id, agent_bead_id: (
-            close_calls.append((epic_id, agent_bead_id)) or False
-        ),
-        emit=lambda message: emitted.append(message),
-    )
-
-    assert result.should_exit is True
-    assert result.reason == "explicit_epic_review_pending"
-    assert close_calls == [("at-explicit", "at-agent")]
-    assert reopened == ["at-explicit.1"]
-    assert any(
-        "Startup diagnostics: closed changeset has active PR lifecycle "
-        "(decision-required): at-explicit.1" in line
-        for line in emitted
-    )
-
-
-def test_run_startup_contract_explicit_epic_closed_active_pr_dry_run_logs_recovery() -> None:
-    close_calls: list[tuple[str, str | None]] = []
-    dry_run_lines: list[str] = []
-    reopened: list[str] = []
-
-    result = _run_startup(
-        explicit_epic_id="at-explicit",
-        branch_pr=True,
-        repo_slug="org/repo",
-        dry_run=True,
-        agent_bead_id="at-agent",
-        show_issue=lambda _issue_id: {
-            "id": "at-explicit",
-            "status": "in_progress",
-            "assignee": "atelier/worker/codex/p100",
-            "labels": ["at:epic"],
-        },
-        next_changeset=lambda **_kwargs: None,
-        list_descendant_changesets=lambda _parent_id, include_closed: (
-            [
-                {
-                    "id": "at-explicit.1",
-                    "status": "closed",
-                    "description": "pr_state: closed\n",
-                    "labels": [],
-                }
-            ]
-            if include_closed
-            else []
-        ),
-        changeset_waiting_on_review_or_signals=lambda *_args, **_kwargs: True,
-        mark_changeset_in_progress=lambda changeset_id: reopened.append(changeset_id),
-        close_epic_if_complete=lambda epic_id, agent_bead_id: (
-            close_calls.append((epic_id, agent_bead_id)) or False
-        ),
-        dry_run_log=lambda message: dry_run_lines.append(message),
-    )
-
-    assert result.should_exit is True
-    assert result.reason == "explicit_epic_review_pending"
-    assert close_calls == [("at-explicit", "at-agent")]
-    assert reopened == []
-    assert any(
-        "Would recover closed changeset with active PR lifecycle to in_progress: at-explicit.1"
-        in line
-        for line in dry_run_lines
-    )
 
 
 def test_run_startup_contract_explicit_epic_no_actionable_remains_non_terminal() -> None:
     merged_ids: list[str] = []
-    close_calls: list[tuple[str, str | None]] = []
     emitted: list[str] = []
 
     result = _run_startup(
@@ -808,16 +630,12 @@ def test_run_startup_contract_explicit_epic_no_actionable_remains_non_terminal()
         ),
         changeset_integration_signal=lambda _issue, repo_slug, git_path: (False, None),
         mark_changeset_merged=lambda changeset_id: merged_ids.append(changeset_id),
-        close_epic_if_complete=lambda epic_id, agent_bead_id: (
-            close_calls.append((epic_id, agent_bead_id)) or False
-        ),
         emit=lambda message: emitted.append(message),
     )
 
     assert result.should_exit is True
     assert result.reason == "explicit_epic_not_actionable"
     assert merged_ids == []
-    assert close_calls == [("at-explicit", "at-agent")]
     assert emitted == [
         "Explicit epic at-explicit has no actionable ready changesets; run without an epic id to "
         "select available work."
@@ -1194,9 +1012,8 @@ def test_run_startup_contract_reclaims_stale_family_assignment() -> None:
     assert result.reassign_from == "atelier/worker/codex/p099"
 
 
-def test_run_startup_contract_auto_reconciles_stale_merged_state_before_selection() -> None:
+def test_run_startup_contract_auto_does_not_reconcile_stale_merged_state_before_selection() -> None:
     merged_ids: list[str] = []
-    close_calls: list[tuple[str, str | None]] = []
     list_epics_calls = 0
     stale_epic = {
         "id": "at-stale",
@@ -1238,9 +1055,6 @@ def test_run_startup_contract_auto_reconciles_stale_merged_state_before_selectio
             "abc1234" if issue.get("id") == "at-stale.1" else None,
         ),
         mark_changeset_merged=lambda changeset_id: merged_ids.append(changeset_id),
-        close_epic_if_complete=lambda epic_id, agent_bead_id: (
-            close_calls.append((epic_id, agent_bead_id)) or epic_id == "at-stale"
-        ),
         next_changeset=lambda **kwargs: (
             {"id": "at-ready.1"} if kwargs["epic_id"] == "at-ready" else None
         ),
@@ -1248,13 +1062,11 @@ def test_run_startup_contract_auto_reconciles_stale_merged_state_before_selectio
 
     assert result.reason == "selected_auto"
     assert result.epic_id == "at-ready"
-    assert merged_ids == ["at-stale.1"]
-    assert ("at-stale", None) in close_calls
-    assert list_epics_calls == 2
+    assert merged_ids == []
+    assert list_epics_calls == 1
 
 
-def test_run_startup_contract_auto_reconciles_only_active_epics() -> None:
-    close_calls: list[tuple[str, str | None]] = []
+def test_run_startup_contract_auto_skips_reconciliation_for_active_epics() -> None:
     selected = {
         "id": "at-ready",
         "status": "open",
@@ -1293,9 +1105,6 @@ def test_run_startup_contract_auto_reconciles_only_active_epics() -> None:
 
     result = _run_startup(
         list_epics=lambda: [closed, deferred, non_executable, selected, in_progress],
-        close_epic_if_complete=lambda epic_id, agent_bead_id: (
-            close_calls.append((epic_id, agent_bead_id)) or False
-        ),
         next_changeset=lambda **kwargs: (
             {"id": "at-ready.1"} if kwargs["epic_id"] == "at-ready" else None
         ),
@@ -1303,7 +1112,6 @@ def test_run_startup_contract_auto_reconciles_only_active_epics() -> None:
 
     assert result.reason == "selected_auto"
     assert result.epic_id == "at-ready"
-    assert close_calls == [("at-ready", None), ("at-in-progress", None)]
 
 
 def test_run_startup_contract_uses_ready_changeset_fallback() -> None:

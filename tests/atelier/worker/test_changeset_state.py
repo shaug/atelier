@@ -99,6 +99,118 @@ def test_close_completed_container_changesets_reopens_active_pr_changeset() -> N
     )
 
 
+def test_close_completed_ancestor_container_changesets_closes_claimed_lineage_only() -> None:
+    issues = {
+        "at-1.2.1": {
+            "id": "at-1.2.1",
+            "status": "closed",
+            "parent": "at-1.2",
+            "labels": [],
+            "description": "",
+        },
+        "at-1.2": {
+            "id": "at-1.2",
+            "status": "in_progress",
+            "parent": "at-1.1",
+            "labels": [],
+            "description": "",
+        },
+        "at-1.1": {
+            "id": "at-1.1",
+            "status": "in_progress",
+            "parent": "at-1",
+            "labels": [],
+            "description": "",
+        },
+        "at-1": {
+            "id": "at-1",
+            "status": "in_progress",
+            "labels": ["at:epic"],
+            "description": "",
+        },
+    }
+
+    def _show(args, **_kwargs):
+        if args[:1] != ["show"]:
+            return []
+        issue_id = args[1]
+        issue = issues.get(issue_id)
+        if issue is None:
+            return []
+        return [issue]
+
+    with (
+        patch("atelier.worker.changeset_state.beads.run_bd_json", side_effect=_show),
+        patch("atelier.worker.changeset_state._close_guard_allows", return_value=True),
+        patch("atelier.worker.changeset_state.mark_changeset_closed") as mark_closed,
+    ):
+        closed = changeset_state.close_completed_ancestor_container_changesets(
+            "at-1.2.1",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            has_open_descendant_changesets=lambda _issue_id: False,
+        )
+
+    assert closed == ["at-1.2", "at-1.1"]
+    assert [call.args[0] for call in mark_closed.call_args_list] == ["at-1.2", "at-1.1"]
+
+
+def test_close_completed_ancestor_container_changesets_stops_when_ancestor_has_open_descendants() -> (
+    None
+):
+    issues = {
+        "at-1.2.1": {
+            "id": "at-1.2.1",
+            "status": "closed",
+            "parent": "at-1.2",
+            "labels": [],
+            "description": "",
+        },
+        "at-1.2": {
+            "id": "at-1.2",
+            "status": "in_progress",
+            "parent": "at-1.1",
+            "labels": [],
+            "description": "",
+        },
+        "at-1.1": {
+            "id": "at-1.1",
+            "status": "in_progress",
+            "parent": "at-1",
+            "labels": [],
+            "description": "",
+        },
+    }
+
+    def _show(args, **_kwargs):
+        if args[:1] != ["show"]:
+            return []
+        issue_id = args[1]
+        issue = issues.get(issue_id)
+        if issue is None:
+            return []
+        return [issue]
+
+    with (
+        patch("atelier.worker.changeset_state.beads.run_bd_json", side_effect=_show),
+        patch("atelier.worker.changeset_state._close_guard_allows", return_value=True),
+        patch("atelier.worker.changeset_state.mark_changeset_closed") as mark_closed,
+    ):
+        closed = changeset_state.close_completed_ancestor_container_changesets(
+            "at-1.2.1",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            has_open_descendant_changesets=lambda issue_id: issue_id == "at-1.1",
+        )
+
+    assert closed == ["at-1.2"]
+    mark_closed.assert_called_once_with(
+        "at-1.2",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+
 def test_promote_planned_descendant_changesets_promotes_deferred_only() -> None:
     descendants = [
         {"id": "at-1.1", "status": "deferred", "labels": []},

@@ -14,6 +14,8 @@ def test_worker_opening_prompt_uses_status_metadata_wording() -> None:
 
     assert "update beads status/metadata for this changeset" in prompt
     assert "update beads state/labels for this changeset" not in prompt
+    assert "implement only committable changeset artifacts" in prompt
+    assert "planner owns non-commit orchestration" in prompt
 
 
 def test_worker_opening_prompt_review_feedback_avoids_label_reset_guidance() -> None:
