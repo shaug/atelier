@@ -22,6 +22,53 @@ _RATIONALE = re.compile(
     r"\b(?:rationale|split because|split due to|reviewability|dependency|sequencing)\b",
     re.IGNORECASE,
 )
+_CROSS_CUTTING_INVARIANT = re.compile(
+    r"\b(?:lifecycle|contract|invariant|state machine)\b",
+    re.IGNORECASE,
+)
+_IMPACT_MAP = re.compile(r"\b(?:invariant impact map|impact map)\b", re.IGNORECASE)
+_MUTATION_ENTRY_POINTS = re.compile(
+    r"\b(?:mutation entry points?|write entry points?)\b",
+    re.IGNORECASE,
+)
+_RECOVERY_PATHS = re.compile(
+    r"\b(?:recovery paths?|rollback paths?|failure recovery)\b",
+    re.IGNORECASE,
+)
+_EXTERNAL_SIDE_EFFECT_ADAPTERS = re.compile(
+    r"\b(?:external side[- ]effect adapters?|provider adapters?|external adapters?)\b",
+    re.IGNORECASE,
+)
+_CONCERN_DOMAINS: dict[str, re.Pattern[str]] = {
+    "lifecycle-state-machine": re.compile(
+        r"\b(?:lifecycle|state machine|state transition)\b",
+        re.IGNORECASE,
+    ),
+    "external-ticket-provider-sync": re.compile(
+        r"\b(?:external|provider|ticket sync|provider sync|sync adapter)\b",
+        re.IGNORECASE,
+    ),
+    "dry-run-observability": re.compile(
+        r"\b(?:dry[- ]?run|observability|telemetry|metrics|instrumentation)\b",
+        re.IGNORECASE,
+    ),
+}
+_RESPLIT_THRESHOLD_TRIGGER = re.compile(
+    r"\b(?:re[- ]?split trigger|split trigger|loc threshold|file threshold|> ?400|> ?800)\b",
+    re.IGNORECASE,
+)
+_RESPLIT_NEW_DOMAIN_TRIGGER = re.compile(
+    r"\b(?:new concern domain|additional concern domain|new domain during review)\b",
+    re.IGNORECASE,
+)
+_DEFERRED_FOLLOW_ON_ACTION = re.compile(
+    r"\b(?:deferred follow[- ]on|create deferred changeset|stack extension|extend stack)\b",
+    re.IGNORECASE,
+)
+_REVIEW_SCOPE_GROWTH = re.compile(
+    r"\b(?:review feedback|scope expansion during review|scope grows during review)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -83,6 +130,7 @@ def _normalize_text(value: object) -> str:
 
 def _text_blob(issue: dict[str, object]) -> str:
     fields = (
+        "title",
         "description",
         "notes",
         "acceptance",
@@ -105,6 +153,42 @@ def _extract_loc_estimate(text: str) -> int | None:
     if not values:
         return None
     return max(values)
+
+
+def _cross_cutting_corpus(
+    *,
+    epic_issue: dict[str, object] | None,
+    target_changesets: list[dict[str, object]],
+) -> str:
+    parts: list[str] = []
+    if epic_issue is not None:
+        parts.append(_text_blob(epic_issue))
+    parts.extend(_text_blob(issue) for issue in target_changesets)
+    return "\n".join(part for part in parts if part.strip())
+
+
+def _subject_id(
+    *,
+    epic_issue: dict[str, object] | None,
+    target_changesets: list[dict[str, object]],
+) -> str:
+    if epic_issue is not None:
+        epic_id = _issue_id(epic_issue)
+        if epic_id:
+            return epic_id
+    if target_changesets:
+        target_id = _issue_id(target_changesets[0])
+        if target_id:
+            return target_id
+    return "(changeset)"
+
+
+def _matched_concern_domains(text: str) -> list[str]:
+    matched: list[str] = []
+    for domain, pattern in _CONCERN_DOMAINS.items():
+        if pattern.search(text):
+            matched.append(domain)
+    return matched
 
 
 def _load_issue(issue_id: str, *, beads_dir: str | None) -> dict[str, object] | None:
@@ -169,6 +253,53 @@ def _evaluate_guardrails(
         else:
             path_summary = (
                 f"{epic_id}: multi-unit decomposition ({len(child_changesets)} children)."
+            )
+
+    corpus = _cross_cutting_corpus(epic_issue=epic_issue, target_changesets=target_changesets)
+    if _CROSS_CUTTING_INVARIANT.search(corpus):
+        subject = _subject_id(epic_issue=epic_issue, target_changesets=target_changesets)
+        has_impact_map = _IMPACT_MAP.search(corpus)
+        has_mutation_entry_points = _MUTATION_ENTRY_POINTS.search(corpus)
+        has_recovery_paths = _RECOVERY_PATHS.search(corpus)
+        has_external_adapters = _EXTERNAL_SIDE_EFFECT_ADAPTERS.search(corpus)
+        if not (
+            has_impact_map
+            and has_mutation_entry_points
+            and has_recovery_paths
+            and has_external_adapters
+        ):
+            violations.append(
+                f"{subject}: missing invariant impact map coverage for mutation entry points, "
+                "recovery paths, and external side-effect adapters."
+            )
+
+        concern_domains = _matched_concern_domains(corpus)
+        if epic_issue is not None and len(concern_domains) >= 2 and len(child_changesets) < 2:
+            violations.append(
+                f"{subject}: touches multiple concern domains ({', '.join(concern_domains)}) "
+                "without stacked decomposition; split into multiple changesets or record "
+                "explicit decomposition constraints."
+            )
+
+        has_threshold_trigger = _RESPLIT_THRESHOLD_TRIGGER.search(corpus)
+        has_new_domain_trigger = _RESPLIT_NEW_DOMAIN_TRIGGER.search(corpus)
+        if not (has_threshold_trigger and has_new_domain_trigger):
+            violations.append(
+                f"{subject}: missing explicit re-split triggers for threshold crossings and "
+                "new concern domains discovered during review."
+            )
+
+        has_deferred_follow_on = _DEFERRED_FOLLOW_ON_ACTION.search(corpus)
+        if not has_deferred_follow_on:
+            violations.append(
+                f"{subject}: missing required planner action when re-split triggers fire "
+                "(create deferred follow-on work or stack extension)."
+            )
+
+        if not _REVIEW_SCOPE_GROWTH.search(corpus):
+            violations.append(
+                f"{subject}: missing review-feedback scope-growth guidance; capture expansion "
+                "immediately as deferred follow-on work or stack extension."
             )
 
     checked_ids = [_issue_id(issue) for issue in target_changesets if _issue_id(issue)]

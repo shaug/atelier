@@ -110,6 +110,94 @@ def test_evaluate_guardrails_reports_multi_unit_decomposition() -> None:
     assert report.violations == []
 
 
+def test_evaluate_guardrails_flags_cross_cutting_guardrail_gaps() -> None:
+    module = _load_script_module()
+    epic = {
+        "id": "at-epic",
+        "labels": ["at:epic"],
+        "title": "Fix lifecycle invariant regression",
+        "description": ("Concern domains: lifecycle state machine and external provider sync."),
+    }
+    children = [
+        {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 230"},
+        {"id": "at-epic.2", "labels": [], "description": "LOC estimate: 260"},
+    ]
+
+    report = module._evaluate_guardrails(
+        epic_issue=epic,
+        child_changesets=children,
+        target_changesets=children,
+    )
+
+    assert any("missing invariant impact map coverage" in item for item in report.violations)
+    assert any("missing explicit re-split triggers" in item for item in report.violations)
+    assert any("missing required planner action" in item for item in report.violations)
+    assert any(
+        "missing review-feedback scope-growth guidance" in item for item in report.violations
+    )
+
+
+def test_evaluate_guardrails_flags_cross_cutting_single_changeset_decomposition_gap() -> None:
+    module = _load_script_module()
+    epic = {
+        "id": "at-epic",
+        "labels": ["at:epic"],
+        "title": "Fix lifecycle invariant regression",
+        "notes": (
+            "Decomposition rationale: split due to dependency sequencing.\n"
+            "Invariant impact map:\n"
+            "- mutation entry points\n"
+            "- recovery paths\n"
+            "- external side-effect adapters\n"
+            "Re-split trigger: LOC threshold > 400 and new concern domain during review.\n"
+            "Planner action: create deferred follow-on changeset or stack extension.\n"
+            "Review feedback: scope expansion during review is captured immediately."
+        ),
+        "description": ("Concern domains: lifecycle state machine and external provider sync."),
+    }
+    child = {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 300"}
+
+    report = module._evaluate_guardrails(
+        epic_issue=epic,
+        child_changesets=[child],
+        target_changesets=[child],
+    )
+
+    assert any("without stacked decomposition" in item for item in report.violations)
+
+
+def test_evaluate_guardrails_accepts_cross_cutting_guardrails_when_complete() -> None:
+    module = _load_script_module()
+    epic = {
+        "id": "at-epic",
+        "labels": ["at:epic"],
+        "title": "Fix lifecycle invariant regression",
+        "notes": (
+            "Invariant impact map:\n"
+            "- mutation entry points\n"
+            "- recovery paths\n"
+            "- external side-effect adapters\n"
+            "Concern domains: lifecycle state machine, external provider sync, dry-run "
+            "observability.\n"
+            "Re-split trigger: LOC threshold > 400 and new concern domain during review.\n"
+            "Planner action: create deferred follow-on changeset or stack extension.\n"
+            "Review feedback: scope expansion during review is captured immediately."
+        ),
+    }
+    children = [
+        {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 230"},
+        {"id": "at-epic.2", "labels": [], "description": "LOC estimate: 260"},
+    ]
+
+    report = module._evaluate_guardrails(
+        epic_issue=epic,
+        child_changesets=children,
+        target_changesets=children,
+    )
+
+    assert report.violations == []
+
+
 def test_run_bd_json_defaults_to_direct_mode(monkeypatch) -> None:
     module = _load_script_module()
     captured: dict[str, list[str]] = {}
