@@ -538,7 +538,9 @@ def test_changeset_integration_signal_strict_sha_requires_source_reachability() 
     assert integrated_sha is None
 
 
-def test_changeset_integration_signal_strict_sha_allows_target_only_with_merged_pr() -> None:
+def test_changeset_integration_signal_strict_sha_merged_pr_rejects_target_only_without_source_lineage() -> (
+    None
+):
     issue = {
         "description": (
             "changeset.integrated_sha: abcdef1234567890abcdef1234567890abcdef12\n"
@@ -594,8 +596,8 @@ def test_changeset_integration_signal_strict_sha_allows_target_only_with_merged_
             require_target_branch_proof=True,
         )
 
-    assert ok is True
-    assert integrated_sha == "abcdef1234567890abcdef1234567890abcdef12"
+    assert ok is False
+    assert integrated_sha is None
 
 
 def test_changeset_integration_signal_strict_mode_uses_pr_base_branch_target() -> None:

@@ -287,8 +287,7 @@ def changeset_integration_signal(
                         is True
                         for source_ref in source_refs
                     ):
-                        if not pr_merged:
-                            continue
+                        continue
                     for ref in current_target_refs:
                         if (
                             git.git_is_ancestor(repo_root, candidate_sha, ref, git_path=git_path)
