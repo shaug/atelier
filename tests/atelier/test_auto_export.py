@@ -214,6 +214,54 @@ def test_auto_export_blocks_command_output_contamination(monkeypatch) -> None:
     assert provider.created == []
 
 
+def test_auto_export_allows_plain_output_heading(monkeypatch) -> None:
+    provider = FakeProvider()
+    context = _context(auto_enabled=True)
+    issue = {
+        "id": "at-1",
+        "title": "Epic",
+        "labels": ["at:epic"],
+        "description": "Investigation notes\nOutput:\nExpected artifacts for downstream steps.",
+    }
+
+    monkeypatch.setattr(auto_export, "_resolve_provider", lambda *_args, **_kwargs: provider)
+    monkeypatch.setattr(auto_export, "_load_issue", lambda *_args, **_kwargs: issue)
+    monkeypatch.setattr(
+        auto_export.beads, "update_external_tickets", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(auto_export.beads, "list_work_children", lambda *_, **__: [])
+
+    result = auto_export.auto_export_issue("at-1", context=context)
+
+    assert result.status == "exported"
+    assert provider.created
+    body = provider.created[0].body
+    assert isinstance(body, str)
+    assert "Output:" in body
+
+
+def test_auto_export_blocks_output_heading_with_runner_context(monkeypatch) -> None:
+    provider = FakeProvider()
+    context = _context(auto_enabled=True)
+    issue = {
+        "id": "at-1",
+        "title": "Epic",
+        "labels": ["at:epic"],
+        "description": "Output:\nWall time: 0.51 seconds",
+    }
+
+    monkeypatch.setattr(auto_export, "_resolve_provider", lambda *_args, **_kwargs: provider)
+    monkeypatch.setattr(auto_export, "_load_issue", lambda *_args, **_kwargs: issue)
+    monkeypatch.setattr(auto_export.beads, "list_work_children", lambda *_, **__: [])
+
+    result = auto_export.auto_export_issue("at-1", context=context)
+
+    assert result.status == "failed"
+    assert "export blocked" in result.message
+    assert "Output:" in result.message
+    assert provider.created == []
+
+
 def test_auto_export_honors_opt_out_label(monkeypatch) -> None:
     provider = FakeProvider()
     context = _context(auto_enabled=True)

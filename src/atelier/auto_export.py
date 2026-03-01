@@ -24,7 +24,18 @@ _SUSPICIOUS_OUTPUT_PATTERNS = (
     re.compile(r"^\s*process exited with code\s+\d+\b", re.IGNORECASE),
     re.compile(r"^\s*original token count:\s*\d+\b", re.IGNORECASE),
     re.compile(r"^\s*total output lines:\s*\d+\b", re.IGNORECASE),
-    re.compile(r"^\s*output:\s*$", re.IGNORECASE),
+    re.compile(r"\bstdout\s*=\s*['\"]", re.IGNORECASE),
+    re.compile(r"\bstderr\s*=\s*['\"]", re.IGNORECASE),
+    re.compile(r"^\s*atelier:[^\s]+:[^\s]+:[^\s]+\s*$", re.IGNORECASE),
+)
+_OUTPUT_HEADING_RE = re.compile(r"^\s*output:\s*$", re.IGNORECASE)
+_OUTPUT_HEADING_CONTEXT_PATTERNS = (
+    re.compile(r"^\s*chunk id:\s*", re.IGNORECASE),
+    re.compile(r"^\s*wall time:\s*", re.IGNORECASE),
+    re.compile(r"^\s*process exited with code\s+\d+\b", re.IGNORECASE),
+    re.compile(r"^\s*original token count:\s*\d+\b", re.IGNORECASE),
+    re.compile(r"^\s*total output lines:\s*\d+\b", re.IGNORECASE),
+    re.compile(r"^\s*exit code:\s*\d+\b", re.IGNORECASE),
     re.compile(r"\bstdout\s*=\s*['\"]", re.IGNORECASE),
     re.compile(r"\bstderr\s*=\s*['\"]", re.IGNORECASE),
     re.compile(r"^\s*atelier:[^\s]+:[^\s]+:[^\s]+\s*$", re.IGNORECASE),
@@ -388,16 +399,36 @@ def _validated_ticket_body(body: str) -> str:
 
 def _suspicious_output_markers(text: str) -> list[str]:
     markers: list[str] = []
-    for line in text.splitlines():
-        candidate = line.strip()
+    stripped_lines = [line.strip() for line in text.splitlines()]
+    for index, candidate in enumerate(stripped_lines):
         if not candidate:
             continue
-        if not any(pattern.search(candidate) for pattern in _SUSPICIOUS_OUTPUT_PATTERNS):
+        suspicious_direct = any(
+            pattern.search(candidate) for pattern in _SUSPICIOUS_OUTPUT_PATTERNS
+        )
+        suspicious_output_heading = _OUTPUT_HEADING_RE.search(
+            candidate
+        ) and _has_output_heading_context(stripped_lines, index)
+        if not suspicious_direct and not suspicious_output_heading:
             continue
         markers.append(candidate[:_SUSPICIOUS_MARKER_MAX_WIDTH])
         if len(markers) >= _SUSPICIOUS_MARKER_SAMPLE_LIMIT:
             break
     return markers
+
+
+def _has_output_heading_context(lines: list[str], index: int) -> bool:
+    start = max(0, index - 2)
+    end = min(len(lines), index + 3)
+    for nearby_index in range(start, end):
+        if nearby_index == index:
+            continue
+        nearby_line = lines[nearby_index]
+        if not nearby_line:
+            continue
+        if any(pattern.search(nearby_line) for pattern in _OUTPUT_HEADING_CONTEXT_PATTERNS):
+            return True
+    return False
 
 
 def _create_ticket_ref(
