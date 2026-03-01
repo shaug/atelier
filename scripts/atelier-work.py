@@ -229,16 +229,12 @@ def _run_command(command: Sequence[str], *, cwd: Path | None, dry_run: bool) -> 
 def _run_shell_command(command: str, *, cwd: Path, dry_run: bool) -> int:
     """Run a shell command through bash.
 
-    Args:
-      command: Shell command string to execute.
-      cwd: Working directory for command execution.
-      dry_run: Whether to skip command execution.
-
-    Returns:
-      Exit code from command execution.
+    Uses a non-login shell (-c) so the command inherits the current process
+    environment (e.g. PATH, venv). A login shell (-lc) would source profile
+    files and can switch to a different Python or tool chain.
     """
 
-    return _run_command(["bash", "-lc", command], cwd=cwd, dry_run=dry_run)
+    return _run_command(["bash", "-c", command], cwd=cwd, dry_run=dry_run)
 
 
 def _capture_output(command: Sequence[str], *, cwd: Path) -> str:
