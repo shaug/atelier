@@ -598,7 +598,9 @@ def run_planner(args: object) -> None:
                 prime_addendum = beads.prime_addendum(beads_root=beads_root, cwd=project_data_dir)
                 updated_content = planner_agents_path.read_text(encoding="utf-8")
                 next_content = agent_home.apply_beads_prime_addendum(
-                    updated_content, prime_addendum
+                    updated_content,
+                    prime_addendum,
+                    role=policy.ROLE_PLANNER,
                 )
                 if next_content != updated_content:
                     planner_agents_path.write_text(next_content, encoding="utf-8")

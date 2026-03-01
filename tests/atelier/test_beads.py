@@ -1958,14 +1958,15 @@ def test_prime_addendum_returns_prime_output_without_rewriting() -> None:
     assert value == stdout.strip()
 
 
-def test_prime_addendum_strips_unsupported_export_command_lines() -> None:
-    """Lines referencing bd export or bd sync --export are removed (unsupported/deprecated)."""
+def test_prime_addendum_strips_unsupported_command_lines() -> None:
+    """Unsupported/deprecated command lines are removed from prime addendum output."""
     stdout = (
         "## Beads Workflow Context\n\n"
         "```\n"
         "[ ] bd export\n"
         "[ ] bd sync --flush-only\n"
         "[ ] bd sync --export\n"
+        "[ ] bd dolt commit\n"
         "```\n"
         "- Use bd ready.\n"
     )
@@ -1982,6 +1983,7 @@ def test_prime_addendum_strips_unsupported_export_command_lines() -> None:
     assert value is not None
     assert "bd export" not in value
     assert "sync --export" not in value
+    assert "bd dolt commit" not in value
     assert "bd sync --flush-only" in value
     assert "Use bd ready" in value
 

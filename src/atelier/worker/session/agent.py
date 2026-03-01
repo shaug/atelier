@@ -196,7 +196,11 @@ def prepare_agent_session(
             )
             prime_addendum = beads.prime_addendum(beads_root=beads_root, cwd=project_data_dir)
             updated_content = worker_agents_path.read_text(encoding="utf-8")
-            next_content = agent_home.apply_beads_prime_addendum(updated_content, prime_addendum)
+            next_content = agent_home.apply_beads_prime_addendum(
+                updated_content,
+                prime_addendum,
+                role=policy.ROLE_WORKER,
+            )
             if next_content != updated_content:
                 worker_agents_path.write_text(next_content, encoding="utf-8")
             updated_content = worker_agents_path.read_text(encoding="utf-8")

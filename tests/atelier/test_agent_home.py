@@ -274,3 +274,32 @@ def test_apply_beads_prime_addendum_replaces_existing_block() -> None:
     assert "old" not in updated
     assert "new" in updated
     assert updated.count("ATELIER_BEADS_PRIME_START") == 1
+
+
+def test_apply_beads_prime_addendum_worker_role_replaces_generic_prime_guidance() -> None:
+    content = "# Worker Context\n\nBase instructions.\n"
+    addendum = (
+        "# Beads Workflow Context\n\n"
+        "# 🚨 SESSION CLOSE PROTOCOL 🚨\n\n"
+        "```\n"
+        "[ ] bd close at-123\n"
+        "```\n"
+        "Run `bd ready` for backlog triage.\n"
+    )
+
+    updated = agent_home.apply_beads_prime_addendum(content, addendum, role="worker")
+
+    assert "Worker Runtime Context" in updated
+    assert "bd close at-123" not in updated
+    assert "SESSION CLOSE PROTOCOL" not in updated
+    assert "assigned epic/changeset bead is the only execution scope" in updated
+
+
+def test_apply_beads_prime_addendum_planner_role_keeps_addendum_body() -> None:
+    content = "# Planner Context\n\nBase instructions.\n"
+    addendum = "# Beads Workflow Context\n\n- Use bd ready."
+
+    updated = agent_home.apply_beads_prime_addendum(content, addendum, role="planner")
+
+    assert "Use bd ready." in updated
+    assert "Worker Runtime Context" not in updated

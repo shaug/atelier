@@ -21,3 +21,5 @@ def test_worker_agents_template_contains_core_sections() -> None:
     assert "committable artifacts (code/config/docs/tests)" in content
     assert "Do not mutate sibling/unclaimed work-bead lifecycle state." in content
     assert "Update changeset metadata and labels." not in content
+    assert "do not set `status=closed`" in content
+    assert "Set `status=closed` only when terminal proof exists" in content
