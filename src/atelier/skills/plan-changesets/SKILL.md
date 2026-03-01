@@ -27,6 +27,14 @@ create/edit deferred work.
 - Separate renames from behavioral changes.
 - Prefer additive-first changesets.
 - Keep changesets reviewable (~200–400 LOC; split when >800 LOC).
+- For lifecycle/contract invariant bugs, record an upfront invariant impact map
+  that calls out:
+  - mutation entry points
+  - recovery paths
+  - external side-effect adapters
+- If work spans multiple concern domains (for example lifecycle state machine,
+  external provider/ticket sync, dry-run/observability), default to stacked
+  changesets by domain instead of a single large unit.
 - Avoid one-child decomposition by default. If a split would produce exactly one
   child changeset, keep the epic as the executable changeset unless you record
   explicit decomposition rationale.
@@ -36,6 +44,13 @@ create/edit deferred work.
 - If a changeset is trending >400 LOC, consider splitting before implementation.
 - Record the LOC estimate and any explicit approval in notes (use `--notes` or
   `--append-notes`, not `--estimate`).
+- Define explicit re-split triggers in notes/description (for example LOC/file
+  thresholds and newly discovered concern domains during review).
+- Define required planner action for re-split triggers: create deferred
+  follow-on changesets or extend the current stack.
+- If review feedback expands scope, capture that work immediately as deferred
+  follow-on changesets (or stack extensions) rather than accreting it into the
+  active changeset.
 
 ## Steps
 
@@ -50,9 +65,31 @@ create/edit deferred work.
 1. Capture an estimated LOC range and record it in notes.
 1. If a changeset violates guardrails (especially >800 LOC), pause and request
    explicit approval; record the approval decision in notes.
+1. For lifecycle/contract invariant work, capture an invariant impact map before
+   opening implementation changesets.
+1. If review uncovers a new concern domain or crosses re-split thresholds,
+   create deferred follow-on changesets immediately.
 1. Record guardrails in the changeset description or notes.
 1. The script creates the bead, applies auto-export when enabled by project
    config, and prints non-fatal retry instructions if export fails.
+
+## Example (Cross-cutting lifecycle bug)
+
+Scenario: `Prevent premature close of active-PR changesets`.
+
+1. Record invariant impact map in epic notes:
+   - mutation entry points: close/finalize and reconcile transitions
+   - recovery paths: reopen rollback and retry flows
+   - external side-effect adapters: provider sync + PR lifecycle refresh
+1. Decompose by concern domain:
+   - changeset A: lifecycle state machine correction + tests
+   - changeset B: external ticket/provider sync and dry-run observability
+1. Define re-split triggers up front:
+   - LOC > 400 in a single changeset
+   - more than 3 files touched outside a declared domain
+   - review introduces a new concern domain
+1. If a trigger fires during review, add deferred follow-on changesets
+   immediately and keep the active changeset scoped.
 
 ## Verification
 
