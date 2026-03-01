@@ -74,6 +74,104 @@ def test_changeset_integration_signal_rejects_merged_pr_without_branch_proof() -
     assert integrated_sha is None
 
 
+def test_changeset_integration_signal_strict_mode_uses_pr_merge_commit_reachability() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/work\n"
+        )
+    }
+    merge_sha = "abcdef1234567890abcdef1234567890abcdef12"
+
+    def fake_branch_ref_for_lookup(
+        _repo_root: Path, branch: str, *, git_path: str | None = None
+    ) -> str | None:
+        del git_path
+        if branch == "main":
+            return "origin/main"
+        return None
+
+    def fake_is_ancestor(
+        _repo_root: Path,
+        ancestor: str,
+        descendant: str,
+        *,
+        git_path: str | None = None,
+    ) -> bool:
+        del git_path
+        return ancestor == merge_sha and descendant == "origin/main"
+
+    with (
+        patch(
+            "atelier.worker.integration.branch_ref_for_lookup",
+            side_effect=fake_branch_ref_for_lookup,
+        ),
+        patch("atelier.worker.integration.git.git_rev_parse", return_value=merge_sha),
+        patch("atelier.worker.integration.git.git_is_ancestor", side_effect=fake_is_ancestor),
+        patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.worker.integration._refresh_origin_refs", return_value=False),
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug="org/repo",
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: {
+                "baseRefName": "main",
+                "mergedAt": "2026-03-01T00:00:00Z",
+                "mergeCommit": {"oid": merge_sha},
+            },
+            require_target_branch_proof=True,
+        )
+
+    assert ok is True
+    assert integrated_sha == merge_sha
+
+
+def test_changeset_integration_signal_strict_mode_rejects_unreachable_pr_merge_commit() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/work\n"
+        )
+    }
+    merge_sha = "abcdef1234567890abcdef1234567890abcdef12"
+
+    def fake_branch_ref_for_lookup(
+        _repo_root: Path, branch: str, *, git_path: str | None = None
+    ) -> str | None:
+        del git_path
+        if branch == "main":
+            return "origin/main"
+        return None
+
+    with (
+        patch(
+            "atelier.worker.integration.branch_ref_for_lookup",
+            side_effect=fake_branch_ref_for_lookup,
+        ),
+        patch("atelier.worker.integration.git.git_rev_parse", return_value=merge_sha),
+        patch("atelier.worker.integration.git.git_is_ancestor", return_value=False),
+        patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.worker.integration._refresh_origin_refs", return_value=False),
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug="org/repo",
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: {
+                "baseRefName": "main",
+                "mergedAt": "2026-03-01T00:00:00Z",
+                "mergeCommit": {"oid": merge_sha},
+            },
+            require_target_branch_proof=True,
+        )
+
+    assert ok is False
+    assert integrated_sha is None
+
+
 def test_changeset_integration_signal_strict_mode_uses_origin_target_ref() -> None:
     issue = {
         "description": (

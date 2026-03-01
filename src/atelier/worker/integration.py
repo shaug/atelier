@@ -28,6 +28,27 @@ def _normalize_branch_field(value: object) -> str | None:
     return normalized
 
 
+def _extract_pr_merge_commit_sha(payload: dict[str, object]) -> str | None:
+    merge_commit = payload.get("mergeCommit")
+    if isinstance(merge_commit, dict):
+        oid = merge_commit.get("oid")
+        if isinstance(oid, str):
+            normalized = oid.strip()
+            if normalized:
+                return normalized
+        sha = merge_commit.get("sha")
+        if isinstance(sha, str):
+            normalized = sha.strip()
+            if normalized:
+                return normalized
+    direct_sha = payload.get("mergeCommitOid")
+    if isinstance(direct_sha, str):
+        normalized = direct_sha.strip()
+        if normalized:
+            return normalized
+    return None
+
+
 def _root_integrated_into_parent(
     *,
     fields: dict[str, str],
@@ -234,10 +255,12 @@ def changeset_integration_signal(
     if require_target_branch_proof:
         pr_merged = False
         pr_base_branch: str | None = None
+        pr_merge_commit_sha: str | None = None
         if repo_slug and work_branch:
             pr_payload = lookup_pr_payload(repo_slug, work_branch)
             if isinstance(pr_payload, dict):
                 pr_base_branch = _normalize_branch_field(pr_payload.get("baseRefName"))
+                pr_merge_commit_sha = _extract_pr_merge_commit_sha(pr_payload)
                 merged_at = pr_payload.get("mergedAt")
                 if isinstance(merged_at, str):
                     pr_merged = bool(merged_at.strip())
@@ -275,6 +298,17 @@ def changeset_integration_signal(
             return refs
 
         source_refs = source_refs_for_branches()
+
+        def prove_pr_merge_commit(current_target_refs: list[str]) -> tuple[bool, str | None]:
+            if not pr_merged or not pr_merge_commit_sha or not current_target_refs:
+                return False, None
+            merge_commit_sha = git.git_rev_parse(repo_root, pr_merge_commit_sha, git_path=git_path)
+            if not merge_commit_sha:
+                return False, None
+            for ref in current_target_refs:
+                if git.git_is_ancestor(repo_root, merge_commit_sha, ref, git_path=git_path) is True:
+                    return True, merge_commit_sha
+            return False, None
 
         def prove_against_targets(current_target_refs: list[str]) -> tuple[bool, str | None]:
             if integrated_sha_candidates and current_target_refs:
@@ -316,6 +350,9 @@ def changeset_integration_signal(
         proven, integrated_sha = prove_against_targets(target_refs)
         if proven:
             return True, integrated_sha
+        proven, integrated_sha = prove_pr_merge_commit(target_refs)
+        if proven:
+            return True, integrated_sha
         if target_branches and _refresh_origin_refs(repo_root, git_path=git_path):
             refreshed_target_refs = _target_refs_for_branches(
                 repo_root,
@@ -325,6 +362,9 @@ def changeset_integration_signal(
             )
             source_refs = source_refs_for_branches()
             proven, integrated_sha = prove_against_targets(refreshed_target_refs)
+            if proven:
+                return True, integrated_sha
+            proven, integrated_sha = prove_pr_merge_commit(refreshed_target_refs)
             if proven:
                 return True, integrated_sha
         if pr_merged and integrated_sha_candidates:
