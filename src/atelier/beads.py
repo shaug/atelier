@@ -772,7 +772,7 @@ def _value_indicates_pending_changes(value: object) -> bool:
     if isinstance(value, dict):
         return any(_value_indicates_pending_changes(item) for item in value.values())
     if isinstance(value, (list, tuple, set)):
-        return any(_value_indicates_pending_changes(item) for item in value) or bool(value)
+        return any(_value_indicates_pending_changes(item) for item in value)
     return False
 
 
