@@ -68,6 +68,9 @@ run_shellcheck_publish_scripts() {
 }
 
 run_hotspot_guardrails() {
+  if [[ ! -f "${repo_root}/scripts/hotspot_complexity_report.py" ]]; then
+    return 0
+  fi
   (cd "${repo_root}" && python3 scripts/hotspot_complexity_report.py --check)
 }
 
