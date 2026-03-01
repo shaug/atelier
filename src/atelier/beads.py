@@ -1964,6 +1964,41 @@ def close_issue(
     return result
 
 
+def mark_issue_in_progress(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> ExternalTicketReconcileResult:
+    """Set a Beads issue to in-progress and reconcile reopened tickets.
+
+    Args:
+        issue_id: Bead identifier to move into the in-progress state.
+        beads_root: Path to the Beads data directory.
+        cwd: Working directory for `bd` invocation.
+
+    Returns:
+        Reconciliation result for exported GitHub tickets reopened because the
+        issue became active again.
+
+    Raises:
+        ValueError: If ``issue_id`` is empty after trimming whitespace.
+    """
+    cleaned_issue_id = issue_id.strip()
+    if not cleaned_issue_id:
+        raise ValueError("issue_id must not be empty")
+    run_bd_command(
+        ["update", cleaned_issue_id, "--status", "in_progress"],
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+    return reconcile_reopened_issue_exported_github_tickets(
+        cleaned_issue_id,
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+
+
 def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
     """Run a bd command with --json and return parsed output."""
     cmd = list(args)
@@ -2764,6 +2799,7 @@ def parse_external_tickets(description: str | None) -> list[ExternalTicketRef]:
 _GITHUB_API_ISSUE_PATH = re.compile(r"^/repos/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
 _GITHUB_WEB_ISSUE_PATH = re.compile(r"^/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
 _EXTERNAL_CLOSE_NOTE_PREFIX = "external_close_pending:"
+_EXTERNAL_REOPEN_NOTE_PREFIX = "external_reopen_pending:"
 
 
 def _github_repo_from_ticket_url(url: str | None) -> str | None:
@@ -2829,6 +2865,21 @@ def _append_external_close_note(
 ) -> None:
     run_bd_command(
         ["update", issue_id, "--append-notes", f"{_EXTERNAL_CLOSE_NOTE_PREFIX} {note}"],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
+
+
+def _append_external_reopen_note(
+    issue_id: str,
+    note: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    run_bd_command(
+        ["update", issue_id, "--append-notes", f"{_EXTERNAL_REOPEN_NOTE_PREFIX} {note}"],
         beads_root=beads_root,
         cwd=cwd,
         allow_failure=True,
@@ -2938,6 +2989,118 @@ def reconcile_closed_issue_exported_github_tickets(
         seen_notes.add(note)
         unique_notes.append(note)
         _append_external_close_note(issue_id, note, beads_root=beads_root, cwd=cwd)
+
+    return ExternalTicketReconcileResult(
+        issue_id=issue_id,
+        stale_exported_github_tickets=stale,
+        reconciled_tickets=reconciled,
+        updated=updated,
+        needs_decision_notes=tuple(unique_notes),
+    )
+
+
+def reconcile_reopened_issue_exported_github_tickets(
+    issue_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> ExternalTicketReconcileResult:
+    """Reopen stale exported GitHub tickets when a local bead reopens.
+
+    Args:
+        issue_id: Bead identifier to reconcile.
+        beads_root: Beads store root.
+        cwd: Repository root where Beads commands run.
+
+    Returns:
+        Reconciliation result including stale/reconciled counts and any
+        decision-required notes.
+    """
+    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        return ExternalTicketReconcileResult(
+            issue_id=issue_id,
+            stale_exported_github_tickets=0,
+            reconciled_tickets=0,
+            updated=False,
+            needs_decision_notes=tuple(),
+        )
+    issue = issues[0]
+    status = str(issue.get("status") or "").strip().lower()
+    if status in {"closed", "done"}:
+        return ExternalTicketReconcileResult(
+            issue_id=issue_id,
+            stale_exported_github_tickets=0,
+            reconciled_tickets=0,
+            updated=False,
+            needs_decision_notes=tuple(),
+        )
+    description = issue.get("description")
+    existing_tickets = parse_external_tickets(description if isinstance(description, str) else None)
+    if not existing_tickets:
+        return ExternalTicketReconcileResult(
+            issue_id=issue_id,
+            stale_exported_github_tickets=0,
+            reconciled_tickets=0,
+            updated=False,
+            needs_decision_notes=tuple(),
+        )
+
+    from .github_issues_provider import GithubIssuesProvider
+
+    stale = 0
+    reconciled = 0
+    updated = False
+    notes: list[str] = []
+    provider_cache: dict[str, GithubIssuesProvider] = {}
+    merged_tickets: list[ExternalTicketRef] = []
+    for ticket in existing_tickets:
+        if ticket.provider != "github" or ticket.direction != "exported":
+            merged_tickets.append(ticket)
+            continue
+        if ticket.state != "closed":
+            merged_tickets.append(ticket)
+            continue
+        stale += 1
+        repo_slug = _github_repo_from_ticket_url(ticket.url)
+        if not repo_slug:
+            notes.append(
+                f"github:{ticket.ticket_id} missing repo slug; cannot reopen exported ticket state"
+            )
+            merged_tickets.append(ticket)
+            continue
+        provider = provider_cache.get(repo_slug)
+        if provider is None:
+            provider = GithubIssuesProvider(repo=repo_slug)
+            provider_cache[repo_slug] = provider
+        try:
+            refreshed = provider.reopen_ticket(
+                ticket,
+                comment=(
+                    f"Reopening external ticket because local bead {issue_id} is active again."
+                ),
+            )
+            merged = _merge_ticket_state(ticket, refreshed, assume_closed=False)
+        except RuntimeError as exc:
+            notes.append(f"github:{ticket.ticket_id} {exc}")
+            merged_tickets.append(ticket)
+            continue
+        merged_tickets.append(merged)
+        reconciled += 1
+        if merged != ticket:
+            updated = True
+
+    if updated:
+        update_external_tickets(issue_id, merged_tickets, beads_root=beads_root, cwd=cwd)
+
+    unique_notes: list[str] = []
+    seen_notes: set[str] = set()
+    for note in notes:
+        if note in seen_notes:
+            continue
+        seen_notes.add(note)
+        unique_notes.append(note)
+        _append_external_reopen_note(issue_id, note, beads_root=beads_root, cwd=cwd)
 
     return ExternalTicketReconcileResult(
         issue_id=issue_id,
@@ -3623,6 +3786,45 @@ def epic_changeset_summary(
     return summarize_changesets(changesets)
 
 
+def close_transition_has_active_pr_lifecycle(
+    issue_payload: dict[str, object],
+    *,
+    beads_root: Path | None = None,
+    cwd: Path | None = None,
+    active_pr_lifecycle: bool | None = None,
+) -> bool:
+    """Return whether close-state transition must be blocked by active PR lifecycle.
+
+    Args:
+        issue_payload: Candidate issue payload.
+        beads_root: Optional Beads store path used to hydrate missing description
+            metadata.
+        cwd: Optional working directory used with ``beads_root`` lookups.
+        active_pr_lifecycle: Optional caller-provided lifecycle signal. When
+            provided, this value is authoritative.
+
+    Returns:
+        ``True`` when the issue has active PR lifecycle state and must not
+        transition to closed.
+    """
+    if active_pr_lifecycle is not None:
+        return bool(active_pr_lifecycle)
+    candidate = issue_payload
+    description = candidate.get("description")
+    if not isinstance(description, str) and beads_root is not None and cwd is not None:
+        issue_id = candidate.get("id")
+        if isinstance(issue_id, str) and issue_id.strip():
+            detailed = run_bd_json(["show", issue_id.strip()], beads_root=beads_root, cwd=cwd)
+            if detailed and isinstance(detailed[0], dict):
+                candidate = detailed[0]
+                description = candidate.get("description")
+    review = changesets.parse_review_metadata(description if isinstance(description, str) else "")
+    review_state = lifecycle.normalize_review_state(review.pr_state)
+    if review_state == "pushed":
+        return lifecycle.canonical_lifecycle_status(candidate.get("status")) == "closed"
+    return lifecycle.is_active_pr_lifecycle_state(review_state)
+
+
 def close_epic_if_complete(
     epic_id: str,
     agent_bead_id: str | None,
@@ -3630,8 +3832,11 @@ def close_epic_if_complete(
     beads_root: Path,
     cwd: Path,
     confirm: Callable[[ChangesetSummary], bool] | None = None,
+    dry_run: bool = False,
+    dry_run_log: Callable[[str], None] | None = None,
 ) -> bool:
     """Close an epic and clear hook if all changesets are complete."""
+
     issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
     if not issues:
         return False
@@ -3642,11 +3847,46 @@ def close_epic_if_complete(
         cwd=cwd,
         include_closed=True,
     )
+    changeset_candidates = list_descendant_changesets(
+        epic_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        include_closed=True,
+    )
+    if not changeset_candidates and not work_children:
+        changeset_candidates = [issue]
+    active_lifecycle_detected = False
+    for candidate in changeset_candidates:
+        if lifecycle.canonical_lifecycle_status(candidate.get("status")) != "closed":
+            continue
+        if not close_transition_has_active_pr_lifecycle(
+            candidate,
+            beads_root=beads_root,
+            cwd=cwd,
+        ):
+            continue
+        candidate_id = candidate.get("id")
+        if not dry_run and isinstance(candidate_id, str) and candidate_id.strip():
+            mark_issue_in_progress(
+                candidate_id.strip(),
+                beads_root=beads_root,
+                cwd=cwd,
+            )
+        active_lifecycle_detected = True
+    if active_lifecycle_detected:
+        return False
     is_standalone_changeset = not work_children and lifecycle.is_closed_status(issue.get("status"))
     summary = epic_changeset_summary(epic_id, beads_root=beads_root, cwd=cwd)
     if not is_standalone_changeset and not summary.ready_to_close:
         return False
     if confirm is not None and not confirm(summary):
+        return False
+    if dry_run:
+        if dry_run_log is not None:
+            if agent_bead_id:
+                dry_run_log(f"Would close epic {epic_id} and clear hook {agent_bead_id}.")
+            else:
+                dry_run_log(f"Would close epic {epic_id}.")
         return False
     close_issue(
         epic_id,

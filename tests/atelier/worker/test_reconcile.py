@@ -90,6 +90,27 @@ def test_list_reconcile_epic_candidates_includes_closed_open_pr_drift() -> None:
     assert candidates == {"at-1": ["at-1.9"]}
 
 
+def test_list_reconcile_epic_candidates_includes_closed_pushed_pr_drift() -> None:
+    drift_issue = {
+        "id": "at-1.10",
+        "status": "closed",
+        "labels": [],
+        "description": "changeset.work_branch: feat/at-1.10\npr_state: pushed\n",
+    }
+    with patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]):
+        candidates = reconcile.list_reconcile_epic_candidates(
+            project_config=_project_config(),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            changeset_integration_signal=lambda *_args, **_kwargs: (True, "abc1234"),
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            is_closed_status=lambda _status: False,
+            epic_root_integrated_into_parent=lambda *_args, **_kwargs: False,
+        )
+
+    assert candidates == {"at-1": ["at-1.10"]}
+
+
 def test_resolve_hook_agent_bead_for_epic_prefers_epic_assignee() -> None:
     with (
         patch(
@@ -203,6 +224,7 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
     logs: list[str] = []
     with (
         patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]),
+        patch("atelier.worker.reconcile.beads.mark_issue_in_progress") as mark_issue_in_progress,
         patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
         patch(
             "atelier.worker.reconcile.prs.read_github_pr_status",
@@ -237,8 +259,13 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
 
     assert result.scanned == 1
     assert result.actionable == 1
-    assert result.reconciled == 0
-    assert result.failed == 1
+    assert result.reconciled == 1
+    assert result.failed == 0
+    mark_issue_in_progress.assert_called_once_with(
+        "at-1.9",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
     assert any(
         "reconcile anomaly: at-1.9 -> epic=at-1 closed+active-pr-lifecycle" in line for line in logs
     )

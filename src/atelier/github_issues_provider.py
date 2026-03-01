@@ -188,6 +188,19 @@ class GithubIssuesProvider:
         _run(cmd)
         return self.sync_state(ref)
 
+    def reopen_ticket(
+        self,
+        ref: ExternalTicketRef,
+        *,
+        comment: str | None = None,
+    ) -> ExternalTicketRef:
+        _require_gh()
+        cmd = ["gh", "issue", "reopen", str(ref.ticket_id), "--repo", self.repo]
+        if comment:
+            cmd.extend(["--comment", comment])
+        _run(cmd)
+        return self.sync_state(ref)
+
     def sync_state(self, ref: ExternalTicketRef) -> ExternalTicketRef:
         if not self.sync_options.include_state:
             return ref

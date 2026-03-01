@@ -24,7 +24,7 @@ from .work_finalization_runtime import (
     is_changeset_recovery_candidate,
     resolve_epic_id_for_changeset,
 )
-from .work_finalization_state import mark_changeset_merged
+from .work_finalization_state import mark_changeset_in_progress, mark_changeset_merged
 from .work_runtime_common import (
     dry_run_log,
     filter_epics,
@@ -553,9 +553,10 @@ def handle_queue_before_claim(
 class _StartupContractService(worker_startup.StartupContractService):
     """Concrete startup-contract service implementation for worker runtime."""
 
-    def __init__(self, *, beads_root: Path, repo_root: Path) -> None:
+    def __init__(self, *, beads_root: Path, repo_root: Path, dry_run: bool = False) -> None:
         self._beads_root = beads_root
         self._repo_root = repo_root
+        self._dry_run = dry_run
 
     def handle_queue_before_claim(
         self,
@@ -677,6 +678,13 @@ class _StartupContractService(worker_startup.StartupContractService):
             repo_root=self._repo_root,
         )
 
+    def mark_changeset_in_progress(self, changeset_id: str) -> None:
+        mark_changeset_in_progress(
+            changeset_id,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
+        )
+
     def update_changeset_integrated_sha(self, changeset_id: str, integrated_sha: str) -> None:
         beads.update_changeset_integrated_sha(
             changeset_id,
@@ -692,6 +700,8 @@ class _StartupContractService(worker_startup.StartupContractService):
             agent_bead_id,
             beads_root=self._beads_root,
             cwd=self._repo_root,
+            dry_run=self._dry_run,
+            dry_run_log=self.dry_run_log if self._dry_run else None,
         )
 
     def resolve_hooked_epic(self, agent_bead_id: str, agent_id: str) -> str | None:
@@ -816,7 +826,11 @@ def run_startup_contract(
     Returns:
         Function result.
     """
-    service = _StartupContractService(beads_root=context.beads_root, repo_root=context.repo_root)
+    service = _StartupContractService(
+        beads_root=context.beads_root,
+        repo_root=context.repo_root,
+        dry_run=context.dry_run,
+    )
     return worker_startup.run_startup_contract_service(context=context, service=service)
 
 

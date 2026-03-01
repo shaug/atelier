@@ -2487,6 +2487,121 @@ def test_close_epic_if_complete_respects_confirm() -> None:
     close_issue.assert_not_called()
 
 
+def test_close_epic_if_complete_reopens_active_pr_descendant() -> None:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:2] == ["show", "epic-1"]:
+            return [{"id": "epic-1", "labels": ["at:epic"], "status": "in_progress"}]
+        if args[:2] == ["list", "--parent"] and args[2] == "epic-1":
+            return [
+                {
+                    "id": "epic-1.1",
+                    "status": "closed",
+                    "description": "pr_state: draft-pr\n",
+                    "labels": [],
+                    "type": "task",
+                }
+            ]
+        if args[:2] == ["list", "--parent"] and args[2] == "epic-1.1":
+            return []
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.mark_issue_in_progress") as mark_issue_in_progress,
+        patch("atelier.beads.close_issue") as close_issue,
+        patch("atelier.beads.clear_agent_hook") as clear_hook,
+    ):
+        result = beads.close_epic_if_complete(
+            "epic-1",
+            "agent-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result is False
+    mark_issue_in_progress.assert_called_once_with(
+        "epic-1.1",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    close_issue.assert_not_called()
+    clear_hook.assert_not_called()
+
+
+def test_close_epic_if_complete_dry_run_skips_active_pr_recovery_mutation() -> None:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:2] == ["show", "epic-1"]:
+            return [{"id": "epic-1", "labels": ["at:epic"], "status": "in_progress"}]
+        if args[:2] == ["list", "--parent"] and args[2] == "epic-1":
+            return [
+                {
+                    "id": "epic-1.1",
+                    "status": "closed",
+                    "description": "pr_state: draft-pr\n",
+                    "labels": [],
+                    "type": "task",
+                }
+            ]
+        if args[:2] == ["list", "--parent"] and args[2] == "epic-1.1":
+            return []
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.mark_issue_in_progress") as mark_issue_in_progress,
+        patch("atelier.beads.close_issue") as close_issue,
+        patch("atelier.beads.clear_agent_hook") as clear_hook,
+    ):
+        result = beads.close_epic_if_complete(
+            "epic-1",
+            "agent-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            dry_run=True,
+        )
+
+    assert result is False
+    mark_issue_in_progress.assert_not_called()
+    close_issue.assert_not_called()
+    clear_hook.assert_not_called()
+
+
+def test_close_epic_if_complete_dry_run_skips_close_mutation() -> None:
+    work = lambda i, s="open": {"id": i, "status": s, "labels": [], "type": "task"}
+    changesets = {
+        "epic-1": [work("epic-1.1", "closed")],
+        "epic-1.1": [],
+    }
+    dry_run_lines: list[str] = []
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:2] == ["show", "epic-1"]:
+            return [{"id": "epic-1", "labels": ["at:epic"]}]
+        if args[:2] == ["list", "--parent"]:
+            return changesets.get(args[2], [])
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.close_issue") as close_issue,
+        patch("atelier.beads.clear_agent_hook") as clear_hook,
+    ):
+        result = beads.close_epic_if_complete(
+            "epic-1",
+            "agent-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            confirm=lambda _summary: True,
+            dry_run=True,
+            dry_run_log=dry_run_lines.append,
+        )
+
+    assert result is False
+    assert dry_run_lines == ["Would close epic epic-1 and clear hook agent-1."]
+    close_issue.assert_not_called()
+    clear_hook.assert_not_called()
+
+
 def test_close_epic_if_complete_closes_standalone_changeset() -> None:
     def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         if args[:2] == ["show", "at-irs"]:
@@ -2520,6 +2635,62 @@ def test_close_epic_if_complete_closes_standalone_changeset() -> None:
         cwd=Path("/repo"),
     )
     clear_hook.assert_called_once()
+
+
+def test_close_epic_if_complete_reopens_active_pr_standalone_changeset() -> None:
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:2] == ["show", "at-irs"]:
+            return [
+                {
+                    "id": "at-irs",
+                    "labels": [],
+                    "status": "closed",
+                    "description": "pr_state: in-review\n",
+                }
+            ]
+        if args[:2] == ["list", "--parent"]:
+            return []
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.mark_issue_in_progress") as mark_issue_in_progress,
+        patch("atelier.beads.close_issue") as close_issue,
+        patch("atelier.beads.clear_agent_hook") as clear_hook,
+    ):
+        result = beads.close_epic_if_complete(
+            "at-irs",
+            "agent-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result is False
+    mark_issue_in_progress.assert_called_once_with(
+        "at-irs",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    close_issue.assert_not_called()
+    clear_hook.assert_not_called()
+
+
+def test_close_transition_has_active_pr_lifecycle_treats_pushed_as_active_when_closed() -> None:
+    assert (
+        beads.close_transition_has_active_pr_lifecycle(
+            {"status": "closed", "description": "pr_state: pushed\n"}
+        )
+        is True
+    )
+
+
+def test_close_transition_has_active_pr_lifecycle_treats_pushed_as_inactive_when_open() -> None:
+    assert (
+        beads.close_transition_has_active_pr_lifecycle(
+            {"status": "in_progress", "description": "pr_state: pushed\n"}
+        )
+        is False
+    )
 
 
 def test_close_issue_runs_close_and_reconciles_on_success() -> None:
@@ -2579,6 +2750,29 @@ def test_close_issue_skips_reconcile_when_close_fails_with_allow_failure() -> No
         allow_failure=True,
     )
     reconcile.assert_not_called()
+
+
+def test_mark_issue_in_progress_runs_update_and_reconciles_reopen() -> None:
+    with (
+        patch("atelier.beads.run_bd_command") as run_command,
+        patch("atelier.beads.reconcile_reopened_issue_exported_github_tickets") as reconcile,
+    ):
+        beads.mark_issue_in_progress(
+            "at-1",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    run_command.assert_called_once_with(
+        ["update", "at-1", "--status", "in_progress"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    reconcile.assert_called_once_with(
+        "at-1",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
 
 
 def test_update_changeset_review_updates_description() -> None:
@@ -2874,6 +3068,125 @@ def test_reconcile_closed_issue_exported_github_tickets_skips_policy_opt_outs() 
     assert result.updated is False
     assert result.needs_decision_notes == tuple()
     close_ticket.assert_not_called()
+    update_external.assert_not_called()
+
+
+def test_reconcile_reopened_issue_exported_github_tickets_reopens_and_updates() -> None:
+    ticket_json = json.dumps(
+        [
+            {
+                "provider": "github",
+                "id": "179",
+                "url": "https://api.github.com/repos/acme/widgets/issues/179",
+                "relation": "primary",
+                "direction": "exported",
+                "sync_mode": "export",
+                "state": "closed",
+                "parent_id": "174",
+            }
+        ]
+    )
+    issue = {
+        "id": "at-4kv",
+        "status": "in_progress",
+        "description": f"external_tickets: {ticket_json}\n",
+    }
+    refreshed = beads.ExternalTicketRef(
+        provider="github",
+        ticket_id="179",
+        url="https://github.com/acme/widgets/issues/179",
+        state="open",
+        raw_state="open",
+        state_updated_at="2026-02-25T22:00:00Z",
+        parent_id="200",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_update(
+        issue_id: str,
+        tickets: list[beads.ExternalTicketRef],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> dict[str, object]:
+        captured["issue_id"] = issue_id
+        captured["tickets"] = tickets
+        return {}
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[issue]),
+        patch("atelier.beads.update_external_tickets", side_effect=fake_update),
+        patch(
+            "atelier.github_issues_provider.GithubIssuesProvider.reopen_ticket",
+            return_value=refreshed,
+        ),
+    ):
+        result = beads.reconcile_reopened_issue_exported_github_tickets(
+            "at-4kv",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result.stale_exported_github_tickets == 1
+    assert result.reconciled_tickets == 1
+    assert result.updated is True
+    assert result.needs_decision_notes == tuple()
+    assert captured["issue_id"] == "at-4kv"
+    updated_tickets = captured["tickets"]
+    assert isinstance(updated_tickets, list)
+    assert updated_tickets[0].state == "open"
+    assert updated_tickets[0].state_updated_at == "2026-02-25T22:00:00Z"
+    assert updated_tickets[0].parent_id == "200"
+    assert updated_tickets[0].last_synced_at is not None
+
+
+def test_reconcile_reopened_issue_exported_github_tickets_adds_note_on_missing_repo() -> None:
+    ticket_json = json.dumps(
+        [
+            {
+                "provider": "github",
+                "id": "180",
+                "relation": "primary",
+                "direction": "exported",
+                "sync_mode": "export",
+                "state": "closed",
+            }
+        ]
+    )
+    issue = {
+        "id": "at-4kv",
+        "status": "open",
+        "description": f"external_tickets: {ticket_json}\n",
+    }
+    notes: list[str] = []
+
+    def fake_command(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> None:
+        if "--append-notes" in args:
+            notes.append(args[-1])
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[issue]),
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
+        patch("atelier.beads.update_external_tickets") as update_external,
+    ):
+        result = beads.reconcile_reopened_issue_exported_github_tickets(
+            "at-4kv",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result.stale_exported_github_tickets == 1
+    assert result.reconciled_tickets == 0
+    assert result.updated is False
+    assert result.needs_decision_notes
+    assert any("missing repo slug" in note for note in result.needs_decision_notes)
+    assert any(note.startswith("external_reopen_pending:") for note in notes)
     update_external.assert_not_called()
 
 

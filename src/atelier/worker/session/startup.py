@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ... import changeset_fields, lifecycle, pr_strategy
+from ... import beads, changeset_fields, lifecycle, pr_strategy
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
@@ -440,6 +440,8 @@ class StartupContractService(Protocol):
 
     def mark_changeset_merged(self, changeset_id: str) -> None: ...
 
+    def mark_changeset_in_progress(self, changeset_id: str) -> None: ...
+
     def update_changeset_integrated_sha(self, changeset_id: str, integrated_sha: str) -> None: ...
 
     def close_epic_if_complete(self, epic_id: str, agent_bead_id: str | None) -> bool: ...
@@ -519,6 +521,8 @@ def run_startup_contract_service(
     queue_only = context.queue_only
     dry_run = context.dry_run
     assume_yes = context.assume_yes
+    beads_root = context.beads_root
+    repo_root = context.repo_root
     repo_slug = context.repo_slug
     branch_pr = context.branch_pr
     branch_pr_strategy = context.branch_pr_strategy
@@ -547,18 +551,36 @@ def run_startup_contract_service(
             if changeset_id is None or changeset_id in seen_changesets:
                 continue
             seen_changesets.add(changeset_id)
-            if lifecycle.is_closed_status(candidate.get("status")):
-                if service.changeset_waiting_on_review_or_signals(
-                    candidate,
-                    repo_slug=repo_slug,
-                    branch_pr=branch_pr,
-                    branch_pr_strategy=branch_pr_strategy,
-                    git_path=git_path,
-                ):
+            if service.changeset_waiting_on_review_or_signals(
+                candidate,
+                repo_slug=repo_slug,
+                branch_pr=branch_pr,
+                branch_pr_strategy=branch_pr_strategy,
+                git_path=git_path,
+            ):
+                if lifecycle.is_closed_status(candidate.get("status")):
+                    if beads.close_transition_has_active_pr_lifecycle(
+                        candidate,
+                        active_pr_lifecycle=True,
+                    ):
+                        if dry_run:
+                            service.dry_run_log(
+                                "Would recover closed changeset with active PR lifecycle "
+                                f"to in_progress: {changeset_id}"
+                            )
+                        else:
+                            service.mark_changeset_in_progress(changeset_id)
                     service.emit(
                         "Startup diagnostics: closed changeset has active PR lifecycle "
                         f"(decision-required): {changeset_id}"
                     )
+                else:
+                    service.emit(
+                        "Startup diagnostics: changeset has active PR lifecycle "
+                        f"(auto-close deferred): {changeset_id}"
+                    )
+                continue
+            if lifecycle.is_closed_status(candidate.get("status")):
                 continue
             integration_proven, integrated_sha = service.changeset_integration_signal(
                 candidate,

@@ -25,15 +25,53 @@ def list_child_issues(
     return beads.run_bd_json(args, beads_root=beads_root, cwd=repo_root)
 
 
+def _load_changeset_issue(
+    changeset_id: str, *, beads_root: Path, repo_root: Path
+) -> dict[str, object] | None:
+    issues = beads.run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=repo_root)
+    if not issues:
+        return None
+    issue = issues[0]
+    if not isinstance(issue, dict):
+        return None
+    return issue
+
+
+def _close_guard_allows(
+    changeset_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    issue: dict[str, object] | None = None,
+    active_pr_lifecycle: bool | None = None,
+) -> bool:
+    candidate = issue
+    if candidate is None or "description" not in candidate:
+        candidate = _load_changeset_issue(changeset_id, beads_root=beads_root, repo_root=repo_root)
+    if candidate is None:
+        return True
+    if not beads.close_transition_has_active_pr_lifecycle(
+        candidate,
+        beads_root=beads_root,
+        cwd=repo_root,
+        active_pr_lifecycle=active_pr_lifecycle,
+    ):
+        return True
+    mark_changeset_in_progress(changeset_id, beads_root=beads_root, repo_root=repo_root)
+    return False
+
+
 def mark_changeset_in_progress(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
-    beads.run_bd_command(
-        ["update", changeset_id, "--status", "in_progress"],
+    beads.mark_issue_in_progress(
+        changeset_id,
         beads_root=beads_root,
         cwd=repo_root,
     )
 
 
 def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+    if not _close_guard_allows(changeset_id, beads_root=beads_root, repo_root=repo_root):
+        return
     beads.run_bd_command(
         [
             "update",
@@ -52,6 +90,8 @@ def mark_changeset_closed(changeset_id: str, *, beads_root: Path, repo_root: Pat
 
 
 def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+    if not _close_guard_allows(changeset_id, beads_root=beads_root, repo_root=repo_root):
+        return
     beads.run_bd_command(
         [
             "update",
@@ -74,6 +114,8 @@ def mark_changeset_merged(changeset_id: str, *, beads_root: Path, repo_root: Pat
 
 
 def mark_changeset_abandoned(changeset_id: str, *, beads_root: Path, repo_root: Path) -> None:
+    if not _close_guard_allows(changeset_id, beads_root=beads_root, repo_root=repo_root):
+        return
     beads.run_bd_command(
         [
             "update",
@@ -154,6 +196,13 @@ def close_completed_container_changesets(
         if status == "closed":
             continue
         if has_open_descendant_changesets(issue_id):
+            continue
+        if not _close_guard_allows(
+            issue_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            issue=issue,
+        ):
             continue
         mark_changeset_closed(issue_id, beads_root=beads_root, repo_root=repo_root)
         closed.append(issue_id)

@@ -1409,6 +1409,8 @@ def changeset_waiting_on_review_or_signals(
     """
     if not branch_pr:
         return False
+    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
+    closing_gate = canonical_status == "closed"
     work_branch = changeset_work_branch(issue)
     if work_branch:
         pushed = git.git_ref_exists(
@@ -1422,6 +1424,8 @@ def changeset_waiting_on_review_or_signals(
         if state in {"draft-pr", "pr-open", "in-review", "approved"}:
             return True
         if state == "pushed":
+            if closing_gate:
+                return True
             decision = changeset_pr_creation_decision(
                 issue,
                 repo_slug=repo_slug,
@@ -1435,6 +1439,8 @@ def changeset_waiting_on_review_or_signals(
         if review_state in {"draft-pr", "pr-open", "in-review", "approved"}:
             return True
         if review_state == "pushed":
+            if closing_gate:
+                return True
             decision = changeset_pr_creation_decision(
                 issue,
                 repo_slug=repo_slug,

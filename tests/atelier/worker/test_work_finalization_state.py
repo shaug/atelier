@@ -984,6 +984,40 @@ def test_changeset_waiting_on_review_prefers_live_pr_over_stale_closed_metadata(
     assert waiting is True
 
 
+def test_changeset_waiting_on_review_treats_closed_pushed_state_as_active(monkeypatch) -> None:
+    issue = {
+        "status": "closed",
+        "description": (
+            "changeset.root_branch: feat/at-kid\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/at-kid.2\n"
+            "pr_state: pushed\n"
+        ),
+    }
+
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "lookup_pr_payload",
+        lambda *_args, **_kwargs: None,
+    )
+
+    waiting = work_finalization_state.changeset_waiting_on_review_or_signals(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        branch_pr=True,
+        branch_pr_strategy="parallel",
+        git_path="git",
+    )
+
+    assert waiting is True
+
+
 def test_changeset_stack_integrity_preflight_reconciles_parent_review_metadata(
     monkeypatch,
 ) -> None:

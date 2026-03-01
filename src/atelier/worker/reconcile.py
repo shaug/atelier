@@ -88,7 +88,7 @@ def _review_drift_state(
     if _canonical_changeset_status(issue) != "closed":
         return None
     stored_state = _stored_review_state(issue)
-    if stored_state in lifecycle.ACTIVE_REVIEW_STATES:
+    if lifecycle.is_active_pr_lifecycle_state(stored_state):
         return stored_state
     live_state = _live_review_state(
         issue,
@@ -96,7 +96,7 @@ def _review_drift_state(
         repo_root=repo_root,
         git_path=git_path,
     )
-    if live_state in lifecycle.ACTIVE_REVIEW_STATES:
+    if lifecycle.is_active_pr_lifecycle_state(live_state):
         return live_state
     return None
 
@@ -269,8 +269,8 @@ def reconcile_blocked_merged_changesets(
             continue
         actionable += 1
         drift_anomaly_ids.add(changeset_id)
-        failed += 1
         if dry_run:
+            failed += 1
             if log:
                 log(
                     "reconcile dry-run anomaly: "
@@ -278,6 +278,22 @@ def reconcile_blocked_merged_changesets(
                     f"closed+active-pr-lifecycle(state={drift_state})"
                 )
             continue
+        if beads.close_transition_has_active_pr_lifecycle(
+            issue,
+            active_pr_lifecycle=True,
+        ):
+            beads.mark_issue_in_progress(
+                changeset_id,
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+            reconciled += 1
+            if log:
+                log(
+                    "reconcile recovery: "
+                    f"{changeset_id} -> epic={epic_id} restored to in_progress "
+                    "after closed+active-pr-lifecycle drift"
+                )
         if log:
             log(
                 "reconcile anomaly: "

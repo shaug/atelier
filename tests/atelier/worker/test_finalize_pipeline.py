@@ -481,12 +481,10 @@ def test_run_finalize_pipeline_blocks_closed_changeset_while_pr_active(
     )
 
     service = _FinalizeServiceStub()
-    blocked_reasons: list[str] = []
+    reopened: list[str] = []
     notifications: list[str] = []
     service.changeset_waiting_on_review_or_signals_fn = lambda _issue, *, context: True
-    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked_reasons.append(
-        reason
-    )
+    service.mark_changeset_in_progress_fn = lambda changeset_id: reopened.append(changeset_id)
     service.send_planner_notification_fn = lambda **kwargs: notifications.append(
         str(kwargs.get("subject"))
     )
@@ -498,7 +496,7 @@ def test_run_finalize_pipeline_blocks_closed_changeset_while_pr_active(
 
     assert result.reason == "changeset_closed_pr_lifecycle_active"
     assert result.continue_running is False
-    assert blocked_reasons == ["closed changeset has active PR lifecycle"]
+    assert reopened == ["at-epic.1"]
     assert notifications == ["NEEDS-DECISION: Closed changeset has active PR lifecycle (at-epic.1)"]
 
 
