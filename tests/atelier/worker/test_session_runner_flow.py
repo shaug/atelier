@@ -286,6 +286,55 @@ def test_run_worker_once_blocks_on_active_root_branch_conflict() -> None:
     deps.infra.beads.set_agent_hook.assert_not_called()
 
 
+def test_run_worker_once_forwards_epic_id_for_missing_root_branch_prompt() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p1prompt",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p1prompt",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-uuzc",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.infra.beads.claim_epic = Mock(
+        return_value={"id": "at-uuzc", "title": "Collision proof startup"}
+    )
+    deps.infra.beads.extract_workspace_root_branch = Mock(return_value="")
+    deps.lifecycle.extract_changeset_root_branch = lambda _issue: ""
+    deps.infra.branching.suggest_root_branch = Mock(
+        return_value="feat/collision-proof-startup-at-uuzc"
+    )
+    deps.infra.root_branch.prompt_root_branch = Mock(
+        return_value="feat/collision-proof-startup-at-uuzc"
+    )
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=True, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p1prompt"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "no_ready_changesets"
+    assert summary.epic_id == "at-uuzc"
+    assert deps.infra.branching.suggest_root_branch.call_args.kwargs["bead_id"] == "at-uuzc"
+    assert deps.infra.root_branch.prompt_root_branch.call_args.kwargs["epic_id"] == "at-uuzc"
+    assert deps.infra.root_branch.prompt_root_branch.call_args.kwargs["assume_yes"] is True
+    deps.infra.beads.update_workspace_root_branch.assert_called_once_with(
+        "at-uuzc",
+        "feat/collision-proof-startup-at-uuzc",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+    )
+
+
 def test_run_worker_once_dry_run_without_epic_stops_cleanly() -> None:
     agent = AgentHome(
         name="worker",
