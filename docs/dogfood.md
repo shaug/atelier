@@ -36,20 +36,21 @@ source of truth and that changesets remain reviewable.
 ## Self-Updating Worker Supervisor
 
 For Atelier-on-Atelier development, use
-`scripts/self_update_worker_supervisor.py` to run one-shot worker cycles while
+`scripts/atelier-work.py` to run one-shot worker cycles while
 refreshing the local checkout between cycles.
 
 Example:
 
 ```sh
-scripts/self_update_worker_supervisor.py \
+scripts/atelier-work.py \
   --repo-path ~/code/atelier \
-  --install-command "just install-editable" \
+  --install "just install-editable" \
   -- --mode auto
 ```
 
 Defaults:
 
+- install runs after update (`just install`); use `--install COMMAND` to override or `--no-install` to skip
 - update policy is fast-forward-only (`--update-policy ff-only`)
 - worker command runs once (`atelier work --run-mode once`)
 - dry-run mode (`--dry-run`) prints planned update/install/worker actions

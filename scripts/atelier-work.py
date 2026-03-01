@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Run a self-updating supervisor loop for Atelier worker sessions.
 
-The runner updates a local Atelier checkout (fast-forward only by default),
-optionally runs an install command, and then runs one worker session per cycle.
+The runner ensures the enlistment is on the mainline branch (default: main),
+then updates the checkout (fast-forward only), runs the install command
+(default: just install), and runs one worker session per cycle. If HEAD is
+not on the mainline branch, the update step is skipped and the cycle fails.
 
 Examples:
-  scripts/self_update_worker_supervisor.py \
-    --repo-path ~/code/atelier \
-    --install-command "just install-editable"
+  scripts/atelier-work.py --repo-path ~/code/atelier
+  # (runs "just install" after update by default)
 
-  scripts/self_update_worker_supervisor.py \
-    --repo-path ~/code/atelier \
-    --dry-run \
-    -- --mode auto
+  scripts/atelier-work.py --repo-path ~/code/atelier --install "just install-editable"
+
+  scripts/atelier-work.py --repo-path ~/code/atelier --no-install --dry-run -- --mode auto
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ class RunnerConfig:
     repo_path: Path
     git_remote: str
     git_ref: str | None
+    mainline_branch: str
     update_policy: str
     install_command: str | None
     worker_command: str
@@ -89,15 +90,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help=("Git ref to pull from the remote. Defaults to current branch when omitted."),
     )
     parser.add_argument(
+        "--mainline-branch",
+        default="main",
+        help=(
+            "Branch that must be checked out before update (default: main). "
+            "Update is skipped when HEAD is not this branch."
+        ),
+    )
+    parser.add_argument(
         "--update-policy",
         choices=("ff-only", "skip"),
         default="ff-only",
         help="How to handle repo updates before each cycle (default: ff-only)",
     )
     parser.add_argument(
-        "--install-command",
+        "--install",
+        nargs="?",
         default=None,
-        help=("Optional shell command to run after update and before the worker run."),
+        const="just install",
+        metavar="COMMAND",
+        help=(
+            "Run COMMAND after update (default: just install when omitted). "
+            "Use --no-install to skip the install step."
+        ),
+    )
+    parser.add_argument(
+        "--no-install",
+        action="store_true",
+        help="Skip the install step.",
     )
     parser.add_argument(
         "--worker-command",
@@ -159,12 +179,20 @@ def _parse_args(argv: Sequence[str]) -> tuple[RunnerConfig, list[str]]:
     if args.dry_run and max_cycles is None:
         max_cycles = 1
 
+    if args.no_install:
+        install_command = None
+    elif args.install is not None:
+        install_command = (args.install.strip() or "just install") or None
+    else:
+        install_command = "just install"
+
     config = RunnerConfig(
         repo_path=Path(args.repo_path).expanduser().resolve(),
         git_remote=args.git_remote,
         git_ref=args.git_ref,
+        mainline_branch=args.mainline_branch.strip() or "main",
         update_policy=args.update_policy,
-        install_command=args.install_command,
+        install_command=install_command,
         worker_command=args.worker_command,
         loop_interval_seconds=args.loop_interval_seconds,
         max_cycles=max_cycles,
@@ -256,18 +284,8 @@ def _require_git_repo(repo_path: Path) -> None:
     )
 
 
-def _resolve_git_ref(config: RunnerConfig) -> str:
-    """Resolve the git ref to pull from remote.
-
-    Args:
-      config: Runner configuration.
-
-    Returns:
-      Explicit git ref or current branch name.
-    """
-
-    if config.git_ref:
-        return config.git_ref
+def _current_branch(config: RunnerConfig) -> str:
+    """Return the current branch name (short) for the repo."""
     return _capture_output(
         [
             "git",
@@ -282,8 +300,26 @@ def _resolve_git_ref(config: RunnerConfig) -> str:
     )
 
 
+def _resolve_git_ref(config: RunnerConfig) -> str:
+    """Resolve the git ref to pull from remote.
+
+    Args:
+      config: Runner configuration.
+
+    Returns:
+      Explicit git ref or current branch name.
+    """
+
+    if config.git_ref:
+        return config.git_ref
+    return _current_branch(config)
+
+
 def _run_update_step(config: RunnerConfig) -> bool:
     """Run the repository update preflight step.
+
+    Update runs only when the enlistment is on the configured mainline branch.
+    Otherwise the step fails so the supervisor does not pull into a feature branch.
 
     Args:
       config: Runner configuration.
@@ -295,6 +331,18 @@ def _run_update_step(config: RunnerConfig) -> bool:
     if config.update_policy == "skip":
         _log("update: skipped by --update-policy=skip")
         return True
+
+    try:
+        current = _current_branch(config)
+    except RuntimeError as exc:
+        _log(f"update: failed to resolve current branch: {exc}")
+        return False
+    if current != config.mainline_branch:
+        _log(
+            f"update: not on mainline branch (current={current!r}, "
+            f"mainline={config.mainline_branch!r}); skipping update"
+        )
+        return False
 
     try:
         ref = _resolve_git_ref(config)
@@ -354,7 +402,7 @@ def _run_install_step(config: RunnerConfig) -> bool:
     """
 
     if not config.install_command:
-        _log("install: skipped (no --install-command configured)")
+        _log("install: skipped (--no-install or no install command)")
         return True
 
     _log("install: running configured install command")
