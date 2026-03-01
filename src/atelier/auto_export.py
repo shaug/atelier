@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,32 @@ from .models import ProjectConfig
 OPT_OUT_LABELS = {"ext:no-export", "ext:skip-export"}
 OPT_OUT_FIELD_VALUES = {"skip", "no", "false", "off", "manual"}
 DEFAULT_RETRY_SCRIPT = "skills/tickets/scripts/auto_export_issue.py"
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_CONTROL_CHARACTER_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+_SUSPICIOUS_OUTPUT_PATTERNS = (
+    re.compile(r"^\s*chunk id:\s*", re.IGNORECASE),
+    re.compile(r"^\s*wall time:\s*", re.IGNORECASE),
+    re.compile(r"^\s*process exited with code\s+\d+\b", re.IGNORECASE),
+    re.compile(r"^\s*original token count:\s*\d+\b", re.IGNORECASE),
+    re.compile(r"^\s*total output lines:\s*\d+\b", re.IGNORECASE),
+    re.compile(r"\bstdout\s*=\s*['\"]", re.IGNORECASE),
+    re.compile(r"\bstderr\s*=\s*['\"]", re.IGNORECASE),
+    re.compile(r"^\s*atelier:[^\s]+:[^\s]+:[^\s]+\s*$", re.IGNORECASE),
+)
+_OUTPUT_HEADING_RE = re.compile(r"^\s*output:\s*$", re.IGNORECASE)
+_OUTPUT_HEADING_CONTEXT_PATTERNS = (
+    re.compile(r"^\s*chunk id:\s*", re.IGNORECASE),
+    re.compile(r"^\s*wall time:\s*", re.IGNORECASE),
+    re.compile(r"^\s*process exited with code\s+\d+\b", re.IGNORECASE),
+    re.compile(r"^\s*original token count:\s*\d+\b", re.IGNORECASE),
+    re.compile(r"^\s*total output lines:\s*\d+\b", re.IGNORECASE),
+    re.compile(r"^\s*exit code:\s*\d+\b", re.IGNORECASE),
+    re.compile(r"\bstdout\s*=\s*['\"]", re.IGNORECASE),
+    re.compile(r"\bstderr\s*=\s*['\"]", re.IGNORECASE),
+    re.compile(r"^\s*atelier:[^\s]+:[^\s]+:[^\s]+\s*$", re.IGNORECASE),
+)
+_SUSPICIOUS_MARKER_SAMPLE_LIMIT = 3
+_SUSPICIOUS_MARKER_MAX_WIDTH = 80
 
 
 @dataclass(frozen=True)
@@ -311,15 +338,7 @@ def _ticket_body(
     parent_issue_id: str | None,
     parent_ticket: ExternalTicketRef | None,
 ) -> str | None:
-    parts: list[str] = []
-    description = _issue_description(issue).strip()
-    if description:
-        parts.append(description)
-    acceptance = issue.get("acceptance_criteria") or issue.get("acceptance")
-    if isinstance(acceptance, str):
-        text = acceptance.strip()
-        if text:
-            parts.append(f"Acceptance criteria:\n{text}")
+    parts = _canonical_ticket_body_parts(issue)
     if parent_ticket:
         parent_ref = f"{parent_ticket.provider}:{parent_ticket.ticket_id}"
         parent_url = parent_ticket.url
@@ -334,7 +353,82 @@ def _ticket_body(
         parts.append(f"Local bead: {bead_id}")
     if not parts:
         return None
-    return "\n\n".join(parts)
+    rendered = "\n\n".join(parts)
+    return _validated_ticket_body(rendered)
+
+
+def _canonical_ticket_body_parts(issue: dict[str, object]) -> list[str]:
+    parts: list[str] = []
+    description = _normalized_ticket_text(_issue_description(issue))
+    if description:
+        parts.append(description)
+    design = _normalized_ticket_text(issue.get("design"))
+    if design:
+        parts.append(f"Design:\n{design}")
+    acceptance = _normalized_ticket_text(
+        issue.get("acceptance_criteria") or issue.get("acceptance")
+    )
+    if acceptance:
+        parts.append(f"Acceptance criteria:\n{acceptance}")
+    notes = _normalized_ticket_text(issue.get("notes"))
+    if notes:
+        parts.append(f"Notes:\n{notes}")
+    return parts
+
+
+def _normalized_ticket_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+    stripped_ansi = _ANSI_ESCAPE_RE.sub("", normalized)
+    stripped_control = _CONTROL_CHARACTER_RE.sub("", stripped_ansi)
+    cleaned = stripped_control.strip()
+    return cleaned or None
+
+
+def _validated_ticket_body(body: str) -> str:
+    suspicious_markers = _suspicious_output_markers(body)
+    if not suspicious_markers:
+        return body
+    markers = ", ".join(suspicious_markers)
+    raise RuntimeError(
+        "export blocked: rendered ticket body contains suspicious command-output markers "
+        f"({markers}). Remove terminal logs from description/design/acceptance/notes and retry."
+    )
+
+
+def _suspicious_output_markers(text: str) -> list[str]:
+    markers: list[str] = []
+    stripped_lines = [line.strip() for line in text.splitlines()]
+    for index, candidate in enumerate(stripped_lines):
+        if not candidate:
+            continue
+        suspicious_direct = any(
+            pattern.search(candidate) for pattern in _SUSPICIOUS_OUTPUT_PATTERNS
+        )
+        suspicious_output_heading = _OUTPUT_HEADING_RE.search(
+            candidate
+        ) and _has_output_heading_context(stripped_lines, index)
+        if not suspicious_direct and not suspicious_output_heading:
+            continue
+        markers.append(candidate[:_SUSPICIOUS_MARKER_MAX_WIDTH])
+        if len(markers) >= _SUSPICIOUS_MARKER_SAMPLE_LIMIT:
+            break
+    return markers
+
+
+def _has_output_heading_context(lines: list[str], index: int) -> bool:
+    start = max(0, index - 2)
+    end = min(len(lines), index + 3)
+    for nearby_index in range(start, end):
+        if nearby_index == index:
+            continue
+        nearby_line = lines[nearby_index]
+        if not nearby_line:
+            continue
+        if any(pattern.search(nearby_line) for pattern in _OUTPUT_HEADING_CONTEXT_PATTERNS):
+            return True
+    return False
 
 
 def _create_ticket_ref(
