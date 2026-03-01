@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 from ... import config
 from ...models import ProjectConfig
 from ..errors import ExternalCommandFailedError, ValidationFailedError
+from .init_project_args import InitProjectArgs
 
 
 class BuildProjectConfig(Protocol):
@@ -19,7 +20,7 @@ class BuildProjectConfig(Protocol):
         enlistment_path: str,
         origin: str | None,
         origin_raw: str | None,
-        args: object | None,
+        args: InitProjectArgs | None,
         *,
         prompt_missing_only: bool = False,
         raw_existing: dict | None = None,
@@ -32,7 +33,7 @@ class ComposeProjectConfigRequest(BaseModel):
     enlistment_path: str
     origin: str | None
     origin_raw: str | None
-    args: object | None
+    args: InitProjectArgs | None
     prompt_missing_only: bool = False
     raw_existing: dict | None = None
     allow_editor_empty: bool = False

@@ -3,11 +3,11 @@ from .compose_project_config import (
     ComposeProjectConfigRequest,
     ComposeProjectConfigService,
 )
+from .init_project_args import InitProjectArgs
 from .initialize_project import (
     InitializeProjectOutcome,
     InitializeProjectRequest,
     InitializeProjectService,
-    InitProjectArgs,
 )
 from .resolve_external_provider import (
     ResolveExternalProviderOutcome,
