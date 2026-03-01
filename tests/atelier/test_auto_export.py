@@ -131,6 +131,89 @@ def test_auto_export_exports_when_enabled(monkeypatch) -> None:
     assert ticket.relation == "primary"
 
 
+def test_auto_export_renders_design_acceptance_and_notes(monkeypatch) -> None:
+    provider = FakeProvider()
+    context = _context(auto_enabled=True)
+    issue = {
+        "id": "at-1",
+        "title": "Epic",
+        "labels": ["at:epic"],
+        "description": "Scope summary",
+        "design": "Proposed implementation",
+        "acceptance_criteria": "- AC1\n- AC2",
+        "notes": "Operator notes",
+    }
+
+    monkeypatch.setattr(auto_export, "_resolve_provider", lambda *_args, **_kwargs: provider)
+    monkeypatch.setattr(auto_export, "_load_issue", lambda *_args, **_kwargs: issue)
+    monkeypatch.setattr(
+        auto_export.beads, "update_external_tickets", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(auto_export.beads, "list_work_children", lambda *_, **__: [])
+
+    result = auto_export.auto_export_issue("at-1", context=context)
+
+    assert result.status == "exported"
+    assert provider.created
+    body = provider.created[0].body
+    assert isinstance(body, str)
+    assert "Scope summary" in body
+    assert "Design:\nProposed implementation" in body
+    assert "Acceptance criteria:\n- AC1\n- AC2" in body
+    assert "Notes:\nOperator notes" in body
+
+
+def test_auto_export_strips_ansi_sequences_from_body(monkeypatch) -> None:
+    provider = FakeProvider()
+    context = _context(auto_enabled=True)
+    issue = {
+        "id": "at-1",
+        "title": "Epic",
+        "labels": ["at:epic"],
+        "description": "\x1b[32mScope summary\x1b[0m",
+        "acceptance_criteria": "\x1b[33mAC1\x1b[0m",
+    }
+
+    monkeypatch.setattr(auto_export, "_resolve_provider", lambda *_args, **_kwargs: provider)
+    monkeypatch.setattr(auto_export, "_load_issue", lambda *_args, **_kwargs: issue)
+    monkeypatch.setattr(
+        auto_export.beads, "update_external_tickets", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(auto_export.beads, "list_work_children", lambda *_, **__: [])
+
+    result = auto_export.auto_export_issue("at-1", context=context)
+
+    assert result.status == "exported"
+    body = provider.created[0].body
+    assert isinstance(body, str)
+    assert "\x1b[" not in body
+    assert "Scope summary" in body
+    assert "Acceptance criteria:\nAC1" in body
+
+
+def test_auto_export_blocks_command_output_contamination(monkeypatch) -> None:
+    provider = FakeProvider()
+    context = _context(auto_enabled=True)
+    issue = {
+        "id": "at-1",
+        "title": "Epic",
+        "labels": ["at:epic"],
+        "description": "Scope summary\nProcess exited with code 1",
+    }
+
+    monkeypatch.setattr(auto_export, "_resolve_provider", lambda *_args, **_kwargs: provider)
+    monkeypatch.setattr(auto_export, "_load_issue", lambda *_args, **_kwargs: issue)
+    monkeypatch.setattr(auto_export.beads, "list_work_children", lambda *_, **__: [])
+
+    result = auto_export.auto_export_issue("at-1", context=context)
+
+    assert result.status == "failed"
+    assert "export blocked" in result.message
+    assert "Process exited with code 1" in result.message
+    assert "Remove terminal logs" in result.message
+    assert provider.created == []
+
+
 def test_auto_export_honors_opt_out_label(monkeypatch) -> None:
     provider = FakeProvider()
     context = _context(auto_enabled=True)
