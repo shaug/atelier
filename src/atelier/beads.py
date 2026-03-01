@@ -57,6 +57,7 @@ _EMBEDDED_BACKEND_PANIC_MARKERS = (
     "setcrashonfatalerror",
 )
 _TERMINAL_DEPENDENCY_STATUSES = {"closed", "done"}
+_ACTIVE_TOP_LEVEL_DISCOVERY_STATUSES = frozenset({"open", "in_progress", "blocked"})
 _BEADS_STARTUP_HEALTHY = "healthy_dolt"
 _BEADS_STARTUP_MISSING_DOLT = "missing_dolt_with_legacy_sqlite"
 _BEADS_STARTUP_INSUFFICIENT_DOLT = "insufficient_dolt_vs_legacy_data"
@@ -346,6 +347,32 @@ class ExternalTicketReconcileResult:
     reconciled_tickets: int
     updated: bool
     needs_decision_notes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EpicIdentityViolation:
+    """Active top-level work missing executable epic identity metadata."""
+
+    issue_id: str
+    status: str | None
+    issue_type: str | None
+    labels: tuple[str, ...]
+    remediation_command: str
+
+
+@dataclass(frozen=True)
+class EpicDiscoveryParityReport:
+    """Parity diagnostics between active top-level work and epic index discovery."""
+
+    active_top_level_work_count: int
+    indexed_active_epic_count: int
+    missing_executable_identity: tuple[EpicIdentityViolation, ...]
+    missing_from_index: tuple[str, ...]
+
+    @property
+    def in_parity(self) -> bool:
+        """Return whether active top-level work and epic index are aligned."""
+        return not self.missing_executable_identity and not self.missing_from_index
 
 
 @dataclass(frozen=True)
@@ -2315,6 +2342,127 @@ def list_epics(
             i for i in result if lifecycle.canonical_lifecycle_status(i.get("status")) != "closed"
         ]
     return result
+
+
+def _active_top_level_work_issues(
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> list[dict[str, object]]:
+    issues = run_bd_json(["list", "--all", "--limit", "0"], beads_root=beads_root, cwd=cwd)
+    active: list[dict[str, object]] = []
+    for issue in issues:
+        labels = _issue_labels(issue)
+        issue_type = lifecycle.issue_payload_type(issue)
+        parent_id = _issue_parent_id(issue)
+        role = lifecycle.infer_work_role(
+            labels=labels,
+            issue_type=issue_type,
+            parent_id=parent_id,
+            has_work_children=False,
+        )
+        if not role.is_work or not role.is_epic:
+            continue
+        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
+        if canonical_status not in _ACTIVE_TOP_LEVEL_DISCOVERY_STATUSES:
+            continue
+        active.append(issue)
+    return sorted(
+        active,
+        key=lambda issue: (
+            str(issue.get("id") or "").strip(),
+            str(issue.get("title") or "").strip(),
+        ),
+    )
+
+
+def _identity_remediation_command(issue_id: str) -> str:
+    return f"bd update {issue_id} --type epic --add-label at:epic"
+
+
+def epic_discovery_parity_report(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    indexed_epics: list[dict[str, object]] | None = None,
+) -> EpicDiscoveryParityReport:
+    """Return startup/doctor parity diagnostics for top-level epic discovery.
+
+    Args:
+        beads_root: Project Beads store root.
+        cwd: Working directory for bd commands.
+        indexed_epics: Optional pre-fetched epic index payload from
+            :func:`list_epics`. When omitted, the function queries epics.
+
+    Returns:
+        A parity report containing:
+        - active top-level work count (open/in_progress/blocked),
+        - indexed active epic count from `at:epic` discovery,
+        - active top-level work missing executable identity metadata
+          (`at:epic` + `issue_type=epic`) with deterministic remediation,
+        - executable active top-level work IDs missing from the epic index.
+    """
+    active_top_level = _active_top_level_work_issues(beads_root=beads_root, cwd=cwd)
+    missing_identity: list[EpicIdentityViolation] = []
+    executable_active_ids: set[str] = set()
+    for issue in active_top_level:
+        issue_id = str(issue.get("id") or "").strip()
+        if not issue_id:
+            continue
+        labels = _issue_labels(issue)
+        issue_type = lifecycle.issue_payload_type(issue)
+        parent_id = _issue_parent_id(issue)
+        is_executable = lifecycle.is_executable_epic_identity(
+            labels=labels,
+            issue_type=issue_type,
+            parent_id=parent_id,
+        )
+        if is_executable:
+            executable_active_ids.add(issue_id)
+            continue
+        missing_identity.append(
+            EpicIdentityViolation(
+                issue_id=issue_id,
+                status=lifecycle.canonical_lifecycle_status(issue.get("status")),
+                issue_type=lifecycle.normalize_status_value(issue_type),
+                labels=tuple(sorted(labels)),
+                remediation_command=_identity_remediation_command(issue_id),
+            )
+        )
+
+    epics = (
+        indexed_epics
+        if indexed_epics is not None
+        else list_epics(beads_root=beads_root, cwd=cwd, include_closed=False)
+    )
+    indexed_active_ids: set[str] = set()
+    for issue in epics:
+        issue_id = str(issue.get("id") or "").strip()
+        if not issue_id:
+            continue
+        canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
+        if canonical_status not in _ACTIVE_TOP_LEVEL_DISCOVERY_STATUSES:
+            continue
+        labels = _issue_labels(issue)
+        issue_type = lifecycle.issue_payload_type(issue)
+        parent_id = _issue_parent_id(issue)
+        if not lifecycle.is_executable_epic_identity(
+            labels=labels,
+            issue_type=issue_type,
+            parent_id=parent_id,
+        ):
+            continue
+        indexed_active_ids.add(issue_id)
+
+    missing_from_index = tuple(sorted(executable_active_ids - indexed_active_ids))
+    return EpicDiscoveryParityReport(
+        active_top_level_work_count=len(active_top_level),
+        indexed_active_epic_count=len(indexed_active_ids),
+        missing_executable_identity=tuple(
+            sorted(missing_identity, key=lambda violation: violation.issue_id)
+        ),
+        missing_from_index=missing_from_index,
+    )
 
 
 def _strip_unsupported_commands_from_addendum(text: str) -> str:

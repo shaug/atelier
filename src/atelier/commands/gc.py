@@ -208,6 +208,12 @@ def gc(args: object) -> None:
         )
     )
     actions.extend(
+        gc_labels.collect_report_epic_identity_guardrails(
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    )
+    actions.extend(
         gc_hooks.collect_hooks(
             beads_root=beads_root,
             repo_root=repo_root,

@@ -183,3 +183,56 @@ def collect_normalize_epic_labels(
             )
         )
     return actions
+
+
+def collect_report_epic_identity_guardrails(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[GcAction]:
+    """Report active top-level work that drifts from executable epic identity."""
+    report = beads.epic_discovery_parity_report(
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    actions: list[GcAction] = []
+    if report.missing_executable_identity:
+        details: list[str] = [
+            (
+                "active top-level work must keep executable epic identity "
+                "(issue_type=epic + label at:epic)"
+            )
+        ]
+        for violation in report.missing_executable_identity:
+            labels = ", ".join(violation.labels) if violation.labels else "(none)"
+            details.append(
+                f"{violation.issue_id}: status={violation.status or 'missing'}, "
+                f"type={violation.issue_type or 'missing'}, labels={labels}"
+            )
+            details.append(f"remediation: {violation.remediation_command}")
+        actions.append(
+            GcAction(
+                description="Report active top-level work missing executable epic identity",
+                details=tuple(details),
+                apply=lambda: None,
+                report_only=True,
+            )
+        )
+
+    if report.missing_from_index:
+        details = [
+            "epic discovery index drift detected for executable top-level work:",
+            ", ".join(report.missing_from_index),
+            "remediation: run `bd prime`; if mismatch persists run "
+            "`bd doctor --fix --yes` and rerun gc",
+        ]
+        actions.append(
+            GcAction(
+                description="Report executable top-level work missing from epic discovery index",
+                details=tuple(details),
+                apply=lambda: None,
+                report_only=True,
+            )
+        )
+
+    return actions

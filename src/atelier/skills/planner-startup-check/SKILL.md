@@ -32,6 +32,9 @@ during startup triage. Do not wait for approval to capture deferred work.
    - Do not reformat, summarize, or compress the list.
    - Epic discovery is indexed by the required `at:epic` label. Missing
      `at:epic` means the issue is outside the planner epic pool.
+   - When startup diagnostics report active top-level work missing executable
+     identity, apply deterministic remediation:
+     `bd update <id> --type epic --add-label at:epic`
    - `cs:*` lifecycle labels are not execution gates.
 
 ## Verification
