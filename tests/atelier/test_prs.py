@@ -83,6 +83,20 @@ def test_lookup_github_pr_status_reports_found_payload() -> None:
     assert result.error is None
 
 
+def test_lookup_github_pr_status_requests_merge_commit_field() -> None:
+    with (
+        patch("atelier.prs._gh_available", return_value=True),
+        patch("atelier.prs._find_latest_pr_number", return_value=42),
+        patch("atelier.prs._run_json", return_value={"number": 42, "state": "OPEN"}) as run_json,
+    ):
+        result = prs.lookup_github_pr_status("org/repo", "feature/test")
+
+    assert result.outcome == "found"
+    request = run_json.call_args.args[0]
+    json_fields = request[request.index("--json") + 1]
+    assert "mergeCommit" in json_fields
+
+
 def test_lookup_github_pr_status_prefers_open_pr_over_newer_closed_pr() -> None:
     with (
         patch("atelier.prs._gh_available", return_value=True),

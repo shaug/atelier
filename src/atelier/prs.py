@@ -298,7 +298,8 @@ def lookup_github_pr_status(repo: str, head: str, *, refresh: bool = False) -> G
                 repo,
                 "--json",
                 "number,url,state,baseRefName,headRefName,title,body,labels,isDraft,"
-                "mergedAt,closedAt,updatedAt,reviewDecision,mergeable,mergeStateStatus,"
+                "mergedAt,mergeCommit,closedAt,updatedAt,reviewDecision,mergeable,"
+                "mergeStateStatus,"
                 "reviewRequests,comments,reviews",
             ]
         )
