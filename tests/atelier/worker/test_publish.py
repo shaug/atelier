@@ -74,6 +74,23 @@ def test_render_changeset_pr_body_adds_explicit_github_issue_references() -> Non
     assert "- Addresses #417" in body
 
 
+def test_render_changeset_pr_body_parses_oxford_comma_issue_references() -> None:
+    issue = {
+        "title": "Preserve all referenced tickets",
+        "description": (
+            "scope: keep linked references stable\nnotes: Fixes #701, #702, and #703\n"
+        ),
+    }
+    fields = {"scope": "Preserve all referenced tickets."}
+
+    body = publish.render_changeset_pr_body(issue, fields=fields)
+
+    assert "## Tickets" in body
+    assert "- Fixes #701" in body
+    assert "- Fixes #702" in body
+    assert "- Fixes #703" in body
+
+
 def test_render_changeset_pr_body_dedupes_and_prefers_fixes_action() -> None:
     issue = {
         "title": "Normalize export handling",

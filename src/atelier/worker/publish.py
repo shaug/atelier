@@ -26,7 +26,7 @@ _EXPLICIT_GITHUB_CLAUSE_RE = re.compile(
         r"\s*(?::|-)?\s*"
         r"(?P<references>"
         r"(?:https://(?:api\.)?github\.com/(?:repos/)?[^/\s]+/[^/\s]+/issues/\d+\b|#\d+\b)"
-        r"(?:\s*(?:,|and|&)\s*"
+        r"(?:\s*(?:,\s*and|,|and|&)\s*"
         r"(?:https://(?:api\.)?github\.com/(?:repos/)?[^/\s]+/[^/\s]+/issues/\d+\b|#\d+\b))*"
         r")"
     ),
