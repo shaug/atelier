@@ -2206,14 +2206,15 @@ def list_epics(
     return result
 
 
-def _strip_unsupported_export_from_addendum(text: str) -> str:
-    """Remove lines referencing bd export or bd sync --export (unsupported/deprecated)."""
+def _strip_unsupported_commands_from_addendum(text: str) -> str:
+    """Remove lines referencing unsupported/deprecated Beads commands."""
     if not text:
         return text
+    blocked_substrings = ("bd export", "sync --export", "bd dolt commit")
     out: list[str] = []
     for line in text.splitlines():
         lower = line.lower()
-        if "bd export" in lower or "sync --export" in lower:
+        if any(token in lower for token in blocked_substrings):
             continue
         out.append(line)
     return "\n".join(out).strip()
@@ -2227,9 +2228,9 @@ def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
     agent AGENTS.md so the planner or worker sees up-to-date Beads guidance.
     Injection is done elsewhere via agent_home.apply_beads_prime_addendum():
     the planner syncs it during plan, and the worker syncs it at session start.
-    Lines that reference unsupported or deprecated commands (bd export,
-    bd sync --export) are stripped before return so agents are not told to
-    run unavailable commands.
+    Lines that reference unsupported or deprecated commands (`bd export`,
+    `bd sync --export`, `bd dolt commit`) are stripped before return so agents
+    are not told to run unavailable commands.
     """
     env = beads_env(beads_root)
     command = ["bd", "prime", "--full"]
@@ -2248,7 +2249,7 @@ def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
     if result.returncode != 0:
         return None
     output = (result.stdout or "").strip()
-    output = _strip_unsupported_export_from_addendum(output)
+    output = _strip_unsupported_commands_from_addendum(output)
     return output or None
 
 

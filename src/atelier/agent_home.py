@@ -25,6 +25,22 @@ CLAUDE_HOOKS_DIRNAME = "hooks"
 CLAUDE_HOOK_SCRIPT = "append_agentsmd_context.sh"
 BEADS_PRIME_BLOCK_START = "<!-- ATELIER_BEADS_PRIME_START -->"
 BEADS_PRIME_BLOCK_END = "<!-- ATELIER_BEADS_PRIME_END -->"
+_WORKER_SAFE_PRIME_ADDENDUM = "\n".join(
+    (
+        "## Worker Runtime Context",
+        "",
+        "- The assigned epic/changeset bead is the only execution scope.",
+        "- Keep `pr_state` accurate: `pushed`, `draft-pr`, `pr-open`, "
+        "`in-review`, `approved`, `merged`, `closed`.",
+        "- Do not set `status=closed` while PR lifecycle is active "
+        "(`pushed`, `draft-pr`, `pr-open`, `in-review`, `approved`).",
+        "- Set `status=closed` only when terminal proof exists:",
+        "  - PR lifecycle is terminal (`pr_state=merged` or `pr_state=closed`), or",
+        "  - non-PR integration proof exists (`changeset.integrated_sha`).",
+        "- Do not run backlog/planning workflows from worker sessions "
+        "(`bd ready`, `bd create`, `bd dep add`, `bd close` for unrelated work).",
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -497,10 +513,22 @@ done
         settings_path.write_text(json.dumps(settings_payload, indent=2) + "\n", encoding="utf-8")
 
 
-def apply_beads_prime_addendum(content: str, addendum: str | None) -> str:
-    """Insert or update the Beads prime addendum block in AGENTS content."""
+def _apply_role_beads_addendum(addendum: str | None, *, role: str | None) -> str | None:
+    """Return role-specific addendum content to inject into AGENTS.md."""
     body = (addendum or "").strip("\n")
     if not body:
+        return None
+    if (role or "").strip().lower() == "worker":
+        return _WORKER_SAFE_PRIME_ADDENDUM
+    return body
+
+
+def apply_beads_prime_addendum(
+    content: str, addendum: str | None, *, role: str | None = None
+) -> str:
+    """Insert or update the Beads prime addendum block in AGENTS content."""
+    body = _apply_role_beads_addendum(addendum, role=role)
+    if body is None:
         return content
     pattern = re.compile(
         re.escape(BEADS_PRIME_BLOCK_START) + r".*?" + re.escape(BEADS_PRIME_BLOCK_END),

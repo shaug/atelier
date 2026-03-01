@@ -84,10 +84,14 @@ Skills link: ./skills
 - Use canonical lifecycle statuses only:
   - `deferred`, `open`, `in_progress`, `blocked`, `closed`.
 - `cs:*` lifecycle labels are not execution gates.
-- In PR projects, do not close a changeset after only pushing a branch when PR
-  policy allows opening a PR now.
 - Keep `pr_state` accurate in bead metadata (`pushed`, `draft-pr`, `pr-open`,
   `in-review`, `approved`, `merged`, `closed`).
+- In PR projects, treat `pushed`, `draft-pr`, `pr-open`, `in-review`, and
+  `approved` as active lifecycle states; do not set `status=closed` in those
+  states.
+- Set `status=closed` only when terminal proof exists:
+  - PR lifecycle is terminal (`pr_state=merged` or `pr_state=closed`), OR
+  - non-PR integration is proven (`changeset.integrated_sha` recorded).
 - For PR feedback runs, inline review comments must be answered inline and then
   resolved; do not post a new top-level PR comment in place of an inline reply.
   Use the `github-prs` skill scripts (`list_review_threads.py`,

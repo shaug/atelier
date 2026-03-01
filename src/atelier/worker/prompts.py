@@ -44,6 +44,12 @@ def worker_opening_prompt(
             "acceptance criteria; do not mention internal bead IDs."
         ),
         (
+            "Do not set status=closed while PR lifecycle is active "
+            "(`pushed`,`draft-pr`,`pr-open`,`in-review`,`approved`). "
+            "Close only when PR is terminal (`merged`/`closed`) or non-PR "
+            "integration proof exists (`changeset.integrated_sha`)."
+        ),
+        (
             "When done, update beads status/metadata for this changeset and required "
             "ancestor lifecycle state only. If blocked, send NEEDS-DECISION with "
             "details and exit."
