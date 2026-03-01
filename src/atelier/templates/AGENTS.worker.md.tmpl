@@ -110,6 +110,23 @@ Skills link: ./skills
 - Do not mutate sibling/unclaimed work-bead lifecycle state.
 - Follow repository `AGENTS.md` for required checks and commit rules.
 
+## Concurrency-Safe External Writes
+
+When code in this changeset writes local external state that may be touched by
+multiple agents/processes, default to corruption-avoidance behavior.
+
+- Prefer atomic write primitives where available.
+- If atomic writes are not available, require explicit read-after-write
+  verification and bounded retries.
+- Keep writes idempotent where practical so retries are safe.
+- Fail closed on uncertainty and preserve the previous known-good state.
+- Never report success when persistence cannot be confirmed.
+- Treat this as mandatory for representative targets such as:
+  - project-scoped Beads state
+  - worktree metadata/mappings
+  - branch refs/ref-like coordination files
+  - runtime lock/lease/heartbeat/queue-claim files
+
 ## External Tickets
 
 - Beads are authoritative. Do not rely on external systems for required info.
