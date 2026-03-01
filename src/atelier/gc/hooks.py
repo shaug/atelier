@@ -13,14 +13,15 @@ def release_epic(epic: dict[str, object], *, beads_root: Path, cwd: Path) -> Non
     epic_id = str(epic.get("id") or "")
     if not epic_id:
         return
-    labels = issue_labels(epic)
-    status = str(epic.get("status") or "")
-    args = ["update", epic_id, "--assignee", ""]
-    if "at:hooked" in labels:
-        args.extend(["--remove-label", "at:hooked"])
-    if status and status not in {"closed", "done"}:
-        args.extend(["--status", "open"])
-    beads.run_bd_command(args, beads_root=beads_root, cwd=cwd, allow_failure=True)
+    assignee_value = epic.get("assignee")
+    expected_assignee = assignee_value if isinstance(assignee_value, str) else ""
+    beads.release_epic_assignment(
+        epic_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        expected_assignee=expected_assignee,
+        expected_hooked="at:hooked" in issue_labels(epic),
+    )
 
 
 def collect_hooks(
@@ -84,14 +85,21 @@ def collect_hooks(
             continue
         epic = try_show_issue(hook_bead, beads_root=beads_root, cwd=repo_root)
         description = f"Release stale hook for {agent_id} (epic {hook_bead})"
+        hook_value = hook_bead if isinstance(hook_bead, str) else None
 
         def _apply_release(
             agent_bead_id: str = issue_id,
             epic_issue: dict[str, object] | None = epic,
+            expected_hook: str | None = hook_value,
         ) -> None:
             if epic_issue:
                 release_epic(epic_issue, beads_root=beads_root, cwd=repo_root)
-            beads.clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
+            beads.clear_agent_hook(
+                agent_bead_id,
+                beads_root=beads_root,
+                cwd=repo_root,
+                expected_hook=expected_hook,
+            )
 
         actions.append(GcAction(description=description, apply=_apply_release))
 
@@ -125,7 +133,12 @@ def collect_hooks(
                 if agent_payload and agent_payload.get("hook_bead") == epic_id_value:
                     agent_issue_id = agent_payload.get("issue_id")
                     if isinstance(agent_issue_id, str) and agent_issue_id:
-                        beads.clear_agent_hook(agent_issue_id, beads_root=beads_root, cwd=repo_root)
+                        beads.clear_agent_hook(
+                            agent_issue_id,
+                            beads_root=beads_root,
+                            cwd=repo_root,
+                            expected_hook=epic_id_value,
+                        )
 
             actions.append(GcAction(description=description, apply=_apply_expired))
             continue
@@ -145,7 +158,12 @@ def collect_hooks(
                 if agent_payload and agent_payload.get("hook_bead") == epic_id_value:
                     agent_issue_id = agent_payload.get("issue_id")
                     if isinstance(agent_issue_id, str) and agent_issue_id:
-                        beads.clear_agent_hook(agent_issue_id, beads_root=beads_root, cwd=repo_root)
+                        beads.clear_agent_hook(
+                            agent_issue_id,
+                            beads_root=beads_root,
+                            cwd=repo_root,
+                            expected_hook=epic_id_value,
+                        )
 
             actions.append(GcAction(description=description, apply=_apply_closed))
             continue

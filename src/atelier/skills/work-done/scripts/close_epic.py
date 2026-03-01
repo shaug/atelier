@@ -42,7 +42,12 @@ def close_epic(
     """
     if direct_close:
         beads.close_issue(epic_id, beads_root=beads_root, cwd=cwd)
-        beads.clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=cwd)
+        beads.clear_agent_hook(
+            agent_bead_id,
+            beads_root=beads_root,
+            cwd=cwd,
+            expected_hook=epic_id,
+        )
         return True
     return beads.close_epic_if_complete(
         epic_id,

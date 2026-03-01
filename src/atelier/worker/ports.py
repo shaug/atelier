@@ -118,7 +118,14 @@ class BeadsService(Protocol):
         allow_takeover_from: str | None = None,
     ) -> Issue: ...
 
-    def clear_agent_hook(self, agent_bead_id: str, *, beads_root: Path, cwd: Path) -> None: ...
+    def clear_agent_hook(
+        self,
+        agent_bead_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        expected_hook: str | None = None,
+    ) -> None: ...
 
     def extract_workspace_root_branch(self, issue: Issue) -> str | None: ...
 

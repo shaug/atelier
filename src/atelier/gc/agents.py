@@ -77,12 +77,18 @@ def collect_agent_homes(
             agent: str = agent_id,
             agent_bead_id: str = issue_id,
             has_hook: bool = isinstance(hook_bead, str) and bool(hook_bead),
+            hook_epic: str | None = hook_bead if isinstance(hook_bead, str) else None,
             epics_to_release: tuple[dict[str, object], ...] = tuple(dependent_epics),
         ) -> None:
             for epic_issue in epics_to_release:
                 release_epic(epic_issue, beads_root=beads_root, cwd=repo_root)
             if has_hook:
-                beads.clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
+                beads.clear_agent_hook(
+                    agent_bead_id,
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                    expected_hook=hook_epic,
+                )
             beads.run_bd_command(
                 ["close", agent_bead_id],
                 beads_root=beads_root,

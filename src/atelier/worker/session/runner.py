@@ -160,7 +160,12 @@ def _abort_startup_read_failure(
     except SystemExit:
         pass
     try:
-        beads.clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
+        beads.clear_agent_hook(
+            agent_bead_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            expected_hook=selected_epic,
+        )
     except SystemExit:
         pass
     return WorkerRunSummary(started=False, reason=reason, epic_id=selected_epic)
@@ -233,7 +238,12 @@ def _abort_startup_preparation_failure(
     except SystemExit:
         pass
     try:
-        beads.clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=repo_root)
+        beads.clear_agent_hook(
+            agent_bead_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            expected_hook=selected_epic,
+        )
     except SystemExit:
         pass
     return WorkerRunSummary(
@@ -601,7 +611,10 @@ def run_worker_once(
                 )
                 if previous_agent_id:
                     infra.beads.clear_agent_hook(
-                        previous_agent_id, beads_root=beads_root, cwd=repo_root
+                        previous_agent_id,
+                        beads_root=beads_root,
+                        cwd=repo_root,
+                        expected_hook=selected_epic,
                     )
             finishstep()
             break
@@ -797,7 +810,10 @@ def run_worker_once(
                 selected_epic, beads_root=beads_root, repo_root=repo_root
             )
             infra.beads.clear_agent_hook(
-                agent_bead_id_required, beads_root=beads_root, cwd=repo_root
+                agent_bead_id_required,
+                beads_root=beads_root,
+                cwd=repo_root,
+                expected_hook=selected_epic,
             )
             return finish(
                 WorkerRunSummary(started=False, reason="no_ready_changesets", epic_id=selected_epic)
