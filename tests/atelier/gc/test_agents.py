@@ -92,7 +92,7 @@ def test_collect_agent_homes_prunes_stale_session_agent_beads_deterministically(
         ),
         patch(
             "atelier.beads.clear_agent_hook",
-            side_effect=lambda issue_id, *, beads_root, cwd: calls.append(("clear", issue_id)),
+            side_effect=lambda issue_id, **_kwargs: calls.append(("clear", issue_id)),
         ),
         patch(
             "atelier.agent_home.cleanup_agent_home_by_id",

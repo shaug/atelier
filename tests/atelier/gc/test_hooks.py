@@ -1,7 +1,6 @@
 """Tests for gc.hooks."""
 
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import atelier.gc.hooks as gc_hooks
@@ -54,7 +53,7 @@ def test_collect_hooks_releases_stale_hook_when_heartbeat_missing() -> None:
         ),
         patch(
             "atelier.beads.clear_agent_hook",
-            side_effect=lambda issue_id, *, beads_root, cwd: calls.append(("clear", issue_id)),
+            side_effect=lambda issue_id, **_kwargs: calls.append(("clear", issue_id)),
         ),
     ):
         actions = gc_hooks.collect_hooks(
@@ -77,25 +76,12 @@ def test_release_epic_clears_assignee_and_hooked_label() -> None:
         "status": "in_progress",
         "assignee": "agent-1",
     }
-    calls: list[list[str]] = []
-
-    def fake_run_bd_command(
-        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ) -> object:
-        calls.append(args)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    with patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command):
+    with patch("atelier.beads.release_epic_assignment", return_value=True) as release_assignment:
         gc_hooks.release_epic(epic, beads_root=Path("/beads"), cwd=Path("/repo"))
-
-    expected = [
-        "update",
+    release_assignment.assert_called_once_with(
         "epic-1",
-        "--assignee",
-        "",
-        "--remove-label",
-        "at:hooked",
-        "--status",
-        "open",
-    ]
-    assert any(call == expected for call in calls), f"Expected {expected} in {calls}"
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        expected_assignee="agent-1",
+        expected_hooked=True,
+    )

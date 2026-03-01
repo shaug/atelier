@@ -429,11 +429,13 @@ def test_run_worker_once_reclaims_stale_explicit_assignment_and_clears_old_hook(
             "at-previous-agent",
             beads_root=Path("/project/.atelier/.beads"),
             cwd=Path("/repo"),
+            expected_hook="at-explicit",
         ),
         call(
             "at-agent",
             beads_root=Path("/project/.atelier/.beads"),
             cwd=Path("/repo"),
+            expected_hook="at-explicit",
         ),
     ]
 
@@ -486,6 +488,7 @@ def test_run_worker_once_releases_epic_when_changeset_selection_reads_fail() -> 
         "at-agent",
         beads_root=Path("/project/.atelier/.beads"),
         cwd=Path("/repo"),
+        expected_hook="at-epic",
     )
     assert not deps.control._die.called
 
@@ -539,6 +542,7 @@ def test_run_worker_once_releases_epic_when_selected_changeset_read_fails() -> N
         "at-agent",
         beads_root=Path("/project/.atelier/.beads"),
         cwd=Path("/repo"),
+        expected_hook="at-epic",
     )
     assert not deps.control._die.called
 
@@ -603,6 +607,7 @@ def test_run_worker_once_blocks_changeset_on_non_recoverable_worktree_prep_error
         "at-agent",
         beads_root=Path("/project/.atelier/.beads"),
         cwd=Path("/repo"),
+        expected_hook="at-epic",
     )
     assert not deps.control._die.called
 
@@ -683,6 +688,7 @@ def test_run_worker_once_reports_worker_template_load_failure_reason_code() -> N
         "at-agent",
         beads_root=Path("/project/.atelier/.beads"),
         cwd=Path("/repo"),
+        expected_hook="at-epic",
     )
     assert not deps.control._die.called
 

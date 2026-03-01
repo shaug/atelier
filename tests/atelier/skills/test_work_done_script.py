@@ -79,10 +79,17 @@ def test_close_epic_direct_close_reconciles_and_clears_hook(monkeypatch) -> None
         assert cwd == Path("/repo")
         return object()
 
-    def fake_clear_agent_hook(agent_bead_id: str, *, beads_root: Path, cwd: Path) -> None:
+    def fake_clear_agent_hook(
+        agent_bead_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        expected_hook: str | None = None,
+    ) -> None:
         events.append(("clear_hook", agent_bead_id))
         assert beads_root == Path("/beads")
         assert cwd == Path("/repo")
+        assert expected_hook == "at-epic"
 
     monkeypatch.setattr(module.beads, "close_issue", fake_close_issue)
     monkeypatch.setattr(module.beads, "clear_agent_hook", fake_clear_agent_hook)

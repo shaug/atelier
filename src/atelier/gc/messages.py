@@ -46,6 +46,19 @@ def collect_message_claims(
             body: str = payload.body,
             metadata: dict[str, object] = dict(payload.metadata),
         ) -> None:
+            current = beads.run_bd_json(["show", message_id], beads_root=beads_root, cwd=repo_root)
+            if not current:
+                return
+            issue_payload = current[0]
+            assignee_value = issue_payload.get("assignee")
+            expected_assignee = assignee_value if isinstance(assignee_value, str) else ""
+            if expected_assignee:
+                beads.run_bd_command(
+                    ["update", message_id, "--assignee", "", "--status", "open"],
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                    allow_failure=True,
+                )
             metadata["claimed_by"] = None
             metadata["claimed_at"] = None
             updated = messages.render_message(metadata, body)

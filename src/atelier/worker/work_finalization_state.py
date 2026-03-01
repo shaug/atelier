@@ -118,14 +118,15 @@ def release_epic_assignment(epic_id: str, *, beads_root: Path, repo_root: Path) 
     if not issues:
         return
     issue = issues[0]
-    labels = issue_labels(issue)
-    status = str(issue.get("status") or "")
-    args = ["update", epic_id, "--assignee", ""]
-    if "at:hooked" in labels:
-        args.extend(["--remove-label", "at:hooked"])
-    if status and status not in {"closed", "done"}:
-        args.extend(["--status", "open"])
-    beads.run_bd_command(args, beads_root=beads_root, cwd=repo_root, allow_failure=True)
+    assignee_value = issue.get("assignee")
+    expected_assignee = assignee_value if isinstance(assignee_value, str) else ""
+    beads.release_epic_assignment(
+        epic_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+        expected_assignee=expected_assignee,
+        expected_hooked="at:hooked" in issue_labels(issue),
+    )
 
 
 def has_open_descendant_changesets(changeset_id: str, *, beads_root: Path, repo_root: Path) -> bool:

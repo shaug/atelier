@@ -27,6 +27,8 @@ def test_collect_message_retention_closes_expired_channel_messages() -> None:
     ) -> list[dict[str, object]]:
         if args[:3] == ["list", "--label", "at:message"]:
             return [issue]
+        if args[:2] == ["show", "msg-1"]:
+            return [issue]
         return []
 
     def fake_run_bd_command(
@@ -65,6 +67,8 @@ def test_collect_message_retention_skips_non_expired() -> None:
     ) -> list[dict[str, object]]:
         if args[:3] == ["list", "--label", "at:message"]:
             return [issue]
+        if args[:2] == ["show", "msg-1"]:
+            return [issue]
         return []
 
     with patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json):
@@ -99,6 +103,8 @@ def test_collect_message_claims_releases_stale_claim() -> None:
         args: list[str], *, beads_root: Path, cwd: Path
     ) -> list[dict[str, object]]:
         if args[:3] == ["list", "--label", "at:message"]:
+            return [issue]
+        if args[:2] == ["show", "msg-1"]:
             return [issue]
         return []
 

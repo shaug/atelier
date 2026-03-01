@@ -70,6 +70,7 @@ _DOLT_SERVER_PID_FILENAME = "dolt-server.pid"
 _DOLT_SERVER_STARTUP_TIMEOUT_SECONDS = 2.0
 _DOLT_SERVER_STARTUP_POLL_INTERVAL_SECONDS = 0.1
 _DOLT_SERVER_RECOVERY_MAX_ATTEMPTS = 2
+_DESCRIPTION_UPDATE_MAX_ATTEMPTS = 5
 _DOLT_SERVER_PRECHECK_BYPASS_COMMANDS = {
     "completion",
     "doctor",
@@ -941,6 +942,24 @@ def _parity_verified_after_migration(
     return after.dolt_issue_total >= before.legacy_issue_total
 
 
+def _verify_migration_parity_with_resample(
+    *,
+    before: StartupBeadsState,
+    after: StartupBeadsState,
+    beads_root: Path,
+    cwd: Path,
+) -> tuple[bool, StartupBeadsState]:
+    """Re-sample startup parity to avoid failing closed on transient skew."""
+    candidate = after
+    if _parity_verified_after_migration(before=before, after=candidate):
+        return True, candidate
+    for _attempt in range(2):
+        candidate = detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
+        if _parity_verified_after_migration(before=before, after=candidate):
+            return True, candidate
+    return False, candidate
+
+
 def _attempt_startup_auto_migration(
     *,
     args: list[str],
@@ -1050,18 +1069,24 @@ def _attempt_startup_auto_migration(
         )
 
     post_state = detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
-    if not _parity_verified_after_migration(before=startup_state, after=post_state):
+    parity_ok, verified_state = _verify_migration_parity_with_resample(
+        before=startup_state,
+        after=post_state,
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+    if not parity_ok:
         _record_startup_auto_migration_diagnostic(
             beads_root=beads_root,
             status="blocked",
             reason="parity verification failed after migration",
-            startup_state=post_state,
+            startup_state=verified_state,
         )
         die(
             "startup migration blocked: parity verification failed after migration.\n"
             f"backup_path={backup_path}\n"
             f"before={format_startup_beads_diagnostics(startup_state)}\n"
-            f"after={format_startup_beads_diagnostics(post_state)}\n"
+            f"after={format_startup_beads_diagnostics(verified_state)}\n"
             "Run `bd migrate --to-dolt --inspect` and resolve parity before retrying."
         )
     _ISSUE_TYPE_CACHE.pop(beads_root, None)
@@ -1075,13 +1100,13 @@ def _attempt_startup_auto_migration(
         beads_root=beads_root,
         status="migrated",
         reason=_startup_auto_migration_reason(startup_state),
-        startup_state=post_state,
+        startup_state=verified_state,
     )
     atelier_log.warning(
         "Startup Beads auto-migration completed: "
         f"backup_path={backup_path}; "
         f"before={format_startup_beads_diagnostics(startup_state)}; "
-        f"after={format_startup_beads_diagnostics(post_state)}"
+        f"after={format_startup_beads_diagnostics(verified_state)}"
     )
 
 
@@ -1999,6 +2024,56 @@ def mark_issue_in_progress(
     )
 
 
+def release_epic_assignment(
+    epic_id: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    expected_assignee: str | None = None,
+    expected_hooked: bool | None = None,
+) -> bool:
+    """Release epic ownership with optional assignee/hook preconditions."""
+    issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    if not issues:
+        return False
+    issue = issues[0]
+    labels = _issue_labels(issue)
+    status = str(issue.get("status") or "")
+    assignee_raw = issue.get("assignee")
+    assignee = (
+        assignee_raw.strip() if isinstance(assignee_raw, str) and assignee_raw.strip() else None
+    )
+    expected_assignee_normalized = _normalize_description_field_value(expected_assignee)
+    if expected_assignee is not None and assignee != expected_assignee_normalized:
+        return False
+    if expected_hooked is not None:
+        has_hooked = "at:hooked" in labels
+        if has_hooked != expected_hooked:
+            return False
+
+    args = ["update", epic_id, "--assignee", ""]
+    if "at:hooked" in labels:
+        args.extend(["--remove-label", "at:hooked"])
+    if status and status not in {"closed", "done"}:
+        args.extend(["--status", "open"])
+    run_bd_command(args, beads_root=beads_root, cwd=cwd, allow_failure=True)
+    refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+    if not refreshed:
+        return False
+    updated = refreshed[0]
+    updated_assignee_raw = updated.get("assignee")
+    updated_assignee = (
+        updated_assignee_raw.strip()
+        if isinstance(updated_assignee_raw, str) and updated_assignee_raw.strip()
+        else None
+    )
+    if updated_assignee is not None:
+        return False
+    if "at:hooked" in _issue_labels(updated):
+        return False
+    return True
+
+
 def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
     """Run a bd command with --json and return parsed output."""
     cmd = list(args)
@@ -2570,6 +2645,97 @@ def parse_description_fields(description: str | None) -> dict[str, str]:
     return _parse_description_fields(description)
 
 
+def _normalize_description_field_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned or cleaned.lower() == "null":
+        return None
+    return cleaned
+
+
+def _issue_description(issue: dict[str, object]) -> str:
+    description = issue.get("description")
+    return description if isinstance(description, str) else ""
+
+
+def _description_matches_updates(
+    issue: dict[str, object],
+    *,
+    fields: dict[str, str | None],
+) -> bool:
+    parsed = _parse_description_fields(_issue_description(issue))
+    for key, value in fields.items():
+        current = _normalize_description_field_value(parsed.get(key))
+        expected = _normalize_description_field_value(value)
+        if current != expected:
+            return False
+    return True
+
+
+def _description_matches_expected(
+    issue: dict[str, object],
+    *,
+    expected_current: dict[str, str | None],
+) -> bool:
+    parsed = _parse_description_fields(_issue_description(issue))
+    for key, value in expected_current.items():
+        current = _normalize_description_field_value(parsed.get(key))
+        expected = _normalize_description_field_value(value)
+        if current != expected:
+            return False
+    return True
+
+
+def _update_description_fields_optimistic(
+    issue_id: str,
+    *,
+    fields: dict[str, str | None],
+    beads_root: Path,
+    cwd: Path,
+    expected_current: dict[str, str | None] | None = None,
+    require_expected_match: bool = False,
+) -> dict[str, object]:
+    """Apply description field updates with optimistic retry + verification."""
+    for _attempt in range(_DESCRIPTION_UPDATE_MAX_ATTEMPTS):
+        issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+        if not issues:
+            die(f"issue not found: {issue_id}")
+        issue = issues[0]
+        if expected_current and not _description_matches_expected(
+            issue,
+            expected_current=expected_current,
+        ):
+            if require_expected_match:
+                return issue
+            break
+        updated = _issue_description(issue)
+        changed = False
+        for key, value in fields.items():
+            next_value = _update_description_field(updated, key=key, value=value)
+            if next_value != updated:
+                changed = True
+                updated = next_value
+        if not changed:
+            return issue
+        _update_issue_description(issue_id, updated, beads_root=beads_root, cwd=cwd)
+        refreshed = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+        if not refreshed:
+            continue
+        candidate = refreshed[0]
+        if expected_current and not _description_matches_expected(
+            candidate,
+            expected_current=expected_current,
+        ):
+            if require_expected_match:
+                return candidate
+            continue
+        if _description_matches_updates(candidate, fields=fields):
+            return candidate
+    die(f"concurrent description update conflict for {issue_id}")
+    raise RuntimeError("unreachable")
+
+
 def issue_description_fields(
     issue_id: str,
     *,
@@ -2613,22 +2779,12 @@ def update_issue_description_fields(
     Returns:
         Refreshed issue payload when available, otherwise the pre-update issue.
     """
-    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
-    if not issues:
-        die(f"issue not found: {issue_id}")
-    issue = issues[0]
-    description = issue.get("description")
-    updated = description if isinstance(description, str) else ""
-    changed = False
-    for key, value in fields.items():
-        next_value = _update_description_field(updated, key=key, value=value)
-        if next_value != updated:
-            changed = True
-            updated = next_value
-    if changed:
-        _update_issue_description(issue_id, updated, beads_root=beads_root, cwd=cwd)
-    refreshed = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
-    return refreshed[0] if refreshed else issue
+    return _update_description_fields_optimistic(
+        issue_id,
+        fields=fields,
+        beads_root=beads_root,
+        cwd=cwd,
+    )
 
 
 def _normalize_hook_value(value: object) -> str | None:
@@ -3293,12 +3449,6 @@ def update_workspace_root_branch(
     if current and current != root_branch and not allow_override:
         die("workspace root branch already set; override not permitted")
 
-    description = issue.get("description")
-    updated = _update_description_field(
-        description if isinstance(description, str) else "",
-        key="workspace.root_branch",
-        value=root_branch,
-    )
     label = workspace_label(root_branch)
     labels = sorted(_issue_labels(issue))
     remove_labels = [
@@ -3312,10 +3462,12 @@ def update_workspace_root_branch(
         for existing in remove_labels:
             args.extend(["--remove-label", existing])
         run_bd_command(args, beads_root=beads_root, cwd=cwd)
-
-    _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
-    refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
-    return refreshed[0] if refreshed else issue
+    return _update_description_fields_optimistic(
+        epic_id,
+        fields={"workspace.root_branch": root_branch},
+        beads_root=beads_root,
+        cwd=cwd,
+    )
 
 
 def update_workspace_parent_branch(
@@ -3341,14 +3493,12 @@ def update_workspace_parent_branch(
             die("workspace parent branch already set; override not permitted")
     if current == parent_branch:
         return issue
-    updated = _update_description_field(
-        description if isinstance(description, str) else "",
-        key="workspace.parent_branch",
-        value=parent_branch,
+    return _update_description_fields_optimistic(
+        epic_id,
+        fields={"workspace.parent_branch": parent_branch},
+        beads_root=beads_root,
+        cwd=cwd,
     )
-    _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
-    refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
-    return refreshed[0] if refreshed else issue
 
 
 def update_worktree_path(
@@ -3367,15 +3517,12 @@ def update_worktree_path(
     current = extract_worktree_path(issue)
     if current and current != worktree_path and not allow_override:
         die("worktree path already set; override not permitted")
-    description = issue.get("description")
-    updated = _update_description_field(
-        description if isinstance(description, str) else "",
-        key="worktree_path",
-        value=worktree_path,
+    return _update_description_fields_optimistic(
+        epic_id,
+        fields={"worktree_path": worktree_path},
+        beads_root=beads_root,
+        cwd=cwd,
     )
-    _update_issue_description(epic_id, updated, beads_root=beads_root, cwd=cwd)
-    refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
-    return refreshed[0] if refreshed else issue
 
 
 def update_changeset_branch_metadata(
@@ -3406,11 +3553,9 @@ def update_changeset_branch_metadata(
             return None
         return cleaned
 
-    updated = description if isinstance(description, str) else ""
-    changed = False
+    updates: dict[str, str | None] = {}
 
     def apply(key: str, value: str | None) -> None:
-        nonlocal updated, changed
         normalized = normalize(value)
         if normalized is None:
             return
@@ -3423,8 +3568,7 @@ def update_changeset_branch_metadata(
             die(f"{key} already set; override not permitted")
         if current == normalized:
             return
-        updated = _update_description_field(updated, key=key, value=normalized)
-        changed = True
+        updates[key] = normalized
 
     apply("changeset.root_branch", root_branch)
     apply("changeset.parent_branch", parent_branch)
@@ -3432,11 +3576,14 @@ def update_changeset_branch_metadata(
     apply("changeset.root_base", root_base)
     apply("changeset.parent_base", parent_base)
 
-    if changed:
-        _update_issue_description(changeset_id, updated, beads_root=beads_root, cwd=cwd)
-        refreshed = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
-        return refreshed[0] if refreshed else issue
-    return issue
+    if not updates:
+        return issue
+    return _update_description_fields_optimistic(
+        changeset_id,
+        fields=updates,
+        beads_root=beads_root,
+        cwd=cwd,
+    )
 
 
 def update_external_tickets(
@@ -3453,13 +3600,6 @@ def update_external_tickets(
     issue = issues[0]
     payload = [external_ticket_payload(ticket) for ticket in tickets]
     serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True)
-    description = issue.get("description")
-    updated = _update_description_field(
-        description if isinstance(description, str) else "",
-        key=EXTERNAL_TICKETS_KEY,
-        value=serialized,
-    )
-
     desired_labels = {external_label(ticket.provider) for ticket in tickets}
     labels = sorted(_issue_labels(issue))
     remove_labels = [
@@ -3473,10 +3613,12 @@ def update_external_tickets(
         for label in remove_labels:
             args.extend(["--remove-label", label])
         run_bd_command(args, beads_root=beads_root, cwd=cwd)
-
-    _update_issue_description(issue_id, updated, beads_root=beads_root, cwd=cwd)
-    refreshed = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
-    return refreshed[0] if refreshed else issue
+    return _update_description_fields_optimistic(
+        issue_id,
+        fields={EXTERNAL_TICKETS_KEY: serialized},
+        beads_root=beads_root,
+        cwd=cwd,
+    )
 
 
 def clear_agent_hook(
@@ -3484,25 +3626,31 @@ def clear_agent_hook(
     *,
     beads_root: Path,
     cwd: Path,
+    expected_hook: str | None = None,
 ) -> None:
     """Clear the hooked epic id on the agent bead description."""
     issues = run_bd_json(["show", agent_bead_id], beads_root=beads_root, cwd=cwd)
     if not issues:
         die(f"agent bead not found: {agent_bead_id}")
+    current_hook = get_agent_hook(agent_bead_id, beads_root=beads_root, cwd=cwd)
+    if expected_hook is not None and current_hook != _normalize_hook_value(expected_hook):
+        return
+    if current_hook is None:
+        return
     run_bd_command(
         ["slot", "clear", agent_bead_id, HOOK_SLOT_NAME],
         beads_root=beads_root,
         cwd=cwd,
         allow_failure=True,
     )
-    issue = issues[0]
-    description = issue.get("description")
-    updated = _update_description_field(
-        description if isinstance(description, str) else "",
-        key="hook_bead",
-        value=None,
+    _update_description_fields_optimistic(
+        agent_bead_id,
+        fields={"hook_bead": None},
+        expected_current={"hook_bead": current_hook},
+        require_expected_match=True,
+        beads_root=beads_root,
+        cwd=cwd,
     )
-    _update_issue_description(agent_bead_id, updated, beads_root=beads_root, cwd=cwd)
 
 
 def list_policy_beads(role: str | None, *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
@@ -3720,7 +3868,12 @@ def claim_epic(
             f"epic {epic_id} claim rejected for planner {agent_id}; "
             "planner agents cannot claim executable work"
         )
-    existing_assignee = issue.get("assignee")
+    raw_existing_assignee = issue.get("assignee")
+    existing_assignee = (
+        raw_existing_assignee.strip()
+        if isinstance(raw_existing_assignee, str) and raw_existing_assignee.strip()
+        else None
+    )
     if _is_planner_assignee(existing_assignee) and is_executable_work:
         die(
             f"epic {epic_id} is assigned to planner {existing_assignee}; "
@@ -3732,22 +3885,47 @@ def claim_epic(
         and existing_assignee != allow_takeover_from
     ):
         die(f"epic {epic_id} already has an assignee")
-    update_args = [
-        "update",
-        epic_id,
-        "--assignee",
-        agent_id,
-        "--status",
-        "in_progress",
-        "--add-label",
-        "at:hooked",
-    ]
+
+    if (
+        existing_assignee
+        and allow_takeover_from
+        and existing_assignee == allow_takeover_from
+        and existing_assignee != agent_id
+    ):
+        released = release_epic_assignment(
+            epic_id,
+            beads_root=beads_root,
+            cwd=cwd,
+            expected_assignee=allow_takeover_from,
+            expected_hooked="at:hooked" in _issue_labels(issue),
+        )
+        if not released:
+            die(f"epic {epic_id} takeover failed; claim ownership changed")
+
+    claim_result = run_bd_command(
+        ["update", epic_id, "--claim"],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
+    if claim_result.returncode != 0:
+        refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
+        assignee = None
+        if refreshed:
+            candidate_assignee = refreshed[0].get("assignee")
+            if isinstance(candidate_assignee, str) and candidate_assignee.strip():
+                assignee = candidate_assignee.strip()
+        if assignee != agent_id:
+            die(f"epic {epic_id} already has an assignee")
+
+    update_args = ["update", epic_id, "--status", "in_progress", "--add-label", "at:hooked"]
     if _is_standalone_changeset_without_epic_label(issue, beads_root=beads_root, cwd=cwd):
         update_args.extend(["--add-label", "at:epic"])
     run_bd_command(
         update_args,
         beads_root=beads_root,
         cwd=cwd,
+        allow_failure=True,
     )
     refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
     if refreshed:
@@ -3894,7 +4072,12 @@ def close_epic_if_complete(
         cwd=cwd,
     )
     if agent_bead_id:
-        clear_agent_hook(agent_bead_id, beads_root=beads_root, cwd=cwd)
+        clear_agent_hook(
+            agent_bead_id,
+            beads_root=beads_root,
+            cwd=cwd,
+            expected_hook=epic_id,
+        )
     return True
 
 
@@ -3915,14 +4098,12 @@ def set_agent_hook(
         cwd=cwd,
         allow_failure=True,
     )
-    issue = issues[0]
-    description = issue.get("description")
-    updated = _update_description_field(
-        description if isinstance(description, str) else "",
-        key="hook_bead",
-        value=epic_id,
+    _update_description_fields_optimistic(
+        agent_bead_id,
+        fields={"hook_bead": epic_id},
+        beads_root=beads_root,
+        cwd=cwd,
     )
-    _update_issue_description(agent_bead_id, updated, beads_root=beads_root, cwd=cwd)
 
 
 def create_message_bead(
@@ -3991,11 +4172,19 @@ def list_queue_messages(
         if queue is not None and queue_name != queue:
             continue
         claimed_by = payload.metadata.get("claimed_by")
-        if unclaimed_only and isinstance(claimed_by, str) and claimed_by.strip():
+        assignee = issue.get("assignee")
+        assignee_claim = (
+            assignee.strip() if isinstance(assignee, str) and assignee.strip() else None
+        )
+        if unclaimed_only and (
+            (isinstance(claimed_by, str) and claimed_by.strip()) or assignee_claim
+        ):
             continue
         enriched = dict(issue)
         enriched["queue"] = queue_name
-        enriched["claimed_by"] = claimed_by
+        enriched["claimed_by"] = (
+            claimed_by if isinstance(claimed_by, str) and claimed_by.strip() else assignee_claim
+        )
         matches.append(enriched)
     return matches
 
@@ -4009,26 +4198,59 @@ def claim_queue_message(
     queue: str | None = None,
 ) -> dict[str, object]:
     """Claim a queued message bead by setting claimed metadata."""
-    issues = run_bd_json(["show", message_id], beads_root=beads_root, cwd=cwd)
-    if not issues:
-        die(f"message not found: {message_id}")
-    issue = issues[0]
-    description = issue.get("description")
-    payload = messages.parse_message(description if isinstance(description, str) else "")
-    queue_name = payload.metadata.get("queue")
-    if not isinstance(queue_name, str) or not queue_name.strip():
-        die(f"message {message_id} is not in a queue")
-    if queue is not None and queue_name != queue:
-        die(f"message {message_id} is not in queue {queue!r}")
-    claimed_by = payload.metadata.get("claimed_by")
-    if isinstance(claimed_by, str) and claimed_by.strip():
-        die(f"message {message_id} already claimed by {claimed_by}")
-    payload.metadata["claimed_by"] = agent_id
-    payload.metadata["claimed_at"] = dt.datetime.now(tz=dt.timezone.utc).isoformat()
-    updated = messages.render_message(payload.metadata, payload.body)
-    _update_issue_description(message_id, updated, beads_root=beads_root, cwd=cwd)
-    refreshed = run_bd_json(["show", message_id], beads_root=beads_root, cwd=cwd)
-    return refreshed[0] if refreshed else issue
+    claim_result = run_bd_command(
+        ["update", message_id, "--claim", "--status", "open"],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
+    if claim_result.returncode != 0:
+        refreshed = run_bd_json(["show", message_id], beads_root=beads_root, cwd=cwd)
+        assignee = None
+        if refreshed:
+            value = refreshed[0].get("assignee")
+            if isinstance(value, str) and value.strip():
+                assignee = value.strip()
+        if assignee != agent_id:
+            die(f"message {message_id} already claimed by {assignee or 'another agent'}")
+    for _attempt in range(_DESCRIPTION_UPDATE_MAX_ATTEMPTS):
+        issues = run_bd_json(["show", message_id], beads_root=beads_root, cwd=cwd)
+        if not issues:
+            die(f"message not found: {message_id}")
+        issue = issues[0]
+        assignee = issue.get("assignee")
+        if not isinstance(assignee, str) or assignee.strip() != agent_id:
+            die(f"message {message_id} already claimed by another agent")
+        description = issue.get("description")
+        payload = messages.parse_message(description if isinstance(description, str) else "")
+        queue_name = payload.metadata.get("queue")
+        if not isinstance(queue_name, str) or not queue_name.strip():
+            die(f"message {message_id} is not in a queue")
+        if queue is not None and queue_name != queue:
+            die(f"message {message_id} is not in queue {queue!r}")
+        claimed_by = payload.metadata.get("claimed_by")
+        if isinstance(claimed_by, str) and claimed_by.strip() and claimed_by.strip() != agent_id:
+            die(f"message {message_id} already claimed by {claimed_by}")
+        payload.metadata["claimed_by"] = agent_id
+        payload.metadata["claimed_at"] = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+        updated = messages.render_message(payload.metadata, payload.body)
+        _update_issue_description(message_id, updated, beads_root=beads_root, cwd=cwd)
+        refreshed = run_bd_json(["show", message_id], beads_root=beads_root, cwd=cwd)
+        if not refreshed:
+            continue
+        candidate = refreshed[0]
+        refreshed_payload = messages.parse_message(_issue_description(candidate))
+        refreshed_claimed_by = refreshed_payload.metadata.get("claimed_by")
+        refreshed_claimed_at = refreshed_payload.metadata.get("claimed_at")
+        if (
+            isinstance(refreshed_claimed_by, str)
+            and refreshed_claimed_by.strip() == agent_id
+            and isinstance(refreshed_claimed_at, str)
+            and refreshed_claimed_at.strip()
+        ):
+            return candidate
+    die(f"concurrent queue claim metadata conflict for {message_id}")
+    raise RuntimeError("unreachable")
 
 
 def mark_message_read(
@@ -4068,14 +4290,12 @@ def update_changeset_integrated_sha(
             die("changeset integrated sha already set; override not permitted")
     if current == integrated_sha:
         return issue
-    updated = _update_description_field(
-        description if isinstance(description, str) else "",
-        key="changeset.integrated_sha",
-        value=integrated_sha,
+    return _update_description_fields_optimistic(
+        changeset_id,
+        fields={"changeset.integrated_sha": integrated_sha},
+        beads_root=beads_root,
+        cwd=cwd,
     )
-    _update_issue_description(changeset_id, updated, beads_root=beads_root, cwd=cwd)
-    refreshed = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
-    return refreshed[0] if refreshed else issue
 
 
 def update_changeset_review(
@@ -4086,16 +4306,17 @@ def update_changeset_review(
     cwd: Path,
 ) -> None:
     """Update review metadata fields for a changeset bead."""
-    issues = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
-    if not issues:
-        die(f"changeset not found: {changeset_id}")
-    issue = issues[0]
-    description = issue.get("description")
-    updated = changesets.apply_review_metadata(
-        description if isinstance(description, str) else "",
-        metadata,
+    _update_description_fields_optimistic(
+        changeset_id,
+        fields={
+            "pr_url": metadata.pr_url,
+            "pr_number": metadata.pr_number,
+            "pr_state": metadata.pr_state,
+            "review_owner": metadata.review_owner,
+        },
+        beads_root=beads_root,
+        cwd=cwd,
     )
-    _update_issue_description(changeset_id, updated, beads_root=beads_root, cwd=cwd)
 
 
 def update_changeset_review_feedback_cursor(
@@ -4106,14 +4327,9 @@ def update_changeset_review_feedback_cursor(
     cwd: Path,
 ) -> None:
     """Persist the latest handled review feedback timestamp on a changeset."""
-    issues = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
-    if not issues:
-        die(f"changeset not found: {changeset_id}")
-    issue = issues[0]
-    description = issue.get("description")
-    updated = _update_description_field(
-        description if isinstance(description, str) else "",
-        key="review.last_feedback_seen_at",
-        value=latest_feedback_at,
+    _update_description_fields_optimistic(
+        changeset_id,
+        fields={"review.last_feedback_seen_at": latest_feedback_at},
+        beads_root=beads_root,
+        cwd=cwd,
     )
-    _update_issue_description(changeset_id, updated, beads_root=beads_root, cwd=cwd)
