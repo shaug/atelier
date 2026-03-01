@@ -186,25 +186,26 @@ def prepare_agent_session(
             },
         )
         if agent.path.exists():
-            paths.ensure_dir(worker_agents_path.parent)
-            worker_agents_path.write_text(worker_content, encoding="utf-8")
-            policy.sync_agent_home_policy(
-                agent,
-                role=policy.ROLE_WORKER,
-                beads_root=beads_root,
-                cwd=repo_root,
-            )
-            prime_addendum = beads.prime_addendum(beads_root=beads_root, cwd=project_data_dir)
-            updated_content = worker_agents_path.read_text(encoding="utf-8")
-            next_content = agent_home.apply_beads_prime_addendum(
-                updated_content,
-                prime_addendum,
-                role=policy.ROLE_WORKER,
-            )
-            if next_content != updated_content:
-                worker_agents_path.write_text(next_content, encoding="utf-8")
-            updated_content = worker_agents_path.read_text(encoding="utf-8")
-            agent_home.ensure_claude_compat(agent.path, updated_content)
+            with agent_home.agent_home_write_lock(agent.path):
+                paths.ensure_dir(worker_agents_path.parent)
+                agent_home.write_text_atomic(worker_agents_path, worker_content)
+                policy.sync_agent_home_policy(
+                    agent,
+                    role=policy.ROLE_WORKER,
+                    beads_root=beads_root,
+                    cwd=repo_root,
+                )
+                prime_addendum = beads.prime_addendum(beads_root=beads_root, cwd=project_data_dir)
+                updated_content = worker_agents_path.read_text(encoding="utf-8")
+                next_content = agent_home.apply_beads_prime_addendum(
+                    updated_content,
+                    prime_addendum,
+                    role=policy.ROLE_WORKER,
+                )
+                if next_content != updated_content:
+                    agent_home.write_text_atomic(worker_agents_path, next_content)
+                updated_content = worker_agents_path.read_text(encoding="utf-8")
+                agent_home.ensure_claude_compat(agent.path, updated_content)
 
     env_workspace_path = changeset_worktree_path or (project_data_dir / "worktrees" / "unknown")
     env = workspace.workspace_environment(

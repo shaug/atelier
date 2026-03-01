@@ -411,78 +411,79 @@ def cleanup_epic_branches_and_worktrees(
         if log:
             log(f"cleanup skip: {epic_id} (project data dir unavailable)")
         return
-    mapping_path = worktrees.mapping_path(project_data_dir, epic_id)
-    mapping = worktrees.load_mapping(mapping_path)
-    if mapping is None:
-        if log:
-            log(f"cleanup skip: {epic_id} (no worktree mapping)")
-        return
-
-    relpaths = sorted(
-        {
-            relpath
-            for relpath in [
-                mapping.worktree_path,
-                *mapping.changeset_worktrees.values(),
-            ]
-            if relpath
-        }
-    )
-    for relpath in relpaths:
-        worktree_path = project_data_dir / relpath
-        if not worktree_path.exists():
+    with worktrees.worktree_state_lock(project_data_dir):
+        mapping_path = worktrees.mapping_path(project_data_dir, epic_id)
+        mapping = worktrees.load_mapping(mapping_path)
+        if mapping is None:
             if log:
-                log(f"cleanup skip worktree: {worktree_path} (missing)")
-            continue
-        if not (worktree_path / ".git").exists():
+                log(f"cleanup skip: {epic_id} (no worktree mapping)")
+            return
+
+        relpaths = sorted(
+            {
+                relpath
+                for relpath in [
+                    mapping.worktree_path,
+                    *mapping.changeset_worktrees.values(),
+                ]
+                if relpath
+            }
+        )
+        for relpath in relpaths:
+            worktree_path = project_data_dir / relpath
+            if not worktree_path.exists():
+                if log:
+                    log(f"cleanup skip worktree: {worktree_path} (missing)")
+                continue
+            if not (worktree_path / ".git").exists():
+                if log:
+                    log(f"cleanup skip worktree: {worktree_path} (not a git worktree)")
+                continue
             if log:
-                log(f"cleanup skip worktree: {worktree_path} (not a git worktree)")
-            continue
-        if log:
-            log(f"cleanup remove worktree: {worktree_path}")
-        ok, detail = run_git_status(
-            ["worktree", "remove", "--force", str(worktree_path)],
-            repo_root=repo_root,
-            git_path=git_path,
-        )
-        if log:
-            if ok:
-                log(f"cleanup removed worktree: {worktree_path}")
-            else:
-                log(f"cleanup failed worktree: {worktree_path} ({detail})")
+                log(f"cleanup remove worktree: {worktree_path}")
+            ok, detail = run_git_status(
+                ["worktree", "remove", "--force", str(worktree_path)],
+                repo_root=repo_root,
+                git_path=git_path,
+            )
+            if log:
+                if ok:
+                    log(f"cleanup removed worktree: {worktree_path}")
+                else:
+                    log(f"cleanup failed worktree: {worktree_path} ({detail})")
 
-    branches = {mapping.root_branch, *mapping.changesets.values()}
-    for branch in branches:
-        if not branch or branch in keep:
-            if log and branch:
-                log(f"cleanup keep branch: {branch}")
-            continue
-        if log:
-            log(f"cleanup delete remote branch: origin/{branch}")
-        remote_ok, remote_detail = run_git_status(
-            ["push", "origin", "--delete", branch],
-            repo_root=repo_root,
-            git_path=git_path,
-        )
-        if log:
-            if remote_ok:
-                log(f"cleanup deleted remote branch: origin/{branch}")
-            else:
-                log(f"cleanup remote branch skip/fail: origin/{branch} ({remote_detail})")
-        if log:
-            log(f"cleanup delete local branch: {branch}")
-        local_ok, local_detail = run_git_status(
-            ["branch", "-D", branch], repo_root=repo_root, git_path=git_path
-        )
-        if log:
-            if local_ok:
-                log(f"cleanup deleted local branch: {branch}")
-            else:
-                log(f"cleanup local branch skip/fail: {branch} ({local_detail})")
+        branches = {mapping.root_branch, *mapping.changesets.values()}
+        for branch in branches:
+            if not branch or branch in keep:
+                if log and branch:
+                    log(f"cleanup keep branch: {branch}")
+                continue
+            if log:
+                log(f"cleanup delete remote branch: origin/{branch}")
+            remote_ok, remote_detail = run_git_status(
+                ["push", "origin", "--delete", branch],
+                repo_root=repo_root,
+                git_path=git_path,
+            )
+            if log:
+                if remote_ok:
+                    log(f"cleanup deleted remote branch: origin/{branch}")
+                else:
+                    log(f"cleanup remote branch skip/fail: origin/{branch} ({remote_detail})")
+            if log:
+                log(f"cleanup delete local branch: {branch}")
+            local_ok, local_detail = run_git_status(
+                ["branch", "-D", branch], repo_root=repo_root, git_path=git_path
+            )
+            if log:
+                if local_ok:
+                    log(f"cleanup deleted local branch: {branch}")
+                else:
+                    log(f"cleanup local branch skip/fail: {branch} ({local_detail})")
 
-    mapping_path.unlink(missing_ok=True)
-    if log:
-        log(f"cleanup removed mapping: {mapping_path}")
+        mapping_path.unlink(missing_ok=True)
+        if log:
+            log(f"cleanup removed mapping: {mapping_path}")
 
 
 def integrate_epic_root_to_parent(

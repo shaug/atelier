@@ -7,14 +7,23 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Iterator, TextIO
 
 from . import paths, templates
 from .io import die, warn
 from .models import ProjectConfig
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - platform fallback
+    fcntl = None
 
 AGENT_METADATA_FILENAME = "agent.json"
 AGENT_INSTRUCTIONS_FILENAME = "AGENTS.md"
@@ -54,6 +63,13 @@ class AgentHome:
 
 SESSION_ENV_VAR = "ATELIER_AGENT_SESSION"
 _SESSION_START_GRACE_NS = 5_000_000_000
+_AGENT_HOME_LOCK_DIRNAME = ".locks"
+_AGENT_HOME_LOCK_FILENAME = "runtime-files.lock"
+
+_AGENT_HOME_LOCK_GUARD = threading.Lock()
+_AGENT_HOME_LOCAL_LOCKS: dict[str, threading.RLock] = {}
+_AGENT_HOME_LOCK_DEPTH: dict[tuple[int, str], int] = {}
+_AGENT_HOME_LOCK_HANDLES: dict[tuple[int, str], TextIO] = {}
 
 
 def _normalize_agent_name(value: str) -> str:
@@ -62,6 +78,115 @@ def _normalize_agent_name(value: str) -> str:
         die("agent name must not be empty")
     normalized = normalized.replace("/", "-").replace("\\", "-")
     return normalized
+
+
+def _agent_home_lock_path(agent_path: Path) -> Path:
+    return agent_path / _AGENT_HOME_LOCK_DIRNAME / _AGENT_HOME_LOCK_FILENAME
+
+
+def _agent_home_lock_key(agent_path: Path) -> str:
+    try:
+        return str(agent_path.resolve())
+    except OSError:
+        return str(agent_path)
+
+
+def _agent_home_local_lock(agent_path: Path) -> threading.RLock:
+    key = _agent_home_lock_key(agent_path)
+    with _AGENT_HOME_LOCK_GUARD:
+        lock = _AGENT_HOME_LOCAL_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _AGENT_HOME_LOCAL_LOCKS[key] = lock
+        return lock
+
+
+def _acquire_file_lock(handle: TextIO) -> None:
+    if fcntl is None:  # pragma: no cover - no-op on unsupported platforms
+        return
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _release_file_lock(handle: TextIO) -> None:
+    if fcntl is None:  # pragma: no cover - no-op on unsupported platforms
+        return
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def agent_home_write_lock(agent_path: Path) -> Iterator[None]:
+    """Serialize runtime file rewrites for an agent home."""
+    lock_path = _agent_home_lock_path(agent_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    local_lock = _agent_home_local_lock(agent_path)
+    lock_key = _agent_home_lock_key(agent_path)
+    thread_id = threading.get_ident()
+    state_key = (thread_id, lock_key)
+
+    local_lock.acquire()
+    handle = None
+    try:
+        with _AGENT_HOME_LOCK_GUARD:
+            current_depth = _AGENT_HOME_LOCK_DEPTH.get(state_key, 0)
+            _AGENT_HOME_LOCK_DEPTH[state_key] = current_depth + 1
+            if current_depth == 0:
+                handle = lock_path.open("a+", encoding="utf-8")
+        if handle is not None:
+            try:
+                _acquire_file_lock(handle)
+            except OSError as exc:
+                handle.close()
+                with _AGENT_HOME_LOCK_GUARD:
+                    _AGENT_HOME_LOCK_DEPTH.pop(state_key, None)
+                die(f"failed to acquire agent-home write lock: {exc}")
+            with _AGENT_HOME_LOCK_GUARD:
+                _AGENT_HOME_LOCK_HANDLES[state_key] = handle
+        yield
+    finally:
+        release_handle = None
+        with _AGENT_HOME_LOCK_GUARD:
+            depth = _AGENT_HOME_LOCK_DEPTH.get(state_key, 0)
+            if depth <= 1:
+                _AGENT_HOME_LOCK_DEPTH.pop(state_key, None)
+                release_handle = _AGENT_HOME_LOCK_HANDLES.pop(state_key, None)
+            else:
+                _AGENT_HOME_LOCK_DEPTH[state_key] = depth - 1
+        if release_handle is not None:
+            try:
+                _release_file_lock(release_handle)
+            except OSError:
+                pass
+            release_handle.close()
+        local_lock.release()
+
+
+def write_text_atomic(
+    path: Path,
+    content: str,
+    *,
+    encoding: str = "utf-8",
+    mode: int | None = None,
+) -> None:
+    """Atomically replace a text file with new content."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            "w",
+            encoding=encoding,
+            delete=False,
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as handle:
+            handle.write(content)
+            temp_path = Path(handle.name)
+        if mode is not None:
+            os.chmod(temp_path, mode)
+        os.replace(temp_path, path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink(missing_ok=True)
 
 
 def _derive_agent_name(agent_id: str) -> str:
@@ -326,7 +451,7 @@ def _write_metadata(home_dir: Path, agent: AgentHome) -> None:
         "role": agent.role,
         "session_key": agent.session_key,
     }
-    _metadata_path(home_dir).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    write_text_atomic(_metadata_path(home_dir), json.dumps(payload, indent=2) + "\n")
 
 
 def ensure_agent_home(
@@ -347,29 +472,30 @@ def ensure_agent_home(
     )
     paths.ensure_dir(home_dir)
 
-    agents_path = home_dir / AGENT_INSTRUCTIONS_FILENAME
-    if not agents_path.exists():
-        agents_path.write_text(
-            templates.agent_home_template(prefer_installed_if_modified=True),
-            encoding="utf-8",
-        )
+    with agent_home_write_lock(home_dir):
+        agents_path = home_dir / AGENT_INSTRUCTIONS_FILENAME
+        if not agents_path.exists():
+            write_text_atomic(
+                agents_path,
+                templates.agent_home_template(prefer_installed_if_modified=True),
+            )
 
-    stored = _load_metadata(home_dir)
-    if (
-        stored is None
-        or stored.agent_id != agent_id
-        or stored.role != role
-        or stored.session_key != normalized_session
-    ):
-        stored = AgentHome(
-            name=agent_name,
-            agent_id=agent_id,
-            role=role,
-            path=home_dir,
-            session_key=normalized_session,
-        )
-        _write_metadata(home_dir, stored)
-    return stored
+        stored = _load_metadata(home_dir)
+        if (
+            stored is None
+            or stored.agent_id != agent_id
+            or stored.role != role
+            or stored.session_key != normalized_session
+        ):
+            stored = AgentHome(
+                name=agent_name,
+                agent_id=agent_id,
+                role=role,
+                path=home_dir,
+                session_key=normalized_session,
+            )
+            _write_metadata(home_dir, stored)
+        return stored
 
 
 def resolve_agent_home(
@@ -424,7 +550,7 @@ def _ensure_dir_link(dest: Path, target: Path) -> None:
         warn(f"failed to link {dest} -> {target}")
         path_marker = dest.with_suffix(".path")
         try:
-            path_marker.write_text(str(target), encoding="utf-8")
+            write_text_atomic(path_marker, str(target))
         except OSError:
             return
 
@@ -457,20 +583,21 @@ def ensure_claude_compat(agent_path: Path, agents_content: str) -> None:
     """Ensure CLAUDE.md and hooks exist for Claude Code compatibility."""
     if not agent_path.exists():
         return
-    preface = (
-        "This project uses AGENTS.md as the authoritative behavioral contract.\n"
-        "Claude must follow the rules below.\n"
-    )
-    content = preface.rstrip("\n") + "\n\n---\n\n" + agents_content.rstrip("\n") + "\n"
-    claude_path = agent_path / CLAUDE_INSTRUCTIONS_FILENAME
-    if not claude_path.exists() or claude_path.read_text(encoding="utf-8") != content:
-        claude_path.write_text(content, encoding="utf-8")
+    with agent_home_write_lock(agent_path):
+        preface = (
+            "This project uses AGENTS.md as the authoritative behavioral contract.\n"
+            "Claude must follow the rules below.\n"
+        )
+        content = preface.rstrip("\n") + "\n\n---\n\n" + agents_content.rstrip("\n") + "\n"
+        claude_path = agent_path / CLAUDE_INSTRUCTIONS_FILENAME
+        if not claude_path.exists() or claude_path.read_text(encoding="utf-8") != content:
+            write_text_atomic(claude_path, content)
 
-    claude_dir = agent_path / CLAUDE_DIRNAME
-    hooks_dir = claude_dir / CLAUDE_HOOKS_DIRNAME
-    hooks_dir.mkdir(parents=True, exist_ok=True)
-    hook_path = hooks_dir / CLAUDE_HOOK_SCRIPT
-    hook_body = """#!/bin/bash
+        claude_dir = agent_path / CLAUDE_DIRNAME
+        hooks_dir = claude_dir / CLAUDE_HOOKS_DIRNAME
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook_path = hooks_dir / CLAUDE_HOOK_SCRIPT
+        hook_body = """#!/bin/bash
 set -euo pipefail
 
 project_dir="${CLAUDE_PROJECT_DIR:-$(pwd)}"
@@ -482,35 +609,34 @@ find "$project_dir" -maxdepth 5 -name "AGENTS.md" -type f | while read -r file; 
   echo ""
 done
 """
-    if not hook_path.exists() or hook_path.read_text(encoding="utf-8") != hook_body:
-        hook_path.write_text(hook_body, encoding="utf-8")
-        hook_path.chmod(0o755)
+        if not hook_path.exists() or hook_path.read_text(encoding="utf-8") != hook_body:
+            write_text_atomic(hook_path, hook_body, mode=0o755)
 
-    settings_path = claude_dir / CLAUDE_SETTINGS_FILENAME
-    settings_payload = {
-        "hooks": {
-            "SessionStart": [
-                {
-                    "matcher": "startup",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/"
-                            "append_agentsmd_context.sh",
-                        }
-                    ],
-                }
-            ]
+        settings_path = claude_dir / CLAUDE_SETTINGS_FILENAME
+        settings_payload = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/"
+                                "append_agentsmd_context.sh",
+                            }
+                        ],
+                    }
+                ]
+            }
         }
-    }
-    current = None
-    if settings_path.exists():
-        try:
-            current = json.loads(settings_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            current = None
-    if current != settings_payload:
-        settings_path.write_text(json.dumps(settings_payload, indent=2) + "\n", encoding="utf-8")
+        current = None
+        if settings_path.exists():
+            try:
+                current = json.loads(settings_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                current = None
+        if current != settings_payload:
+            write_text_atomic(settings_path, json.dumps(settings_payload, indent=2) + "\n")
 
 
 def _apply_role_beads_addendum(addendum: str | None, *, role: str | None) -> str | None:

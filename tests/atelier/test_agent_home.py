@@ -1,6 +1,8 @@
 import json
 import os
 import tempfile
+import threading
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -247,6 +249,58 @@ def test_ensure_claude_compat_writes_files() -> None:
 
         settings_path = agent_path / agent_home.CLAUDE_DIRNAME / agent_home.CLAUDE_SETTINGS_FILENAME
         assert settings_path.exists()
+
+
+def test_ensure_claude_compat_serializes_concurrent_rewrites(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        agent_path = root / "agent"
+        agent_path.mkdir(parents=True)
+
+        active_lock = threading.Lock()
+        start = threading.Barrier(3)
+        active = 0
+        max_active = 0
+        failures: list[Exception] = []
+        original_write = agent_home.write_text_atomic
+
+        def wrapped_write(*args, **kwargs):
+            nonlocal active, max_active
+            with active_lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.02)
+            try:
+                return original_write(*args, **kwargs)
+            finally:
+                with active_lock:
+                    active -= 1
+
+        monkeypatch.setattr(agent_home, "write_text_atomic", wrapped_write)
+
+        def run(content: str) -> None:
+            try:
+                start.wait(timeout=1.0)
+                agent_home.ensure_claude_compat(agent_path, content)
+            except Exception as exc:  # pragma: no cover - debugging guard
+                failures.append(exc)
+
+        thread_a = threading.Thread(target=run, args=("# Agent A\nrule: one\n",))
+        thread_b = threading.Thread(target=run, args=("# Agent B\nrule: two\n",))
+        thread_a.start()
+        thread_b.start()
+        start.wait(timeout=1.0)
+        thread_a.join(timeout=3.0)
+        thread_b.join(timeout=3.0)
+
+        assert not failures
+        assert max_active == 1
+
+        settings_path = agent_path / agent_home.CLAUDE_DIRNAME / agent_home.CLAUDE_SETTINGS_FILENAME
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert isinstance(payload.get("hooks"), dict)
 
 
 def test_apply_beads_prime_addendum_inserts_block() -> None:

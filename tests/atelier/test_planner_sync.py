@@ -165,12 +165,16 @@ def test_dirty_worktree_records_blocked_and_warns_after_threshold(
     assert any("15+ minutes" in message for message in messages)
 
 
-def test_lock_path_isolated_per_agent_and_worktree(tmp_path: Path) -> None:
+def test_lock_path_scoped_to_shared_worktree_identity(tmp_path: Path) -> None:
     service_a = planner_sync.PlannerSyncService(
-        _context(tmp_path, agent_id="planner-a", worktree_name="planner-a")
+        _context(tmp_path, agent_id="planner-a", worktree_name="planner-shared")
     )
     service_b = planner_sync.PlannerSyncService(
-        _context(tmp_path, agent_id="planner-b", worktree_name="planner-b")
+        _context(tmp_path, agent_id="planner-b", worktree_name="planner-shared")
+    )
+    service_c = planner_sync.PlannerSyncService(
+        _context(tmp_path, agent_id="planner-c", worktree_name="planner-other")
     )
 
-    assert service_a.lock_path != service_b.lock_path
+    assert service_a.lock_path == service_b.lock_path
+    assert service_a.lock_path != service_c.lock_path

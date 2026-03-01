@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
+import threading
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import resources
 from importlib.abc import Traversable
@@ -11,6 +15,16 @@ from pathlib import Path
 from typing import Callable
 
 from . import __version__, paths
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - platform fallback
+    fcntl = None
+
+_SKILLS_LOCK_DIRNAME = ".locks"
+_SKILLS_LOCK_FILENAME = "skills-sync.lock"
+_SKILLS_LOCK_GUARD = threading.Lock()
+_SKILLS_LOCAL_LOCKS: dict[str, threading.RLock] = {}
 
 
 @dataclass(frozen=True)
@@ -35,6 +49,129 @@ class ProjectSkillsSyncResult:
     skills_dir: Path
     action: str
     detail: str | None = None
+
+
+def _skills_lock_path(workspace_dir: Path) -> Path:
+    return workspace_dir / _SKILLS_LOCK_DIRNAME / _SKILLS_LOCK_FILENAME
+
+
+def _local_skills_lock(lock_path: Path) -> threading.RLock:
+    key = str(lock_path.resolve())
+    with _SKILLS_LOCK_GUARD:
+        lock = _SKILLS_LOCAL_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _SKILLS_LOCAL_LOCKS[key] = lock
+        return lock
+
+
+def _acquire_file_lock(handle) -> None:
+    if fcntl is None:  # pragma: no cover - no-op on unsupported platforms
+        return
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _release_file_lock(handle) -> None:
+    if fcntl is None:  # pragma: no cover - no-op on unsupported platforms
+        return
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _skills_write_lock(workspace_dir: Path):
+    lock_path = _skills_lock_path(workspace_dir)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    local_lock = _local_skills_lock(lock_path)
+    local_lock.acquire()
+    handle = None
+    try:
+        handle = lock_path.open("a+", encoding="utf-8")
+        _acquire_file_lock(handle)
+        yield
+    finally:
+        if handle is not None:
+            try:
+                _release_file_lock(handle)
+            except OSError:
+                pass
+            handle.close()
+        local_lock.release()
+
+
+def _remove_path(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+        return
+    shutil.rmtree(path)
+
+
+def _stage_skills_tree(
+    workspace_dir: Path,
+    definitions: dict[str, SkillDefinition],
+) -> Path:
+    staging_dir = workspace_dir / f".skills-staging-{os.getpid()}-{time.time_ns()}"
+    staging_dir.mkdir(parents=True, exist_ok=False)
+    for definition in definitions.values():
+        for rel_path, payload in definition.files.items():
+            dest = staging_dir / definition.name / rel_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(payload)
+    return staging_dir
+
+
+def _verify_skills_tree(
+    skills_dir: Path,
+    definitions: dict[str, SkillDefinition],
+) -> bool:
+    if not skills_dir.exists() or not skills_dir.is_dir():
+        return False
+    expected = set(definitions.keys())
+    actual = {entry.name for entry in skills_dir.iterdir() if entry.is_dir()}
+    if actual != expected:
+        return False
+    for name, definition in definitions.items():
+        skill_dir = skills_dir / name
+        if not (skill_dir / "SKILL.md").is_file():
+            return False
+        if _hash_dir(skill_dir) != definition.digest:
+            return False
+    return True
+
+
+def _install_staged_skills(
+    workspace_dir: Path,
+    skills_dir: Path,
+    staging_dir: Path,
+    definitions: dict[str, SkillDefinition],
+) -> None:
+    backup_path = workspace_dir / f".skills-backup-{os.getpid()}-{time.time_ns()}"
+    has_backup = False
+    try:
+        if skills_dir.exists() or skills_dir.is_symlink():
+            os.replace(skills_dir, backup_path)
+            has_backup = True
+        os.replace(staging_dir, skills_dir)
+        if not _verify_skills_tree(skills_dir, definitions):
+            raise OSError("skills install verification failed")
+        if has_backup:
+            _remove_path(backup_path)
+            has_backup = False
+    except OSError:
+        if has_backup:
+            try:
+                _remove_path(skills_dir)
+                os.replace(backup_path, skills_dir)
+                has_backup = False
+            except OSError:
+                pass
+        raise
+    finally:
+        if has_backup and backup_path.exists():
+            _remove_path(backup_path)
+        if staging_dir.exists():
+            _remove_path(staging_dir)
 
 
 def _normalize_skill_name(value: str) -> str:
@@ -199,16 +336,14 @@ def workspace_skill_state(
 def install_workspace_skills(workspace_dir: Path) -> dict[str, dict[str, str]]:
     definitions = load_packaged_skills()
     skills_dir = workspace_dir / paths.SKILLS_DIRNAME
-    if skills_dir.exists():
-        if skills_dir.is_symlink() or skills_dir.is_file():
-            skills_dir.unlink()
-        else:
-            shutil.rmtree(skills_dir)
-    for definition in definitions.values():
-        for rel_path, payload in definition.files.items():
-            dest = skills_dir / definition.name / rel_path
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(payload)
+    with _skills_write_lock(workspace_dir):
+        staging_dir = _stage_skills_tree(workspace_dir, definitions)
+        _install_staged_skills(
+            workspace_dir,
+            skills_dir,
+            staging_dir,
+            definitions,
+        )
     return {
         name: {"version": __version__, "hash": definition.digest}
         for name, definition in definitions.items()

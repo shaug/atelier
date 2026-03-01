@@ -1,5 +1,7 @@
 import shutil
 import tempfile
+import threading
+import time
 from importlib import resources
 from pathlib import Path
 
@@ -91,6 +93,54 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
             "planner-startup-check",
         ):
             assert (workspace_dir / "skills" / name / "SKILL.md").exists()
+
+
+def test_install_workspace_skills_serializes_concurrent_writers(
+    monkeypatch,
+) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        workspace_dir = Path(tmp)
+        lock = threading.Lock()
+        start = threading.Barrier(3)
+        active = 0
+        max_active = 0
+        failures: list[Exception] = []
+        original_install = skills._install_staged_skills
+
+        def wrapped_install(*args, **kwargs):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.05)
+            try:
+                return original_install(*args, **kwargs)
+            finally:
+                with lock:
+                    active -= 1
+
+        def runner() -> None:
+            try:
+                start.wait(timeout=1.0)
+                skills.install_workspace_skills(workspace_dir)
+            except Exception as exc:  # pragma: no cover - debugging guard
+                failures.append(exc)
+
+        monkeypatch.setattr(skills, "_install_staged_skills", wrapped_install)
+
+        thread_a = threading.Thread(target=runner)
+        thread_b = threading.Thread(target=runner)
+        thread_a.start()
+        thread_b.start()
+        start.wait(timeout=1.0)
+        thread_a.join(timeout=3.0)
+        thread_b.join(timeout=3.0)
+
+        assert not failures
+        assert max_active == 1
+        assert (workspace_dir / "skills" / "planner-startup-check" / "SKILL.md").exists()
+        state = skills.workspace_skill_state(workspace_dir, skills.packaged_skill_metadata())
+        assert state.needs_install is False
 
 
 def test_packaged_planning_skills_include_scripts() -> None:

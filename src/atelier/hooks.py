@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import agent_home as agent_home_io
 from .agent_home import AgentHome
 from .agents import AgentSpec
 from .io import die
@@ -48,9 +49,10 @@ def ensure_agent_hooks(agent_home: AgentHome, agent: AgentSpec) -> Path | None:
         return None
     path = hooks_path(agent_home)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = render_hook_config(hook_commands())
-        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        with agent_home_io.agent_home_write_lock(agent_home.path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = render_hook_config(hook_commands())
+            agent_home_io.write_text_atomic(path, json.dumps(payload, indent=2) + "\n")
     except OSError:
         return None
     return path

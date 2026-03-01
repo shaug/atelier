@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
@@ -483,3 +484,79 @@ def test_ensure_changeset_checkout_creates_branches() -> None:
     assert calls
     assert any("checkout" in item for item in calls[0])
     assert any("checkout" in item for item in calls[-1])
+
+
+def test_ensure_changeset_branch_concurrent_writers_preserve_all_entries() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        worktrees.ensure_worktree_mapping(project_dir, "epic", "feat/root")
+        mapping_file = worktrees.mapping_path(project_dir, "epic")
+
+        original_write_mapping = worktrees.write_mapping
+        synchronize_single_entry_writes = threading.Barrier(2)
+
+        def delayed_write(path: Path, mapping: worktrees.WorktreeMapping) -> None:
+            non_epic_changesets = [key for key in mapping.changesets if key != "epic"]
+            if path == mapping_file and len(non_epic_changesets) == 1:
+                try:
+                    synchronize_single_entry_writes.wait(timeout=0.3)
+                except threading.BrokenBarrierError:
+                    pass
+            original_write_mapping(path, mapping)
+
+        start = threading.Barrier(3)
+        failures: list[Exception] = []
+
+        def run_writer(changeset_id: str) -> None:
+            try:
+                start.wait(timeout=1.0)
+                worktrees.ensure_changeset_branch(
+                    project_dir,
+                    "epic",
+                    changeset_id,
+                    root_branch="feat/root",
+                )
+            except Exception as exc:  # pragma: no cover - debugging guard
+                failures.append(exc)
+
+        with patch("atelier.worktrees.write_mapping", side_effect=delayed_write):
+            thread_a = threading.Thread(target=run_writer, args=("epic.1",))
+            thread_b = threading.Thread(target=run_writer, args=("epic.2",))
+            thread_a.start()
+            thread_b.start()
+            start.wait(timeout=1.0)
+            thread_a.join(timeout=2.0)
+            thread_b.join(timeout=2.0)
+
+        assert not failures
+        mapping = worktrees.load_mapping(mapping_file)
+        assert mapping is not None
+        assert mapping.changesets["epic.1"] == "feat/root-epic.1"
+        assert mapping.changesets["epic.2"] == "feat/root-epic.2"
+
+
+def test_worktree_state_lock_nested_project_dirs_acquire_each_file_lock() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_a = Path(tmp) / "project-a"
+        project_b = Path(tmp) / "project-b"
+        acquired_lock_paths: list[Path] = []
+        released_lock_paths: list[Path] = []
+
+        def fake_acquire(handle: object) -> None:
+            acquired_lock_paths.append(Path(str(getattr(handle, "name"))))
+
+        def fake_release(handle: object) -> None:
+            released_lock_paths.append(Path(str(getattr(handle, "name"))))
+
+        with (
+            patch("atelier.worktrees._acquire_file_lock", side_effect=fake_acquire),
+            patch("atelier.worktrees._release_file_lock", side_effect=fake_release),
+        ):
+            with worktrees.worktree_state_lock(project_a):
+                with worktrees.worktree_state_lock(project_b):
+                    pass
+
+        expected_a = worktrees._state_lock_path(project_a)  # pyright: ignore[reportPrivateUsage]
+        expected_b = worktrees._state_lock_path(project_b)  # pyright: ignore[reportPrivateUsage]
+        assert acquired_lock_paths == [expected_a, expected_b]
+        assert released_lock_paths == [expected_b, expected_a]

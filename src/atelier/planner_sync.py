@@ -175,9 +175,7 @@ class PlannerSyncService:
     def lock_path(self) -> Path:
         """Return the filesystem lock path for this planner agent/worktree."""
         lock_root = self.context.project_data_dir / "locks" / "planner-sync"
-        digest = hashlib.sha1(
-            f"{self.context.agent_id}|{self.context.worktree_path.resolve()}".encode("utf-8")
-        ).hexdigest()
+        digest = hashlib.sha1(str(self.context.worktree_path.resolve()).encode("utf-8")).hexdigest()
         return lock_root / f"{digest}.lock"
 
     def sync_startup(self) -> PlannerSyncOutcome:
