@@ -198,6 +198,49 @@ def test_evaluate_guardrails_accepts_cross_cutting_guardrails_when_complete() ->
     assert report.violations == []
 
 
+def test_evaluate_guardrails_detects_numeric_threshold_trigger_without_phrase() -> None:
+    module = _load_script_module()
+    epic = {
+        "id": "at-epic",
+        "labels": ["at:epic"],
+        "title": "Fix lifecycle invariant regression",
+        "notes": (
+            "Invariant impact map:\n"
+            "- mutation entry points\n"
+            "- recovery paths\n"
+            "- external side-effect adapters\n"
+            "Concern domains: lifecycle state machine, external provider sync.\n"
+            "Resplit criteria: LOC > 400 and new concern domain during review.\n"
+            "Planner action: create deferred follow-on changeset or stack extension.\n"
+            "Review feedback: scope expansion during review is captured immediately."
+        ),
+    }
+    children = [
+        {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 230"},
+        {"id": "at-epic.2", "labels": [], "description": "LOC estimate: 260"},
+    ]
+
+    report = module._evaluate_guardrails(
+        epic_issue=epic,
+        child_changesets=children,
+        target_changesets=children,
+    )
+
+    assert not any("missing explicit re-split triggers" in item for item in report.violations)
+
+
+def test_matched_concern_domains_ignores_standalone_external_token() -> None:
+    module = _load_script_module()
+    text = (
+        "This bug touches lifecycle state machine behavior and documents external "
+        "side-effect adapters."
+    )
+
+    domains = module._matched_concern_domains(text)
+
+    assert domains == ["lifecycle-state-machine"]
+
+
 def test_run_bd_json_defaults_to_direct_mode(monkeypatch) -> None:
     module = _load_script_module()
     captured: dict[str, list[str]] = {}

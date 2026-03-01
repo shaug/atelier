@@ -45,7 +45,8 @@ _CONCERN_DOMAINS: dict[str, re.Pattern[str]] = {
         re.IGNORECASE,
     ),
     "external-ticket-provider-sync": re.compile(
-        r"\b(?:external|provider|ticket sync|provider sync|sync adapter)\b",
+        r"\b(?:external provider(?: sync)?|external ticket sync|ticket sync|"
+        r"provider sync|sync adapters?)\b",
         re.IGNORECASE,
     ),
     "dry-run-observability": re.compile(
@@ -54,9 +55,10 @@ _CONCERN_DOMAINS: dict[str, re.Pattern[str]] = {
     ),
 }
 _RESPLIT_THRESHOLD_TRIGGER = re.compile(
-    r"\b(?:re[- ]?split trigger|split trigger|loc threshold|file threshold|> ?400|> ?800)\b",
+    r"\b(?:re[- ]?split trigger|split trigger|loc threshold|file threshold)\b",
     re.IGNORECASE,
 )
+_RESPLIT_THRESHOLD_NUMERIC = re.compile(r">\s*(?:400|800)\b")
 _RESPLIT_NEW_DOMAIN_TRIGGER = re.compile(
     r"\b(?:new concern domain|additional concern domain|new domain during review)\b",
     re.IGNORECASE,
@@ -191,6 +193,10 @@ def _matched_concern_domains(text: str) -> list[str]:
     return matched
 
 
+def _has_resplit_threshold_trigger(text: str) -> bool:
+    return bool(_RESPLIT_THRESHOLD_TRIGGER.search(text) or _RESPLIT_THRESHOLD_NUMERIC.search(text))
+
+
 def _load_issue(issue_id: str, *, beads_dir: str | None) -> dict[str, object] | None:
     issues = _run_bd_json(["show", issue_id, "--json"], beads_dir=beads_dir)
     if not issues:
@@ -281,7 +287,7 @@ def _evaluate_guardrails(
                 "explicit decomposition constraints."
             )
 
-        has_threshold_trigger = _RESPLIT_THRESHOLD_TRIGGER.search(corpus)
+        has_threshold_trigger = _has_resplit_threshold_trigger(corpus)
         has_new_domain_trigger = _RESPLIT_NEW_DOMAIN_TRIGGER.search(corpus)
         if not (has_threshold_trigger and has_new_domain_trigger):
             violations.append(
