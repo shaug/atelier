@@ -113,8 +113,7 @@ Do not add hidden behavior or implicit defaults.
 When code writes local external state that can be touched by multiple agents or
 processes, it must be designed to avoid corruption by default.
 
-- Prefer atomic write primitives where available (for example: temp-file + fsync
-  \+ atomic rename, atomic ref updates, or compare-and-swap style updates).
+- Prefer atomic write primitives where available (for example: temp-file + fsync + atomic rename, atomic ref updates, or compare-and-swap style updates).
 - If atomic writes are not available, require explicit read-after-write
   verification and bounded retries before reporting success.
 - Make write operations idempotent where practical so retries do not duplicate
