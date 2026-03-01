@@ -1251,6 +1251,7 @@ def changeset_parent_lifecycle_state(
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
+    beads_root: Path | None = None,
 ) -> str | None:
     """Changeset parent lifecycle state.
 
@@ -1259,6 +1260,7 @@ def changeset_parent_lifecycle_state(
         repo_slug: Value for `repo_slug`.
         repo_root: Value for `repo_root`.
         git_path: Value for `git_path`.
+        beads_root: Optional Beads root for dependency lookups.
 
     Returns:
         Function result.
@@ -1268,7 +1270,7 @@ def changeset_parent_lifecycle_state(
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
-        beads_root=None,
+        beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
     )
 
@@ -1280,6 +1282,7 @@ def changeset_pr_creation_decision(
     repo_root: Path,
     git_path: str | None,
     branch_pr_strategy: object,
+    beads_root: Path | None = None,
 ) -> pr_strategy.PrStrategyDecision:
     """Changeset pr creation decision.
 
@@ -1289,6 +1292,7 @@ def changeset_pr_creation_decision(
         repo_root: Value for `repo_root`.
         git_path: Value for `git_path`.
         branch_pr_strategy: Value for `branch_pr_strategy`.
+        beads_root: Optional Beads root for dependency lookups.
 
     Returns:
         Function result.
@@ -1299,7 +1303,7 @@ def changeset_pr_creation_decision(
         repo_root=repo_root,
         git_path=git_path,
         branch_pr_strategy=branch_pr_strategy,
-        beads_root=None,
+        beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
     )
 
@@ -1393,6 +1397,7 @@ def changeset_waiting_on_review_or_signals(
     branch_pr: bool,
     branch_pr_strategy: object,
     git_path: str | None,
+    beads_root: Path | None = None,
 ) -> bool:
     """Changeset waiting on review or signals.
 
@@ -1403,6 +1408,7 @@ def changeset_waiting_on_review_or_signals(
         branch_pr: Value for `branch_pr`.
         branch_pr_strategy: Value for `branch_pr_strategy`.
         git_path: Value for `git_path`.
+        beads_root: Optional Beads root for dependency lookups.
 
     Returns:
         Function result.
@@ -1432,6 +1438,7 @@ def changeset_waiting_on_review_or_signals(
                 repo_root=repo_root,
                 git_path=git_path,
                 branch_pr_strategy=branch_pr_strategy,
+                beads_root=beads_root,
             )
             return not decision.allow_pr
     review_state = changeset_review_state(issue)
@@ -1447,6 +1454,7 @@ def changeset_waiting_on_review_or_signals(
                 repo_root=repo_root,
                 git_path=git_path,
                 branch_pr_strategy=branch_pr_strategy,
+                beads_root=beads_root,
             )
             return not decision.allow_pr
     return False

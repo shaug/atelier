@@ -65,6 +65,7 @@ class _NextChangesetService(worker_startup.NextChangesetService):
             branch_pr=branch_pr,
             branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
+            beads_root=self._beads_root,
         )
 
     def changeset_has_review_handoff_signal(
@@ -669,6 +670,7 @@ class _StartupContractService(worker_startup.StartupContractService):
             branch_pr=branch_pr,
             branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
+            beads_root=self._beads_root,
         )
 
     def mark_changeset_merged(self, changeset_id: str) -> None:

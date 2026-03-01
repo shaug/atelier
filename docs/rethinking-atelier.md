@@ -580,6 +580,17 @@ queue items, then choose a new epic (auto = oldest ready, else oldest assigned;
 prompt = user selection). If no eligible epics exist, emit a `NEEDS-DECISION`
 message to the overseer.
 
+When startup evaluates review-waiting changesets for PR-creation eligibility,
+reason strings should be interpreted consistently:
+
+- `parent:merged`: parent lineage resolved and merged; child is actionable.
+- `parent:closed`: parent lineage resolved and terminal under the active
+  strategy.
+- `blocked:dependency-parent-unresolved`: dependency lineage metadata could not
+  resolve a deterministic parent branch.
+- `blocked:dependency-parent-pr-missing`: parent metadata points to a missing
+  upstream PR and requires reconciliation.
+
 ## Claiming Strategy (Atomicity)
 
 ### Option A: bd-only (simpler)

@@ -1018,6 +1018,65 @@ def test_changeset_waiting_on_review_treats_closed_pushed_state_as_active(monkey
     assert waiting is True
 
 
+def test_changeset_waiting_on_review_uses_beads_root_for_dependency_parent_gate(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-kid.2",
+        "description": (
+            "changeset.root_branch: feat/at-kid\n"
+            "changeset.parent_branch: feat/at-kid\n"
+            "changeset.work_branch: feat/at-kid.2\n"
+        ),
+        "dependencies": ["at-kid.1"],
+    }
+
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"description": "changeset.work_branch: feat/at-kid.1\n"}]
+            if args == ["show", "at-kid.1"]
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "lookup_pr_payload",
+        lambda _repo_slug, branch: (
+            {"state": "CLOSED", "mergedAt": "2026-02-28T00:00:00Z"}
+            if branch == "feat/at-kid.1"
+            else None
+        ),
+    )
+
+    waiting_without_beads_context = work_finalization_state.changeset_waiting_on_review_or_signals(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        branch_pr=True,
+        branch_pr_strategy="sequential",
+        git_path="git",
+    )
+    waiting_with_beads_context = work_finalization_state.changeset_waiting_on_review_or_signals(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        branch_pr=True,
+        branch_pr_strategy="sequential",
+        git_path="git",
+        beads_root=Path("/beads"),
+    )
+
+    assert waiting_without_beads_context is True
+    assert waiting_with_beads_context is False
+
+
 def test_changeset_stack_integrity_preflight_reconciles_parent_review_metadata(
     monkeypatch,
 ) -> None:
