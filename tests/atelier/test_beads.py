@@ -918,6 +918,15 @@ def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(
     cwd.mkdir()
 
     db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    probe_command = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--inspect",
+        "--json",
+    ]
     migrate = [
         "bd",
         "--db",
@@ -960,6 +969,13 @@ def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(
                 argv=request.argv,
                 returncode=0,
                 stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        if argv == probe_command:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"inspect":"ok"}',
                 stderr="",
             )
         if argv == migrate:
@@ -1007,6 +1023,15 @@ def test_run_bd_command_list_auto_migrates_recoverable_startup_state(
     cwd.mkdir()
 
     db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    probe_command = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--inspect",
+        "--json",
+    ]
     migrate = [
         "bd",
         "--db",
@@ -1049,6 +1074,13 @@ def test_run_bd_command_list_auto_migrates_recoverable_startup_state(
                 argv=request.argv,
                 returncode=0,
                 stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        if argv == probe_command:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"inspect":"ok"}',
                 stderr="",
             )
         if argv == migrate:
@@ -1147,6 +1179,15 @@ def test_run_bd_command_prime_auto_migrates_insufficient_dolt_state(
     cwd.mkdir()
 
     db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    probe_command = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--inspect",
+        "--json",
+    ]
     migrate = [
         "bd",
         "--db",
@@ -1156,19 +1197,18 @@ def test_run_bd_command_prime_auto_migrates_insufficient_dolt_state(
         "--yes",
         "--json",
     ]
-    stats_calls = 0
+    migrated = False
     calls: list[list[str]] = []
     diagnostics: list[str] = []
 
     def fake_run_with_runner(
         request: exec_util.CommandRequest,
     ) -> exec_util.CommandResult | None:
-        nonlocal stats_calls
+        nonlocal migrated
         argv = list(request.argv)
         calls.append(argv)
         if argv == ["bd", "stats", "--json"]:
-            stats_calls += 1
-            if stats_calls == 1:
+            if not migrated:
                 return exec_util.CommandResult(
                     argv=request.argv,
                     returncode=0,
@@ -1188,7 +1228,15 @@ def test_run_bd_command_prime_auto_migrates_insufficient_dolt_state(
                 stdout='{"summary":{"total_issues":4}}',
                 stderr="",
             )
+        if argv == probe_command:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"inspect":"ok"}',
+                stderr="",
+            )
         if argv == migrate:
+            migrated = True
             return exec_util.CommandResult(
                 argv=request.argv,
                 returncode=0,
@@ -1272,6 +1320,101 @@ def test_run_bd_command_prime_blocks_auto_migration_for_old_bd_version(
     assert not list((beads_root / "backups").glob("*.bak"))
 
 
+def test_run_bd_command_degrades_when_migration_capability_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "beads.db").write_bytes(b"legacy")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    probe_command = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--inspect",
+        "--json",
+    ]
+    migrate = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--yes",
+        "--json",
+    ]
+    calls: list[list[str]] = []
+    diagnostics: list[str] = []
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "stats", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":2}}',
+                stderr="",
+            )
+        if argv == db_stats:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        if argv == probe_command:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout=(
+                    '{"error":"dolt_not_available","message":"Dolt backend requires CGO. '
+                    'This binary was built without CGO support."}'
+                ),
+                stderr="",
+            )
+        if argv == ["bd", "prime"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="primed",
+                stderr="",
+            )
+        if argv == ["bd", "ready"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="[]",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.bd_invocation.detect_bd_version", return_value=(0, 56, 1)),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.say", side_effect=diagnostics.append),
+    ):
+        prime_result = beads.run_bd_command(["prime"], beads_root=beads_root, cwd=cwd)
+        ready_result = beads.run_bd_command(["ready"], beads_root=beads_root, cwd=cwd)
+
+    assert prime_result.returncode == 0
+    assert ready_result.returncode == 0
+    assert diagnostics
+    assert "auto-upgrade blocked" in diagnostics[0]
+    assert "requires a `bd` build with Dolt/CGO support" in diagnostics[0]
+    assert probe_command in calls
+    assert calls.count(probe_command) == 1
+    assert migrate not in calls
+
+
 def test_run_bd_command_prime_blocks_when_migration_parity_fails(
     tmp_path: Path,
 ) -> None:
@@ -1282,6 +1425,15 @@ def test_run_bd_command_prime_blocks_when_migration_parity_fails(
     cwd.mkdir()
 
     db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    probe_command = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--inspect",
+        "--json",
+    ]
     migrate = [
         "bd",
         "--db",
@@ -1325,6 +1477,13 @@ def test_run_bd_command_prime_blocks_when_migration_parity_fails(
                 stdout='{"summary":{"total_issues":8}}',
                 stderr="",
             )
+        if argv == probe_command:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"inspect":"ok"}',
+                stderr="",
+            )
         if argv == migrate:
             (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True, exist_ok=True)
             return exec_util.CommandResult(
@@ -1364,6 +1523,15 @@ def test_run_bd_command_prime_reconciles_runtime_agent_metadata(
     monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/planner/codex/runtime")
 
     db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    probe_command = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--inspect",
+        "--json",
+    ]
     migrate = [
         "bd",
         "--db",
@@ -1405,6 +1573,13 @@ def test_run_bd_command_prime_reconciles_runtime_agent_metadata(
                 argv=request.argv,
                 returncode=0,
                 stdout='{"summary":{"total_issues":8}}',
+                stderr="",
+            )
+        if argv == probe_command:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"inspect":"ok"}',
                 stderr="",
             )
         if argv == ["bd", "show", "at-agent-runtime", "--json"]:
@@ -1488,6 +1663,15 @@ def test_run_bd_command_prime_recreates_missing_runtime_agent_bead(
     monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/planner/codex/runtime")
 
     db_stats = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    probe_command = [
+        "bd",
+        "--db",
+        str(beads_root / "beads.db"),
+        "migrate",
+        "--to-dolt",
+        "--inspect",
+        "--json",
+    ]
     migrate = [
         "bd",
         "--db",
@@ -1528,6 +1712,13 @@ def test_run_bd_command_prime_recreates_missing_runtime_agent_bead(
                 argv=request.argv,
                 returncode=0,
                 stdout='{"summary":{"total_issues":2}}',
+                stderr="",
+            )
+        if argv == probe_command:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"inspect":"ok"}',
                 stderr="",
             )
         if argv == ["bd", "show", "at-agent-required", "--json"]:
@@ -1779,6 +1970,52 @@ def test_detect_startup_beads_state_reports_insufficient_dolt(tmp_path: Path) ->
     assert state.migration_eligible is True
     assert state.dolt_issue_total == 3
     assert state.legacy_issue_total == 11
+
+
+def test_detect_startup_beads_state_resamples_transient_mismatch(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "beads.db").write_bytes(b"")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    legacy_argv = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+    dolt_calls = 0
+    legacy_calls = 0
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        nonlocal dolt_calls, legacy_calls
+        argv = list(request.argv)
+        if argv == ["bd", "stats", "--json"]:
+            dolt_calls += 1
+            total = 3 if dolt_calls == 1 else 4
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout=json.dumps({"summary": {"total_issues": total}}),
+                stderr="",
+            )
+        if argv == legacy_argv:
+            legacy_calls += 1
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":4}}',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+        state = beads.detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
+
+    assert state.classification == "healthy_dolt"
+    assert state.migration_eligible is False
+    assert state.dolt_issue_total == 4
+    assert state.legacy_issue_total == 4
+    assert dolt_calls >= 2
+    assert legacy_calls >= 2
 
 
 def test_verify_migration_parity_with_resample_handles_transient_skew() -> None:
