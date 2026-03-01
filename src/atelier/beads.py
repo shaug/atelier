@@ -2749,6 +2749,53 @@ def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[st
     return []
 
 
+def run_bd_json_read_only(
+    args: list[str], *, beads_root: Path, cwd: Path
+) -> tuple[list[dict[str, object]], str | None]:
+    """Run a read-only bd JSON query without exiting on command failure.
+
+    Args:
+        args: `bd` arguments without the leading binary name.
+        beads_root: Root directory for the Beads store.
+        cwd: Working directory for the command.
+
+    Returns:
+        Tuple containing parsed payload and optional failure detail. Failures
+        include the exact command, exit code, and stderr/stdout detail when
+        present.
+    """
+    cmd = list(args)
+    if "--json" not in cmd:
+        cmd.append("--json")
+    command_text = " ".join(["bd", *cmd])
+    result = run_bd_command(cmd, beads_root=beads_root, cwd=cwd, allow_failure=True)
+    if result.returncode != 0:
+        detail_parts: list[str] = []
+        stderr_text = result.stderr.strip() if result.stderr else ""
+        stdout_text = result.stdout.strip() if result.stdout else ""
+        if stderr_text:
+            detail_parts.append(f"stderr: {stderr_text}")
+        if stdout_text:
+            detail_parts.append(f"stdout: {stdout_text}")
+        detail = "\n".join(detail_parts)
+        message = f"command failed: {command_text} (exit {result.returncode})"
+        if detail:
+            message = f"{message}\n{detail}"
+        return [], message
+    raw = result.stdout.strip() if result.stdout else ""
+    if not raw:
+        return [], None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return [], f"command failed: {command_text}\nfailed to parse bd json output: {exc}"
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)], None
+    if isinstance(payload, dict):
+        return [payload], None
+    return [], None
+
+
 def parse_issue_records(issues: list[dict[str, object]], *, source: str) -> list[BeadsIssueRecord]:
     """Validate Beads issue payloads while preserving raw issue mappings."""
     records: list[BeadsIssueRecord] = []
