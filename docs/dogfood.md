@@ -33,6 +33,27 @@ source of truth and that changesets remain reviewable.
      or
    - closes the epic when all changesets are complete.
 
+## Self-Updating Worker Supervisor
+
+For Atelier-on-Atelier development, use
+`scripts/self_update_worker_supervisor.py` to run one-shot worker cycles while
+refreshing the local checkout between cycles.
+
+Example:
+
+```sh
+scripts/self_update_worker_supervisor.py \
+  --repo-path ~/code/atelier \
+  --install-command "just install-editable" \
+  -- --mode auto
+```
+
+Defaults:
+
+- update policy is fast-forward-only (`--update-policy ff-only`)
+- worker command runs once (`atelier work --run-mode once`)
+- dry-run mode (`--dry-run`) prints planned update/install/worker actions
+
 ## Expected Outcomes
 
 - Beads contain full intent, constraints, and acceptance criteria.
