@@ -1230,3 +1230,67 @@ def test_changeset_stack_integrity_preflight_resolves_epic_parent_without_metada
 
     assert preflight.ok is True
     assert metadata_updates == []
+
+
+def test_release_epic_assignment_uses_runtime_agent_guard_when_available(monkeypatch) -> None:
+    monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/worker/codex/p100")
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [{"id": "at-epic", "assignee": "atelier/worker/codex/p200"}],
+    )
+    release_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "release_epic_assignment",
+        lambda epic_id, **kwargs: release_calls.append({"epic_id": epic_id, **kwargs}),
+    )
+
+    work_finalization_state.release_epic_assignment(
+        "at-epic",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert release_calls == [
+        {
+            "epic_id": "at-epic",
+            "beads_root": Path("/beads"),
+            "cwd": Path("/repo"),
+            "expected_assignee": "atelier/worker/codex/p100",
+            "expected_hooked": False,
+        }
+    ]
+
+
+def test_release_epic_assignment_falls_back_to_issue_assignee_without_runtime_agent(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("ATELIER_AGENT_ID", raising=False)
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [{"id": "at-epic", "assignee": "atelier/worker/codex/p300"}],
+    )
+    release_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "release_epic_assignment",
+        lambda epic_id, **kwargs: release_calls.append({"epic_id": epic_id, **kwargs}),
+    )
+
+    work_finalization_state.release_epic_assignment(
+        "at-epic",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert release_calls == [
+        {
+            "epic_id": "at-epic",
+            "beads_root": Path("/beads"),
+            "cwd": Path("/repo"),
+            "expected_assignee": "atelier/worker/codex/p300",
+            "expected_hooked": False,
+        }
+    ]

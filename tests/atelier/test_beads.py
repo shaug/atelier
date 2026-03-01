@@ -1,5 +1,7 @@
 import json
 import sqlite3
+import threading
+import time
 from pathlib import Path
 from subprocess import CompletedProcess
 from tempfile import TemporaryDirectory
@@ -9,6 +11,27 @@ import pytest
 
 import atelier.beads as beads
 from atelier import exec as exec_util
+
+
+@pytest.fixture(autouse=True)
+def _redirect_virtual_beads_issue_locks(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Keep synthetic /beads tests writable while preserving real lock semantics."""
+    virtual_root = Path("/beads")
+    redirected_root = tmp_path / "virtual-beads-store"
+    redirected_root.mkdir(parents=True, exist_ok=True)
+    original_lock_path = beads._issue_write_lock_path  # pyright: ignore[reportPrivateUsage]
+
+    def redirected_lock_path(*, issue_id: str, beads_root: Path) -> Path:
+        if beads_root == virtual_root:
+            return original_lock_path(issue_id=issue_id, beads_root=redirected_root)
+        return original_lock_path(issue_id=issue_id, beads_root=beads_root)
+
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCK_STATE", {})
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCAL_LOCKS", {})
+    monkeypatch.setattr(beads, "_issue_write_lock_path", redirected_lock_path)
 
 
 def test_beads_env_sets_beads_db() -> None:
@@ -1799,6 +1822,56 @@ def test_verify_migration_parity_with_resample_handles_transient_skew() -> None:
     assert state == healed
 
 
+def test_verify_migration_parity_with_resample_retries_more_than_once() -> None:
+    before = beads.StartupBeadsState(
+        classification="missing_dolt_with_legacy_sqlite",
+        migration_eligible=True,
+        has_dolt_store=False,
+        has_legacy_sqlite=True,
+        dolt_issue_total=None,
+        legacy_issue_total=12,
+        reason="legacy_sqlite_has_data_while_dolt_is_unavailable",
+    )
+    after = beads.StartupBeadsState(
+        classification="healthy_dolt",
+        migration_eligible=False,
+        has_dolt_store=True,
+        has_legacy_sqlite=True,
+        dolt_issue_total=10,
+        legacy_issue_total=12,
+        reason="dolt_issue_total_is_healthy",
+    )
+    still_skewed = beads.StartupBeadsState(
+        classification="healthy_dolt",
+        migration_eligible=False,
+        has_dolt_store=True,
+        has_legacy_sqlite=True,
+        dolt_issue_total=11,
+        legacy_issue_total=12,
+        reason="dolt_issue_total_is_healthy",
+    )
+    healed = beads.StartupBeadsState(
+        classification="healthy_dolt",
+        migration_eligible=False,
+        has_dolt_store=True,
+        has_legacy_sqlite=True,
+        dolt_issue_total=12,
+        legacy_issue_total=12,
+        reason="dolt_issue_total_is_healthy",
+    )
+
+    with patch("atelier.beads.detect_startup_beads_state", side_effect=[still_skewed, healed]):
+        verified, state = beads._verify_migration_parity_with_resample(  # pyright: ignore[reportPrivateUsage]
+            before=before,
+            after=after,
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert verified is True
+    assert state == healed
+
+
 def test_run_bd_command_allows_changeset_in_progress_when_dependencies_closed(
     tmp_path: Path,
 ) -> None:
@@ -2387,6 +2460,136 @@ def test_set_agent_hook_updates_description() -> None:
     assert called["args"][:3] == ["slot", "set", "atelier-agent"]
 
 
+def test_update_issue_description_fields_serializes_concurrent_writers() -> None:
+    state = {"description": "scope: demo\n"}
+    release_first_write = threading.Event()
+    first_write_started = threading.Event()
+    errors: list[BaseException] = []
+    write_order = 0
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        del args, beads_root, cwd
+        return [{"id": "issue-1", "description": state["description"]}]
+
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
+        del issue_id, beads_root, cwd
+        nonlocal write_order
+        write_order += 1
+        if write_order == 1:
+            first_write_started.set()
+            assert release_first_write.wait(timeout=1.0)
+        state["description"] = description
+
+    def apply_fields(fields: dict[str, str | None]) -> None:
+        try:
+            beads.update_issue_description_fields(
+                "issue-1",
+                fields,
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )
+        except BaseException as exc:  # pragma: no cover - assertion surface
+            errors.append(exc)
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+    ):
+        first = threading.Thread(target=apply_fields, args=({"hook_bead": "epic-1"},))
+        second = threading.Thread(target=apply_fields, args=({"pr_state": "in-review"},))
+        first.start()
+        assert first_write_started.wait(timeout=1.0)
+        second.start()
+        time.sleep(0.05)
+        release_first_write.set()
+        first.join(timeout=1.0)
+        second.join(timeout=1.0)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert not errors
+    assert "hook_bead: epic-1" in state["description"]
+    assert "pr_state: in-review" in state["description"]
+
+
+def test_issue_write_lock_releases_global_guard_before_file_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class _TrackingLock:
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self.held = False
+
+        def acquire(self, blocking: bool = True, timeout: float = -1.0) -> bool:
+            if timeout < 0:
+                acquired = self._lock.acquire(blocking)
+            else:
+                acquired = self._lock.acquire(blocking, timeout)
+            if acquired:
+                self.held = True
+            return acquired
+
+        def release(self) -> None:
+            self.held = False
+            self._lock.release()
+
+        def __enter__(self) -> "_TrackingLock":
+            self.acquire()
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            self.release()
+
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    guard = _TrackingLock()
+    saw_guard_during_acquire: list[bool] = []
+
+    def fake_acquire(handle: object) -> None:
+        del handle
+        saw_guard_during_acquire.append(guard.held)
+
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCK_STATE_GUARD", guard)
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCK_STATE", {})
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCAL_LOCKS", {})
+    monkeypatch.setattr(beads, "_acquire_issue_file_lock", fake_acquire)
+
+    with beads._issue_write_lock("issue-1", beads_root=beads_root):  # pyright: ignore[reportPrivateUsage]
+        pass
+
+    assert saw_guard_during_acquire == [False]
+
+
+def test_issue_write_lock_fails_closed_on_file_lock_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    key = beads._issue_write_lock_key(  # pyright: ignore[reportPrivateUsage]
+        issue_id="issue-1", beads_root=beads_root
+    )
+
+    def fail_acquire(handle: object) -> None:
+        del handle
+        raise OSError("boom")
+
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCK_STATE", {})
+    monkeypatch.setattr(beads, "_ISSUE_WRITE_LOCAL_LOCKS", {})
+    monkeypatch.setattr(beads, "_acquire_issue_file_lock", fail_acquire)
+
+    def fake_die(message: str, code: int = 1) -> None:
+        raise RuntimeError(f"{code}:{message}")
+
+    with patch("atelier.beads.die", side_effect=fake_die):
+        with pytest.raises(RuntimeError, match="1:failed to acquire issue write lock for issue-1"):
+            with beads._issue_write_lock("issue-1", beads_root=beads_root):  # pyright: ignore[reportPrivateUsage]
+                pytest.fail("context body should not execute on lock acquisition failure")
+
+    assert key not in beads._ISSUE_WRITE_LOCK_STATE  # pyright: ignore[reportPrivateUsage]
+
+
 def test_update_changeset_branch_metadata_skips_base_overwrite_by_default() -> None:
     issue = {
         "id": "at-1.1",
@@ -2546,6 +2749,79 @@ def test_claim_queue_message_sets_claimed_metadata() -> None:
     assert "claimed_by: atelier/worker/agent" in captured["description"]
     assert "claimed_at:" in captured["description"]
     assert any(cmd[:3] == ["update", "msg-1", "--claim"] for cmd in commands)
+
+
+def test_claim_queue_message_rejects_second_concurrent_claimant() -> None:
+    state_lock = threading.Lock()
+    state: dict[str, object] = {
+        "id": "msg-2",
+        "description": "---\nqueue: triage\n---\n\nBody\n",
+        "assignee": None,
+    }
+    outcome: dict[str, str] = {}
+    thread_agents: dict[int, str] = {}
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        del args, beads_root, cwd
+        with state_lock:
+            return [dict(state)]
+
+    def fake_run_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        with state_lock:
+            if args[:3] == ["update", "msg-2", "--claim"]:
+                if state["assignee"] is None:
+                    actor = thread_agents.get(threading.get_ident(), "")
+                    state["assignee"] = actor
+                    if "winner" not in outcome:
+                        outcome["winner"] = actor
+                    return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+                return CompletedProcess(
+                    args=args, returncode=1, stdout="", stderr="already claimed"
+                )
+        return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
+        del issue_id, beads_root, cwd
+        with state_lock:
+            state["description"] = description
+
+    failures: list[str] = []
+
+    def claim(agent_id: str) -> None:
+        thread_agents[threading.get_ident()] = agent_id
+        try:
+            beads.claim_queue_message(
+                "msg-2",
+                agent_id,
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )
+        except RuntimeError as exc:
+            failures.append(str(exc))
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_run_command),
+        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch("atelier.beads.die", side_effect=RuntimeError),
+    ):
+        first = threading.Thread(target=claim, args=("agent-a",))
+        second = threading.Thread(target=claim, args=("agent-b",))
+        first.start()
+        second.start()
+        first.join(timeout=1.0)
+        second.join(timeout=1.0)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert len(failures) == 1
+    with state_lock:
+        description = str(state["description"])
+    assert "claimed_by:" in description
+    assert "claimed_at:" in description
 
 
 def test_list_inbox_messages_filters_unread() -> None:
