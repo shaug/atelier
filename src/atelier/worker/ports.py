@@ -157,7 +157,13 @@ class BeadsService(Protocol):
 class BranchingService(Protocol):
     """Branch naming and existence helpers."""
 
-    def suggest_root_branch(self, title: str, prefix: str) -> str: ...
+    def suggest_root_branch(
+        self,
+        title: str,
+        prefix: str,
+        *,
+        bead_id: str | None = None,
+    ) -> str: ...
 
 
 class ConfigService(Protocol):
@@ -194,6 +200,7 @@ class RootBranchService(Protocol):
         *,
         title: str,
         branch_prefix: str,
+        epic_id: str | None = None,
         beads_root: Path,
         repo_root: Path,
         assume_yes: bool = False,

@@ -32,12 +32,13 @@ def prompt_root_branch(
     *,
     title: str,
     branch_prefix: str,
+    epic_id: str | None = None,
     beads_root: Path,
     repo_root: Path,
     assume_yes: bool = False,
 ) -> str:
     """Prompt for a root branch name with validation and uniqueness checks."""
-    suggested = branching.suggest_root_branch(title, branch_prefix)
+    suggested = branching.suggest_root_branch(title, branch_prefix, bead_id=epic_id)
     while True:
         if assume_yes:
             root_branch = branching.normalize_root_branch(suggested or "")
