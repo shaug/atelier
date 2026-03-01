@@ -2412,10 +2412,13 @@ def epic_discovery_parity_report(
         labels = _issue_labels(issue)
         issue_type = lifecycle.issue_payload_type(issue)
         parent_id = _issue_parent_id(issue)
-        is_executable = lifecycle.is_executable_epic_identity(
-            labels=labels,
-            issue_type=issue_type,
-            parent_id=parent_id,
+        is_executable = (
+            lifecycle.is_executable_epic_identity(
+                labels=labels,
+                issue_type=issue_type,
+                parent_id=parent_id,
+            )
+            and lifecycle.normalize_status_value(issue_type) == "epic"
         )
         if is_executable:
             executable_active_ids.add(issue_id)
@@ -2446,10 +2449,13 @@ def epic_discovery_parity_report(
         labels = _issue_labels(issue)
         issue_type = lifecycle.issue_payload_type(issue)
         parent_id = _issue_parent_id(issue)
-        if not lifecycle.is_executable_epic_identity(
-            labels=labels,
-            issue_type=issue_type,
-            parent_id=parent_id,
+        if not (
+            lifecycle.is_executable_epic_identity(
+                labels=labels,
+                issue_type=issue_type,
+                parent_id=parent_id,
+            )
+            and lifecycle.normalize_status_value(issue_type) == "epic"
         ):
             continue
         indexed_active_ids.add(issue_id)
