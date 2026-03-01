@@ -194,58 +194,61 @@ def collect_resolved_epic_artifacts(
             worktree_paths: list[Path] = list(existing_worktrees),
             branches_to_prune: list[str] = sorted(prunable_branches),
         ) -> None:
-            log_debug(
-                f"cleanup resolved epic start epic={epic_value} "
-                f"worktrees={len(worktree_paths)} branches={len(branches_to_prune)}"
-            )
-            for worktree_path in worktree_paths:
-                status_lines = git.git_status_porcelain(worktree_path, git_path=git_path)
-                force_remove = False
-                if status_lines:
-                    say(f"Resolved worktree has local changes: {worktree_path}")
-                    for line in status_lines[:20]:
-                        say(f"- {line}")
-                    if len(status_lines) > 20:
-                        say(f"- ... ({len(status_lines) - 20} more)")
-                    if assume_yes:
-                        force_remove = True
-                    else:
-                        choice = select(
-                            "Resolved worktree cleanup action",
-                            ("force-remove", "exit"),
-                            "exit",
-                        )
-                        if choice != "force-remove":
-                            die("gc aborted by user")
-                        force_remove = True
-                log_debug(f"removing resolved worktree path={worktree_path} force={force_remove}")
-                args = ["worktree", "remove"]
-                if force_remove:
-                    args.append("--force")
-                args.append(str(worktree_path))
-                ok, detail = run_git_gc_command(args, repo_root=repo_root, git_path=git_path)
-                if not ok:
-                    die(detail)
+            with worktrees.worktree_state_lock(project_dir):
+                log_debug(
+                    f"cleanup resolved epic start epic={epic_value} "
+                    f"worktrees={len(worktree_paths)} branches={len(branches_to_prune)}"
+                )
+                for worktree_path in worktree_paths:
+                    status_lines = git.git_status_porcelain(worktree_path, git_path=git_path)
+                    force_remove = False
+                    if status_lines:
+                        say(f"Resolved worktree has local changes: {worktree_path}")
+                        for line in status_lines[:20]:
+                            say(f"- {line}")
+                        if len(status_lines) > 20:
+                            say(f"- ... ({len(status_lines) - 20} more)")
+                        if assume_yes:
+                            force_remove = True
+                        else:
+                            choice = select(
+                                "Resolved worktree cleanup action",
+                                ("force-remove", "exit"),
+                                "exit",
+                            )
+                            if choice != "force-remove":
+                                die("gc aborted by user")
+                            force_remove = True
+                    log_debug(
+                        f"removing resolved worktree path={worktree_path} force={force_remove}"
+                    )
+                    args = ["worktree", "remove"]
+                    if force_remove:
+                        args.append("--force")
+                    args.append(str(worktree_path))
+                    ok, detail = run_git_gc_command(args, repo_root=repo_root, git_path=git_path)
+                    if not ok:
+                        die(detail)
 
-            current_branch = git.git_current_branch(repo_root, git_path=git_path)
-            for branch in branches_to_prune:
-                local_ref, remote_ref = branch_lookup_ref(repo_root, branch, git_path=git_path)
-                if remote_ref:
-                    log_debug(f"deleting remote branch branch={branch} epic={epic_value}")
-                    run_git_gc_command(
-                        ["push", "origin", "--delete", branch],
-                        repo_root=repo_root,
-                        git_path=git_path,
-                    )
-                if local_ref and current_branch != branch:
-                    log_debug(f"deleting local branch branch={branch} epic={epic_value}")
-                    run_git_gc_command(
-                        ["branch", "-D", branch],
-                        repo_root=repo_root,
-                        git_path=git_path,
-                    )
-            mapping_path.unlink(missing_ok=True)
-            log_debug(f"cleanup resolved epic complete epic={epic_value}")
+                current_branch = git.git_current_branch(repo_root, git_path=git_path)
+                for branch in branches_to_prune:
+                    local_ref, remote_ref = branch_lookup_ref(repo_root, branch, git_path=git_path)
+                    if remote_ref:
+                        log_debug(f"deleting remote branch branch={branch} epic={epic_value}")
+                        run_git_gc_command(
+                            ["push", "origin", "--delete", branch],
+                            repo_root=repo_root,
+                            git_path=git_path,
+                        )
+                    if local_ref and current_branch != branch:
+                        log_debug(f"deleting local branch branch={branch} epic={epic_value}")
+                        run_git_gc_command(
+                            ["branch", "-D", branch],
+                            repo_root=repo_root,
+                            git_path=git_path,
+                        )
+                mapping_path.unlink(missing_ok=True)
+                log_debug(f"cleanup resolved epic complete epic={epic_value}")
 
         actions.append(
             GcAction(
@@ -382,32 +385,33 @@ def collect_closed_workspace_branches_without_mapping(
             ),
             branches_to_prune: list[str] = sorted(prunable_branches),
         ) -> None:
-            if changeset_worktree_path is not None:
-                log_debug(f"removing changeset worktree path={changeset_worktree_path}")
-                ok, detail = run_git_gc_command(
-                    ["worktree", "remove", str(changeset_worktree_path)],
-                    repo_root=repo_root,
-                    git_path=git_path,
-                )
-                if not ok:
-                    die(detail)
-            current_branch = git.git_current_branch(repo_root, git_path=git_path)
-            for branch in branches_to_prune:
-                local_ref, remote_ref = branch_lookup_ref(repo_root, branch, git_path=git_path)
-                if remote_ref:
-                    log_debug(f"deleting remote workspace branch branch={branch}")
-                    run_git_gc_command(
-                        ["push", "origin", "--delete", branch],
+            with worktrees.worktree_state_lock(project_dir):
+                if changeset_worktree_path is not None:
+                    log_debug(f"removing changeset worktree path={changeset_worktree_path}")
+                    ok, detail = run_git_gc_command(
+                        ["worktree", "remove", str(changeset_worktree_path)],
                         repo_root=repo_root,
                         git_path=git_path,
                     )
-                if local_ref and current_branch != branch:
-                    log_debug(f"deleting local workspace branch branch={branch}")
-                    run_git_gc_command(
-                        ["branch", "-D", branch],
-                        repo_root=repo_root,
-                        git_path=git_path,
-                    )
+                    if not ok:
+                        die(detail)
+                current_branch = git.git_current_branch(repo_root, git_path=git_path)
+                for branch in branches_to_prune:
+                    local_ref, remote_ref = branch_lookup_ref(repo_root, branch, git_path=git_path)
+                    if remote_ref:
+                        log_debug(f"deleting remote workspace branch branch={branch}")
+                        run_git_gc_command(
+                            ["push", "origin", "--delete", branch],
+                            repo_root=repo_root,
+                            git_path=git_path,
+                        )
+                    if local_ref and current_branch != branch:
+                        log_debug(f"deleting local workspace branch branch={branch}")
+                        run_git_gc_command(
+                            ["branch", "-D", branch],
+                            repo_root=repo_root,
+                            git_path=git_path,
+                        )
 
         actions.append(
             GcAction(
@@ -448,40 +452,41 @@ def collect_orphan_worktrees(
             mapping_path: Path = path,
             mapping_worktree_path: str = mapping.worktree_path,
         ) -> None:
-            worktree_path = Path(mapping_worktree_path)
-            if not worktree_path.is_absolute():
-                worktree_path = project_dir / worktree_path
-            status_lines = git.git_status_porcelain(worktree_path, git_path=git_path)
-            force_remove = False
-            if status_lines:
-                say(f"Orphaned worktree has local changes: {worktree_path}")
-                for line in status_lines[:20]:
-                    say(f"- {line}")
-                if len(status_lines) > 20:
-                    say(f"- ... ({len(status_lines) - 20} more)")
-                if assume_yes:
-                    force_remove = True
-                else:
-                    choice = select(
-                        "Orphaned worktree cleanup action",
-                        ("force-remove", "exit"),
-                        "exit",
-                    )
-                    if choice != "force-remove":
-                        die("gc aborted by user")
-                    force_remove = True
-            log_debug(
-                f"removing orphaned worktree epic={epic} path={worktree_path} force={force_remove}"
-            )
-            worktrees.remove_git_worktree(
-                project_dir,
-                repo_root,
-                epic,
-                git_path=git_path,
-                force=force_remove,
-            )
-            mapping_path.unlink(missing_ok=True)
-            log_debug(f"removed orphaned worktree epic={epic}")
+            with worktrees.worktree_state_lock(project_dir):
+                worktree_path = Path(mapping_worktree_path)
+                if not worktree_path.is_absolute():
+                    worktree_path = project_dir / worktree_path
+                status_lines = git.git_status_porcelain(worktree_path, git_path=git_path)
+                force_remove = False
+                if status_lines:
+                    say(f"Orphaned worktree has local changes: {worktree_path}")
+                    for line in status_lines[:20]:
+                        say(f"- {line}")
+                    if len(status_lines) > 20:
+                        say(f"- ... ({len(status_lines) - 20} more)")
+                    if assume_yes:
+                        force_remove = True
+                    else:
+                        choice = select(
+                            "Orphaned worktree cleanup action",
+                            ("force-remove", "exit"),
+                            "exit",
+                        )
+                        if choice != "force-remove":
+                            die("gc aborted by user")
+                        force_remove = True
+                log_debug(
+                    f"removing orphaned worktree epic={epic} path={worktree_path} force={force_remove}"
+                )
+                worktrees.remove_git_worktree(
+                    project_dir,
+                    repo_root,
+                    epic,
+                    git_path=git_path,
+                    force=force_remove,
+                )
+                mapping_path.unlink(missing_ok=True)
+                log_debug(f"removed orphaned worktree epic={epic}")
 
         actions.append(
             GcAction(

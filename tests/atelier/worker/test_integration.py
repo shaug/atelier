@@ -1,6 +1,10 @@
+import tempfile
+import threading
+import time
 from pathlib import Path
 from unittest.mock import patch
 
+import atelier.gc.worktrees as gc_worktrees
 from atelier import worktrees
 from atelier.worker import integration
 
@@ -1008,6 +1012,131 @@ def test_cleanup_epic_branches_and_worktrees_invokes_git_actions() -> None:
 
     assert ["push", "origin", "--delete", "feat/root"] in calls
     assert ["branch", "-D", "feat/root-at-1"] in calls
+
+
+def test_cleanup_paths_serialize_worker_and_gc_actions() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        epic_id = "at-1"
+        mapping_path = worktrees.mapping_path(project_dir, epic_id)
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_path,
+            worktrees.WorktreeMapping(
+                epic_id=epic_id,
+                worktree_path=f"worktrees/{epic_id}",
+                root_branch="feat/root",
+                changesets={"at-1.1": "feat/root-at-1.1"},
+                changeset_worktrees={"at-1.1": "worktrees/at-1.1"},
+            ),
+        )
+        epic_worktree = project_dir / "worktrees" / epic_id
+        changeset_worktree = project_dir / "worktrees" / "at-1.1"
+        epic_worktree.mkdir(parents=True, exist_ok=True)
+        changeset_worktree.mkdir(parents=True, exist_ok=True)
+        (epic_worktree / ".git").write_text("gitdir: /tmp/a", encoding="utf-8")
+        (changeset_worktree / ".git").write_text("gitdir: /tmp/b", encoding="utf-8")
+        epic_issue = {
+            "id": epic_id,
+            "status": "closed",
+            "labels": ["at:epic"],
+            "description": "workspace.parent_branch: main\n",
+        }
+        refs = {
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+            "refs/heads/feat/root",
+            "refs/remotes/origin/feat/root",
+            "refs/heads/feat/root-at-1.1",
+            "refs/remotes/origin/feat/root-at-1.1",
+        }
+
+        overlap_lock = threading.Lock()
+        first_call_barrier = threading.Barrier(2)
+        first_call_threads: set[int] = set()
+        active_calls = 0
+        max_active_calls = 0
+
+        def tracked_call() -> None:
+            nonlocal active_calls, max_active_calls
+            thread_id = threading.get_ident()
+            should_wait = False
+            with overlap_lock:
+                if thread_id not in first_call_threads:
+                    first_call_threads.add(thread_id)
+                    should_wait = True
+            if should_wait:
+                try:
+                    first_call_barrier.wait(timeout=1.0)
+                except threading.BrokenBarrierError:
+                    pass
+            with overlap_lock:
+                active_calls += 1
+                max_active_calls = max(max_active_calls, active_calls)
+            time.sleep(0.05)
+            with overlap_lock:
+                active_calls -= 1
+
+        def run_git_status(
+            args: list[str],
+            *,
+            repo_root: Path,
+            git_path: str | None = None,
+            cwd: Path | None = None,
+        ) -> tuple[bool, str | None]:
+            _ = args, repo_root, git_path, cwd
+            tracked_call()
+            return True, None
+
+        with (
+            patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
+            patch("atelier.git.git_default_branch", return_value="main"),
+            patch(
+                "atelier.git.git_ref_exists",
+                side_effect=lambda repo, ref, git_path=None: ref in refs,
+            ),
+            patch("atelier.git.git_is_ancestor", return_value=True),
+            patch("atelier.git.git_branch_fully_applied", return_value=False),
+            patch("atelier.git.git_status_porcelain", return_value=[]),
+            patch("atelier.git.git_current_branch", return_value="main"),
+            patch(
+                "atelier.gc.worktrees.run_git_gc_command",
+                side_effect=lambda args, repo_root=None, git_path=None: (
+                    tracked_call(),
+                    (True, ""),
+                )[1],
+            ),
+        ):
+            actions = gc_worktrees.collect_resolved_epic_artifacts(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+                assume_yes=False,
+            )
+            assert actions
+
+            thread_worker = threading.Thread(
+                target=integration.cleanup_epic_branches_and_worktrees,
+                kwargs={
+                    "project_data_dir": project_dir,
+                    "repo_root": repo_root,
+                    "epic_id": epic_id,
+                    "keep_branches": {"main"},
+                    "run_git_status": run_git_status,
+                },
+            )
+            thread_gc = threading.Thread(target=actions[0].apply)
+            thread_worker.start()
+            thread_gc.start()
+            thread_worker.join(timeout=3.0)
+            thread_gc.join(timeout=3.0)
+
+        assert max_active_calls == 1
 
 
 def test_integrate_epic_root_to_parent_uses_file_backed_squash_commit_message() -> None:

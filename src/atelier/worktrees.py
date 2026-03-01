@@ -3,15 +3,32 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Iterator, TextIO
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - platform fallback
+    fcntl = None
 
 from . import exec as exec_util
 from . import git, paths
 from .io import die
 
 METADATA_DIRNAME = ".meta"
+_STATE_LOCK_DIRNAME = ".locks"
+_STATE_LOCK_FILENAME = "worktrees-state.lock"
+
+_STATE_LOCK_GUARD = threading.Lock()
+_STATE_LOCK_HANDLES: dict[int, TextIO] = {}
+_STATE_LOCK_DEPTH: dict[int, int] = {}
+_STATE_LOCAL_LOCK = threading.RLock()
 
 
 @dataclass(frozen=True)
@@ -36,6 +53,67 @@ def worktree_dir(project_dir: Path, epic_id: str) -> Path:
 def mapping_path(project_dir: Path, epic_id: str) -> Path:
     """Return the mapping file path for an epic worktree."""
     return worktrees_root(project_dir) / METADATA_DIRNAME / f"{epic_id}.json"
+
+
+def _state_lock_path(project_dir: Path) -> Path:
+    meta_root = worktrees_root(project_dir) / METADATA_DIRNAME
+    return meta_root / _STATE_LOCK_DIRNAME / _STATE_LOCK_FILENAME
+
+
+def _acquire_file_lock(handle: TextIO) -> None:
+    if fcntl is None:  # pragma: no cover - no-op on unsupported platforms
+        return
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _release_file_lock(handle: TextIO) -> None:
+    if fcntl is None:  # pragma: no cover - no-op on unsupported platforms
+        return
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def worktree_state_lock(project_dir: Path) -> Iterator[None]:
+    """Serialize worktree metadata writes across threads/processes."""
+    lock_path = _state_lock_path(project_dir)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    thread_id = threading.get_ident()
+    _STATE_LOCAL_LOCK.acquire()
+    handle: TextIO | None = None
+    try:
+        with _STATE_LOCK_GUARD:
+            current_depth = _STATE_LOCK_DEPTH.get(thread_id, 0)
+            _STATE_LOCK_DEPTH[thread_id] = current_depth + 1
+            if current_depth == 0:
+                handle = lock_path.open("a+", encoding="utf-8")
+        if handle is not None:
+            try:
+                _acquire_file_lock(handle)
+            except OSError as exc:
+                handle.close()
+                with _STATE_LOCK_GUARD:
+                    _STATE_LOCK_DEPTH.pop(thread_id, None)
+                die(f"failed to acquire worktree state lock: {exc}")
+            with _STATE_LOCK_GUARD:
+                _STATE_LOCK_HANDLES[thread_id] = handle
+        yield
+    finally:
+        release_handle: TextIO | None = None
+        with _STATE_LOCK_GUARD:
+            depth = _STATE_LOCK_DEPTH.get(thread_id, 0)
+            if depth <= 1:
+                _STATE_LOCK_DEPTH.pop(thread_id, None)
+                release_handle = _STATE_LOCK_HANDLES.pop(thread_id, None)
+            else:
+                _STATE_LOCK_DEPTH[thread_id] = depth - 1
+        if release_handle is not None:
+            try:
+                _release_file_lock(release_handle)
+            except OSError:
+                pass
+            release_handle.close()
+        _STATE_LOCAL_LOCK.release()
 
 
 def load_mapping(path: Path) -> WorktreeMapping | None:
@@ -80,7 +158,7 @@ def load_mapping(path: Path) -> WorktreeMapping | None:
 
 
 def write_mapping(path: Path, mapping: WorktreeMapping) -> None:
-    """Write a worktree mapping to disk."""
+    """Write a worktree mapping to disk using atomic replacement."""
     payload = {
         "epic_id": mapping.epic_id,
         "worktree_path": mapping.worktree_path,
@@ -88,7 +166,24 @@ def write_mapping(path: Path, mapping: WorktreeMapping) -> None:
         "changesets": mapping.changesets,
         "changeset_worktrees": mapping.changeset_worktrees,
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(payload, indent=2) + "\n"
+    temp_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            delete=False,
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as handle:
+            handle.write(serialized)
+            temp_path = Path(handle.name)
+        os.replace(temp_path, path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink(missing_ok=True)
 
 
 def reconcile_mapping_ownership(
@@ -110,113 +205,117 @@ def reconcile_mapping_ownership(
         Tuple of epic ids whose mapping files were updated.
     """
 
-    owner_map: dict[str, str] = {}
-    for raw_changeset_id, raw_epic_id in owner_by_changeset.items():
-        changeset_id = raw_changeset_id.strip()
-        epic_id = raw_epic_id.strip()
-        if not changeset_id or not epic_id:
-            continue
-        owner_map[changeset_id] = epic_id
-
-    root_map: dict[str, str] = {}
-    for raw_epic_id, raw_root_branch in (epic_root_branches or {}).items():
-        epic_id = raw_epic_id.strip()
-        root_branch = raw_root_branch.strip()
-        if not epic_id or not root_branch:
-            continue
-        root_map[epic_id] = root_branch
-
-    meta_dir = worktrees_root(project_dir) / METADATA_DIRNAME
-    if not meta_dir.exists():
-        return ()
-
-    mappings: dict[str, WorktreeMapping] = {}
-    for path in sorted(meta_dir.glob("*.json")):
-        mapping = load_mapping(path)
-        if mapping is None:
-            continue
-        mappings[mapping.epic_id] = mapping
-    if not mappings:
-        return ()
-
-    moved_changesets: dict[str, dict[str, str]] = {}
-    moved_worktrees: dict[str, dict[str, str]] = {}
-    changed_epics: set[str] = set()
-
-    for epic_id in sorted(mappings):
-        mapping = mappings[epic_id]
-        owned_changesets: dict[str, str] = {}
-        owned_worktrees: dict[str, str] = {}
-
-        for changeset_id, branch in mapping.changesets.items():
-            owner = owner_map.get(changeset_id)
-            if owner == epic_id:
-                owned_changesets[changeset_id] = branch
+    with worktree_state_lock(project_dir):
+        owner_map: dict[str, str] = {}
+        for raw_changeset_id, raw_epic_id in owner_by_changeset.items():
+            changeset_id = raw_changeset_id.strip()
+            epic_id = raw_epic_id.strip()
+            if not changeset_id or not epic_id:
                 continue
-            if not owner:
-                continue
-            destination = moved_changesets.setdefault(owner, {})
-            destination.setdefault(changeset_id, branch)
+            owner_map[changeset_id] = epic_id
 
-        for changeset_id, relpath in mapping.changeset_worktrees.items():
-            owner = owner_map.get(changeset_id)
-            if owner == epic_id:
-                owned_worktrees[changeset_id] = relpath
+        root_map: dict[str, str] = {}
+        for raw_epic_id, raw_root_branch in (epic_root_branches or {}).items():
+            epic_id = raw_epic_id.strip()
+            root_branch = raw_root_branch.strip()
+            if not epic_id or not root_branch:
                 continue
-            if not owner:
-                continue
-            destination = moved_worktrees.setdefault(owner, {})
-            destination.setdefault(changeset_id, relpath)
+            root_map[epic_id] = root_branch
 
-        if owned_changesets != mapping.changesets or owned_worktrees != mapping.changeset_worktrees:
-            mappings[epic_id] = WorktreeMapping(
-                epic_id=mapping.epic_id,
-                worktree_path=mapping.worktree_path,
-                root_branch=mapping.root_branch,
-                changesets=owned_changesets,
-                changeset_worktrees=owned_worktrees,
+        meta_dir = worktrees_root(project_dir) / METADATA_DIRNAME
+        if not meta_dir.exists():
+            return ()
+
+        mappings: dict[str, WorktreeMapping] = {}
+        for path in sorted(meta_dir.glob("*.json")):
+            mapping = load_mapping(path)
+            if mapping is None:
+                continue
+            mappings[mapping.epic_id] = mapping
+        if not mappings:
+            return ()
+
+        moved_changesets: dict[str, dict[str, str]] = {}
+        moved_worktrees: dict[str, dict[str, str]] = {}
+        changed_epics: set[str] = set()
+
+        for epic_id in sorted(mappings):
+            mapping = mappings[epic_id]
+            owned_changesets: dict[str, str] = {}
+            owned_worktrees: dict[str, str] = {}
+
+            for changeset_id, branch in mapping.changesets.items():
+                owner = owner_map.get(changeset_id)
+                if owner == epic_id:
+                    owned_changesets[changeset_id] = branch
+                    continue
+                if not owner:
+                    continue
+                destination = moved_changesets.setdefault(owner, {})
+                destination.setdefault(changeset_id, branch)
+
+            for changeset_id, relpath in mapping.changeset_worktrees.items():
+                owner = owner_map.get(changeset_id)
+                if owner == epic_id:
+                    owned_worktrees[changeset_id] = relpath
+                    continue
+                if not owner:
+                    continue
+                destination = moved_worktrees.setdefault(owner, {})
+                destination.setdefault(changeset_id, relpath)
+
+            if (
+                owned_changesets != mapping.changesets
+                or owned_worktrees != mapping.changeset_worktrees
+            ):
+                mappings[epic_id] = WorktreeMapping(
+                    epic_id=mapping.epic_id,
+                    worktree_path=mapping.worktree_path,
+                    root_branch=mapping.root_branch,
+                    changesets=owned_changesets,
+                    changeset_worktrees=owned_worktrees,
+                )
+                changed_epics.add(epic_id)
+
+        destination_epics = sorted(set(moved_changesets) | set(moved_worktrees))
+        for epic_id in destination_epics:
+            current = mappings.get(epic_id)
+            if current is None:
+                current = WorktreeMapping(
+                    epic_id=epic_id,
+                    worktree_path=f"{paths.WORKTREES_DIRNAME}/{epic_id}",
+                    root_branch=root_map.get(epic_id, ""),
+                    changesets={},
+                    changeset_worktrees={},
+                )
+
+            merged_changesets = dict(current.changesets)
+            for changeset_id, branch in moved_changesets.get(epic_id, {}).items():
+                merged_changesets.setdefault(changeset_id, branch)
+
+            merged_worktrees = dict(current.changeset_worktrees)
+            for changeset_id, relpath in moved_worktrees.get(epic_id, {}).items():
+                merged_worktrees.setdefault(changeset_id, relpath)
+
+            resolved_root = current.root_branch or root_map.get(epic_id, "")
+            updated = WorktreeMapping(
+                epic_id=current.epic_id,
+                worktree_path=current.worktree_path,
+                root_branch=resolved_root,
+                changesets=merged_changesets,
+                changeset_worktrees=merged_worktrees,
             )
-            changed_epics.add(epic_id)
+            if updated != current:
+                changed_epics.add(epic_id)
+            mappings[epic_id] = updated
 
-    destination_epics = sorted(set(moved_changesets) | set(moved_worktrees))
-    for epic_id in destination_epics:
-        current = mappings.get(epic_id)
-        if current is None:
-            current = WorktreeMapping(
-                epic_id=epic_id,
-                worktree_path=f"{paths.WORKTREES_DIRNAME}/{epic_id}",
-                root_branch=root_map.get(epic_id, ""),
-                changesets={},
-                changeset_worktrees={},
-            )
+        if not changed_epics:
+            return ()
 
-        merged_changesets = dict(current.changesets)
-        for changeset_id, branch in moved_changesets.get(epic_id, {}).items():
-            merged_changesets.setdefault(changeset_id, branch)
-
-        merged_worktrees = dict(current.changeset_worktrees)
-        for changeset_id, relpath in moved_worktrees.get(epic_id, {}).items():
-            merged_worktrees.setdefault(changeset_id, relpath)
-
-        resolved_root = current.root_branch or root_map.get(epic_id, "")
-        updated = WorktreeMapping(
-            epic_id=current.epic_id,
-            worktree_path=current.worktree_path,
-            root_branch=resolved_root,
-            changesets=merged_changesets,
-            changeset_worktrees=merged_worktrees,
-        )
-        if updated != current:
-            changed_epics.add(epic_id)
-        mappings[epic_id] = updated
-
-    if not changed_epics:
-        return ()
-
-    paths.ensure_dir(meta_dir)
-    for epic_id in sorted(changed_epics):
-        write_mapping(mapping_path(project_dir, epic_id), mappings[epic_id])
-    return tuple(sorted(changed_epics))
+        paths.ensure_dir(meta_dir)
+        for epic_id in sorted(changed_epics):
+            write_mapping(mapping_path(project_dir, epic_id), mappings[epic_id])
+        return tuple(sorted(changed_epics))
 
 
 def _worktree_branch_in_use(
@@ -362,65 +461,66 @@ def reconcile_worktree_mapping_root_branch(
     git_path: str | None = None,
 ) -> WorktreeMapping:
     """Reconcile a stale mapping root branch when migration is deterministic."""
-    old_root = current_mapping.root_branch.strip()
-    new_root = expected_root_branch.strip()
-    if not old_root or old_root == new_root:
-        return current_mapping
+    with worktree_state_lock(project_dir):
+        old_root = current_mapping.root_branch.strip()
+        new_root = expected_root_branch.strip()
+        if not old_root or old_root == new_root:
+            return current_mapping
 
-    mapped_path = _resolve_mapping_worktree_path(project_dir, current_mapping)
-    if mapped_path.exists():
-        if not (mapped_path / ".git").exists():
-            die(
-                "worktree mapping migration blocked: "
-                f"{mapped_path} exists but is not a git worktree. "
-                "Fix the path or remove stale mapping metadata before retrying."
-            )
-        current_branch = git.git_current_branch(mapped_path, git_path=git_path)
-        if not current_branch or current_branch == "HEAD":
-            die(
-                "worktree mapping migration blocked: "
-                f"unable to resolve current branch for {mapped_path}. "
-                "Checkout a branch manually, then rerun."
-            )
-        if current_branch == old_root:
-            status = git.git_status_porcelain(mapped_path, git_path=git_path)
-            if status:
+        mapped_path = _resolve_mapping_worktree_path(project_dir, current_mapping)
+        if mapped_path.exists():
+            if not (mapped_path / ".git").exists():
                 die(
                     "worktree mapping migration blocked: "
-                    f"{mapped_path} has local changes on {old_root!r}. "
-                    "Commit/stash/discard changes, then rerun."
+                    f"{mapped_path} exists but is not a git worktree. "
+                    "Fix the path or remove stale mapping metadata before retrying."
                 )
-            if not _branch_exists(repo_root, new_root, git_path=git_path):
+            current_branch = git.git_current_branch(mapped_path, git_path=git_path)
+            if not current_branch or current_branch == "HEAD":
                 die(
                     "worktree mapping migration blocked: "
-                    f"target root branch {new_root!r} does not exist "
-                    f"(current mapping root is {old_root!r})."
+                    f"unable to resolve current branch for {mapped_path}. "
+                    "Checkout a branch manually, then rerun."
                 )
-            _checkout_branch_for_mapping_migration(
-                mapped_path,
-                new_root,
-                repo_root=repo_root,
-                git_path=git_path,
-            )
-        elif current_branch != new_root:
-            die(
-                "worktree mapping migration blocked: "
-                f"{mapped_path} is on {current_branch!r}, expected {old_root!r} "
-                f"or {new_root!r}. Resolve branch state manually, then rerun."
-            )
+            if current_branch == old_root:
+                status = git.git_status_porcelain(mapped_path, git_path=git_path)
+                if status:
+                    die(
+                        "worktree mapping migration blocked: "
+                        f"{mapped_path} has local changes on {old_root!r}. "
+                        "Commit/stash/discard changes, then rerun."
+                    )
+                if not _branch_exists(repo_root, new_root, git_path=git_path):
+                    die(
+                        "worktree mapping migration blocked: "
+                        f"target root branch {new_root!r} does not exist "
+                        f"(current mapping root is {old_root!r})."
+                    )
+                _checkout_branch_for_mapping_migration(
+                    mapped_path,
+                    new_root,
+                    repo_root=repo_root,
+                    git_path=git_path,
+                )
+            elif current_branch != new_root:
+                die(
+                    "worktree mapping migration blocked: "
+                    f"{mapped_path} is on {current_branch!r}, expected {old_root!r} "
+                    f"or {new_root!r}. Resolve branch state manually, then rerun."
+                )
 
-    updated_changesets = dict(current_mapping.changesets)
-    if updated_changesets.get(epic_id) == old_root:
-        updated_changesets[epic_id] = new_root
-    updated = WorktreeMapping(
-        epic_id=current_mapping.epic_id,
-        worktree_path=current_mapping.worktree_path,
-        root_branch=new_root,
-        changesets=updated_changesets,
-        changeset_worktrees=current_mapping.changeset_worktrees,
-    )
-    write_mapping(mapping_path(project_dir, epic_id), updated)
-    return updated
+        updated_changesets = dict(current_mapping.changesets)
+        if updated_changesets.get(epic_id) == old_root:
+            updated_changesets[epic_id] = new_root
+        updated = WorktreeMapping(
+            epic_id=current_mapping.epic_id,
+            worktree_path=current_mapping.worktree_path,
+            root_branch=new_root,
+            changesets=updated_changesets,
+            changeset_worktrees=current_mapping.changeset_worktrees,
+        )
+        write_mapping(mapping_path(project_dir, epic_id), updated)
+        return updated
 
 
 def ensure_worktree_mapping(
@@ -436,48 +536,49 @@ def ensure_worktree_mapping(
         die("epic id must not be empty")
     if not root_branch:
         die("root branch must not be empty")
-    root = worktrees_root(project_dir)
-    paths.ensure_dir(root)
-    path = mapping_path(project_dir, epic_id)
-    paths.ensure_dir(path.parent)
-    mapping = load_mapping(path)
-    if mapping is not None:
-        if mapping.root_branch and mapping.root_branch != root_branch:
-            if repo_root is None:
-                die(
-                    "root branch does not match existing worktree mapping "
-                    f"({mapping.root_branch!r} != {root_branch!r}) and no "
-                    "repository context is available for reconciliation"
+    with worktree_state_lock(project_dir):
+        root = worktrees_root(project_dir)
+        paths.ensure_dir(root)
+        path = mapping_path(project_dir, epic_id)
+        paths.ensure_dir(path.parent)
+        mapping = load_mapping(path)
+        if mapping is not None:
+            if mapping.root_branch and mapping.root_branch != root_branch:
+                if repo_root is None:
+                    die(
+                        "root branch does not match existing worktree mapping "
+                        f"({mapping.root_branch!r} != {root_branch!r}) and no "
+                        "repository context is available for reconciliation"
+                    )
+                mapping = reconcile_worktree_mapping_root_branch(
+                    project_dir,
+                    epic_id,
+                    current_mapping=mapping,
+                    expected_root_branch=root_branch,
+                    repo_root=repo_root,
+                    git_path=git_path,
                 )
-            mapping = reconcile_worktree_mapping_root_branch(
-                project_dir,
-                epic_id,
-                current_mapping=mapping,
-                expected_root_branch=root_branch,
-                repo_root=repo_root,
-                git_path=git_path,
-            )
-        if not mapping.root_branch:
-            updated = WorktreeMapping(
-                epic_id=mapping.epic_id,
-                worktree_path=mapping.worktree_path,
-                root_branch=root_branch,
-                changesets=mapping.changesets,
-                changeset_worktrees=mapping.changeset_worktrees,
-            )
-            write_mapping(path, updated)
-            return updated
+            if not mapping.root_branch:
+                updated = WorktreeMapping(
+                    epic_id=mapping.epic_id,
+                    worktree_path=mapping.worktree_path,
+                    root_branch=root_branch,
+                    changesets=mapping.changesets,
+                    changeset_worktrees=mapping.changeset_worktrees,
+                )
+                write_mapping(path, updated)
+                return updated
+            return mapping
+        relative_path = f"{paths.WORKTREES_DIRNAME}/{epic_id}"
+        mapping = WorktreeMapping(
+            epic_id=epic_id,
+            worktree_path=relative_path,
+            root_branch=root_branch,
+            changesets={},
+            changeset_worktrees={},
+        )
+        write_mapping(path, mapping)
         return mapping
-    relative_path = f"{paths.WORKTREES_DIRNAME}/{epic_id}"
-    mapping = WorktreeMapping(
-        epic_id=epic_id,
-        worktree_path=relative_path,
-        root_branch=root_branch,
-        changesets={},
-        changeset_worktrees={},
-    )
-    write_mapping(path, mapping)
-    return mapping
 
 
 def derive_changeset_branch(root_branch: str, changeset_id: str) -> str:
@@ -497,30 +598,31 @@ def ensure_changeset_branch(
     git_path: str | None = None,
 ) -> tuple[str, WorktreeMapping]:
     """Ensure a changeset branch mapping exists and return it."""
-    mapping = ensure_worktree_mapping(
-        project_dir,
-        epic_id,
-        root_branch,
-        repo_root=repo_root,
-        git_path=git_path,
-    )
-    branch = mapping.changesets.get(changeset_id)
-    if branch:
-        return branch, mapping
-    if changeset_id == epic_id:
-        # Epic-as-changeset runs execute directly on the epic root branch.
-        branch = root_branch
-    else:
-        branch = derive_changeset_branch(root_branch, changeset_id)
-    updated = WorktreeMapping(
-        epic_id=mapping.epic_id,
-        worktree_path=mapping.worktree_path,
-        root_branch=mapping.root_branch,
-        changesets={**mapping.changesets, changeset_id: branch},
-        changeset_worktrees=mapping.changeset_worktrees,
-    )
-    write_mapping(mapping_path(project_dir, epic_id), updated)
-    return branch, updated
+    with worktree_state_lock(project_dir):
+        mapping = ensure_worktree_mapping(
+            project_dir,
+            epic_id,
+            root_branch,
+            repo_root=repo_root,
+            git_path=git_path,
+        )
+        branch = mapping.changesets.get(changeset_id)
+        if branch:
+            return branch, mapping
+        if changeset_id == epic_id:
+            # Epic-as-changeset runs execute directly on the epic root branch.
+            branch = root_branch
+        else:
+            branch = derive_changeset_branch(root_branch, changeset_id)
+        updated = WorktreeMapping(
+            epic_id=mapping.epic_id,
+            worktree_path=mapping.worktree_path,
+            root_branch=mapping.root_branch,
+            changesets={**mapping.changesets, changeset_id: branch},
+            changeset_worktrees=mapping.changeset_worktrees,
+        )
+        write_mapping(mapping_path(project_dir, epic_id), updated)
+        return branch, updated
 
 
 def changeset_worktree_relpath(changeset_id: str) -> str:
@@ -544,25 +646,26 @@ def ensure_changeset_worktree(
     """Ensure a git worktree exists for a changeset and return its path."""
     if not branch or not root_branch:
         die("changeset branch and root branch must not be empty")
-    mapping = ensure_worktree_mapping(
-        project_dir,
-        epic_id,
-        root_branch,
-        repo_root=repo_root,
-        git_path=git_path,
-    )
-    relpath = mapping.changeset_worktrees.get(changeset_id)
-    if not relpath:
-        relpath = changeset_worktree_relpath(changeset_id)
-        updated = WorktreeMapping(
-            epic_id=mapping.epic_id,
-            worktree_path=mapping.worktree_path,
-            root_branch=mapping.root_branch,
-            changesets=mapping.changesets,
-            changeset_worktrees={**mapping.changeset_worktrees, changeset_id: relpath},
+    with worktree_state_lock(project_dir):
+        mapping = ensure_worktree_mapping(
+            project_dir,
+            epic_id,
+            root_branch,
+            repo_root=repo_root,
+            git_path=git_path,
         )
-        write_mapping(mapping_path(project_dir, epic_id), updated)
-        mapping = updated
+        relpath = mapping.changeset_worktrees.get(changeset_id)
+        if not relpath:
+            relpath = changeset_worktree_relpath(changeset_id)
+            updated = WorktreeMapping(
+                epic_id=mapping.epic_id,
+                worktree_path=mapping.worktree_path,
+                root_branch=mapping.root_branch,
+                changesets=mapping.changesets,
+                changeset_worktrees={**mapping.changeset_worktrees, changeset_id: relpath},
+            )
+            write_mapping(mapping_path(project_dir, epic_id), updated)
+            mapping = updated
 
     worktree_path = project_dir / relpath
     if worktree_path.exists():

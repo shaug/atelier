@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from . import beads, editor
+from . import agent_home, beads, editor
 from . import exec as exec_util
 from .agent_home import AGENT_INSTRUCTIONS_FILENAME, AgentHome
 from .io import die
@@ -138,14 +138,15 @@ def sync_agent_home_policy(
     """Ensure the agent home AGENTS.md includes the current policy."""
     if not isinstance(agent.path, Path):
         return
-    issues = beads.list_policy_beads(role, beads_root=beads_root, cwd=cwd)
-    body = ""
-    if issues:
-        body = beads.extract_policy_body(issues[0])
-    agents_path = agent.path / AGENT_INSTRUCTIONS_FILENAME
-    if not agents_path.exists():
-        return
-    content = agents_path.read_text(encoding="utf-8")
-    updated = apply_policy_block(content, role=role, body=body)
-    if updated != content:
-        agents_path.write_text(updated, encoding="utf-8")
+    with agent_home.agent_home_write_lock(agent.path):
+        issues = beads.list_policy_beads(role, beads_root=beads_root, cwd=cwd)
+        body = ""
+        if issues:
+            body = beads.extract_policy_body(issues[0])
+        agents_path = agent.path / AGENT_INSTRUCTIONS_FILENAME
+        if not agents_path.exists():
+            return
+        content = agents_path.read_text(encoding="utf-8")
+        updated = apply_policy_block(content, role=role, body=body)
+        if updated != content:
+            agent_home.write_text_atomic(agents_path, updated)

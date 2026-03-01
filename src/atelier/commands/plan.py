@@ -582,31 +582,34 @@ def run_planner(args: object) -> None:
             )
             finish()
             if agent.path.exists():
-                paths.ensure_dir(planner_agents_path.parent)
-                finish = _step("Write planner AGENTS.md", timings=timings, trace=trace)
-                planner_agents_path.write_text(planner_content, encoding="utf-8")
-                finish(str(planner_agents_path))
-                finish = _step("Sync policy", timings=timings, trace=trace)
-                policy.sync_agent_home_policy(
-                    agent,
-                    role=policy.ROLE_PLANNER,
-                    beads_root=beads_root,
-                    cwd=repo_root,
-                )
-                finish()
-                finish = _step("Sync Beads addendum", timings=timings, trace=trace)
-                prime_addendum = beads.prime_addendum(beads_root=beads_root, cwd=project_data_dir)
-                updated_content = planner_agents_path.read_text(encoding="utf-8")
-                next_content = agent_home.apply_beads_prime_addendum(
-                    updated_content,
-                    prime_addendum,
-                    role=policy.ROLE_PLANNER,
-                )
-                if next_content != updated_content:
-                    planner_agents_path.write_text(next_content, encoding="utf-8")
-                finish()
-                updated_content = planner_agents_path.read_text(encoding="utf-8")
-                agent_home.ensure_claude_compat(agent.path, updated_content)
+                with agent_home.agent_home_write_lock(agent.path):
+                    paths.ensure_dir(planner_agents_path.parent)
+                    finish = _step("Write planner AGENTS.md", timings=timings, trace=trace)
+                    agent_home.write_text_atomic(planner_agents_path, planner_content)
+                    finish(str(planner_agents_path))
+                    finish = _step("Sync policy", timings=timings, trace=trace)
+                    policy.sync_agent_home_policy(
+                        agent,
+                        role=policy.ROLE_PLANNER,
+                        beads_root=beads_root,
+                        cwd=repo_root,
+                    )
+                    finish()
+                    finish = _step("Sync Beads addendum", timings=timings, trace=trace)
+                    prime_addendum = beads.prime_addendum(
+                        beads_root=beads_root, cwd=project_data_dir
+                    )
+                    updated_content = planner_agents_path.read_text(encoding="utf-8")
+                    next_content = agent_home.apply_beads_prime_addendum(
+                        updated_content,
+                        prime_addendum,
+                        role=policy.ROLE_PLANNER,
+                    )
+                    if next_content != updated_content:
+                        agent_home.write_text_atomic(planner_agents_path, next_content)
+                    finish()
+                    updated_content = planner_agents_path.read_text(encoding="utf-8")
+                    agent_home.ensure_claude_compat(agent.path, updated_content)
             env = workspace.workspace_environment(
                 project_enlistment,
                 planner_branch,
