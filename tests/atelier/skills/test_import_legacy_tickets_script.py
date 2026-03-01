@@ -137,6 +137,48 @@ def test_main_reports_migrated_when_recoverable_state_is_resolved(
     )
 
 
+def test_main_reports_blocked_when_recoverable_state_remains_unresolved(
+    monkeypatch, capsys, tmp_path: Path
+) -> None:
+    module = _load_script()
+    before = _state(
+        classification="missing_dolt_with_legacy_sqlite",
+        migration_eligible=True,
+        has_dolt_store=False,
+        has_legacy_sqlite=True,
+        dolt_issue_total=3,
+        legacy_issue_total=3,
+        reason="legacy_sqlite_has_data_while_dolt_is_unavailable",
+    )
+    after = before
+    state_reads = iter([before, after])
+
+    beads_root = tmp_path / "beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    monkeypatch.setattr(module, "_resolve_context", lambda **_kwargs: (beads_root, repo_root, None))
+    monkeypatch.setattr(
+        module.beads,
+        "detect_startup_beads_state",
+        lambda **_kwargs: next(state_reads),
+    )
+    monkeypatch.setattr(module.beads, "run_bd_command", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        module.beads,
+        "format_startup_beads_diagnostics",
+        lambda state: f"classification={state.classification}",
+    )
+    monkeypatch.setattr(module.sys, "argv", ["import_legacy_tickets.py"])
+
+    module.main()
+
+    output = capsys.readouterr().out.strip().splitlines()
+    assert output[0] == (
+        "Beads startup auto-upgrade blocked: legacy migration remained unresolved after startup prime"
+    )
+
+
 def test_main_emits_override_warning(monkeypatch, capsys, tmp_path: Path) -> None:
     module = _load_script()
     beads_root = tmp_path / "override-beads"

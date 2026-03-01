@@ -940,6 +940,7 @@ def test_run_bd_command_prime_auto_migrates_recoverable_startup_state(
                 stderr="",
             )
         if argv == migrate:
+            (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True, exist_ok=True)
             return exec_util.CommandResult(
                 argv=request.argv,
                 returncode=0,
@@ -1028,10 +1029,18 @@ def test_run_bd_command_list_auto_migrates_recoverable_startup_state(
                 stderr="",
             )
         if argv == migrate:
+            (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True, exist_ok=True)
             return exec_util.CommandResult(
                 argv=request.argv,
                 returncode=0,
                 stdout='{"migrated":8}',
+                stderr="",
+            )
+        if argv == ["bd", "dolt", "show", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"connection_ok":true,"database":"beads_at"}',
                 stderr="",
             )
         if argv == ["bd", "list", "--json"]:
@@ -1294,6 +1303,7 @@ def test_run_bd_command_prime_blocks_when_migration_parity_fails(
                 stderr="",
             )
         if argv == migrate:
+            (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True, exist_ok=True)
             return exec_util.CommandResult(
                 argv=request.argv,
                 returncode=0,
@@ -1397,7 +1407,15 @@ def test_run_bd_command_prime_reconciles_runtime_agent_metadata(
                 stdout=json.dumps(payload),
                 stderr="",
             )
+        if argv == ["bd", "dolt", "show", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"connection_ok":true,"database":"beads_at"}',
+                stderr="",
+            )
         if argv == migrate:
+            (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True, exist_ok=True)
             return exec_util.CommandResult(
                 argv=request.argv,
                 returncode=0,
@@ -1496,7 +1514,15 @@ def test_run_bd_command_prime_recreates_missing_runtime_agent_bead(
                 stdout="[]",
                 stderr="",
             )
+        if argv == ["bd", "dolt", "show", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"connection_ok":true,"database":"beads_at"}',
+                stderr="",
+            )
         if argv == migrate:
+            (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True, exist_ok=True)
             return exec_util.CommandResult(
                 argv=request.argv,
                 returncode=0,
@@ -1574,6 +1600,81 @@ def test_detect_startup_beads_state_reports_healthy_dolt(tmp_path: Path) -> None
     assert state.migration_eligible is False
     assert state.dolt_issue_total == 12
     assert state.legacy_issue_total == 12
+
+
+def test_detect_startup_beads_state_never_reports_healthy_without_dolt_store(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "beads.db").write_bytes(b"")
+    (beads_root / "issues.jsonl").write_text('{"id":"at-1"}\n', encoding="utf-8")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    legacy_argv = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        if argv == ["bd", "stats", "--json"] or argv == legacy_argv:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":3}}',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+        state = beads.detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
+
+    assert state.classification == "missing_dolt_with_legacy_sqlite"
+    assert state.migration_eligible is True
+    assert state.has_dolt_store is False
+    assert state.dolt_issue_total == 3
+    assert state.legacy_issue_total == 3
+    assert state.dolt_count_source == "bd_stats_without_dolt_store"
+    assert state.legacy_count_source == "bd_stats_legacy_sqlite"
+    diagnostics = beads.format_startup_beads_diagnostics(state)
+    assert "dolt_store=missing" in diagnostics
+    assert "dolt_count_source=bd_stats_without_dolt_store" in diagnostics
+
+
+def test_detect_startup_beads_state_skips_recovery_for_explicit_non_dolt_backend(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "beads.db").write_bytes(b"")
+    (beads_root / "metadata.json").write_text('{"backend":"sqlite"}\n', encoding="utf-8")
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    legacy_argv = ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"]
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        if argv == ["bd", "stats", "--json"] or argv == legacy_argv:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"summary":{"total_issues":3}}',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+        state = beads.detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
+
+    assert state.classification == "startup_state_unknown"
+    assert state.migration_eligible is False
+    assert state.reason == "dolt_store_missing_for_non_dolt_backend"
+    assert state.backend == "sqlite"
+    assert state.dolt_count_source == "bd_stats_non_dolt_backend"
 
 
 def test_detect_startup_beads_state_reports_missing_dolt_with_legacy(
