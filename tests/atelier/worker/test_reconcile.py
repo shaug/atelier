@@ -161,6 +161,48 @@ def test_list_reconcile_epic_candidates_skips_stale_closed_active_metadata_when_
     assert candidates == {}
 
 
+def test_list_reconcile_epic_candidates_recovers_after_transient_pr_lookup_error() -> None:
+    drift_issue = {
+        "id": "at-1.14",
+        "status": "closed",
+        "labels": [],
+        "description": "changeset.work_branch: feat/at-1.14\npr_state: in-review\n",
+    }
+    with (
+        patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]),
+        patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
+        patch(
+            "atelier.worker.reconcile.prs.lookup_github_pr_status",
+            side_effect=[
+                prs.GithubPrLookup(outcome="error", error="gh timeout"),
+                prs.GithubPrLookup(
+                    outcome="found",
+                    payload={
+                        "number": 14,
+                        "state": "OPEN",
+                        "isDraft": False,
+                        "reviewDecision": None,
+                    },
+                ),
+            ],
+        ) as lookup,
+    ):
+        candidates = reconcile.list_reconcile_epic_candidates(
+            project_config=_project_config(),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            changeset_integration_signal=lambda *_args, **_kwargs: (False, None),
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            is_closed_status=lambda _status: False,
+            epic_root_integrated_into_parent=lambda *_args, **_kwargs: False,
+        )
+
+    assert candidates == {"at-1": ["at-1.14"]}
+    assert lookup.call_count == 2
+    assert lookup.call_args_list[0].kwargs == {}
+    assert lookup.call_args_list[1].kwargs == {"refresh": True}
+
+
 def test_resolve_hook_agent_bead_for_epic_prefers_epic_assignee() -> None:
     with (
         patch(

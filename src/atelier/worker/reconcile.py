@@ -83,6 +83,10 @@ def _live_review_state(
     pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path)
     lookup = prs.lookup_github_pr_status(repo_slug, work_branch)
     if lookup.failed:
+        # Retry with a forced refresh so a transient cached lookup error does
+        # not keep poisoning reconcile decisions for this branch.
+        lookup = prs.lookup_github_pr_status(repo_slug, work_branch, refresh=True)
+    if lookup.failed:
         return None, lookup.error
     if not lookup.found or not isinstance(lookup.payload, dict):
         return None, None
