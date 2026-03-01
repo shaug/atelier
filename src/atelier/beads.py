@@ -118,6 +118,41 @@ _DOLT_SERVER_ERROR_MARKERS = (
     "no such host",
     "unknown database",
 )
+_DOLT_AUTO_COMMIT_MODES = {"off", "on", "batch"}
+_DOLT_DIRECT_RUNTIME_MODES = {"direct"}
+_DOLT_COMMIT_SKIP_MESSAGE_PREFIX = "Skipping `bd dolt commit`:"
+_DOLT_COMMIT_PENDING_BOOL_KEYS = {
+    "dirty",
+    "has_changes",
+    "has_pending_changes",
+    "has_uncommitted_changes",
+    "is_dirty",
+    "working_set_dirty",
+}
+_DOLT_COMMIT_PENDING_COUNT_KEYS = {
+    "change_count",
+    "changes",
+    "modified_count",
+    "pending_change_count",
+    "pending_changes",
+    "staged_change_count",
+    "staged_changes",
+    "unstaged_change_count",
+    "unstaged_changes",
+    "working_set_changes",
+}
+_DOLT_COMMIT_PENDING_COLLECTION_KEYS = {
+    "changes",
+    "modified",
+    "pending",
+    "staged",
+    "tables",
+    "uncommitted",
+    "unstaged",
+    "working_set",
+}
+_DOLT_COMMIT_CLEAN_KEYS = {"clean", "is_clean", "working_set_clean"}
+_DOLT_COMMIT_IGNORED_STATUS_KEYS = {"branch", "commit", "hash", "head"}
 
 try:
     import fcntl  # type: ignore[attr-defined]
@@ -454,6 +489,13 @@ class DoltServerRuntime:
     database: str
 
 
+@dataclass(frozen=True)
+class _DoltCommitDecision:
+    should_run: bool
+    reason: str
+    message: str
+
+
 def beads_env(beads_root: Path) -> dict[str, str]:
     """Return an environment mapping with BEADS_DIR set."""
     env = os.environ.copy()
@@ -633,6 +675,262 @@ def _configured_beads_backend(beads_root: Path) -> str | None:
         return None
     backend = backend_value.strip().lower()
     return backend or None
+
+
+def _configured_dolt_mode(beads_root: Path) -> str | None:
+    metadata_path = beads_root / "metadata.json"
+    try:
+        raw = metadata_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not raw.strip():
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    mode_value = payload.get("dolt_mode")
+    if not isinstance(mode_value, str):
+        return None
+    mode = mode_value.strip().lower()
+    return mode or None
+
+
+def _is_dolt_commit_command(args: list[str]) -> bool:
+    for index, token in enumerate(args[:-1]):
+        if token == "dolt" and args[index + 1] == "commit":
+            return True
+    return False
+
+
+def _extract_dolt_auto_commit_override(args: list[str]) -> str | None:
+    for index, token in enumerate(args):
+        if token == "--dolt-auto-commit":
+            if index + 1 >= len(args):
+                return ""
+            return args[index + 1]
+        if token.startswith("--dolt-auto-commit="):
+            return token.split("=", 1)[1]
+    return None
+
+
+def _normalize_dolt_auto_commit_mode(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if not normalized:
+        return "off"
+    if normalized in _DOLT_AUTO_COMMIT_MODES:
+        return normalized
+    return None
+
+
+def _read_dolt_auto_commit_mode(
+    *,
+    args: list[str],
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[str | None, str | None]:
+    override = _extract_dolt_auto_commit_override(args)
+    if override is not None:
+        normalized = _normalize_dolt_auto_commit_mode(override)
+        if normalized is None:
+            return None, f"invalid --dolt-auto-commit value `{override}`"
+        return normalized, None
+
+    result = _run_raw_bd_command(
+        ["bd", "config", "get", "dolt.auto-commit", "--json"],
+        cwd=cwd,
+        env=env,
+    )
+    if result is None:
+        return None, "missing required command: bd"
+    if result.returncode != 0:
+        return None, _short_detail(_command_output_detail(result))
+    payload = _parse_raw_json_output(result)
+    if not isinstance(payload, dict):
+        return None, "invalid dolt.auto-commit payload"
+    normalized = _normalize_dolt_auto_commit_mode(payload.get("value"))
+    if normalized is None:
+        raw_value = payload.get("value")
+        return None, f"invalid dolt.auto-commit value `{raw_value}`"
+    return normalized, None
+
+
+def _value_indicates_pending_changes(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value > 0
+    if isinstance(value, float):
+        return value > 0.0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized not in {"", "0", "0.0", "false", "none", "null", "clean"}
+    if isinstance(value, dict):
+        return any(_value_indicates_pending_changes(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_value_indicates_pending_changes(item) for item in value) or bool(value)
+    return False
+
+
+def _vc_status_has_pending_changes(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    for key in _DOLT_COMMIT_CLEAN_KEYS:
+        value = payload.get(key)
+        if isinstance(value, bool) and not value:
+            return True
+    for key in _DOLT_COMMIT_PENDING_BOOL_KEYS:
+        value = payload.get(key)
+        if isinstance(value, bool) and value:
+            return True
+    for key in _DOLT_COMMIT_PENDING_COUNT_KEYS:
+        value = payload.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value > 0:
+            return True
+        if isinstance(value, float) and value > 0.0:
+            return True
+        if isinstance(value, str):
+            try:
+                if int(value.strip()) > 0:
+                    return True
+            except ValueError:
+                continue
+    for raw_key, value in payload.items():
+        key = str(raw_key).strip().lower().replace("-", "_")
+        if key in _DOLT_COMMIT_IGNORED_STATUS_KEYS:
+            continue
+        if key in _DOLT_COMMIT_PENDING_COLLECTION_KEYS:
+            if _value_indicates_pending_changes(value):
+                return True
+            continue
+        if any(token in key for token in _DOLT_COMMIT_PENDING_COLLECTION_KEYS):
+            if _value_indicates_pending_changes(value):
+                return True
+    return False
+
+
+def _resolve_dolt_commit_decision(
+    *,
+    args: list[str],
+    beads_root: Path,
+    cwd: Path,
+    env: dict[str, str],
+) -> _DoltCommitDecision | None:
+    if not _is_dolt_commit_command(args):
+        return None
+
+    backend = _configured_beads_backend(beads_root)
+    if backend and backend != "dolt":
+        return _DoltCommitDecision(
+            should_run=False,
+            reason="non_dolt_backend",
+            message=(
+                f"{_DOLT_COMMIT_SKIP_MESSAGE_PREFIX} backend is `{backend}` and "
+                "does not use a Dolt working-set commit."
+            ),
+        )
+
+    dolt_mode = _configured_dolt_mode(beads_root)
+    if dolt_mode in _DOLT_DIRECT_RUNTIME_MODES:
+        return _DoltCommitDecision(
+            should_run=False,
+            reason="direct_mode",
+            message=(
+                f"{_DOLT_COMMIT_SKIP_MESSAGE_PREFIX} dolt_mode is `{dolt_mode}` and "
+                "writes are already persisted directly."
+            ),
+        )
+
+    auto_commit_mode, auto_commit_detail = _read_dolt_auto_commit_mode(args=args, cwd=cwd, env=env)
+    if auto_commit_mode is None:
+        detail = auto_commit_detail or "unable to resolve dolt.auto-commit mode"
+        return _DoltCommitDecision(
+            should_run=False,
+            reason="invalid_auto_commit_mode",
+            message=f"{_DOLT_COMMIT_SKIP_MESSAGE_PREFIX} {detail}.",
+        )
+    if auto_commit_mode != "batch":
+        return _DoltCommitDecision(
+            should_run=False,
+            reason="auto_persist_mode",
+            message=(
+                f"{_DOLT_COMMIT_SKIP_MESSAGE_PREFIX} dolt.auto-commit is "
+                f"`{auto_commit_mode}`; no batch commit is required."
+            ),
+        )
+
+    show_result = _run_raw_bd_command(["bd", "dolt", "show", "--json"], cwd=cwd, env=env)
+    if show_result is None:
+        return _DoltCommitDecision(
+            should_run=False,
+            reason="missing_bd",
+            message=f"{_DOLT_COMMIT_SKIP_MESSAGE_PREFIX} missing required command: bd.",
+        )
+    if show_result.returncode != 0:
+        detail = _short_detail(_command_output_detail(show_result)) or "dolt capability unavailable"
+        return _DoltCommitDecision(
+            should_run=False,
+            reason="dolt_capability_unavailable",
+            message=(
+                f"{_DOLT_COMMIT_SKIP_MESSAGE_PREFIX} Dolt commit capability is unavailable "
+                f"({detail})."
+            ),
+        )
+    show_payload = _parse_raw_json_output(show_result)
+    if not isinstance(show_payload, dict):
+        return _DoltCommitDecision(
+            should_run=False,
+            reason="invalid_dolt_show_payload",
+            message=f"{_DOLT_COMMIT_SKIP_MESSAGE_PREFIX} invalid `bd dolt show --json` payload.",
+        )
+    connection_ok = show_payload.get("connection_ok")
+    if isinstance(connection_ok, bool) and not connection_ok:
+        return _DoltCommitDecision(
+            should_run=False,
+            reason="dolt_connection_unavailable",
+            message=(
+                f"{_DOLT_COMMIT_SKIP_MESSAGE_PREFIX} `bd dolt show --json` reported "
+                "connection_ok=false."
+            ),
+        )
+
+    status_result = _run_raw_bd_command(["bd", "vc", "status", "--json"], cwd=cwd, env=env)
+    if status_result is None:
+        return _DoltCommitDecision(
+            should_run=False,
+            reason="missing_bd",
+            message=f"{_DOLT_COMMIT_SKIP_MESSAGE_PREFIX} missing required command: bd.",
+        )
+    if status_result.returncode != 0:
+        detail = (
+            _short_detail(_command_output_detail(status_result)) or "unable to inspect working set"
+        )
+        return _DoltCommitDecision(
+            should_run=False,
+            reason="status_unavailable",
+            message=(
+                f"{_DOLT_COMMIT_SKIP_MESSAGE_PREFIX} unable to inspect Dolt working-set "
+                f"changes ({detail})."
+            ),
+        )
+    status_payload = _parse_raw_json_output(status_result)
+    if not _vc_status_has_pending_changes(status_payload):
+        return _DoltCommitDecision(
+            should_run=False,
+            reason="no_pending_changes",
+            message=f"{_DOLT_COMMIT_SKIP_MESSAGE_PREFIX} no pending Dolt working-set changes.",
+        )
+    return _DoltCommitDecision(
+        should_run=True,
+        reason="batch_pending_changes",
+        message="Running `bd dolt commit`: batch mode has pending Dolt working-set changes.",
+    )
 
 
 def _extract_total_issues(payload: object) -> int | None:
@@ -2177,6 +2475,20 @@ def run_bd_command(
         bd_invocation.ensure_supported_bd_version(env=env)
     except RuntimeError as exc:
         die(str(exc))
+    dolt_commit_decision = _resolve_dolt_commit_decision(
+        args=args,
+        beads_root=beads_root,
+        cwd=cwd,
+        env=env,
+    )
+    if dolt_commit_decision is not None and not dolt_commit_decision.should_run:
+        atelier_log.info(dolt_commit_decision.message)
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout=f"{dolt_commit_decision.message}\n",
+            stderr="",
+        )
     _attempt_startup_auto_migration(args=args, beads_root=beads_root, cwd=cwd, env=env)
     _normalize_dolt_runtime_metadata_once(beads_root=beads_root)
     if _should_emit_startup_auto_migration_diagnostic(args):
@@ -2622,11 +2934,17 @@ def epic_discovery_parity_report(
     )
 
 
-def _strip_unsupported_commands_from_addendum(text: str) -> str:
+def _strip_unsupported_commands_from_addendum(
+    text: str,
+    *,
+    keep_dolt_commit: bool = False,
+) -> str:
     """Remove lines referencing unsupported/deprecated Beads commands."""
     if not text:
         return text
-    blocked_substrings = ("bd export", "sync --export", "bd dolt commit")
+    blocked_substrings = ("bd export", "sync --export")
+    if not keep_dolt_commit:
+        blocked_substrings = (*blocked_substrings, "bd dolt commit")
     out: list[str] = []
     for line in text.splitlines():
         lower = line.lower()
@@ -2645,8 +2963,9 @@ def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
     Injection is done elsewhere via agent_home.apply_beads_prime_addendum():
     the planner syncs it during plan, and the worker syncs it at session start.
     Lines that reference unsupported or deprecated commands (`bd export`,
-    `bd sync --export`, `bd dolt commit`) are stripped before return so agents
-    are not told to run unavailable commands.
+    `bd sync --export`) are stripped before return. `bd dolt commit` is kept
+    only when runtime/backend/pending-change checks indicate a Dolt
+    working-set commit is actually required.
     """
     env = beads_env(beads_root)
     command = ["bd", "prime", "--full"]
@@ -2665,7 +2984,19 @@ def prime_addendum(*, beads_root: Path, cwd: Path) -> str | None:
     if result.returncode != 0:
         return None
     output = (result.stdout or "").strip()
-    output = _strip_unsupported_commands_from_addendum(output)
+    keep_dolt_commit = False
+    if "bd dolt commit" in output.lower():
+        decision = _resolve_dolt_commit_decision(
+            args=["dolt", "commit"],
+            beads_root=beads_root,
+            cwd=cwd,
+            env=env,
+        )
+        keep_dolt_commit = bool(decision and decision.should_run)
+    output = _strip_unsupported_commands_from_addendum(
+        output,
+        keep_dolt_commit=keep_dolt_commit,
+    )
     return output or None
 
 
