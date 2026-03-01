@@ -102,7 +102,10 @@ def collect_resolved_epic_artifacts(
                 f"integration target: {target_ref}",
                 f"branches blocked by integration check: {non_integrated_summary}",
                 "skip reason: closed epic cleanup keeps branch/worktree pruning safe by default",
-                "recovery: add label cs:abandoned to request explicit cleanup confirmation",
+                (
+                    "recovery: add label cs:abandoned or cs:superseded "
+                    "to request explicit cleanup confirmation"
+                ),
             )
             actions.append(
                 GcAction(
@@ -171,6 +174,12 @@ def collect_resolved_epic_artifacts(
             f"integration target: {target_ref}",
         ]
         if non_integrated_branches and cleanup_override_labels:
+            details_list.append(
+                (
+                    "warning: integration safety checks were bypassed by explicit "
+                    "cleanup override labels"
+                )
+            )
             details_list.append(
                 f"integration override labels: {', '.join(sorted(cleanup_override_labels))}"
             )

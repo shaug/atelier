@@ -155,6 +155,10 @@ def test_collect_resolved_epic_artifacts_skips_when_not_integrated() -> None:
         assert actions[0].description == "Skip resolved epic artifact cleanup for at-epic"
         assert actions[0].report_only is True
         assert "branches blocked by integration check: feat/root" in actions[0].details
+        assert (
+            "recovery: add label cs:abandoned or cs:superseded to request explicit cleanup "
+            "confirmation"
+        ) in actions[0].details
 
 
 def test_collect_resolved_epic_artifacts_allows_explicit_abandoned_cleanup() -> None:
@@ -217,6 +221,10 @@ def test_collect_resolved_epic_artifacts_allows_explicit_abandoned_cleanup() -> 
         assert len(actions) == 1
         assert actions[0].description == "Prune explicitly abandoned epic artifacts for at-epic"
         assert actions[0].report_only is False
+        assert (
+            "warning: integration safety checks were bypassed by explicit cleanup override labels"
+            in actions[0].details
+        )
         assert "integration override labels: cs:abandoned" in actions[0].details
         assert "non-integrated branches allowed by override: feat/root" in actions[0].details
 
