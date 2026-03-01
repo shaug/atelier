@@ -192,3 +192,57 @@ def test_collect_message_claims_skips_release_when_claim_owner_changes() -> None
         actions[0].apply()
 
     assert commands == []
+
+
+def test_collect_message_claims_skips_release_when_assignee_changes_from_unassigned() -> None:
+    now = dt.datetime.now(tz=dt.timezone.utc)
+    stale_time = (now - dt.timedelta(hours=25)).isoformat()
+    stale_description = render_message(
+        {
+            "channel": "ops",
+            "queue": "work",
+            "claimed_by": "agent-1",
+            "claimed_at": stale_time,
+        },
+        "hello",
+    )
+    listed_issue = {
+        "id": "msg-1",
+        "description": stale_description,
+    }
+    current_issue = {
+        "id": "msg-1",
+        "assignee": "agent-2",
+        "description": stale_description,
+    }
+
+    commands: list[list[str]] = []
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:3] == ["list", "--label", "at:message"]:
+            return [listed_issue]
+        if args[:2] == ["show", "msg-1"]:
+            return [current_issue]
+        return []
+
+    def fake_run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> object:
+        commands.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+    ):
+        actions = gc_messages.collect_message_claims(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            stale_hours=24.0,
+        )
+        assert len(actions) == 1
+        actions[0].apply()
+
+    assert commands == []

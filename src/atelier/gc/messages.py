@@ -63,7 +63,7 @@ def collect_message_claims(
                 return
             issue_payload = current[0]
             current_assignee = _clean_optional_string(issue_payload.get("assignee"))
-            if stale_assignee is not None and current_assignee != stale_assignee:
+            if current_assignee != stale_assignee:
                 return
             description = issue_payload.get("description")
             if not isinstance(description, str):
