@@ -1,3 +1,5 @@
+import datetime as dt
+
 from atelier.worker import publish
 
 
@@ -125,3 +127,84 @@ def test_render_changeset_pr_body_ignores_numbered_prose_after_action_token() ->
     assert "- Addresses #901" in body
     assert "#1" not in body
     assert "#2" not in body
+
+
+def test_render_pr_ticket_lines_marks_closed_external_issue_as_addresses() -> None:
+    issue = {
+        "description": (
+            "external_tickets: "
+            '[{"provider":"github","id":"371","relation":"primary","state":"closed",'
+            '"state_updated_at":"2026-03-01T16:30:04Z","last_synced_at":"2026-03-01T16:30:04Z"}]'
+        )
+    }
+
+    lines = publish.render_pr_ticket_lines(
+        issue, now=dt.datetime(2026, 3, 1, 16, 55, tzinfo=dt.UTC)
+    )
+
+    assert lines == ["- Addresses #371"]
+
+
+def test_render_pr_ticket_lines_fails_closed_for_stale_state_metadata() -> None:
+    issue = {
+        "description": (
+            "external_tickets: "
+            '[{"provider":"github","id":"371","relation":"primary","state":"open",'
+            '"state_updated_at":"2026-03-01T15:22:33Z","last_synced_at":"2026-03-01T15:22:33Z"}]'
+        )
+    }
+
+    lines = publish.render_pr_ticket_lines(
+        issue, now=dt.datetime(2026, 3, 1, 16, 55, tzinfo=dt.UTC)
+    )
+
+    assert lines == ["- Addresses #371"]
+
+
+def test_render_pr_ticket_lines_ignores_recent_last_synced_when_state_timestamp_is_stale() -> None:
+    issue = {
+        "description": (
+            "external_tickets: "
+            '[{"provider":"github","id":"371","relation":"primary","state":"open",'
+            '"state_updated_at":"2026-03-01T15:22:33Z","last_synced_at":"2026-03-01T16:54:00Z"}]'
+        )
+    }
+
+    lines = publish.render_pr_ticket_lines(
+        issue, now=dt.datetime(2026, 3, 1, 16, 55, tzinfo=dt.UTC)
+    )
+
+    assert lines == ["- Addresses #371"]
+
+
+def test_render_pr_ticket_lines_allows_fixes_for_fresh_state_metadata() -> None:
+    issue = {
+        "description": (
+            "external_tickets: "
+            '[{"provider":"github","id":"387","relation":"primary","state":"open",'
+            '"state_updated_at":"2026-03-01T16:50:00Z","last_synced_at":"2026-03-01T16:50:00Z"}]'
+        )
+    }
+
+    lines = publish.render_pr_ticket_lines(
+        issue, now=dt.datetime(2026, 3, 1, 16, 55, tzinfo=dt.UTC)
+    )
+
+    assert lines == ["- Fixes #387"]
+
+
+def test_render_pr_ticket_lines_does_not_upgrade_closed_ticket_from_explicit_clause() -> None:
+    issue = {
+        "description": (
+            "external_tickets: "
+            '[{"provider":"github","id":"371","relation":"primary","state":"open",'
+            '"state_updated_at":"2026-03-01T15:22:33Z","last_synced_at":"2026-03-01T15:22:33Z"}]\n'
+            "notes: Fixes #371\n"
+        )
+    }
+
+    lines = publish.render_pr_ticket_lines(
+        issue, now=dt.datetime(2026, 3, 1, 16, 55, tzinfo=dt.UTC)
+    )
+
+    assert lines == ["- Addresses #371"]

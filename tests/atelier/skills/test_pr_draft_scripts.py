@@ -85,6 +85,23 @@ def test_render_tickets_section_ignores_numbered_prose_after_action_token() -> N
     assert "#2" not in section
 
 
+def test_render_tickets_section_avoids_closing_clause_for_closed_ticket() -> None:
+    module = _load_script_module()
+    issue = {
+        "description": (
+            "scope: test\n"
+            "external_tickets: "
+            '[{"provider":"github","id":"371","relation":"primary","state":"closed"}]\n'
+        )
+    }
+
+    section = module.render_ticket_section(issue)
+
+    assert "## Tickets" in section
+    assert "- Addresses #371" in section
+    assert "- Fixes #371" not in section
+
+
 def test_load_issue_defaults_to_direct_mode(monkeypatch, tmp_path: Path) -> None:
     module = _load_script_module()
     captured: dict[str, list[str]] = {}

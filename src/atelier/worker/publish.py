@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 
 from .. import beads
@@ -32,6 +33,98 @@ _EXPLICIT_GITHUB_CLAUSE_RE = re.compile(
     ),
     re.IGNORECASE,
 )
+_CLOSING_STATE_MAX_AGE = dt.timedelta(hours=1)
+
+
+def _utc_now() -> dt.datetime:
+    """Return the current UTC timestamp."""
+    return dt.datetime.now(tz=dt.timezone.utc)
+
+
+def _parse_timestamp(value: str | None) -> dt.datetime | None:
+    """Parse ISO-8601 metadata timestamps into aware UTC datetimes."""
+    if not value:
+        return None
+    candidate = value.strip()
+    if not candidate:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(candidate.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def _ticket_state_timestamp(ticket: ExternalTicketRef) -> dt.datetime | None:
+    """Return the ticket state timestamp used for closing-clause freshness.
+
+    Prefer ``state_updated_at`` when present because local writes can refresh
+    ``last_synced_at`` without re-reading remote state.
+    """
+    state_updated = _parse_timestamp(ticket.state_updated_at)
+    if state_updated is not None:
+        return state_updated
+    return _parse_timestamp(ticket.last_synced_at)
+
+
+def _ticket_has_state_tracking(ticket: ExternalTicketRef) -> bool:
+    """Return whether ticket metadata includes state tracking fields."""
+    return any(
+        (
+            ticket.state is not None,
+            ticket.state_updated_at is not None,
+            ticket.last_synced_at is not None,
+        )
+    )
+
+
+def _ticket_allows_closing_clause(
+    ticket: ExternalTicketRef,
+    *,
+    now: dt.datetime | None = None,
+) -> bool:
+    """Return whether a ticket can safely use a closing clause."""
+    if ticket.relation == "context":
+        return False
+
+    if ticket.state == "closed":
+        return False
+    if ticket.state == "unknown":
+        return False
+
+    if not _ticket_has_state_tracking(ticket):
+        # Backwards-compatibility for legacy metadata without state tracking.
+        return True
+
+    reference_timestamp = _ticket_state_timestamp(ticket)
+    if reference_timestamp is None:
+        return False
+
+    now_utc = now or _utc_now()
+    return now_utc - reference_timestamp <= _CLOSING_STATE_MAX_AGE
+
+
+def _ticket_forbids_closing_clause(
+    ticket: ExternalTicketRef,
+    *,
+    now: dt.datetime | None = None,
+) -> bool:
+    """Return whether stale/terminal state metadata forbids closing clauses."""
+    if ticket.state == "closed":
+        return True
+    if ticket.state == "unknown":
+        return True
+    if not _ticket_has_state_tracking(ticket):
+        return False
+
+    reference_timestamp = _ticket_state_timestamp(ticket)
+    if reference_timestamp is None:
+        return True
+
+    now_utc = now or _utc_now()
+    return now_utc - reference_timestamp > _CLOSING_STATE_MAX_AGE
 
 
 def normalized_markdown_bullets(value: str) -> list[str]:
@@ -67,18 +160,22 @@ def format_ticket_reference(ticket: ExternalTicketRef) -> str:
     return normalize_github_reference(ticket.url or "") or ticket_id
 
 
-def ticket_action_verb(ticket: ExternalTicketRef) -> str:
+def ticket_action_verb(
+    ticket: ExternalTicketRef,
+    *,
+    now: dt.datetime | None = None,
+) -> str:
     """Resolve the PR ticket action verb for an external ticket.
 
     Args:
         ticket: External ticket reference payload.
 
     Returns:
-        ``Fixes`` for resolvable tickets and ``Addresses`` for context tickets.
+        ``Fixes`` for safely closable tickets and ``Addresses`` otherwise.
     """
-    if ticket.relation == "context":
-        return "Addresses"
-    return "Fixes"
+    if _ticket_allows_closing_clause(ticket, now=now):
+        return "Fixes"
+    return "Addresses"
 
 
 def normalize_github_reference(value: str) -> str | None:
@@ -122,23 +219,36 @@ def _merge_ticket_line(
     lines: list[str],
     seen: dict[tuple[str, str], int],
     actions: dict[tuple[str, str], str],
+    allow_fixes: bool = True,
 ) -> None:
+    effective_action = action
+    if action == "Fixes" and not allow_fixes:
+        effective_action = "Addresses"
     position = seen.get(key)
     if position is None:
         seen[key] = len(lines)
-        actions[key] = action
-        lines.append(f"- {action} {reference}")
+        actions[key] = effective_action
+        lines.append(f"- {effective_action} {reference}")
         return
-    if actions.get(key) != "Fixes" and action == "Fixes":
+    if not allow_fixes and actions.get(key) == "Fixes":
+        actions[key] = "Addresses"
+        lines[position] = f"- Addresses {reference}"
+        return
+    if allow_fixes and actions.get(key) != "Fixes" and effective_action == "Fixes":
         actions[key] = "Fixes"
         lines[position] = f"- Fixes {reference}"
 
 
-def render_pr_ticket_lines(issue: dict[str, object]) -> list[str]:
+def render_pr_ticket_lines(
+    issue: dict[str, object],
+    *,
+    now: dt.datetime | None = None,
+) -> list[str]:
     """Render PR ticket bullets from a bead issue payload.
 
     Args:
         issue: Bead issue payload.
+        now: Optional timestamp override used for deterministic freshness checks.
 
     Returns:
         Ticket bullets for the PR ``Tickets`` section.
@@ -148,18 +258,24 @@ def render_pr_ticket_lines(issue: dict[str, object]) -> list[str]:
     lines: list[str] = []
     seen: dict[tuple[str, str], int] = {}
     actions: dict[tuple[str, str], str] = {}
+    disallow_fixes: set[tuple[str, str]] = set()
+    now_utc = now or _utc_now()
     for ticket in tickets:
         reference = format_ticket_reference(ticket).strip()
         if not reference:
             continue
         dedupe_key = (ticket.provider, reference.lower())
+        allow_fixes = _ticket_allows_closing_clause(ticket, now=now_utc)
+        if _ticket_forbids_closing_clause(ticket, now=now_utc):
+            disallow_fixes.add(dedupe_key)
         _merge_ticket_line(
             key=dedupe_key,
             reference=reference,
-            action=ticket_action_verb(ticket),
+            action=ticket_action_verb(ticket, now=now_utc),
             lines=lines,
             seen=seen,
             actions=actions,
+            allow_fixes=allow_fixes,
         )
     for action, reference in parse_explicit_github_references(
         description if isinstance(description, str) else None
@@ -172,6 +288,7 @@ def render_pr_ticket_lines(issue: dict[str, object]) -> list[str]:
             lines=lines,
             seen=seen,
             actions=actions,
+            allow_fixes=dedupe_key not in disallow_fixes,
         )
     return lines
 
