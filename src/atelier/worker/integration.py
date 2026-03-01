@@ -87,7 +87,11 @@ def _integration_target_branches(
 
 
 def _target_refs_for_branch(
-    repo_root: Path, branch: str, *, git_path: str | None = None
+    repo_root: Path,
+    branch: str,
+    *,
+    git_path: str | None = None,
+    require_remote_tracking: bool = False,
 ) -> list[str]:
     normalized = branch.strip()
     if not normalized:
@@ -109,6 +113,8 @@ def _target_refs_for_branch(
         )
         if remote_exists:
             return [remote_ref]
+        if require_remote_tracking:
+            return []
         refs.append(normalized)
         return refs
 
@@ -117,11 +123,20 @@ def _target_refs_for_branch(
 
 
 def _target_refs_for_branches(
-    repo_root: Path, branches: list[str], *, git_path: str | None = None
+    repo_root: Path,
+    branches: list[str],
+    *,
+    git_path: str | None = None,
+    require_remote_tracking: bool = False,
 ) -> list[str]:
     refs: list[str] = []
     for branch in branches:
-        for ref in _target_refs_for_branch(repo_root, branch, git_path=git_path):
+        for ref in _target_refs_for_branch(
+            repo_root,
+            branch,
+            git_path=git_path,
+            require_remote_tracking=require_remote_tracking,
+        ):
             if ref not in refs:
                 refs.append(ref)
     return refs
@@ -222,7 +237,12 @@ def changeset_integration_signal(
             repo_root=repo_root,
             git_path=git_path,
         )
-        target_refs = _target_refs_for_branches(repo_root, target_branches, git_path=git_path)
+        target_refs = _target_refs_for_branches(
+            repo_root,
+            target_branches,
+            git_path=git_path,
+            require_remote_tracking=True,
+        )
         source_branches: list[str] = []
         for branch in (work_branch, root_branch):
             if branch and branch not in source_branches:
@@ -275,7 +295,10 @@ def changeset_integration_signal(
             return True, integrated_sha
         if target_branches and _refresh_origin_refs(repo_root, git_path=git_path):
             refreshed_target_refs = _target_refs_for_branches(
-                repo_root, target_branches, git_path=git_path
+                repo_root,
+                target_branches,
+                git_path=git_path,
+                require_remote_tracking=True,
             )
             proven, integrated_sha = prove_against_targets(refreshed_target_refs)
             if proven:

@@ -185,6 +185,78 @@ def test_changeset_integration_signal_strict_mode_rejects_local_only_target_proo
     assert integrated_sha is None
 
 
+def test_changeset_integration_signal_strict_mode_fetches_before_accepting_target_ref() -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: main\n"
+            "changeset.work_branch: feat/work\n"
+        )
+    }
+    refreshed = {"value": False}
+
+    def fake_ref_exists(_repo_root: Path, ref: str, *, git_path: str | None = None) -> bool:
+        del git_path
+        if ref in {
+            "refs/heads/feat/root",
+            "refs/heads/feat/work",
+            "refs/heads/main",
+        }:
+            return True
+        if ref == "refs/remotes/origin/main":
+            return refreshed["value"]
+        return False
+
+    def fake_is_ancestor(
+        _repo_root: Path,
+        ancestor: str,
+        descendant: str,
+        *,
+        git_path: str | None = None,
+    ) -> bool:
+        del git_path
+        if ancestor == "feat/work" and descendant == "main":
+            return True
+        if ancestor == "feat/work" and descendant == "origin/main":
+            return refreshed["value"]
+        return False
+
+    def fake_rev_parse(_repo_root: Path, ref: str, *, git_path: str | None = None) -> str | None:
+        del git_path
+        mapping = {
+            "feat/work": "worksha",
+            "feat/root": "rootsha",
+        }
+        return mapping.get(ref)
+
+    def fake_refresh(_repo_root: Path, *, git_path: str | None = None) -> bool:
+        del git_path
+        refreshed["value"] = True
+        return True
+
+    with (
+        patch("atelier.worker.integration.git.git_ref_exists", side_effect=fake_ref_exists),
+        patch("atelier.worker.integration.git.git_default_branch", return_value="main"),
+        patch("atelier.worker.integration.git.git_is_ancestor", side_effect=fake_is_ancestor),
+        patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
+        patch("atelier.worker.integration.git.git_rev_parse", side_effect=fake_rev_parse),
+        patch(
+            "atelier.worker.integration._refresh_origin_refs", side_effect=fake_refresh
+        ) as refresh,
+    ):
+        ok, integrated_sha = integration.changeset_integration_signal(
+            issue,
+            repo_slug=None,
+            repo_root=Path("/repo"),
+            lookup_pr_payload=lambda _repo, _branch: None,
+            require_target_branch_proof=True,
+        )
+
+    assert ok is True
+    assert integrated_sha == "worksha"
+    assert refresh.call_count == 1
+
+
 def test_changeset_integration_signal_strict_mode_retries_after_fetch_refresh() -> None:
     issue = {
         "description": (
@@ -543,7 +615,15 @@ def test_changeset_integration_signal_active_pr_state_allows_parent_integration(
         patch(
             "atelier.worker.integration.git.git_is_ancestor",
             side_effect=lambda _repo_root, ancestor, descendant, *, git_path=None: (
-                ancestor == "feat/root" and descendant == "main"
+                ancestor == "feat/root" and descendant == "origin/main"
+            ),
+        ),
+        patch(
+            "atelier.worker.integration.git.git_ref_exists",
+            side_effect=lambda _repo_root, ref, **_kwargs: (
+                ref == "refs/remotes/origin/main"
+                or ref == "refs/heads/feat/root"
+                or ref == "refs/heads/main"
             ),
         ),
         patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
@@ -581,12 +661,21 @@ def test_changeset_integration_signal_active_pr_state_uses_work_to_target_for_st
         git_path: str | None = None,
     ) -> bool:
         del git_path
-        return ancestor == "feat/work" and descendant == "main"
+        return ancestor == "feat/work" and descendant == "origin/main"
 
     with (
         patch(
             "atelier.worker.integration.branch_ref_for_lookup",
             side_effect=lambda _r, branch, **_k: branch,
+        ),
+        patch(
+            "atelier.worker.integration.git.git_ref_exists",
+            side_effect=lambda _repo_root, ref, **_kwargs: (
+                ref == "refs/remotes/origin/main"
+                or ref == "refs/heads/feat/root"
+                or ref == "refs/heads/feat/work"
+                or ref == "refs/heads/main"
+            ),
         ),
         patch("atelier.worker.integration.git.git_is_ancestor", side_effect=fake_is_ancestor),
         patch("atelier.worker.integration.git.git_branch_fully_applied", return_value=False),
