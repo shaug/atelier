@@ -13,7 +13,8 @@ during startup triage. Do not wait for approval to capture deferred work.
 ## Inputs
 
 - agent_id: Planner agent identity.
-- beads_dir: Optional Beads store path.
+- beads_dir: Optional explicit Beads store override. Default is the
+  project-scoped Beads root.
 - queue: Optional queue name to check (if queues are enabled).
 
 ## Steps
@@ -51,3 +52,9 @@ during startup triage. Do not wait for approval to capture deferred work.
   - unread planner inbox messages
   - queued messages with queue name and claim state
   - active epics in stable `epic-list --show-drafts` format
+  - Beads root + total epic count diagnostics for planner/worker parity checks
+
+## Parity and recovery
+
+- Use the one-shot parity check and recovery playbook in
+  `docs/beads-store-parity.md`.

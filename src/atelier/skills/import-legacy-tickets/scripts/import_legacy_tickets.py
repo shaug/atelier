@@ -8,23 +8,20 @@ import os
 import sys
 from pathlib import Path
 
-from atelier import beads, config
-from atelier.commands.resolve import resolve_current_project_with_repo_root
+from atelier import beads
+from atelier.beads_context import resolve_skill_beads_context
 
 _MISSING_DOLT = "missing_dolt_with_legacy_sqlite"
 _INSUFFICIENT_DOLT = "insufficient_dolt_vs_legacy_data"
 _HEALTHY_DOLT = "healthy_dolt"
 
 
-def _resolve_context(*, beads_dir: str | None) -> tuple[Path, Path]:
-    repo_env = os.environ.get("ATELIER_PROJECT", "").strip()
-    beads_env = str(beads_dir or "").strip() or os.environ.get("BEADS_DIR", "").strip()
-    repo_root = Path(repo_env).resolve() if repo_env else Path.cwd()
-    if beads_env:
-        return Path(beads_env).expanduser().resolve(), repo_root
-    project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
-    project_data_dir = config.resolve_project_data_dir(project_root, project_config)
-    return config.resolve_beads_root(project_data_dir, repo_root), repo_root
+def _resolve_context(*, beads_dir: str | None) -> tuple[Path, Path, str | None]:
+    context = resolve_skill_beads_context(
+        beads_dir=beads_dir,
+        repo_dir=os.environ.get("ATELIER_PROJECT", "").strip() or None,
+    )
+    return context.beads_root, context.repo_root, context.override_warning
 
 
 def _status_reason(state: beads.StartupBeadsState) -> str:
@@ -62,11 +59,13 @@ def main() -> None:
     parser.add_argument(
         "--beads-dir",
         default="",
-        help="beads root path (defaults to BEADS_DIR env var or project config)",
+        help="explicit beads root override (defaults to project-scoped store)",
     )
     args = parser.parse_args()
 
-    beads_root, repo_root = _resolve_context(beads_dir=args.beads_dir)
+    beads_root, repo_root, override_warning = _resolve_context(beads_dir=args.beads_dir)
+    if override_warning:
+        print(override_warning, file=sys.stderr)
     if not beads_root.exists():
         print(f"error: beads dir not found: {beads_root}", file=sys.stderr)
         raise SystemExit(1)
