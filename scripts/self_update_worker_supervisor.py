@@ -101,7 +101,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--worker-command",
-        default="atelier work --run-mode once",
+        default="atelier work --run-mode once --yes",
         help=("Base worker command to run once per cycle. Arguments after '--' are appended."),
     )
     parser.add_argument(
@@ -251,7 +251,8 @@ def _require_git_repo(repo_path: Path) -> None:
     """
 
     _capture_output(
-        ["git", "-C", str(repo_path), "rev-parse", "--is-inside-work-tree"], cwd=repo_path
+        ["git", "-C", str(repo_path), "rev-parse", "--is-inside-work-tree"],
+        cwd=repo_path,
     )
 
 
@@ -305,7 +306,15 @@ def _run_update_step(config: RunnerConfig) -> bool:
         f"remote={config.git_remote!r} ref={ref!r} repo={config.repo_path}"
     )
     fetch_rc = _run_command(
-        ["git", "-C", str(config.repo_path), "fetch", "--prune", config.git_remote, ref],
+        [
+            "git",
+            "-C",
+            str(config.repo_path),
+            "fetch",
+            "--prune",
+            config.git_remote,
+            ref,
+        ],
         cwd=config.repo_path,
         dry_run=config.dry_run,
     )
