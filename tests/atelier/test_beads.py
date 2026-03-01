@@ -2270,6 +2270,181 @@ def test_ensure_atelier_store_skips_existing_root() -> None:
     run_command.assert_not_called()
 
 
+def test_run_bd_command_skips_dolt_commit_when_direct_mode(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt", "dolt_mode": "direct"}),
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner") as run_with_runner,
+    ):
+        result = beads.run_bd_command(["dolt", "commit"], beads_root=beads_root, cwd=cwd)
+
+    run_with_runner.assert_not_called()
+    assert result.returncode == 0
+    assert "dolt_mode is `direct`" in result.stdout.lower()
+
+
+def test_resolve_dolt_commit_decision_requires_batch_pending_changes(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt", "dolt_mode": "server"}),
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+    calls: list[list[str]] = []
+
+    def fake_run_raw(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> exec_util.CommandResult | None:
+        del cwd, env
+        calls.append(list(argv))
+        if argv == ["bd", "config", "get", "dolt.auto-commit", "--json"]:
+            return exec_util.CommandResult(
+                argv=tuple(argv),
+                returncode=0,
+                stdout='{"key":"dolt.auto-commit","value":"batch"}',
+                stderr="",
+            )
+        if argv == ["bd", "dolt", "show", "--json"]:
+            return exec_util.CommandResult(
+                argv=tuple(argv),
+                returncode=0,
+                stdout='{"backend":"dolt","connection_ok":true}',
+                stderr="",
+            )
+        if argv == ["bd", "vc", "status", "--json"]:
+            return exec_util.CommandResult(
+                argv=tuple(argv),
+                returncode=0,
+                stdout='{"working_set":{"tables":["issues"]}}',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads._run_raw_bd_command", side_effect=fake_run_raw):
+        decision = beads._resolve_dolt_commit_decision(  # pyright: ignore[reportPrivateUsage]
+            args=["dolt", "commit"],
+            beads_root=beads_root,
+            cwd=cwd,
+            env=beads.beads_env(beads_root),
+        )
+
+    assert decision is not None
+    assert decision.should_run is True
+    assert decision.reason == "batch_pending_changes"
+    assert calls == [
+        ["bd", "config", "get", "dolt.auto-commit", "--json"],
+        ["bd", "dolt", "show", "--json"],
+        ["bd", "vc", "status", "--json"],
+    ]
+
+
+def test_resolve_dolt_commit_decision_skips_unsupported_commit_path(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt", "dolt_mode": "server"}),
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+    calls: list[list[str]] = []
+
+    def fake_run_raw(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> exec_util.CommandResult | None:
+        del cwd, env
+        calls.append(list(argv))
+        if argv == ["bd", "config", "get", "dolt.auto-commit", "--json"]:
+            return exec_util.CommandResult(
+                argv=tuple(argv),
+                returncode=0,
+                stdout='{"key":"dolt.auto-commit","value":"batch"}',
+                stderr="",
+            )
+        if argv == ["bd", "dolt", "show", "--json"]:
+            return exec_util.CommandResult(
+                argv=tuple(argv),
+                returncode=1,
+                stdout="",
+                stderr="Error: no store available",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads._run_raw_bd_command", side_effect=fake_run_raw):
+        decision = beads._resolve_dolt_commit_decision(  # pyright: ignore[reportPrivateUsage]
+            args=["dolt", "commit"],
+            beads_root=beads_root,
+            cwd=cwd,
+            env=beads.beads_env(beads_root),
+        )
+
+    assert decision is not None
+    assert decision.should_run is False
+    assert decision.reason == "dolt_capability_unavailable"
+    assert "no store available" in decision.message
+    assert calls == [
+        ["bd", "config", "get", "dolt.auto-commit", "--json"],
+        ["bd", "dolt", "show", "--json"],
+    ]
+
+
+def test_run_bd_command_skips_unsupported_dolt_commit_without_false_error(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt", "dolt_mode": "server"}),
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        if argv == ["bd", "config", "get", "dolt.auto-commit", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"key":"dolt.auto-commit","value":"batch"}',
+                stderr="",
+            )
+        if argv == ["bd", "dolt", "show", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr="Error: no store available",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        result = beads.run_bd_command(["dolt", "commit"], beads_root=beads_root, cwd=cwd)
+
+    assert result.returncode == 0
+    assert "no store available" in result.stdout.lower()
+    assert "command failed" not in result.stdout.lower()
+
+
 def test_prime_addendum_returns_output() -> None:
     with patch(
         "atelier.beads.subprocess.run",
@@ -2337,6 +2512,70 @@ def test_prime_addendum_strips_unsupported_command_lines() -> None:
     assert "bd dolt commit" not in value
     assert "bd sync --flush-only" in value
     assert "Use bd ready" in value
+
+
+def test_prime_addendum_keeps_dolt_commit_when_batch_pending_changes_exist(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt", "dolt_mode": "server"}),
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+    stdout = (
+        "## Beads Workflow Context\n\n"
+        "```\n"
+        "[ ] bd export\n"
+        "[ ] bd sync --export\n"
+        "[ ] bd dolt commit\n"
+        "```\n"
+        "- Runtime-close checklist.\n"
+    )
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        if argv == ["bd", "prime", "--full"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout=stdout,
+                stderr="",
+            )
+        if argv == ["bd", "config", "get", "dolt.auto-commit", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"key":"dolt.auto-commit","value":"batch"}',
+                stderr="",
+            )
+        if argv == ["bd", "dolt", "show", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"backend":"dolt","connection_ok":true}',
+                stderr="",
+            )
+        if argv == ["bd", "vc", "status", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"working_set":{"tables":["issues"]}}',
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+        value = beads.prime_addendum(beads_root=beads_root, cwd=cwd)
+
+    assert value is not None
+    assert "bd export" not in value
+    assert "sync --export" not in value
+    assert "bd dolt commit" in value
 
 
 def test_ensure_issue_prefix_noop_when_already_expected() -> None:
