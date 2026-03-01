@@ -90,25 +90,66 @@ def test_list_reconcile_epic_candidates_includes_closed_open_pr_drift() -> None:
     assert candidates == {"at-1": ["at-1.9"]}
 
 
-def test_list_reconcile_epic_candidates_includes_closed_pushed_pr_drift() -> None:
+def test_list_reconcile_epic_candidates_skips_closed_pushed_state_without_live_pr() -> None:
     drift_issue = {
         "id": "at-1.10",
         "status": "closed",
         "labels": [],
         "description": "changeset.work_branch: feat/at-1.10\npr_state: pushed\n",
     }
-    with patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]):
+    with (
+        patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]),
+        patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
+        patch("atelier.worker.reconcile.prs.read_github_pr_status", return_value=None),
+    ):
         candidates = reconcile.list_reconcile_epic_candidates(
             project_config=_project_config(),
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
-            changeset_integration_signal=lambda *_args, **_kwargs: (True, "abc1234"),
+            changeset_integration_signal=lambda *_args, **_kwargs: (False, None),
             resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
             is_closed_status=lambda _status: False,
             epic_root_integrated_into_parent=lambda *_args, **_kwargs: False,
         )
 
-    assert candidates == {"at-1": ["at-1.10"]}
+    assert candidates == {}
+
+
+def test_list_reconcile_epic_candidates_skips_stale_closed_active_metadata_when_live_pr_closed() -> (
+    None
+):
+    drift_issue = {
+        "id": "at-1.11",
+        "status": "closed",
+        "labels": [],
+        "description": "changeset.work_branch: feat/at-1.11\npr_state: in-review\n",
+    }
+    with (
+        patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]),
+        patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
+        patch(
+            "atelier.worker.reconcile.prs.read_github_pr_status",
+            return_value={
+                "number": 11,
+                "state": "CLOSED",
+                "isDraft": False,
+                "reviewDecision": None,
+                "mergedAt": "2026-02-28T00:00:00Z",
+                "closedAt": "2026-02-28T00:00:00Z",
+            },
+        ),
+    ):
+        candidates = reconcile.list_reconcile_epic_candidates(
+            project_config=_project_config(),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            changeset_integration_signal=lambda *_args, **_kwargs: (False, None),
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            is_closed_status=lambda _status: False,
+            epic_root_integrated_into_parent=lambda *_args, **_kwargs: False,
+        )
+
+    assert candidates == {}
 
 
 def test_resolve_hook_agent_bead_for_epic_prefers_epic_assignee() -> None:
@@ -267,8 +308,62 @@ def test_reconcile_blocked_merged_changesets_reports_closed_active_pr_drift() ->
         cwd=Path("/repo"),
     )
     assert any(
-        "reconcile anomaly: at-1.9 -> epic=at-1 closed+active-pr-lifecycle" in line for line in logs
+        "closed+active-pr-lifecycle(evidence(source=live-pr,active=pr-open" in line for line in logs
     )
+
+
+def test_reconcile_does_not_reopen_closed_changeset_when_live_pr_is_merged() -> None:
+    drift_issue = {
+        "id": "at-1.12",
+        "status": "closed",
+        "labels": [],
+        "description": "changeset.work_branch: feat/at-1.12\npr_state: in-review\n",
+    }
+    project = config.ProjectConfig(
+        project=config.ProjectSection(origin="https://github.com/org/repo"),
+        branch=config.BranchConfig(pr=True),
+    )
+    with (
+        patch("atelier.worker.reconcile.beads.list_all_changesets", return_value=[drift_issue]),
+        patch("atelier.worker.reconcile.git.git_ref_exists", return_value=True),
+        patch(
+            "atelier.worker.reconcile.prs.read_github_pr_status",
+            return_value={
+                "number": 12,
+                "state": "CLOSED",
+                "isDraft": False,
+                "reviewDecision": None,
+                "mergedAt": "2026-02-28T00:00:00Z",
+                "closedAt": "2026-02-28T00:00:00Z",
+            },
+        ),
+        patch("atelier.worker.reconcile.beads.mark_issue_in_progress") as mark_issue_in_progress,
+    ):
+        result = reconcile.reconcile_blocked_merged_changesets(
+            agent_id="worker/1",
+            agent_bead_id="at-agent",
+            project_config=project,
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            dry_run=False,
+            resolve_epic_id_for_changeset=lambda *_args, **_kwargs: "at-1",
+            changeset_integration_signal=lambda *_args, **_kwargs: (False, None),
+            issue_dependency_ids=lambda _issue: tuple(),
+            issue_labels=lambda issue: {str(label) for label in issue.get("labels", [])},
+            finalize_changeset=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("merged finalize path should not run for stale metadata")
+            ),
+            finalize_epic_if_complete=lambda **_kwargs: FinalizeResult(
+                continue_running=True, reason="changeset_complete"
+            ),
+        )
+
+    assert result.scanned == 1
+    assert result.actionable == 0
+    assert result.reconciled == 0
+    assert result.failed == 0
+    mark_issue_in_progress.assert_not_called()
 
 
 def test_reconcile_reports_closed_merged_like_without_integration_proof() -> None:

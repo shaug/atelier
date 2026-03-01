@@ -21,6 +21,14 @@ class ReconcileCandidate:
     dependency_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ReopenLifecycleEvidence:
+    active_state: str
+    source: str
+    stored_state: str | None
+    live_state: str | None
+
+
 def _normalized_labels(issue: dict[str, object]) -> set[str]:
     return lifecycle.normalized_labels(issue.get("labels"))
 
@@ -74,30 +82,35 @@ def _live_review_state(
         return None
     pushed = git.git_ref_exists(repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path)
     pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+    if not pr_payload:
+        return None
     review_requested = prs.has_review_requests(pr_payload)
     return prs.lifecycle_state(pr_payload, pushed=pushed, review_requested=review_requested)
 
 
-def _review_drift_state(
+def _review_drift_evidence(
     issue: dict[str, object],
     *,
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
-) -> str | None:
+) -> ReopenLifecycleEvidence | None:
     if _canonical_changeset_status(issue) != "closed":
         return None
     stored_state = _stored_review_state(issue)
-    if lifecycle.is_active_pr_lifecycle_state(stored_state):
-        return stored_state
     live_state = _live_review_state(
         issue,
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
     )
-    if lifecycle.is_active_pr_lifecycle_state(live_state):
-        return live_state
+    if live_state in lifecycle.ACTIVE_REVIEW_STATES:
+        return ReopenLifecycleEvidence(
+            active_state=live_state,
+            source="live-pr",
+            stored_state=stored_state,
+            live_state=live_state,
+        )
     return None
 
 
@@ -136,13 +149,13 @@ def list_reconcile_epic_candidates(
         if not isinstance(issue_id, str) or not issue_id.strip():
             continue
         changeset_id = issue_id.strip()
-        drift_state = _review_drift_state(
+        drift_evidence = _review_drift_evidence(
             issue,
             repo_slug=repo_slug,
             repo_root=repo_root,
             git_path=git_path,
         )
-        if drift_state is None:
+        if drift_evidence is None:
             status = _canonical_changeset_status(issue)
             if status not in {"open", "in_progress", "blocked", "closed"}:
                 continue
@@ -182,6 +195,15 @@ def list_reconcile_epic_candidates(
     for epic_id in sorted(candidates):
         ordered[epic_id] = sorted(candidates[epic_id])
     return ordered
+
+
+def _format_reopen_evidence(evidence: ReopenLifecycleEvidence) -> str:
+    stored = evidence.stored_state or "none"
+    live = evidence.live_state or "none"
+    return (
+        f"evidence(source={evidence.source},active={evidence.active_state},"
+        f"stored={stored},live={live})"
+    )
 
 
 def resolve_hook_agent_bead_for_epic(
@@ -250,13 +272,13 @@ def reconcile_blocked_merged_changesets(
             continue
         if _canonical_changeset_status(issue) != "closed":
             continue
-        drift_state = _review_drift_state(
+        drift_evidence = _review_drift_evidence(
             issue,
             repo_slug=repo_slug,
             repo_root=repo_root,
             git_path=git_path,
         )
-        if drift_state is None:
+        if drift_evidence is None:
             continue
         epic_id = resolve_epic_id_for_changeset(issue, beads_root=beads_root, repo_root=repo_root)
         if epic_filter and epic_id != epic_filter:
@@ -275,7 +297,7 @@ def reconcile_blocked_merged_changesets(
                 log(
                     "reconcile dry-run anomaly: "
                     f"{changeset_id} -> epic={epic_id} "
-                    f"closed+active-pr-lifecycle(state={drift_state})"
+                    f"closed+active-pr-lifecycle({_format_reopen_evidence(drift_evidence)})"
                 )
             continue
         if beads.close_transition_has_active_pr_lifecycle(
@@ -292,13 +314,14 @@ def reconcile_blocked_merged_changesets(
                 log(
                     "reconcile recovery: "
                     f"{changeset_id} -> epic={epic_id} restored to in_progress "
-                    "after closed+active-pr-lifecycle drift"
+                    "after closed+active-pr-lifecycle drift "
+                    f"({_format_reopen_evidence(drift_evidence)})"
                 )
         if log:
             log(
                 "reconcile anomaly: "
                 f"{changeset_id} -> epic={epic_id} "
-                f"closed+active-pr-lifecycle(state={drift_state}) "
+                f"closed+active-pr-lifecycle({_format_reopen_evidence(drift_evidence)}) "
                 "decision-required"
             )
 
@@ -404,7 +427,7 @@ def reconcile_blocked_merged_changesets(
             dependency_finalized_cache[issue_id] = True
             return True
         if (
-            _review_drift_state(
+            _review_drift_evidence(
                 issue,
                 repo_slug=repo_slug,
                 repo_root=repo_root,
