@@ -486,8 +486,13 @@ def run_worker_sessions(
         try:
             # Deep-clone args so nested mutable fields cannot leak across loop iterations.
             iteration_args = copy.deepcopy(args)
-        except Exception:
-            # Fallback keeps behavior for uncommon non-deepcopyable args objects.
+        except (TypeError, copy.Error) as exc:
+            # Preserve behavior for uncommon non-deepcopyable args objects, but keep a
+            # diagnostic breadcrumb when we must fall back to shallow copy semantics.
+            atelier_log.debug(
+                "Falling back to shallow args copy after deepcopy failure: "
+                f"{type(exc).__name__}: {exc}"
+            )
             iteration_args = copy.copy(args)
         if explicit_epic_requested:
             setattr(iteration_args, "epic_id", explicit_epic_id)

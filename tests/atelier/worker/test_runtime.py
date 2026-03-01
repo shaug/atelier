@@ -353,6 +353,72 @@ def test_run_worker_sessions_implicit_retries_do_not_mutate_caller_args() -> Non
     assert seen_nested == [(1,), (2,)]
 
 
+def test_run_worker_sessions_deepcopy_type_error_falls_back_with_debug_log() -> None:
+    class Args:
+        def __init__(self) -> None:
+            self.queue = False
+            self.epic_id = None
+
+        def __deepcopy__(self, memo: object) -> object:
+            del memo
+            raise TypeError("not deepcopyable")
+
+    original_args = Args()
+    seen_ids: list[int] = []
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del mode, dry_run, session_key
+        seen_ids.append(id(args))
+        return WorkerRunSummary(started=False, reason="no_eligible_epics")
+
+    with patch("atelier.worker.runtime.atelier_log.debug") as debug_log:
+        runtime.run_worker_sessions(
+            args=original_args,
+            mode="auto",
+            run_mode="default",
+            dry_run=False,
+            session_key="sess",
+            run_worker_once=run_once,
+            report_worker_summary=lambda _summary, _dry: None,
+            watch_interval_seconds=lambda: 5,
+            dry_run_log=lambda _message: None,
+            emit=lambda _message: None,
+        )
+
+    assert len(seen_ids) == 1
+    assert any(
+        "Falling back to shallow args copy after deepcopy failure" in str(call.args[0])
+        for call in debug_log.call_args_list
+    )
+
+
+def test_run_worker_sessions_deepcopy_unexpected_error_bubbles() -> None:
+    class Args:
+        def __init__(self) -> None:
+            self.queue = False
+            self.epic_id = None
+
+        def __deepcopy__(self, memo: object) -> object:
+            del memo
+            raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        runtime.run_worker_sessions(
+            args=Args(),
+            mode="auto",
+            run_mode="default",
+            dry_run=False,
+            session_key="sess",
+            run_worker_once=lambda *_args, **_kwargs: WorkerRunSummary(
+                started=False, reason="no_eligible_epics"
+            ),
+            report_worker_summary=lambda _summary, _dry: None,
+            watch_interval_seconds=lambda: 5,
+            dry_run_log=lambda _message: None,
+            emit=lambda _message: None,
+        )
+
+
 def test_classify_non_watch_exit_outcome_is_deterministic() -> None:
     explicit_success = runtime.classify_non_watch_exit_outcome(
         WorkerRunSummary(started=False, reason="explicit_epic_completed"),
