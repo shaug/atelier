@@ -62,7 +62,15 @@ _BEADS_STARTUP_MISSING_DOLT = "missing_dolt_with_legacy_sqlite"
 _BEADS_STARTUP_INSUFFICIENT_DOLT = "insufficient_dolt_vs_legacy_data"
 _BEADS_STARTUP_UNKNOWN = "startup_state_unknown"
 _STARTUP_AUTO_MIGRATION_MIN_BD_VERSION = (0, 56, 1)
+_STARTUP_COUNT_SKEW_RECHECK_ATTEMPTS = 2
 _STARTUP_AUTO_MIGRATION_ATTEMPTED: set[Path] = set()
+_DOLT_MIGRATION_UNAVAILABLE_MARKERS = (
+    "dolt_not_available",
+    "dolt backend requires cgo",
+    "this binary was built without cgo support",
+    "built without cgo support",
+    "cgo disabled",
+)
 _DOLT_SERVER_HOST_DEFAULT = "127.0.0.1"
 _DOLT_SERVER_PORT_DEFAULT = 3307
 _DOLT_SERVER_USER_DEFAULT = "root"
@@ -645,6 +653,99 @@ def _read_bd_stats_total(
     return issue_total, None
 
 
+def _read_startup_issue_totals(
+    *,
+    beads_root: Path,
+    has_legacy_sqlite: bool,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[int | None, str | None, int | None, str | None]:
+    dolt_issue_total, dolt_detail = _read_bd_stats_total(
+        ["bd", "stats", "--json"], cwd=cwd, env=env
+    )
+    legacy_issue_total: int | None = None
+    legacy_detail: str | None = None
+    if has_legacy_sqlite:
+        legacy_issue_total, legacy_detail = _read_bd_stats_total(
+            ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"],
+            cwd=cwd,
+            env=env,
+        )
+    return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
+
+
+def _stabilize_startup_issue_totals(
+    *,
+    beads_root: Path,
+    has_dolt_store: bool,
+    has_legacy_sqlite: bool,
+    dolt_issue_total: int | None,
+    dolt_detail: str | None,
+    legacy_issue_total: int | None,
+    legacy_detail: str | None,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[int | None, str | None, int | None, str | None]:
+    if not has_dolt_store or not has_legacy_sqlite:
+        return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
+    for _ in range(_STARTUP_COUNT_SKEW_RECHECK_ATTEMPTS):
+        if dolt_issue_total is None or legacy_issue_total is None:
+            return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
+        if legacy_issue_total <= dolt_issue_total:
+            return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
+        (
+            dolt_issue_total,
+            dolt_detail,
+            legacy_issue_total,
+            legacy_detail,
+        ) = _read_startup_issue_totals(
+            beads_root=beads_root,
+            has_legacy_sqlite=has_legacy_sqlite,
+            cwd=cwd,
+            env=env,
+        )
+    return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
+
+
+def _is_dolt_migration_capability_unavailable(detail: str | None) -> bool:
+    if not detail:
+        return False
+    normalized = detail.lower()
+    return any(marker in normalized for marker in _DOLT_MIGRATION_UNAVAILABLE_MARKERS)
+
+
+def _startup_migration_capability_guidance(*, detail: str) -> str:
+    summary = _short_detail(detail) or "dolt migration capability unavailable"
+    return (
+        "automatic migration requires a `bd` build with Dolt/CGO support; "
+        f"detected unavailable migration capability ({summary}). "
+        "Install a compatible `bd` binary, run `bd migrate --to-dolt --inspect`, and retry."
+    )
+
+
+def _startup_auto_migration_capability_probe(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    env: dict[str, str],
+) -> str | None:
+    probe_command = bd_invocation.with_bd_mode(
+        "migrate",
+        "--to-dolt",
+        "--inspect",
+        "--json",
+        beads_dir=str(beads_root),
+        env=env,
+    )
+    result = _run_raw_bd_command(probe_command, cwd=cwd, env=env)
+    if result is None or result.returncode == 0:
+        return None
+    detail = _command_output_detail(result)
+    if _is_dolt_migration_capability_unavailable(detail):
+        return detail
+    return None
+
+
 def _clean_text(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -895,17 +996,33 @@ def detect_startup_beads_state(*, beads_root: Path, cwd: Path) -> StartupBeadsSt
         )
 
     env = beads_env(beads_root)
-    dolt_issue_total, dolt_detail = _read_bd_stats_total(
-        ["bd", "stats", "--json"], cwd=cwd, env=env
+    (
+        dolt_issue_total,
+        dolt_detail,
+        legacy_issue_total,
+        legacy_detail,
+    ) = _read_startup_issue_totals(
+        beads_root=beads_root,
+        has_legacy_sqlite=has_legacy_sqlite,
+        cwd=cwd,
+        env=env,
     )
-    legacy_issue_total: int | None = None
-    legacy_detail: str | None = None
-    if has_legacy_sqlite:
-        legacy_issue_total, legacy_detail = _read_bd_stats_total(
-            ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"],
-            cwd=cwd,
-            env=env,
-        )
+    (
+        dolt_issue_total,
+        dolt_detail,
+        legacy_issue_total,
+        legacy_detail,
+    ) = _stabilize_startup_issue_totals(
+        beads_root=beads_root,
+        has_dolt_store=has_dolt_store,
+        has_legacy_sqlite=has_legacy_sqlite,
+        dolt_issue_total=dolt_issue_total,
+        dolt_detail=dolt_detail,
+        legacy_issue_total=legacy_issue_total,
+        legacy_detail=legacy_detail,
+        cwd=cwd,
+        env=env,
+    )
 
     if dolt_issue_total is None:
         dolt_count_source = "unavailable"
@@ -1186,6 +1303,26 @@ def _attempt_startup_auto_migration(
             f"{startup_diagnostics}"
         )
 
+    capability_detail = _startup_auto_migration_capability_probe(
+        beads_root=beads_root,
+        cwd=cwd,
+        env=env,
+    )
+    if capability_detail is not None:
+        reason = _startup_migration_capability_guidance(detail=capability_detail)
+        _record_startup_auto_migration_diagnostic(
+            beads_root=beads_root,
+            status="blocked",
+            reason=reason,
+            startup_state=startup_state,
+        )
+        atelier_log.warning(
+            "Startup Beads auto-migration unavailable: "
+            f"detail={_short_detail(capability_detail) or capability_detail}; "
+            f"{startup_diagnostics}"
+        )
+        return
+
     try:
         backup_path = _backup_startup_legacy_sqlite(beads_root)
     except (OSError, RuntimeError) as exc:
@@ -1219,6 +1356,20 @@ def _attempt_startup_auto_migration(
         die("missing required command: bd")
     if migration_result.returncode != 0:
         migration_detail = _command_output_detail(migration_result) or "bd migrate failed"
+        if _is_dolt_migration_capability_unavailable(migration_detail):
+            reason = _startup_migration_capability_guidance(detail=migration_detail)
+            _record_startup_auto_migration_diagnostic(
+                beads_root=beads_root,
+                status="blocked",
+                reason=reason,
+                startup_state=startup_state,
+            )
+            atelier_log.warning(
+                "Startup Beads auto-migration unavailable after migrate invocation: "
+                f"detail={_short_detail(migration_detail) or migration_detail}; "
+                f"{startup_diagnostics}"
+            )
+            return
         _record_startup_auto_migration_diagnostic(
             beads_root=beads_root,
             status="blocked",
