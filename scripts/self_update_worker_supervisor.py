@@ -295,7 +295,11 @@ def _run_update_step(config: RunnerConfig) -> bool:
         _log("update: skipped by --update-policy=skip")
         return True
 
-    ref = _resolve_git_ref(config)
+    try:
+        ref = _resolve_git_ref(config)
+    except RuntimeError as exc:
+        _log(f"update: failed to resolve git ref: {exc}")
+        return False
     _log(
         "update: fast-forward-only sync "
         f"remote={config.git_remote!r} ref={ref!r} repo={config.repo_path}"
@@ -414,8 +418,12 @@ def _run_cycle(config: RunnerConfig, worker_passthrough: Sequence[str], cycle_nu
 
     _log(f"cycle {cycle_number}: starting")
     update_ok = _run_update_step(config)
+    if not update_ok:
+        _log("cycle: preflight failed; install and worker run skipped")
+        return 1
+
     install_ok = _run_install_step(config)
-    if not (update_ok and install_ok):
+    if not install_ok:
         _log("cycle: preflight failed; worker run skipped")
         return 1
 

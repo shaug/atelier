@@ -93,10 +93,17 @@ def test_run_cycle_skips_worker_when_preflight_fails(
         continue_on_worker_failure=False,
     )
 
+    install_called = False
     worker_called = False
 
     monkeypatch.setattr(supervisor_module, "_run_update_step", lambda _config: False)
-    monkeypatch.setattr(supervisor_module, "_run_install_step", lambda _config: True)
+
+    def _record_install(_config: Any) -> bool:
+        nonlocal install_called
+        install_called = True
+        return True
+
+    monkeypatch.setattr(supervisor_module, "_run_install_step", _record_install)
 
     def _record_worker(_config: Any, _passthrough: Any) -> bool:
         nonlocal worker_called
@@ -108,6 +115,7 @@ def test_run_cycle_skips_worker_when_preflight_fails(
     cycle_rc = supervisor_module._run_cycle(config, ["--mode", "auto"], cycle_number=1)
 
     assert cycle_rc == 1
+    assert install_called is False
     assert worker_called is False
 
 
@@ -144,6 +152,40 @@ def test_run_cycle_runs_worker_when_preflight_succeeds(
 
     assert cycle_rc == 0
     assert calls == [("worker", ["--mode", "auto"])]
+
+
+def test_run_update_step_returns_false_when_git_ref_resolution_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    supervisor_module: ModuleType,
+) -> None:
+    config = supervisor_module.RunnerConfig(
+        repo_path=Path("."),
+        git_remote="origin",
+        git_ref=None,
+        update_policy="ff-only",
+        install_command=None,
+        worker_command="atelier work --run-mode once",
+        loop_interval_seconds=0.0,
+        max_cycles=1,
+        dry_run=False,
+        fail_fast=False,
+        continue_on_worker_failure=False,
+    )
+
+    logs: list[str] = []
+
+    def _raise_ref_error(_config: Any) -> str:
+        raise RuntimeError("symbolic-ref failed")
+
+    monkeypatch.setattr(supervisor_module, "_resolve_git_ref", _raise_ref_error)
+    monkeypatch.setattr(supervisor_module, "_log", logs.append)
+
+    update_ok = supervisor_module._run_update_step(config)
+
+    assert update_ok is False
+    assert logs == [
+        "update: failed to resolve git ref: symbolic-ref failed",
+    ]
 
 
 def test_main_dry_run_defaults_to_one_cycle(
