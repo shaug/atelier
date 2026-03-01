@@ -37,6 +37,21 @@ def _load_changeset_issue(
     return issue
 
 
+def _issue_parent_id(issue: dict[str, object]) -> str | None:
+    try:
+        boundary = beads.parse_issue_boundary(
+            issue, source="worker_changeset_state:issue_parent_id"
+        )
+    except ValueError:
+        raw_parent = issue.get("parent")
+        if isinstance(raw_parent, str):
+            normalized = raw_parent.strip()
+            if normalized:
+                return normalized
+        return None
+    return boundary.parent_id
+
+
 def _close_guard_allows(
     changeset_id: str,
     *,
@@ -206,6 +221,52 @@ def close_completed_container_changesets(
             continue
         mark_changeset_closed(issue_id, beads_root=beads_root, repo_root=repo_root)
         closed.append(issue_id)
+    return closed
+
+
+def close_completed_ancestor_container_changesets(
+    changeset_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    has_open_descendant_changesets: Callable[[str], bool],
+) -> list[str]:
+    closed: list[str] = []
+    visited: set[str] = set()
+    current_id = changeset_id.strip()
+    while current_id and current_id not in visited:
+        visited.add(current_id)
+        current_issue = _load_changeset_issue(
+            current_id, beads_root=beads_root, repo_root=repo_root
+        )
+        if current_issue is None:
+            break
+        parent_id = _issue_parent_id(current_issue)
+        if not parent_id:
+            break
+        if parent_id in visited:
+            break
+        parent_issue = _load_changeset_issue(parent_id, beads_root=beads_root, repo_root=repo_root)
+        if parent_issue is None:
+            break
+        if "at:epic" in issue_labels(parent_issue):
+            break
+        parent_status = str(parent_issue.get("status") or "").strip().lower()
+        if parent_status == "closed":
+            current_id = parent_id
+            continue
+        if has_open_descendant_changesets(parent_id):
+            break
+        if not _close_guard_allows(
+            parent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            issue=parent_issue,
+        ):
+            break
+        mark_changeset_closed(parent_id, beads_root=beads_root, repo_root=repo_root)
+        closed.append(parent_id)
+        current_id = parent_id
     return closed
 
 

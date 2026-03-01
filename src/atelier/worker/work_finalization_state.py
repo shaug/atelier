@@ -1709,6 +1709,29 @@ def close_completed_container_changesets(
     )
 
 
+def close_completed_ancestor_container_changesets(
+    changeset_id: str, *, beads_root: Path, repo_root: Path
+) -> list[str]:
+    """Close completed ancestor container changesets for a claimed changeset.
+
+    Args:
+        changeset_id: Claimed changeset identifier.
+        beads_root: Path to the Beads store.
+        repo_root: Repository root used for Beads operations.
+
+    Returns:
+        Ordered ancestor ids that were transitioned to canonical ``closed``.
+    """
+    return worker_finalization_service.close_completed_ancestor_container_changesets(
+        changeset_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        has_open_descendant_changesets=lambda issue_id: has_open_descendant_changesets(
+            issue_id, beads_root=beads_root, repo_root=repo_root
+        ),
+    )
+
+
 def promote_planned_descendant_changesets(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> list[str]:
@@ -1861,6 +1884,7 @@ __all__ = [
     "changeset_waiting_on_review",
     "changeset_waiting_on_review_or_signals",
     "changeset_work_branch",
+    "close_completed_ancestor_container_changesets",
     "close_completed_container_changesets",
     "epic_root_integrated_into_parent",
     "handle_pushed_without_pr",

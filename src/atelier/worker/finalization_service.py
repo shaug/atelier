@@ -78,6 +78,21 @@ def close_completed_container_changesets(
     )
 
 
+def close_completed_ancestor_container_changesets(
+    changeset_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+    has_open_descendant_changesets: Callable[[str], bool],
+) -> list[str]:
+    return worker_changeset_state.close_completed_ancestor_container_changesets(
+        changeset_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        has_open_descendant_changesets=has_open_descendant_changesets,
+    )
+
+
 def promote_planned_descendant_changesets(
     changeset_id: str, *, beads_root: Path, repo_root: Path
 ) -> list[str]:
