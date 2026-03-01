@@ -35,7 +35,11 @@ def _command_detail(result: subprocess.CompletedProcess[str]) -> str:
 
 
 def _list_child_issue_ids(*, epic_id: str, beads_root: Path, cwd: Path) -> set[str]:
-    issues = beads.run_bd_json(["list", "--parent", epic_id], beads_root=beads_root, cwd=cwd)
+    issues = beads.run_bd_json(
+        ["list", "--parent", epic_id, "--limit", "0"],
+        beads_root=beads_root,
+        cwd=cwd,
+    )
     ids: set[str] = set()
     for issue in issues:
         issue_id = issue.get("id")
