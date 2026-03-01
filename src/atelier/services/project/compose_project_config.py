@@ -1,15 +1,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
 
 from ... import config
 from ...models import ProjectConfig
 from ..errors import ExternalCommandFailedError, ValidationFailedError
+from .init_project_args import InitProjectArgs
 
-BuildProjectConfig = Callable[..., ProjectConfig]
+
+class BuildProjectConfig(Protocol):
+    """Typed collaborator contract for project-config composition."""
+
+    def __call__(
+        self,
+        existing: ProjectConfig | dict,
+        enlistment_path: str,
+        origin: str | None,
+        origin_raw: str | None,
+        args: InitProjectArgs | None,
+        *,
+        prompt_missing_only: bool = False,
+        raw_existing: dict | None = None,
+        allow_editor_empty: bool = False,
+    ) -> ProjectConfig: ...
 
 
 class ComposeProjectConfigRequest(BaseModel):
@@ -17,7 +33,7 @@ class ComposeProjectConfigRequest(BaseModel):
     enlistment_path: str
     origin: str | None
     origin_raw: str | None
-    args: object | None
+    args: InitProjectArgs | None
     prompt_missing_only: bool = False
     raw_existing: dict | None = None
     allow_editor_empty: bool = False

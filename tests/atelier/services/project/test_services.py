@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -29,7 +30,30 @@ from atelier.services.project import (
 
 
 def test_compose_and_provider_contract_failures() -> None:
-    compose = ComposeProjectConfigService(build_config=lambda *args, **kwargs: ProjectConfig())
+    def build_config(
+        existing: ProjectConfig | dict,
+        enlistment_path: str,
+        origin: str | None,
+        origin_raw: str | None,
+        args: InitProjectArgs | None,
+        *,
+        prompt_missing_only: bool = False,
+        raw_existing: dict | None = None,
+        allow_editor_empty: bool = False,
+    ) -> ProjectConfig:
+        del (
+            existing,
+            enlistment_path,
+            origin,
+            origin_raw,
+            args,
+            prompt_missing_only,
+            raw_existing,
+            allow_editor_empty,
+        )
+        return ProjectConfig()
+
+    compose = ComposeProjectConfigService(build_config=build_config)
     with pytest.raises(ServiceFailure) as exc_info:
         compose.run(
             ComposeProjectConfigRequest(
@@ -38,9 +62,33 @@ def test_compose_and_provider_contract_failures() -> None:
         )
     assert exc_info.value.code == "validation_failed"
 
+    def resolve_provider(
+        project_config: ProjectConfig,
+        repo_root: Path,
+        *,
+        agent_name: str,
+        project_data_dir: Path | None = None,
+        agent_home: Path | None = None,
+        interactive: bool = True,
+        chooser: object | None = None,
+    ) -> PlannerProviderResolution:
+        del (
+            project_config,
+            repo_root,
+            agent_name,
+            project_data_dir,
+            agent_home,
+            interactive,
+            chooser,
+        )
+        return PlannerProviderResolution(None, (), None)
+
+    def choose_provider(_text: str, options: Sequence[str], _default: str | None) -> str:
+        return options[0]
+
     provider = ResolveExternalProviderService(
-        resolve_provider=lambda *args, **kwargs: PlannerProviderResolution(None, (), None),
-        choose_provider=lambda _text, options, _default: options[0],
+        resolve_provider=resolve_provider,
+        choose_provider=choose_provider,
         confirm_choice=lambda _text, _default: False,
     )
     with pytest.raises(ServiceFailure) as exc_info:
@@ -58,9 +106,30 @@ def test_compose_and_provider_contract_failures() -> None:
 
 
 def test_compose_and_provider_failures_capture_system_exit_exception() -> None:
-    compose = ComposeProjectConfigService(
-        build_config=lambda *args, **kwargs: (_ for _ in ()).throw(SystemExit("compose failed"))
-    )
+    def build_config(
+        existing: ProjectConfig | dict,
+        enlistment_path: str,
+        origin: str | None,
+        origin_raw: str | None,
+        args: InitProjectArgs | None,
+        *,
+        prompt_missing_only: bool = False,
+        raw_existing: dict | None = None,
+        allow_editor_empty: bool = False,
+    ) -> ProjectConfig:
+        del (
+            existing,
+            enlistment_path,
+            origin,
+            origin_raw,
+            args,
+            prompt_missing_only,
+            raw_existing,
+            allow_editor_empty,
+        )
+        raise SystemExit("compose failed")
+
+    compose = ComposeProjectConfigService(build_config=build_config)
     with pytest.raises(ServiceFailure) as exc_info:
         compose.run(
             ComposeProjectConfigRequest(
@@ -76,11 +145,33 @@ def test_compose_and_provider_failures_capture_system_exit_exception() -> None:
     assert exc_info.value.recovery_hint == "compose failed"
     assert isinstance(exc_info.value.__cause__, SystemExit)
 
+    def resolve_provider(
+        project_config: ProjectConfig,
+        repo_root: Path,
+        *,
+        agent_name: str,
+        project_data_dir: Path | None = None,
+        agent_home: Path | None = None,
+        interactive: bool = True,
+        chooser: object | None = None,
+    ) -> PlannerProviderResolution:
+        del (
+            project_config,
+            repo_root,
+            agent_name,
+            project_data_dir,
+            agent_home,
+            interactive,
+            chooser,
+        )
+        raise SystemExit("provider failed")
+
+    def choose_provider(_text: str, options: Sequence[str], _default: str | None) -> str:
+        return options[0]
+
     provider = ResolveExternalProviderService(
-        resolve_provider=lambda *args, **kwargs: (_ for _ in ()).throw(
-            SystemExit("provider failed")
-        ),
-        choose_provider=lambda _text, options, _default: options[0],
+        resolve_provider=resolve_provider,
+        choose_provider=choose_provider,
         confirm_choice=lambda _text, _default: False,
     )
     with pytest.raises(ServiceFailure) as exc_info:
@@ -327,10 +418,48 @@ def test_initialize_project_service_maps_boundary_failures_to_stable_service_err
 def test_initialize_project_service_run_builds_dependencies() -> None:
     captured: dict[str, object] = {}
 
-    def fake_build_config(*_args: object, **_kwargs: object) -> ProjectConfig:
+    def fake_build_config(
+        existing: ProjectConfig | dict,
+        enlistment_path: str,
+        origin: str | None,
+        origin_raw: str | None,
+        args: object | None,
+        *,
+        prompt_missing_only: bool = False,
+        raw_existing: dict | None = None,
+        allow_editor_empty: bool = False,
+    ) -> ProjectConfig:
+        del (
+            existing,
+            enlistment_path,
+            origin,
+            origin_raw,
+            args,
+            prompt_missing_only,
+            raw_existing,
+            allow_editor_empty,
+        )
         return ProjectConfig()
 
-    def fake_resolve_provider(*_args: object, **_kwargs: object) -> PlannerProviderResolution:
+    def fake_resolve_provider(
+        project_config: ProjectConfig,
+        repo_root: Path,
+        *,
+        agent_name: str,
+        project_data_dir: Path | None = None,
+        agent_home: Path | None = None,
+        interactive: bool = True,
+        chooser: object | None = None,
+    ) -> PlannerProviderResolution:
+        del (
+            project_config,
+            repo_root,
+            agent_name,
+            project_data_dir,
+            agent_home,
+            interactive,
+            chooser,
+        )
         return PlannerProviderResolution(None, (), None)
 
     def fake_choose_provider(_text: str, options: tuple[str, ...], _default: str | None) -> str:
