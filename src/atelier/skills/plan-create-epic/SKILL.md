@@ -24,6 +24,8 @@ Do not request approval to create or edit deferred beads.
 
 1. Create the epic with the script:
    - `python skills/plan-create-epic/scripts/create_epic.py --title "<title>" --scope "<scope>" --acceptance "<acceptance>" [--changeset-strategy "<changeset_strategy>"] [--design "<design>"] [--beads-dir "<beads_dir>"] [--no-export]`
+   - This is the canonical top-level executable-work creation path; it sets both
+     `issue_type=epic` and the required `at:epic` discovery label.
 1. The script creates the bead, applies auto-export when enabled by project
    config, sets status to `deferred`, and prints non-fatal retry instructions if
    export fails.
@@ -35,7 +37,10 @@ Do not request approval to create or edit deferred beads.
 ## Verification
 
 - Epic is created with `at:epic` label (required for epic discovery/indexing).
+- Epic is created with `issue_type=epic`.
 - Epic status is `deferred` until explicit promotion.
 - Acceptance criteria stored in the acceptance field.
 - When auto-export is enabled and not opted out, `external_tickets` is updated
   with `direction=exported` and `sync_mode=export`.
+- If startup diagnostics report identity drift, remediation is deterministic:
+  `bd update <epic-id> --type epic --add-label at:epic`.

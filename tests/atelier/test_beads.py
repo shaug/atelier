@@ -2919,6 +2919,119 @@ def test_list_epics_finds_epic_beyond_default_window() -> None:
     assert result[0]["id"] == "at-epic"
 
 
+def test_epic_discovery_parity_report_detects_identity_violations() -> None:
+    indexed_epic = {
+        "id": "at-indexed",
+        "status": "open",
+        "labels": ["at:epic"],
+        "issue_type": "epic",
+    }
+    active_issues = [
+        indexed_epic,
+        {
+            "id": "at-missing",
+            "status": "in_progress",
+            "issue_type": "epic",
+            "labels": [],
+        },
+        {
+            "id": "at-indexed.1",
+            "status": "open",
+            "issue_type": "task",
+            "labels": [],
+            "parent": "at-indexed",
+        },
+    ]
+
+    def fake_run(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--all", "--limit", "0"]:
+            return active_issues
+        if args[:3] == ["list", "--label", "at:epic"]:
+            return [indexed_epic]
+        return []
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_run):
+        report = beads.epic_discovery_parity_report(
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert report.active_top_level_work_count == 2
+    assert report.indexed_active_epic_count == 1
+    assert report.missing_from_index == ()
+    assert len(report.missing_executable_identity) == 1
+    violation = report.missing_executable_identity[0]
+    assert violation.issue_id == "at-missing"
+    assert violation.remediation_command == "bd update at-missing --type epic --add-label at:epic"
+
+
+def test_epic_discovery_parity_report_detects_index_mismatch() -> None:
+    active_issue = {
+        "id": "at-epic",
+        "status": "open",
+        "issue_type": "epic",
+        "labels": ["at:epic"],
+    }
+
+    def fake_run(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--all", "--limit", "0"]:
+            return [active_issue]
+        if args[:3] == ["list", "--label", "at:epic"]:
+            return []
+        return []
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_run):
+        report = beads.epic_discovery_parity_report(
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert report.active_top_level_work_count == 1
+    assert report.indexed_active_epic_count == 0
+    assert report.missing_executable_identity == ()
+    assert report.missing_from_index == ("at-epic",)
+
+
+def test_epic_discovery_parity_report_flags_type_drift_with_epic_label() -> None:
+    indexed_epic = {
+        "id": "at-indexed",
+        "status": "open",
+        "issue_type": "epic",
+        "labels": ["at:epic"],
+    }
+    type_drift_issue = {
+        "id": "at-type-drift",
+        "status": "open",
+        "issue_type": "task",
+        "labels": ["at:epic"],
+    }
+
+    def fake_run(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        if args[:4] == ["list", "--all", "--limit", "0"]:
+            return [indexed_epic, type_drift_issue]
+        if args[:3] == ["list", "--label", "at:epic"]:
+            return [indexed_epic, type_drift_issue]
+        return []
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_run):
+        report = beads.epic_discovery_parity_report(
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert report.active_top_level_work_count == 2
+    assert report.indexed_active_epic_count == 1
+    assert report.missing_from_index == ()
+    assert len(report.missing_executable_identity) == 1
+    violation = report.missing_executable_identity[0]
+    assert violation.issue_id == "at-type-drift"
+    assert violation.issue_type == "task"
+    assert violation.labels == ("at:epic",)
+    assert (
+        violation.remediation_command == "bd update at-type-drift --type epic --add-label at:epic"
+    )
+
+
 def test_summarize_changesets_counts_and_ready() -> None:
     changesets = [
         {"status": "closed", "description": "pr_state: merged\n"},

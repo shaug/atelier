@@ -163,6 +163,35 @@ def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path
 
     epics = planner_overview.list_epics(beads_root=beads_root, repo_root=repo_root)
     lines.append(f"- Total epics: {len(epics)}")
+    parity = beads.epic_discovery_parity_report(
+        beads_root=beads_root,
+        cwd=repo_root,
+        indexed_epics=epics,
+    )
+    lines.append(
+        f"- Active top-level work (open/in_progress/blocked): {parity.active_top_level_work_count}"
+    )
+    lines.append(f"- Indexed active epics (at:epic discovery): {parity.indexed_active_epic_count}")
+    if parity.in_parity:
+        lines.append("Epic discovery parity: ok")
+    if parity.missing_executable_identity:
+        lines.append("Identity guardrail violations (deterministic remediation):")
+        for violation in parity.missing_executable_identity:
+            labels = ", ".join(violation.labels) if violation.labels else "(none)"
+            lines.append(
+                f"- {violation.issue_id} [status={violation.status or 'missing'} "
+                f"type={violation.issue_type or 'missing'}] labels={labels}"
+            )
+            lines.append(f"  remediation: {violation.remediation_command}")
+    if parity.missing_from_index:
+        lines.append("Discovery index mismatch for executable top-level work:")
+        for issue_id in parity.missing_from_index:
+            lines.append(f"- {issue_id}")
+        lines.append(
+            "  remediation: run `bd prime`; if mismatch persists, run "
+            "`bd doctor --fix --yes` and rerun startup."
+        )
+
     _append_deferred_changeset_summary(
         lines,
         epics,

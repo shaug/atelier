@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _load_script():
@@ -16,11 +17,26 @@ def _load_script():
     return module
 
 
+def _parity_ok() -> SimpleNamespace:
+    return SimpleNamespace(
+        active_top_level_work_count=0,
+        indexed_active_epic_count=0,
+        missing_executable_identity=(),
+        missing_from_index=(),
+        in_parity=True,
+    )
+
+
 def test_render_startup_overview_reports_empty_sections(monkeypatch) -> None:
     module = _load_script()
     monkeypatch.setattr(module.beads, "list_inbox_messages", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(module.beads, "list_queue_messages", lambda **_kwargs: [])
     monkeypatch.setattr(module.beads, "list_descendant_changesets", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        module.beads,
+        "epic_discovery_parity_report",
+        lambda **_kwargs: _parity_ok(),
+    )
     monkeypatch.setattr(module.planner_overview, "list_epics", lambda **_kwargs: [])
     monkeypatch.setattr(
         module.planner_overview,
@@ -40,6 +56,9 @@ def test_render_startup_overview_reports_empty_sections(monkeypatch) -> None:
         "No unread messages.",
         "No queued messages.",
         "- Total epics: 0",
+        "- Active top-level work (open/in_progress/blocked): 0",
+        "- Indexed active epics (at:epic discovery): 0",
+        "Epic discovery parity: ok",
         "No deferred changesets under open/in-progress/blocked epics.",
         "Epics by state:",
         "- (none)",
@@ -95,6 +114,17 @@ def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatc
         module.beads, "list_descendant_changesets", _fake_list_descendant_changesets
     )
     monkeypatch.setattr(
+        module.beads,
+        "epic_discovery_parity_report",
+        lambda **_kwargs: SimpleNamespace(
+            active_top_level_work_count=2,
+            indexed_active_epic_count=2,
+            missing_executable_identity=(),
+            missing_from_index=(),
+            in_parity=True,
+        ),
+    )
+    monkeypatch.setattr(
         module.planner_overview,
         "list_epics",
         lambda **_kwargs: [
@@ -125,6 +155,9 @@ def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatc
         "- at-q-1 [planner] First | claim: unclaimed",
         "- at-q-2 [planner] Second | claim: claimed by atelier/worker/agent",
         "- Total epics: 3",
+        "- Active top-level work (open/in_progress/blocked): 2",
+        "- Indexed active epics (at:epic discovery): 2",
+        "Epic discovery parity: ok",
         "Deferred changesets under open/in-progress/blocked epics:",
         "- at-1 [open] Epic one",
         "  - at-1.1 [deferred] First deferred",
@@ -166,6 +199,17 @@ def test_render_startup_overview_caps_deferred_epic_scan(monkeypatch) -> None:
     monkeypatch.setenv("ATELIER_STARTUP_DEFERRED_EPIC_SCAN_LIMIT", "1")
     monkeypatch.setattr(module.beads, "list_inbox_messages", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(module.beads, "list_queue_messages", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        module.beads,
+        "epic_discovery_parity_report",
+        lambda **_kwargs: SimpleNamespace(
+            active_top_level_work_count=3,
+            indexed_active_epic_count=3,
+            missing_executable_identity=(),
+            missing_from_index=(),
+            in_parity=True,
+        ),
+    )
     scanned_epics: list[str] = []
 
     def _fake_list_descendant_changesets(parent_id: str, **_kwargs):
@@ -203,6 +247,9 @@ def test_render_startup_overview_caps_deferred_epic_scan(monkeypatch) -> None:
         "No unread messages.",
         "No queued messages.",
         "- Total epics: 3",
+        "- Active top-level work (open/in_progress/blocked): 3",
+        "- Indexed active epics (at:epic discovery): 3",
+        "Epic discovery parity: ok",
         "Deferred changesets under open/in-progress/blocked epics:",
         "- at-1 [open] Epic one",
         "  - at-1.1 [deferred] Deferred child",
@@ -237,3 +284,44 @@ def test_main_emits_override_warning(monkeypatch, capsys, tmp_path: Path) -> Non
 
     captured = capsys.readouterr()
     assert "warning: override mismatch" in captured.err
+
+
+def test_render_startup_overview_reports_identity_guardrail_remediation(monkeypatch) -> None:
+    module = _load_script()
+    monkeypatch.setattr(module.beads, "list_inbox_messages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(module.beads, "list_queue_messages", lambda **_kwargs: [])
+    monkeypatch.setattr(module.beads, "list_descendant_changesets", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(module.planner_overview, "list_epics", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        module.beads,
+        "epic_discovery_parity_report",
+        lambda **_kwargs: SimpleNamespace(
+            active_top_level_work_count=1,
+            indexed_active_epic_count=0,
+            missing_executable_identity=(
+                SimpleNamespace(
+                    issue_id="at-missing",
+                    status="open",
+                    issue_type="epic",
+                    labels=(),
+                    remediation_command="bd update at-missing --type epic --add-label at:epic",
+                ),
+            ),
+            missing_from_index=(),
+            in_parity=False,
+        ),
+    )
+    monkeypatch.setattr(
+        module.planner_overview,
+        "render_epics",
+        lambda issues, *, show_drafts: "Epics by state:\n- (none)",
+    )
+
+    rendered = module._render_startup_overview(
+        "atelier/planner/example",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert "Identity guardrail violations (deterministic remediation):" in rendered
+    assert "remediation: bd update at-missing --type epic --add-label at:epic" in rendered

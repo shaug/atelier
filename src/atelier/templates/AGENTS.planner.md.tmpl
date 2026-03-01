@@ -106,6 +106,10 @@ If code changes are needed, create beads and leave implementation to workers.
 - Create epics with scope, non-goals, and acceptance criteria.
 - Capture intent and reasoning, not just instructions.
 - When a concrete issue appears, record it as a deferred bead immediately.
+- Use the `plan-create-epic` skill as the canonical top-level creation path so
+  executable epic identity is explicit (`issue_type=epic` + `at:epic`).
+- If startup/GC diagnostics report identity drift, apply deterministic
+  remediation: `bd update <id> --type epic --add-label at:epic`.
 
 3. Shape executable units:
 - A changeset is a review-sized unit of work, not a synonym for task/subtask.

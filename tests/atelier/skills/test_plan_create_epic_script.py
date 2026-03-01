@@ -84,6 +84,10 @@ def test_create_epic_defaults_to_deferred_status(monkeypatch, tmp_path: Path) ->
     module.main()
 
     assert commands[0][0] == "create"
+    assert "--type" in commands[0]
+    assert commands[0][commands[0].index("--type") + 1] == "epic"
+    assert "--label" in commands[0]
+    assert "at:epic" in commands[0]
     assert commands[1] == ["update", "at-epic-1", "--status", "deferred"]
 
 
