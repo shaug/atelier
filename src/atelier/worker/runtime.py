@@ -483,7 +483,12 @@ def run_worker_sessions(
     excluded_implicit_epics: set[str] = set()
 
     def build_iteration_args() -> object:
-        iteration_args = copy.copy(args)
+        try:
+            # Deep-clone args so nested mutable fields cannot leak across loop iterations.
+            iteration_args = copy.deepcopy(args)
+        except Exception:
+            # Fallback keeps behavior for uncommon non-deepcopyable args objects.
+            iteration_args = copy.copy(args)
         if explicit_epic_requested:
             setattr(iteration_args, "epic_id", explicit_epic_id)
             return iteration_args

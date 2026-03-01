@@ -310,8 +310,12 @@ def test_run_worker_sessions_implicit_resets_epic_id_across_retries() -> None:
 
 
 def test_run_worker_sessions_implicit_retries_do_not_mutate_caller_args() -> None:
-    args = type("Args", (), {"queue": False, "epic_id": None})()
+    args = type("Args", (), {})()
+    args.queue = False
+    args.epic_id = None
+    args.nested = {"seen": []}
     calls = 0
+    seen_nested: list[tuple[int, ...]] = []
 
     def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
         del mode, dry_run, session_key
@@ -319,6 +323,9 @@ def test_run_worker_sessions_implicit_retries_do_not_mutate_caller_args() -> Non
         calls += 1
         setattr(args, "epic_id", "at-fail")
         setattr(args, "implicit_excluded_epic_ids", ("at-overwritten",))
+        nested = getattr(args, "nested")
+        nested["seen"].append(calls)
+        seen_nested.append(tuple(nested["seen"]))
         if calls == 1:
             return WorkerRunSummary(
                 started=False,
@@ -342,6 +349,8 @@ def test_run_worker_sessions_implicit_retries_do_not_mutate_caller_args() -> Non
 
     assert getattr(args, "epic_id", None) is None
     assert not hasattr(args, "implicit_excluded_epic_ids")
+    assert args.nested == {"seen": []}
+    assert seen_nested == [(1,), (2,)]
 
 
 def test_classify_non_watch_exit_outcome_is_deterministic() -> None:
