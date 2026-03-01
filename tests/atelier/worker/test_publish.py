@@ -161,6 +161,22 @@ def test_render_pr_ticket_lines_fails_closed_for_stale_state_metadata() -> None:
     assert lines == ["- Addresses #371"]
 
 
+def test_render_pr_ticket_lines_ignores_recent_last_synced_when_state_timestamp_is_stale() -> None:
+    issue = {
+        "description": (
+            "external_tickets: "
+            '[{"provider":"github","id":"371","relation":"primary","state":"open",'
+            '"state_updated_at":"2026-03-01T15:22:33Z","last_synced_at":"2026-03-01T16:54:00Z"}]'
+        )
+    }
+
+    lines = publish.render_pr_ticket_lines(
+        issue, now=dt.datetime(2026, 3, 1, 16, 55, tzinfo=dt.UTC)
+    )
+
+    assert lines == ["- Addresses #371"]
+
+
 def test_render_pr_ticket_lines_allows_fixes_for_fresh_state_metadata() -> None:
     issue = {
         "description": (

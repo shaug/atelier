@@ -58,12 +58,15 @@ def _parse_timestamp(value: str | None) -> dt.datetime | None:
 
 
 def _ticket_state_timestamp(ticket: ExternalTicketRef) -> dt.datetime | None:
-    """Return the newest known state-sync timestamp for a ticket."""
+    """Return the ticket state timestamp used for closing-clause freshness.
+
+    Prefer ``state_updated_at`` when present because local writes can refresh
+    ``last_synced_at`` without re-reading remote state.
+    """
     state_updated = _parse_timestamp(ticket.state_updated_at)
-    last_synced = _parse_timestamp(ticket.last_synced_at)
-    if state_updated and last_synced:
-        return state_updated if state_updated >= last_synced else last_synced
-    return state_updated or last_synced
+    if state_updated is not None:
+        return state_updated
+    return _parse_timestamp(ticket.last_synced_at)
 
 
 def _ticket_has_state_tracking(ticket: ExternalTicketRef) -> bool:
