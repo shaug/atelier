@@ -13,3 +13,4 @@ class GcAction:
     description: str
     apply: Callable[[], None]
     details: tuple[str, ...] = ()
+    report_only: bool = False
