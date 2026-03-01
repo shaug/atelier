@@ -34,8 +34,14 @@ description: >-
    - `bd create --acceptance ... --design ... --estimate ... --priority ...`
    - use `--notes` / `--append-notes` for addendums without rewriting
      descriptions
-1. Persist Beads changes after updates or before ending a session:
-   - `bd dolt commit`
+1. Persist Beads changes only when a Dolt working-set commit is required:
+   - Check backend/capability first: `bd dolt show --json`.
+   - Check mode and pending state: `bd config get dolt.auto-commit --json` and
+     `bd vc status --json`.
+   - Run `bd dolt commit` only when auto-commit mode is `batch` and pending
+     working-set changes exist.
+   - In direct/auto-persist modes (for example `off`/`on`) or when no pending
+     changes exist, skip `bd dolt commit`.
 
 ## Notes
 
