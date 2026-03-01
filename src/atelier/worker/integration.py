@@ -247,11 +247,16 @@ def changeset_integration_signal(
         for branch in (work_branch, root_branch):
             if branch and branch not in source_branches:
                 source_branches.append(branch)
-        source_refs: list[str] = []
-        for source_branch in source_branches:
-            source_ref = branch_ref_for_lookup(repo_root, source_branch, git_path=git_path)
-            if source_ref and source_ref not in source_refs:
-                source_refs.append(source_ref)
+
+        def source_refs_for_branches() -> list[str]:
+            refs: list[str] = []
+            for source_branch in source_branches:
+                source_ref = branch_ref_for_lookup(repo_root, source_branch, git_path=git_path)
+                if source_ref and source_ref not in refs:
+                    refs.append(source_ref)
+            return refs
+
+        source_refs = source_refs_for_branches()
 
         def prove_against_targets(current_target_refs: list[str]) -> tuple[bool, str | None]:
             if integrated_sha_candidates and current_target_refs:
@@ -300,6 +305,7 @@ def changeset_integration_signal(
                 git_path=git_path,
                 require_remote_tracking=True,
             )
+            source_refs = source_refs_for_branches()
             proven, integrated_sha = prove_against_targets(refreshed_target_refs)
             if proven:
                 return True, integrated_sha
