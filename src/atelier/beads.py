@@ -4927,6 +4927,22 @@ def ensure_agent_bead(
     return {"id": issue_id, "title": agent_id}
 
 
+def _claim_is_complete(
+    candidate: dict[str, object],
+    *,
+    claimant: str,
+    beads_root: Path,
+) -> bool:
+    assignee = candidate.get("assignee")
+    status = str(candidate.get("status") or "").strip().lower()
+    return (
+        isinstance(assignee, str)
+        and assignee == claimant
+        and status == "in_progress"
+        and has_issue_label(_issue_labels(candidate), _LABEL_HOOKED, beads_root=beads_root)
+    )
+
+
 def claim_epic(
     epic_id: str,
     agent_id: str,
@@ -4936,16 +4952,6 @@ def claim_epic(
     allow_takeover_from: str | None = None,
 ) -> dict[str, object]:
     """Claim an epic by assigning it to the agent."""
-
-    def _claim_is_complete(candidate: dict[str, object], *, claimant: str) -> bool:
-        assignee = candidate.get("assignee")
-        status = str(candidate.get("status") or "").strip().lower()
-        return (
-            isinstance(assignee, str)
-            and assignee == claimant
-            and status == "in_progress"
-            and has_issue_label(_issue_labels(candidate), _LABEL_HOOKED, beads_root=beads_root)
-        )
 
     with _issue_write_lock(epic_id, beads_root=beads_root):
         issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
@@ -5045,7 +5051,7 @@ def claim_epic(
             assignee = updated.get("assignee")
             if assignee != agent_id:
                 die(f"epic {epic_id} claim failed; already assigned")
-            if _claim_is_complete(updated, claimant=agent_id):
+            if _claim_is_complete(updated, claimant=agent_id, beads_root=beads_root):
                 return updated
             if attempt == 0:
                 continue
@@ -5055,7 +5061,6 @@ def claim_epic(
                 f"{issue_label(_LABEL_HOOKED, beads_root=beads_root)}"
             )
         die(f"epic {epic_id} claim failed; unable to verify claimed state")
-        return issue
 
 
 def epic_changeset_summary(
