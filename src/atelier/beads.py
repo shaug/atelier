@@ -587,26 +587,28 @@ def issue_label(
     beads_root: Path | None = None,
     prefix: str | None = None,
 ) -> str:
-    """Build a namespaced Beads label for the configured project prefix."""
+    """Build an Atelier-managed namespaced Beads label.
+
+    Atelier lifecycle/runtime labels use a fixed ``at:*`` namespace regardless
+    of project issue id prefix.
+    """
     cleaned_name = name.strip().lower()
     if not cleaned_name:
         return ""
     resolved_prefix = prefix.strip().lower() if isinstance(prefix, str) else ""
     if not resolved_prefix:
-        if beads_root is not None:
-            resolved_prefix = configured_issue_prefix(beads_root=beads_root)
-        else:
-            resolved_prefix = ATELIER_ISSUE_PREFIX
+        del beads_root
+        resolved_prefix = ATELIER_ISSUE_PREFIX
     return f"{resolved_prefix}:{cleaned_name}"
 
 
 def issue_label_candidates(name: str, *, beads_root: Path) -> tuple[str, ...]:
     """Return primary + compatibility labels for a namespaced label name."""
-    primary = issue_label(name, beads_root=beads_root)
-    legacy = issue_label(name, prefix=ATELIER_ISSUE_PREFIX)
-    if primary == legacy:
+    primary = issue_label(name)
+    compatibility = issue_label(name, prefix=configured_issue_prefix(beads_root=beads_root))
+    if compatibility == primary:
         return (primary,)
-    return (primary, legacy)
+    return (primary, compatibility)
 
 
 def has_issue_label(
@@ -625,6 +627,33 @@ def has_issue_label(
     if suffix == ":":
         return False
     return any(label.endswith(suffix) for label in label_values)
+
+
+def _list_issues_for_label(
+    label_name: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    extra_args: list[str] | None = None,
+) -> list[dict[str, object]]:
+    """List issues for primary + compatibility label namespaces."""
+    args_tail = list(extra_args or ())
+    issues: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
+    for label in issue_label_candidates(label_name, beads_root=beads_root):
+        label_issues = run_bd_json(
+            ["list", "--label", label, *args_tail],
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+        for issue in label_issues:
+            issue_id = str(issue.get("id") or "").strip()
+            if issue_id:
+                if issue_id in seen_ids:
+                    continue
+                seen_ids.add(issue_id)
+            issues.append(issue)
+    return issues
 
 
 def _default_dolt_database_name(beads_root: Path) -> str:
@@ -3111,7 +3140,8 @@ def release_epic_assignment(
 
         args = ["update", epic_id, "--assignee", ""]
         if has_issue_label(labels, _LABEL_HOOKED, beads_root=beads_root):
-            args.extend(["--remove-label", issue_label(_LABEL_HOOKED, beads_root=beads_root)])
+            for hooked_label in issue_label_candidates(_LABEL_HOOKED, beads_root=beads_root):
+                args.extend(["--remove-label", hooked_label])
         if status and status not in {"closed", "done"}:
             args.extend(["--status", "open"])
         run_bd_command(args, beads_root=beads_root, cwd=cwd, allow_failure=True)
@@ -5130,8 +5160,18 @@ def _create_issue_with_body(
 
 def find_agent_bead(agent_id: str, *, beads_root: Path, cwd: Path) -> dict[str, object] | None:
     """Find an agent bead by agent identity."""
-    issues = run_bd_json(
-        ["list", "--label", issue_label(_LABEL_AGENT, beads_root=beads_root), "--title", agent_id],
+    issues = _list_issues_for_label(
+        _LABEL_AGENT,
+        beads_root=beads_root,
+        cwd=cwd,
+        extra_args=["--title", agent_id],
+    )
+    for issue in issues:
+        title = issue.get("title")
+        if isinstance(title, str) and title == agent_id:
+            return issue
+    issues = _list_issues_for_label(
+        _LABEL_AGENT,
         beads_root=beads_root,
         cwd=cwd,
     )
@@ -5533,16 +5573,19 @@ def list_inbox_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List message beads assigned to the agent."""
-    args = [
-        "list",
-        "--label",
-        issue_label(_LABEL_MESSAGE, beads_root=beads_root),
-        "--assignee",
-        agent_id,
+    issues = _list_issues_for_label(
+        _LABEL_MESSAGE,
+        beads_root=beads_root,
+        cwd=cwd,
+        extra_args=["--assignee", agent_id],
+    )
+    if not unread_only:
+        return issues
+    return [
+        issue
+        for issue in issues
+        if has_issue_label(_issue_labels(issue), _LABEL_UNREAD, beads_root=beads_root)
     ]
-    if unread_only:
-        args.extend(["--label", issue_label(_LABEL_UNREAD, beads_root=beads_root)])
-    return run_bd_json(args, beads_root=beads_root, cwd=cwd)
 
 
 def list_queue_messages(
@@ -5554,10 +5597,13 @@ def list_queue_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List queued message beads, optionally filtered by queue name."""
-    args = ["list", "--label", issue_label(_LABEL_MESSAGE, beads_root=beads_root)]
+    issues = _list_issues_for_label(_LABEL_MESSAGE, beads_root=beads_root, cwd=cwd)
     if unread_only:
-        args.extend(["--label", issue_label(_LABEL_UNREAD, beads_root=beads_root)])
-    issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
+        issues = [
+            issue
+            for issue in issues
+            if has_issue_label(_issue_labels(issue), _LABEL_UNREAD, beads_root=beads_root)
+        ]
     matches: list[dict[str, object]] = []
     for issue in issues:
         description = issue.get("description")
@@ -5663,13 +5709,11 @@ def mark_message_read(
     cwd: Path,
 ) -> None:
     """Mark a message bead as read."""
+    args = ["update", message_id]
+    for unread_label in issue_label_candidates(_LABEL_UNREAD, beads_root=beads_root):
+        args.extend(["--remove-label", unread_label])
     run_bd_command(
-        [
-            "update",
-            message_id,
-            "--remove-label",
-            issue_label(_LABEL_UNREAD, beads_root=beads_root),
-        ],
+        args,
         beads_root=beads_root,
         cwd=cwd,
     )

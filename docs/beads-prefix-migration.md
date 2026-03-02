@@ -23,5 +23,6 @@ This project supports per-project Beads prefixes via `beads.prefix`.
   setup.
 - Suggested prefixes are deterministic (`tuber-service` -> `ts`, then `ts2`,
   `ts3`, ... when collisions exist).
-- Runtime lookup remains compatibility-safe for legacy `at:*` labels while
+- Atelier-managed lifecycle/runtime labels use fixed `at:*` names.
+- Runtime lookup remains compatibility-safe for legacy non-`at:*` variants while
   migrating.

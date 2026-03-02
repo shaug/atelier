@@ -41,6 +41,27 @@ def test_beads_env_sets_beads_db() -> None:
     assert env["BEADS_DB"] == "/tmp/project/.beads/beads.db"
 
 
+def test_issue_label_uses_fixed_at_namespace_with_custom_issue_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+
+    assert beads.issue_label("epic", beads_root=beads_root) == "at:epic"
+    assert beads.issue_label_candidates("epic", beads_root=beads_root) == ("at:epic", "ts:epic")
+
+
+def test_issue_label_candidates_dedupe_when_issue_prefix_is_at(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+
+    assert beads.issue_label_candidates("epic", beads_root=beads_root) == ("at:epic",)
+
+
 def test_dolt_server_supervision_bypasses_rename_prefix() -> None:
     assert not beads._is_dolt_server_supervision_target(
         [
@@ -3131,6 +3152,35 @@ def test_find_agent_bead_falls_back_to_description_agent_id() -> None:
     }
 
 
+def test_find_agent_bead_reads_compatibility_label_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    calls: list[list[str]] = []
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        del beads_root, cwd
+        calls.append(args)
+        if args == ["list", "--label", "at:agent", "--title", "agent-7"]:
+            return []
+        if args == ["list", "--label", "ts:agent", "--title", "agent-7"]:
+            return [{"id": "ts-agent", "title": "agent-7", "labels": ["ts:agent"]}]
+        raise AssertionError(f"unexpected args: {args}")
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_json):
+        result = beads.find_agent_bead("agent-7", beads_root=beads_root, cwd=Path("/repo"))
+
+    assert result == {"id": "ts-agent", "title": "agent-7", "labels": ["ts:agent"]}
+    assert calls == [
+        ["list", "--label", "at:agent", "--title", "agent-7"],
+        ["list", "--label", "ts:agent", "--title", "agent-7"],
+    ]
+
+
 def test_ensure_agent_bead_creates_when_missing() -> None:
     def fake_command(*_args, **_kwargs) -> CompletedProcess[str]:
         return CompletedProcess(args=["bd"], returncode=0, stdout="atelier-2\n", stderr="")
@@ -3846,6 +3896,66 @@ def test_release_epic_assignment_skips_when_assignee_no_longer_matches() -> None
     run_command.assert_not_called()
 
 
+def test_release_epic_assignment_removes_compatibility_hook_labels(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    initial = {
+        "id": "epic-9",
+        "status": "in_progress",
+        "labels": ["at:epic", "ts:hooked"],
+        "assignee": "agent-old",
+    }
+    released = {
+        "id": "epic-9",
+        "status": "open",
+        "labels": ["at:epic"],
+        "assignee": None,
+    }
+    show_calls = 0
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        del beads_root, cwd
+        nonlocal show_calls
+        if args == ["show", "epic-9"]:
+            show_calls += 1
+            return [initial] if show_calls == 1 else [released]
+        raise AssertionError(f"unexpected args: {args}")
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command") as run_command,
+    ):
+        assert (
+            beads.release_epic_assignment(
+                "epic-9",
+                beads_root=beads_root,
+                cwd=Path("/repo"),
+                expected_assignee="agent-old",
+                expected_hooked=True,
+            )
+            is True
+        )
+
+    update_args = run_command.call_args.args[0]
+    assert update_args == [
+        "update",
+        "epic-9",
+        "--assignee",
+        "",
+        "--remove-label",
+        "at:hooked",
+        "--remove-label",
+        "ts:hooked",
+        "--status",
+        "open",
+    ]
+
+
 def test_claim_epic_blocks_planner_owned_executable_work() -> None:
     issue = {
         "id": "atelier-9",
@@ -4380,34 +4490,88 @@ def test_claim_queue_message_rejects_second_concurrent_claimant() -> None:
 
 
 def test_list_inbox_messages_filters_unread() -> None:
-    with patch("atelier.beads.run_bd_json", return_value=[{"id": "atelier-77"}]) as run_json:
+    with patch(
+        "atelier.beads.run_bd_json",
+        return_value=[{"id": "atelier-77", "labels": ["at:message", "at:unread"]}],
+    ) as run_json:
         result = beads.list_inbox_messages("alice", beads_root=Path("/beads"), cwd=Path("/repo"))
     assert result
     called_args = run_json.call_args.args[0]
-    assert "--label" in called_args
-    assert "at:unread" in called_args
+    assert called_args == ["list", "--label", "at:message", "--assignee", "alice"]
 
 
 def test_list_queue_messages_filters_unread_by_default() -> None:
-    with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
-        beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
+    issues = [
+        {
+            "id": "msg-unread",
+            "labels": ["at:message", "at:unread"],
+            "description": "---\nqueue: ops\n---\n\ntest\n",
+        },
+        {
+            "id": "msg-read",
+            "labels": ["at:message"],
+            "description": "---\nqueue: ops\n---\n\ntest\n",
+        },
+    ]
+    with patch("atelier.beads.run_bd_json", return_value=issues) as run_json:
+        result = beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
     called_args = run_json.call_args.args[0]
-    assert called_args == ["list", "--label", "at:message", "--label", "at:unread"]
+    assert called_args == ["list", "--label", "at:message"]
+    assert [issue["id"] for issue in result] == ["msg-unread"]
 
 
 def test_list_queue_messages_can_include_read_messages() -> None:
-    with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
-        beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"), unread_only=False)
+    issues = [
+        {
+            "id": "msg-unread",
+            "labels": ["at:message", "at:unread"],
+            "description": "---\nqueue: ops\n---\n\ntest\n",
+        },
+        {
+            "id": "msg-read",
+            "labels": ["at:message"],
+            "description": "---\nqueue: ops\n---\n\ntest\n",
+        },
+    ]
+    with patch("atelier.beads.run_bd_json", return_value=issues) as run_json:
+        result = beads.list_queue_messages(
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            unread_only=False,
+        )
     called_args = run_json.call_args.args[0]
     assert called_args == ["list", "--label", "at:message"]
+    assert [issue["id"] for issue in result] == ["msg-unread", "msg-read"]
 
 
 def test_mark_message_read_updates_labels() -> None:
     with patch("atelier.beads.run_bd_command") as run_command:
         beads.mark_message_read("atelier-88", beads_root=Path("/beads"), cwd=Path("/repo"))
     called_args = run_command.call_args.args[0]
-    assert "update" in called_args
-    assert "--remove-label" in called_args
+    assert called_args == ["update", "atelier-88", "--remove-label", "at:unread"]
+
+
+def test_mark_message_read_removes_compatibility_unread_label(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+
+    with patch("atelier.beads.run_bd_command") as run_command:
+        beads.mark_message_read("atelier-88", beads_root=beads_root, cwd=Path("/repo"))
+
+    called_args = run_command.call_args.args[0]
+    assert called_args == [
+        "update",
+        "atelier-88",
+        "--remove-label",
+        "at:unread",
+        "--remove-label",
+        "ts:unread",
+    ]
 
 
 def test_list_descendant_changesets_walks_tree() -> None:
@@ -4472,6 +4636,41 @@ def test_list_epics_finds_epic_beyond_default_window() -> None:
         )
     assert len(result) == 1
     assert result[0]["id"] == "at-epic"
+
+
+def test_list_epics_prefers_at_namespace_with_compat_fallback_for_mixed_issue_ids(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    queries: list[list[str]] = []
+
+    def fake_run(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        del beads_root, cwd
+        queries.append(args)
+        if args == ["list", "--label", "at:epic", "--all", "--limit", "0"]:
+            return [
+                {"id": "at-1", "status": "open", "labels": ["at:epic"]},
+                {"id": "ts-2", "status": "in_progress", "labels": ["at:epic"]},
+            ]
+        if args == ["list", "--label", "ts:epic", "--all", "--limit", "0"]:
+            return [
+                {"id": "ts-2", "status": "in_progress", "labels": ["ts:epic"]},
+                {"id": "ts-3", "status": "open", "labels": ["ts:epic"]},
+            ]
+        raise AssertionError(f"unexpected args: {args}")
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_run):
+        result = beads.list_epics(beads_root=beads_root, cwd=Path("/repo"), include_closed=True)
+
+    assert queries == [
+        ["list", "--label", "at:epic", "--all", "--limit", "0"],
+        ["list", "--label", "ts:epic", "--all", "--limit", "0"],
+    ]
+    assert [issue["id"] for issue in result] == ["at-1", "ts-2", "ts-3"]
 
 
 def test_epic_discovery_parity_report_detects_identity_violations() -> None:
