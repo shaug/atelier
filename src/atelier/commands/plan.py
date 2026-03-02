@@ -139,6 +139,20 @@ def _planner_session_mode_line(selection: _PlannerSessionSelection) -> str:
     return f"Planner session mode: start new ({selection.reason})."
 
 
+def _run_interactive_agent_command(cmd: list[str], *, cwd: Path | None, env: dict[str, str]) -> int:
+    request = exec.CommandRequest(
+        argv=tuple(cmd),
+        cwd=cwd,
+        env=env,
+        capture_output=False,
+        text=False,
+    )
+    result = exec.run_with_runner(request)
+    if result is None:
+        die(f"missing required command: {cmd[0]}")
+    return result.returncode
+
+
 def _planner_opening_prompt(
     *, project_enlistment: str, planner_branch: str, planner_workspace_uid: str | None
 ) -> str:
@@ -750,7 +764,26 @@ def run_planner(args: object) -> None:
                     else:
                         say("Planner session id: unavailable.")
                 else:
-                    exec.run_command(launch_cmd, cwd=launch_cwd, env=env)
+                    launch_returncode = _run_interactive_agent_command(
+                        launch_cmd,
+                        cwd=launch_cwd,
+                        env=env,
+                    )
+                    can_fallback_from_resume = (
+                        selection.mode == "resume"
+                        and selection.session_id is None
+                        and launch_cmd != start_cmd
+                    )
+                    if launch_returncode != 0 and can_fallback_from_resume:
+                        say("Planner resume failed; starting a new session.")
+                        launch_cmd, launch_cwd = start_cmd, start_cwd
+                        launch_returncode = _run_interactive_agent_command(
+                            launch_cmd,
+                            cwd=launch_cwd,
+                            env=env,
+                        )
+                    if launch_returncode != 0:
+                        die(f"command failed: {' '.join(launch_cmd)} (exit {launch_returncode})")
             finally:
                 sync_monitor.stop()
     finally:

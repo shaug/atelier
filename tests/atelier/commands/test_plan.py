@@ -321,13 +321,16 @@ def test_plan_resumes_claude_session_by_default(tmp_path: Path) -> None:
             "atelier.commands.plan.worktrees.ensure_git_worktree",
             return_value=worktree_path,
         ),
-        patch("atelier.commands.plan.exec.run_command") as run_command,
+        patch(
+            "atelier.commands.plan._run_interactive_agent_command",
+            return_value=0,
+        ) as run_interactive_agent_command,
         patch("atelier.commands.plan.say") as say,
     ):
         plan_cmd.run_planner(SimpleNamespace(epic_id=None))
 
-    run_command.assert_called_once()
-    launch_cmd = run_command.call_args.args[0]
+    run_interactive_agent_command.assert_called_once()
+    launch_cmd = run_interactive_agent_command.call_args.args[0]
     assert launch_cmd[0] == "claude"
     assert "--continue" in launch_cmd
     assert any("Planner session mode: resume" in str(call.args[0]) for call in say.call_args_list)
@@ -389,13 +392,16 @@ def test_plan_applies_claude_yolo_flag(tmp_path: Path) -> None:
             "atelier.commands.plan.worktrees.ensure_git_worktree",
             return_value=worktree_path,
         ),
-        patch("atelier.commands.plan.exec.run_command") as run_command,
+        patch(
+            "atelier.commands.plan._run_interactive_agent_command",
+            return_value=0,
+        ) as run_interactive_agent_command,
         patch("atelier.commands.plan.say"),
     ):
         plan_cmd.run_planner(SimpleNamespace(epic_id=None, yolo=True))
 
-    run_command.assert_called_once()
-    launch_cmd = run_command.call_args.args[0]
+    run_interactive_agent_command.assert_called_once()
+    launch_cmd = run_interactive_agent_command.call_args.args[0]
     assert launch_cmd[0] == "claude"
     assert "--dangerously-skip-permissions" in launch_cmd
 
@@ -456,17 +462,97 @@ def test_plan_new_session_uses_claude_start_prompt(tmp_path: Path) -> None:
             "atelier.commands.plan.worktrees.ensure_git_worktree",
             return_value=worktree_path,
         ),
-        patch("atelier.commands.plan.exec.run_command") as run_command,
+        patch(
+            "atelier.commands.plan._run_interactive_agent_command",
+            return_value=0,
+        ) as run_interactive_agent_command,
         patch("atelier.commands.plan.say"),
     ):
         plan_cmd.run_planner(SimpleNamespace(epic_id=None, new_session=True))
 
-    run_command.assert_called_once()
-    launch_cmd = run_command.call_args.args[0]
+    run_interactive_agent_command.assert_called_once()
+    launch_cmd = run_interactive_agent_command.call_args.args[0]
     assert launch_cmd[0] == "claude"
     assert "--continue" not in launch_cmd
     assert "Run `planner-startup-check` before any planning work." in launch_cmd[-1]
     assert launch_cmd[-1].splitlines()[0] == "atelier:/repo:main-planner-planner"
+
+
+def test_plan_claude_resume_failure_falls_back_to_new_session(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "worktrees" / "planner"
+    agent = AgentHome(
+        name="planner",
+        agent_id="atelier/planner/planner",
+        role="planner",
+        path=Path("/project/agents/planner"),
+    )
+
+    class DummyResult:
+        stdout = ""
+        returncode = 0
+
+    with (
+        patch(
+            "atelier.commands.plan.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _project_payload_for_agent("claude"),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.plan.agent_home.resolve_agent_home", return_value=agent),
+        patch("atelier.commands.plan.agent_home.cleanup_agent_home"),
+        patch("atelier.commands.plan.beads.ensure_agent_bead"),
+        patch(
+            "atelier.commands.plan.beads.run_bd_command",
+            return_value=DummyResult(),
+        ),
+        patch("atelier.commands.plan.beads.run_bd_json", return_value=[]),
+        patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.config.write_project_config"),
+        patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
+        patch(
+            "atelier.commands.plan.worktrees.ensure_git_worktree",
+            return_value=worktree_path,
+        ),
+        patch(
+            "atelier.commands.plan._run_interactive_agent_command",
+            side_effect=[1, 0],
+        ) as run_interactive_agent_command,
+        patch("atelier.commands.plan.say") as say,
+    ):
+        plan_cmd.run_planner(SimpleNamespace(epic_id=None))
+
+    assert run_interactive_agent_command.call_count == 2
+    first_cmd = run_interactive_agent_command.call_args_list[0].args[0]
+    second_cmd = run_interactive_agent_command.call_args_list[1].args[0]
+    assert first_cmd[0] == "claude"
+    assert "--continue" in first_cmd
+    assert second_cmd[0] == "claude"
+    assert "--continue" not in second_cmd
+    assert any(
+        "Planner resume failed; starting a new session." in str(call.args[0])
+        for call in say.call_args_list
+    )
 
 
 def test_plan_resumes_saved_planner_session_by_default(tmp_path: Path) -> None:
