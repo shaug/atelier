@@ -128,6 +128,11 @@ class TestAgentSpec:
         assert project_paths == (".claude/skills",)
         assert global_paths == ("~/.claude/skills",)
 
+    def test_claude_yolo_flag_defaults(self) -> None:
+        claude = get_agent("claude")
+        assert claude is not None
+        assert claude.yolo_flags == ("--dangerously-skip-permissions",)
+
     def test_skill_lookup_paths_unsupported_agent(self) -> None:
         assert agents.skill_lookup_paths("unknown") == ((), ())
 

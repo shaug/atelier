@@ -90,6 +90,7 @@ AGENTS: dict[str, AgentSpec] = {
         command=("claude",),
         resume_subcommand=("--continue",),
         resume_requires_session_id=False,
+        yolo_flags=("--dangerously-skip-permissions",),
         supports_hooks=True,
         project_skill_lookup_paths=(".claude/skills",),
         global_skill_lookup_paths=("~/.claude/skills",),
