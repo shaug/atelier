@@ -5618,7 +5618,11 @@ def _closed_active_pr_condition_still_blocking(
     if not thread_id:
         return True
     if thread_id not in thread_issue_cache:
-        thread_issues = run_bd_json(["show", thread_id], beads_root=beads_root, cwd=cwd)
+        thread_issues, _error = run_bd_json_read_only(
+            ["show", thread_id],
+            beads_root=beads_root,
+            cwd=cwd,
+        )
         thread_issue_cache[thread_id] = thread_issues[0] if thread_issues else None
     thread_issue = thread_issue_cache.get(thread_id)
     if not isinstance(thread_issue, dict):
