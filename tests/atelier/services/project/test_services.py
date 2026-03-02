@@ -309,6 +309,93 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
+@pytest.mark.parametrize("prefix_changed", [False, True])
+def test_initialize_project_service_handles_beads_prefix_noop_and_migration(
+    prefix_changed: bool,
+) -> None:
+    payload = ProjectConfig(project=ProjectSection(origin="github.com/acme/widgets"))
+    compose_service = SimpleNamespace(
+        run=lambda _request: ComposeProjectConfigOutcome(payload=payload)
+    )
+    provider_service = SimpleNamespace(
+        run=lambda _request: ResolveExternalProviderOutcome(
+            payload=payload,
+            selected_provider="github",
+            messages=(),
+        )
+    )
+
+    with (
+        patch(
+            "atelier.services.project.initialize_project.git.resolve_repo_enlistment",
+            return_value=(Path("/repo"), "/repo", None, payload.project.origin),
+        ),
+        patch(
+            "atelier.services.project.initialize_project.paths.project_dir_for_enlistment",
+            return_value=Path("/project-data"),
+        ),
+        patch(
+            "atelier.services.project.initialize_project.paths.project_config_path",
+            return_value=Path("/project-data/config.json"),
+        ),
+        patch(
+            "atelier.services.project.initialize_project.paths.project_config_user_path",
+            return_value=Path("/project-data/config.user.json"),
+        ),
+        patch(
+            "atelier.services.project.initialize_project.config.load_project_config",
+            return_value=None,
+        ),
+        patch("atelier.services.project.initialize_project.config.load_json", return_value=None),
+        patch("atelier.services.project.initialize_project.project.ensure_project_dirs"),
+        patch(
+            "atelier.services.project.initialize_project.config.resolve_upgrade_policy",
+            return_value="ask",
+        ),
+        patch(
+            "atelier.services.project.initialize_project.skills.sync_project_skills",
+            return_value=SimpleNamespace(action="up_to_date"),
+        ),
+        patch("atelier.services.project.initialize_project.config.write_project_config"),
+        patch("atelier.services.project.initialize_project.project.ensure_project_scaffold"),
+        patch(
+            "atelier.services.project.initialize_project.config.resolve_beads_root",
+            return_value=Path("/project-data/.beads"),
+        ),
+        patch(
+            "atelier.services.project.initialize_project.config.resolve_beads_prefix",
+            return_value="ts",
+        ),
+        patch("atelier.services.project.initialize_project.beads.ensure_atelier_store"),
+        patch(
+            "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
+            return_value=prefix_changed,
+        ) as ensure_issue_prefix,
+        patch("atelier.services.project.initialize_project.beads.run_bd_command"),
+        patch("atelier.services.project.initialize_project.beads.ensure_atelier_types"),
+    ):
+        service = InitializeProjectService(
+            compose_config_service=compose_service,
+            resolve_provider_service=provider_service,
+            confirm_choice=lambda _text, _default=False: False,
+        )
+        outcome = service(
+            InitializeProjectRequest(
+                args=InitProjectArgs(yes=True),
+                cwd=Path("/repo"),
+                stdin_isatty=False,
+                stdout_isatty=False,
+            )
+        )
+
+    assert outcome.messages[-1] == "Initialized Atelier project"
+    ensure_issue_prefix.assert_called_once_with(
+        "ts",
+        beads_root=Path("/project-data/.beads"),
+        cwd=Path("/project-data"),
+    )
+
+
 def test_initialize_project_service_maps_boundary_failures_to_stable_service_errors() -> None:
     payload = ProjectConfig(project=ProjectSection(origin="github.com/acme/widgets"))
     compose_service = SimpleNamespace(

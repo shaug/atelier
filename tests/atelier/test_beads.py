@@ -2704,14 +2704,32 @@ def test_ensure_issue_prefix_updates_when_mismatched() -> None:
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
     with (
-        patch("atelier.beads._current_issue_prefix", return_value="atelier"),
+        patch("atelier.beads._current_issue_prefix", side_effect=["atelier", "at"]),
         patch("atelier.beads.run_bd_command", side_effect=fake_command),
     ):
         changed = beads.ensure_issue_prefix("at", beads_root=Path("/beads"), cwd=Path("/repo"))
 
     assert changed is True
-    assert calls[0] == ["config", "set", "issue_prefix", "at"]
-    assert calls[1] == ["rename-prefix", "at-", "--repair"]
+    assert calls == [["rename-prefix", "at-", "--repair"]]
+
+
+def test_ensure_issue_prefix_sets_config_if_rename_does_not_update_it() -> None:
+    calls: list[list[str]] = []
+
+    def fake_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> CompletedProcess[str]:
+        calls.append(args)
+        return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    with (
+        patch("atelier.beads._current_issue_prefix", side_effect=["atelier", "atelier"]),
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
+    ):
+        changed = beads.ensure_issue_prefix("at", beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert changed is True
+    assert calls == [["rename-prefix", "at-", "--repair"], ["config", "set", "issue_prefix", "at"]]
 
 
 def test_claim_epic_updates_assignee_and_status() -> None:

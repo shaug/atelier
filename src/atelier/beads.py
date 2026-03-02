@@ -3299,9 +3299,12 @@ def ensure_issue_prefix(
     current = _current_issue_prefix(beads_root=beads_root, cwd=cwd)
     if current == expected:
         return False
-    run_bd_command(["config", "set", "issue_prefix", expected], beads_root=beads_root, cwd=cwd)
-    # Keep existing issue ids aligned with configured prefix.
     run_bd_command(["rename-prefix", f"{expected}-", "--repair"], beads_root=beads_root, cwd=cwd)
+    # Some bd versions already persist issue_prefix during rename; others do not.
+    # Verify and set only when required to keep migration idempotent.
+    migrated = _current_issue_prefix(beads_root=beads_root, cwd=cwd)
+    if migrated != expected:
+        run_bd_command(["config", "set", "issue_prefix", expected], beads_root=beads_root, cwd=cwd)
     _ISSUE_PREFIX_CACHE[_issue_prefix_cache_key(beads_root)] = expected
     return True
 
