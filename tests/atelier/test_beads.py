@@ -41,6 +41,24 @@ def test_beads_env_sets_beads_db() -> None:
     assert env["BEADS_DB"] == "/tmp/project/.beads/beads.db"
 
 
+def test_issue_label_uses_fixed_at_namespace_with_custom_issue_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+
+    assert beads.issue_label("epic", beads_root=beads_root) == "at:epic"
+    assert beads.issue_label_candidates("epic", beads_root=beads_root) == ("at:epic",)
+    assert beads.issue_label_candidates(
+        "epic",
+        beads_root=beads_root,
+        include_configured_prefix=True,
+    ) == ("at:epic", "ts:epic")
+
+
 def test_dolt_server_supervision_bypasses_rename_prefix() -> None:
     assert not beads._is_dolt_server_supervision_target(
         [
@@ -3131,6 +3149,35 @@ def test_find_agent_bead_falls_back_to_description_agent_id() -> None:
     }
 
 
+def test_find_agent_bead_reads_compatibility_label_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    calls: list[list[str]] = []
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        del beads_root, cwd
+        calls.append(args)
+        if args == ["list", "--label", "at:agent", "--title", "agent-7"]:
+            return []
+        if args == ["list", "--label", "ts:agent", "--title", "agent-7"]:
+            return [{"id": "ts-agent", "title": "agent-7", "labels": ["ts:agent"]}]
+        raise AssertionError(f"unexpected args: {args}")
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_json):
+        result = beads.find_agent_bead("agent-7", beads_root=beads_root, cwd=Path("/repo"))
+
+    assert result == {"id": "ts-agent", "title": "agent-7", "labels": ["ts:agent"]}
+    assert calls == [
+        ["list", "--label", "at:agent", "--title", "agent-7"],
+        ["list", "--label", "ts:agent", "--title", "agent-7"],
+    ]
+
+
 def test_ensure_agent_bead_creates_when_missing() -> None:
     def fake_command(*_args, **_kwargs) -> CompletedProcess[str]:
         return CompletedProcess(args=["bd"], returncode=0, stdout="atelier-2\n", stderr="")
@@ -4384,8 +4431,15 @@ def test_list_inbox_messages_filters_unread() -> None:
         result = beads.list_inbox_messages("alice", beads_root=Path("/beads"), cwd=Path("/repo"))
     assert result
     called_args = run_json.call_args.args[0]
-    assert "--label" in called_args
-    assert "at:unread" in called_args
+    assert called_args == [
+        "list",
+        "--label",
+        "at:message",
+        "--assignee",
+        "alice",
+        "--label",
+        "at:unread",
+    ]
 
 
 def test_list_queue_messages_filters_unread_by_default() -> None:
@@ -4562,8 +4616,7 @@ def test_mark_message_read_updates_labels() -> None:
     with patch("atelier.beads.run_bd_command") as run_command:
         beads.mark_message_read("atelier-88", beads_root=Path("/beads"), cwd=Path("/repo"))
     called_args = run_command.call_args.args[0]
-    assert "update" in called_args
-    assert "--remove-label" in called_args
+    assert called_args == ["update", "atelier-88", "--remove-label", "at:unread"]
 
 
 def test_list_descendant_changesets_walks_tree() -> None:

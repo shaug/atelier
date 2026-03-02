@@ -318,7 +318,7 @@ def init_command(
 
     Args:
         branch_prefix: Prefix for new workspace branches (optional).
-        beads_prefix: Prefix for Beads issue ids/labels (for example: ``ts``).
+        beads_prefix: Prefix for Beads issue ids (for example: ``ts``).
         branch_pr_mode: Workspace PR mode (none|draft|ready).
         branch_history: History policy (manual|squash|merge|rebase).
         branch_squash_message: Squash commit subject policy
@@ -421,7 +421,7 @@ def new_command(
     Args:
         path: Path for the new project (optional).
         branch_prefix: Prefix for new workspace branches (optional).
-        beads_prefix: Prefix for Beads issue ids/labels (for example: ``ts``).
+        beads_prefix: Prefix for Beads issue ids (for example: ``ts``).
         branch_pr_mode: Workspace PR mode (none|draft|ready).
         branch_history: History policy (manual|squash|merge|rebase).
         branch_squash_message: Squash commit subject policy

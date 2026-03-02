@@ -268,7 +268,7 @@ def test_select_global_review_feedback_changeset_retries_and_skips_failed_family
         ),
         patch(
             "atelier.worker.review.beads.issue_label_candidates",
-            return_value=("ts:epic", "at:epic"),
+            return_value=("at:epic", "ts:epic"),
         ),
         patch(
             "atelier.worker.review.prs.lookup_github_pr_status",

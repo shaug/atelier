@@ -23,5 +23,8 @@ This project supports per-project Beads prefixes via `beads.prefix`.
   setup.
 - Suggested prefixes are deterministic (`tuber-service` -> `ts`, then `ts2`,
   `ts3`, ... when collisions exist).
-- Runtime lookup remains compatibility-safe for legacy `at:*` labels while
-  migrating.
+- Atelier-managed lifecycle/runtime labels use fixed `at:*` names.
+- Legacy non-`at:*` compatibility in this changeset is limited to agent-label
+  lookup fallback only.
+- Epic identity and runtime lifecycle labels (`at:epic`, `at:message`,
+  `at:unread`, `at:hooked`) are fixed to `at:*` with no broad prefixed fallback.

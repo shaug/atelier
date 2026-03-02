@@ -172,7 +172,7 @@ def test_find_active_root_branch_conflicts_queries_compatibility_epic_labels() -
 
     with patch(
         "atelier.worker.session.runner.beads_runtime.issue_label_candidates",
-        return_value=("ts:epic", "at:epic"),
+        return_value=("at:epic", "ts:epic"),
     ):
         blocking = runner._find_active_root_branch_conflicts(  # pyright: ignore[reportPrivateUsage]
             beads=_FakeBeads(),
@@ -183,7 +183,7 @@ def test_find_active_root_branch_conflicts_queries_compatibility_epic_labels() -
         )
 
     assert queries == [
-        ["list", "--label", "ts:epic", "--all", "--limit", "0"],
         ["list", "--label", "at:epic", "--all", "--limit", "0"],
+        ["list", "--label", "ts:epic", "--all", "--limit", "0"],
     ]
     assert [issue["id"] for issue in blocking] == ["shared-epic", "at-legacy"]
