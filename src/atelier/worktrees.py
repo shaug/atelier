@@ -379,7 +379,8 @@ def _ensure_root_branch_exists(
                     f"origin/{root_branch}",
                 ],
                 git_path=git_path,
-            )
+            ),
+            capture_output=True,
         )
         return
 
@@ -399,7 +400,8 @@ def _ensure_root_branch_exists(
                     default_branch,
                 ],
                 git_path=git_path,
-            )
+            ),
+            capture_output=True,
         )
         return
     if git.git_ref_exists(repo_root, remote_default_ref, git_path=git_path):
@@ -413,7 +415,8 @@ def _ensure_root_branch_exists(
                     f"origin/{default_branch}",
                 ],
                 git_path=git_path,
-            )
+            ),
+            capture_output=True,
         )
         return
     die(f"default branch {default_branch!r} not found for worktree")
@@ -448,7 +451,8 @@ def _checkout_branch_for_mapping_migration(
             git.git_command(
                 ["-C", str(worktree_path), "checkout", root_branch],
                 git_path=git_path,
-            )
+            ),
+            capture_output=True,
         )
         return
     if git.git_ref_exists(repo_root, remote_ref, git_path=git_path):
@@ -463,7 +467,8 @@ def _checkout_branch_for_mapping_migration(
                     f"origin/{root_branch}",
                 ],
                 git_path=git_path,
-            )
+            ),
+            capture_output=True,
         )
         return
     die(
@@ -763,7 +768,7 @@ def ensure_changeset_worktree(
     else:
         die(f"root branch {root_branch!r} not found for changeset worktree")
 
-    exec_util.run_command(git.git_command(args, git_path=git_path))
+    exec_util.run_command(git.git_command(args, git_path=git_path), capture_output=True)
     return worktree_path
 
 
@@ -803,7 +808,8 @@ def ensure_changeset_checkout(
                         f"origin/{root_branch}",
                     ],
                     git_path=git_path,
-                )
+                ),
+                capture_output=True,
             )
         else:
             exec_util.run_command(
@@ -817,7 +823,8 @@ def ensure_changeset_checkout(
                         default_branch,
                     ],
                     git_path=git_path,
-                )
+                ),
+                capture_output=True,
             )
 
     branch_ref = f"refs/heads/{branch}"
@@ -826,7 +833,8 @@ def ensure_changeset_checkout(
             git.git_command(
                 ["-C", str(worktree_path), "checkout", branch],
                 git_path=git_path,
-            )
+            ),
+            capture_output=True,
         )
         return
 
@@ -844,7 +852,8 @@ def ensure_changeset_checkout(
                     f"origin/{branch}",
                 ],
                 git_path=git_path,
-            )
+            ),
+            capture_output=True,
         )
         return
 
@@ -869,7 +878,8 @@ def ensure_changeset_checkout(
                 ),
             ],
             git_path=git_path,
-        )
+        ),
+        capture_output=True,
     )
 
 
@@ -918,7 +928,7 @@ def ensure_git_worktree(
             root_branch,
         ]
 
-    exec_util.run_command(git.git_command(args, git_path=git_path))
+    exec_util.run_command(git.git_command(args, git_path=git_path), capture_output=True)
     return worktree_path
 
 
@@ -944,5 +954,5 @@ def remove_git_worktree(
     if force:
         args.append("--force")
     args.append(str(worktree_path))
-    exec_util.run_command(git.git_command(args, git_path=git_path))
+    exec_util.run_command(git.git_command(args, git_path=git_path), capture_output=True)
     return True

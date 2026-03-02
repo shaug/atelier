@@ -268,12 +268,18 @@ def run_command(
     cmd: list[str],
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
+    *,
+    capture_output: bool = False,
 ) -> None:
     """Run a command and raise a user-facing error on failure.
 
     Args:
         cmd: Command and arguments to execute.
         cwd: Optional working directory.
+        env: Optional environment variables for the command.
+        capture_output: When true, capture stderr/stdout for actionable failure
+            diagnostics. Defaults to ``False`` to preserve interactive command
+            behavior.
 
     Returns:
         None.
@@ -285,8 +291,8 @@ def run_command(
         argv=tuple(cmd),
         cwd=cwd,
         env=env,
-        capture_output=True,
-        text=True,
+        capture_output=capture_output,
+        text=capture_output,
     )
     result = run_with_runner(request)
     if result is None:

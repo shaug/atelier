@@ -135,6 +135,34 @@ def test_run_command_forwards_env_and_cwd(monkeypatch: pytest.MonkeyPatch) -> No
     assert request.argv == ("bd", "sync")
     assert request.cwd == Path("/tmp/atelier")
     assert request.env == {"BEADS_DIR": "/tmp/beads"}
+    assert request.capture_output is False
+    assert request.text is False
+
+
+def test_run_command_capture_output_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """run_command enables text capture only when explicitly requested."""
+    captured: dict[str, object] = {}
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+        *,
+        runner: exec_util.CommandRunner | None = None,
+    ) -> exec_util.CommandResult | None:
+        del runner
+        captured["request"] = request
+        return exec_util.CommandResult(
+            argv=request.argv,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(exec_util, "run_with_runner", fake_run_with_runner)
+
+    exec_util.run_command(["bd", "sync"], capture_output=True)
+
+    request = captured["request"]
+    assert isinstance(request, exec_util.CommandRequest)
     assert request.capture_output is True
     assert request.text is True
 
