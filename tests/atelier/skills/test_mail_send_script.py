@@ -6,6 +6,8 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
+import pytest
+
 
 def _load_script_module():
     script_path = (
@@ -135,3 +137,44 @@ def test_dispatch_message_non_planner_sender_does_not_reroute() -> None:
     assert result.issue_id == "at-msg-2"
     create.assert_called_once()
     reroute.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("incident_id", "subject", "body"),
+    [
+        ("at-5j4z", "/", "/"),
+        ("at-adjt", "/", "Investigate dependency drift in planner handoff"),
+        ("at-b22t", "Fix worker startup contract", "/"),
+        ("at-dc89", "x", "y"),
+    ],
+)
+def test_dispatch_message_reroute_rejects_incident_placeholder_shapes(
+    incident_id: str,
+    subject: str,
+    body: str,
+) -> None:
+    module = _load_script_module()
+    with (
+        patch.object(module.agent_home, "is_session_agent_active", return_value=False),
+        patch.object(module, "_create_reroute_epic") as reroute,
+        patch.object(module.beads, "create_message_bead") as create_message,
+    ):
+        with pytest.raises(RuntimeError) as excinfo:
+            module.dispatch_message(
+                subject=subject,
+                body=body,
+                to="atelier/worker/codex/p303-t3",
+                from_agent="atelier/planner/codex/p202-t2",
+                thread=None,
+                reply_to=None,
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )
+
+    detail = str(excinfo.value)
+    assert "invalid executable work payload for inactive-worker reroute epic creation" in detail, (
+        incident_id
+    )
+    assert "planner-context: NEEDS-DECISION" in detail, incident_id
+    reroute.assert_not_called()
+    create_message.assert_not_called()

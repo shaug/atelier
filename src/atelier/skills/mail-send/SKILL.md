@@ -26,6 +26,9 @@ description: >-
    - active worker recipient: create an `at:message` bead assigned to `to`
    - inactive worker recipient: create an unassigned executable reroute epic
      (`at:epic`, status `open`) with routing diagnostics
+1. Inactive worker reroutes enforce executable-work quality checks on
+   `subject`/`body`; low-information placeholders fail closed with deterministic
+   diagnostics and a `planner-context: NEEDS-DECISION` hint.
 
 ## Verification
 
