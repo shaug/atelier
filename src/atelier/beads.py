@@ -54,6 +54,7 @@ _AGENT_ISSUE_TYPE = "agent"
 _FALLBACK_ISSUE_TYPE = "task"
 _ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
 _ISSUE_PREFIX_CACHE: dict[Path, str] = {}
+_PROJECT_DOLT_SCOPE_CACHE: dict[Path, str] = {}
 _STORE_REPAIR_ATTEMPTED: set[Path] = set()
 _EMBEDDED_PANIC_REPAIR_ATTEMPTED: set[Path] = set()
 _DOLT_RUNTIME_NORMALIZED: set[Path] = set()
@@ -618,10 +619,67 @@ def _default_dolt_database_name(beads_root: Path) -> str:
     return f"beads_{prefix}_{scope}"
 
 
+def _coerce_project_scope_identity(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized.lower()
+
+
+def _project_scope_identity_from_config_payload(payload: dict[str, object]) -> str | None:
+    project_payload = payload.get("project")
+    if isinstance(project_payload, dict):
+        explicit_project_id = _coerce_project_scope_identity(
+            project_payload.get("id") or project_payload.get("project_id")
+        )
+        if explicit_project_id:
+            return f"project-id:{explicit_project_id}"
+        normalized_origin = _coerce_project_scope_identity(project_payload.get("origin"))
+        if normalized_origin:
+            return f"origin:{normalized_origin}"
+        repo_url = project_payload.get("repo_url")
+        if isinstance(repo_url, str):
+            normalized_repo = git.normalize_origin_url(repo_url)
+            if normalized_repo:
+                return f"repo:{normalized_repo.lower()}"
+
+    atelier_payload = payload.get("atelier")
+    if isinstance(atelier_payload, dict):
+        explicit_atelier_id = _coerce_project_scope_identity(
+            atelier_payload.get("project_id") or atelier_payload.get("id")
+        )
+        if explicit_atelier_id:
+            return f"atelier-id:{explicit_atelier_id}"
+    return None
+
+
+def _project_scope_identity(beads_root: Path) -> str:
+    project_dir = beads_root.parent
+    for config_path in (
+        paths.project_config_sys_path(project_dir),
+        paths.project_config_legacy_path(project_dir),
+    ):
+        payload = config.load_json(config_path)
+        if isinstance(payload, dict):
+            identity = _project_scope_identity_from_config_payload(payload)
+            if identity:
+                return identity
+    fallback = project_dir.name.strip().lower()
+    return fallback or _coerce_project_scope_identity(str(project_dir.resolve())) or "project"
+
+
 def _project_dolt_database_scope(beads_root: Path) -> str:
-    resolved_root = str(beads_root.resolve())
-    digest = hashlib.sha256(resolved_root.encode("utf-8")).hexdigest()
-    return digest[:_DOLT_DATABASE_SCOPE_HASH_LENGTH]
+    key = beads_root.resolve()
+    cached = _PROJECT_DOLT_SCOPE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    identity = _project_scope_identity(beads_root)
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    scope = digest[:_DOLT_DATABASE_SCOPE_HASH_LENGTH]
+    _PROJECT_DOLT_SCOPE_CACHE[key] = scope
+    return scope
 
 
 def _dolt_database_remediation(*, expected_database: str) -> str:
@@ -761,6 +819,7 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
 
     expected_database = _default_dolt_database_name(beads_root)
     local_candidates = _local_dolt_database_candidates(beads_root)
+    preserve_database = False
     if local_candidates and expected_database not in local_candidates:
         choices = ", ".join(local_candidates)
         remediation = _dolt_database_remediation(expected_database=expected_database)
@@ -769,8 +828,9 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
             f"{metadata_path}: local databases ({choices}) do not include expected "
             f"{expected_database}. {remediation}"
         )
+        preserve_database = True
     current_database = _normalize_dolt_database_name(updated.get("dolt_database"))
-    if current_database != expected_database:
+    if not preserve_database and current_database != expected_database:
         updated["dolt_database"] = expected_database
         changes.append("dolt_database")
 
@@ -2148,9 +2208,17 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
     host = host_value.strip() if isinstance(host_value, str) and host_value.strip() else "127.0.0.1"
     port = _parse_dolt_runtime_port(payload.get("dolt_server_port"))
     expected_database = _default_dolt_database_name(beads_root)
+    local_candidates = _local_dolt_database_candidates(beads_root)
     configured_database = _normalize_dolt_database_name(payload.get("dolt_database"))
     ownership_error: str | None = None
-    if configured_database and configured_database != expected_database:
+    if local_candidates and expected_database not in local_candidates:
+        choices = ", ".join(local_candidates)
+        remediation = _dolt_database_remediation(expected_database=expected_database)
+        ownership_error = (
+            "dolt server ownership mismatch: local databases "
+            f"({choices}) do not include expected {expected_database}. {remediation}"
+        )
+    elif configured_database and configured_database != expected_database:
         remediation = _dolt_database_remediation(expected_database=expected_database)
         ownership_error = (
             "dolt server ownership mismatch: metadata.json configures "

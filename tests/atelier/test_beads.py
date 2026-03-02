@@ -47,11 +47,29 @@ def test_default_dolt_database_name_is_project_scoped_and_prefix_aware(
 ) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
+    (tmp_path / "config.sys.json").write_text(
+        json.dumps({"project": {"origin": "github.com/shaug/atelier"}}),
+        encoding="utf-8",
+    )
 
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    beads._PROJECT_DOLT_SCOPE_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     default_name = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     assert default_name.startswith("beads_at_")
     assert len(default_name) > len("beads_at_")
+
+    relocated_project = tmp_path / "relocated"
+    relocated_project.mkdir()
+    (relocated_project / "config.sys.json").write_text(
+        json.dumps({"project": {"origin": "github.com/shaug/atelier"}}),
+        encoding="utf-8",
+    )
+    relocated_beads_root = relocated_project / ".beads"
+    relocated_beads_root.mkdir()
+    relocated_default = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
+        relocated_beads_root
+    )
+    assert relocated_default == default_name
 
     monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
@@ -68,6 +86,9 @@ def test_normalize_dolt_runtime_metadata_once_converges_to_project_database(
     beads_root.mkdir()
     monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    beads._PROJECT_DOLT_SCOPE_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    expected_database = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
+    (beads_root / "dolt" / expected_database / ".dolt").mkdir(parents=True)
     (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
     metadata_path = beads_root / "metadata.json"
     metadata_path.write_text(
@@ -93,9 +114,6 @@ def test_normalize_dolt_runtime_metadata_once_converges_to_project_database(
     )
 
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-    expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
-        beads_root
-    )
     assert payload["backend"] == "dolt"
     assert payload["dolt_mode"] == "server"
     assert payload["dolt_server_host"] == "127.0.0.1"
@@ -187,6 +205,41 @@ def test_normalize_dolt_runtime_metadata_once_overrides_configured_db_when_ambig
     assert (beads_root / "dolt" / "beads_at" / ".dolt").is_dir()
 
 
+def test_normalize_dolt_runtime_metadata_once_preserves_database_when_expected_missing(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    beads._PROJECT_DOLT_SCOPE_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    expected_database = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
+    (beads_root / "dolt" / "beads" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_other" / ".dolt").mkdir(parents=True)
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "backend": "dolt",
+                "dolt_mode": "embedded",
+                "dolt_server_host": "",
+                "dolt_server_port": 0,
+                "dolt_database": "beads",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    beads._DOLT_RUNTIME_NORMALIZED.clear()  # pyright: ignore[reportPrivateUsage]
+    with patch("atelier.beads.atelier_log.warning") as warning_log:
+        beads._normalize_dolt_runtime_metadata_once(  # pyright: ignore[reportPrivateUsage]
+            beads_root=beads_root
+        )
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert payload["dolt_database"] == "beads"
+    messages = [str(call.args[0]) for call in warning_log.call_args_list if call.args]
+    assert any(f"do not include expected {expected_database}" in message for message in messages)
+
+
 def test_normalize_dolt_runtime_metadata_once_sets_expected_db_with_multiple_candidates(
     tmp_path: Path,
 ) -> None:
@@ -252,7 +305,10 @@ def test_resolve_dolt_server_runtime_uses_project_scoped_database_by_default(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
-    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+    (beads_root / "dolt" / expected_database / ".dolt").mkdir(parents=True)
     (beads_root / "dolt" / "beads_other" / ".dolt").mkdir(parents=True)
     (beads_root / "metadata.json").write_text(json.dumps({"backend": "dolt"}), encoding="utf-8")
 
@@ -260,9 +316,6 @@ def test_resolve_dolt_server_runtime_uses_project_scoped_database_by_default(
         beads_root
     )
 
-    expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
-        beads_root
-    )
     assert runtime.database == expected_database
     assert runtime.ownership_error is None
 
@@ -271,7 +324,10 @@ def test_resolve_dolt_server_runtime_rejects_configured_database_mismatch(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
-    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+    (beads_root / "dolt" / expected_database / ".dolt").mkdir(parents=True)
     (beads_root / "dolt" / "beads_other" / ".dolt").mkdir(parents=True)
     (beads_root / "metadata.json").write_text(
         json.dumps({"backend": "dolt", "dolt_database": "beads_other/"}),
@@ -282,9 +338,6 @@ def test_resolve_dolt_server_runtime_rejects_configured_database_mismatch(
         beads_root
     )
 
-    expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
-        beads_root
-    )
     assert runtime.database == expected_database
     assert runtime.ownership_error is not None
     assert "metadata.json configures dolt_database=beads_other" in runtime.ownership_error
@@ -295,6 +348,10 @@ def test_resolve_dolt_server_runtime_rejects_non_candidate_configured_database(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
+    expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+    (beads_root / "dolt" / expected_database / ".dolt").mkdir(parents=True)
     (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
     (beads_root / "dolt" / "beads_other" / ".dolt").mkdir(parents=True)
     (beads_root / "metadata.json").write_text(
@@ -306,13 +363,34 @@ def test_resolve_dolt_server_runtime_rejects_non_candidate_configured_database(
         beads_root
     )
 
-    expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
-        beads_root
-    )
     assert runtime.database == expected_database
     assert runtime.ownership_error is not None
     assert "metadata.json configures dolt_database=beads_unknown" in runtime.ownership_error
     assert f"expected {expected_database}" in runtime.ownership_error
+
+
+def test_resolve_dolt_server_runtime_fails_closed_when_expected_db_missing(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_other" / ".dolt").mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt", "dolt_database": ""}),
+        encoding="utf-8",
+    )
+
+    runtime = beads._resolve_dolt_server_runtime(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+
+    assert runtime.database == expected_database
+    assert runtime.ownership_error is not None
+    assert "local databases (beads_at, beads_other)" in runtime.ownership_error
+    assert f"do not include expected {expected_database}" in runtime.ownership_error
 
 
 def test_run_bd_command_fails_closed_when_server_reports_other_project_database(
