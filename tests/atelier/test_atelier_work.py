@@ -36,6 +36,8 @@ def test_parse_args_sets_single_cycle_for_dry_run(supervisor_module: ModuleType)
     assert config.max_cycles == 1
     assert config.mainline_branch == "main"
     assert config.install_command == "just install"
+    assert config.atelier_path == "atelier"
+    assert config.worker_command == "atelier work --run-mode once"
     assert config.worker_yes is False
     assert passthrough == []
 
@@ -45,6 +47,8 @@ def test_parse_args_default_install_command_is_just_install(supervisor_module: M
     config, _ = parse_args(["--repo-path", "."])
     assert config.install_command == "just install"
     assert config.worker_yes is False
+    assert config.atelier_path == "atelier"
+    assert config.worker_command == "atelier work --run-mode once"
 
 
 def test_parse_args_no_install_disables_install_step(supervisor_module: ModuleType) -> None:
@@ -52,6 +56,7 @@ def test_parse_args_no_install_disables_install_step(supervisor_module: ModuleTy
     config, _ = parse_args(["--repo-path", ".", "--no-install"])
     assert config.install_command is None
     assert config.worker_yes is False
+    assert config.atelier_path == "atelier"
 
 
 def test_parse_args_install_override(supervisor_module: ModuleType) -> None:
@@ -64,6 +69,15 @@ def test_parse_args_yes_flag_sets_worker_yes(supervisor_module: ModuleType) -> N
     parse_args = supervisor_module._parse_args
     config, _ = parse_args(["--repo-path", ".", "--yes"])
     assert config.worker_yes is True
+
+
+def test_parse_args_uses_atelier_path_for_default_worker(supervisor_module: ModuleType) -> None:
+    parse_args = supervisor_module._parse_args
+    config, _ = parse_args(
+        ["--repo-path", ".", "--atelier-path", "./.venv/bin/atelier"]
+    )
+    assert config.atelier_path == "./.venv/bin/atelier"
+    assert config.worker_command == "./.venv/bin/atelier work --run-mode once"
 
 
 def test_parse_args_captures_worker_passthrough(supervisor_module: ModuleType) -> None:
@@ -137,6 +151,7 @@ def test_run_cycle_skips_worker_when_preflight_fails(
         mainline_branch="main",
         update_policy="ff-only",
         install_command=None,
+        atelier_path="atelier",
         worker_command="atelier work --run-mode once",
         worker_yes=False,
         loop_interval_seconds=0.0,
@@ -183,6 +198,7 @@ def test_run_cycle_runs_worker_when_preflight_succeeds(
         mainline_branch="main",
         update_policy="ff-only",
         install_command="just install-editable",
+        atelier_path="atelier",
         worker_command="atelier work --run-mode once",
         worker_yes=False,
         loop_interval_seconds=0.0,
@@ -220,6 +236,7 @@ def test_run_update_step_returns_false_when_not_on_mainline(
         mainline_branch="main",
         update_policy="ff-only",
         install_command=None,
+        atelier_path="atelier",
         worker_command="atelier work --run-mode once",
         worker_yes=False,
         loop_interval_seconds=0.0,
@@ -251,6 +268,7 @@ def test_run_update_step_returns_false_when_git_ref_resolution_fails(
         mainline_branch="main",
         update_policy="ff-only",
         install_command=None,
+        atelier_path="atelier",
         worker_command="atelier work --run-mode once",
         worker_yes=False,
         loop_interval_seconds=0.0,

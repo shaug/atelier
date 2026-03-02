@@ -37,6 +37,7 @@ class RunnerConfig:
     mainline_branch: str
     update_policy: str
     install_command: str | None
+    atelier_path: str
     worker_command: str
     worker_yes: bool
     loop_interval_seconds: float
@@ -105,6 +106,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="How to handle repo updates before each cycle (default: ff-only)",
     )
     parser.add_argument(
+        "--atelier-path",
+        default="atelier",
+        help="Path to the atelier executable used for the worker command.",
+    )
+    parser.add_argument(
         "--install",
         nargs="?",
         default=None,
@@ -122,8 +128,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--worker-command",
-        default="atelier work --run-mode once",
-        help=("Base worker command to run once per cycle. Arguments after '--' are appended."),
+        default=None,
+        help=(
+            "Base worker command to run once per cycle. When omitted, the default "
+            "is '<atelier-path> work --run-mode once'. Arguments after '--' are "
+            "appended."
+        ),
     )
     parser.add_argument(
         "--yes",
@@ -192,6 +202,12 @@ def _parse_args(argv: Sequence[str]) -> tuple[RunnerConfig, list[str]]:
     else:
         install_command = "just install"
 
+    atelier_path = args.atelier_path.strip() or "atelier"
+    if args.worker_command:
+        worker_command = args.worker_command
+    else:
+        worker_command = f"{atelier_path} work --run-mode once"
+
     config = RunnerConfig(
         repo_path=Path(args.repo_path).expanduser().resolve(),
         git_remote=args.git_remote,
@@ -199,7 +215,8 @@ def _parse_args(argv: Sequence[str]) -> tuple[RunnerConfig, list[str]]:
         mainline_branch=args.mainline_branch.strip() or "main",
         update_policy=args.update_policy,
         install_command=install_command,
-        worker_command=args.worker_command,
+        atelier_path=atelier_path,
+        worker_command=worker_command,
         worker_yes=args.yes,
         loop_interval_seconds=args.loop_interval_seconds,
         max_cycles=max_cycles,
