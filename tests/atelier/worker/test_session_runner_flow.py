@@ -641,6 +641,7 @@ def test_run_worker_once_blocks_changeset_on_non_recoverable_worktree_prep_error
     assert summary.reason == "changeset_startup_preparation_blocked"
     assert summary.epic_id == "at-epic"
     assert summary.changeset_id == "at-epic.1"
+    assert deps.infra.worker_session_worktree.prepare_worktrees.call_count == 1
     deps.lifecycle.mark_changeset_blocked.assert_called_once()
     blocked_args = deps.lifecycle.mark_changeset_blocked.call_args.kwargs
     assert "startup preparation failed at prepare worktrees" in str(blocked_args["reason"])
@@ -659,6 +660,84 @@ def test_run_worker_once_blocks_changeset_on_non_recoverable_worktree_prep_error
         expected_hook="at-epic",
     )
     assert not deps.control._die.called
+
+
+def test_run_worker_once_retries_transient_prepare_worktree_failures_before_blocking() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p6bt",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p6bt",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [{"id": "at-epic.1", "title": "Changeset", "description": ""}]
+            if args[:2] == ["show", "at-epic.1"]
+            else []
+        )
+    )
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        side_effect=[
+            RuntimeError(
+                "command failed: git -C /repo worktree add /tmp/worktrees/at-epic.1 feat/branch "
+                "(exit 128)\nstderr:\nfatal: Unable to create '/repo/.git/index.lock': File exists."
+            ),
+            RuntimeError(
+                "command failed: git -C /repo worktree add /tmp/worktrees/at-epic.1 feat/branch "
+                "(exit 128)\nstderr:\nfatal: Unable to create '/repo/.git/index.lock': File exists."
+            ),
+        ]
+    )
+    deps.lifecycle.mark_changeset_blocked = Mock()
+    deps.lifecycle.send_planner_notification = Mock()
+    deps.lifecycle.release_epic_assignment = Mock()
+    deps.infra.beads.clear_agent_hook = Mock()
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p6bt"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "changeset_startup_preparation_blocked"
+    assert summary.epic_id == "at-epic"
+    assert summary.changeset_id == "at-epic.1"
+    assert deps.infra.worker_session_worktree.prepare_worktrees.call_count == 2
+    retry_logs = [str(call.args[0]) for call in deps.control._say.call_args_list]
+    assert any("Prepare worktrees transient failure; retrying" in line for line in retry_logs)
+    deps.lifecycle.mark_changeset_blocked.assert_called_once()
+    blocked_reason = str(deps.lifecycle.mark_changeset_blocked.call_args.kwargs["reason"])
+    assert "attempt 1/2" in blocked_reason
+    assert "attempt 2/2" in blocked_reason
+    assert "index.lock" in blocked_reason
+    deps.lifecycle.send_planner_notification.assert_called_once()
+    notification_body = str(deps.lifecycle.send_planner_notification.call_args.kwargs["body"])
+    assert "attempt 1/2" in notification_body
+    assert "attempt 2/2" in notification_body
+    assert "index.lock" in notification_body
+    deps.lifecycle.release_epic_assignment.assert_called_once_with(
+        "at-epic",
+        beads_root=Path("/project/.atelier/.beads"),
+        repo_root=Path("/repo"),
+    )
+    deps.infra.beads.clear_agent_hook.assert_called_once_with(
+        "at-agent",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+        expected_hook="at-epic",
+    )
 
 
 def test_run_worker_once_reports_worker_template_load_failure_reason_code() -> None:

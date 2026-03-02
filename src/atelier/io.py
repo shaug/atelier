@@ -15,6 +15,17 @@ except ImportError:  # pragma: no cover - safety fallback when dependency is mis
     questionary = None
 
 
+class AtelierSystemExit(SystemExit):
+    """SystemExit carrying user-facing details while preserving numeric exit code."""
+
+    def __init__(self, message: str, code: int = 1) -> None:
+        super().__init__(code)
+        self.detail = message
+
+    def __str__(self) -> str:
+        return self.detail
+
+
 def _use_questionary() -> bool:
     if questionary is None:
         return False
@@ -81,7 +92,7 @@ def die(message: str, code: int = 1) -> NoReturn:
         >>> die("fatal", code=2)
     """
     log.error(f"error: {message}")
-    sys.exit(code)
+    raise AtelierSystemExit(message, code=code)
 
 
 def prompt(

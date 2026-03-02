@@ -23,6 +23,14 @@ from .startup import StartupContractContext
 from .worktree import WorktreePreparationContext
 
 _WORKER_QUEUE_NAME = "worker"
+_PREPARE_WORKTREES_MAX_ATTEMPTS = 2
+_TRANSIENT_PREPARE_WORKTREES_MARKERS = (
+    "index.lock",
+    "cannot lock ref",
+    "another git process seems to be running",
+    "resource temporarily unavailable",
+    "timed out",
+)
 
 
 @dataclass(frozen=True)
@@ -207,7 +215,7 @@ def _abort_startup_preparation_failure(
     summary_reason: str = "changeset_startup_preparation_blocked",
 ) -> WorkerRunSummary:
     """Fail closed on startup preparation errors after selecting a changeset."""
-    detail = str(error).strip() or repr(error)
+    detail = _format_preparation_error_detail(error)
     if dry_run:
         control.dry_run_log(
             "Would block selected changeset and notify planner after startup "
@@ -271,6 +279,21 @@ def _abort_startup_preparation_failure(
         epic_id=selected_epic,
         changeset_id=changeset_id,
     )
+
+
+def _format_preparation_error_detail(error: BaseException) -> str:
+    detail = str(error).strip()
+    if detail:
+        return detail
+    if isinstance(error, SystemExit):
+        code = error.code if isinstance(error.code, int) else 1
+        return f"command exited with code {code}"
+    return repr(error)
+
+
+def _is_transient_prepare_worktrees_error(error: BaseException) -> bool:
+    detail = _format_preparation_error_detail(error).lower()
+    return any(marker in detail for marker in _TRANSIENT_PREPARE_WORKTREES_MARKERS)
 
 
 @dataclass(frozen=True)
@@ -897,24 +920,65 @@ def run_worker_once(
         else:
             control.say(f"Next changeset: {changeset_id} {changeset_title}")
         finishstep = control.step("Prepare worktrees", timings=timings, trace=trace)
-        try:
-            worktree_prep = infra.worker_session_worktree.prepare_worktrees(
-                context=WorktreePreparationContext(
-                    dry_run=dry_run,
-                    project_data_dir=project_data_dir,
-                    repo_root=repo_root,
-                    beads_root=beads_root,
-                    selected_epic=selected_epic,
-                    changeset_id=str(changeset_id),
-                    root_branch_value=root_branch_value or "",
-                    changeset_parent_branch=parent_branch_for_changeset or "",
-                    allow_parent_branch_override=allow_parent_branch_override,
-                    git_path=git_path,
-                    epic_parent_branch=parent_branch_value or "",
-                ),
-                control=control,
-            )
-        except (RuntimeError, SystemExit) as exc:
+        prep_failures: list[str] = []
+        worktree_prep = None
+        for attempt in range(1, _PREPARE_WORKTREES_MAX_ATTEMPTS + 1):
+            try:
+                worktree_prep = infra.worker_session_worktree.prepare_worktrees(
+                    context=WorktreePreparationContext(
+                        dry_run=dry_run,
+                        project_data_dir=project_data_dir,
+                        repo_root=repo_root,
+                        beads_root=beads_root,
+                        selected_epic=selected_epic,
+                        changeset_id=str(changeset_id),
+                        root_branch_value=root_branch_value or "",
+                        changeset_parent_branch=parent_branch_for_changeset or "",
+                        allow_parent_branch_override=allow_parent_branch_override,
+                        git_path=git_path,
+                        epic_parent_branch=parent_branch_value or "",
+                    ),
+                    control=control,
+                )
+                break
+            except (RuntimeError, SystemExit) as exc:
+                detail = _format_preparation_error_detail(exc)
+                prep_failures.append(
+                    f"attempt {attempt}/{_PREPARE_WORKTREES_MAX_ATTEMPTS}: {detail}"
+                )
+                should_retry = (
+                    attempt < _PREPARE_WORKTREES_MAX_ATTEMPTS
+                    and _is_transient_prepare_worktrees_error(exc)
+                )
+                if should_retry:
+                    retry_message = (
+                        "Prepare worktrees transient failure; retrying "
+                        f"({attempt}/{_PREPARE_WORKTREES_MAX_ATTEMPTS}): {detail}"
+                    )
+                    if dry_run:
+                        control.dry_run_log(f"Would retry startup worktree prep: {retry_message}")
+                    else:
+                        control.say(retry_message)
+                    continue
+                finishstep(extra="blocked")
+                failure_detail = "\n".join(prep_failures)
+                return finish(
+                    _abort_startup_preparation_failure(
+                        beads=infra.beads,
+                        lifecycle=lifecycle,
+                        control=control,
+                        selected_epic=selected_epic,
+                        changeset_id=str(changeset_id),
+                        agent_id=agent.agent_id,
+                        agent_bead_id=agent_bead_id_required,
+                        beads_root=beads_root,
+                        repo_root=repo_root,
+                        dry_run=dry_run,
+                        stage="prepare worktrees",
+                        error=RuntimeError(failure_detail),
+                    )
+                )
+        if worktree_prep is None:
             finishstep(extra="blocked")
             return finish(
                 _abort_startup_preparation_failure(
@@ -929,7 +993,7 @@ def run_worker_once(
                     repo_root=repo_root,
                     dry_run=dry_run,
                     stage="prepare worktrees",
-                    error=exc,
+                    error=RuntimeError("worktree preparation produced no result"),
                 )
             )
         changeset_worktree_path = worktree_prep.changeset_worktree_path

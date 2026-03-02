@@ -135,8 +135,8 @@ def test_run_command_forwards_env_and_cwd(monkeypatch: pytest.MonkeyPatch) -> No
     assert request.argv == ("bd", "sync")
     assert request.cwd == Path("/tmp/atelier")
     assert request.env == {"BEADS_DIR": "/tmp/beads"}
-    assert request.capture_output is False
-    assert request.text is False
+    assert request.capture_output is True
+    assert request.text is True
 
 
 def test_run_command_fails_when_command_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -157,8 +157,11 @@ def test_run_command_fails_when_command_errors(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(exec_util, "run_with_runner", fake_run_with_runner)
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as excinfo:
         exec_util.run_command(["bd", "sync"])
+    assert "command failed: bd sync (exit 2)" in str(excinfo.value)
+    assert "stderr:" in str(excinfo.value)
+    assert "boom" in str(excinfo.value)
 
 
 def test_run_typed_parses_with_spec() -> None:

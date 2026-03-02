@@ -134,11 +134,30 @@ def _missing_command_detail(request: CommandRequest) -> str:
 
 
 def _command_failure_detail(request: CommandRequest, result: CommandResult) -> str:
-    output = (result.stderr or result.stdout or "").strip()
+    def summarize_stream(value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            return ""
+        lines = stripped.splitlines()
+        kept_lines = lines[:8]
+        summary = "\n".join(kept_lines)
+        if len(lines) > 8:
+            summary += "\n... (truncated)"
+        if len(summary) > 600:
+            summary = summary[:597].rstrip() + "..."
+        return summary
+
     command_text = " ".join(request.argv)
-    if output:
-        return f"command failed: {command_text}\n{output}"
-    return f"command failed: {command_text}"
+    stderr_summary = summarize_stream(result.stderr or "")
+    stdout_summary = summarize_stream(result.stdout or "")
+    lines = [f"command failed: {command_text} (exit {result.returncode})"]
+    if stderr_summary:
+        lines.append("stderr:")
+        lines.append(stderr_summary)
+    if stdout_summary:
+        lines.append("stdout:")
+        lines.append(stdout_summary)
+    return "\n".join(lines)
 
 
 def run_typed(spec: CommandSpec[ParsedT], *, runner: CommandRunner | None = None) -> ParsedT:
@@ -262,19 +281,18 @@ def run_command(
     Example:
         >>> run_command(["true"])
     """
-    result = run_with_runner(
-        CommandRequest(
-            argv=tuple(cmd),
-            cwd=cwd,
-            env=env,
-            capture_output=False,
-            text=False,
-        )
+    request = CommandRequest(
+        argv=tuple(cmd),
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
     )
+    result = run_with_runner(request)
     if result is None:
         die(f"missing required command: {cmd[0]}")
     if result.returncode != 0:
-        die(f"command failed: {' '.join(cmd)}")
+        die(_command_failure_detail(request, result))
 
 
 def try_run_command(
