@@ -1067,31 +1067,29 @@ def run_worker_once(
         workspace_branch = agent_prep.workspace_branch
         env = agent_prep.env
         finishstep()
-        opening_prompt = ""
         merge_conflict = startup_result.reason == "merge_conflict"
         review_feedback = startup_result.reason == "review_feedback"
         feedback_before = None
-        if agent_spec.name == "codex":
-            followup_mode = merge_conflict or review_feedback
-            review_pr_url = lifecycle.changeset_pr_url(changeset) if followup_mode else None
-            if followup_mode and not review_pr_url and repo_slug:
-                feedback_branch = lifecycle.changeset_work_branch(changeset)
-                if feedback_branch:
-                    pr_payload = lifecycle.lookup_pr_payload(repo_slug, feedback_branch)
-                    if pr_payload:
-                        payload_url = pr_payload.get("url")
-                        if isinstance(payload_url, str) and payload_url.strip():
-                            review_pr_url = payload_url.strip()
-            opening_prompt = command_ports.worker_opening_prompt(
-                project_enlistment=project_enlistment,
-                workspace_branch=workspace_branch,
-                epic_id=selected_epic,
-                changeset_id=str(changeset_id),
-                changeset_title=str(changeset_title),
-                merge_conflict=merge_conflict,
-                review_feedback=review_feedback,
-                review_pr_url=review_pr_url,
-            )
+        followup_mode = merge_conflict or review_feedback
+        review_pr_url = lifecycle.changeset_pr_url(changeset) if followup_mode else None
+        if agent_spec.name == "codex" and followup_mode and not review_pr_url and repo_slug:
+            feedback_branch = lifecycle.changeset_work_branch(changeset)
+            if feedback_branch:
+                pr_payload = lifecycle.lookup_pr_payload(repo_slug, feedback_branch)
+                if pr_payload:
+                    payload_url = pr_payload.get("url")
+                    if isinstance(payload_url, str) and payload_url.strip():
+                        review_pr_url = payload_url.strip()
+        opening_prompt = command_ports.worker_opening_prompt(
+            project_enlistment=project_enlistment,
+            workspace_branch=workspace_branch,
+            epic_id=selected_epic,
+            changeset_id=str(changeset_id),
+            changeset_title=str(changeset_title),
+            merge_conflict=merge_conflict,
+            review_feedback=review_feedback,
+            review_pr_url=review_pr_url,
+        )
         if review_feedback:
             feedback_before = lifecycle.capture_review_feedback_snapshot(
                 issue=changeset,

@@ -126,6 +126,23 @@ def _planner_session_mode_line(selection: _PlannerSessionSelection) -> str:
     return f"Planner session mode: start new ({selection.reason})."
 
 
+def _planner_opening_prompt(
+    *, project_enlistment: str, planner_branch: str, planner_workspace_uid: str | None
+) -> str:
+    session = workspace.workspace_session_identifier(
+        project_enlistment,
+        planner_branch,
+        planner_workspace_uid,
+    )
+    return "\n".join(
+        [
+            session,
+            "Run `planner-startup-check` before any planning work.",
+            ("After startup-check, summarize inbox/queue actions and continue planning in beads."),
+        ]
+    )
+
+
 def _list_inbox_messages(
     agent_id: str,
     *,
@@ -655,14 +672,13 @@ def run_planner(args: object) -> None:
             finish(f"every {sync_service.settings.interval_seconds}s")
             _report_timings(timings, trace=trace)
             planner_workspace_uid: str | None = None
-            opening_prompt = ""
             if agent_spec.name == "codex":
                 planner_workspace_uid = f"planner-{agent.name}"
-                opening_prompt = workspace.workspace_session_identifier(
-                    project_enlistment,
-                    planner_branch,
-                    planner_workspace_uid,
-                )
+            opening_prompt = _planner_opening_prompt(
+                project_enlistment=project_enlistment,
+                planner_branch=planner_branch,
+                planner_workspace_uid=planner_workspace_uid,
+            )
             try:
                 say(f"Starting {agent_spec.display_name} session")
                 start_cmd, start_cwd = agent_spec.build_start_command(

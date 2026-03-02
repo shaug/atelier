@@ -882,3 +882,70 @@ def test_run_worker_once_continues_after_review_pending_finalize() -> None:
     assert summary.started is True
     assert summary.reason == "agent_session_complete"
     deps.infra.worker_session_agent.start_agent_session.assert_called_once()
+
+
+def test_run_worker_once_passes_opening_prompt_to_non_codex_agents() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p8",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p8",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.lifecycle.next_changeset = lambda **_kwargs: {"id": "at-epic.1", "title": "Changeset"}
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [{"id": "at-epic.1", "title": "Changeset", "description": ""}]
+            if args[:2] == ["show", "at-epic.1"]
+            else []
+        )
+    )
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        return_value=SimpleNamespace(
+            epic_worktree_path=Path("/tmp/epic"),
+            changeset_worktree_path=Path("/tmp/changeset"),
+            branch="feat/root-at-epic.1",
+        )
+    )
+    deps.infra.worker_session_agent.prepare_agent_session = Mock(
+        return_value=SimpleNamespace(
+            agent_spec=SimpleNamespace(name="claude", display_name="Claude"),
+            agent_options=[],
+            project_enlistment=Path("/repo"),
+            workspace_branch="feat/root",
+            env={},
+        )
+    )
+    deps.infra.worker_session_agent.start_agent_session = Mock(
+        return_value=SimpleNamespace(
+            started_at=dt.datetime.now(dt.timezone.utc),
+            returncode=0,
+        )
+    )
+    deps.lifecycle.finalize_changeset = lambda **_kwargs: FinalizeResult(
+        continue_running=True,
+        reason="changeset_review_pending",
+    )
+    deps.commands.worker_opening_prompt = Mock(return_value="open-prompt")
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p8"),
+        deps=deps,
+    )
+
+    assert summary.started is True
+    assert summary.reason == "agent_session_complete"
+    deps.commands.worker_opening_prompt.assert_called_once()
+    deps.infra.worker_session_agent.start_agent_session.assert_called_once()
+    start_kwargs = deps.infra.worker_session_agent.start_agent_session.call_args.kwargs
+    assert start_kwargs["opening_prompt"] == "open-prompt"

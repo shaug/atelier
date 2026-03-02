@@ -18,6 +18,15 @@ def _fake_project_payload() -> ProjectConfig:
     return ProjectConfig()
 
 
+def _project_payload_for_agent(agent_name: str) -> ProjectConfig:
+    payload = _fake_project_payload()
+    return payload.model_copy(
+        update={
+            "agent": payload.agent.model_copy(update={"default": agent_name}),
+        }
+    )
+
+
 class _DummyPlannerSyncService:
     def __init__(self, *_args, **_kwargs) -> None:
         self.settings = planner_sync.PlannerSyncSettings(interval_seconds=600)
@@ -80,6 +89,7 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
     calls: list[list[str]] = []
     steps: list[str] = []
     captured_env: dict[str, str] = {}
+    captured_cmd: list[str] = []
 
     def fake_run_bd_command(args, *, beads_root: Path, cwd: Path, allow_failure: bool = False):
         calls.append(args)
@@ -97,6 +107,7 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         return False
 
     def fake_run_codex_command(cmd, *, cwd: Path | None, env: dict | None):
+        captured_cmd[:] = list(cmd)
         if env:
             captured_env.update({str(k): str(v) for k, v in env.items()})
         return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
@@ -173,6 +184,9 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
     assert calls[0][0] == "prime"
     assert captured_env.get("ATELIER_PLAN_EPIC") == "atelier-epic"
     assert captured_env.get("ATELIER_WORKSPACE") == "main-planner-planner"
+    assert captured_cmd
+    assert "Run `planner-startup-check` before any planning work." in captured_cmd[-1]
+    assert captured_cmd[-1].splitlines()[0] == "atelier:/repo:main-planner-planner:planner-planner"
     reconcile.assert_called_once()
     cleanup_home.assert_called_once_with(agent, project_dir=tmp_path)
     ensure_git_worktree.assert_called_once_with(
@@ -182,6 +196,74 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         root_branch="main-planner-planner",
         git_path="git",
     )
+
+
+def test_plan_passes_opening_prompt_to_claude_start_command(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "worktrees" / "planner"
+    agent = AgentHome(
+        name="planner",
+        agent_id="atelier/planner/planner",
+        role="planner",
+        path=Path("/project/agents/planner"),
+    )
+
+    class DummyResult:
+        stdout = ""
+        returncode = 0
+
+    with (
+        patch(
+            "atelier.commands.plan.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _project_payload_for_agent("claude"),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.plan.agent_home.resolve_agent_home", return_value=agent),
+        patch("atelier.commands.plan.agent_home.cleanup_agent_home"),
+        patch("atelier.commands.plan.beads.ensure_agent_bead"),
+        patch(
+            "atelier.commands.plan.beads.run_bd_command",
+            return_value=DummyResult(),
+        ),
+        patch("atelier.commands.plan.beads.run_bd_json", return_value=[]),
+        patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.config.write_project_config"),
+        patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
+        patch(
+            "atelier.commands.plan.worktrees.ensure_git_worktree",
+            return_value=worktree_path,
+        ),
+        patch("atelier.commands.plan.exec.run_command") as run_command,
+        patch("atelier.commands.plan.say"),
+    ):
+        plan_cmd.run_planner(SimpleNamespace(epic_id=None))
+
+    run_command.assert_called_once()
+    launch_cmd = run_command.call_args.args[0]
+    assert launch_cmd[0] == "claude"
+    assert "Run `planner-startup-check` before any planning work." in launch_cmd[-1]
+    assert launch_cmd[-1].splitlines()[0] == "atelier:/repo:main-planner-planner"
 
 
 def test_plan_resumes_saved_planner_session_by_default(tmp_path: Path) -> None:
