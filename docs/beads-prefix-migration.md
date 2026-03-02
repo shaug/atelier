@@ -6,9 +6,9 @@ This project supports per-project Beads prefixes via `beads.prefix`.
 
 1. Re-run init and choose a new prefix:
    - `atelier init --beads-prefix ts`
-1. Atelier updates Beads config and runs prefix repair:
-   - `bd config set issue_prefix ts`
+1. Atelier runs prefix repair before final prefix verification:
    - `bd rename-prefix ts- --repair`
+   - if needed, `bd config set issue_prefix ts`
 1. Validate store health and identity:
    - `bd prime`
    - `bd doctor --fix --yes`
