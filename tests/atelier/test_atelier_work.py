@@ -36,6 +36,7 @@ def test_parse_args_sets_single_cycle_for_dry_run(supervisor_module: ModuleType)
     assert config.max_cycles == 1
     assert config.mainline_branch == "main"
     assert config.install_command == "just install"
+    assert config.worker_yes is False
     assert passthrough == []
 
 
@@ -43,18 +44,26 @@ def test_parse_args_default_install_command_is_just_install(supervisor_module: M
     parse_args = supervisor_module._parse_args
     config, _ = parse_args(["--repo-path", "."])
     assert config.install_command == "just install"
+    assert config.worker_yes is False
 
 
 def test_parse_args_no_install_disables_install_step(supervisor_module: ModuleType) -> None:
     parse_args = supervisor_module._parse_args
     config, _ = parse_args(["--repo-path", ".", "--no-install"])
     assert config.install_command is None
+    assert config.worker_yes is False
 
 
 def test_parse_args_install_override(supervisor_module: ModuleType) -> None:
     parse_args = supervisor_module._parse_args
     config, _ = parse_args(["--repo-path", ".", "--install", "just install-editable"])
     assert config.install_command == "just install-editable"
+
+
+def test_parse_args_yes_flag_sets_worker_yes(supervisor_module: ModuleType) -> None:
+    parse_args = supervisor_module._parse_args
+    config, _ = parse_args(["--repo-path", ".", "--yes"])
+    assert config.worker_yes is True
 
 
 def test_parse_args_captures_worker_passthrough(supervisor_module: ModuleType) -> None:
@@ -95,6 +104,28 @@ def test_build_worker_command_appends_passthrough(supervisor_module: ModuleType)
     ]
 
 
+def test_build_worker_command_adds_yes_when_requested(
+    supervisor_module: ModuleType,
+) -> None:
+    build_worker_command = supervisor_module._build_worker_command
+
+    command = build_worker_command(
+        "atelier work --run-mode once",
+        ["--mode", "auto"],
+        add_yes=True,
+    )
+
+    assert command == [
+        "atelier",
+        "work",
+        "--run-mode",
+        "once",
+        "--mode",
+        "auto",
+        "--yes",
+    ]
+
+
 def test_run_cycle_skips_worker_when_preflight_fails(
     monkeypatch: pytest.MonkeyPatch,
     supervisor_module: ModuleType,
@@ -107,6 +138,7 @@ def test_run_cycle_skips_worker_when_preflight_fails(
         update_policy="ff-only",
         install_command=None,
         worker_command="atelier work --run-mode once",
+        worker_yes=False,
         loop_interval_seconds=0.0,
         max_cycles=1,
         dry_run=False,
@@ -152,6 +184,7 @@ def test_run_cycle_runs_worker_when_preflight_succeeds(
         update_policy="ff-only",
         install_command="just install-editable",
         worker_command="atelier work --run-mode once",
+        worker_yes=False,
         loop_interval_seconds=0.0,
         max_cycles=1,
         dry_run=False,
@@ -188,6 +221,7 @@ def test_run_update_step_returns_false_when_not_on_mainline(
         update_policy="ff-only",
         install_command=None,
         worker_command="atelier work --run-mode once",
+        worker_yes=False,
         loop_interval_seconds=0.0,
         max_cycles=1,
         dry_run=False,
@@ -218,6 +252,7 @@ def test_run_update_step_returns_false_when_git_ref_resolution_fails(
         update_policy="ff-only",
         install_command=None,
         worker_command="atelier work --run-mode once",
+        worker_yes=False,
         loop_interval_seconds=0.0,
         max_cycles=1,
         dry_run=False,

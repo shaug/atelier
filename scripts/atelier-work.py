@@ -38,6 +38,7 @@ class RunnerConfig:
     update_policy: str
     install_command: str | None
     worker_command: str
+    worker_yes: bool
     loop_interval_seconds: float
     max_cycles: int | None
     dry_run: bool
@@ -121,8 +122,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--worker-command",
-        default="atelier work --run-mode once --yes",
+        default="atelier work --run-mode once",
         help=("Base worker command to run once per cycle. Arguments after '--' are appended."),
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Pass --yes to the worker command.",
     )
     parser.add_argument(
         "--loop-interval-seconds",
@@ -194,6 +200,7 @@ def _parse_args(argv: Sequence[str]) -> tuple[RunnerConfig, list[str]]:
         update_policy=args.update_policy,
         install_command=install_command,
         worker_command=args.worker_command,
+        worker_yes=args.yes,
         loop_interval_seconds=args.loop_interval_seconds,
         max_cycles=max_cycles,
         dry_run=args.dry_run,
@@ -415,7 +422,9 @@ def _run_install_step(config: RunnerConfig) -> bool:
     return True
 
 
-def _build_worker_command(worker_command: str, worker_passthrough: Sequence[str]) -> list[str]:
+def _build_worker_command(
+    worker_command: str, worker_passthrough: Sequence[str], *, add_yes: bool = False
+) -> list[str]:
     """Build the worker command and append passthrough arguments.
 
     Args:
@@ -433,6 +442,8 @@ def _build_worker_command(worker_command: str, worker_passthrough: Sequence[str]
     if not command:
         raise RuntimeError("worker command resolved to an empty command")
     command.extend(worker_passthrough)
+    if add_yes:
+        command.append("--yes")
     return command
 
 
@@ -447,7 +458,11 @@ def _run_worker_step(config: RunnerConfig, worker_passthrough: Sequence[str]) ->
       ``True`` when worker command exits zero.
     """
 
-    command = _build_worker_command(config.worker_command, worker_passthrough)
+    command = _build_worker_command(
+        config.worker_command,
+        worker_passthrough,
+        add_yes=config.worker_yes,
+    )
     _log("worker: running one worker cycle")
     worker_rc = _run_command(command, cwd=config.repo_path, dry_run=config.dry_run)
     if worker_rc != 0:
