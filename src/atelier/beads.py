@@ -188,6 +188,8 @@ _RuntimeMetadataReconcileOutcome = Literal[
     "blocked_mismatch",
     "failed",
 ]
+_NEEDS_DECISION_SUBJECT_PREFIX = "NEEDS-DECISION:"
+_NEEDS_DECISION_CLOSED_ACTIVE_PR_REASON = "needs-decision: closed changeset has active pr lifecycle"
 
 try:
     import fcntl  # type: ignore[attr-defined]
@@ -5559,6 +5561,10 @@ def list_queue_messages(
         args.extend(["--label", issue_label(_LABEL_UNREAD, beads_root=beads_root)])
     issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
     matches: list[dict[str, object]] = []
+    duplicate_groups: dict[tuple[str, str], dict[str, object]] = {}
+    duplicate_replaced_ids: set[str] = set()
+    thread_issue_cache: dict[str, dict[str, object] | None] = {}
+    stale_ids: set[str] = set()
     for issue in issues:
         description = issue.get("description")
         if not isinstance(description, str):
@@ -5578,13 +5584,161 @@ def list_queue_messages(
             (isinstance(claimed_by, str) and claimed_by.strip()) or assignee_claim
         ):
             continue
+        issue_id = str(issue.get("id") or "").strip()
         enriched = dict(issue)
         enriched["queue"] = queue_name
         enriched["claimed_by"] = (
             claimed_by if isinstance(claimed_by, str) and claimed_by.strip() else assignee_claim
         )
+        thread_id = payload.metadata.get("thread")
+        normalized_thread = (
+            thread_id.strip() if isinstance(thread_id, str) and thread_id.strip() else None
+        )
+        reason_key = _needs_decision_reason_key(
+            enriched.get("title"),
+            thread_id=normalized_thread,
+        )
+        if normalized_thread and reason_key is not None:
+            dedupe_key = (normalized_thread, reason_key)
+            current = duplicate_groups.get(dedupe_key)
+            if current is None:
+                duplicate_groups[dedupe_key] = enriched
+            else:
+                if _issue_sorts_after(enriched, current):
+                    replaced_id = str(current.get("id") or "").strip()
+                    if replaced_id:
+                        duplicate_replaced_ids.add(replaced_id)
+                    duplicate_groups[dedupe_key] = enriched
+                elif issue_id:
+                    duplicate_replaced_ids.add(issue_id)
+            continue
         matches.append(enriched)
+    for dedupe_key, selected in duplicate_groups.items():
+        _thread_id, reason_key = dedupe_key
+        issue_id = str(selected.get("id") or "").strip()
+        if (
+            reason_key == _NEEDS_DECISION_CLOSED_ACTIVE_PR_REASON
+            and not _closed_active_pr_condition_still_blocking(
+                selected,
+                thread_issue_cache=thread_issue_cache,
+                beads_root=beads_root,
+                cwd=cwd,
+            )
+        ):
+            if issue_id:
+                stale_ids.add(issue_id)
+            continue
+        matches.append(selected)
+    if unread_only:
+        resolved_ids = duplicate_replaced_ids | stale_ids
+        _mark_messages_read_best_effort(
+            resolved_ids,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+    if duplicate_replaced_ids or stale_ids:
+        hidden_ids = duplicate_replaced_ids | stale_ids
+        matches = [
+            issue for issue in matches if str(issue.get("id") or "").strip() not in hidden_ids
+        ]
     return matches
+
+
+def _issue_sorts_after(candidate: dict[str, object], current: dict[str, object]) -> bool:
+    candidate_timestamp = _parse_issue_timestamp(candidate.get("created_at"))
+    current_timestamp = _parse_issue_timestamp(current.get("created_at"))
+    if candidate_timestamp is not None and current_timestamp is not None:
+        if candidate_timestamp != current_timestamp:
+            return candidate_timestamp > current_timestamp
+    elif candidate_timestamp is not None:
+        return True
+    elif current_timestamp is not None:
+        return False
+    candidate_id = str(candidate.get("id") or "").strip()
+    current_id = str(current.get("id") or "").strip()
+    return candidate_id > current_id
+
+
+def _parse_issue_timestamp(value: object) -> dt.datetime | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def _needs_decision_reason_key(subject: object, *, thread_id: str | None) -> str | None:
+    if not isinstance(subject, str):
+        return None
+    normalized_subject = " ".join(subject.split())
+    if not normalized_subject.startswith(_NEEDS_DECISION_SUBJECT_PREFIX):
+        return None
+    if thread_id:
+        suffix = f"({thread_id})"
+        if normalized_subject.endswith(suffix):
+            normalized_subject = normalized_subject[: -len(suffix)].rstrip()
+    return normalized_subject.lower()
+
+
+def _closed_active_pr_condition_still_blocking(
+    issue: dict[str, object],
+    *,
+    thread_issue_cache: dict[str, dict[str, object] | None],
+    beads_root: Path,
+    cwd: Path,
+) -> bool:
+    description = issue.get("description")
+    payload = messages.parse_message(description if isinstance(description, str) else "")
+    thread_value = payload.metadata.get("thread")
+    thread_id = (
+        thread_value.strip() if isinstance(thread_value, str) and thread_value.strip() else ""
+    )
+    if not thread_id:
+        return True
+    if thread_id not in thread_issue_cache:
+        thread_issues, _error = run_bd_json_read_only(
+            ["show", thread_id],
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+        thread_issue_cache[thread_id] = thread_issues[0] if thread_issues else None
+    thread_issue = thread_issue_cache.get(thread_id)
+    if not isinstance(thread_issue, dict):
+        return True
+    status = lifecycle.canonical_lifecycle_status(thread_issue.get("status"))
+    if status != "closed":
+        return False
+    thread_fields = _parse_description_fields(_issue_description(thread_issue))
+    review_state = lifecycle.normalize_review_state(thread_fields.get("pr_state"))
+    return lifecycle.is_active_pr_lifecycle_state(review_state)
+
+
+def _mark_messages_read_best_effort(
+    message_ids: set[str],
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    unread_label = issue_label(_LABEL_UNREAD, beads_root=beads_root)
+    for message_id in sorted(message_ids):
+        cleaned_id = message_id.strip()
+        if not cleaned_id:
+            continue
+        run_bd_command(
+            ["update", cleaned_id, "--remove-label", unread_label],
+            beads_root=beads_root,
+            cwd=cwd,
+            allow_failure=True,
+        )
 
 
 def claim_queue_message(
