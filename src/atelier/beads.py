@@ -632,6 +632,7 @@ def _ambiguous_dolt_database_detail(
 ) -> str:
     choices = ", ".join(candidates)
     return (
+        "dolt server ownership is ambiguous: "
         f"multiple Dolt databases found under {beads_root / 'dolt'} ({choices}); "
         f"project-scoped default is {preferred}"
     )
@@ -645,8 +646,6 @@ def _resolve_project_scoped_dolt_database_name(
     preferred = _default_dolt_database_name(beads_root)
     candidates = _local_dolt_database_candidates(beads_root)
     if not candidates:
-        return preferred, None
-    if preferred in candidates:
         return preferred, None
     if len(candidates) == 1:
         candidate = candidates[0]
@@ -676,7 +675,13 @@ def _resolve_project_scoped_dolt_database_name(
     )
     if strict:
         return None, detail
-    return preferred, detail
+    if preferred in candidates:
+        return preferred, detail
+    if "beads_at" in candidates:
+        return "beads_at", detail
+    if _DOLT_DATABASE_DEFAULT in candidates:
+        return _DOLT_DATABASE_DEFAULT, detail
+    return candidates[0], detail
 
 
 def _discover_dolt_database_name(beads_root: Path) -> str:
