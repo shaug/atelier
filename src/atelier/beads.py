@@ -25,6 +25,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import bd_invocation, changesets, config, exec, git, lifecycle, messages, paths, prs
 from . import log as atelier_log
+from .beads_runtime import agent_hooks as beads_agent_hooks
+from .beads_runtime import external_reconcile as beads_external_reconcile
+from .beads_runtime import issue_mutations as beads_issue_mutations
+from .beads_runtime import queue_messages as beads_queue_messages
+from .beads_runtime import startup_migration as beads_startup_migration
 from .external_tickets import (
     ExternalTicketRef,
     external_ticket_payload,
@@ -1564,133 +1569,30 @@ def detect_startup_beads_state(*, beads_root: Path, cwd: Path) -> StartupBeadsSt
         A deterministic state classification with migration eligibility flags
         and diagnostics payload fields.
     """
-    has_legacy_sqlite = (beads_root / "beads.db").is_file()
-    has_dolt_store = _startup_dolt_store_exists(beads_root)
-    configured_backend = _configured_beads_backend(beads_root)
-    dolt_backend_expected = configured_backend in {None, "dolt"}
-    if not beads_root.exists():
-        return StartupBeadsState(
-            classification=_BEADS_STARTUP_UNKNOWN,
-            migration_eligible=False,
-            has_dolt_store=has_dolt_store,
-            has_legacy_sqlite=has_legacy_sqlite,
-            dolt_issue_total=None,
-            legacy_issue_total=None,
-            reason="beads_root_missing",
-            backend=configured_backend,
-        )
-
-    env = beads_env(beads_root)
-    (
-        dolt_issue_total,
-        dolt_detail,
-        legacy_issue_total,
-        legacy_detail,
-    ) = _read_startup_issue_totals(
+    return beads_startup_migration.detect_startup_beads_state(
         beads_root=beads_root,
-        has_legacy_sqlite=has_legacy_sqlite,
         cwd=cwd,
-        env=env,
-    )
-    (
-        dolt_issue_total,
-        dolt_detail,
-        legacy_issue_total,
-        legacy_detail,
-    ) = _stabilize_startup_issue_totals(
-        beads_root=beads_root,
-        has_dolt_store=has_dolt_store,
-        has_legacy_sqlite=has_legacy_sqlite,
-        dolt_issue_total=dolt_issue_total,
-        dolt_detail=dolt_detail,
-        legacy_issue_total=legacy_issue_total,
-        legacy_detail=legacy_detail,
-        cwd=cwd,
-        env=env,
-    )
-
-    if dolt_issue_total is None:
-        dolt_count_source = "unavailable"
-    elif has_dolt_store:
-        dolt_count_source = "bd_stats_dolt_store"
-    elif dolt_backend_expected:
-        dolt_count_source = "bd_stats_without_dolt_store"
-    else:
-        dolt_count_source = "bd_stats_non_dolt_backend"
-
-    if legacy_issue_total is None:
-        legacy_count_source = "unavailable"
-    else:
-        legacy_count_source = "bd_stats_legacy_sqlite"
-
-    legacy_has_data = bool(legacy_issue_total and legacy_issue_total > 0)
-    common_state = {
-        "has_dolt_store": has_dolt_store,
-        "has_legacy_sqlite": has_legacy_sqlite,
-        "dolt_issue_total": dolt_issue_total,
-        "legacy_issue_total": legacy_issue_total,
-        "backend": configured_backend,
-        "dolt_count_source": dolt_count_source,
-        "legacy_count_source": legacy_count_source,
-        "dolt_detail": dolt_detail,
-        "legacy_detail": legacy_detail,
-    }
-
-    if not has_dolt_store:
-        if legacy_has_data and dolt_backend_expected:
-            return StartupBeadsState(
-                classification=_BEADS_STARTUP_MISSING_DOLT,
-                migration_eligible=True,
-                reason="legacy_sqlite_has_data_while_dolt_is_unavailable",
-                **common_state,
-            )
-        reason = "dolt_store_missing_without_recoverable_legacy_data"
-        if configured_backend and configured_backend != "dolt":
-            reason = "dolt_store_missing_for_non_dolt_backend"
-        return StartupBeadsState(
-            classification=_BEADS_STARTUP_UNKNOWN,
-            migration_eligible=False,
-            reason=reason,
-            **common_state,
-        )
-
-    if dolt_issue_total is not None:
-        if (
-            has_legacy_sqlite
-            and legacy_issue_total is not None
-            and legacy_issue_total > dolt_issue_total
-        ):
-            return StartupBeadsState(
-                classification=_BEADS_STARTUP_INSUFFICIENT_DOLT,
-                migration_eligible=True,
-                reason="legacy_issue_total_exceeds_dolt_issue_total",
-                **common_state,
-            )
-        return StartupBeadsState(
-            classification=_BEADS_STARTUP_HEALTHY,
-            migration_eligible=False,
-            reason="dolt_issue_total_is_healthy",
-            **common_state,
-        )
-
-    if legacy_has_data and _is_embedded_backend_panic(dolt_detail or ""):
-        return StartupBeadsState(
-            classification=_BEADS_STARTUP_MISSING_DOLT,
-            migration_eligible=True,
-            reason="legacy_sqlite_has_data_while_dolt_is_unavailable",
-            **common_state,
-        )
-    return StartupBeadsState(
-        classification=_BEADS_STARTUP_UNKNOWN,
-        migration_eligible=False,
-        reason="insufficient_signals_for_classification",
-        **common_state,
+        deps=beads_startup_migration.StartupMigrationDeps(
+            startup_dolt_store_exists=_startup_dolt_store_exists,
+            configured_beads_backend=_configured_beads_backend,
+            beads_env=beads_env,
+            read_startup_issue_totals=_read_startup_issue_totals,
+            stabilize_startup_issue_totals=_stabilize_startup_issue_totals,
+            is_embedded_backend_panic=_is_embedded_backend_panic,
+        ),
+        labels=beads_startup_migration.StartupClassificationLabels(
+            healthy=_BEADS_STARTUP_HEALTHY,
+            missing_dolt=_BEADS_STARTUP_MISSING_DOLT,
+            insufficient_dolt=_BEADS_STARTUP_INSUFFICIENT_DOLT,
+            unknown=_BEADS_STARTUP_UNKNOWN,
+        ),
+        startup_state_factory=StartupBeadsState,
     )
 
 
 def format_startup_beads_diagnostics(state: StartupBeadsState) -> str:
     """Format startup state diagnostics for logs, guidance, and notifications."""
-    return "Startup Beads state: " + "; ".join(state.diagnostics())
+    return beads_startup_migration.format_startup_beads_diagnostics(state)
 
 
 def _startup_auto_migration_reason(state: StartupBeadsState) -> str:
@@ -3122,46 +3024,20 @@ def release_epic_assignment(
     expected_hooked: bool | None = None,
 ) -> bool:
     """Release epic ownership with optional assignee/hook preconditions."""
-    with _issue_write_lock(epic_id, beads_root=beads_root):
-        issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
-        if not issues:
-            return False
-        issue = issues[0]
-        labels = _issue_labels(issue)
-        status = str(issue.get("status") or "")
-        assignee_raw = issue.get("assignee")
-        assignee = (
-            assignee_raw.strip() if isinstance(assignee_raw, str) and assignee_raw.strip() else None
-        )
-        expected_assignee_normalized = _normalize_description_field_value(expected_assignee)
-        if expected_assignee is not None and assignee != expected_assignee_normalized:
-            return False
-        if expected_hooked is not None:
-            has_hooked = has_issue_label(labels, _LABEL_HOOKED, beads_root=beads_root)
-            if has_hooked != expected_hooked:
-                return False
-
-        args = ["update", epic_id, "--assignee", ""]
-        if has_issue_label(labels, _LABEL_HOOKED, beads_root=beads_root):
-            args.extend(["--remove-label", issue_label(_LABEL_HOOKED)])
-        if status and status not in {"closed", "done"}:
-            args.extend(["--status", "open"])
-        run_bd_command(args, beads_root=beads_root, cwd=cwd, allow_failure=True)
-        refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
-        if not refreshed:
-            return False
-        updated = refreshed[0]
-        updated_assignee_raw = updated.get("assignee")
-        updated_assignee = (
-            updated_assignee_raw.strip()
-            if isinstance(updated_assignee_raw, str) and updated_assignee_raw.strip()
-            else None
-        )
-        if updated_assignee is not None:
-            return False
-        if has_issue_label(_issue_labels(updated), _LABEL_HOOKED, beads_root=beads_root):
-            return False
-        return True
+    return beads_agent_hooks.release_epic_assignment(
+        epic_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        expected_assignee=expected_assignee,
+        expected_hooked=expected_hooked,
+        issue_write_lock=lambda issue_id, root: _issue_write_lock(issue_id, beads_root=root),
+        run_bd_json=run_bd_json,
+        run_bd_command=run_bd_command,
+        issue_labels=_issue_labels,
+        has_issue_label=lambda labels, name: has_issue_label(labels, name, beads_root=beads_root),
+        issue_label=lambda name: issue_label(name, beads_root=beads_root),
+        normalize_description_field_value=_normalize_description_field_value,
+    )
 
 
 def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
@@ -3985,7 +3861,10 @@ def _parse_description_fields(description: str | None) -> dict[str, str]:
 
 def parse_description_fields(description: str | None) -> dict[str, str]:
     """Parse key/value fields from a bead description."""
-    return _parse_description_fields(description)
+    return beads_issue_mutations.parse_description_fields(
+        description,
+        parse_impl=_parse_description_fields,
+    )
 
 
 def _normalize_description_field_value(value: str | None) -> str | None:
@@ -4097,12 +3976,13 @@ def issue_description_fields(
         Parsed description key/value fields, or an empty dict when the issue is
         missing.
     """
-    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
-    if not issues:
-        return {}
-    description = issues[0].get("description")
-    text = description if isinstance(description, str) else ""
-    return _parse_description_fields(text)
+    return beads_issue_mutations.issue_description_fields(
+        issue_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        run_bd_json=run_bd_json,
+        parse_impl=_parse_description_fields,
+    )
 
 
 def update_issue_description_fields(
@@ -4123,11 +4003,12 @@ def update_issue_description_fields(
     Returns:
         Refreshed issue payload when available, otherwise the pre-update issue.
     """
-    return _update_description_fields_optimistic(
+    return beads_issue_mutations.update_issue_description_fields(
         issue_id,
-        fields=fields,
+        fields,
         beads_root=beads_root,
         cwd=cwd,
+        update_impl=_update_description_fields_optimistic,
     )
 
 
@@ -4216,19 +4097,17 @@ def get_agent_hook(
     cwd: Path,
 ) -> str | None:
     """Return the currently hooked epic id for an agent bead."""
-    slot_hook = _slot_show_hook(agent_bead_id, beads_root=beads_root, cwd=cwd)
-    if slot_hook:
-        return slot_hook
-    issues = run_bd_json(["show", agent_bead_id], beads_root=beads_root, cwd=cwd)
-    if not issues:
-        return None
-    issue = issues[0]
-    description = issue.get("description")
-    fields = _parse_description_fields(description if isinstance(description, str) else "")
-    hook = _normalize_hook_value(fields.get("hook_bead"))
-    if hook:
-        _slot_set_hook(agent_bead_id, hook, beads_root=beads_root, cwd=cwd)
-    return hook
+    return beads_agent_hooks.get_agent_hook(
+        agent_bead_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        run_bd_command=run_bd_command,
+        run_bd_json=run_bd_json,
+        parse_description_fields=_parse_description_fields,
+        normalize_hook_value=_normalize_hook_value,
+        extract_hook_from_slot_payload=_extract_hook_from_slot_payload,
+        hook_slot_name=HOOK_SLOT_NAME,
+    )
 
 
 def workspace_label(root_branch: str) -> str:
@@ -4397,105 +4276,18 @@ def reconcile_closed_issue_exported_github_tickets(
     Exported GitHub links default to close-on-bead-close unless the ticket is
     `relation=context` or explicitly sets `on_close=none`.
     """
-    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
-    if not issues:
-        return ExternalTicketReconcileResult(
-            issue_id=issue_id,
-            stale_exported_github_tickets=0,
-            reconciled_tickets=0,
-            updated=False,
-            needs_decision_notes=tuple(),
-        )
-    issue = issues[0]
-    status = str(issue.get("status") or "").strip().lower()
-    if status not in {"closed", "done"}:
-        return ExternalTicketReconcileResult(
-            issue_id=issue_id,
-            stale_exported_github_tickets=0,
-            reconciled_tickets=0,
-            updated=False,
-            needs_decision_notes=tuple(),
-        )
-    description = issue.get("description")
-    existing_tickets = parse_external_tickets(description if isinstance(description, str) else None)
-    if not existing_tickets:
-        return ExternalTicketReconcileResult(
-            issue_id=issue_id,
-            stale_exported_github_tickets=0,
-            reconciled_tickets=0,
-            updated=False,
-            needs_decision_notes=tuple(),
-        )
-
-    from .github_issues_provider import GithubIssuesProvider
-
-    stale = 0
-    reconciled = 0
-    updated = False
-    notes: list[str] = []
-    provider_cache: dict[str, GithubIssuesProvider] = {}
-    merged_tickets: list[ExternalTicketRef] = []
-    for ticket in existing_tickets:
-        if ticket.provider != "github" or ticket.direction != "exported":
-            merged_tickets.append(ticket)
-            continue
-        if ticket.state == "closed":
-            merged_tickets.append(ticket)
-            continue
-        stale += 1
-        action = _close_action_for_ticket(ticket)
-        if action == "none":
-            merged_tickets.append(ticket)
-            continue
-        repo_slug = _github_repo_from_ticket_url(ticket.url)
-        if not repo_slug:
-            notes.append(
-                f"github:{ticket.ticket_id} missing repo slug; "
-                "cannot reconcile exported ticket state"
-            )
-            merged_tickets.append(ticket)
-            continue
-        provider = provider_cache.get(repo_slug)
-        if provider is None:
-            provider = GithubIssuesProvider(repo=repo_slug)
-            provider_cache[repo_slug] = provider
-        close_comment = None
-        if ticket.on_close == "comment":
-            close_comment = f"Closing external ticket because local bead {issue_id} is closed."
-        try:
-            if action == "close":
-                refreshed = provider.close_ticket(ticket, comment=close_comment)
-                merged = _merge_ticket_state(ticket, refreshed, assume_closed=True)
-            else:
-                refreshed = provider.sync_state(ticket)
-                merged = _merge_ticket_state(ticket, refreshed, assume_closed=False)
-        except RuntimeError as exc:
-            notes.append(f"github:{ticket.ticket_id} {exc}")
-            merged_tickets.append(ticket)
-            continue
-        merged_tickets.append(merged)
-        reconciled += 1
-        if merged != ticket:
-            updated = True
-
-    if updated:
-        update_external_tickets(issue_id, merged_tickets, beads_root=beads_root, cwd=cwd)
-
-    unique_notes: list[str] = []
-    seen_notes: set[str] = set()
-    for note in notes:
-        if note in seen_notes:
-            continue
-        seen_notes.add(note)
-        unique_notes.append(note)
-        _append_external_close_note(issue_id, note, beads_root=beads_root, cwd=cwd)
-
-    return ExternalTicketReconcileResult(
-        issue_id=issue_id,
-        stale_exported_github_tickets=stale,
-        reconciled_tickets=reconciled,
-        updated=updated,
-        needs_decision_notes=tuple(unique_notes),
+    return beads_external_reconcile.reconcile_closed_issue_exported_github_tickets(
+        issue_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        run_bd_json=run_bd_json,
+        parse_external_tickets=parse_external_tickets,
+        close_action_for_ticket=_close_action_for_ticket,
+        github_repo_from_ticket_url=_github_repo_from_ticket_url,
+        merge_ticket_state=_merge_ticket_state,
+        update_external_tickets=update_external_tickets,
+        append_external_close_note=_append_external_close_note,
+        result_factory=ExternalTicketReconcileResult,
     )
 
 
@@ -4516,98 +4308,17 @@ def reconcile_reopened_issue_exported_github_tickets(
         Reconciliation result including stale/reconciled counts and any
         decision-required notes.
     """
-    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
-    if not issues:
-        return ExternalTicketReconcileResult(
-            issue_id=issue_id,
-            stale_exported_github_tickets=0,
-            reconciled_tickets=0,
-            updated=False,
-            needs_decision_notes=tuple(),
-        )
-    issue = issues[0]
-    status = str(issue.get("status") or "").strip().lower()
-    if status in {"closed", "done"}:
-        return ExternalTicketReconcileResult(
-            issue_id=issue_id,
-            stale_exported_github_tickets=0,
-            reconciled_tickets=0,
-            updated=False,
-            needs_decision_notes=tuple(),
-        )
-    description = issue.get("description")
-    existing_tickets = parse_external_tickets(description if isinstance(description, str) else None)
-    if not existing_tickets:
-        return ExternalTicketReconcileResult(
-            issue_id=issue_id,
-            stale_exported_github_tickets=0,
-            reconciled_tickets=0,
-            updated=False,
-            needs_decision_notes=tuple(),
-        )
-
-    from .github_issues_provider import GithubIssuesProvider
-
-    stale = 0
-    reconciled = 0
-    updated = False
-    notes: list[str] = []
-    provider_cache: dict[str, GithubIssuesProvider] = {}
-    merged_tickets: list[ExternalTicketRef] = []
-    for ticket in existing_tickets:
-        if ticket.provider != "github" or ticket.direction != "exported":
-            merged_tickets.append(ticket)
-            continue
-        if ticket.state != "closed":
-            merged_tickets.append(ticket)
-            continue
-        stale += 1
-        repo_slug = _github_repo_from_ticket_url(ticket.url)
-        if not repo_slug:
-            notes.append(
-                f"github:{ticket.ticket_id} missing repo slug; cannot reopen exported ticket state"
-            )
-            merged_tickets.append(ticket)
-            continue
-        provider = provider_cache.get(repo_slug)
-        if provider is None:
-            provider = GithubIssuesProvider(repo=repo_slug)
-            provider_cache[repo_slug] = provider
-        try:
-            refreshed = provider.reopen_ticket(
-                ticket,
-                comment=(
-                    f"Reopening external ticket because local bead {issue_id} is active again."
-                ),
-            )
-            merged = _merge_ticket_state(ticket, refreshed, assume_closed=False)
-        except RuntimeError as exc:
-            notes.append(f"github:{ticket.ticket_id} {exc}")
-            merged_tickets.append(ticket)
-            continue
-        merged_tickets.append(merged)
-        reconciled += 1
-        if merged != ticket:
-            updated = True
-
-    if updated:
-        update_external_tickets(issue_id, merged_tickets, beads_root=beads_root, cwd=cwd)
-
-    unique_notes: list[str] = []
-    seen_notes: set[str] = set()
-    for note in notes:
-        if note in seen_notes:
-            continue
-        seen_notes.add(note)
-        unique_notes.append(note)
-        _append_external_reopen_note(issue_id, note, beads_root=beads_root, cwd=cwd)
-
-    return ExternalTicketReconcileResult(
-        issue_id=issue_id,
-        stale_exported_github_tickets=stale,
-        reconciled_tickets=reconciled,
-        updated=updated,
-        needs_decision_notes=tuple(unique_notes),
+    return beads_external_reconcile.reconcile_reopened_issue_exported_github_tickets(
+        issue_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        run_bd_json=run_bd_json,
+        parse_external_tickets=parse_external_tickets,
+        github_repo_from_ticket_url=_github_repo_from_ticket_url,
+        merge_ticket_state=_merge_ticket_state,
+        update_external_tickets=update_external_tickets,
+        append_external_reopen_note=_append_external_reopen_note,
+        result_factory=ExternalTicketReconcileResult,
     )
 
 
@@ -4975,29 +4686,20 @@ def clear_agent_hook(
     expected_hook: str | None = None,
 ) -> None:
     """Clear the hooked epic id on the agent bead description."""
-    with _issue_write_lock(agent_bead_id, beads_root=beads_root):
-        issues = run_bd_json(["show", agent_bead_id], beads_root=beads_root, cwd=cwd)
-        if not issues:
-            die(f"agent bead not found: {agent_bead_id}")
-        current_hook = get_agent_hook(agent_bead_id, beads_root=beads_root, cwd=cwd)
-        if expected_hook is not None and current_hook != _normalize_hook_value(expected_hook):
-            return
-        if current_hook is None:
-            return
-        run_bd_command(
-            ["slot", "clear", agent_bead_id, HOOK_SLOT_NAME],
-            beads_root=beads_root,
-            cwd=cwd,
-            allow_failure=True,
-        )
-        _update_description_fields_optimistic(
-            agent_bead_id,
-            fields={"hook_bead": None},
-            expected_current={"hook_bead": current_hook},
-            require_expected_match=True,
-            beads_root=beads_root,
-            cwd=cwd,
-        )
+    beads_agent_hooks.clear_agent_hook(
+        agent_bead_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        expected_hook=expected_hook,
+        issue_write_lock=lambda issue_id, root: _issue_write_lock(issue_id, beads_root=root),
+        run_bd_json=run_bd_json,
+        run_bd_command=run_bd_command,
+        get_agent_hook_impl=get_agent_hook,
+        normalize_hook_value=_normalize_hook_value,
+        update_description_fields_optimistic=_update_description_fields_optimistic,
+        hook_slot_name=HOOK_SLOT_NAME,
+        die=die,
+    )
 
 
 def list_policy_beads(role: str | None, *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
@@ -5223,115 +4925,29 @@ def claim_epic(
     allow_takeover_from: str | None = None,
 ) -> dict[str, object]:
     """Claim an epic by assigning it to the agent."""
-
-    with _issue_write_lock(epic_id, beads_root=beads_root):
-        issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
-        if not issues:
-            die(f"epic not found: {epic_id}")
-        issue = issues[0]
-        claimability = _evaluate_epic_claimability(issue)
-        is_executable_work = lifecycle.is_executable_epic_identity(
-            labels=_issue_labels(issue),
-            issue_type=lifecycle.issue_payload_type(issue),
-            parent_id=_issue_parent_id(issue),
-        )
-        if is_executable_work and not claimability.claimable:
-            detail = ", ".join(claimability.reasons)
-            die(
-                f"epic {epic_id} is not claimable under lifecycle contract ({detail}); "
-                "require top-level work in open/in_progress status"
-            )
-        if is_executable_work and _is_planner_assignee(agent_id):
-            die(
-                f"epic {epic_id} claim rejected for planner {agent_id}; "
-                "planner agents cannot claim executable work"
-            )
-        raw_existing_assignee = issue.get("assignee")
-        existing_assignee = (
-            raw_existing_assignee.strip()
-            if isinstance(raw_existing_assignee, str) and raw_existing_assignee.strip()
-            else None
-        )
-        if _is_planner_assignee(existing_assignee) and is_executable_work:
-            die(
-                f"epic {epic_id} is assigned to planner {existing_assignee}; "
-                "planner agents cannot own executable work"
-            )
-        if (
-            existing_assignee
-            and existing_assignee != agent_id
-            and existing_assignee != allow_takeover_from
-        ):
-            die(f"epic {epic_id} already has an assignee")
-
-        if (
-            existing_assignee
-            and allow_takeover_from
-            and existing_assignee == allow_takeover_from
-            and existing_assignee != agent_id
-        ):
-            released = release_epic_assignment(
-                epic_id,
-                beads_root=beads_root,
-                cwd=cwd,
-                expected_assignee=allow_takeover_from,
-                expected_hooked=has_issue_label(
-                    _issue_labels(issue), _LABEL_HOOKED, beads_root=beads_root
-                ),
-            )
-            if not released:
-                die(f"epic {epic_id} takeover failed; claim ownership changed")
-
-        claim_result = run_bd_command(
-            ["update", epic_id, "--claim"],
-            beads_root=beads_root,
-            cwd=cwd,
-            allow_failure=True,
-        )
-        if claim_result.returncode != 0:
-            refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
-            assignee = None
-            if refreshed:
-                candidate_assignee = refreshed[0].get("assignee")
-                if isinstance(candidate_assignee, str) and candidate_assignee.strip():
-                    assignee = candidate_assignee.strip()
-            if assignee != agent_id:
-                die(f"epic {epic_id} already has an assignee")
-
-        update_args = [
-            "update",
-            epic_id,
-            "--status",
-            "in_progress",
-            "--add-label",
-            issue_label(_LABEL_HOOKED, beads_root=beads_root),
-        ]
-        if _is_standalone_changeset_without_epic_label(issue, beads_root=beads_root, cwd=cwd):
-            update_args.extend(["--add-label", issue_label(_LABEL_EPIC, beads_root=beads_root)])
-        for attempt in range(2):
-            run_bd_command(
-                update_args,
-                beads_root=beads_root,
-                cwd=cwd,
-                allow_failure=True,
-            )
-            refreshed = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
-            if not refreshed:
-                continue
-            updated = refreshed[0]
-            assignee = updated.get("assignee")
-            if assignee != agent_id:
-                die(f"epic {epic_id} claim failed; already assigned")
-            if _claim_is_complete(updated, claimant=agent_id, beads_root=beads_root):
-                return updated
-            if attempt == 0:
-                continue
-            die(
-                "epic "
-                f"{epic_id} claim failed; expected status=in_progress and label "
-                f"{issue_label(_LABEL_HOOKED, beads_root=beads_root)}"
-            )
-        die(f"epic {epic_id} claim failed; unable to verify claimed state")
+    return beads_agent_hooks.claim_epic(
+        epic_id,
+        agent_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_takeover_from=allow_takeover_from,
+        issue_write_lock=lambda issue_id, root: _issue_write_lock(issue_id, beads_root=root),
+        run_bd_json=run_bd_json,
+        run_bd_command=run_bd_command,
+        issue_labels=_issue_labels,
+        evaluate_epic_claimability=_evaluate_epic_claimability,
+        lifecycle_is_executable_epic_identity=lifecycle.is_executable_epic_identity,
+        lifecycle_issue_payload_type=lifecycle.issue_payload_type,
+        issue_parent_id=_issue_parent_id,
+        is_planner_assignee=_is_planner_assignee,
+        release_epic_assignment_impl=release_epic_assignment,
+        is_standalone_changeset_without_epic_label=_is_standalone_changeset_without_epic_label,
+        has_issue_label=lambda labels, name: has_issue_label(labels, name, beads_root=beads_root),
+        issue_label=lambda name: issue_label(name, beads_root=beads_root),
+        label_hooked=_LABEL_HOOKED,
+        label_epic=_LABEL_EPIC,
+        die=die,
+    )
 
 
 def epic_changeset_summary(
@@ -5486,22 +5102,18 @@ def set_agent_hook(
     cwd: Path,
 ) -> None:
     """Store the hooked epic id on the agent bead description."""
-    with _issue_write_lock(agent_bead_id, beads_root=beads_root):
-        issues = run_bd_json(["show", agent_bead_id], beads_root=beads_root, cwd=cwd)
-        if not issues:
-            die(f"agent bead not found: {agent_bead_id}")
-        run_bd_command(
-            ["slot", "set", agent_bead_id, HOOK_SLOT_NAME, epic_id],
-            beads_root=beads_root,
-            cwd=cwd,
-            allow_failure=True,
-        )
-        _update_description_fields_optimistic(
-            agent_bead_id,
-            fields={"hook_bead": epic_id},
-            beads_root=beads_root,
-            cwd=cwd,
-        )
+    beads_agent_hooks.set_agent_hook(
+        agent_bead_id,
+        epic_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        issue_write_lock=lambda issue_id, root: _issue_write_lock(issue_id, beads_root=root),
+        run_bd_json=run_bd_json,
+        run_bd_command=run_bd_command,
+        update_description_fields_optimistic=_update_description_fields_optimistic,
+        hook_slot_name=HOOK_SLOT_NAME,
+        die=die,
+    )
 
 
 def create_message_bead(
@@ -5514,26 +5126,20 @@ def create_message_bead(
     cwd: Path,
 ) -> dict[str, object]:
     """Create a message bead and return its data."""
-    description = messages.render_message(metadata, body)
-    args = [
-        "create",
-        "--type",
-        "task",
-        "--labels",
-        ",".join(
-            [
-                issue_label(_LABEL_MESSAGE, beads_root=beads_root),
-                issue_label(_LABEL_UNREAD, beads_root=beads_root),
-            ]
-        ),
-        "--title",
-        subject,
-    ]
-    if assignee:
-        args.extend(["--assignee", assignee])
-    issue_id = _create_issue_with_body(args, description, beads_root=beads_root, cwd=cwd)
-    issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
-    return issues[0] if issues else {"id": issue_id, "title": subject}
+    return beads_queue_messages.create_message_bead(
+        subject=subject,
+        body=body,
+        metadata=metadata,
+        assignee=assignee,
+        beads_root=beads_root,
+        cwd=cwd,
+        render_message=messages.render_message,
+        create_issue_with_body=_create_issue_with_body,
+        run_bd_json=run_bd_json,
+        issue_label=lambda name: issue_label(name, beads_root=beads_root),
+        label_message=_LABEL_MESSAGE,
+        label_unread=_LABEL_UNREAD,
+    )
 
 
 def list_inbox_messages(
@@ -5544,38 +5150,16 @@ def list_inbox_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List message beads assigned to the agent."""
-    args = ["list", "--label", issue_label(_LABEL_MESSAGE), "--assignee", agent_id]
-    if unread_only:
-        args.extend(["--label", issue_label(_LABEL_UNREAD)])
-    messages_for_agent = run_bd_json(args, beads_root=beads_root, cwd=cwd)
-    matches: list[dict[str, object]] = []
-    thread_issue_cache: dict[str, dict[str, object] | None] = {}
-    repo_slug_cache: dict[str, str | None] = {}
-    stale_reasons: dict[str, str] = {}
-    for issue in messages_for_agent:
-        issue_id = str(issue.get("id") or "").strip()
-        thread_id = _message_thread_id(issue)
-        reason_key = _needs_decision_reason_key(issue.get("title"), thread_id=thread_id)
-        stale_reason = _needs_decision_stale_reason(
-            reason_key,
-            thread_id=thread_id,
-            thread_issue_cache=thread_issue_cache,
-            repo_slug_cache=repo_slug_cache,
-            beads_root=beads_root,
-            cwd=cwd,
-        )
-        if stale_reason is not None:
-            if issue_id:
-                stale_reasons[issue_id] = stale_reason
-            continue
-        matches.append(issue)
-    if stale_reasons:
-        _resolve_stale_messages_best_effort(
-            stale_reasons,
-            beads_root=beads_root,
-            cwd=cwd,
-        )
-    return matches
+    return beads_queue_messages.list_inbox_messages(
+        agent_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        unread_only=unread_only,
+        run_bd_json=run_bd_json,
+        issue_label=lambda name: issue_label(name, beads_root=beads_root),
+        label_message=_LABEL_MESSAGE,
+        label_unread=_LABEL_UNREAD,
+    )
 
 
 def list_queue_messages(
@@ -5587,98 +5171,18 @@ def list_queue_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List queued message beads, optionally filtered by queue name."""
-    args = ["list", "--label", issue_label(_LABEL_MESSAGE)]
-    if unread_only:
-        args.extend(["--label", issue_label(_LABEL_UNREAD)])
-    issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
-    matches: list[dict[str, object]] = []
-    duplicate_groups: dict[tuple[str, str], dict[str, object]] = {}
-    duplicate_replaced_ids: set[str] = set()
-    thread_issue_cache: dict[str, dict[str, object] | None] = {}
-    repo_slug_cache: dict[str, str | None] = {}
-    stale_reasons: dict[str, str] = {}
-    for issue in issues:
-        description = issue.get("description")
-        if not isinstance(description, str):
-            continue
-        payload = messages.parse_message(description)
-        queue_name = payload.metadata.get("queue")
-        if not isinstance(queue_name, str) or not queue_name.strip():
-            continue
-        if queue is not None and queue_name != queue:
-            continue
-        claimed_by = payload.metadata.get("claimed_by")
-        assignee = issue.get("assignee")
-        assignee_claim = (
-            assignee.strip() if isinstance(assignee, str) and assignee.strip() else None
-        )
-        if unclaimed_only and (
-            (isinstance(claimed_by, str) and claimed_by.strip()) or assignee_claim
-        ):
-            continue
-        issue_id = str(issue.get("id") or "").strip()
-        enriched = dict(issue)
-        enriched["queue"] = queue_name
-        enriched["claimed_by"] = (
-            claimed_by if isinstance(claimed_by, str) and claimed_by.strip() else assignee_claim
-        )
-        thread_id = payload.metadata.get("thread")
-        normalized_thread = (
-            thread_id.strip() if isinstance(thread_id, str) and thread_id.strip() else None
-        )
-        reason_key = _needs_decision_reason_key(
-            enriched.get("title"),
-            thread_id=normalized_thread,
-        )
-        if normalized_thread and reason_key is not None:
-            dedupe_key = (normalized_thread, reason_key)
-            current = duplicate_groups.get(dedupe_key)
-            if current is None:
-                duplicate_groups[dedupe_key] = enriched
-            else:
-                if _issue_sorts_after(enriched, current):
-                    replaced_id = str(current.get("id") or "").strip()
-                    if replaced_id:
-                        duplicate_replaced_ids.add(replaced_id)
-                    duplicate_groups[dedupe_key] = enriched
-                elif issue_id:
-                    duplicate_replaced_ids.add(issue_id)
-            continue
-        matches.append(enriched)
-    for dedupe_key, selected in duplicate_groups.items():
-        thread_id, reason_key = dedupe_key
-        issue_id = str(selected.get("id") or "").strip()
-        stale_reason = _needs_decision_stale_reason(
-            reason_key,
-            thread_id=thread_id,
-            thread_issue_cache=thread_issue_cache,
-            repo_slug_cache=repo_slug_cache,
-            beads_root=beads_root,
-            cwd=cwd,
-        )
-        if stale_reason is not None:
-            if issue_id:
-                stale_reasons[issue_id] = stale_reason
-            continue
-        matches.append(selected)
-    if unread_only:
-        _mark_messages_read_best_effort(
-            duplicate_replaced_ids,
-            beads_root=beads_root,
-            cwd=cwd,
-        )
-    if stale_reasons:
-        _resolve_stale_messages_best_effort(
-            stale_reasons,
-            beads_root=beads_root,
-            cwd=cwd,
-        )
-    if duplicate_replaced_ids or stale_reasons:
-        hidden_ids = duplicate_replaced_ids | set(stale_reasons)
-        matches = [
-            issue for issue in matches if str(issue.get("id") or "").strip() not in hidden_ids
-        ]
-    return matches
+    return beads_queue_messages.list_queue_messages(
+        beads_root=beads_root,
+        cwd=cwd,
+        queue=queue,
+        unclaimed_only=unclaimed_only,
+        unread_only=unread_only,
+        run_bd_json=run_bd_json,
+        parse_message=messages.parse_message,
+        issue_label=lambda name: issue_label(name, beads_root=beads_root),
+        label_message=_LABEL_MESSAGE,
+        label_unread=_LABEL_UNREAD,
+    )
 
 
 def _issue_sorts_after(candidate: dict[str, object], current: dict[str, object]) -> bool:
@@ -5986,64 +5490,22 @@ def claim_queue_message(
     queue: str | None = None,
 ) -> dict[str, object]:
     """Claim a queued message bead by setting claimed metadata."""
-    with _issue_write_lock(message_id, beads_root=beads_root):
-        claim_result = run_bd_command(
-            ["update", message_id, "--claim", "--status", "open"],
-            beads_root=beads_root,
-            cwd=cwd,
-            allow_failure=True,
-        )
-        if claim_result.returncode != 0:
-            refreshed = run_bd_json(["show", message_id], beads_root=beads_root, cwd=cwd)
-            assignee = None
-            if refreshed:
-                value = refreshed[0].get("assignee")
-                if isinstance(value, str) and value.strip():
-                    assignee = value.strip()
-            if assignee != agent_id:
-                die(f"message {message_id} already claimed by {assignee or 'another agent'}")
-        for _attempt in range(_DESCRIPTION_UPDATE_MAX_ATTEMPTS):
-            issues = run_bd_json(["show", message_id], beads_root=beads_root, cwd=cwd)
-            if not issues:
-                die(f"message not found: {message_id}")
-            issue = issues[0]
-            assignee = issue.get("assignee")
-            if not isinstance(assignee, str) or assignee.strip() != agent_id:
-                die(f"message {message_id} already claimed by another agent")
-            description = issue.get("description")
-            payload = messages.parse_message(description if isinstance(description, str) else "")
-            queue_name = payload.metadata.get("queue")
-            if not isinstance(queue_name, str) or not queue_name.strip():
-                die(f"message {message_id} is not in a queue")
-            if queue is not None and queue_name != queue:
-                die(f"message {message_id} is not in queue {queue!r}")
-            claimed_by = payload.metadata.get("claimed_by")
-            if (
-                isinstance(claimed_by, str)
-                and claimed_by.strip()
-                and claimed_by.strip() != agent_id
-            ):
-                die(f"message {message_id} already claimed by {claimed_by}")
-            payload.metadata["claimed_by"] = agent_id
-            payload.metadata["claimed_at"] = dt.datetime.now(tz=dt.timezone.utc).isoformat()
-            updated = messages.render_message(payload.metadata, payload.body)
-            _update_issue_description(message_id, updated, beads_root=beads_root, cwd=cwd)
-            refreshed = run_bd_json(["show", message_id], beads_root=beads_root, cwd=cwd)
-            if not refreshed:
-                continue
-            candidate = refreshed[0]
-            refreshed_payload = messages.parse_message(_issue_description(candidate))
-            refreshed_claimed_by = refreshed_payload.metadata.get("claimed_by")
-            refreshed_claimed_at = refreshed_payload.metadata.get("claimed_at")
-            if (
-                isinstance(refreshed_claimed_by, str)
-                and refreshed_claimed_by.strip() == agent_id
-                and isinstance(refreshed_claimed_at, str)
-                and refreshed_claimed_at.strip()
-            ):
-                return candidate
-    die(f"concurrent queue claim metadata conflict for {message_id}")
-    raise RuntimeError("unreachable")
+    return beads_queue_messages.claim_queue_message(
+        message_id,
+        agent_id,
+        beads_root=beads_root,
+        cwd=cwd,
+        queue=queue,
+        issue_write_lock=lambda issue_id, root: _issue_write_lock(issue_id, beads_root=root),
+        run_bd_command=run_bd_command,
+        run_bd_json=run_bd_json,
+        parse_message=messages.parse_message,
+        render_message=messages.render_message,
+        issue_description=_issue_description,
+        update_issue_description=_update_issue_description,
+        description_update_max_attempts=_DESCRIPTION_UPDATE_MAX_ATTEMPTS,
+        die=die,
+    )
 
 
 def mark_message_read(
@@ -6053,10 +5515,13 @@ def mark_message_read(
     cwd: Path,
 ) -> None:
     """Mark a message bead as read."""
-    run_bd_command(
-        ["update", message_id, "--remove-label", issue_label(_LABEL_UNREAD)],
+    beads_queue_messages.mark_message_read(
+        message_id,
         beads_root=beads_root,
         cwd=cwd,
+        run_bd_command=run_bd_command,
+        issue_label=lambda name: issue_label(name, beads_root=beads_root),
+        label_unread=_LABEL_UNREAD,
     )
 
 
