@@ -87,6 +87,7 @@ _DOLT_SERVER_HOST_DEFAULT = "127.0.0.1"
 _DOLT_SERVER_PORT_DEFAULT = 3307
 _DOLT_SERVER_USER_DEFAULT = "root"
 _DOLT_DATABASE_DEFAULT = "beads"
+_LEGACY_DOLT_DATABASE_NAMES = frozenset({"beads_at", _DOLT_DATABASE_DEFAULT})
 _STARTUP_AUTO_MIGRATION_DIAGNOSTICS: dict[Path, "_StartupAutoMigrationDiagnostic"] = {}
 _RUNTIME_AGENT_ID_ENV = "ATELIER_AGENT_ID"
 _RUNTIME_AGENT_BEAD_ID_ENV = "ATELIER_AGENT_BEAD_ID"
@@ -499,6 +500,7 @@ class DoltServerRuntime:
     host: str
     port: int
     database: str
+    ownership_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -644,8 +646,29 @@ def _resolve_project_scoped_dolt_database_name(
     candidates = _local_dolt_database_candidates(beads_root)
     if not candidates:
         return preferred, None
+    if preferred in candidates:
+        return preferred, None
     if len(candidates) == 1:
-        return candidates[0], None
+        candidate = candidates[0]
+        if candidate in _LEGACY_DOLT_DATABASE_NAMES and candidate != preferred:
+            source_path = beads_root / "dolt" / candidate
+            target_path = beads_root / "dolt" / preferred
+            try:
+                source_path.rename(target_path)
+            except OSError as exc:
+                detail = (
+                    "dolt server ownership migration failed: "
+                    f"unable to rename legacy database {candidate!r} to {preferred!r} "
+                    f"({exc})"
+                )
+                if strict:
+                    return None, detail
+                return candidate, detail
+            return (
+                preferred,
+                f"renamed legacy Dolt database {candidate!r} to project-scoped {preferred!r}",
+            )
+        return candidate, None
     detail = _ambiguous_dolt_database_detail(
         beads_root=beads_root,
         candidates=candidates,
@@ -653,13 +676,7 @@ def _resolve_project_scoped_dolt_database_name(
     )
     if strict:
         return None, detail
-    if preferred in candidates:
-        return preferred, detail
-    if "beads_at" in candidates:
-        return "beads_at", detail
-    if _DOLT_DATABASE_DEFAULT in candidates:
-        return _DOLT_DATABASE_DEFAULT, detail
-    return candidates[0], detail
+    return preferred, detail
 
 
 def _discover_dolt_database_name(beads_root: Path) -> str:
@@ -742,6 +759,14 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
         updated["dolt_server_user"] = _DOLT_SERVER_USER_DEFAULT
         changes.append("dolt_server_user")
 
+    discovered_database, discovery_detail = _resolve_project_scoped_dolt_database_name(
+        beads_root,
+        strict=False,
+    )
+    if discovery_detail:
+        atelier_log.warning(
+            f"Dolt runtime database convergence detail for {metadata_path}: {discovery_detail}"
+        )
     database_value = updated.get("dolt_database")
     if not isinstance(database_value, str) or not database_value.strip():
         database_name, resolution_detail = _resolve_project_scoped_dolt_database_name(
@@ -1979,20 +2004,23 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
     host_value = payload.get("dolt_server_host")
     host = host_value.strip() if isinstance(host_value, str) and host_value.strip() else "127.0.0.1"
     port = _parse_dolt_runtime_port(payload.get("dolt_server_port"))
+    discovered_database, discovery_detail = _resolve_project_scoped_dolt_database_name(
+        beads_root,
+        strict=True,
+    )
+    ownership_error = discovery_detail
+    if discovered_database is None:
+        discovered_database = _default_dolt_database_name(beads_root)
     database_value = payload.get("dolt_database")
-    if isinstance(database_value, str) and database_value.strip():
-        database = database_value.strip()
-    else:
-        database, resolution_detail = _resolve_project_scoped_dolt_database_name(
-            beads_root, strict=True
+    configured_database = (
+        database_value.strip() if isinstance(database_value, str) and database_value.strip() else ""
+    )
+    if configured_database and not ownership_error and configured_database != discovered_database:
+        ownership_error = (
+            "dolt server ownership mismatch: metadata.json configures "
+            f"dolt_database={configured_database}, expected {discovered_database}"
         )
-        if database is None:
-            database = ""
-            atelier_log.warning(
-                "Dolt runtime database resolution blocked: "
-                f"{resolution_detail}. Set `.beads/metadata.json` `dolt_database` "
-                "to the intended local database and rerun the command."
-            )
+    database = discovered_database
     dolt_root = beads_root / "dolt"
     return DoltServerRuntime(
         dolt_root=dolt_root,
@@ -2000,6 +2028,7 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
         host=host,
         port=port,
         database=database,
+        ownership_error=ownership_error,
     )
 
 
@@ -2144,6 +2173,8 @@ def _probe_dolt_server_health(
     cwd: Path,
     env: dict[str, str],
 ) -> tuple[bool, str | None]:
+    if runtime.ownership_error:
+        return False, runtime.ownership_error
     result = _run_raw_bd_command(["bd", "dolt", "show", "--json"], cwd=cwd, env=env)
     if result is None:
         return False, "missing required command: bd"
@@ -2178,12 +2209,8 @@ def _restart_dolt_server_with_recovery(
     env: dict[str, str],
 ) -> tuple[bool, str]:
     runtime = _resolve_dolt_server_runtime(beads_root)
-    if not runtime.database.strip():
-        return (
-            False,
-            "dolt runtime database is unset or ambiguous; set `.beads/metadata.json` "
-            "`dolt_database` to the intended local database and retry",
-        )
+    if runtime.ownership_error:
+        return False, runtime.ownership_error
     stopped = _stop_dolt_server_processes(runtime, cwd=cwd, env=env)
     started, start_detail = _start_dolt_server(runtime, env=env)
     if not started:
@@ -2216,11 +2243,8 @@ def _ensure_dolt_server_preflight(
     if not (beads_root / "dolt").exists():
         return None
     runtime = _resolve_dolt_server_runtime(beads_root)
-    if not runtime.database.strip():
-        return (
-            "dolt runtime database is unset or ambiguous; set `.beads/metadata.json` "
-            "`dolt_database` to the intended local database and retry"
-        )
+    if runtime.ownership_error:
+        return runtime.ownership_error
     healthy, detail = _probe_dolt_server_health(runtime, cwd=cwd, env=env)
     if healthy:
         return None

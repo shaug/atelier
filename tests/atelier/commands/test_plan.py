@@ -52,6 +52,11 @@ def _stub_bd_command(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(plan_cmd.beads, "run_bd_command", lambda *_a, **_k: _Result())
 
 
+@pytest.fixture(autouse=True)
+def _stub_prefix_convergence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(plan_cmd.beads, "ensure_atelier_issue_prefix", lambda *_a, **_k: False)
+
+
 def test_trace_flag_defaults_to_disabled_even_when_legacy_env_is_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -73,16 +78,23 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         path=Path("/project/agents/planner"),
     )
     calls: list[list[str]] = []
+    steps: list[str] = []
     captured_env: dict[str, str] = {}
 
     def fake_run_bd_command(args, *, beads_root: Path, cwd: Path, allow_failure: bool = False):
         calls.append(args)
+        steps.append(str(args[0]))
 
         class Result:
             stdout = ""
             returncode = 0
 
         return Result()
+
+    def fake_ensure_prefix(*, beads_root: Path, cwd: Path) -> bool:
+        del beads_root, cwd
+        steps.append("ensure_prefix")
+        return False
 
     def fake_run_codex_command(cmd, *, cwd: Path | None, env: dict | None):
         if env:
@@ -125,6 +137,10 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
             "atelier.commands.plan.beads.run_bd_command",
             side_effect=fake_run_bd_command,
         ),
+        patch(
+            "atelier.commands.plan.beads.ensure_atelier_issue_prefix",
+            side_effect=fake_ensure_prefix,
+        ),
         patch("atelier.commands.plan.beads.run_bd_json", return_value=[]),
         patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
         patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
@@ -152,6 +168,8 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
         plan_cmd.run_planner(SimpleNamespace(epic_id="atelier-epic", reconcile=True))
 
     assert calls
+    assert steps[0] == "ensure_prefix"
+    assert steps[1] == "prime"
     assert calls[0][0] == "prime"
     assert captured_env.get("ATELIER_PLAN_EPIC") == "atelier-epic"
     assert captured_env.get("ATELIER_WORKSPACE") == "main-planner-planner"
