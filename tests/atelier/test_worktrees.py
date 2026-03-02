@@ -466,7 +466,8 @@ def test_ensure_changeset_checkout_creates_branches() -> None:
             return True
         return False
 
-    def fake_run(cmd: list[str]) -> None:
+    def fake_run(cmd: list[str], *, capture_output: bool = False) -> None:
+        assert capture_output is True
         calls.append(cmd)
 
     with (

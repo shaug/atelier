@@ -139,6 +139,34 @@ def test_run_command_forwards_env_and_cwd(monkeypatch: pytest.MonkeyPatch) -> No
     assert request.text is False
 
 
+def test_run_command_capture_output_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """run_command enables text capture only when explicitly requested."""
+    captured: dict[str, object] = {}
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+        *,
+        runner: exec_util.CommandRunner | None = None,
+    ) -> exec_util.CommandResult | None:
+        del runner
+        captured["request"] = request
+        return exec_util.CommandResult(
+            argv=request.argv,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(exec_util, "run_with_runner", fake_run_with_runner)
+
+    exec_util.run_command(["bd", "sync"], capture_output=True)
+
+    request = captured["request"]
+    assert isinstance(request, exec_util.CommandRequest)
+    assert request.capture_output is True
+    assert request.text is True
+
+
 def test_run_command_fails_when_command_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """run_command exits when the command return code is non-zero."""
 
@@ -157,8 +185,11 @@ def test_run_command_fails_when_command_errors(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(exec_util, "run_with_runner", fake_run_with_runner)
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as excinfo:
         exec_util.run_command(["bd", "sync"])
+    assert "command failed: bd sync (exit 2)" in str(excinfo.value)
+    assert "stderr:" in str(excinfo.value)
+    assert "boom" in str(excinfo.value)
 
 
 def test_run_typed_parses_with_spec() -> None:
