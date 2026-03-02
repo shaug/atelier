@@ -1552,6 +1552,8 @@ def test_reconcile_startup_auto_migration_runtime_database_preserves_configured_
     assert payload["dolt_database"] == "beads_other"
     assert ["bd", "dolt", "set", "database", "beads_at", "--update-config"] in calls
     assert any("reconciliation blocked" in message for message in warnings)
+    assert any("intentionally preserved" in message for message in warnings)
+    assert not any("reconciliation failed" in message for message in warnings)
 
 
 def test_update_runtime_metadata_dolt_database_accepts_ambiguous_explicit_selection(
@@ -1567,12 +1569,12 @@ def test_update_runtime_metadata_dolt_database_accepts_ambiguous_explicit_select
         encoding="utf-8",
     )
 
-    updated = beads._update_runtime_metadata_dolt_database(  # pyright: ignore[reportPrivateUsage]
+    result = beads._update_runtime_metadata_dolt_database(  # pyright: ignore[reportPrivateUsage]
         beads_root=beads_root,
         database_name="beads_other",
     )
 
-    assert updated is True
+    assert result == "unchanged"
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert payload["dolt_database"] == "beads_other/"
 
