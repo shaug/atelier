@@ -6,10 +6,11 @@ import datetime as dt
 import json
 import re
 from collections.abc import Callable
-from dataclasses import replace
-from typing import Protocol, TypeVar
+from dataclasses import dataclass, replace
+from typing import Literal, Protocol, TypeVar, overload
 from urllib.parse import urlparse
 
+from .. import github_issues_provider
 from ..external_tickets import ExternalTicketRef, normalize_external_ticket_entry
 from .issue_mutations import parse_description_fields
 
@@ -17,6 +18,21 @@ ReconcileResultT = TypeVar("ReconcileResultT")
 EXTERNAL_TICKETS_KEY = "external_tickets"
 _GITHUB_API_ISSUE_PATH = re.compile(r"^/repos/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
 _GITHUB_WEB_ISSUE_PATH = re.compile(r"^/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
+_NOT_FOUND_PATTERN = re.compile(r"(^|\D)404(\D|$)")
+
+
+class GithubClient(Protocol):
+    """External GitHub CLI boundary used by reconcile helpers."""
+
+    @overload
+    def gh(self, args: list[str], *, json_mode: Literal[False] = False) -> None: ...
+
+    @overload
+    def gh(self, args: list[str], *, json_mode: Literal[True]) -> object: ...
+
+    def gh(self, args: list[str], *, json_mode: bool = False) -> object | None:
+        """Run a GitHub CLI command via a concrete adapter."""
+        ...
 
 
 class GithubTicketProvider(Protocol):
@@ -43,6 +59,55 @@ class GithubTicketProvider(Protocol):
     ) -> ExternalTicketRef:
         """Reopen a GitHub ticket and return refreshed state."""
         ...
+
+
+@dataclass(frozen=True)
+class GithubIssuesClient:
+    """GitHub issue operations built on top of the gh command boundary."""
+
+    repo_slug: str
+    github: GithubClient
+
+    def close_ticket(
+        self,
+        ticket: ExternalTicketRef,
+        *,
+        comment: str | None = None,
+    ) -> ExternalTicketRef:
+        args = ["issue", "close", str(ticket.ticket_id), "--repo", self.repo_slug]
+        if comment:
+            args.extend(["--comment", comment])
+        self.github.gh(args)
+        return self.sync_state(ticket)
+
+    def sync_state(self, ticket: ExternalTicketRef) -> ExternalTicketRef:
+        payload = self.github.gh(
+            ["api", f"repos/{self.repo_slug}/issues/{ticket.ticket_id}"],
+            json_mode=True,
+        )
+        if not isinstance(payload, dict):
+            raise RuntimeError("Unexpected gh issue view output")
+        parent_id = _load_parent_ticket_id(
+            self.github,
+            repo_slug=self.repo_slug,
+            ticket_id=ticket.ticket_id,
+        )
+        refreshed = github_issues_provider.issue_payload_to_ref(payload, parent_id=parent_id)
+        if refreshed is None:
+            raise RuntimeError("Failed to parse issue state")
+        return refreshed
+
+    def reopen_ticket(
+        self,
+        ticket: ExternalTicketRef,
+        *,
+        comment: str | None = None,
+    ) -> ExternalTicketRef:
+        args = ["issue", "reopen", str(ticket.ticket_id), "--repo", self.repo_slug]
+        if comment:
+            args.extend(["--comment", comment])
+        self.github.gh(args)
+        return self.sync_state(ticket)
 
 
 class ExternalReconcileIssueStore(Protocol):
@@ -76,8 +141,8 @@ class ExternalReconcileGithubClient(Protocol):
         """Resolve a GitHub repo slug from a ticket URL."""
         ...
 
-    def github_provider(self, repo_slug: str) -> GithubTicketProvider:
-        """Return a provider instance for the given GitHub repository."""
+    def github_issues(self, repo_slug: str) -> GithubTicketProvider:
+        """Return a GitHub issues client for the given repository."""
         ...
 
 
@@ -226,7 +291,7 @@ def reconcile_closed_issue_exported_github_tickets(
             continue
         provider = provider_cache.get(repo_slug)
         if provider is None:
-            provider = github.github_provider(repo_slug)
+            provider = github.github_issues(repo_slug)
             provider_cache[repo_slug] = provider
         close_comment = None
         if ticket.on_close == "comment":
@@ -328,7 +393,7 @@ def reconcile_reopened_issue_exported_github_tickets(
             continue
         provider = provider_cache.get(repo_slug)
         if provider is None:
-            provider = github.github_provider(repo_slug)
+            provider = github.github_issues(repo_slug)
             provider_cache[repo_slug] = provider
         try:
             refreshed = provider.reopen_ticket(
@@ -364,3 +429,29 @@ def reconcile_reopened_issue_exported_github_tickets(
         updated=updated,
         needs_decision_notes=tuple(unique_notes),
     )
+
+
+def _load_parent_ticket_id(
+    github: GithubClient,
+    *,
+    repo_slug: str,
+    ticket_id: str,
+) -> str | None:
+    try:
+        payload = github.gh(
+            ["api", f"repos/{repo_slug}/issues/{ticket_id}/parent"],
+            json_mode=True,
+        )
+    except RuntimeError as exc:
+        if _NOT_FOUND_PATTERN.search(str(exc).lower()):
+            return None
+        raise
+    if not isinstance(payload, dict):
+        return None
+    parent = payload.get("id") or payload.get("number")
+    if isinstance(parent, int):
+        return str(parent)
+    if isinstance(parent, str):
+        cleaned = parent.strip()
+        return cleaned or None
+    return None

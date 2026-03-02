@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
+from subprocess import CompletedProcess
 from typing import NoReturn
 
 import pytest
@@ -22,21 +23,34 @@ class _IssueMutationsClient:
         del issue_id
         return nullcontext()
 
-    def show_issue(self, issue_id: str) -> dict[str, object] | None:
-        issue = self.issues.get(issue_id)
-        if issue is None:
-            return None
-        return dict(issue)
-
-    def update_issue_description(self, issue_id: str, description: str) -> None:
-        self.writes += 1
-        if self.interleaved:
+    def bd(
+        self,
+        args: list[str],
+        *,
+        json_mode: bool = False,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str] | list[dict[str, object]]:
+        del allow_failure
+        if json_mode:
+            if args[:1] == ["show"] and len(args) >= 2:
+                issue = self.issues.get(args[1])
+                return [dict(issue)] if issue else []
+            return []
+        if args[:1] == ["update"] and "--body-file" in args and len(args) >= 2:
+            issue_id = args[1]
+            self.writes += 1
+            if self.interleaved:
+                self.issues[issue_id] = {
+                    "id": issue_id,
+                    "description": self.interleaved.pop(0),
+                }
+                return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+            body_file = args[args.index("--body-file") + 1]
             self.issues[issue_id] = {
                 "id": issue_id,
-                "description": self.interleaved.pop(0),
+                "description": Path(body_file).read_text(encoding="utf-8"),
             }
-            return
-        self.issues[issue_id] = {"id": issue_id, "description": description}
+        return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
 
 def _fail(message: str) -> NoReturn:

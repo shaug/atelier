@@ -13,19 +13,14 @@ FailureHandler = Callable[[str], NoReturn]
 
 
 class RuntimeBeadsClient(Protocol):
-    """Bound Beads command client consumed by domain runtime modules.
-
-    Runtime modules depend only on command execution and issue-scoped locking.
-    Higher-level convenience operations are implemented as helpers in this
-    module and may use optional client overrides when available.
-    """
+    """Bound Beads command client consumed by domain runtime modules."""
 
     def issue_write_lock(self, issue_id: str) -> AbstractContextManager[None]:
         """Acquire an issue-scoped write lock context."""
         ...
 
     @overload
-    def run(
+    def bd(
         self,
         args: list[str],
         *,
@@ -34,7 +29,7 @@ class RuntimeBeadsClient(Protocol):
     ) -> CompletedProcess[str]: ...
 
     @overload
-    def run(
+    def bd(
         self,
         args: list[str],
         *,
@@ -42,7 +37,7 @@ class RuntimeBeadsClient(Protocol):
         allow_failure: bool = False,
     ) -> list[dict[str, object]]: ...
 
-    def run(
+    def bd(
         self,
         args: list[str],
         *,
@@ -55,7 +50,7 @@ class RuntimeBeadsClient(Protocol):
 
 def run_json(client: RuntimeBeadsClient, args: list[str]) -> list[dict[str, object]]:
     """Run a Beads JSON command and return parsed issue payload rows."""
-    payload = client.run(args, json_mode=True)
+    payload = client.bd(args, json_mode=True)
     if isinstance(payload, list):
         return payload
     raise RuntimeError(f"expected JSON payload for `bd {' '.join(args)}`")
@@ -68,36 +63,21 @@ def run_command(
     allow_failure: bool = False,
 ) -> CompletedProcess[str]:
     """Run a raw Beads command and return the subprocess result."""
-    result = client.run(args, allow_failure=allow_failure)
+    result = client.bd(args, allow_failure=allow_failure)
     if isinstance(result, list):
         raise RuntimeError(f"expected command result for `bd {' '.join(args)}`")
     return result
 
 
 def show_issue(client: RuntimeBeadsClient, issue_id: str) -> dict[str, object] | None:
-    """Load one issue payload by id.
-
-    Uses a client override when provided; otherwise executes ``bd show``.
-    """
-    issue_loader = getattr(client, "show_issue", None)
-    if callable(issue_loader):
-        issue = issue_loader(issue_id)
-        if issue is None or isinstance(issue, dict):
-            return issue
+    """Load one issue payload by id."""
     issues = run_json(client, ["show", issue_id])
     return issues[0] if issues else None
 
 
 def issue_label(client: RuntimeBeadsClient, name: str) -> str:
-    """Build a namespaced issue label.
-
-    Uses a client override when provided and falls back to ``at:<name>``.
-    """
-    label_builder = getattr(client, "issue_label", None)
-    if callable(label_builder):
-        label = label_builder(name)
-        if isinstance(label, str) and label.strip():
-            return label
+    """Build a namespaced issue label."""
+    del client
     cleaned = name.strip()
     if not cleaned:
         return cleaned
@@ -112,12 +92,6 @@ def create_issue_with_body(
     description: str,
 ) -> str:
     """Create an issue using a body-file workflow and return the issue id."""
-    issue_creator = getattr(client, "create_issue_with_body", None)
-    if callable(issue_creator):
-        issue_id = issue_creator(args, description)
-        if isinstance(issue_id, str) and issue_id.strip():
-            return issue_id.strip()
-
     temp_path = _write_temp_body_file(description)
     try:
         result = run_command(client, [*args, "--body-file", str(temp_path), "--silent"])
@@ -135,11 +109,6 @@ def update_issue_description(
     description: str,
 ) -> None:
     """Persist full issue description text via ``bd update --body-file``."""
-    description_updater = getattr(client, "update_issue_description", None)
-    if callable(description_updater):
-        description_updater(issue_id, description)
-        return
-
     temp_path = _write_temp_body_file(description)
     try:
         run_command(client, ["update", issue_id, "--body-file", str(temp_path)])

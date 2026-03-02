@@ -82,9 +82,26 @@ class _GithubClient:
     def github_repo_from_ticket_url(self, url: str | None) -> str | None:
         return external_reconcile.github_repo_from_ticket_url(url)
 
-    def github_provider(self, repo_slug: str) -> _Provider:
+    def github_issues(self, repo_slug: str) -> _Provider:
         del repo_slug
         return self.provider
+
+
+@dataclass
+class _GhBoundary:
+    issue_payload: dict[str, object]
+    parent_payload: object | Exception
+    calls: list[tuple[list[str], bool]] = field(default_factory=list)
+
+    def gh(self, args: list[str], *, json_mode: bool = False) -> object | None:
+        self.calls.append((list(args), json_mode))
+        if args == ["api", "repos/org/repo/issues/7"]:
+            return self.issue_payload
+        if args == ["api", "repos/org/repo/issues/7/parent"]:
+            if isinstance(self.parent_payload, Exception):
+                raise self.parent_payload
+            return self.parent_payload
+        return None
 
 
 def _issue_with_tickets(*, status: str, tickets: list[dict[str, object]]) -> dict[str, object]:
@@ -157,3 +174,53 @@ def test_reconcile_reopened_issue_records_missing_repo_note() -> None:
     assert result.updated is False
     assert notes
     assert "cannot reopen exported ticket state" in notes[0]
+
+
+def test_github_issues_client_sync_state_ignores_missing_parent_endpoint() -> None:
+    boundary = _GhBoundary(
+        issue_payload={
+            "number": 7,
+            "url": "https://github.com/org/repo/issues/7",
+            "state": "OPEN",
+            "stateReason": "reopened",
+            "updatedAt": "2026-03-02T00:00:00Z",
+        },
+        parent_payload=RuntimeError("HTTP 404 Not Found"),
+    )
+    client = external_reconcile.GithubIssuesClient(repo_slug="org/repo", github=boundary)
+    ticket = ExternalTicketRef(provider="github", ticket_id="7")
+
+    refreshed = client.sync_state(ticket)
+
+    assert refreshed.ticket_id == "7"
+    assert refreshed.parent_id is None
+    assert refreshed.state == "open"
+
+
+def test_github_issues_client_close_ticket_routes_through_gh_boundary() -> None:
+    boundary = _GhBoundary(
+        issue_payload={
+            "number": 7,
+            "url": "https://github.com/org/repo/issues/7",
+            "state": "CLOSED",
+            "stateReason": "completed",
+            "updatedAt": "2026-03-02T00:00:00Z",
+        },
+        parent_payload={"number": 1},
+    )
+    client = external_reconcile.GithubIssuesClient(repo_slug="org/repo", github=boundary)
+    ticket = ExternalTicketRef(provider="github", ticket_id="7")
+
+    refreshed = client.close_ticket(ticket, comment="closing from test")
+
+    assert boundary.calls[0][0] == [
+        "issue",
+        "close",
+        "7",
+        "--repo",
+        "org/repo",
+        "--comment",
+        "closing from test",
+    ]
+    assert refreshed.state == "closed"
+    assert refreshed.parent_id == "1"

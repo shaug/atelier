@@ -26,7 +26,7 @@ class _AgentHooksClient:
         del issue_id
         return nullcontext()
 
-    def run(
+    def bd(
         self,
         args: list[str],
         *,
@@ -75,17 +75,13 @@ class _AgentHooksClient:
             issue["labels"] = labels
             return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
+        if args[:1] == ["update"] and "--body-file" in args and len(args) >= 2:
+            issue_id = args[1]
+            body_file = args[args.index("--body-file") + 1]
+            self.issues[issue_id]["description"] = Path(body_file).read_text(encoding="utf-8")
+            return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
-
-    def show_issue(self, issue_id: str) -> dict[str, object] | None:
-        issue = self.issues.get(issue_id)
-        return dict(issue) if issue is not None else None
-
-    def update_issue_description(self, issue_id: str, description: str) -> None:
-        self.issues[issue_id]["description"] = description
-
-    def issue_label(self, name: str) -> str:
-        return f"at:{name}"
 
 
 def _fail(message: str) -> NoReturn:

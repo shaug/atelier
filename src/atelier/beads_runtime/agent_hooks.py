@@ -74,10 +74,9 @@ def _slot_show_hook(
         ["slot", "show", agent_bead_id, "--json"],
         allow_failure=True,
     )
-    if getattr(result, "returncode", 1) != 0:
+    if result.returncode != 0:
         return None
-    raw_output = getattr(result, "stdout", "") or ""
-    raw = raw_output.strip()
+    raw = (result.stdout or "").strip()
     if not raw:
         return None
     try:
@@ -204,8 +203,8 @@ def claim_epic(
             parent_id=parent_id,
         )
 
-        if is_executable_work and not bool(getattr(claimability, "claimable", False)):
-            reasons = getattr(claimability, "reasons", ())
+        if is_executable_work and not claimability.claimable:
+            reasons = claimability.reasons
             detail = ", ".join(reasons)
             fail(
                 f"epic {epic_id} is not claimable under lifecycle contract ({detail}); "
@@ -256,7 +255,7 @@ def claim_epic(
             ["update", epic_id, "--claim"],
             allow_failure=True,
         )
-        if getattr(claim_result, "returncode", 1) != 0:
+        if claim_result.returncode != 0:
             refreshed = run_json(client, ["show", epic_id])
             assignee = None
             if refreshed:

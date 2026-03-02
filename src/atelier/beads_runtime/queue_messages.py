@@ -141,7 +141,7 @@ def claim_queue_message(
             ["update", message_id, "--claim", "--status", "open"],
             allow_failure=True,
         )
-        if getattr(claim_result, "returncode", 1) != 0:
+        if claim_result.returncode != 0:
             refreshed = run_json(client, ["show", message_id])
             assignee = None
             if refreshed:

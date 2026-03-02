@@ -28,7 +28,6 @@ from . import (
     config,
     exec,
     git,
-    github_issues_provider,
     lifecycle,
     messages,
     paths,
@@ -371,6 +370,41 @@ class BeadsClient:
         return _issue_write_lock(issue_id, beads_root=self.beads_root)
 
     @overload
+    def bd(
+        self,
+        args: list[str],
+        *,
+        json_mode: Literal[False] = False,
+        allow_failure: bool = False,
+    ) -> subprocess.CompletedProcess[str]: ...
+
+    @overload
+    def bd(
+        self,
+        args: list[str],
+        *,
+        json_mode: Literal[True],
+        allow_failure: bool = False,
+    ) -> list[dict[str, object]]: ...
+
+    def bd(
+        self,
+        args: list[str],
+        *,
+        json_mode: bool = False,
+        allow_failure: bool = False,
+    ) -> subprocess.CompletedProcess[str] | list[dict[str, object]]:
+        """Run a Beads command in raw or JSON mode."""
+        if json_mode:
+            return run_bd_json(args, beads_root=self.beads_root, cwd=self.cwd)
+        return run_bd_command(
+            args,
+            beads_root=self.beads_root,
+            cwd=self.cwd,
+            allow_failure=allow_failure,
+        )
+
+    @overload
     def run(
         self,
         args: list[str],
@@ -395,15 +429,8 @@ class BeadsClient:
         json_mode: bool = False,
         allow_failure: bool = False,
     ) -> subprocess.CompletedProcess[str] | list[dict[str, object]]:
-        """Run a Beads command in raw or JSON mode."""
-        if json_mode:
-            return run_bd_json(args, beads_root=self.beads_root, cwd=self.cwd)
-        return run_bd_command(
-            args,
-            beads_root=self.beads_root,
-            cwd=self.cwd,
-            allow_failure=allow_failure,
-        )
+        """Compatibility alias for the `bd(...)` command boundary."""
+        return self.bd(args, json_mode=json_mode, allow_failure=allow_failure)
 
     def run_command(
         self,
@@ -411,10 +438,10 @@ class BeadsClient:
         *,
         allow_failure: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        return self.run(args, allow_failure=allow_failure)
+        return self.bd(args, allow_failure=allow_failure)
 
     def run_json(self, args: list[str]) -> list[dict[str, object]]:
-        return self.run(args, json_mode=True)
+        return self.bd(args, json_mode=True)
 
     @overload
     def show_issue(self, issue_id: str) -> dict[str, object] | None: ...
@@ -430,7 +457,7 @@ class BeadsClient:
     ) -> dict[str, object] | BeadsIssueRecord | None:
         """Return one issue payload in raw or validated record form."""
         if source is None:
-            issues = self.run(["show", issue_id], json_mode=True)
+            issues = self.bd(["show", issue_id], json_mode=True)
             return issues[0] if issues else None
         records = self.issue_records(["show", issue_id], source=source)
         return records[0] if records else None
@@ -501,9 +528,42 @@ class _ExternalReconcileGithubClient:
     def github_repo_from_ticket_url(self, url: str | None) -> str | None:
         return beads_external_reconcile.github_repo_from_ticket_url(url)
 
-    def github_provider(self, repo_slug: str) -> beads_external_reconcile.GithubTicketProvider:
-        provider = github_issues_provider.GithubIssuesProvider(repo=repo_slug)
-        return cast(beads_external_reconcile.GithubTicketProvider, provider)
+    @overload
+    def gh(self, args: list[str], *, json_mode: Literal[False] = False) -> None: ...
+
+    @overload
+    def gh(self, args: list[str], *, json_mode: Literal[True]) -> object: ...
+
+    def gh(self, args: list[str], *, json_mode: bool = False) -> object | None:
+        command = ["gh", *args]
+        result = exec.run_with_runner(
+            exec.CommandRequest(
+                argv=tuple(command),
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+            )
+        )
+        if result is None:
+            raise RuntimeError("missing required command: gh")
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(detail or f"command failed: {' '.join(command)}")
+        if not json_mode:
+            return None
+        raw = (result.stdout or "").strip()
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"failed to parse gh json output: {exc}") from exc
+
+    def github_issues(self, repo_slug: str) -> beads_external_reconcile.GithubTicketProvider:
+        return cast(
+            beads_external_reconcile.GithubTicketProvider,
+            beads_external_reconcile.GithubIssuesClient(repo_slug=repo_slug, github=self),
+        )
 
 
 @dataclass(frozen=True)
@@ -4872,8 +4932,8 @@ def create_message_bead(
         metadata=metadata,
         assignee=assignee,
         client=runtime,
-        label_message=_LABEL_MESSAGE,
-        label_unread=_LABEL_UNREAD,
+        label_message=issue_label(_LABEL_MESSAGE, beads_root=beads_root),
+        label_unread=issue_label(_LABEL_UNREAD, beads_root=beads_root),
     )
 
 
@@ -4890,8 +4950,8 @@ def list_inbox_messages(
         agent_id,
         unread_only=unread_only,
         client=runtime,
-        label_message=_LABEL_MESSAGE,
-        label_unread=_LABEL_UNREAD,
+        label_message=issue_label(_LABEL_MESSAGE, beads_root=beads_root),
+        label_unread=issue_label(_LABEL_UNREAD, beads_root=beads_root),
     )
 
 
@@ -4910,8 +4970,8 @@ def list_queue_messages(
         unclaimed_only=unclaimed_only,
         unread_only=unread_only,
         client=runtime,
-        label_message=_LABEL_MESSAGE,
-        label_unread=_LABEL_UNREAD,
+        label_message=issue_label(_LABEL_MESSAGE, beads_root=beads_root),
+        label_unread=issue_label(_LABEL_UNREAD, beads_root=beads_root),
     )
 
 
@@ -5242,7 +5302,7 @@ def mark_message_read(
     beads_queue_messages.mark_message_read(
         message_id,
         client=runtime,
-        label_unread=_LABEL_UNREAD,
+        label_unread=issue_label(_LABEL_UNREAD, beads_root=beads_root),
     )
 
 

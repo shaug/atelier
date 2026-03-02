@@ -25,7 +25,7 @@ class _QueueClient:
         del issue_id
         return nullcontext()
 
-    def run(
+    def bd(
         self,
         args: list[str],
         *,
@@ -40,26 +40,26 @@ class _QueueClient:
             if args[:1] == ["list"]:
                 return [dict(issue) for issue in self.issues.values()]
             return []
-        self.commands.append(args)
+        self.commands.append(list(args))
+        if args[:1] == ["create"]:
+            self.create_args = list(args)
+            body_file = args[args.index("--body-file") + 1]
+            description = Path(body_file).read_text(encoding="utf-8")
+            self.create_description = description
+            issue_id = "msg-created"
+            title = args[args.index("--title") + 1]
+            self.issues[issue_id] = {"id": issue_id, "title": title, "description": description}
+            return CompletedProcess(args=args, returncode=0, stdout=f"{issue_id}\n", stderr="")
         if args[:3] == ["update", "msg-1", "--claim"]:
             issue = self.issues.get("msg-1")
             if issue is not None:
                 issue["assignee"] = "agent-1"
+        if args[:1] == ["update"] and "--body-file" in args and len(args) >= 2:
+            issue_id = args[1]
+            body_file = args[args.index("--body-file") + 1]
+            issue = self.issues[issue_id]
+            issue["description"] = Path(body_file).read_text(encoding="utf-8")
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
-
-    def create_issue_with_body(self, args: list[str], description: str) -> str:
-        self.create_args = list(args)
-        self.create_description = description
-        issue_id = "msg-created"
-        self.issues[issue_id] = {"id": issue_id, "title": "Hello", "description": description}
-        return issue_id
-
-    def update_issue_description(self, issue_id: str, description: str) -> None:
-        issue = self.issues[issue_id]
-        issue["description"] = description
-
-    def issue_label(self, name: str) -> str:
-        return f"at:{name}"
 
 
 def _fail(message: str) -> NoReturn:
