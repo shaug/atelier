@@ -83,11 +83,23 @@ def _select_planner_session(
             session_id=None,
             reason="--new-session requested",
         )
-    if agent_spec.name != "codex" or agent_spec.resume_subcommand is None:
+    if agent_spec.resume_subcommand is None:
         return _PlannerSessionSelection(
             mode="fresh",
             session_id=None,
             reason=f"{agent_spec.display_name} resume is unavailable for planner sessions",
+        )
+    if not agent_spec.resume_requires_session_id:
+        return _PlannerSessionSelection(
+            mode="resume",
+            session_id=None,
+            reason=f"{agent_spec.display_name} resume command",
+        )
+    if agent_spec.name != "codex":
+        return _PlannerSessionSelection(
+            mode="fresh",
+            session_id=None,
+            reason=f"{agent_spec.display_name} resume requires a session id",
         )
     matches = sessions.find_codex_sessions(
         project_enlistment,
@@ -121,8 +133,9 @@ def _select_planner_session(
 
 
 def _planner_session_mode_line(selection: _PlannerSessionSelection) -> str:
-    if selection.mode == "resume" and selection.session_id:
-        return f"Planner session mode: resume {selection.session_id} ({selection.reason})."
+    if selection.mode == "resume":
+        session_fragment = f" {selection.session_id}" if selection.session_id else ""
+        return f"Planner session mode: resume{session_fragment} ({selection.reason})."
     return f"Planner session mode: start new ({selection.reason})."
 
 
@@ -701,7 +714,7 @@ def run_planner(args: object) -> None:
                         cwd=repo_root,
                     )
                 launch_cmd, launch_cwd = start_cmd, start_cwd
-                if selection.mode == "resume" and selection.session_id:
+                if selection.mode == "resume":
                     resume = agent_spec.build_resume_command(
                         agent.path,
                         agent_options,
