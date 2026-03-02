@@ -221,7 +221,7 @@ def _is_implicit_epic_parent_edge(
     if not heritage_parent_id or dependency_id != heritage_parent_id:
         return False
     if dependency_issue is None:
-        return True
+        return False
     if _normalize_branch(changeset_fields.work_branch(dependency_issue)):
         return False
     return _is_epic_issue(dependency_issue)
