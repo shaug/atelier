@@ -499,6 +499,7 @@ class DoltServerRuntime:
     host: str
     port: int
     database: str
+    ownership_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -629,6 +630,7 @@ def _ambiguous_dolt_database_detail(
 ) -> str:
     choices = ", ".join(candidates)
     return (
+        "dolt server ownership is ambiguous: "
         f"multiple Dolt databases found under {beads_root / 'dolt'} ({choices}); "
         f"project-scoped default is {preferred}"
     )
@@ -652,13 +654,7 @@ def _resolve_project_scoped_dolt_database_name(
     )
     if strict:
         return None, detail
-    if preferred in candidates:
-        return preferred, detail
-    if "beads_at" in candidates:
-        return "beads_at", detail
-    if _DOLT_DATABASE_DEFAULT in candidates:
-        return _DOLT_DATABASE_DEFAULT, detail
-    return candidates[0], detail
+    return None, detail
 
 
 def _discover_dolt_database_name(beads_root: Path) -> str:
@@ -741,23 +737,35 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
         updated["dolt_server_user"] = _DOLT_SERVER_USER_DEFAULT
         changes.append("dolt_server_user")
 
+    resolved_database, resolution_detail = _resolve_project_scoped_dolt_database_name(
+        beads_root,
+        strict=True,
+    )
+    if resolution_detail:
+        atelier_log.warning(
+            f"Dolt runtime database convergence detail for {metadata_path}: {resolution_detail}"
+        )
     database_name = _normalize_dolt_database_name(updated.get("dolt_database"))
     if database_name is None:
-        database_name, resolution_detail = _resolve_project_scoped_dolt_database_name(
-            beads_root, strict=True
-        )
-        if database_name is None:
+        if resolved_database is None:
             atelier_log.warning(
                 "Skipping Beads runtime normalization for `dolt_database`: "
                 f"{resolution_detail}. Set `.beads/metadata.json` `dolt_database` "
                 "to the intended local database and rerun the command."
             )
         else:
-            updated["dolt_database"] = database_name
+            updated["dolt_database"] = resolved_database
             changes.append("dolt_database")
     else:
         current_database_value = updated.get("dolt_database")
-        if not isinstance(current_database_value, str) or current_database_value != database_name:
+        if resolved_database is None and resolution_detail is not None:
+            atelier_log.warning(
+                "Preserving configured Beads runtime `dolt_database` because "
+                "ownership is ambiguous; set `.beads/metadata.json` "
+                "`dolt_database` to the intended local database and rerun "
+                "the command."
+            )
+        elif not isinstance(current_database_value, str) or current_database_value != database_name:
             updated["dolt_database"] = database_name
             changes.append("dolt_database")
 
@@ -2104,18 +2112,31 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
     host_value = payload.get("dolt_server_host")
     host = host_value.strip() if isinstance(host_value, str) and host_value.strip() else "127.0.0.1"
     port = _parse_dolt_runtime_port(payload.get("dolt_server_port"))
-    database = _normalize_dolt_database_name(payload.get("dolt_database"))
-    if database is None:
-        database, resolution_detail = _resolve_project_scoped_dolt_database_name(
-            beads_root, strict=True
-        )
-        if database is None:
-            database = ""
-            atelier_log.warning(
-                "Dolt runtime database resolution blocked: "
-                f"{resolution_detail}. Set `.beads/metadata.json` `dolt_database` "
-                "to the intended local database and rerun the command."
+    database_value = payload.get("dolt_database")
+    configured_database = _normalize_dolt_database_name(database_value)
+    discovered_database, discovery_detail = _resolve_project_scoped_dolt_database_name(
+        beads_root,
+        strict=True,
+    )
+    ownership_error = discovery_detail
+    if configured_database and ownership_error:
+        local_candidates = _local_dolt_database_candidates(beads_root)
+        if configured_database in local_candidates:
+            discovered_database = configured_database
+            ownership_error = None
+        else:
+            ownership_error = (
+                f"{ownership_error}; configured dolt_database={configured_database} does not "
+                "match any discovered local candidate"
             )
+    if discovered_database is None:
+        discovered_database = _default_dolt_database_name(beads_root)
+    if configured_database and not ownership_error and configured_database != discovered_database:
+        ownership_error = (
+            "dolt server ownership mismatch: metadata.json configures "
+            f"dolt_database={configured_database}, expected {discovered_database}"
+        )
+    database = discovered_database
     dolt_root = beads_root / "dolt"
     return DoltServerRuntime(
         dolt_root=dolt_root,
@@ -2123,6 +2144,7 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
         host=host,
         port=port,
         database=database,
+        ownership_error=ownership_error,
     )
 
 
@@ -2267,6 +2289,8 @@ def _probe_dolt_server_health(
     cwd: Path,
     env: dict[str, str],
 ) -> tuple[bool, str | None]:
+    if runtime.ownership_error:
+        return False, runtime.ownership_error
     result = _run_raw_bd_command(["bd", "dolt", "show", "--json"], cwd=cwd, env=env)
     if result is None:
         return False, "missing required command: bd"
@@ -2301,12 +2325,8 @@ def _restart_dolt_server_with_recovery(
     env: dict[str, str],
 ) -> tuple[bool, str]:
     runtime = _resolve_dolt_server_runtime(beads_root)
-    if not runtime.database.strip():
-        return (
-            False,
-            "dolt runtime database is unset or ambiguous; set `.beads/metadata.json` "
-            "`dolt_database` to the intended local database and retry",
-        )
+    if runtime.ownership_error:
+        return False, runtime.ownership_error
     stopped = _stop_dolt_server_processes(runtime, cwd=cwd, env=env)
     started, start_detail = _start_dolt_server(runtime, env=env)
     if not started:
@@ -2339,11 +2359,8 @@ def _ensure_dolt_server_preflight(
     if not (beads_root / "dolt").exists():
         return None
     runtime = _resolve_dolt_server_runtime(beads_root)
-    if not runtime.database.strip():
-        return (
-            "dolt runtime database is unset or ambiguous; set `.beads/metadata.json` "
-            "`dolt_database` to the intended local database and retry"
-        )
+    if runtime.ownership_error:
+        return runtime.ownership_error
     healthy, detail = _probe_dolt_server_health(runtime, cwd=cwd, env=env)
     if healthy:
         return None
@@ -5029,6 +5046,22 @@ def ensure_agent_bead(
     return {"id": issue_id, "title": agent_id}
 
 
+def _claim_is_complete(
+    candidate: dict[str, object],
+    *,
+    claimant: str,
+    beads_root: Path,
+) -> bool:
+    assignee = candidate.get("assignee")
+    status = str(candidate.get("status") or "").strip().lower()
+    return (
+        isinstance(assignee, str)
+        and assignee == claimant
+        and status == "in_progress"
+        and has_issue_label(_issue_labels(candidate), _LABEL_HOOKED, beads_root=beads_root)
+    )
+
+
 def claim_epic(
     epic_id: str,
     agent_id: str,
@@ -5038,16 +5071,6 @@ def claim_epic(
     allow_takeover_from: str | None = None,
 ) -> dict[str, object]:
     """Claim an epic by assigning it to the agent."""
-
-    def _claim_is_complete(candidate: dict[str, object], *, claimant: str) -> bool:
-        assignee = candidate.get("assignee")
-        status = str(candidate.get("status") or "").strip().lower()
-        return (
-            isinstance(assignee, str)
-            and assignee == claimant
-            and status == "in_progress"
-            and has_issue_label(_issue_labels(candidate), _LABEL_HOOKED, beads_root=beads_root)
-        )
 
     with _issue_write_lock(epic_id, beads_root=beads_root):
         issues = run_bd_json(["show", epic_id], beads_root=beads_root, cwd=cwd)
@@ -5147,7 +5170,7 @@ def claim_epic(
             assignee = updated.get("assignee")
             if assignee != agent_id:
                 die(f"epic {epic_id} claim failed; already assigned")
-            if _claim_is_complete(updated, claimant=agent_id):
+            if _claim_is_complete(updated, claimant=agent_id, beads_root=beads_root):
                 return updated
             if attempt == 0:
                 continue
@@ -5157,7 +5180,6 @@ def claim_epic(
                 f"{issue_label(_LABEL_HOOKED, beads_root=beads_root)}"
             )
         die(f"epic {epic_id} claim failed; unable to verify claimed state")
-        return issue
 
 
 def epic_changeset_summary(

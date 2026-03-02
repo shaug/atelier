@@ -405,6 +405,9 @@ def run_planner(args: object) -> None:
     try:
         with agents.scoped_agent_env(agent.agent_id):
             say("Planner session")
+            finish = _step("Converge Beads prefix", timings=timings, trace=trace)
+            beads.ensure_atelier_issue_prefix(beads_root=beads_root, cwd=repo_root)
+            finish()
             finish = _step("Prime beads", timings=timings, trace=trace)
             beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
             finish()
