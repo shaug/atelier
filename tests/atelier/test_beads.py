@@ -41,29 +41,19 @@ def test_beads_env_sets_beads_db() -> None:
     assert env["BEADS_DB"] == "/tmp/project/.beads/beads.db"
 
 
-def test_default_dolt_database_name_is_project_scoped_and_prefix_aware(
+def test_default_dolt_database_name_is_prefix_only_and_prefix_aware(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
-    (tmp_path / "config.sys.json").write_text(
-        json.dumps({"project": {"origin": "github.com/shaug/atelier"}}),
-        encoding="utf-8",
-    )
 
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
-    beads._PROJECT_DOLT_SCOPE_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     default_name = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
-    assert default_name.startswith("beads_at_")
-    assert len(default_name) > len("beads_at_")
+    assert default_name == "beads_at"
 
     relocated_project = tmp_path / "relocated"
     relocated_project.mkdir()
-    (relocated_project / "config.sys.json").write_text(
-        json.dumps({"project": {"origin": "github.com/shaug/atelier"}}),
-        encoding="utf-8",
-    )
     relocated_beads_root = relocated_project / ".beads"
     relocated_beads_root.mkdir()
     relocated_default = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
@@ -74,7 +64,7 @@ def test_default_dolt_database_name_is_project_scoped_and_prefix_aware(
     monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     ops_name = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
-    assert ops_name.startswith("beads_ops_")
+    assert ops_name == "beads_ops"
     assert default_name != ops_name
 
 
@@ -86,7 +76,6 @@ def test_normalize_dolt_runtime_metadata_once_converges_to_project_database(
     beads_root.mkdir()
     monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
-    beads._PROJECT_DOLT_SCOPE_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     expected_database = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     (beads_root / "dolt" / expected_database / ".dolt").mkdir(parents=True)
     (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
@@ -119,7 +108,7 @@ def test_normalize_dolt_runtime_metadata_once_converges_to_project_database(
     assert payload["dolt_server_host"] == "127.0.0.1"
     assert payload["dolt_server_port"] == 3307
     assert payload["dolt_server_user"] == "root"
-    assert expected_database.startswith("beads_ops_")
+    assert expected_database == "beads_ops"
     assert payload["dolt_database"] == expected_database
     assert (beads_root / "dolt" / "beads_at" / ".dolt").is_dir()
 
@@ -210,7 +199,6 @@ def test_normalize_dolt_runtime_metadata_once_preserves_database_when_expected_m
 ) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
-    beads._PROJECT_DOLT_SCOPE_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     expected_database = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     (beads_root / "dolt" / "beads" / ".dolt").mkdir(parents=True)
     (beads_root / "dolt" / "beads_other" / ".dolt").mkdir(parents=True)
@@ -301,7 +289,7 @@ def test_normalize_dolt_runtime_metadata_once_sets_project_db_for_single_project
     assert payload["dolt_database"] == preferred
 
 
-def test_resolve_dolt_server_runtime_uses_project_scoped_database_by_default(
+def test_resolve_dolt_server_runtime_uses_prefix_database_by_default(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
@@ -352,7 +340,7 @@ def test_resolve_dolt_server_runtime_rejects_non_candidate_configured_database(
         beads_root
     )
     (beads_root / "dolt" / expected_database / ".dolt").mkdir(parents=True)
-    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_local" / ".dolt").mkdir(parents=True)
     (beads_root / "dolt" / "beads_other" / ".dolt").mkdir(parents=True)
     (beads_root / "metadata.json").write_text(
         json.dumps({"backend": "dolt", "dolt_database": "beads_unknown"}),
@@ -371,8 +359,11 @@ def test_resolve_dolt_server_runtime_rejects_non_candidate_configured_database(
 
 def test_resolve_dolt_server_runtime_fails_closed_when_expected_db_missing(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     beads_root = tmp_path / ".beads"
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
         beads_root
     )
@@ -1201,7 +1192,7 @@ def test_run_bd_command_covers_dolt_lifecycle_paths_across_projects(
     assert restart_calls == [recovering_beads_root, failing_beads_root]
 
 
-def test_run_bd_command_keeps_shared_endpoint_project_scoped(
+def test_run_bd_command_accepts_shared_endpoint_with_prefix_database(
     tmp_path: Path,
 ) -> None:
     project_a_beads = tmp_path / "project-a" / ".beads"
@@ -1245,48 +1236,25 @@ def test_run_bd_command_keeps_shared_endpoint_project_scoped(
                 stdout="[]",
                 stderr="",
             )
+        if argv == ["bd", "list", "--json"] and request.cwd == repo_b:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="[]",
+                stderr="",
+            )
         raise AssertionError(f"unexpected command: cwd={request.cwd} argv={argv}")
-
-    def fake_restart_dolt_server_with_recovery(
-        *, beads_root: Path, cwd: Path, env: dict[str, str]
-    ) -> tuple[bool, str]:
-        del cwd, env
-        if beads_root == project_b_beads:
-            remediation = beads._dolt_database_remediation(  # pyright: ignore[reportPrivateUsage]
-                expected_database=expected_b
-            )
-            return (
-                False,
-                "dolt server ownership mismatch: "
-                f"expected database={expected_b}, got {expected_a}. {remediation}",
-            )
-        return False, "unexpected recovery invocation"
-
-    def fake_die(message: str, code: int = 1) -> None:
-        del code
-        raise RuntimeError(message)
 
     with (
         patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
         patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
-        patch(
-            "atelier.beads._restart_dolt_server_with_recovery",
-            side_effect=fake_restart_dolt_server_with_recovery,
-        ),
-        patch("atelier.beads._startup_state_diagnostics", return_value="startup-diag"),
-        patch("atelier.beads.die", side_effect=fake_die),
     ):
         result_a = beads.run_bd_command(["list", "--json"], beads_root=project_a_beads, cwd=repo_a)
-        with pytest.raises(RuntimeError) as excinfo:
-            beads.run_bd_command(["list", "--json"], beads_root=project_b_beads, cwd=repo_b)
+        result_b = beads.run_bd_command(["list", "--json"], beads_root=project_b_beads, cwd=repo_b)
 
     assert result_a.returncode == 0
-    message = str(excinfo.value)
-    assert "dolt server preflight failed before running bd command" in message
-    assert f"expected database={expected_b}" in message
-    assert "Run `bd dolt set database" in message
-    assert "startup-diag" in message
-    assert (repo_b, ["bd", "list", "--json"]) not in calls
+    assert result_b.returncode == 0
+    assert expected_a == expected_b == "beads_at"
 
 
 def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(
@@ -1773,7 +1741,7 @@ def test_reconcile_startup_auto_migration_runtime_database_logs_unchanged_metada
     assert not any("fell back to metadata update" in message for message in warnings)
 
 
-def test_reconcile_startup_auto_migration_runtime_database_preserves_configured_ambiguous_db(
+def test_reconcile_startup_auto_migration_runtime_database_updates_to_expected_db(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
@@ -1822,14 +1790,13 @@ def test_reconcile_startup_auto_migration_runtime_database_preserves_configured_
         )
 
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-    assert payload["dolt_database"] == "beads_other"
+    assert payload["dolt_database"] == "beads_at"
     assert ["bd", "dolt", "set", "database", "beads_at", "--update-config"] in calls
-    assert any("reconciliation blocked" in message for message in warnings)
-    assert any("intentionally preserved" in message for message in warnings)
+    assert any("fell back to metadata update" in message for message in warnings)
     assert not any("reconciliation failed" in message for message in warnings)
 
 
-def test_update_runtime_metadata_dolt_database_blocks_project_scope_mismatch(
+def test_update_runtime_metadata_dolt_database_blocks_expected_database_mismatch(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
@@ -3466,7 +3433,7 @@ def test_ensure_issue_prefix_reconciles_runtime_metadata_when_prefix_changes(
     assert calls == [["rename-prefix", "ops-", "--repair"]]
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     expected_database = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
-    assert expected_database.startswith("beads_ops_")
+    assert expected_database == "beads_ops"
     assert payload["dolt_database"] == expected_database
 
 
