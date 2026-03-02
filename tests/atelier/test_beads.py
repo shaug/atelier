@@ -1192,13 +1192,24 @@ def test_run_bd_command_covers_dolt_lifecycle_paths_across_projects(
     assert restart_calls == [recovering_beads_root, failing_beads_root]
 
 
-def test_run_bd_command_accepts_shared_endpoint_with_prefix_database(
+def test_run_bd_command_fails_closed_when_prefix_claimed_by_other_project(
     tmp_path: Path,
 ) -> None:
-    project_a_beads = tmp_path / "project-a" / ".beads"
-    project_b_beads = tmp_path / "project-b" / ".beads"
+    projects_root = tmp_path / "projects"
+    project_a = projects_root / "project-a"
+    project_b = projects_root / "project-b"
+    project_a_beads = project_a / ".beads"
+    project_b_beads = project_b / ".beads"
     for beads_root in (project_a_beads, project_b_beads):
         (beads_root / "dolt").mkdir(parents=True)
+    (project_a / "config.sys.json").write_text(
+        json.dumps({"beads": {"prefix": "at"}}),
+        encoding="utf-8",
+    )
+    (project_b / "config.sys.json").write_text(
+        json.dumps({"beads": {"prefix": "at"}}),
+        encoding="utf-8",
+    )
     repo_a = tmp_path / "repo-a"
     repo_b = tmp_path / "repo-b"
     repo_a.mkdir()
@@ -1236,25 +1247,30 @@ def test_run_bd_command_accepts_shared_endpoint_with_prefix_database(
                 stdout="[]",
                 stderr="",
             )
-        if argv == ["bd", "list", "--json"] and request.cwd == repo_b:
-            return exec_util.CommandResult(
-                argv=request.argv,
-                returncode=0,
-                stdout="[]",
-                stderr="",
-            )
         raise AssertionError(f"unexpected command: cwd={request.cwd} argv={argv}")
+
+    def fake_die(message: str, code: int = 1) -> None:
+        del code
+        raise RuntimeError(message)
 
     with (
         patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
         patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.paths.projects_root", return_value=projects_root),
+        patch("atelier.beads._startup_state_diagnostics", return_value="startup-diag"),
+        patch("atelier.beads.die", side_effect=fake_die),
     ):
         result_a = beads.run_bd_command(["list", "--json"], beads_root=project_a_beads, cwd=repo_a)
-        result_b = beads.run_bd_command(["list", "--json"], beads_root=project_b_beads, cwd=repo_b)
+        with pytest.raises(RuntimeError) as excinfo:
+            beads.run_bd_command(["list", "--json"], beads_root=project_b_beads, cwd=repo_b)
 
     assert result_a.returncode == 0
-    assert result_b.returncode == 0
     assert expected_a == expected_b == "beads_at"
+    message = str(excinfo.value)
+    assert "dolt server preflight failed before running bd command" in message
+    assert "beads.prefix collision for 'at'" in message
+    assert "claimed by" in message
+    assert (repo_b, ["bd", "list", "--json"]) not in calls
 
 
 def test_run_bd_command_rejects_changeset_in_progress_with_open_dependencies(

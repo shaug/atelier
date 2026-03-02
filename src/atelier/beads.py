@@ -636,6 +636,55 @@ def _local_dolt_database_candidates(beads_root: Path) -> tuple[str, ...]:
     return tuple(sorted(candidates))
 
 
+def _project_config_payload(project_dir: Path) -> dict[str, object] | None:
+    for config_path in (
+        paths.project_config_sys_path(project_dir),
+        paths.project_config_legacy_path(project_dir),
+    ):
+        payload = config.load_json(config_path)
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def _prefix_collision_owner(beads_root: Path, *, prefix: str) -> Path | None:
+    current_project_dir = beads_root.parent.resolve()
+    project_dirs_root = paths.projects_root()
+    if current_project_dir.parent != project_dirs_root.resolve():
+        return None
+    owners: set[Path] = {current_project_dir}
+    if not project_dirs_root.exists():
+        return None
+    for candidate in sorted(project_dirs_root.iterdir()):
+        if not candidate.is_dir():
+            continue
+        payload = _project_config_payload(candidate)
+        if payload is None:
+            continue
+        if config.resolve_beads_prefix(payload) != prefix:
+            continue
+        owners.add(candidate.resolve())
+    if len(owners) <= 1:
+        return None
+    return sorted(owners, key=str)[0]
+
+
+def _prefix_collision_ownership_error(beads_root: Path) -> str | None:
+    prefix = configured_issue_prefix(beads_root=beads_root)
+    owner = _prefix_collision_owner(beads_root, prefix=prefix)
+    if owner is None:
+        return None
+    current_project_dir = beads_root.parent.resolve()
+    if owner == current_project_dir:
+        return None
+    return (
+        "dolt server ownership mismatch: beads.prefix collision for "
+        f"{prefix!r}. Prefix is already claimed by {owner}; current project is "
+        f"{current_project_dir}. Configure a unique prefix with "
+        "`atelier config --prompt` and rerun."
+    )
+
+
 def _ambiguous_dolt_database_detail(
     *,
     beads_root: Path,
@@ -2147,8 +2196,10 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
     expected_database = _default_dolt_database_name(beads_root)
     local_candidates = _local_dolt_database_candidates(beads_root)
     configured_database = _normalize_dolt_database_name(payload.get("dolt_database"))
-    ownership_error: str | None = None
-    if local_candidates and expected_database not in local_candidates:
+    ownership_error = _prefix_collision_ownership_error(beads_root)
+    if ownership_error is not None:
+        pass
+    elif local_candidates and expected_database not in local_candidates:
         choices = ", ".join(local_candidates)
         remediation = _dolt_database_remediation(expected_database=expected_database)
         ownership_error = (
