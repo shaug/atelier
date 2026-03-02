@@ -96,7 +96,11 @@ def test_normalize_dolt_runtime_metadata_once_updates_legacy_fields(
     assert payload["dolt_server_user"] == "root"
     assert payload["dolt_database"] == expected_database
     assert (beads_root / "dolt" / expected_database / ".dolt").is_dir()
-    assert not (beads_root / "dolt" / "beads_at").exists()
+    legacy_database_path = beads_root / "dolt" / "beads_at"
+    if expected_database == "beads_at":
+        assert legacy_database_path.exists()
+    else:
+        assert not legacy_database_path.exists()
 
 
 def test_normalize_dolt_runtime_metadata_once_sanitizes_database_name(tmp_path: Path) -> None:

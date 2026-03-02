@@ -771,8 +771,8 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
         atelier_log.warning(
             f"Dolt runtime database convergence detail for {metadata_path}: {discovery_detail}"
         )
-    database_value = updated.get("dolt_database")
-    if not isinstance(database_value, str) or not database_value.strip():
+    database_name = _normalize_dolt_database_name(updated.get("dolt_database"))
+    if database_name is None:
         database_name, resolution_detail = _resolve_project_scoped_dolt_database_name(
             beads_root, strict=True
         )
@@ -783,6 +783,11 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
                 "to the intended local database and rerun the command."
             )
         else:
+            updated["dolt_database"] = database_name
+            changes.append("dolt_database")
+    else:
+        current_database_value = updated.get("dolt_database")
+        if not isinstance(current_database_value, str) or current_database_value != database_name:
             updated["dolt_database"] = database_name
             changes.append("dolt_database")
 
