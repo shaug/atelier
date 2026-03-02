@@ -3823,6 +3823,26 @@ def test_claim_epic_allows_expected_takeover() -> None:
     release_claim.assert_called_once()
 
 
+def test_claim_epic_fails_closed_when_takeover_owner_changes() -> None:
+    issue = {"id": "atelier-9", "labels": ["at:epic"], "status": "open", "assignee": "agent-old"}
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[issue]),
+        patch("atelier.beads.release_epic_assignment", return_value=False),
+        patch("atelier.beads.die", side_effect=RuntimeError("die called")) as die_fn,
+    ):
+        with pytest.raises(RuntimeError, match="die called"):
+            beads.claim_epic(
+                "atelier-9",
+                "agent-new",
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+                allow_takeover_from="agent-old",
+            )
+
+    assert "takeover failed; claim ownership changed" in str(die_fn.call_args.args[0])
+
+
 def test_claim_epic_retries_until_hooked_state_visible() -> None:
     issue = {"id": "atelier-9", "status": "open", "labels": ["at:epic"], "assignee": None}
     incomplete = {"id": "atelier-9", "status": "open", "labels": ["at:epic"], "assignee": "agent"}
@@ -4443,6 +4463,50 @@ def test_claim_queue_message_rejects_second_concurrent_claimant() -> None:
         description = str(state["description"])
     assert "claimed_by:" in description
     assert "claimed_at:" in description
+
+
+def test_claim_queue_message_fails_closed_after_metadata_conflict_retry_exhaustion() -> None:
+    state: dict[str, object] = {
+        "id": "msg-3",
+        "description": "---\nqueue: triage\n---\n\nBody\n",
+        "assignee": None,
+    }
+    updates: list[str] = []
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        del args, beads_root, cwd
+        return [dict(state)]
+
+    def fake_run_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        if args[:3] == ["update", "msg-3", "--claim"]:
+            state["assignee"] = "agent-a"
+        return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
+        del issue_id, beads_root, cwd
+        updates.append(description)
+        # Simulate another writer overwriting metadata immediately after each write.
+        state["description"] = "---\nqueue: triage\n---\n\nBody\n"
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_run_command),
+        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch("atelier.beads.die", side_effect=RuntimeError("die called")) as die_fn,
+    ):
+        with pytest.raises(RuntimeError, match="die called"):
+            beads.claim_queue_message(
+                "msg-3",
+                "agent-a",
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            )
+
+    assert len(updates) == beads._DESCRIPTION_UPDATE_MAX_ATTEMPTS  # pyright: ignore[reportPrivateUsage]
+    assert "concurrent queue claim metadata conflict for msg-3" in str(die_fn.call_args.args[0])
 
 
 def test_list_inbox_messages_filters_unread() -> None:

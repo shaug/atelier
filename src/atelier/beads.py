@@ -14,7 +14,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -298,6 +298,119 @@ def _issue_write_lock(issue_id: str, *, beads_root: Path) -> Iterator[None]:
                 to_release.close()
         finally:
             local_lock.release()
+
+
+@dataclass(frozen=True)
+class _BeadsAgentHooksRuntime:
+    """Runtime adapter implementing the bounded ``beads_runtime.agent_hooks`` contract."""
+
+    beads_root: Path
+
+    def issue_write_lock(self, issue_id: str, beads_root: Path) -> AbstractContextManager[None]:
+        return _issue_write_lock(issue_id, beads_root=beads_root)
+
+    def run_bd_json(
+        self, args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        return run_bd_json(args, beads_root=beads_root, cwd=cwd)
+
+    def run_bd_command(
+        self, args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        return run_bd_command(args, beads_root=beads_root, cwd=cwd, allow_failure=allow_failure)
+
+    def issue_labels(self, issue: dict[str, object]) -> set[str]:
+        return _issue_labels(issue)
+
+    def has_issue_label(self, labels: set[str] | list[str], name: str) -> bool:
+        return has_issue_label(labels, name, beads_root=self.beads_root)
+
+    def issue_label(self, name: str) -> str:
+        return issue_label(name, beads_root=self.beads_root)
+
+    def normalize_description_field_value(self, value: str | None) -> str | None:
+        return _normalize_description_field_value(value)
+
+    def parse_description_fields(self, description: str | None) -> dict[str, str]:
+        return _parse_description_fields(description)
+
+    def normalize_hook_value(self, value: object) -> str | None:
+        return _normalize_hook_value(value)
+
+    def extract_hook_from_slot_payload(self, payload: object) -> str | None:
+        return _extract_hook_from_slot_payload(payload)
+
+    def update_description_fields_optimistic(
+        self,
+        issue_id: str,
+        *,
+        fields: dict[str, str | None],
+        expected_current: dict[str, str | None] | None = None,
+        require_expected_match: bool = False,
+        beads_root: Path,
+        cwd: Path,
+    ) -> dict[str, object]:
+        return _update_description_fields_optimistic(
+            issue_id,
+            fields=fields,
+            expected_current=expected_current,
+            require_expected_match=require_expected_match,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+
+    def evaluate_epic_claimability(self, issue: dict[str, object]) -> object:
+        return _evaluate_epic_claimability(issue)
+
+    def lifecycle_is_executable_epic_identity(
+        self,
+        *,
+        labels: set[str],
+        issue_type: object,
+        parent_id: str | None,
+    ) -> bool:
+        return lifecycle.is_executable_epic_identity(
+            labels=labels,
+            issue_type=issue_type,
+            parent_id=parent_id,
+        )
+
+    def lifecycle_issue_payload_type(self, issue: dict[str, object]) -> object:
+        return lifecycle.issue_payload_type(issue)
+
+    def issue_parent_id(self, issue: dict[str, object]) -> str | None:
+        return _issue_parent_id(issue)
+
+    def is_planner_assignee(self, value: object) -> bool:
+        return _is_planner_assignee(value)
+
+    def release_epic_assignment(
+        self,
+        epic_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        expected_assignee: str | None = None,
+        expected_hooked: bool | None = None,
+    ) -> bool:
+        return release_epic_assignment(
+            epic_id,
+            beads_root=beads_root,
+            cwd=cwd,
+            expected_assignee=expected_assignee,
+            expected_hooked=expected_hooked,
+        )
+
+    def is_standalone_changeset_without_epic_label(
+        self, issue: dict[str, object], *, beads_root: Path, cwd: Path
+    ) -> bool:
+        return _is_standalone_changeset_without_epic_label(issue, beads_root=beads_root, cwd=cwd)
+
+    def get_agent_hook(self, agent_bead_id: str, *, beads_root: Path, cwd: Path) -> str | None:
+        return get_agent_hook(agent_bead_id, beads_root=beads_root, cwd=cwd)
+
+    def die(self, message: str) -> None:
+        die(message)
 
 
 class _IssueTypeModel(BaseModel):
@@ -3024,19 +3137,14 @@ def release_epic_assignment(
     expected_hooked: bool | None = None,
 ) -> bool:
     """Release epic ownership with optional assignee/hook preconditions."""
+    runtime = _BeadsAgentHooksRuntime(beads_root=beads_root)
     return beads_agent_hooks.release_epic_assignment(
         epic_id,
         beads_root=beads_root,
         cwd=cwd,
         expected_assignee=expected_assignee,
         expected_hooked=expected_hooked,
-        issue_write_lock=lambda issue_id, root: _issue_write_lock(issue_id, beads_root=root),
-        run_bd_json=run_bd_json,
-        run_bd_command=run_bd_command,
-        issue_labels=_issue_labels,
-        has_issue_label=lambda labels, name: has_issue_label(labels, name, beads_root=beads_root),
-        issue_label=lambda name: issue_label(name, beads_root=beads_root),
-        normalize_description_field_value=_normalize_description_field_value,
+        runtime=runtime,
     )
 
 
@@ -4097,15 +4205,12 @@ def get_agent_hook(
     cwd: Path,
 ) -> str | None:
     """Return the currently hooked epic id for an agent bead."""
+    runtime = _BeadsAgentHooksRuntime(beads_root=beads_root)
     return beads_agent_hooks.get_agent_hook(
         agent_bead_id,
         beads_root=beads_root,
         cwd=cwd,
-        run_bd_command=run_bd_command,
-        run_bd_json=run_bd_json,
-        parse_description_fields=_parse_description_fields,
-        normalize_hook_value=_normalize_hook_value,
-        extract_hook_from_slot_payload=_extract_hook_from_slot_payload,
+        runtime=runtime,
         hook_slot_name=HOOK_SLOT_NAME,
     )
 
@@ -4686,19 +4791,14 @@ def clear_agent_hook(
     expected_hook: str | None = None,
 ) -> None:
     """Clear the hooked epic id on the agent bead description."""
+    runtime = _BeadsAgentHooksRuntime(beads_root=beads_root)
     beads_agent_hooks.clear_agent_hook(
         agent_bead_id,
         beads_root=beads_root,
         cwd=cwd,
         expected_hook=expected_hook,
-        issue_write_lock=lambda issue_id, root: _issue_write_lock(issue_id, beads_root=root),
-        run_bd_json=run_bd_json,
-        run_bd_command=run_bd_command,
-        get_agent_hook_impl=get_agent_hook,
-        normalize_hook_value=_normalize_hook_value,
-        update_description_fields_optimistic=_update_description_fields_optimistic,
+        runtime=runtime,
         hook_slot_name=HOOK_SLOT_NAME,
-        die=die,
     )
 
 
@@ -4925,28 +5025,16 @@ def claim_epic(
     allow_takeover_from: str | None = None,
 ) -> dict[str, object]:
     """Claim an epic by assigning it to the agent."""
+    runtime = _BeadsAgentHooksRuntime(beads_root=beads_root)
     return beads_agent_hooks.claim_epic(
         epic_id,
         agent_id,
         beads_root=beads_root,
         cwd=cwd,
         allow_takeover_from=allow_takeover_from,
-        issue_write_lock=lambda issue_id, root: _issue_write_lock(issue_id, beads_root=root),
-        run_bd_json=run_bd_json,
-        run_bd_command=run_bd_command,
-        issue_labels=_issue_labels,
-        evaluate_epic_claimability=_evaluate_epic_claimability,
-        lifecycle_is_executable_epic_identity=lifecycle.is_executable_epic_identity,
-        lifecycle_issue_payload_type=lifecycle.issue_payload_type,
-        issue_parent_id=_issue_parent_id,
-        is_planner_assignee=_is_planner_assignee,
-        release_epic_assignment_impl=release_epic_assignment,
-        is_standalone_changeset_without_epic_label=_is_standalone_changeset_without_epic_label,
-        has_issue_label=lambda labels, name: has_issue_label(labels, name, beads_root=beads_root),
-        issue_label=lambda name: issue_label(name, beads_root=beads_root),
+        runtime=runtime,
         label_hooked=_LABEL_HOOKED,
         label_epic=_LABEL_EPIC,
-        die=die,
     )
 
 
@@ -5102,17 +5190,14 @@ def set_agent_hook(
     cwd: Path,
 ) -> None:
     """Store the hooked epic id on the agent bead description."""
+    runtime = _BeadsAgentHooksRuntime(beads_root=beads_root)
     beads_agent_hooks.set_agent_hook(
         agent_bead_id,
         epic_id,
         beads_root=beads_root,
         cwd=cwd,
-        issue_write_lock=lambda issue_id, root: _issue_write_lock(issue_id, beads_root=root),
-        run_bd_json=run_bd_json,
-        run_bd_command=run_bd_command,
-        update_description_fields_optimistic=_update_description_fields_optimistic,
+        runtime=runtime,
         hook_slot_name=HOOK_SLOT_NAME,
-        die=die,
     )
 
 
