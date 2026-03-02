@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import TextIO
+from typing import Literal, TextIO
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -165,6 +165,12 @@ _DOLT_COMMIT_PENDING_COLLECTION_KEYS = {
 }
 _DOLT_COMMIT_CLEAN_KEYS = {"clean", "is_clean", "working_set_clean"}
 _DOLT_COMMIT_IGNORED_STATUS_KEYS = {"branch", "commit", "hash", "head"}
+_RuntimeMetadataReconcileOutcome = Literal[
+    "updated",
+    "unchanged",
+    "blocked_ambiguous",
+    "failed",
+]
 
 try:
     import fcntl  # type: ignore[attr-defined]
@@ -1719,10 +1725,14 @@ def _read_startup_migration_dolt_database(
     return database_name, None
 
 
-def _update_runtime_metadata_dolt_database(*, beads_root: Path, database_name: str) -> bool:
+def _update_runtime_metadata_dolt_database(
+    *,
+    beads_root: Path,
+    database_name: str,
+) -> _RuntimeMetadataReconcileOutcome:
     metadata_path = beads_root / "metadata.json"
     if not metadata_path.exists():
-        return False
+        return "failed"
     try:
         raw = metadata_path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -1730,7 +1740,7 @@ def _update_runtime_metadata_dolt_database(*, beads_root: Path, database_name: s
             f"Startup migration runtime DB reconciliation skipped: unable to read {metadata_path} "
             f"({exc})"
         )
-        return False
+        return "failed"
     payload: dict[str, object]
     if raw.strip():
         try:
@@ -1740,19 +1750,45 @@ def _update_runtime_metadata_dolt_database(*, beads_root: Path, database_name: s
                 "Startup migration runtime DB reconciliation skipped: invalid metadata JSON at "
                 f"{metadata_path} ({exc})"
             )
-            return False
+            return "failed"
         if not isinstance(parsed, dict):
             atelier_log.warning(
                 "Startup migration runtime DB reconciliation skipped: metadata payload is not an "
                 f"object at {metadata_path}"
             )
-            return False
+            return "failed"
         payload = dict(parsed)
     else:
         payload = {}
     existing_database_value = payload.get("dolt_database")
+    existing_database = _normalize_dolt_database_name(existing_database_value)
+    local_candidates = _local_dolt_database_candidates(beads_root)
+    if len(local_candidates) > 1:
+        choices = ", ".join(local_candidates)
+        if existing_database == database_name:
+            return "unchanged"
+        if existing_database is None:
+            atelier_log.warning(
+                "Startup migration runtime DB reconciliation blocked: multiple local Dolt "
+                f"databases found ({choices}) and metadata has no configured dolt_database. "
+                "Set `.beads/metadata.json` `dolt_database` to the intended database and rerun."
+            )
+            return "blocked_ambiguous"
+        if existing_database not in local_candidates:
+            atelier_log.warning(
+                "Startup migration runtime DB reconciliation blocked: configured "
+                f"dolt_database={existing_database} is not one of local candidates ({choices}). "
+                "Set `.beads/metadata.json` `dolt_database` to the intended database and rerun."
+            )
+            return "blocked_ambiguous"
+        atelier_log.warning(
+            "Startup migration runtime DB reconciliation blocked: preserving configured "
+            f"dolt_database={existing_database} while `bd dolt show` reported {database_name}. "
+            "Set `.beads/metadata.json` `dolt_database` explicitly if switching is intended."
+        )
+        return "blocked_ambiguous"
     if isinstance(existing_database_value, str) and existing_database_value == database_name:
-        return True
+        return "unchanged"
     payload["dolt_database"] = database_name
     try:
         metadata_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -1761,8 +1797,8 @@ def _update_runtime_metadata_dolt_database(*, beads_root: Path, database_name: s
             f"Startup migration runtime DB reconciliation skipped: unable to write {metadata_path} "
             f"({exc})"
         )
-        return False
-    return True
+        return "failed"
+    return "updated"
 
 
 def _reconcile_startup_auto_migration_runtime_database(
@@ -1793,10 +1829,28 @@ def _reconcile_startup_auto_migration_runtime_database(
         if set_result is None
         else _short_detail(_command_output_detail(set_result)) or "runtime config update failed"
     )
-    if _update_runtime_metadata_dolt_database(beads_root=beads_root, database_name=database_name):
+    metadata_reconcile = _update_runtime_metadata_dolt_database(
+        beads_root=beads_root,
+        database_name=database_name,
+    )
+    if metadata_reconcile == "updated":
         atelier_log.warning(
             "Startup migration runtime DB reconciliation fell back to metadata update after "
             f"`bd dolt set database` failed ({set_detail})."
+        )
+        return
+    if metadata_reconcile == "unchanged":
+        atelier_log.warning(
+            "Startup migration runtime DB reconciliation could not update runtime config via "
+            f"`bd dolt set database` ({set_detail}), but metadata at {metadata_path} already "
+            "matched the active database."
+        )
+        return
+    if metadata_reconcile == "blocked_ambiguous":
+        atelier_log.warning(
+            "Startup migration runtime DB reconciliation blocked: unable to update runtime "
+            f"config via `bd dolt set database` ({set_detail}) and metadata at {metadata_path} "
+            "is intentionally preserved due to ambiguous local Dolt database ownership."
         )
         return
     atelier_log.warning(
