@@ -406,6 +406,84 @@ def test_plan_applies_claude_yolo_flag(tmp_path: Path) -> None:
     assert "--dangerously-skip-permissions" in launch_cmd
 
 
+def test_plan_prefers_planner_scoped_launch_options(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "worktrees" / "planner"
+    agent = AgentHome(
+        name="planner",
+        agent_id="atelier/planner/planner",
+        role="planner",
+        path=Path("/project/agents/planner"),
+    )
+    payload = _fake_project_payload()
+    payload = payload.model_copy(
+        update={
+            "agent": payload.agent.model_copy(
+                update={
+                    "default": "claude",
+                    "options": {"claude": ["--model", "haiku"]},
+                    "launch_options": {
+                        "planner": {"claude": ["--model", "sonnet"]},
+                        "worker": {"claude": ["--print"]},
+                    },
+                }
+            )
+        }
+    )
+
+    class DummyResult:
+        stdout = ""
+        returncode = 0
+
+    with (
+        patch(
+            "atelier.commands.plan.resolve_current_project_with_repo_root",
+            return_value=(Path("/project"), payload, "/repo", Path("/repo")),
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.plan.config.resolve_beads_root",
+            return_value=Path("/beads"),
+        ),
+        patch("atelier.commands.plan.agent_home.resolve_agent_home", return_value=agent),
+        patch("atelier.commands.plan.agent_home.cleanup_agent_home"),
+        patch("atelier.commands.plan.beads.ensure_agent_bead"),
+        patch(
+            "atelier.commands.plan.beads.run_bd_command",
+            return_value=DummyResult(),
+        ),
+        patch("atelier.commands.plan.beads.run_bd_json", return_value=[]),
+        patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.config.write_project_config"),
+        patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
+        patch("atelier.commands.plan.worktrees.ensure_git_worktree", return_value=worktree_path),
+        patch(
+            "atelier.commands.plan._run_interactive_agent_command",
+            return_value=0,
+        ) as run_interactive_agent_command,
+        patch("atelier.commands.plan.say"),
+    ):
+        plan_cmd.run_planner(SimpleNamespace(epic_id=None))
+
+    run_interactive_agent_command.assert_called_once()
+    launch_cmd = run_interactive_agent_command.call_args.args[0]
+    assert "--model" in launch_cmd
+    assert "sonnet" in launch_cmd
+    assert "--print" not in launch_cmd
+
+
 def test_plan_new_session_uses_claude_start_prompt(tmp_path: Path) -> None:
     worktree_path = tmp_path / "worktrees" / "planner"
     agent = AgentHome(

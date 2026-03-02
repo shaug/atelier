@@ -92,7 +92,12 @@ def prepare_agent_session(
     agent_spec = agents.get_agent(project_config.agent.default)
     if agent_spec is None:
         raise RuntimeError(f"unsupported agent {project_config.agent.default!r}")
-    agent_options = list(project_config.agent.options.get(agent_spec.name, []))
+    agent_options = agents.resolve_launch_options(
+        agent_name=agent_spec.name,
+        role="worker",
+        global_options=project_config.agent.options,
+        launch_options=project_config.agent.launch_options,
+    )
     if yolo:
         agent_options = agents.apply_yolo_options(agent_spec, agent_options)
     if agent_spec.name == "codex":

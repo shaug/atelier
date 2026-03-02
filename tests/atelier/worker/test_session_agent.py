@@ -148,6 +148,51 @@ def test_prepare_agent_session_applies_yolo_options(monkeypatch) -> None:
     assert "--yolo" in prep.agent_options
 
 
+def test_prepare_agent_session_prefers_worker_scoped_options(monkeypatch) -> None:
+    monkeypatch.setattr(
+        session_agent.agents, "get_agent", lambda _name: _FakeAgentSpec(name="codex")
+    )
+    project_config = _project_config().model_copy(
+        update={
+            "agent": _project_config().agent.model_copy(
+                update={
+                    "options": {"codex": ["--model", "gpt-4"]},
+                    "launch_options": {
+                        "worker": {"codex": ["--model", "gpt-5"]},
+                        "planner": {"codex": ["--model", "gpt-4.5"]},
+                    },
+                }
+            )
+        }
+    )
+    agent = agent_home.AgentHome(
+        name="codex",
+        agent_id="atelier/worker/codex/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+
+    prep = session_agent.prepare_agent_session(
+        project_config=project_config,
+        project_data_dir=Path("/project-data"),
+        repo_root=Path("/repo"),
+        beads_root=Path("/beads"),
+        agent=agent,
+        changeset_worktree_path=Path("/worktree"),
+        selected_epic="at-epic",
+        changeset_id="at-epic.1",
+        root_branch_value="feat/root",
+        enlistment_path=Path("/repo"),
+        yes=True,
+        yolo=False,
+        dry_run=True,
+        session_control=_TestControl(),
+        command_ops=_TestCommandOps(),
+    )
+
+    assert prep.agent_options == ["--model", "gpt-5"]
+
+
 def test_prepare_agent_session_applies_claude_yolo_options(monkeypatch) -> None:
     monkeypatch.setattr(
         session_agent.agents,
@@ -189,6 +234,48 @@ def test_prepare_agent_session_applies_claude_yolo_options(monkeypatch) -> None:
     assert "--model" in prep.agent_options
     assert "sonnet" in prep.agent_options
     assert "--dangerously-skip-permissions" in prep.agent_options
+
+
+def test_prepare_agent_session_adds_claude_worker_print_defaults(monkeypatch) -> None:
+    monkeypatch.setattr(
+        session_agent.agents,
+        "get_agent",
+        lambda _name: _FakeAgentSpec(name="claude"),
+    )
+    project_config = _project_config().model_copy(
+        update={
+            "agent": _project_config().agent.model_copy(
+                update={"default": "claude", "options": {"claude": ["--model", "sonnet"]}}
+            )
+        }
+    )
+    agent = agent_home.AgentHome(
+        name="claude",
+        agent_id="atelier/worker/claude/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+
+    prep = session_agent.prepare_agent_session(
+        project_config=project_config,
+        project_data_dir=Path("/project-data"),
+        repo_root=Path("/repo"),
+        beads_root=Path("/beads"),
+        agent=agent,
+        changeset_worktree_path=Path("/worktree"),
+        selected_epic="at-epic",
+        changeset_id="at-epic.1",
+        root_branch_value="feat/root",
+        enlistment_path=Path("/repo"),
+        yes=True,
+        yolo=False,
+        dry_run=True,
+        session_control=_TestControl(),
+        command_ops=_TestCommandOps(),
+    )
+
+    assert "--print" in prep.agent_options
+    assert "--output-format=stream-json" in prep.agent_options
 
 
 def test_start_agent_session_dry_run_returns_none() -> None:

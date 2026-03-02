@@ -94,6 +94,15 @@ Editor roles:
 - `editor.edit` for blocking edits.
 - `editor.work` for opening worktrees in an editor.
 
+Agent launch options:
+
+- `agent.options.<agent>` remains supported as the legacy global option map.
+- `agent.launch_options.planner.<agent>` and
+  `agent.launch_options.worker.<agent>` provide role-scoped overrides.
+- No migration is required; existing `agent.options` config continues to work.
+- For Claude workers, Atelier defaults to `--print --output-format=stream-json`
+  unless worker-scoped options override those flags.
+
 Branch prefix:
 
 - Used during planning to suggest root branch names.

@@ -351,3 +351,42 @@ def test_build_project_config_non_interactive_uses_available_suggested_beads_pre
             )
 
     assert payload.beads.prefix == "ts"
+
+
+def test_build_project_config_preserves_agent_launch_options() -> None:
+    args = SimpleNamespace(
+        branch_prefix="",
+        beads_prefix="at",
+        branch_pr_mode="draft",
+        branch_history="merge",
+        branch_pr_strategy="sequential",
+        agent="codex",
+        editor_edit="cat",
+        editor_work="cat",
+    )
+    existing = ProjectConfig.model_validate(
+        {
+            "agent": {
+                "default": "codex",
+                "options": {"codex": ["--model", "gpt-4"]},
+                "launch_options": {"worker": {"codex": ["--model", "gpt-5"]}},
+            }
+        }
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = Path(tmp) / "data"
+        with (
+            patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+            patch("atelier.agents.available_agent_names", return_value=("codex",)),
+        ):
+            payload = config.build_project_config(
+                existing,
+                "/repo",
+                "github.com/org/repo",
+                "https://github.com/org/repo",
+                args,
+                allow_editor_empty=True,
+            )
+
+    assert payload.agent.launch_options == {"worker": {"codex": ["--model", "gpt-5"]}}

@@ -91,8 +91,17 @@ Key fields include:
 - `branch.prefix`: default prefix for root branches
 - `branch.pr_mode`: pull request mode (`none`, `draft`, `ready`)
 - `agent.default`: default agent CLI
+- `agent.options.<agent>`: legacy global launch options
+- `agent.launch_options.planner.<agent>`: planner-only launch options
+- `agent.launch_options.worker.<agent>`: worker-only launch options
 - `editor.edit`: blocking editor for quick edits
 - `editor.work`: non-blocking editor for worktree opens
+
+Launch option precedence is deterministic: role-scoped launch options override
+legacy global options for the same flag.
+
+Claude worker launches default to `--print --output-format=stream-json` unless
+explicitly overridden by worker-scoped options.
 
 Agent sessions inherit identity env vars:
 
