@@ -3808,7 +3808,9 @@ def test_claim_epic_allows_expected_takeover() -> None:
         patch(
             "atelier.beads.run_bd_command", return_value=CompletedProcess([], 0, "", "")
         ) as run_command,
-        patch("atelier.beads.release_epic_assignment", return_value=True) as release_claim,
+        patch(
+            "atelier.beads_runtime.agent_hooks.release_epic_assignment", return_value=True
+        ) as release_claim,
     ):
         beads.claim_epic(
             "atelier-9",
@@ -3828,7 +3830,7 @@ def test_claim_epic_fails_closed_when_takeover_owner_changes() -> None:
 
     with (
         patch("atelier.beads.run_bd_json", return_value=[issue]),
-        patch("atelier.beads.release_epic_assignment", return_value=False),
+        patch("atelier.beads_runtime.agent_hooks.release_epic_assignment", return_value=False),
         patch("atelier.beads.die", side_effect=RuntimeError("die called")) as die_fn,
     ):
         with pytest.raises(RuntimeError, match="die called"):

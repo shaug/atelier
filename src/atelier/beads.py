@@ -301,8 +301,8 @@ def _issue_write_lock(issue_id: str, *, beads_root: Path) -> Iterator[None]:
 
 
 @dataclass(frozen=True)
-class _BeadsAgentHooksRuntime:
-    """Runtime adapter implementing the bounded ``beads_runtime.agent_hooks`` contract."""
+class _BeadsRuntimeClient:
+    """Runtime adapter for Beads-domain modules with external client boundaries."""
 
     beads_root: Path
 
@@ -319,98 +319,67 @@ class _BeadsAgentHooksRuntime:
     ) -> subprocess.CompletedProcess[str]:
         return run_bd_command(args, beads_root=beads_root, cwd=cwd, allow_failure=allow_failure)
 
-    def issue_labels(self, issue: dict[str, object]) -> set[str]:
-        return _issue_labels(issue)
-
-    def has_issue_label(self, labels: set[str] | list[str], name: str) -> bool:
-        return has_issue_label(labels, name, beads_root=self.beads_root)
-
     def issue_label(self, name: str) -> str:
         return issue_label(name, beads_root=self.beads_root)
 
-    def normalize_description_field_value(self, value: str | None) -> str | None:
-        return _normalize_description_field_value(value)
+    def die(self, message: str) -> None:
+        die(message)
 
-    def parse_description_fields(self, description: str | None) -> dict[str, str]:
-        return _parse_description_fields(description)
 
-    def normalize_hook_value(self, value: object) -> str | None:
-        return _normalize_hook_value(value)
+@dataclass(frozen=True)
+class _BeadsIssueMutationsClient:
+    """Runtime adapter for issue description mutation helpers."""
 
-    def extract_hook_from_slot_payload(self, payload: object) -> str | None:
-        return _extract_hook_from_slot_payload(payload)
+    def issue_write_lock(self, issue_id: str, beads_root: Path) -> AbstractContextManager[None]:
+        return _issue_write_lock(issue_id, beads_root=beads_root)
 
-    def update_description_fields_optimistic(
+    def read_issue(
         self,
         issue_id: str,
         *,
-        fields: dict[str, str | None],
-        expected_current: dict[str, str | None] | None = None,
-        require_expected_match: bool = False,
         beads_root: Path,
         cwd: Path,
-    ) -> dict[str, object]:
-        return _update_description_fields_optimistic(
-            issue_id,
-            fields=fields,
-            expected_current=expected_current,
-            require_expected_match=require_expected_match,
-            beads_root=beads_root,
-            cwd=cwd,
-        )
+    ) -> dict[str, object] | None:
+        issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+        return issues[0] if issues else None
 
-    def evaluate_epic_claimability(self, issue: dict[str, object]) -> object:
-        return _evaluate_epic_claimability(issue)
-
-    def lifecycle_is_executable_epic_identity(
+    def update_issue_description(
         self,
-        *,
-        labels: set[str],
-        issue_type: object,
-        parent_id: str | None,
-    ) -> bool:
-        return lifecycle.is_executable_epic_identity(
-            labels=labels,
-            issue_type=issue_type,
-            parent_id=parent_id,
-        )
-
-    def lifecycle_issue_payload_type(self, issue: dict[str, object]) -> object:
-        return lifecycle.issue_payload_type(issue)
-
-    def issue_parent_id(self, issue: dict[str, object]) -> str | None:
-        return _issue_parent_id(issue)
-
-    def is_planner_assignee(self, value: object) -> bool:
-        return _is_planner_assignee(value)
-
-    def release_epic_assignment(
-        self,
-        epic_id: str,
+        issue_id: str,
+        description: str,
         *,
         beads_root: Path,
         cwd: Path,
-        expected_assignee: str | None = None,
-        expected_hooked: bool | None = None,
-    ) -> bool:
-        return release_epic_assignment(
-            epic_id,
-            beads_root=beads_root,
-            cwd=cwd,
-            expected_assignee=expected_assignee,
-            expected_hooked=expected_hooked,
-        )
-
-    def is_standalone_changeset_without_epic_label(
-        self, issue: dict[str, object], *, beads_root: Path, cwd: Path
-    ) -> bool:
-        return _is_standalone_changeset_without_epic_label(issue, beads_root=beads_root, cwd=cwd)
-
-    def get_agent_hook(self, agent_bead_id: str, *, beads_root: Path, cwd: Path) -> str | None:
-        return get_agent_hook(agent_bead_id, beads_root=beads_root, cwd=cwd)
+    ) -> None:
+        _update_issue_description(issue_id, description, beads_root=beads_root, cwd=cwd)
 
     def die(self, message: str) -> None:
         die(message)
+
+
+@dataclass(frozen=True)
+class _BeadsQueueMessagesClient(_BeadsRuntimeClient):
+    """Runtime adapter for queue/message operations."""
+
+    def create_issue_with_body(
+        self,
+        args: list[str],
+        description: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> str:
+        return _create_issue_with_body(args, description, beads_root=beads_root, cwd=cwd)
+
+    def update_issue_description(
+        self,
+        issue_id: str,
+        description: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> None:
+        _update_issue_description(issue_id, description, beads_root=beads_root, cwd=cwd)
 
 
 class _IssueTypeModel(BaseModel):
@@ -3137,14 +3106,15 @@ def release_epic_assignment(
     expected_hooked: bool | None = None,
 ) -> bool:
     """Release epic ownership with optional assignee/hook preconditions."""
-    runtime = _BeadsAgentHooksRuntime(beads_root=beads_root)
+    runtime = _BeadsRuntimeClient(beads_root=beads_root)
     return beads_agent_hooks.release_epic_assignment(
         epic_id,
         beads_root=beads_root,
         cwd=cwd,
         expected_assignee=expected_assignee,
         expected_hooked=expected_hooked,
-        runtime=runtime,
+        client=runtime,
+        hooked_label=issue_label(_LABEL_HOOKED, beads_root=beads_root),
     )
 
 
@@ -3725,48 +3695,6 @@ def _issue_parent_id(issue: dict[str, object]) -> str | None:
     return boundary.parent_id
 
 
-def _evaluate_epic_claimability(
-    issue: dict[str, object],
-) -> lifecycle.EpicClaimEvaluation:
-    return lifecycle.evaluate_epic_claimability(
-        status=issue.get("status"),
-        labels=_issue_labels(issue),
-        issue_type=lifecycle.issue_payload_type(issue),
-        parent_id=_issue_parent_id(issue),
-    )
-
-
-def _is_standalone_changeset_without_epic_label(
-    issue: dict[str, object],
-    *,
-    beads_root: Path,
-    cwd: Path,
-) -> bool:
-    labels = _issue_labels(issue)
-    if has_issue_label(labels, _LABEL_EPIC, beads_root=beads_root):
-        return False
-    if not lifecycle.is_work_issue(
-        labels=labels,
-        issue_type=lifecycle.issue_payload_type(issue),
-    ):
-        return False
-    try:
-        boundary = parse_issue_boundary(issue, source="beads:claim_epic")
-    except ValueError:
-        return False
-    if boundary.parent_id is not None:
-        return False
-    issue_id = issue.get("id")
-    if not isinstance(issue_id, str) or not issue_id.strip():
-        return False
-    return not list_work_children(
-        issue_id.strip(),
-        beads_root=beads_root,
-        cwd=cwd,
-        include_closed=True,
-    )
-
-
 def _agent_role(agent_id: object) -> str | None:
     if not isinstance(agent_id, str):
         return None
@@ -3777,10 +3705,6 @@ def _agent_role(agent_id: object) -> str | None:
         value = parts[0].strip().lower()
         return value or None
     return None
-
-
-def _is_planner_assignee(agent_id: object) -> bool:
-    return _agent_role(agent_id) == "planner"
 
 
 def summarize_changesets(
@@ -3953,68 +3877,21 @@ def _normalize_description(description: str | None) -> str:
 
 
 def _parse_description_fields(description: str | None) -> dict[str, str]:
-    fields: dict[str, str] = {}
-    if not description:
-        return fields
-    for line in description.splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        key = key.strip()
-        if not key:
-            continue
-        fields[key] = value.strip()
-    return fields
+    return beads_issue_mutations.parse_description_fields(description)
 
 
 def parse_description_fields(description: str | None) -> dict[str, str]:
     """Parse key/value fields from a bead description."""
-    return beads_issue_mutations.parse_description_fields(
-        description,
-        parse_impl=_parse_description_fields,
-    )
+    return _parse_description_fields(description)
 
 
 def _normalize_description_field_value(value: str | None) -> str | None:
-    if value is None:
-        return None
-    cleaned = value.strip()
-    if not cleaned or cleaned.lower() == "null":
-        return None
-    return cleaned
+    return beads_issue_mutations.normalize_description_field_value(value)
 
 
 def _issue_description(issue: dict[str, object]) -> str:
     description = issue.get("description")
     return description if isinstance(description, str) else ""
-
-
-def _description_matches_updates(
-    issue: dict[str, object],
-    *,
-    fields: dict[str, str | None],
-) -> bool:
-    parsed = _parse_description_fields(_issue_description(issue))
-    for key, value in fields.items():
-        current = _normalize_description_field_value(parsed.get(key))
-        expected = _normalize_description_field_value(value)
-        if current != expected:
-            return False
-    return True
-
-
-def _description_matches_expected(
-    issue: dict[str, object],
-    *,
-    expected_current: dict[str, str | None],
-) -> bool:
-    parsed = _parse_description_fields(_issue_description(issue))
-    for key, value in expected_current.items():
-        current = _normalize_description_field_value(parsed.get(key))
-        expected = _normalize_description_field_value(value)
-        if current != expected:
-            return False
-    return True
 
 
 def _update_description_fields_optimistic(
@@ -4027,44 +3904,16 @@ def _update_description_fields_optimistic(
     require_expected_match: bool = False,
 ) -> dict[str, object]:
     """Apply description field updates with optimistic retry + verification."""
-    with _issue_write_lock(issue_id, beads_root=beads_root):
-        for _attempt in range(_DESCRIPTION_UPDATE_MAX_ATTEMPTS):
-            issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
-            if not issues:
-                die(f"issue not found: {issue_id}")
-            issue = issues[0]
-            if expected_current and not _description_matches_expected(
-                issue,
-                expected_current=expected_current,
-            ):
-                if require_expected_match:
-                    return issue
-                break
-            updated = _issue_description(issue)
-            changed = False
-            for key, value in fields.items():
-                next_value = _update_description_field(updated, key=key, value=value)
-                if next_value != updated:
-                    changed = True
-                    updated = next_value
-            if not changed:
-                return issue
-            _update_issue_description(issue_id, updated, beads_root=beads_root, cwd=cwd)
-            refreshed = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
-            if not refreshed:
-                continue
-            candidate = refreshed[0]
-            if expected_current and not _description_matches_expected(
-                candidate,
-                expected_current=expected_current,
-            ):
-                if require_expected_match:
-                    return candidate
-                continue
-            if _description_matches_updates(candidate, fields=fields):
-                return candidate
-    die(f"concurrent description update conflict for {issue_id}")
-    raise RuntimeError("unreachable")
+    return beads_issue_mutations.update_issue_description_fields(
+        issue_id,
+        fields,
+        beads_root=beads_root,
+        cwd=cwd,
+        client=_BeadsIssueMutationsClient(),
+        expected_current=expected_current,
+        require_expected_match=require_expected_match,
+        description_update_max_attempts=_DESCRIPTION_UPDATE_MAX_ATTEMPTS,
+    )
 
 
 def issue_description_fields(
@@ -4088,8 +3937,7 @@ def issue_description_fields(
         issue_id,
         beads_root=beads_root,
         cwd=cwd,
-        run_bd_json=run_bd_json,
-        parse_impl=_parse_description_fields,
+        client=_BeadsIssueMutationsClient(),
     )
 
 
@@ -4116,85 +3964,8 @@ def update_issue_description_fields(
         fields,
         beads_root=beads_root,
         cwd=cwd,
-        update_impl=_update_description_fields_optimistic,
-    )
-
-
-def _normalize_hook_value(value: object) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        cleaned = value.strip()
-        if not cleaned or cleaned.lower() == "null":
-            return None
-        return cleaned
-    if isinstance(value, (int, float)):
-        return str(value)
-    return None
-
-
-def _extract_hook_from_slot_payload(payload: object) -> str | None:
-    if isinstance(payload, str):
-        return _normalize_hook_value(payload)
-    if isinstance(payload, list):
-        for item in payload:
-            hook = _extract_hook_from_slot_payload(item)
-            if hook:
-                return hook
-        return None
-    if not isinstance(payload, dict):
-        return None
-    if "hook" in payload:
-        return _extract_hook_from_slot_payload(payload.get("hook"))
-    if "slots" in payload and isinstance(payload["slots"], dict):
-        return _extract_hook_from_slot_payload(payload["slots"].get("hook"))
-    if "id" in payload:
-        return _normalize_hook_value(payload.get("id"))
-    if "issue_id" in payload:
-        return _normalize_hook_value(payload.get("issue_id"))
-    if "bead_id" in payload:
-        return _normalize_hook_value(payload.get("bead_id"))
-    if "bead" in payload:
-        return _normalize_hook_value(payload.get("bead"))
-    return None
-
-
-def _slot_show_hook(
-    agent_bead_id: str,
-    *,
-    beads_root: Path,
-    cwd: Path,
-) -> str | None:
-    result = run_bd_command(
-        ["slot", "show", agent_bead_id, "--json"],
-        beads_root=beads_root,
-        cwd=cwd,
-        allow_failure=True,
-    )
-    if result.returncode != 0:
-        return None
-    raw = result.stdout.strip() if result.stdout else ""
-    if not raw:
-        return None
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    return _extract_hook_from_slot_payload(payload)
-
-
-def _slot_set_hook(
-    agent_bead_id: str,
-    epic_id: str,
-    *,
-    beads_root: Path,
-    cwd: Path,
-) -> None:
-    run_bd_command(
-        ["slot", "set", agent_bead_id, HOOK_SLOT_NAME, epic_id],
-        beads_root=beads_root,
-        cwd=cwd,
-        allow_failure=True,
+        client=_BeadsIssueMutationsClient(),
+        description_update_max_attempts=_DESCRIPTION_UPDATE_MAX_ATTEMPTS,
     )
 
 
@@ -4205,12 +3976,12 @@ def get_agent_hook(
     cwd: Path,
 ) -> str | None:
     """Return the currently hooked epic id for an agent bead."""
-    runtime = _BeadsAgentHooksRuntime(beads_root=beads_root)
+    runtime = _BeadsRuntimeClient(beads_root=beads_root)
     return beads_agent_hooks.get_agent_hook(
         agent_bead_id,
         beads_root=beads_root,
         cwd=cwd,
-        runtime=runtime,
+        client=runtime,
         hook_slot_name=HOOK_SLOT_NAME,
     )
 
@@ -4791,13 +4562,14 @@ def clear_agent_hook(
     expected_hook: str | None = None,
 ) -> None:
     """Clear the hooked epic id on the agent bead description."""
-    runtime = _BeadsAgentHooksRuntime(beads_root=beads_root)
+    runtime = _BeadsRuntimeClient(beads_root=beads_root)
     beads_agent_hooks.clear_agent_hook(
         agent_bead_id,
         beads_root=beads_root,
         cwd=cwd,
         expected_hook=expected_hook,
-        runtime=runtime,
+        client=runtime,
+        description_client=_BeadsIssueMutationsClient(),
         hook_slot_name=HOOK_SLOT_NAME,
     )
 
@@ -5025,16 +4797,16 @@ def claim_epic(
     allow_takeover_from: str | None = None,
 ) -> dict[str, object]:
     """Claim an epic by assigning it to the agent."""
-    runtime = _BeadsAgentHooksRuntime(beads_root=beads_root)
+    runtime = _BeadsRuntimeClient(beads_root=beads_root)
     return beads_agent_hooks.claim_epic(
         epic_id,
         agent_id,
         beads_root=beads_root,
         cwd=cwd,
         allow_takeover_from=allow_takeover_from,
-        runtime=runtime,
-        label_hooked=_LABEL_HOOKED,
-        label_epic=_LABEL_EPIC,
+        client=runtime,
+        hooked_label=issue_label(_LABEL_HOOKED, beads_root=beads_root),
+        epic_label=issue_label(_LABEL_EPIC, beads_root=beads_root),
     )
 
 
@@ -5190,13 +4962,14 @@ def set_agent_hook(
     cwd: Path,
 ) -> None:
     """Store the hooked epic id on the agent bead description."""
-    runtime = _BeadsAgentHooksRuntime(beads_root=beads_root)
+    runtime = _BeadsRuntimeClient(beads_root=beads_root)
     beads_agent_hooks.set_agent_hook(
         agent_bead_id,
         epic_id,
         beads_root=beads_root,
         cwd=cwd,
-        runtime=runtime,
+        client=runtime,
+        description_client=_BeadsIssueMutationsClient(),
         hook_slot_name=HOOK_SLOT_NAME,
     )
 
@@ -5211,6 +4984,7 @@ def create_message_bead(
     cwd: Path,
 ) -> dict[str, object]:
     """Create a message bead and return its data."""
+    runtime = _BeadsQueueMessagesClient(beads_root=beads_root)
     return beads_queue_messages.create_message_bead(
         subject=subject,
         body=body,
@@ -5218,10 +4992,7 @@ def create_message_bead(
         assignee=assignee,
         beads_root=beads_root,
         cwd=cwd,
-        render_message=messages.render_message,
-        create_issue_with_body=_create_issue_with_body,
-        run_bd_json=run_bd_json,
-        issue_label=lambda name: issue_label(name, beads_root=beads_root),
+        client=runtime,
         label_message=_LABEL_MESSAGE,
         label_unread=_LABEL_UNREAD,
     )
@@ -5235,13 +5006,13 @@ def list_inbox_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List message beads assigned to the agent."""
+    runtime = _BeadsQueueMessagesClient(beads_root=beads_root)
     return beads_queue_messages.list_inbox_messages(
         agent_id,
         beads_root=beads_root,
         cwd=cwd,
         unread_only=unread_only,
-        run_bd_json=run_bd_json,
-        issue_label=lambda name: issue_label(name, beads_root=beads_root),
+        client=runtime,
         label_message=_LABEL_MESSAGE,
         label_unread=_LABEL_UNREAD,
     )
@@ -5256,15 +5027,14 @@ def list_queue_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List queued message beads, optionally filtered by queue name."""
+    runtime = _BeadsQueueMessagesClient(beads_root=beads_root)
     return beads_queue_messages.list_queue_messages(
         beads_root=beads_root,
         cwd=cwd,
         queue=queue,
         unclaimed_only=unclaimed_only,
         unread_only=unread_only,
-        run_bd_json=run_bd_json,
-        parse_message=messages.parse_message,
-        issue_label=lambda name: issue_label(name, beads_root=beads_root),
+        client=runtime,
         label_message=_LABEL_MESSAGE,
         label_unread=_LABEL_UNREAD,
     )
@@ -5575,21 +5345,15 @@ def claim_queue_message(
     queue: str | None = None,
 ) -> dict[str, object]:
     """Claim a queued message bead by setting claimed metadata."""
+    runtime = _BeadsQueueMessagesClient(beads_root=beads_root)
     return beads_queue_messages.claim_queue_message(
         message_id,
         agent_id,
         beads_root=beads_root,
         cwd=cwd,
         queue=queue,
-        issue_write_lock=lambda issue_id, root: _issue_write_lock(issue_id, beads_root=root),
-        run_bd_command=run_bd_command,
-        run_bd_json=run_bd_json,
-        parse_message=messages.parse_message,
-        render_message=messages.render_message,
-        issue_description=_issue_description,
-        update_issue_description=_update_issue_description,
+        client=runtime,
         description_update_max_attempts=_DESCRIPTION_UPDATE_MAX_ATTEMPTS,
-        die=die,
     )
 
 
@@ -5600,12 +5364,12 @@ def mark_message_read(
     cwd: Path,
 ) -> None:
     """Mark a message bead as read."""
+    runtime = _BeadsQueueMessagesClient(beads_root=beads_root)
     beads_queue_messages.mark_message_read(
         message_id,
         beads_root=beads_root,
         cwd=cwd,
-        run_bd_command=run_bd_command,
-        issue_label=lambda name: issue_label(name, beads_root=beads_root),
+        client=runtime,
         label_unread=_LABEL_UNREAD,
     )
 
