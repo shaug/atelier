@@ -555,6 +555,50 @@ def test_changeset_pr_creation_decision_ignores_parent_child_dependency_variants
     assert decision.reason == "no-parent"
 
 
+def test_sequential_stack_integrity_preflight_ignores_heritage_epic_dependency_without_work_branch(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "parent": "at-epic",
+        "description": (
+            "changeset.parent_branch: feature-root\n"
+            "changeset.root_branch: feature-root\n"
+            "changeset.work_branch: feature-work\n"
+        ),
+        "dependencies": ["at-epic"],
+    }
+
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [
+                {
+                    "id": "at-epic",
+                    "issue_type": "epic",
+                    "description": "workspace.root_branch: feature-root\n",
+                }
+            ]
+            if args == ["show", "at-epic"]
+            else []
+        ),
+    )
+
+    preflight = pr_gate.sequential_stack_integrity_preflight(
+        issue,
+        repo_slug=None,
+        repo_root=Path("/repo"),
+        git_path="git",
+        branch_pr_strategy="sequential",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda *_args, **_kwargs: None,
+    )
+
+    assert preflight.ok is True
+    assert preflight.reason is None
+
+
 def test_changeset_pr_creation_decision_uses_dependency_frontier_parent_state(monkeypatch) -> None:
     issue = {
         "description": (

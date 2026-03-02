@@ -31,6 +31,31 @@ def _normalize_branch(value: object) -> str | None:
     return cleaned
 
 
+def _normalize_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().lower()
+    return cleaned or None
+
+
+def _is_epic_issue(issue: Issue) -> bool:
+    issue_type = _normalize_text(issue.get("issue_type"))
+    if issue_type is None:
+        issue_type = _normalize_text(issue.get("type"))
+    if issue_type == "epic":
+        return True
+    labels = issue.get("labels")
+    if not isinstance(labels, list):
+        return False
+    for entry in labels:
+        label = _normalize_text(entry)
+        if label is None:
+            continue
+        if label == "epic" or label.endswith(":epic"):
+            return True
+    return False
+
+
 def _explicit_parent_id(issue: Issue) -> str | None:
     parent = issue.get("parent")
     if isinstance(parent, dict):
@@ -187,6 +212,21 @@ def _transitive_dependency_frontier(
     return tuple(candidate_id for candidate_id in candidate_ids if candidate_id not in covered_ids)
 
 
+def _is_implicit_epic_parent_edge(
+    *,
+    dependency_id: str,
+    heritage_parent_id: str | None,
+    dependency_issue: Issue | None,
+) -> bool:
+    if not heritage_parent_id or dependency_id != heritage_parent_id:
+        return False
+    if dependency_issue is None:
+        return False
+    if _normalize_branch(changeset_fields.work_branch(dependency_issue)):
+        return False
+    return _is_epic_issue(dependency_issue)
+
+
 @dataclass(frozen=True)
 class ParentLineageResolution:
     """Resolved parent lineage details for a changeset issue."""
@@ -232,24 +272,32 @@ def resolve_parent_lineage(
         changeset_fields.root_branch(issue)
     )
     explicit_parent = _normalize_branch(changeset_fields.parent_branch(issue))
-    dependency_ids = _dependency_ids(issue)
+    raw_dependency_ids = _dependency_ids(issue)
     dependency_parent_hint = _dependency_parent_hint(issue)
     heritage_parent_id = _issue_heritage_id(issue)
     if (
         heritage_parent_id is None
         and dependency_parent_hint
-        and dependency_parent_hint not in dependency_ids
+        and dependency_parent_hint not in raw_dependency_ids
     ):
         heritage_parent_id = dependency_parent_hint
 
     diagnostics: list[str] = []
+    dependency_ids: list[str] = []
     dependency_candidates: dict[str, str] = {}
     dependency_candidate_heritage: dict[str, str | None] = {}
     missing_dependencies: list[str] = []
     missing_branches: list[str] = []
 
-    for dependency_id in dependency_ids:
+    for dependency_id in raw_dependency_ids:
         dependency_issue = lookup_cached_issue(dependency_id)
+        if _is_implicit_epic_parent_edge(
+            dependency_id=dependency_id,
+            heritage_parent_id=heritage_parent_id,
+            dependency_issue=dependency_issue,
+        ):
+            continue
+        dependency_ids.append(dependency_id)
         if dependency_issue is None:
             missing_dependencies.append(dependency_id)
             continue
@@ -311,7 +359,8 @@ def resolve_parent_lineage(
             "dependency work branches missing: " + ", ".join(sorted(missing_branches))
         )
 
-    needs_dependency_parent = bool(dependency_ids) and (
+    normalized_dependency_ids = tuple(dependency_ids)
+    needs_dependency_parent = bool(normalized_dependency_ids) and (
         explicit_parent is None
         or (normalized_root is not None and explicit_parent == normalized_root)
     )
@@ -348,7 +397,7 @@ def resolve_parent_lineage(
         root_branch=normalized_root,
         explicit_parent_branch=explicit_parent,
         effective_parent_branch=effective_parent,
-        dependency_ids=dependency_ids,
+        dependency_ids=normalized_dependency_ids,
         dependency_parent_id=dependency_parent_id,
         dependency_parent_branch=dependency_parent_branch,
         used_dependency_parent=used_dependency_parent,
