@@ -169,6 +169,7 @@ _RuntimeMetadataReconcileOutcome = Literal[
     "updated",
     "unchanged",
     "blocked_ambiguous",
+    "blocked_mismatch",
     "failed",
 ]
 
@@ -612,7 +613,14 @@ def has_issue_label(
 
 def _default_dolt_database_name(beads_root: Path) -> str:
     prefix = configured_issue_prefix(beads_root=beads_root)
-    return f"beads_{prefix}"
+    return f"{_DOLT_DATABASE_DEFAULT}_{prefix}"
+
+
+def _dolt_database_remediation(*, expected_database: str) -> str:
+    return (
+        f"Run `bd dolt set database {expected_database} --update-config`, set "
+        f"`.beads/metadata.json` `dolt_database` to `{expected_database}`, and rerun."
+    )
 
 
 def _local_dolt_database_candidates(beads_root: Path) -> tuple[str, ...]:
@@ -626,6 +634,55 @@ def _local_dolt_database_candidates(beads_root: Path) -> tuple[str, ...]:
         if (child / ".dolt").is_dir():
             candidates.append(child.name)
     return tuple(sorted(candidates))
+
+
+def _project_config_payload(project_dir: Path) -> dict[str, object] | None:
+    for config_path in (
+        paths.project_config_sys_path(project_dir),
+        paths.project_config_legacy_path(project_dir),
+    ):
+        payload = config.load_json(config_path)
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def _prefix_collision_owner(beads_root: Path, *, prefix: str) -> Path | None:
+    current_project_dir = beads_root.parent.resolve()
+    project_dirs_root = paths.projects_root()
+    if current_project_dir.parent != project_dirs_root.resolve():
+        return None
+    owners: set[Path] = {current_project_dir}
+    if not project_dirs_root.exists():
+        return None
+    for candidate in sorted(project_dirs_root.iterdir()):
+        if not candidate.is_dir():
+            continue
+        payload = _project_config_payload(candidate)
+        if payload is None:
+            continue
+        if config.resolve_beads_prefix(payload) != prefix:
+            continue
+        owners.add(candidate.resolve())
+    if len(owners) <= 1:
+        return None
+    return sorted(owners, key=str)[0]
+
+
+def _prefix_collision_ownership_error(beads_root: Path) -> str | None:
+    prefix = configured_issue_prefix(beads_root=beads_root)
+    owner = _prefix_collision_owner(beads_root, prefix=prefix)
+    if owner is None:
+        return None
+    current_project_dir = beads_root.parent.resolve()
+    if owner == current_project_dir:
+        return None
+    return (
+        "dolt server ownership mismatch: beads.prefix collision for "
+        f"{prefix!r}. Prefix is already claimed by {owner}; current project is "
+        f"{current_project_dir}. Configure a unique prefix with "
+        "`atelier config --prompt` and rerun."
+    )
 
 
 def _ambiguous_dolt_database_detail(
@@ -743,37 +800,25 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
         updated["dolt_server_user"] = _DOLT_SERVER_USER_DEFAULT
         changes.append("dolt_server_user")
 
-    resolved_database, resolution_detail = _resolve_project_scoped_dolt_database_name(
-        beads_root,
-        strict=True,
-    )
-    if resolution_detail:
+    expected_database = _default_dolt_database_name(beads_root)
+    local_candidates = _local_dolt_database_candidates(beads_root)
+    preserve_database = False
+    if local_candidates and expected_database not in local_candidates:
+        choices = ", ".join(local_candidates)
+        remediation = _dolt_database_remediation(expected_database=expected_database)
         atelier_log.warning(
-            f"Dolt runtime database convergence detail for {metadata_path}: {resolution_detail}"
+            "Dolt runtime database convergence detail for "
+            f"{metadata_path}: local databases ({choices}) do not include expected "
+            f"{expected_database}. {remediation}"
         )
-    database_name = _normalize_dolt_database_name(updated.get("dolt_database"))
-    if database_name is None:
-        if resolved_database is None:
-            atelier_log.warning(
-                "Skipping Beads runtime normalization for `dolt_database`: "
-                f"{resolution_detail}. Set `.beads/metadata.json` `dolt_database` "
-                "to the intended local database and rerun the command."
-            )
-        else:
-            updated["dolt_database"] = resolved_database
-            changes.append("dolt_database")
-    else:
-        current_database_value = updated.get("dolt_database")
-        if resolved_database is None and resolution_detail is not None:
-            atelier_log.warning(
-                "Preserving configured Beads runtime `dolt_database` because "
-                "ownership is ambiguous; set `.beads/metadata.json` "
-                "`dolt_database` to the intended local database and rerun "
-                "the command."
-            )
-        elif not isinstance(current_database_value, str) or current_database_value != database_name:
-            updated["dolt_database"] = database_name
-            changes.append("dolt_database")
+        preserve_database = True
+    raw_database = updated.get("dolt_database")
+    current_database = _normalize_dolt_database_name(raw_database)
+    if not preserve_database and (
+        current_database != expected_database or raw_database != expected_database
+    ):
+        updated["dolt_database"] = expected_database
+        changes.append("dolt_database")
 
     if not changes:
         atelier_log.debug(
@@ -1760,36 +1805,18 @@ def _update_runtime_metadata_dolt_database(
         payload = dict(parsed)
     else:
         payload = {}
-    existing_database_value = payload.get("dolt_database")
-    existing_database = _normalize_dolt_database_name(existing_database_value)
-    local_candidates = _local_dolt_database_candidates(beads_root)
-    if len(local_candidates) > 1:
-        choices = ", ".join(local_candidates)
-        if existing_database == database_name:
-            return "unchanged"
-        if existing_database is None:
-            atelier_log.warning(
-                "Startup migration runtime DB reconciliation blocked: multiple local Dolt "
-                f"databases found ({choices}) and metadata has no configured dolt_database. "
-                "Set `.beads/metadata.json` `dolt_database` to the intended database and rerun."
-            )
-            return "blocked_ambiguous"
-        if existing_database not in local_candidates:
-            atelier_log.warning(
-                "Startup migration runtime DB reconciliation blocked: configured "
-                f"dolt_database={existing_database} is not one of local candidates ({choices}). "
-                "Set `.beads/metadata.json` `dolt_database` to the intended database and rerun."
-            )
-            return "blocked_ambiguous"
+    expected_database = _default_dolt_database_name(beads_root)
+    if database_name != expected_database:
+        remediation = _dolt_database_remediation(expected_database=expected_database)
         atelier_log.warning(
-            "Startup migration runtime DB reconciliation blocked: preserving configured "
-            f"dolt_database={existing_database} while `bd dolt show` reported {database_name}. "
-            "Set `.beads/metadata.json` `dolt_database` explicitly if switching is intended."
+            "Startup migration runtime DB reconciliation blocked: `bd dolt show` reported "
+            f"{database_name}, expected {expected_database}. {remediation}"
         )
-        return "blocked_ambiguous"
-    if isinstance(existing_database_value, str) and existing_database_value == database_name:
+        return "blocked_mismatch"
+    existing_database_value = payload.get("dolt_database")
+    if isinstance(existing_database_value, str) and existing_database_value == expected_database:
         return "unchanged"
-    payload["dolt_database"] = database_name
+    payload["dolt_database"] = expected_database
     try:
         metadata_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     except OSError as exc:
@@ -1846,11 +1873,11 @@ def _reconcile_startup_auto_migration_runtime_database(
             "matched the active database."
         )
         return
-    if metadata_reconcile == "blocked_ambiguous":
+    if metadata_reconcile in {"blocked_ambiguous", "blocked_mismatch"}:
         atelier_log.warning(
             "Startup migration runtime DB reconciliation blocked: unable to update runtime "
             f"config via `bd dolt set database` ({set_detail}) and metadata at {metadata_path} "
-            "is intentionally preserved due to ambiguous local Dolt database ownership."
+            "is intentionally preserved due to project-scoped database mismatch."
         )
         return
     atelier_log.warning(
@@ -2166,31 +2193,27 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
     host_value = payload.get("dolt_server_host")
     host = host_value.strip() if isinstance(host_value, str) and host_value.strip() else "127.0.0.1"
     port = _parse_dolt_runtime_port(payload.get("dolt_server_port"))
-    database_value = payload.get("dolt_database")
-    configured_database = _normalize_dolt_database_name(database_value)
-    discovered_database, discovery_detail = _resolve_project_scoped_dolt_database_name(
-        beads_root,
-        strict=True,
-    )
-    ownership_error = discovery_detail
-    if configured_database and ownership_error:
-        local_candidates = _local_dolt_database_candidates(beads_root)
-        if configured_database in local_candidates:
-            discovered_database = configured_database
-            ownership_error = None
-        else:
-            ownership_error = (
-                f"{ownership_error}; configured dolt_database={configured_database} does not "
-                "match any discovered local candidate"
-            )
-    if discovered_database is None:
-        discovered_database = _default_dolt_database_name(beads_root)
-    if configured_database and not ownership_error and configured_database != discovered_database:
+    expected_database = _default_dolt_database_name(beads_root)
+    local_candidates = _local_dolt_database_candidates(beads_root)
+    configured_database = _normalize_dolt_database_name(payload.get("dolt_database"))
+    ownership_error = _prefix_collision_ownership_error(beads_root)
+    if ownership_error is not None:
+        pass
+    elif local_candidates and expected_database not in local_candidates:
+        choices = ", ".join(local_candidates)
+        remediation = _dolt_database_remediation(expected_database=expected_database)
+        ownership_error = (
+            "dolt server ownership mismatch: local databases "
+            f"({choices}) do not include expected {expected_database}. {remediation}"
+        )
+    elif configured_database and configured_database != expected_database:
+        remediation = _dolt_database_remediation(expected_database=expected_database)
         ownership_error = (
             "dolt server ownership mismatch: metadata.json configures "
-            f"dolt_database={configured_database}, expected {discovered_database}"
+            f"dolt_database={configured_database}, expected {expected_database}. "
+            f"{remediation}"
         )
-    database = discovered_database
+    database = expected_database
     dolt_root = beads_root / "dolt"
     return DoltServerRuntime(
         dolt_root=dolt_root,
@@ -2364,10 +2387,11 @@ def _probe_dolt_server_health(
         return False, "dolt server health check reported connection_ok=false"
     database = payload.get("database")
     if isinstance(database, str) and database.strip() and database.strip() != runtime.database:
+        remediation = _dolt_database_remediation(expected_database=runtime.database)
         return (
             False,
             "dolt server ownership mismatch: "
-            f"expected database={runtime.database}, got {database.strip()}",
+            f"expected database={runtime.database}, got {database.strip()}. {remediation}",
         )
     return True, None
 
@@ -3567,7 +3591,10 @@ def ensure_issue_prefix(
     migrated = _current_issue_prefix(beads_root=beads_root, cwd=cwd)
     if migrated != expected:
         run_bd_command(["config", "set", "issue_prefix", expected], beads_root=beads_root, cwd=cwd)
-    _ISSUE_PREFIX_CACHE[_issue_prefix_cache_key(beads_root)] = expected
+    key = _issue_prefix_cache_key(beads_root)
+    _ISSUE_PREFIX_CACHE[key] = expected
+    _DOLT_RUNTIME_NORMALIZED.discard(key)
+    _normalize_dolt_runtime_metadata_once(beads_root=beads_root)
     return True
 
 
