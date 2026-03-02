@@ -5,7 +5,15 @@ from __future__ import annotations
 import datetime as dt
 
 from .. import messages
-from .client import FailureHandler, RuntimeBeadsClient
+from .client import (
+    FailureHandler,
+    RuntimeBeadsClient,
+    create_issue_with_body,
+    issue_label,
+    run_command,
+    run_json,
+    update_issue_description,
+)
 
 
 def create_message_bead(
@@ -36,14 +44,14 @@ def create_message_bead(
         "--type",
         "task",
         "--labels",
-        ",".join([client.issue_label(label_message), client.issue_label(label_unread)]),
+        ",".join([issue_label(client, label_message), issue_label(client, label_unread)]),
         "--title",
         subject,
     ]
     if assignee:
         args.extend(["--assignee", assignee])
-    issue_id = client.create_issue_with_body(args, description)
-    issues = client.run(["show", issue_id], json_mode=True)
+    issue_id = create_issue_with_body(client, args, description)
+    issues = run_json(client, ["show", issue_id])
     return issues[0] if issues else {"id": issue_id, "title": subject}
 
 
@@ -65,10 +73,10 @@ def list_inbox_messages(
     Returns:
         Matching message issues.
     """
-    args = ["list", "--label", client.issue_label(label_message), "--assignee", agent_id]
+    args = ["list", "--label", issue_label(client, label_message), "--assignee", agent_id]
     if unread_only:
-        args.extend(["--label", client.issue_label(label_unread)])
-    return client.run(args, json_mode=True)
+        args.extend(["--label", issue_label(client, label_unread)])
+    return run_json(client, args)
 
 
 def list_queue_messages(
@@ -81,10 +89,10 @@ def list_queue_messages(
     label_unread: str = "unread",
 ) -> list[dict[str, object]]:
     """List queued message beads with optional queue filtering."""
-    args = ["list", "--label", client.issue_label(label_message)]
+    args = ["list", "--label", issue_label(client, label_message)]
     if unread_only:
-        args.extend(["--label", client.issue_label(label_unread)])
-    issues = client.run(args, json_mode=True)
+        args.extend(["--label", issue_label(client, label_unread)])
+    issues = run_json(client, args)
     matches: list[dict[str, object]] = []
     for issue in issues:
         description = issue.get("description")
@@ -128,12 +136,13 @@ def claim_queue_message(
 ) -> dict[str, object]:
     """Claim a queued message bead by setting claim metadata."""
     with client.issue_write_lock(message_id):
-        claim_result = client.run(
+        claim_result = run_command(
+            client,
             ["update", message_id, "--claim", "--status", "open"],
             allow_failure=True,
         )
         if getattr(claim_result, "returncode", 1) != 0:
-            refreshed = client.run(["show", message_id], json_mode=True)
+            refreshed = run_json(client, ["show", message_id])
             assignee = None
             if refreshed:
                 value = refreshed[0].get("assignee")
@@ -142,7 +151,7 @@ def claim_queue_message(
             if assignee != agent_id:
                 fail(f"message {message_id} already claimed by {assignee or 'another agent'}")
         for _attempt in range(description_update_max_attempts):
-            issues = client.run(["show", message_id], json_mode=True)
+            issues = run_json(client, ["show", message_id])
             if not issues:
                 fail(f"message not found: {message_id}")
             issue = issues[0]
@@ -171,8 +180,8 @@ def claim_queue_message(
             payload_metadata["claimed_by"] = agent_id
             payload_metadata["claimed_at"] = dt.datetime.now(tz=dt.timezone.utc).isoformat()
             updated = messages.render_message(payload_metadata, payload_body)
-            client.update_issue_description(message_id, updated)
-            refreshed = client.run(["show", message_id], json_mode=True)
+            update_issue_description(client, message_id, updated)
+            refreshed = run_json(client, ["show", message_id])
             if not refreshed:
                 continue
             candidate = refreshed[0]
@@ -206,8 +215,9 @@ def mark_message_read(
     label_unread: str = "unread",
 ) -> None:
     """Mark a message bead as read by removing the unread label."""
-    client.run(
-        ["update", message_id, "--remove-label", client.issue_label(label_unread)],
+    run_command(
+        client,
+        ["update", message_id, "--remove-label", issue_label(client, label_unread)],
     )
 
 

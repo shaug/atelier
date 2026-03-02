@@ -19,7 +19,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Literal, TextIO, cast, overload
-from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -44,7 +43,6 @@ from .beads_runtime import startup_migration as beads_startup_migration
 from .external_tickets import (
     ExternalTicketRef,
     external_ticket_payload,
-    normalize_external_ticket_entry,
 )
 from .io import die, say
 from .worker.models_boundary import BeadsIssueBoundary, parse_issue_boundary
@@ -454,29 +452,6 @@ class BeadsClient:
             cwd=self.cwd,
         )
 
-    def parse_external_tickets(self, description: str | None) -> list[ExternalTicketRef]:
-        """Parse external ticket metadata from an issue description."""
-        return parse_external_tickets(description)
-
-    def github_repo_from_ticket_url(self, url: str | None) -> str | None:
-        """Resolve GitHub repository slug from a ticket URL."""
-        return _github_repo_from_ticket_url(url)
-
-    def github_provider(self, repo_slug: str) -> beads_external_reconcile.GithubTicketProvider:
-        """Return a GitHub issues provider instance for a repository."""
-        provider = github_issues_provider.GithubIssuesProvider(repo=repo_slug)
-        return cast(beads_external_reconcile.GithubTicketProvider, provider)
-
-    def merge_ticket_state(
-        self,
-        ticket: ExternalTicketRef,
-        refreshed: ExternalTicketRef,
-        *,
-        assume_closed: bool = False,
-    ) -> ExternalTicketRef:
-        """Merge provider ticket state into local metadata."""
-        return _merge_ticket_state(ticket, refreshed, assume_closed=assume_closed)
-
     def update_external_tickets(
         self,
         issue_id: str,
@@ -518,6 +493,17 @@ class BeadsClient:
 def create_client(*, beads_root: Path, cwd: Path) -> BeadsClient:
     """Create a typed Beads client for a given store and working directory."""
     return BeadsClient(beads_root=beads_root, cwd=cwd)
+
+
+class _ExternalReconcileGithubClient:
+    """GitHub provider adapter for external ticket reconciliation."""
+
+    def github_repo_from_ticket_url(self, url: str | None) -> str | None:
+        return beads_external_reconcile.github_repo_from_ticket_url(url)
+
+    def github_provider(self, repo_slug: str) -> beads_external_reconcile.GithubTicketProvider:
+        provider = github_issues_provider.GithubIssuesProvider(repo=repo_slug)
+        return cast(beads_external_reconcile.GithubTicketProvider, provider)
 
 
 @dataclass(frozen=True)
@@ -1362,60 +1348,6 @@ def _read_bd_stats_total(
     return issue_total, None
 
 
-def _read_startup_issue_totals(
-    *,
-    beads_root: Path,
-    has_legacy_sqlite: bool,
-    cwd: Path,
-    env: dict[str, str],
-) -> tuple[int | None, str | None, int | None, str | None]:
-    dolt_issue_total, dolt_detail = _read_bd_stats_total(
-        ["bd", "stats", "--json"], cwd=cwd, env=env
-    )
-    legacy_issue_total: int | None = None
-    legacy_detail: str | None = None
-    if has_legacy_sqlite:
-        legacy_issue_total, legacy_detail = _read_bd_stats_total(
-            ["bd", "--db", str(beads_root / "beads.db"), "stats", "--json"],
-            cwd=cwd,
-            env=env,
-        )
-    return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
-
-
-def _stabilize_startup_issue_totals(
-    *,
-    beads_root: Path,
-    has_dolt_store: bool,
-    has_legacy_sqlite: bool,
-    dolt_issue_total: int | None,
-    dolt_detail: str | None,
-    legacy_issue_total: int | None,
-    legacy_detail: str | None,
-    cwd: Path,
-    env: dict[str, str],
-) -> tuple[int | None, str | None, int | None, str | None]:
-    if not has_dolt_store or not has_legacy_sqlite:
-        return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
-    for _ in range(_STARTUP_COUNT_SKEW_RECHECK_ATTEMPTS):
-        if dolt_issue_total is None or legacy_issue_total is None:
-            return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
-        if legacy_issue_total <= dolt_issue_total:
-            return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
-        (
-            dolt_issue_total,
-            dolt_detail,
-            legacy_issue_total,
-            legacy_detail,
-        ) = _read_startup_issue_totals(
-            beads_root=beads_root,
-            has_legacy_sqlite=has_legacy_sqlite,
-            cwd=cwd,
-            env=env,
-        )
-    return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
-
-
 def _is_dolt_migration_capability_unavailable(detail: str | None) -> bool:
     if not detail:
         return False
@@ -1703,14 +1635,12 @@ def detect_startup_beads_state(*, beads_root: Path, cwd: Path) -> StartupBeadsSt
     return beads_startup_migration.detect_startup_beads_state(
         beads_root=beads_root,
         cwd=cwd,
-        deps=beads_startup_migration.StartupMigrationDeps(
-            startup_dolt_store_exists=_startup_dolt_store_exists,
-            configured_beads_backend=_configured_beads_backend,
-            beads_env=beads_env,
-            read_startup_issue_totals=_read_startup_issue_totals,
-            stabilize_startup_issue_totals=_stabilize_startup_issue_totals,
-            is_embedded_backend_panic=_is_embedded_backend_panic,
-        ),
+        startup_dolt_store_exists=_startup_dolt_store_exists,
+        configured_beads_backend=_configured_beads_backend,
+        beads_env=beads_env,
+        read_bd_stats_total=_read_bd_stats_total,
+        is_embedded_backend_panic=_is_embedded_backend_panic,
+        startup_count_skew_recheck_attempts=_STARTUP_COUNT_SKEW_RECHECK_ATTEMPTS,
         labels=beads_startup_migration.StartupClassificationLabels(
             healthy=_BEADS_STARTUP_HEALTHY,
             missing_dolt=_BEADS_STARTUP_MISSING_DOLT,
@@ -4069,74 +3999,11 @@ def extract_worktree_path(issue: dict[str, object]) -> str | None:
 
 def parse_external_tickets(description: str | None) -> list[ExternalTicketRef]:
     """Parse external ticket references from a description."""
-    if not description:
-        return []
-    fields = _parse_description_fields(description)
-    tickets_raw = fields.get(EXTERNAL_TICKETS_KEY)
-    if not tickets_raw or tickets_raw.lower() == "null":
-        return []
-    try:
-        payload = json.loads(tickets_raw)
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(payload, list):
-        return []
-    tickets: list[ExternalTicketRef] = []
-    for entry in payload:
-        if not isinstance(entry, dict):
-            continue
-        normalized = normalize_external_ticket_entry(entry)
-        if normalized is None:
-            continue
-        tickets.append(normalized)
-    return tickets
+    return beads_external_reconcile.parse_external_tickets(description)
 
 
-_GITHUB_API_ISSUE_PATH = re.compile(r"^/repos/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
-_GITHUB_WEB_ISSUE_PATH = re.compile(r"^/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
 _EXTERNAL_CLOSE_NOTE_PREFIX = "external_close_pending:"
 _EXTERNAL_REOPEN_NOTE_PREFIX = "external_reopen_pending:"
-
-
-def _github_repo_from_ticket_url(url: str | None) -> str | None:
-    cleaned = (url or "").strip()
-    if not cleaned:
-        return None
-    parsed = urlparse(cleaned)
-    host = parsed.netloc.lower().split(":", 1)[0]
-    path = parsed.path or ""
-    if host == "api.github.com":
-        match = _GITHUB_API_ISSUE_PATH.match(path)
-    elif host in {"github.com", "www.github.com"}:
-        match = _GITHUB_WEB_ISSUE_PATH.match(path)
-    else:
-        return None
-    if not match:
-        return None
-    owner = match.group("owner").strip()
-    repo = match.group("repo").strip()
-    if not owner or not repo:
-        return None
-    return f"{owner}/{repo}"
-
-
-def _merge_ticket_state(
-    ticket: ExternalTicketRef,
-    refreshed: ExternalTicketRef,
-    *,
-    assume_closed: bool = False,
-) -> ExternalTicketRef:
-    return replace(
-        ticket,
-        url=refreshed.url or ticket.url,
-        parent_id=refreshed.parent_id or ticket.parent_id,
-        state=refreshed.state or ("closed" if assume_closed else ticket.state),
-        raw_state=refreshed.raw_state or ticket.raw_state,
-        state_updated_at=refreshed.state_updated_at or ticket.state_updated_at,
-        content_updated_at=refreshed.content_updated_at or ticket.content_updated_at,
-        notes_updated_at=refreshed.notes_updated_at or ticket.notes_updated_at,
-        last_synced_at=dt.datetime.now(tz=dt.timezone.utc).isoformat(),
-    )
 
 
 def _append_external_close_note(
@@ -4181,9 +4048,11 @@ def reconcile_closed_issue_exported_github_tickets(
     `relation=context` or explicitly sets `on_close=none`.
     """
     runtime = create_client(beads_root=beads_root, cwd=cwd)
+    github = _ExternalReconcileGithubClient()
     return beads_external_reconcile.reconcile_closed_issue_exported_github_tickets(
         issue_id,
-        client=runtime,
+        issue_store=runtime,
+        github=github,
         result_factory=ExternalTicketReconcileResult,
     )
 
@@ -4206,9 +4075,11 @@ def reconcile_reopened_issue_exported_github_tickets(
         decision-required notes.
     """
     runtime = create_client(beads_root=beads_root, cwd=cwd)
+    github = _ExternalReconcileGithubClient()
     return beads_external_reconcile.reconcile_reopened_issue_exported_github_tickets(
         issue_id,
-        client=runtime,
+        issue_store=runtime,
+        github=github,
         result_factory=ExternalTicketReconcileResult,
     )
 

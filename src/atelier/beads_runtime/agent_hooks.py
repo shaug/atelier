@@ -7,7 +7,7 @@ import json
 from .. import lifecycle
 from ..worker.models_boundary import parse_issue_boundary
 from . import issue_mutations
-from .client import FailureHandler, RuntimeBeadsClient
+from .client import FailureHandler, RuntimeBeadsClient, run_command, run_json
 
 
 def release_epic_assignment(
@@ -20,7 +20,7 @@ def release_epic_assignment(
 ) -> bool:
     """Release epic ownership with optional assignee/hook preconditions."""
     with client.issue_write_lock(epic_id):
-        issues = client.run(["show", epic_id], json_mode=True)
+        issues = run_json(client, ["show", epic_id])
         if not issues:
             return False
         issue = issues[0]
@@ -46,8 +46,8 @@ def release_epic_assignment(
             args.extend(["--remove-label", hooked_label])
         if status and status not in {"closed", "done"}:
             args.extend(["--status", "open"])
-        client.run(args, allow_failure=True)
-        refreshed = client.run(["show", epic_id], json_mode=True)
+        run_command(client, args, allow_failure=True)
+        refreshed = run_json(client, ["show", epic_id])
         if not refreshed:
             return False
         updated = refreshed[0]
@@ -69,7 +69,8 @@ def _slot_show_hook(
     *,
     client: RuntimeBeadsClient,
 ) -> str | None:
-    result = client.run(
+    result = run_command(
+        client,
         ["slot", "show", agent_bead_id, "--json"],
         allow_failure=True,
     )
@@ -93,7 +94,8 @@ def _slot_set_hook(
     client: RuntimeBeadsClient,
     hook_slot_name: str,
 ) -> None:
-    client.run(
+    run_command(
+        client,
         ["slot", "set", agent_bead_id, hook_slot_name, epic_id],
         allow_failure=True,
     )
@@ -112,7 +114,7 @@ def get_agent_hook(
     )
     if slot_hook:
         return slot_hook
-    issues = client.run(["show", agent_bead_id], json_mode=True)
+    issues = run_json(client, ["show", agent_bead_id])
     if not issues:
         return None
     issue = issues[0]
@@ -138,7 +140,7 @@ def clear_agent_hook(
 ) -> None:
     """Clear the hooked epic id from slot and description state."""
     with client.issue_write_lock(agent_bead_id):
-        issues = client.run(["show", agent_bead_id], json_mode=True)
+        issues = run_json(client, ["show", agent_bead_id])
         if not issues:
             fail(f"agent bead not found: {agent_bead_id}")
         current_hook = get_agent_hook(
@@ -150,7 +152,8 @@ def clear_agent_hook(
             return
         if current_hook is None:
             return
-        client.run(
+        run_command(
+            client,
             ["slot", "clear", agent_bead_id, hook_slot_name],
             allow_failure=True,
         )
@@ -187,7 +190,7 @@ def claim_epic(
         )
 
     with client.issue_write_lock(epic_id):
-        issues = client.run(["show", epic_id], json_mode=True)
+        issues = run_json(client, ["show", epic_id])
         if not issues:
             fail(f"epic not found: {epic_id}")
         issue = issues[0]
@@ -248,12 +251,13 @@ def claim_epic(
             if not released:
                 fail(f"epic {epic_id} takeover failed; claim ownership changed")
 
-        claim_result = client.run(
+        claim_result = run_command(
+            client,
             ["update", epic_id, "--claim"],
             allow_failure=True,
         )
         if getattr(claim_result, "returncode", 1) != 0:
-            refreshed = client.run(["show", epic_id], json_mode=True)
+            refreshed = run_json(client, ["show", epic_id])
             assignee = None
             if refreshed:
                 candidate_assignee = refreshed[0].get("assignee")
@@ -278,11 +282,12 @@ def claim_epic(
             update_args.extend(["--add-label", epic_label])
 
         for attempt in range(2):
-            client.run(
+            run_command(
+                client,
                 update_args,
                 allow_failure=True,
             )
-            refreshed = client.run(["show", epic_id], json_mode=True)
+            refreshed = run_json(client, ["show", epic_id])
             if not refreshed:
                 continue
             updated = refreshed[0]
@@ -311,10 +316,11 @@ def set_agent_hook(
 ) -> None:
     """Persist hook state for an agent bead in slot + description fields."""
     with client.issue_write_lock(agent_bead_id):
-        issues = client.run(["show", agent_bead_id], json_mode=True)
+        issues = run_json(client, ["show", agent_bead_id])
         if not issues:
             fail(f"agent bead not found: {agent_bead_id}")
-        client.run(
+        run_command(
+            client,
             ["slot", "set", agent_bead_id, hook_slot_name, epic_id],
             allow_failure=True,
         )
@@ -370,10 +376,7 @@ def _is_standalone_changeset_without_epic_label(
     issue_id = issue.get("id")
     if not isinstance(issue_id, str) or not issue_id.strip():
         return False
-    work_children = client.run(
-        ["list", "--parent", issue_id.strip()],
-        json_mode=True,
-    )
+    work_children = run_json(client, ["list", "--parent", issue_id.strip()])
     return not any(
         lifecycle.is_work_issue(
             labels=_issue_labels(child),

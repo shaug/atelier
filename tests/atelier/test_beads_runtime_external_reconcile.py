@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
 from atelier.beads_runtime import external_reconcile
@@ -47,43 +48,22 @@ class _Provider:
 
 
 @dataclass
-class _Client:
+class _IssueStore:
     issue: dict[str, object] | None
     notes: list[str]
-    provider: _Provider = field(default_factory=_Provider)
+    updated_tickets: list[ExternalTicketRef] | None = None
 
     def show_issue(self, issue_id: str) -> dict[str, object] | None:
         del issue_id
         return self.issue
-
-    def parse_external_tickets(self, description: str | None) -> list[ExternalTicketRef]:
-        del description
-        return []
-
-    def github_repo_from_ticket_url(self, url: str | None) -> str | None:
-        del url
-        return None
-
-    def github_provider(self, repo_slug: str) -> _Provider:
-        del repo_slug
-        return self.provider
-
-    def merge_ticket_state(
-        self,
-        ticket: ExternalTicketRef,
-        refreshed: ExternalTicketRef,
-        *,
-        assume_closed: bool = False,
-    ) -> ExternalTicketRef:
-        del assume_closed
-        return refreshed if refreshed is not None else ticket
 
     def update_external_tickets(
         self,
         issue_id: str,
         tickets: list[ExternalTicketRef],
     ) -> dict[str, object]:
-        del issue_id, tickets
+        del issue_id
+        self.updated_tickets = list(tickets)
         return {}
 
     def append_external_close_note(self, issue_id: str, note: str) -> None:
@@ -95,27 +75,48 @@ class _Client:
         self.notes.append(note)
 
 
-def _github_ticket(*, ticket_id: str, state: str) -> ExternalTicketRef:
-    return ExternalTicketRef(
-        provider="github",
-        ticket_id=ticket_id,
-        direction="exported",
-        state=state,
-        relation="derived",
-        url="https://github.com/owner/repo/issues/1",
-    )
+@dataclass
+class _GithubClient:
+    provider: _Provider = field(default_factory=_Provider)
+
+    def github_repo_from_ticket_url(self, url: str | None) -> str | None:
+        return external_reconcile.github_repo_from_ticket_url(url)
+
+    def github_provider(self, repo_slug: str) -> _Provider:
+        del repo_slug
+        return self.provider
+
+
+def _issue_with_tickets(*, status: str, tickets: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "id": "at-1",
+        "status": status,
+        "description": f"external_tickets: {json.dumps(tickets)}\n",
+    }
 
 
 def test_reconcile_closed_issue_records_missing_repo_note() -> None:
     notes: list[str] = []
-    client = _Client(issue={"id": "at-1", "status": "closed", "description": "x"}, notes=notes)
-    client.parse_external_tickets = lambda _description: [
-        _github_ticket(ticket_id="77", state="open")
-    ]  # type: ignore[method-assign]
+    issue_store = _IssueStore(
+        issue=_issue_with_tickets(
+            status="closed",
+            tickets=[
+                {
+                    "provider": "github",
+                    "id": "77",
+                    "direction": "exported",
+                    "state": "open",
+                    "relation": "derived",
+                }
+            ],
+        ),
+        notes=notes,
+    )
 
     result = external_reconcile.reconcile_closed_issue_exported_github_tickets(
         "at-1",
-        client=client,
+        issue_store=issue_store,
+        github=_GithubClient(),
         result_factory=_Result,
     )
 
@@ -128,14 +129,26 @@ def test_reconcile_closed_issue_records_missing_repo_note() -> None:
 
 def test_reconcile_reopened_issue_records_missing_repo_note() -> None:
     notes: list[str] = []
-    client = _Client(issue={"id": "at-1", "status": "in_progress", "description": "x"}, notes=notes)
-    client.parse_external_tickets = (  # type: ignore[method-assign]
-        lambda _description: [_github_ticket(ticket_id="88", state="closed")]
+    issue_store = _IssueStore(
+        issue=_issue_with_tickets(
+            status="in_progress",
+            tickets=[
+                {
+                    "provider": "github",
+                    "id": "88",
+                    "direction": "exported",
+                    "state": "closed",
+                    "relation": "derived",
+                }
+            ],
+        ),
+        notes=notes,
     )
 
     result = external_reconcile.reconcile_reopened_issue_exported_github_tickets(
         "at-1",
-        client=client,
+        issue_store=issue_store,
+        github=_GithubClient(),
         result_factory=_Result,
     )
 

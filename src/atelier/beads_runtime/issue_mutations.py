@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from .client import FailureHandler, RuntimeBeadsClient
+from .client import (
+    FailureHandler,
+    RuntimeBeadsClient,
+    show_issue,
+    update_issue_description,
+)
 
 
 def parse_description_fields(description: str | None) -> dict[str, str]:
@@ -58,7 +63,7 @@ def issue_description_fields(
     client: RuntimeBeadsClient,
 ) -> dict[str, str]:
     """Read parsed description fields for a bead."""
-    issue = client.show_issue(issue_id)
+    issue = show_issue(client, issue_id)
     if issue is None:
         return {}
     return parse_description_fields(_issue_description(issue))
@@ -77,7 +82,7 @@ def update_issue_description_fields(
     """Apply description field updates with optimistic retry + verification."""
     with client.issue_write_lock(issue_id):
         for _attempt in range(max(0, description_update_max_attempts)):
-            issue = client.show_issue(issue_id)
+            issue = show_issue(client, issue_id)
             if issue is None:
                 fail(f"issue not found: {issue_id}")
                 raise RuntimeError("unreachable")
@@ -99,8 +104,8 @@ def update_issue_description_fields(
             if not changed:
                 return issue
 
-            client.update_issue_description(issue_id, updated)
-            candidate = client.show_issue(issue_id)
+            update_issue_description(client, issue_id, updated)
+            candidate = show_issue(client, issue_id)
             if candidate is None:
                 continue
             if expected_current and not _description_matches_expected(

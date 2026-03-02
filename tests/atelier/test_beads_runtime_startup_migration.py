@@ -31,43 +31,37 @@ def _labels() -> startup_migration.StartupClassificationLabels:
     )
 
 
-def _deps(
-    *,
-    has_dolt_store: bool,
-    backend: str | None,
+def _read_stats_total(
     totals: tuple[int | None, str | None, int | None, str | None],
-) -> startup_migration.StartupMigrationDeps:
-    def read_totals(**_kwargs: object) -> tuple[int | None, str | None, int | None, str | None]:
-        return totals
+) -> startup_migration.BdStatsTotalReader:
+    def read_stats_total(
+        argv: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str],
+    ) -> tuple[int | None, str | None]:
+        del cwd, env
+        if "--db" in argv:
+            return totals[2], totals[3]
+        return totals[0], totals[1]
 
-    def stabilize_totals(
-        **_kwargs: object,
-    ) -> tuple[int | None, str | None, int | None, str | None]:
-        return totals
-
-    return startup_migration.StartupMigrationDeps(
-        startup_dolt_store_exists=lambda _root: has_dolt_store,
-        configured_beads_backend=lambda _root: backend,
-        beads_env=lambda _root: {"BEADS_DIR": "/tmp/.beads"},
-        read_startup_issue_totals=read_totals,
-        stabilize_startup_issue_totals=stabilize_totals,
-        is_embedded_backend_panic=lambda _detail: False,
-    )
+    return read_stats_total
 
 
 def test_detect_startup_beads_state_classifies_healthy_dolt_with_fake_deps(tmp_path: Path) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     (beads_root / "beads.db").write_text("", encoding="utf-8")
+    read_stats_total = _read_stats_total((9, None, 9, None))
 
     state = startup_migration.detect_startup_beads_state(
         beads_root=beads_root,
         cwd=tmp_path,
-        deps=_deps(
-            has_dolt_store=True,
-            backend=None,
-            totals=(9, None, 9, None),
-        ),
+        startup_dolt_store_exists=lambda _root: True,
+        configured_beads_backend=lambda _root: None,
+        beads_env=lambda _root: {"BEADS_DIR": "/tmp/.beads"},
+        read_bd_stats_total=read_stats_total,
+        is_embedded_backend_panic=lambda _detail: False,
         labels=_labels(),
         startup_state_factory=_StartupState,
     )
@@ -84,15 +78,16 @@ def test_detect_startup_beads_state_classifies_missing_dolt_with_legacy_fake_dep
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     (beads_root / "beads.db").write_text("", encoding="utf-8")
+    read_stats_total = _read_stats_total((None, "dolt unavailable", 8, None))
 
     state = startup_migration.detect_startup_beads_state(
         beads_root=beads_root,
         cwd=tmp_path,
-        deps=_deps(
-            has_dolt_store=False,
-            backend=None,
-            totals=(None, "dolt unavailable", 8, None),
-        ),
+        startup_dolt_store_exists=lambda _root: False,
+        configured_beads_backend=lambda _root: None,
+        beads_env=lambda _root: {"BEADS_DIR": "/tmp/.beads"},
+        read_bd_stats_total=read_stats_total,
+        is_embedded_backend_panic=lambda _detail: False,
         labels=_labels(),
         startup_state_factory=_StartupState,
     )
@@ -107,15 +102,16 @@ def test_detect_startup_beads_state_classifies_insufficient_dolt_fake_deps(tmp_p
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
     (beads_root / "beads.db").write_text("", encoding="utf-8")
+    read_stats_total = _read_stats_total((3, None, 11, None))
 
     state = startup_migration.detect_startup_beads_state(
         beads_root=beads_root,
         cwd=tmp_path,
-        deps=_deps(
-            has_dolt_store=True,
-            backend=None,
-            totals=(3, None, 11, None),
-        ),
+        startup_dolt_store_exists=lambda _root: True,
+        configured_beads_backend=lambda _root: None,
+        beads_env=lambda _root: {"BEADS_DIR": "/tmp/.beads"},
+        read_bd_stats_total=read_stats_total,
+        is_embedded_backend_panic=lambda _detail: False,
         labels=_labels(),
         startup_state_factory=_StartupState,
     )
