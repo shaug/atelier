@@ -3925,6 +3925,130 @@ def test_list_queue_messages_can_include_read_messages() -> None:
     assert called_args == ["list", "--label", "at:message"]
 
 
+def test_list_queue_messages_dedupes_needs_decision_thread_reason() -> None:
+    issues = [
+        {
+            "id": "msg-old",
+            "title": "NEEDS-DECISION: Startup preparation failed (at-epic.1)",
+            "created_at": "2026-03-02T01:00:00Z",
+            "description": "---\nqueue: planner\nthread: at-epic.1\n---\n\nBody\n",
+            "assignee": None,
+        },
+        {
+            "id": "msg-new",
+            "title": "NEEDS-DECISION: Startup preparation failed (at-epic.1)",
+            "created_at": "2026-03-02T02:00:00Z",
+            "description": "---\nqueue: planner\nthread: at-epic.1\n---\n\nBody\n",
+            "assignee": None,
+        },
+    ]
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=issues),
+        patch("atelier.beads.run_bd_command") as run_command,
+    ):
+        queued = beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert [item["id"] for item in queued] == ["msg-new"]
+    run_command.assert_called_once_with(
+        ["update", "msg-old", "--remove-label", "at:unread"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_failure=True,
+    )
+
+
+def test_list_queue_messages_auto_resolves_stale_closed_active_pr_lifecycle() -> None:
+    queue_issue = {
+        "id": "msg-closed-active",
+        "title": "NEEDS-DECISION: Closed changeset has active PR lifecycle (at-epic.1)",
+        "created_at": "2026-03-02T02:00:00Z",
+        "description": "---\nqueue: planner\nthread: at-epic.1\n---\n\nBody\n",
+        "assignee": None,
+    }
+    thread_issue = {
+        "id": "at-epic.1",
+        "status": "in_progress",
+        "description": "pr_state: pr-open\n",
+    }
+
+    def fake_run_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:1] == ["list"]:
+            return [queue_issue]
+        if args[:2] == ["show", "at-epic.1"]:
+            return [thread_issue]
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_json),
+        patch("atelier.beads.run_bd_command") as run_command,
+    ):
+        queued = beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert queued == []
+    run_command.assert_called_once_with(
+        ["update", "msg-closed-active", "--remove-label", "at:unread"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_failure=True,
+    )
+
+
+def test_list_queue_messages_keeps_latest_active_closed_pr_lifecycle_notification() -> None:
+    older = {
+        "id": "msg-old",
+        "title": "NEEDS-DECISION: Closed changeset has active PR lifecycle (at-epic.1)",
+        "created_at": "2026-03-02T01:00:00Z",
+        "description": "---\nqueue: planner\nthread: at-epic.1\n---\n\nBody\n",
+        "assignee": None,
+    }
+    newer = {
+        "id": "msg-new",
+        "title": "NEEDS-DECISION: Closed changeset has active PR lifecycle (at-epic.1)",
+        "created_at": "2026-03-02T03:00:00Z",
+        "description": "---\nqueue: planner\nthread: at-epic.1\n---\n\nBody\n",
+        "assignee": None,
+    }
+    thread_issue = {
+        "id": "at-epic.1",
+        "status": "closed",
+        "description": "pr_state: pr-open\n",
+    }
+
+    def fake_run_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:1] == ["list"]:
+            return [older, newer]
+        if args[:2] == ["show", "at-epic.1"]:
+            return [thread_issue]
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_json),
+        patch("atelier.beads.run_bd_command") as run_command,
+    ):
+        queued = beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert [item["id"] for item in queued] == ["msg-new"]
+    run_command.assert_called_once_with(
+        ["update", "msg-old", "--remove-label", "at:unread"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_failure=True,
+    )
+
+
 def test_mark_message_read_updates_labels() -> None:
     with patch("atelier.beads.run_bd_command") as run_command:
         beads.mark_message_read("atelier-88", beads_root=Path("/beads"), cwd=Path("/repo"))
