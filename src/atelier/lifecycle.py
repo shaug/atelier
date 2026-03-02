@@ -29,7 +29,7 @@ CANONICAL_LIFECYCLE_STATUSES = {
 }
 ACTIVE_LIFECYCLE_STATUSES = {"open", "in_progress"}
 TERMINAL_CHANGESET_LABELS = {"cs:merged", "cs:abandoned"}
-SPECIAL_NON_WORK_LABELS = {"at:message", "at:agent", "at:policy"}
+SPECIAL_NON_WORK_LABEL_NAMES = {"message", "agent", "policy"}
 SPECIAL_NON_WORK_TYPES = {"message", "agent", "policy"}
 WORK_ISSUE_TYPES = {"epic", "task", "bug", "feature"}
 
@@ -160,6 +160,30 @@ def normalized_labels(raw_labels: object) -> set[str]:
     return normalized
 
 
+def has_namespaced_label(
+    labels: set[str],
+    label_name: str,
+    *,
+    prefix: str | None = None,
+) -> bool:
+    """Return whether labels include ``<prefix>:<label_name>``.
+
+    When ``prefix`` is omitted, this matches by suffix so runtime can support
+    non-`at` prefixes and legacy labels during migration.
+    """
+    clean_name = _clean_text(label_name)
+    if clean_name is None:
+        return False
+    normalized_name = clean_name.lower()
+    if prefix is not None:
+        prefix_clean = _clean_text(prefix)
+        if prefix_clean is None:
+            return False
+        return f"{prefix_clean.lower()}:{normalized_name}" in labels
+    suffix = f":{normalized_name}"
+    return any(label.endswith(suffix) for label in labels)
+
+
 def issue_payload_type(issue: dict[str, object]) -> object:
     """Return canonical issue type payload with legacy fallback.
 
@@ -253,15 +277,19 @@ def dependency_issue_satisfied(
         return True
     issue_type_value = normalize_status_value(issue_type)
     if has_work_children is None:
-        is_changeset = "at:changeset" in labels or bool(
+        is_changeset = has_namespaced_label(labels, "changeset") or bool(
             TERMINAL_CHANGESET_LABELS.intersection(labels)
         )
-        if not is_changeset and issue_type_value in WORK_ISSUE_TYPES and "at:epic" not in labels:
+        if (
+            not is_changeset
+            and issue_type_value in WORK_ISSUE_TYPES
+            and not has_namespaced_label(labels, "epic")
+        ):
             is_changeset = True
     else:
         is_changeset = False
         if not has_work_children:
-            is_changeset = "at:changeset" in labels or bool(
+            is_changeset = has_namespaced_label(labels, "changeset") or bool(
                 TERMINAL_CHANGESET_LABELS.intersection(labels)
             )
             if not is_changeset:
@@ -283,7 +311,7 @@ def is_special_non_work_issue(*, labels: set[str], issue_type: object) -> bool:
     Returns:
         ``True`` when the issue is explicitly special/non-work.
     """
-    if SPECIAL_NON_WORK_LABELS.intersection(labels):
+    if any(has_namespaced_label(labels, name) for name in SPECIAL_NON_WORK_LABEL_NAMES):
         return True
     issue_type_value = normalize_status_value(issue_type)
     return issue_type_value in SPECIAL_NON_WORK_TYPES
@@ -292,7 +320,8 @@ def is_special_non_work_issue(*, labels: set[str], issue_type: object) -> bool:
 def is_work_issue(*, labels: set[str], issue_type: object) -> bool:
     """Return whether an issue should be treated as executable work.
 
-    Work identity is inferred from at:epic or issue type. Changeset role is
+    Work identity is inferred from ``<prefix>:epic`` or issue type. Changeset
+    role is
     inferred from graph (leaf work bead). Planner-owned cleanup-only operations
     should be modeled outside executable work-bead flows.
 
@@ -304,7 +333,7 @@ def is_work_issue(*, labels: set[str], issue_type: object) -> bool:
     """
     if is_special_non_work_issue(labels=labels, issue_type=issue_type):
         return False
-    if "at:epic" in labels:
+    if has_namespaced_label(labels, "epic"):
         return True
     issue_type_value = normalize_status_value(issue_type)
     return issue_type_value in WORK_ISSUE_TYPES
@@ -351,7 +380,7 @@ def is_executable_epic_identity(
     """Return whether an issue has executable epic identity.
 
     Epic execution identity is strict: top-level work beads must also carry the
-    ``at:epic`` label.
+    ``<prefix>:epic`` label.
 
     Args:
         labels: Normalized issue labels.
@@ -359,7 +388,8 @@ def is_executable_epic_identity(
         parent_id: Raw parent issue identifier.
 
     Returns:
-        ``True`` when the issue is top-level work and includes ``at:epic``.
+        ``True`` when the issue is top-level work and includes
+        ``<prefix>:epic``.
     """
     role = infer_work_role(
         labels=labels,
@@ -367,7 +397,7 @@ def is_executable_epic_identity(
         parent_id=parent_id,
         has_work_children=False,
     )
-    return role.is_epic and "at:epic" in labels
+    return role.is_epic and has_namespaced_label(labels, "epic")
 
 
 def evaluate_runnable_leaf(
@@ -447,7 +477,7 @@ def evaluate_epic_claimability(
         reasons.append("not-work-bead")
     if not role.is_epic:
         reasons.append("not-top-level-work")
-    if "at:epic" not in labels:
+    if not has_namespaced_label(labels, "epic"):
         reasons.append("missing-at:epic-label")
     if canonical_status not in ACTIVE_LIFECYCLE_STATUSES:
         reasons.append(f"status={canonical_status or 'missing'}")

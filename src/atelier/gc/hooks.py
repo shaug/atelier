@@ -20,7 +20,7 @@ def release_epic(epic: dict[str, object], *, beads_root: Path, cwd: Path) -> Non
         beads_root=beads_root,
         cwd=cwd,
         expected_assignee=expected_assignee,
-        expected_hooked="at:hooked" in issue_labels(epic),
+        expected_hooked=beads.has_issue_label(issue_labels(epic), "hooked", beads_root=beads_root),
     )
 
 
@@ -38,7 +38,9 @@ def collect_hooks(
     actions: list[GcAction] = []
 
     agent_issues = beads.run_bd_json(
-        ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
+        ["list", "--label", beads.issue_label("agent", beads_root=beads_root)],
+        beads_root=beads_root,
+        cwd=repo_root,
     )
     agents: dict[str, dict[str, object]] = {}
     for issue in agent_issues:
@@ -113,7 +115,11 @@ def collect_hooks(
         claim_expires_at = parse_rfc3339(
             claim_expires_raw if isinstance(claim_expires_raw, str) else None
         )
-        if "at:hooked" not in labels and not assignee and claim_expires_at is None:
+        if (
+            not beads.has_issue_label(labels, "hooked", beads_root=beads_root)
+            and not assignee
+            and claim_expires_at is None
+        ):
             continue
         if not isinstance(epic_id, str) or not epic_id:
             continue
@@ -143,10 +149,16 @@ def collect_hooks(
             actions.append(GcAction(description=description, apply=_apply_expired))
             continue
 
-        if claim_expires_at is not None and "at:hooked" not in labels and not assignee:
+        if (
+            claim_expires_at is not None
+            and not beads.has_issue_label(labels, "hooked", beads_root=beads_root)
+            and not assignee
+        ):
             continue
 
-        if status in {"closed", "done"} and ("at:hooked" in labels or assignee):
+        if status in {"closed", "done"} and (
+            beads.has_issue_label(labels, "hooked", beads_root=beads_root) or assignee
+        ):
             description = f"Release closed epic hook {epic_id}"
 
             def _apply_closed(

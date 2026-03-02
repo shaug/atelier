@@ -111,7 +111,7 @@ def _collect_workspace_root_branches(repo_root: Path, *, beads_root: Path) -> li
     cmd = bd_invocation.with_bd_mode(
         "list",
         "--label",
-        "at:epic",
+        beads.issue_label("epic", beads_root=beads_root),
         "--json",
         beads_dir=str(beads_root),
         env=env,
@@ -254,6 +254,13 @@ def init_command(
         str | None,
         typer.Option("--branch-prefix", help="prefix for workspace branches"),
     ] = None,
+    beads_prefix: Annotated[
+        str | None,
+        typer.Option(
+            "--beads-prefix",
+            help="Beads issue prefix (for example: at, ts, ts2)",
+        ),
+    ] = None,
     branch_pr_mode: Annotated[
         str | None,
         typer.Option(
@@ -311,6 +318,7 @@ def init_command(
 
     Args:
         branch_prefix: Prefix for new workspace branches (optional).
+        beads_prefix: Prefix for Beads issue ids/labels (for example: ``ts``).
         branch_pr_mode: Workspace PR mode (none|draft|ready).
         branch_history: History policy (manual|squash|merge|rebase).
         branch_squash_message: Squash commit subject policy
@@ -330,6 +338,7 @@ def init_command(
     init_cmd.init_project(
         init_cmd.InitProjectArgs(
             branch_prefix=branch_prefix,
+            beads_prefix=beads_prefix,
             branch_pr_mode=branch_pr_mode,
             branch_history=branch_history,
             branch_squash_message=branch_squash_message,
@@ -354,6 +363,13 @@ def new_command(
     branch_prefix: Annotated[
         str | None,
         typer.Option("--branch-prefix", help="prefix for workspace branches"),
+    ] = None,
+    beads_prefix: Annotated[
+        str | None,
+        typer.Option(
+            "--beads-prefix",
+            help="Beads issue prefix (for example: at, ts, ts2)",
+        ),
     ] = None,
     branch_pr_mode: Annotated[
         str | None,
@@ -405,6 +421,7 @@ def new_command(
     Args:
         path: Path for the new project (optional).
         branch_prefix: Prefix for new workspace branches (optional).
+        beads_prefix: Prefix for Beads issue ids/labels (for example: ``ts``).
         branch_pr_mode: Workspace PR mode (none|draft|ready).
         branch_history: History policy (manual|squash|merge|rebase).
         branch_squash_message: Squash commit subject policy
@@ -425,6 +442,7 @@ def new_command(
         SimpleNamespace(
             path=path,
             branch_prefix=branch_prefix,
+            beads_prefix=beads_prefix,
             branch_pr_mode=branch_pr_mode,
             branch_history=branch_history,
             branch_squash_message=branch_squash_message,

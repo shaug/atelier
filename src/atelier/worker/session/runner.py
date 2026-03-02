@@ -90,7 +90,14 @@ def _find_active_root_branch_conflicts(
     repo_root: Path,
 ) -> list[dict[str, object]]:
     issues = beads.run_bd_json(
-        ["list", "--label", "at:epic", "--all", "--limit", "0"],
+        [
+            "list",
+            "--label",
+            beads_runtime.issue_label("epic", beads_root=beads_root),
+            "--all",
+            "--limit",
+            "0",
+        ],
         beads_root=beads_root,
         cwd=repo_root,
     )

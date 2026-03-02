@@ -249,7 +249,7 @@ def close_completed_ancestor_container_changesets(
         parent_issue = _load_changeset_issue(parent_id, beads_root=beads_root, repo_root=repo_root)
         if parent_issue is None:
             break
-        if "at:epic" in issue_labels(parent_issue):
+        if beads.has_issue_label(issue_labels(parent_issue), "epic", beads_root=beads_root):
             break
         parent_status = str(parent_issue.get("status") or "").strip().lower()
         if parent_status == "closed":

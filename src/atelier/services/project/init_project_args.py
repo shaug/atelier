@@ -9,6 +9,7 @@ class InitProjectArgs:
 
     Attributes:
         branch_prefix: Optional branch prefix override for generated worktrees.
+        beads_prefix: Optional Beads issue prefix override.
         branch_pr_mode: Optional PR mode override for new changesets.
         branch_history: Optional git history mode override.
         branch_squash_message: Optional squash commit message policy override.
@@ -20,6 +21,7 @@ class InitProjectArgs:
     """
 
     branch_prefix: str | None = None
+    beads_prefix: str | None = None
     branch_pr_mode: str | None = None
     branch_history: str | None = None
     branch_squash_message: str | None = None

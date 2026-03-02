@@ -30,7 +30,9 @@ def collect_message_claims(
     stale_delta = dt.timedelta(hours=stale_hours)
     actions: list[GcAction] = []
     issues = beads.run_bd_json(
-        ["list", "--label", "at:message"], beads_root=beads_root, cwd=repo_root
+        ["list", "--label", beads.issue_label("message", beads_root=beads_root)],
+        beads_root=beads_root,
+        cwd=repo_root,
     )
     for issue in issues:
         issue_id = issue.get("id")
@@ -110,7 +112,9 @@ def collect_message_retention(
     now = dt.datetime.now(tz=dt.timezone.utc)
     actions: list[GcAction] = []
     issues = beads.run_bd_json(
-        ["list", "--label", "at:message"], beads_root=beads_root, cwd=repo_root
+        ["list", "--label", beads.issue_label("message", beads_root=beads_root)],
+        beads_root=beads_root,
+        cwd=repo_root,
     )
     for issue in issues:
         issue_id = issue.get("id")

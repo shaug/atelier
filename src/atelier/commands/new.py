@@ -60,9 +60,9 @@ def new_project(args: object) -> None:
 
     Args:
         args: CLI argument object with optional fields such as ``path``,
-            ``branch_prefix``, ``branch_pr_mode``, ``branch_history``,
-            ``branch_pr_strategy``, ``agent``, ``editor_edit``, and
-            ``editor_work``.
+            ``branch_prefix``, ``beads_prefix``, ``branch_pr_mode``,
+            ``branch_history``, ``branch_pr_strategy``, ``agent``,
+            ``editor_edit``, and ``editor_work``.
 
     Returns:
         None.
@@ -97,6 +97,7 @@ def new_project(args: object) -> None:
         init_cmd.init_project(
             InitProjectArgs(
                 branch_prefix=getattr(args, "branch_prefix", None),
+                beads_prefix=getattr(args, "beads_prefix", None),
                 branch_pr_mode=(
                     getattr(args, "branch_pr_mode", None) or getattr(args, "branch_pr", None)
                 ),

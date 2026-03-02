@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import bd_invocation, changesets, exec, git, lifecycle, messages, prs
+from . import bd_invocation, changesets, config, exec, git, lifecycle, messages, paths, prs
 from . import log as atelier_log
 from .external_tickets import (
     ExternalTicketRef,
@@ -33,16 +33,27 @@ from .external_tickets import (
 from .io import die, say
 from .worker.models_boundary import BeadsIssueBoundary, parse_issue_boundary
 
-POLICY_LABEL = "at:policy"
+_LABEL_AGENT = "agent"
+_LABEL_CHANGESET = "changeset"
+_LABEL_DRAFT = "draft"
+_LABEL_EPIC = "epic"
+_LABEL_HOOKED = "hooked"
+_LABEL_MESSAGE = "message"
+_LABEL_POLICY = "policy"
+_LABEL_READY = "ready"
+_LABEL_SUBTASK = "subtask"
+_LABEL_UNREAD = "unread"
+ATELIER_ISSUE_PREFIX = "at"
+POLICY_LABEL = _LABEL_POLICY
 POLICY_SCOPE_LABEL = "scope:project"
 EXTERNAL_TICKETS_KEY = "external_tickets"
 PRESERVED_DESCRIPTION_KEYS = (EXTERNAL_TICKETS_KEY,)
 HOOK_SLOT_NAME = "hook"
 ATELIER_CUSTOM_TYPES = ("agent", "policy")
-ATELIER_ISSUE_PREFIX = "at"
 _AGENT_ISSUE_TYPE = "agent"
 _FALLBACK_ISSUE_TYPE = "task"
 _ISSUE_TYPE_CACHE: dict[Path, set[str]] = {}
+_ISSUE_PREFIX_CACHE: dict[Path, str] = {}
 _STORE_REPAIR_ATTEMPTED: set[Path] = set()
 _EMBEDDED_PANIC_REPAIR_ATTEMPTED: set[Path] = set()
 _DOLT_RUNTIME_NORMALIZED: set[Path] = set()
@@ -79,6 +90,7 @@ _DOLT_DATABASE_DEFAULT = "beads"
 _STARTUP_AUTO_MIGRATION_DIAGNOSTICS: dict[Path, "_StartupAutoMigrationDiagnostic"] = {}
 _RUNTIME_AGENT_ID_ENV = "ATELIER_AGENT_ID"
 _RUNTIME_AGENT_BEAD_ID_ENV = "ATELIER_AGENT_BEAD_ID"
+_RUNTIME_BEADS_PREFIX_ENV = "ATELIER_BEADS_PREFIX"
 _DOLT_SERVER_PID_FILENAME = "dolt-server.pid"
 _DOLT_SERVER_STARTUP_TIMEOUT_SECONDS = 2.0
 _DOLT_SERVER_STARTUP_POLL_INTERVAL_SECONDS = 0.1
@@ -501,6 +513,7 @@ def beads_env(beads_root: Path) -> dict[str, str]:
     env = os.environ.copy()
     env["BEADS_DIR"] = str(beads_root)
     env["BEADS_DB"] = str(beads_root / "beads.db")
+    env.setdefault(_RUNTIME_BEADS_PREFIX_ENV, configured_issue_prefix(beads_root=beads_root))
     agent_id = env.get("ATELIER_AGENT_ID")
     if agent_id:
         env.setdefault("BD_ACTOR", agent_id)
@@ -521,10 +534,85 @@ def _short_detail(value: str | None) -> str | None:
     return flattened[:220]
 
 
+def _issue_prefix_cache_key(beads_root: Path) -> Path:
+    return beads_root.resolve()
+
+
+def configured_issue_prefix(*, beads_root: Path) -> str:
+    """Return the configured Beads issue prefix for the project store."""
+    key = _issue_prefix_cache_key(beads_root)
+    cached = _ISSUE_PREFIX_CACHE.get(key)
+    if cached:
+        return cached
+    env_prefix_raw = os.environ.get(_RUNTIME_BEADS_PREFIX_ENV)
+    if isinstance(env_prefix_raw, str) and env_prefix_raw.strip():
+        resolved = config.resolve_beads_prefix({"beads": {"prefix": env_prefix_raw}})
+        _ISSUE_PREFIX_CACHE[key] = resolved
+        return resolved
+    config_payload = config.load_json(paths.project_config_sys_path(beads_root.parent))
+    if config_payload is None:
+        config_payload = config.load_json(paths.project_config_legacy_path(beads_root.parent))
+    resolved = config.resolve_beads_prefix(config_payload)
+    _ISSUE_PREFIX_CACHE[key] = resolved
+    return resolved
+
+
+def issue_label(
+    name: str,
+    *,
+    beads_root: Path | None = None,
+    prefix: str | None = None,
+) -> str:
+    """Build a namespaced Beads label for the configured project prefix."""
+    cleaned_name = name.strip().lower()
+    if not cleaned_name:
+        return ""
+    resolved_prefix = prefix.strip().lower() if isinstance(prefix, str) else ""
+    if not resolved_prefix:
+        if beads_root is not None:
+            resolved_prefix = configured_issue_prefix(beads_root=beads_root)
+        else:
+            resolved_prefix = ATELIER_ISSUE_PREFIX
+    return f"{resolved_prefix}:{cleaned_name}"
+
+
+def issue_label_candidates(name: str, *, beads_root: Path) -> tuple[str, ...]:
+    """Return primary + compatibility labels for a namespaced label name."""
+    primary = issue_label(name, beads_root=beads_root)
+    legacy = issue_label(name, prefix=ATELIER_ISSUE_PREFIX)
+    if primary == legacy:
+        return (primary,)
+    return (primary, legacy)
+
+
+def has_issue_label(
+    labels: set[str] | list[str],
+    name: str,
+    *,
+    beads_root: Path | None = None,
+    prefix: str | None = None,
+) -> bool:
+    """Return whether labels include the namespaced label by suffix/namespace."""
+    label_values = set(labels)
+    target = issue_label(name, beads_root=beads_root, prefix=prefix)
+    if target and target in label_values:
+        return True
+    suffix = f":{name.strip().lower()}"
+    if suffix == ":":
+        return False
+    return any(label.endswith(suffix) for label in label_values)
+
+
+def _default_dolt_database_name(beads_root: Path) -> str:
+    prefix = configured_issue_prefix(beads_root=beads_root)
+    project_key = hashlib.sha256(str(beads_root.parent.resolve()).encode("utf-8")).hexdigest()[:8]
+    return f"beads_{prefix}_{project_key}"
+
+
 def _discover_dolt_database_name(beads_root: Path) -> str:
     dolt_root = beads_root / "dolt"
     if not dolt_root.is_dir():
-        return _DOLT_DATABASE_DEFAULT
+        return _default_dolt_database_name(beads_root)
     candidates: list[str] = []
     for child in dolt_root.iterdir():
         if not child.is_dir():
@@ -532,9 +620,14 @@ def _discover_dolt_database_name(beads_root: Path) -> str:
         if (child / ".dolt").is_dir():
             candidates.append(child.name)
     if not candidates:
-        return _DOLT_DATABASE_DEFAULT
+        return _default_dolt_database_name(beads_root)
+    preferred = _default_dolt_database_name(beads_root)
+    if preferred in candidates:
+        return preferred
     if "beads_at" in candidates:
         return "beads_at"
+    if _DOLT_DATABASE_DEFAULT in candidates:
+        return _DOLT_DATABASE_DEFAULT
     return sorted(candidates)[0]
 
 
@@ -648,7 +741,7 @@ def _startup_dolt_store_exists(beads_root: Path) -> bool:
     dolt_root = beads_root / "dolt"
     if not dolt_root.exists():
         return False
-    if (dolt_root / "beads_at" / ".dolt").is_dir():
+    if (dolt_root / _discover_dolt_database_name(beads_root) / ".dolt").is_dir():
         return True
     for candidate in dolt_root.glob("**/.dolt"):
         if candidate.is_dir():
@@ -1114,7 +1207,7 @@ def _raw_show_issue(issue_id: str, *, cwd: Path, env: dict[str, str]) -> dict[st
 
 
 def _is_agent_issue(issue: dict[str, object]) -> bool:
-    if "at:agent" in _issue_labels(issue):
+    if has_issue_label(_issue_labels(issue), _LABEL_AGENT):
         return True
     issue_type = _clean_text(lifecycle.issue_payload_type(issue))
     if issue_type == "agent":
@@ -1197,7 +1290,7 @@ def _create_runtime_agent_bead(
     agent_id = snapshot.agent_id if snapshot is not None else runtime_agent_id
     title = snapshot.title if snapshot is not None else (agent_id or issue_id)
     labels = set(snapshot.labels if snapshot is not None else ())
-    labels.add("at:agent")
+    labels.add(issue_label(_LABEL_AGENT, beads_root=beads_root))
     description = _merge_runtime_agent_description(
         existing_description=snapshot.description if snapshot is not None else "",
         snapshot_description=snapshot.description if snapshot is not None else "",
@@ -1249,7 +1342,7 @@ def _reconcile_runtime_agent_bead(
     )
     if _normalize_description(merged) != _normalize_description(current_description):
         _update_issue_description(issue_id, merged, beads_root=beads_root, cwd=cwd)
-    labels = {"at:agent"}
+    labels = {issue_label(_LABEL_AGENT, beads_root=beads_root)}
     if snapshot is not None:
         labels.update(snapshot.labels)
     missing_labels = sorted(labels - _issue_labels(existing_issue))
@@ -2093,13 +2186,14 @@ def _repair_beads_store(*, beads_root: Path, cwd: Path, env: dict[str, str]) -> 
 
     _run_raw_bd_command(["bd", "doctor", "--fix", "--yes"], cwd=repair_cwd, env=env)
 
-    init_args = ["bd", "init", "--prefix", ATELIER_ISSUE_PREFIX]
+    expected_prefix = configured_issue_prefix(beads_root=beads_root)
+    init_args = ["bd", "init", "--prefix", expected_prefix]
     if (beads_root / "issues.jsonl").exists():
         init_args.append("--from-jsonl")
     _run_raw_bd_command(init_args, cwd=repair_cwd, env=env)
 
     _run_raw_bd_command(
-        ["bd", "config", "set", "issue_prefix", ATELIER_ISSUE_PREFIX],
+        ["bd", "config", "set", "issue_prefix", expected_prefix],
         cwd=repair_cwd,
         env=env,
     )
@@ -2702,13 +2796,13 @@ def release_epic_assignment(
         if expected_assignee is not None and assignee != expected_assignee_normalized:
             return False
         if expected_hooked is not None:
-            has_hooked = "at:hooked" in labels
+            has_hooked = has_issue_label(labels, _LABEL_HOOKED, beads_root=beads_root)
             if has_hooked != expected_hooked:
                 return False
 
         args = ["update", epic_id, "--assignee", ""]
-        if "at:hooked" in labels:
-            args.extend(["--remove-label", "at:hooked"])
+        if has_issue_label(labels, _LABEL_HOOKED, beads_root=beads_root):
+            args.extend(["--remove-label", issue_label(_LABEL_HOOKED, beads_root=beads_root)])
         if status and status not in {"closed", "done"}:
             args.extend(["--status", "open"])
         run_bd_command(args, beads_root=beads_root, cwd=cwd, allow_failure=True)
@@ -2724,7 +2818,7 @@ def release_epic_assignment(
         )
         if updated_assignee is not None:
             return False
-        if "at:hooked" in _issue_labels(updated):
+        if has_issue_label(_issue_labels(updated), _LABEL_HOOKED, beads_root=beads_root):
             return False
         return True
 
@@ -2830,9 +2924,8 @@ def list_epics(
 ) -> list[dict[str, object]]:
     """List epic beads for the epic pool.
 
-    Uses --label at:epic, --all, and --limit 0 to avoid default list caps and
-    ensure full enumeration. Startup, status, and related commands must use
-    this for deterministic epic pool counts.
+    Uses the configured epic discovery label with compatibility fallback to
+    avoid default list caps and ensure full enumeration.
 
     Args:
         beads_root: Root directory for the Beads planning store.
@@ -2844,9 +2937,20 @@ def list_epics(
     Returns:
         Epic issue payloads from Beads. Non-dict entries are discarded.
     """
-    args = ["list", "--label", "at:epic", "--all", "--limit", "0"]
-    issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
-    result = [i for i in issues if isinstance(i, dict)]
+    result: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
+    for epic_label in issue_label_candidates(_LABEL_EPIC, beads_root=beads_root):
+        args = ["list", "--label", epic_label, "--all", "--limit", "0"]
+        issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            issue_id = str(issue.get("id") or "").strip()
+            if issue_id:
+                if issue_id in seen_ids:
+                    continue
+                seen_ids.add(issue_id)
+            result.append(issue)
     if not include_closed:
         result = [
             i for i in result if lifecycle.canonical_lifecycle_status(i.get("status")) != "closed"
@@ -2886,8 +2990,11 @@ def _active_top_level_work_issues(
     )
 
 
-def _identity_remediation_command(issue_id: str) -> str:
-    return f"bd update {issue_id} --type epic --add-label at:epic"
+def _identity_remediation_command(issue_id: str, *, beads_root: Path) -> str:
+    return (
+        f"bd update {issue_id} --type epic "
+        f"--add-label {issue_label(_LABEL_EPIC, beads_root=beads_root)}"
+    )
 
 
 def epic_discovery_parity_report(
@@ -2907,9 +3014,9 @@ def epic_discovery_parity_report(
     Returns:
         A parity report containing:
         - active top-level work count (open/in_progress/blocked),
-        - indexed active epic count from `at:epic` discovery,
+        - indexed active epic count from `<prefix>:epic` discovery,
         - active top-level work missing executable identity metadata
-          (`at:epic` + `issue_type=epic`) with deterministic remediation,
+          (`<prefix>:epic` + `issue_type=epic`) with deterministic remediation,
         - executable active top-level work IDs missing from the epic index.
     """
     active_top_level = _active_top_level_work_issues(beads_root=beads_root, cwd=cwd)
@@ -2939,7 +3046,7 @@ def epic_discovery_parity_report(
                 status=lifecycle.canonical_lifecycle_status(issue.get("status")),
                 issue_type=lifecycle.normalize_status_value(issue_type),
                 labels=tuple(sorted(labels)),
-                remediation_command=_identity_remediation_command(issue_id),
+                remediation_command=_identity_remediation_command(issue_id, beads_root=beads_root),
             )
         )
 
@@ -3144,15 +3251,26 @@ def _parse_custom_types(value: str | None) -> list[str]:
     return entries
 
 
-def ensure_atelier_store(*, beads_root: Path, cwd: Path) -> bool:
-    """Ensure the Atelier Beads store exists with the expected prefix."""
+def ensure_atelier_store(
+    prefix: str | None = None,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> bool:
+    """Ensure the project Beads store exists with the configured prefix."""
     if beads_root.exists():
         return False
+    expected_prefix = (
+        config.normalize_beads_prefix(prefix, "beads.prefix")
+        if prefix is not None
+        else configured_issue_prefix(beads_root=beads_root)
+    )
     run_bd_command(
-        ["init", "--prefix", ATELIER_ISSUE_PREFIX, "--quiet"],
+        ["init", "--prefix", expected_prefix, "--quiet"],
         beads_root=beads_root,
         cwd=cwd,
     )
+    _ISSUE_PREFIX_CACHE[_issue_prefix_cache_key(beads_root)] = expected_prefix
     return True
 
 
@@ -3184,12 +3302,15 @@ def ensure_issue_prefix(
     run_bd_command(["config", "set", "issue_prefix", expected], beads_root=beads_root, cwd=cwd)
     # Keep existing issue ids aligned with configured prefix.
     run_bd_command(["rename-prefix", f"{expected}-", "--repair"], beads_root=beads_root, cwd=cwd)
+    _ISSUE_PREFIX_CACHE[_issue_prefix_cache_key(beads_root)] = expected
     return True
 
 
 def ensure_atelier_issue_prefix(*, beads_root: Path, cwd: Path) -> bool:
-    """Ensure Atelier uses the canonical issue prefix."""
-    return ensure_issue_prefix(ATELIER_ISSUE_PREFIX, beads_root=beads_root, cwd=cwd)
+    """Ensure the project uses the configured issue prefix."""
+    return ensure_issue_prefix(
+        configured_issue_prefix(beads_root=beads_root), beads_root=beads_root, cwd=cwd
+    )
 
 
 def ensure_custom_types(
@@ -3265,7 +3386,7 @@ def _is_standalone_changeset_without_epic_label(
     cwd: Path,
 ) -> bool:
     labels = _issue_labels(issue)
-    if "at:epic" in labels:
+    if has_issue_label(labels, _LABEL_EPIC, beads_root=beads_root):
         return False
     if not lifecycle.is_work_issue(
         labels=labels,
@@ -4257,18 +4378,29 @@ def list_epics_by_workspace_label(
     root_branch: str, *, beads_root: Path, cwd: Path
 ) -> list[dict[str, object]]:
     """List epic beads with the workspace label."""
-    return run_bd_json(
-        [
-            "list",
-            "--label",
-            "at:epic",
-            "--label",
-            workspace_label(root_branch),
-            "--all",
-        ],
-        beads_root=beads_root,
-        cwd=cwd,
-    )
+    result: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
+    for epic_label in issue_label_candidates(_LABEL_EPIC, beads_root=beads_root):
+        issues = run_bd_json(
+            [
+                "list",
+                "--label",
+                epic_label,
+                "--label",
+                workspace_label(root_branch),
+                "--all",
+            ],
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+        for issue in issues:
+            issue_id = str(issue.get("id") or "").strip()
+            if issue_id:
+                if issue_id in seen_ids:
+                    continue
+                seen_ids.add(issue_id)
+            result.append(issue)
+    return result
 
 
 def find_epics_by_root_branch(
@@ -4508,7 +4640,13 @@ def clear_agent_hook(
 
 def list_policy_beads(role: str | None, *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
     """List project policy beads for the given role."""
-    args = ["list", "--label", POLICY_LABEL, "--label", POLICY_SCOPE_LABEL]
+    args = [
+        "list",
+        "--label",
+        issue_label(POLICY_LABEL, beads_root=beads_root),
+        "--label",
+        POLICY_SCOPE_LABEL,
+    ]
     if role:
         args.extend(["--label", policy_role_label(role)])
     return run_bd_json(args, beads_root=beads_root, cwd=cwd)
@@ -4535,7 +4673,13 @@ def create_policy_bead(
         handle.write(body.rstrip("\n") + "\n" if body else "")
         temp_path = Path(handle.name)
     try:
-        labels = ",".join([POLICY_LABEL, POLICY_SCOPE_LABEL, policy_role_label(role)])
+        labels = ",".join(
+            [
+                issue_label(POLICY_LABEL, beads_root=beads_root),
+                POLICY_SCOPE_LABEL,
+                policy_role_label(role),
+            ]
+        )
         args = [
             "create",
             "--type",
@@ -4635,7 +4779,7 @@ def _create_issue_with_body(
 def find_agent_bead(agent_id: str, *, beads_root: Path, cwd: Path) -> dict[str, object] | None:
     """Find an agent bead by agent identity."""
     issues = run_bd_json(
-        ["list", "--label", "at:agent", "--title", agent_id],
+        ["list", "--label", issue_label(_LABEL_AGENT, beads_root=beads_root), "--title", agent_id],
         beads_root=beads_root,
         cwd=cwd,
     )
@@ -4672,7 +4816,7 @@ def ensure_agent_bead(
             "--type",
             issue_type,
             "--labels",
-            "at:agent",
+            issue_label(_LABEL_AGENT, beads_root=beads_root),
             "--title",
             agent_id,
             "--description",
@@ -4708,7 +4852,7 @@ def claim_epic(
             isinstance(assignee, str)
             and assignee == claimant
             and status == "in_progress"
-            and "at:hooked" in _issue_labels(candidate)
+            and has_issue_label(_issue_labels(candidate), _LABEL_HOOKED, beads_root=beads_root)
         )
 
     with _issue_write_lock(epic_id, beads_root=beads_root):
@@ -4762,7 +4906,9 @@ def claim_epic(
                 beads_root=beads_root,
                 cwd=cwd,
                 expected_assignee=allow_takeover_from,
-                expected_hooked="at:hooked" in _issue_labels(issue),
+                expected_hooked=has_issue_label(
+                    _issue_labels(issue), _LABEL_HOOKED, beads_root=beads_root
+                ),
             )
             if not released:
                 die(f"epic {epic_id} takeover failed; claim ownership changed")
@@ -4783,9 +4929,16 @@ def claim_epic(
             if assignee != agent_id:
                 die(f"epic {epic_id} already has an assignee")
 
-        update_args = ["update", epic_id, "--status", "in_progress", "--add-label", "at:hooked"]
+        update_args = [
+            "update",
+            epic_id,
+            "--status",
+            "in_progress",
+            "--add-label",
+            issue_label(_LABEL_HOOKED, beads_root=beads_root),
+        ]
         if _is_standalone_changeset_without_epic_label(issue, beads_root=beads_root, cwd=cwd):
-            update_args.extend(["--add-label", "at:epic"])
+            update_args.extend(["--add-label", issue_label(_LABEL_EPIC, beads_root=beads_root)])
         for attempt in range(2):
             run_bd_command(
                 update_args,
@@ -4804,7 +4957,11 @@ def claim_epic(
                 return updated
             if attempt == 0:
                 continue
-            die(f"epic {epic_id} claim failed; expected status=in_progress and label at:hooked")
+            die(
+                "epic "
+                f"{epic_id} claim failed; expected status=in_progress and label "
+                f"{issue_label(_LABEL_HOOKED, beads_root=beads_root)}"
+            )
         die(f"epic {epic_id} claim failed; unable to verify claimed state")
         return issue
 
@@ -4995,7 +5152,12 @@ def create_message_bead(
         "--type",
         "task",
         "--labels",
-        "at:message,at:unread",
+        ",".join(
+            [
+                issue_label(_LABEL_MESSAGE, beads_root=beads_root),
+                issue_label(_LABEL_UNREAD, beads_root=beads_root),
+            ]
+        ),
         "--title",
         subject,
     ]
@@ -5014,9 +5176,15 @@ def list_inbox_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List message beads assigned to the agent."""
-    args = ["list", "--label", "at:message", "--assignee", agent_id]
+    args = [
+        "list",
+        "--label",
+        issue_label(_LABEL_MESSAGE, beads_root=beads_root),
+        "--assignee",
+        agent_id,
+    ]
     if unread_only:
-        args.extend(["--label", "at:unread"])
+        args.extend(["--label", issue_label(_LABEL_UNREAD, beads_root=beads_root)])
     return run_bd_json(args, beads_root=beads_root, cwd=cwd)
 
 
@@ -5029,9 +5197,9 @@ def list_queue_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List queued message beads, optionally filtered by queue name."""
-    args = ["list", "--label", "at:message"]
+    args = ["list", "--label", issue_label(_LABEL_MESSAGE, beads_root=beads_root)]
     if unread_only:
-        args.extend(["--label", "at:unread"])
+        args.extend(["--label", issue_label(_LABEL_UNREAD, beads_root=beads_root)])
     issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
     matches: list[dict[str, object]] = []
     for issue in issues:
@@ -5139,7 +5307,12 @@ def mark_message_read(
 ) -> None:
     """Mark a message bead as read."""
     run_bd_command(
-        ["update", message_id, "--remove-label", "at:unread"],
+        [
+            "update",
+            message_id,
+            "--remove-label",
+            issue_label(_LABEL_UNREAD, beads_root=beads_root),
+        ],
         beads_root=beads_root,
         cwd=cwd,
     )

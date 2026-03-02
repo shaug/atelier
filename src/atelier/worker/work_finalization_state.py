@@ -129,7 +129,7 @@ def release_epic_assignment(epic_id: str, *, beads_root: Path, repo_root: Path) 
         beads_root=beads_root,
         cwd=repo_root,
         expected_assignee=expected_assignee,
-        expected_hooked="at:hooked" in issue_labels(issue),
+        expected_hooked=beads.has_issue_label(issue_labels(issue), "hooked", beads_root=beads_root),
     )
 
 

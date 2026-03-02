@@ -34,7 +34,9 @@ def status(args: object) -> None:
 
     epic_issues = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
     agent_issues = beads.run_bd_json(
-        ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
+        ["list", "--label", beads.issue_label("agent", beads_root=beads_root)],
+        beads_root=beads_root,
+        cwd=repo_root,
     )
 
     agents, hook_map, agent_index = _build_agent_payloads(
@@ -211,7 +213,8 @@ def _build_epic_payloads(
                 "worktree_path": worktree_path,
                 "worktree_relpath": worktree_relpath,
                 "hooked_by": hook_map.get(epic_id, []),
-                "hooked": "at:hooked" in labels or epic_id in hook_map,
+                "hooked": beads.has_issue_label(labels, "hooked", beads_root=beads_root)
+                or epic_id in hook_map,
                 "changesets": changeset_counts,
                 "changeset_details": changeset_details,
                 "ready_to_close": summary.ready_to_close,
@@ -501,7 +504,9 @@ def _status_counts(
 
 def _build_queue_payloads(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
     issues = beads.run_bd_json(
-        ["list", "--label", "at:message"], beads_root=beads_root, cwd=repo_root
+        ["list", "--label", beads.issue_label("message", beads_root=beads_root)],
+        beads_root=beads_root,
+        cwd=repo_root,
     )
     queues: dict[str, dict[str, int]] = {}
     for issue in issues:

@@ -114,7 +114,11 @@ Atelier planning always uses a project-scoped Beads store at:
 
 `<atelier-project-dir>/.beads`
 
-Atelier also enforces the Beads issue prefix `at` for this store.
+Atelier stores a project-scoped Beads issue prefix in project config
+(`beads.prefix`). During `atelier init`, Atelier suggests a deterministic prefix
+derived from the project name and resolves local collisions deterministically
+(for example `ts` -> `ts2`). Migration guidance for existing projects is
+documented in `docs/beads-prefix-migration.md`.
 
 Repository-local Beads stores (for example `<repo>/.beads`) are not used for
 Atelier planning state. They are treated as external ticket sources.

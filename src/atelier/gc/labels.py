@@ -40,9 +40,11 @@ def _resolve_changeset_status_for_migration(
 
 def _resolve_epic_status_for_migration(
     issue: dict[str, object],
+    *,
+    beads_root: Path,
 ) -> tuple[str | None, tuple[str, ...]]:
     labels = issue_labels(issue)
-    if "at:epic" not in labels:
+    if not beads.has_issue_label(labels, "epic", beads_root=beads_root):
         return None, ()
     current_status = lifecycle.normalize_status_value(issue.get("status"))
     target_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
@@ -157,7 +159,10 @@ def collect_normalize_epic_labels(
         if not isinstance(issue_id, str) or not issue_id.strip():
             continue
         issue_id = issue_id.strip()
-        status_target, status_reasons = _resolve_epic_status_for_migration(issue)
+        status_target, status_reasons = _resolve_epic_status_for_migration(
+            issue,
+            beads_root=beads_root,
+        )
         if status_target is None:
             continue
         status_value = status_target
@@ -200,7 +205,8 @@ def collect_report_epic_identity_guardrails(
         details: list[str] = [
             (
                 "active top-level work must keep executable epic identity "
-                "(issue_type=epic + label at:epic)"
+                "(issue_type=epic + label "
+                f"{beads.issue_label('epic', beads_root=beads_root)})"
             )
         ]
         for violation in report.missing_executable_identity:

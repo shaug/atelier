@@ -470,7 +470,7 @@ def _external_labels(
 ) -> tuple[str, ...]:
     labels = {"atelier"}
     issue_labels = _issue_labels(issue)
-    if "at:epic" in issue_labels:
+    if beads.has_issue_label(issue_labels, "epic", beads_root=context.beads_root):
         labels.add("epic")
     if lifecycle.is_work_issue(
         labels=issue_labels,

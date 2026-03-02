@@ -283,7 +283,14 @@ def _global_changeset_records(
     emit_diagnostic: Callable[[str], None] | None,
 ) -> tuple[list[beads.BeadsIssueRecord], dict[str, str]]:
     epics = _read_query_with_retry(
-        args=["list", "--label", "at:epic", "--all", "--limit", "0"],
+        args=[
+            "list",
+            "--label",
+            beads.issue_label("epic", beads_root=beads_root),
+            "--all",
+            "--limit",
+            "0",
+        ],
         beads_root=beads_root,
         repo_root=repo_root,
         startup_stage=startup_stage,
