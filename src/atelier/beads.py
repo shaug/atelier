@@ -605,8 +605,7 @@ def has_issue_label(
 
 def _default_dolt_database_name(beads_root: Path) -> str:
     prefix = configured_issue_prefix(beads_root=beads_root)
-    project_key = hashlib.sha256(str(beads_root.parent.resolve()).encode("utf-8")).hexdigest()[:8]
-    return f"beads_{prefix}_{project_key}"
+    return f"beads_{prefix}"
 
 
 def _local_dolt_database_candidates(beads_root: Path) -> tuple[str, ...]:
@@ -742,8 +741,8 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
         updated["dolt_server_user"] = _DOLT_SERVER_USER_DEFAULT
         changes.append("dolt_server_user")
 
-    database_value = updated.get("dolt_database")
-    if not isinstance(database_value, str) or not database_value.strip():
+    database_name = _normalize_dolt_database_name(updated.get("dolt_database"))
+    if database_name is None:
         database_name, resolution_detail = _resolve_project_scoped_dolt_database_name(
             beads_root, strict=True
         )
@@ -754,6 +753,11 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
                 "to the intended local database and rerun the command."
             )
         else:
+            updated["dolt_database"] = database_name
+            changes.append("dolt_database")
+    else:
+        current_database_value = updated.get("dolt_database")
+        if not isinstance(current_database_value, str) or current_database_value != database_name:
             updated["dolt_database"] = database_name
             changes.append("dolt_database")
 
@@ -1221,6 +1225,18 @@ def _clean_text(value: object) -> str | None:
     return cleaned
 
 
+def _normalize_dolt_database_name(value: object) -> str | None:
+    cleaned = _clean_text(value)
+    if cleaned is None:
+        return None
+    normalized = cleaned.rstrip("/\\").strip()
+    if not normalized:
+        return None
+    if "/" in normalized or "\\" in normalized:
+        return None
+    return normalized
+
+
 def _parse_raw_json_output(result: exec.CommandResult | None) -> object | None:
     if result is None or result.returncode != 0:
         return None
@@ -1673,6 +1689,114 @@ def _backup_startup_legacy_sqlite(beads_root: Path) -> Path:
     return backup_path
 
 
+def _read_startup_migration_dolt_database(
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> tuple[str | None, str | None]:
+    show_result = _run_raw_bd_command(["bd", "dolt", "show", "--json"], cwd=cwd, env=env)
+    if show_result is None:
+        return None, "missing required command: bd"
+    if show_result.returncode != 0:
+        return None, _short_detail(_command_output_detail(show_result))
+    show_payload = _parse_raw_json_output(show_result)
+    if not isinstance(show_payload, dict):
+        return None, "invalid `bd dolt show --json` payload"
+    connection_ok = show_payload.get("connection_ok")
+    if isinstance(connection_ok, bool) and not connection_ok:
+        return None, "`bd dolt show --json` reported connection_ok=false"
+    database_name = _normalize_dolt_database_name(show_payload.get("database"))
+    if database_name is None:
+        return None, "`bd dolt show --json` payload missing a valid database name"
+    return database_name, None
+
+
+def _update_runtime_metadata_dolt_database(*, beads_root: Path, database_name: str) -> bool:
+    metadata_path = beads_root / "metadata.json"
+    if not metadata_path.exists():
+        return False
+    try:
+        raw = metadata_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        atelier_log.warning(
+            f"Startup migration runtime DB reconciliation skipped: unable to read {metadata_path} "
+            f"({exc})"
+        )
+        return False
+    payload: dict[str, object]
+    if raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            atelier_log.warning(
+                "Startup migration runtime DB reconciliation skipped: invalid metadata JSON at "
+                f"{metadata_path} ({exc})"
+            )
+            return False
+        if not isinstance(parsed, dict):
+            atelier_log.warning(
+                "Startup migration runtime DB reconciliation skipped: metadata payload is not an "
+                f"object at {metadata_path}"
+            )
+            return False
+        payload = dict(parsed)
+    else:
+        payload = {}
+    existing_database_value = payload.get("dolt_database")
+    if isinstance(existing_database_value, str) and existing_database_value == database_name:
+        return True
+    payload["dolt_database"] = database_name
+    try:
+        metadata_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        atelier_log.warning(
+            f"Startup migration runtime DB reconciliation skipped: unable to write {metadata_path} "
+            f"({exc})"
+        )
+        return False
+    return True
+
+
+def _reconcile_startup_auto_migration_runtime_database(
+    *,
+    beads_root: Path,
+    cwd: Path,
+    env: dict[str, str],
+) -> None:
+    metadata_path = beads_root / "metadata.json"
+    if not metadata_path.exists():
+        return
+    database_name, detail = _read_startup_migration_dolt_database(cwd=cwd, env=env)
+    if database_name is None:
+        atelier_log.warning(
+            "Startup migration completed, but runtime DB reconciliation could not determine the "
+            f"active Dolt database ({detail or 'unknown error'})."
+        )
+        return
+    set_result = _run_raw_bd_command(
+        ["bd", "dolt", "set", "database", database_name, "--update-config"],
+        cwd=cwd,
+        env=env,
+    )
+    if set_result is not None and set_result.returncode == 0:
+        return
+    set_detail = (
+        "missing required command: bd"
+        if set_result is None
+        else _short_detail(_command_output_detail(set_result)) or "runtime config update failed"
+    )
+    if _update_runtime_metadata_dolt_database(beads_root=beads_root, database_name=database_name):
+        atelier_log.warning(
+            "Startup migration runtime DB reconciliation fell back to metadata update after "
+            f"`bd dolt set database` failed ({set_detail})."
+        )
+        return
+    atelier_log.warning(
+        "Startup migration runtime DB reconciliation failed: unable to update runtime config via "
+        f"`bd dolt set database` ({set_detail}) or metadata at {metadata_path}."
+    )
+
+
 def _parity_verified_after_migration(
     *,
     before: StartupBeadsState,
@@ -1848,6 +1972,7 @@ def _attempt_startup_auto_migration(
             f"migration_detail={migration_detail}\n"
             f"{startup_diagnostics}"
         )
+    _reconcile_startup_auto_migration_runtime_database(beads_root=beads_root, cwd=cwd, env=env)
 
     post_state = detect_startup_beads_state(beads_root=beads_root, cwd=cwd)
     parity_ok, verified_state = _verify_migration_parity_with_resample(
@@ -1979,10 +2104,8 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
     host_value = payload.get("dolt_server_host")
     host = host_value.strip() if isinstance(host_value, str) and host_value.strip() else "127.0.0.1"
     port = _parse_dolt_runtime_port(payload.get("dolt_server_port"))
-    database_value = payload.get("dolt_database")
-    if isinstance(database_value, str) and database_value.strip():
-        database = database_value.strip()
-    else:
+    database = _normalize_dolt_database_name(payload.get("dolt_database"))
+    if database is None:
         database, resolution_detail = _resolve_project_scoped_dolt_database_name(
             beads_root, strict=True
         )

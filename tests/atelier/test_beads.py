@@ -41,6 +41,21 @@ def test_beads_env_sets_beads_db() -> None:
     assert env["BEADS_DB"] == "/tmp/project/.beads/beads.db"
 
 
+def test_default_dolt_database_name_uses_prefix_without_hash(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    assert beads._default_dolt_database_name(beads_root) == "beads_at"  # pyright: ignore[reportPrivateUsage]
+
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    assert beads._default_dolt_database_name(beads_root) == "beads_ops"  # pyright: ignore[reportPrivateUsage]
+
+
 def test_normalize_dolt_runtime_metadata_once_updates_legacy_fields(
     tmp_path: Path,
 ) -> None:
@@ -79,6 +94,33 @@ def test_normalize_dolt_runtime_metadata_once_updates_legacy_fields(
     assert payload["dolt_database"] == "beads_at"
 
 
+def test_normalize_dolt_runtime_metadata_once_sanitizes_database_name(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "backend": "dolt",
+                "dolt_mode": "server",
+                "dolt_server_host": "127.0.0.1",
+                "dolt_server_port": 3307,
+                "dolt_server_user": "root",
+                "dolt_database": "beads_at/",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    beads._DOLT_RUNTIME_NORMALIZED.clear()  # pyright: ignore[reportPrivateUsage]
+    beads._normalize_dolt_runtime_metadata_once(  # pyright: ignore[reportPrivateUsage]
+        beads_root=beads_root
+    )
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert payload["dolt_database"] == "beads_at"
+
+
 def test_normalize_dolt_runtime_metadata_once_skips_invalid_json(
     tmp_path: Path,
 ) -> None:
@@ -102,7 +144,7 @@ def test_normalize_dolt_runtime_metadata_once_preserves_configured_db_when_ambig
     beads_root.mkdir()
     preferred = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     (beads_root / "dolt" / preferred / ".dolt").mkdir(parents=True)
-    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads" / ".dolt").mkdir(parents=True)
     metadata_path = beads_root / "metadata.json"
     metadata_path.write_text(
         json.dumps(
@@ -124,7 +166,6 @@ def test_normalize_dolt_runtime_metadata_once_preserves_configured_db_when_ambig
 
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert payload["dolt_database"] == "beads_at"
-    assert payload["dolt_database"] != preferred
 
 
 def test_normalize_dolt_runtime_metadata_once_does_not_fill_db_when_ambiguous(
@@ -134,7 +175,7 @@ def test_normalize_dolt_runtime_metadata_once_does_not_fill_db_when_ambiguous(
     beads_root.mkdir()
     preferred = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     (beads_root / "dolt" / preferred / ".dolt").mkdir(parents=True)
-    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads" / ".dolt").mkdir(parents=True)
     metadata_path = beads_root / "metadata.json"
     metadata_path.write_text(
         json.dumps(
@@ -157,7 +198,6 @@ def test_normalize_dolt_runtime_metadata_once_does_not_fill_db_when_ambiguous(
 
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert payload["dolt_database"] == ""
-    assert payload["dolt_database"] != preferred
     messages = [str(call.args[0]) for call in warning_log.call_args_list if call.args]
     assert any("multiple Dolt databases found" in message for message in messages)
     assert any("Set `.beads/metadata.json` `dolt_database`" in message for message in messages)
@@ -198,7 +238,7 @@ def test_resolve_dolt_server_runtime_keeps_blank_db_when_ambiguous(tmp_path: Pat
     beads_root.mkdir()
     preferred = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     (beads_root / "dolt" / preferred / ".dolt").mkdir(parents=True)
-    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads" / ".dolt").mkdir(parents=True)
     (beads_root / "metadata.json").write_text(
         json.dumps({"backend": "dolt", "dolt_mode": "server", "dolt_database": ""}),
         encoding="utf-8",
@@ -683,7 +723,7 @@ def test_run_bd_command_preflight_fails_closed_for_ambiguous_blank_database(
     beads_root.mkdir(parents=True)
     preferred = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     (beads_root / "dolt" / preferred / ".dolt").mkdir(parents=True)
-    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads" / ".dolt").mkdir(parents=True)
     (beads_root / "metadata.json").write_text(
         json.dumps({"backend": "dolt", "dolt_mode": "server", "dolt_database": ""}),
         encoding="utf-8",
@@ -1314,6 +1354,53 @@ def test_run_bd_command_list_auto_migrates_recoverable_startup_state(
     assert migrate in calls
     assert calls[-1] == ["bd", "list", "--json"]
     assert diagnostics == []
+
+
+def test_reconcile_startup_auto_migration_runtime_database_falls_back_to_metadata(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text(
+        json.dumps({"backend": "dolt", "dolt_database": "beads_at/"}),
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "dolt", "show", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"connection_ok":true,"database":"beads_at/"}',
+                stderr="",
+            )
+        if argv == ["bd", "dolt", "set", "database", "beads_at", "--update-config"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr="unknown flag: --update-config",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+        beads._reconcile_startup_auto_migration_runtime_database(  # pyright: ignore[reportPrivateUsage]
+            beads_root=beads_root,
+            cwd=cwd,
+            env={},
+        )
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert payload["dolt_database"] == "beads_at"
+    assert ["bd", "dolt", "set", "database", "beads_at", "--update-config"] in calls
 
 
 def test_run_bd_command_prime_reports_skipped_healthy_dolt_diagnostic(
