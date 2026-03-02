@@ -1466,6 +1466,7 @@ def test_reconcile_startup_auto_migration_runtime_database_falls_back_to_metadat
     cwd = tmp_path / "repo"
     cwd.mkdir()
     calls: list[list[str]] = []
+    warnings: list[str] = []
 
     def fake_run_with_runner(
         request: exec_util.CommandRequest,
@@ -1488,7 +1489,10 @@ def test_reconcile_startup_auto_migration_runtime_database_falls_back_to_metadat
             )
         raise AssertionError(f"unexpected command: {argv}")
 
-    with patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner):
+    with (
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.atelier_log.warning", side_effect=warnings.append),
+    ):
         beads._reconcile_startup_auto_migration_runtime_database(  # pyright: ignore[reportPrivateUsage]
             beads_root=beads_root,
             cwd=cwd,
@@ -1498,6 +1502,60 @@ def test_reconcile_startup_auto_migration_runtime_database_falls_back_to_metadat
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert payload["dolt_database"] == "beads_at"
     assert ["bd", "dolt", "set", "database", "beads_at", "--update-config"] in calls
+    assert any("fell back to metadata update" in message for message in warnings)
+
+
+def test_reconcile_startup_auto_migration_runtime_database_logs_unchanged_metadata(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text(
+        json.dumps({"backend": "dolt", "dolt_database": "beads_at"}),
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    calls: list[list[str]] = []
+    warnings: list[str] = []
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "dolt", "show", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"connection_ok":true,"database":"beads_at"}',
+                stderr="",
+            )
+        if argv == ["bd", "dolt", "set", "database", "beads_at", "--update-config"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr="unknown flag: --update-config",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.atelier_log.warning", side_effect=warnings.append),
+    ):
+        beads._reconcile_startup_auto_migration_runtime_database(  # pyright: ignore[reportPrivateUsage]
+            beads_root=beads_root,
+            cwd=cwd,
+            env={},
+        )
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert payload["dolt_database"] == "beads_at"
+    assert ["bd", "dolt", "set", "database", "beads_at", "--update-config"] in calls
+    assert any("already matched the active database" in message for message in warnings)
+    assert not any("fell back to metadata update" in message for message in warnings)
 
 
 def test_reconcile_startup_auto_migration_runtime_database_preserves_configured_ambiguous_db(

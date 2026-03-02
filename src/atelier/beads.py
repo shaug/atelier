@@ -1833,10 +1833,17 @@ def _reconcile_startup_auto_migration_runtime_database(
         beads_root=beads_root,
         database_name=database_name,
     )
-    if metadata_reconcile in {"updated", "unchanged"}:
+    if metadata_reconcile == "updated":
         atelier_log.warning(
             "Startup migration runtime DB reconciliation fell back to metadata update after "
             f"`bd dolt set database` failed ({set_detail})."
+        )
+        return
+    if metadata_reconcile == "unchanged":
+        atelier_log.warning(
+            "Startup migration runtime DB reconciliation could not update runtime config via "
+            f"`bd dolt set database` ({set_detail}), but metadata at {metadata_path} already "
+            "matched the active database."
         )
         return
     if metadata_reconcile == "blocked_ambiguous":
