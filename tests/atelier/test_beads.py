@@ -56,11 +56,14 @@ def test_default_dolt_database_name_uses_prefix_without_hash(
     assert beads._default_dolt_database_name(beads_root) == "beads_ops"  # pyright: ignore[reportPrivateUsage]
 
 
-def test_normalize_dolt_runtime_metadata_once_updates_legacy_fields(
+def test_normalize_dolt_runtime_metadata_once_preserves_existing_database_identity(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
     metadata_path = beads_root / "metadata.json"
     metadata_path.write_text(
@@ -94,13 +97,10 @@ def test_normalize_dolt_runtime_metadata_once_updates_legacy_fields(
     assert payload["dolt_server_host"] == "127.0.0.1"
     assert payload["dolt_server_port"] == 3307
     assert payload["dolt_server_user"] == "root"
-    assert payload["dolt_database"] == expected_database
-    assert (beads_root / "dolt" / expected_database / ".dolt").is_dir()
-    legacy_database_path = beads_root / "dolt" / "beads_at"
-    if expected_database == "beads_at":
-        assert legacy_database_path.exists()
-    else:
-        assert not legacy_database_path.exists()
+    assert expected_database == "beads_ops"
+    assert payload["dolt_database"] == "beads_at"
+    assert (beads_root / "dolt" / "beads_at" / ".dolt").is_dir()
+    assert not (beads_root / "dolt" / expected_database).exists()
 
 
 def test_normalize_dolt_runtime_metadata_once_sanitizes_database_name(tmp_path: Path) -> None:
@@ -148,12 +148,15 @@ def test_normalize_dolt_runtime_metadata_once_skips_invalid_json(
 
 def test_normalize_dolt_runtime_metadata_once_preserves_configured_db_when_ambiguous(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     preferred = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     (beads_root / "dolt" / preferred / ".dolt").mkdir(parents=True)
-    (beads_root / "dolt" / "beads" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
     metadata_path = beads_root / "metadata.json"
     metadata_path.write_text(
         json.dumps(
@@ -175,6 +178,8 @@ def test_normalize_dolt_runtime_metadata_once_preserves_configured_db_when_ambig
 
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert payload["dolt_database"] == "beads_at"
+    assert (beads_root / "dolt" / preferred / ".dolt").is_dir()
+    assert (beads_root / "dolt" / "beads_at" / ".dolt").is_dir()
 
 
 def test_normalize_dolt_runtime_metadata_once_does_not_fill_db_when_ambiguous(

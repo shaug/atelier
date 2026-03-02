@@ -87,7 +87,6 @@ _DOLT_SERVER_HOST_DEFAULT = "127.0.0.1"
 _DOLT_SERVER_PORT_DEFAULT = 3307
 _DOLT_SERVER_USER_DEFAULT = "root"
 _DOLT_DATABASE_DEFAULT = "beads"
-_LEGACY_DOLT_DATABASE_NAMES = frozenset({"beads_at", _DOLT_DATABASE_DEFAULT})
 _STARTUP_AUTO_MIGRATION_DIAGNOSTICS: dict[Path, "_StartupAutoMigrationDiagnostic"] = {}
 _RUNTIME_AGENT_ID_ENV = "ATELIER_AGENT_ID"
 _RUNTIME_AGENT_BEAD_ID_ENV = "ATELIER_AGENT_BEAD_ID"
@@ -647,26 +646,7 @@ def _resolve_project_scoped_dolt_database_name(
     if not candidates:
         return preferred, None
     if len(candidates) == 1:
-        candidate = candidates[0]
-        if candidate in _LEGACY_DOLT_DATABASE_NAMES and candidate != preferred:
-            source_path = beads_root / "dolt" / candidate
-            target_path = beads_root / "dolt" / preferred
-            try:
-                source_path.rename(target_path)
-            except OSError as exc:
-                detail = (
-                    "dolt server ownership migration failed: "
-                    f"unable to rename legacy database {candidate!r} to {preferred!r} "
-                    f"({exc})"
-                )
-                if strict:
-                    return None, detail
-                return candidate, detail
-            return (
-                preferred,
-                f"renamed legacy Dolt database {candidate!r} to project-scoped {preferred!r}",
-            )
-        return candidate, None
+        return candidates[0], None
     detail = _ambiguous_dolt_database_detail(
         beads_root=beads_root,
         candidates=candidates,
@@ -674,13 +654,7 @@ def _resolve_project_scoped_dolt_database_name(
     )
     if strict:
         return None, detail
-    if preferred in candidates:
-        return preferred, detail
-    if "beads_at" in candidates:
-        return "beads_at", detail
-    if _DOLT_DATABASE_DEFAULT in candidates:
-        return _DOLT_DATABASE_DEFAULT, detail
-    return candidates[0], detail
+    return None, detail
 
 
 def _discover_dolt_database_name(beads_root: Path) -> str:
@@ -763,31 +737,35 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
         updated["dolt_server_user"] = _DOLT_SERVER_USER_DEFAULT
         changes.append("dolt_server_user")
 
-    discovered_database, discovery_detail = _resolve_project_scoped_dolt_database_name(
+    resolved_database, resolution_detail = _resolve_project_scoped_dolt_database_name(
         beads_root,
-        strict=False,
+        strict=True,
     )
-    if discovery_detail:
+    if resolution_detail:
         atelier_log.warning(
-            f"Dolt runtime database convergence detail for {metadata_path}: {discovery_detail}"
+            f"Dolt runtime database convergence detail for {metadata_path}: {resolution_detail}"
         )
     database_name = _normalize_dolt_database_name(updated.get("dolt_database"))
     if database_name is None:
-        database_name, resolution_detail = _resolve_project_scoped_dolt_database_name(
-            beads_root, strict=True
-        )
-        if database_name is None:
+        if resolved_database is None:
             atelier_log.warning(
                 "Skipping Beads runtime normalization for `dolt_database`: "
                 f"{resolution_detail}. Set `.beads/metadata.json` `dolt_database` "
                 "to the intended local database and rerun the command."
             )
         else:
-            updated["dolt_database"] = database_name
+            updated["dolt_database"] = resolved_database
             changes.append("dolt_database")
     else:
         current_database_value = updated.get("dolt_database")
-        if not isinstance(current_database_value, str) or current_database_value != database_name:
+        if resolved_database is None and resolution_detail is not None:
+            atelier_log.warning(
+                "Preserving configured Beads runtime `dolt_database` because "
+                "ownership is ambiguous; set `.beads/metadata.json` "
+                "`dolt_database` to the intended local database and rerun "
+                "the command."
+            )
+        elif not isinstance(current_database_value, str) or current_database_value != database_name:
             updated["dolt_database"] = database_name
             changes.append("dolt_database")
 
