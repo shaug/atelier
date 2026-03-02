@@ -95,6 +95,123 @@ def test_normalize_dolt_runtime_metadata_once_skips_invalid_json(
     assert metadata_path.read_text(encoding="utf-8") == "{not-json"
 
 
+def test_normalize_dolt_runtime_metadata_once_preserves_configured_db_when_ambiguous(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    preferred = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
+    (beads_root / "dolt" / preferred / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "backend": "dolt",
+                "dolt_mode": "embedded",
+                "dolt_server_host": "",
+                "dolt_server_port": 0,
+                "dolt_database": "beads_at",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    beads._DOLT_RUNTIME_NORMALIZED.clear()  # pyright: ignore[reportPrivateUsage]
+    beads._normalize_dolt_runtime_metadata_once(  # pyright: ignore[reportPrivateUsage]
+        beads_root=beads_root
+    )
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert payload["dolt_database"] == "beads_at"
+    assert payload["dolt_database"] != preferred
+
+
+def test_normalize_dolt_runtime_metadata_once_does_not_fill_db_when_ambiguous(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    preferred = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
+    (beads_root / "dolt" / preferred / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "backend": "dolt",
+                "dolt_mode": "embedded",
+                "dolt_server_host": "",
+                "dolt_server_port": 0,
+                "dolt_database": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    beads._DOLT_RUNTIME_NORMALIZED.clear()  # pyright: ignore[reportPrivateUsage]
+    with patch("atelier.beads.atelier_log.warning") as warning_log:
+        beads._normalize_dolt_runtime_metadata_once(  # pyright: ignore[reportPrivateUsage]
+            beads_root=beads_root
+        )
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert payload["dolt_database"] == ""
+    assert payload["dolt_database"] != preferred
+    messages = [str(call.args[0]) for call in warning_log.call_args_list if call.args]
+    assert any("multiple Dolt databases found" in message for message in messages)
+    assert any("Set `.beads/metadata.json` `dolt_database`" in message for message in messages)
+
+
+def test_normalize_dolt_runtime_metadata_once_sets_project_db_for_single_project_store(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    preferred = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
+    (beads_root / "dolt" / preferred / ".dolt").mkdir(parents=True)
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "backend": "dolt",
+                "dolt_mode": "embedded",
+                "dolt_server_host": "",
+                "dolt_server_port": 0,
+                "dolt_database": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    beads._DOLT_RUNTIME_NORMALIZED.clear()  # pyright: ignore[reportPrivateUsage]
+    beads._normalize_dolt_runtime_metadata_once(  # pyright: ignore[reportPrivateUsage]
+        beads_root=beads_root
+    )
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert payload["dolt_database"] == preferred
+
+
+def test_resolve_dolt_server_runtime_keeps_blank_db_when_ambiguous(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    preferred = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
+    (beads_root / "dolt" / preferred / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt", "dolt_mode": "server", "dolt_database": ""}),
+        encoding="utf-8",
+    )
+
+    with patch("atelier.beads.atelier_log.warning") as warning_log:
+        runtime = beads._resolve_dolt_server_runtime(beads_root)  # pyright: ignore[reportPrivateUsage]
+
+    assert runtime.database == ""
+    messages = [str(call.args[0]) for call in warning_log.call_args_list if call.args]
+    assert any("Dolt runtime database resolution blocked" in message for message in messages)
+
+
 def test_run_bd_issue_records_validates_issues() -> None:
     with patch(
         "atelier.beads.run_bd_json",
@@ -557,6 +674,41 @@ def test_run_bd_command_preflight_recovers_dolt_server_before_command(
     assert calls == [["bd", "list", "--json"]]
     assert probe_health.call_count == 2
     assert restart.call_count == 1
+
+
+def test_run_bd_command_preflight_fails_closed_for_ambiguous_blank_database(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir(parents=True)
+    preferred = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
+    (beads_root / "dolt" / preferred / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt", "dolt_mode": "server", "dolt_database": ""}),
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+
+    def fake_die(message: str, code: int = 1) -> None:
+        del code
+        raise RuntimeError(message)
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads._restart_dolt_server_with_recovery") as restart,
+        patch("atelier.beads.exec.run_with_runner") as run_with_runner,
+        patch("atelier.beads._startup_state_diagnostics", return_value="startup-diag"),
+        patch("atelier.beads.die", side_effect=fake_die),
+    ):
+        with pytest.raises(
+            RuntimeError, match="dolt server preflight failed before running bd command"
+        ):
+            beads.run_bd_command(["show", "at-1", "--json"], beads_root=beads_root, cwd=cwd)
+
+    restart.assert_not_called()
+    run_with_runner.assert_not_called()
 
 
 def test_run_bd_command_retries_after_dolt_server_recovery(tmp_path: Path) -> None:

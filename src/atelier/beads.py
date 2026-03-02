@@ -609,26 +609,64 @@ def _default_dolt_database_name(beads_root: Path) -> str:
     return f"beads_{prefix}_{project_key}"
 
 
-def _discover_dolt_database_name(beads_root: Path) -> str:
+def _local_dolt_database_candidates(beads_root: Path) -> tuple[str, ...]:
     dolt_root = beads_root / "dolt"
     if not dolt_root.is_dir():
-        return _default_dolt_database_name(beads_root)
+        return ()
     candidates: list[str] = []
     for child in dolt_root.iterdir():
         if not child.is_dir():
             continue
         if (child / ".dolt").is_dir():
             candidates.append(child.name)
-    if not candidates:
-        return _default_dolt_database_name(beads_root)
+    return tuple(sorted(candidates))
+
+
+def _ambiguous_dolt_database_detail(
+    *,
+    beads_root: Path,
+    candidates: tuple[str, ...],
+    preferred: str,
+) -> str:
+    choices = ", ".join(candidates)
+    return (
+        f"multiple Dolt databases found under {beads_root / 'dolt'} ({choices}); "
+        f"project-scoped default is {preferred}"
+    )
+
+
+def _resolve_project_scoped_dolt_database_name(
+    beads_root: Path,
+    *,
+    strict: bool,
+) -> tuple[str | None, str | None]:
     preferred = _default_dolt_database_name(beads_root)
+    candidates = _local_dolt_database_candidates(beads_root)
+    if not candidates:
+        return preferred, None
+    if len(candidates) == 1:
+        return candidates[0], None
+    detail = _ambiguous_dolt_database_detail(
+        beads_root=beads_root,
+        candidates=candidates,
+        preferred=preferred,
+    )
+    if strict:
+        return None, detail
     if preferred in candidates:
-        return preferred
+        return preferred, detail
     if "beads_at" in candidates:
-        return "beads_at"
+        return "beads_at", detail
     if _DOLT_DATABASE_DEFAULT in candidates:
-        return _DOLT_DATABASE_DEFAULT
-    return sorted(candidates)[0]
+        return _DOLT_DATABASE_DEFAULT, detail
+    return candidates[0], detail
+
+
+def _discover_dolt_database_name(beads_root: Path) -> str:
+    resolved, _detail = _resolve_project_scoped_dolt_database_name(beads_root, strict=False)
+    if resolved is not None:
+        return resolved
+    return _default_dolt_database_name(beads_root)
 
 
 def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
@@ -706,8 +744,18 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
 
     database_value = updated.get("dolt_database")
     if not isinstance(database_value, str) or not database_value.strip():
-        updated["dolt_database"] = _discover_dolt_database_name(beads_root)
-        changes.append("dolt_database")
+        database_name, resolution_detail = _resolve_project_scoped_dolt_database_name(
+            beads_root, strict=True
+        )
+        if database_name is None:
+            atelier_log.warning(
+                "Skipping Beads runtime normalization for `dolt_database`: "
+                f"{resolution_detail}. Set `.beads/metadata.json` `dolt_database` "
+                "to the intended local database and rerun the command."
+            )
+        else:
+            updated["dolt_database"] = database_name
+            changes.append("dolt_database")
 
     if not changes:
         atelier_log.debug(
@@ -1935,7 +1983,16 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
     if isinstance(database_value, str) and database_value.strip():
         database = database_value.strip()
     else:
-        database = _discover_dolt_database_name(beads_root)
+        database, resolution_detail = _resolve_project_scoped_dolt_database_name(
+            beads_root, strict=True
+        )
+        if database is None:
+            database = ""
+            atelier_log.warning(
+                "Dolt runtime database resolution blocked: "
+                f"{resolution_detail}. Set `.beads/metadata.json` `dolt_database` "
+                "to the intended local database and rerun the command."
+            )
     dolt_root = beads_root / "dolt"
     return DoltServerRuntime(
         dolt_root=dolt_root,
@@ -2121,6 +2178,12 @@ def _restart_dolt_server_with_recovery(
     env: dict[str, str],
 ) -> tuple[bool, str]:
     runtime = _resolve_dolt_server_runtime(beads_root)
+    if not runtime.database.strip():
+        return (
+            False,
+            "dolt runtime database is unset or ambiguous; set `.beads/metadata.json` "
+            "`dolt_database` to the intended local database and retry",
+        )
     stopped = _stop_dolt_server_processes(runtime, cwd=cwd, env=env)
     started, start_detail = _start_dolt_server(runtime, env=env)
     if not started:
@@ -2153,6 +2216,11 @@ def _ensure_dolt_server_preflight(
     if not (beads_root / "dolt").exists():
         return None
     runtime = _resolve_dolt_server_runtime(beads_root)
+    if not runtime.database.strip():
+        return (
+            "dolt runtime database is unset or ambiguous; set `.beads/metadata.json` "
+            "`dolt_database` to the intended local database and retry"
+        )
     healthy, detail = _probe_dolt_server_health(runtime, cwd=cwd, env=env)
     if healthy:
         return None
