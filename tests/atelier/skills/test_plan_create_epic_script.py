@@ -174,3 +174,54 @@ def test_create_epic_fails_closed_when_deferred_update_fails(
         "automatic fail-closed: unable to set deferred status after create",
     ]
     assert export_calls == []
+
+
+def test_create_epic_rejects_low_information_payload(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    commands: list[list[str]] = []
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+
+    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+
+    def fake_run_bd(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        raise AssertionError("bd create must not run when payload validation fails")
+
+    monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_epic.py",
+            "--title",
+            "/",
+            "--scope",
+            "/",
+            "--acceptance",
+            "Validation should reject placeholder payloads.",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert "invalid executable work payload for epic creation" in captured.err
+    assert "- title: [placeholder_value]" in captured.err
+    assert "- scope: [placeholder_value]" in captured.err
+    assert "planner-context: NEEDS-DECISION" in captured.err
+    assert commands == []

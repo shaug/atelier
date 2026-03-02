@@ -20,6 +20,10 @@ def _bootstrap_source_import() -> None:
 _bootstrap_source_import()
 
 from atelier import agent_home, beads  # noqa: E402
+from atelier.executable_work_validation import (  # noqa: E402
+    compact_excerpt,
+    validate_executable_work_payload,
+)
 
 
 @dataclass(frozen=True)
@@ -126,6 +130,35 @@ def _create_reroute_epic(
     return issues[0] if issues else {"id": issue_id, "title": title}
 
 
+def _validate_reroute_payload_or_raise(*, subject: str, body: str, recipient: str) -> None:
+    failures = validate_executable_work_payload(
+        title=subject,
+        scope_text=body,
+        scope_field_name="body",
+        scope_optional=False,
+    )
+    if not failures:
+        return
+
+    diagnostic_lines = [
+        "invalid executable work payload for inactive-worker reroute epic creation",
+    ]
+    for failure in failures:
+        field_name = "subject" if failure.field_name == "title" else failure.field_name
+        diagnostic_lines.append(
+            f"- {field_name}: [{failure.code}] {failure.detail}",
+        )
+    diagnostic_lines.append(
+        "action: provide a concrete subject/body, then rerun mail-send",
+    )
+    diagnostic_lines.append(
+        "planner-context: NEEDS-DECISION: rejected low-information reroute epic payload "
+        f"(recipient='{recipient}'; subject='{compact_excerpt(subject)}'; "
+        f"body='{compact_excerpt(body)}')",
+    )
+    raise RuntimeError("\n".join(diagnostic_lines))
+
+
 def dispatch_message(
     *,
     subject: str,
@@ -138,6 +171,7 @@ def dispatch_message(
     cwd: Path,
 ) -> DispatchOutcome:
     if _agent_role(from_agent) == "planner" and _is_inactive_worker(to):
+        _validate_reroute_payload_or_raise(subject=subject, body=body, recipient=to)
         rerouted = _create_reroute_epic(
             subject=subject,
             body=body,
