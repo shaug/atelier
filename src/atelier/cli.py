@@ -535,6 +535,13 @@ def plan_command(
             help="show planner step timing details",
         ),
     ] = False,
+    yolo: Annotated[
+        bool,
+        typer.Option(
+            "--yolo",
+            help="enable the most permissive agent flags supported by the planner agent",
+        ),
+    ] = False,
 ) -> None:
     """Start a planner session."""
     plan_cmd.run_planner(
@@ -544,6 +551,7 @@ def plan_command(
             yes=yes,
             new_session=new_session,
             trace=trace,
+            yolo=yolo,
         )
     )
 
@@ -622,6 +630,13 @@ def work_command(
             help="reconcile merged changesets before startup contract",
         ),
     ] = False,
+    yolo: Annotated[
+        bool,
+        typer.Option(
+            "--yolo",
+            help="enable the most permissive agent flags supported by the worker agent",
+        ),
+    ] = False,
 ) -> None:
     """Start a worker session."""
     work_cmd.start_worker(
@@ -634,6 +649,7 @@ def work_command(
             dry_run=dry_run,
             yes=yes,
             reconcile=reconcile,
+            yolo=yolo,
         )
     )
 

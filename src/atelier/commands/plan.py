@@ -677,6 +677,8 @@ def run_planner(args: object) -> None:
             if agent_spec is None:
                 die(f"unsupported agent {project_config.agent.default!r}")
             agent_options = list(project_config.agent.options.get(agent_spec.name, []))
+            if bool(getattr(args, "yolo", False)):
+                agent_options = agents.apply_yolo_options(agent_spec, agent_options)
             hook_path = hooks.ensure_agent_hooks(agent, agent_spec)
             hooks.ensure_hooks_path(env, hook_path)
             sync_monitor = planner_sync.PlannerSyncMonitor(sync_service)

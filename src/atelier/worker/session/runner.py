@@ -1023,6 +1023,7 @@ def run_worker_once(
                 root_branch_value=root_branch_value or "",
                 enlistment_path=Path(_enlistment),
                 yes=bool(getattr(args, "yes", False)),
+                yolo=bool(getattr(args, "yolo", False)),
                 dry_run=dry_run,
                 session_control=control,
                 command_ops=command_ports,

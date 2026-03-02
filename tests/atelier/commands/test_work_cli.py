@@ -6,29 +6,30 @@ from typer.testing import CliRunner
 import atelier.cli as cli
 
 
-def test_plan_passes_new_session_flag_to_command() -> None:
+def test_work_passes_yolo_flag_to_command() -> None:
     captured: dict[str, object] = {}
 
-    def fake_run_planner(args: SimpleNamespace) -> None:
+    def fake_start_worker(args: SimpleNamespace) -> None:
         captured["epic_id"] = args.epic_id
-        captured["reconcile"] = args.reconcile
+        captured["mode"] = args.mode
+        captured["run_mode"] = args.run_mode
         captured["yes"] = args.yes
-        captured["new_session"] = args.new_session
-        captured["trace"] = args.trace
+        captured["reconcile"] = args.reconcile
         captured["yolo"] = args.yolo
 
     runner = CliRunner()
-    with patch("atelier.commands.plan.run_planner", fake_run_planner):
+    with patch("atelier.commands.work.start_worker", fake_start_worker):
         result = runner.invoke(
             cli.app,
             [
-                "plan",
-                "--epic-id",
+                "work",
                 "at-epic",
-                "--reconcile",
+                "--mode",
+                "auto",
+                "--run-mode",
+                "once",
                 "--yes",
-                "--new-session",
-                "--trace",
+                "--reconcile",
                 "--yolo",
             ],
         )
@@ -36,9 +37,9 @@ def test_plan_passes_new_session_flag_to_command() -> None:
     assert result.exit_code == 0
     assert captured == {
         "epic_id": "at-epic",
-        "reconcile": True,
+        "mode": "auto",
+        "run_mode": "once",
         "yes": True,
-        "new_session": True,
-        "trace": True,
+        "reconcile": True,
         "yolo": True,
     }

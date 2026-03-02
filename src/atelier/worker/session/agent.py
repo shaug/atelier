@@ -83,6 +83,7 @@ def prepare_agent_session(
     root_branch_value: str,
     enlistment_path: Path,
     yes: bool,
+    yolo: bool,
     dry_run: bool,
     session_control: AgentSessionControl,
     command_ops: AgentSessionCommandOps,
@@ -92,6 +93,8 @@ def prepare_agent_session(
     if agent_spec is None:
         raise RuntimeError(f"unsupported agent {project_config.agent.default!r}")
     agent_options = list(project_config.agent.options.get(agent_spec.name, []))
+    if yolo:
+        agent_options = agents.apply_yolo_options(agent_spec, agent_options)
     if agent_spec.name == "codex":
         agent_options = command_ops.strip_flag_with_value(agent_options, "--cd")
 

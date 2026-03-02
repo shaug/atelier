@@ -938,7 +938,7 @@ def test_run_worker_once_passes_opening_prompt_to_non_codex_agents() -> None:
     deps.commands.worker_opening_prompt = Mock(return_value="open-prompt")
 
     summary = runner.run_worker_once(
-        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False, yolo=True),
         run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p8"),
         deps=deps,
     )
@@ -947,5 +947,7 @@ def test_run_worker_once_passes_opening_prompt_to_non_codex_agents() -> None:
     assert summary.reason == "agent_session_complete"
     deps.commands.worker_opening_prompt.assert_called_once()
     deps.infra.worker_session_agent.start_agent_session.assert_called_once()
+    prep_kwargs = deps.infra.worker_session_agent.prepare_agent_session.call_args.kwargs
+    assert prep_kwargs["yolo"] is True
     start_kwargs = deps.infra.worker_session_agent.start_agent_session.call_args.kwargs
     assert start_kwargs["opening_prompt"] == "open-prompt"

@@ -8,9 +8,16 @@ from atelier.worker.session import agent as session_agent
 
 
 class _FakeAgentSpec:
-    def __init__(self, *, name: str = "codex", display_name: str = "Codex") -> None:
+    def __init__(
+        self,
+        *,
+        name: str = "codex",
+        display_name: str = "Codex",
+        yolo_flags: tuple[str, ...] = (),
+    ) -> None:
         self.name = name
         self.display_name = display_name
+        self.yolo_flags = yolo_flags
 
     def build_start_command(
         self, _agent_home: Path, _options: list[str], prompt: str
@@ -85,6 +92,7 @@ def test_prepare_agent_session_dry_run_sets_workspace_env(monkeypatch) -> None:
         root_branch_value="feat/root",
         enlistment_path=Path("/repo"),
         yes=True,
+        yolo=False,
         dry_run=True,
         session_control=control,
         command_ops=_TestCommandOps(),
@@ -95,6 +103,49 @@ def test_prepare_agent_session_dry_run_sets_workspace_env(monkeypatch) -> None:
     assert prep.env["BEADS_DIR"] == "/beads"
     assert prep.env["BEADS_DB"] == "/beads/beads.db"
     assert any("Would prepare workspace environment variables." in msg for msg in control.logs)
+
+
+def test_prepare_agent_session_applies_yolo_options(monkeypatch) -> None:
+    monkeypatch.setattr(
+        session_agent.agents,
+        "get_agent",
+        lambda _name: _FakeAgentSpec(name="codex", yolo_flags=("--yolo",)),
+    )
+    project_config = _project_config().model_copy(
+        update={
+            "agent": _project_config().agent.model_copy(
+                update={"options": {"codex": ["--model", "fast"]}}
+            )
+        }
+    )
+    agent = agent_home.AgentHome(
+        name="codex",
+        agent_id="atelier/worker/codex/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+
+    prep = session_agent.prepare_agent_session(
+        project_config=project_config,
+        project_data_dir=Path("/project-data"),
+        repo_root=Path("/repo"),
+        beads_root=Path("/beads"),
+        agent=agent,
+        changeset_worktree_path=Path("/worktree"),
+        selected_epic="at-epic",
+        changeset_id="at-epic.1",
+        root_branch_value="feat/root",
+        enlistment_path=Path("/repo"),
+        yes=True,
+        yolo=True,
+        dry_run=True,
+        session_control=_TestControl(),
+        command_ops=_TestCommandOps(),
+    )
+
+    assert "--model" in prep.agent_options
+    assert "fast" in prep.agent_options
+    assert "--yolo" in prep.agent_options
 
 
 def test_start_agent_session_dry_run_returns_none() -> None:

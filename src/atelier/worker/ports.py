@@ -224,6 +224,7 @@ class WorkerSessionAgentService(Protocol):
         root_branch_value: str,
         enlistment_path: Path,
         yes: bool,
+        yolo: bool,
         dry_run: bool,
         session_control: AgentSessionControl,
         command_ops: AgentSessionCommandOps,
