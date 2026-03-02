@@ -1,5 +1,7 @@
 import json
 import os
+import shlex
+import subprocess
 import tempfile
 import threading
 import time
@@ -249,6 +251,80 @@ def test_ensure_claude_compat_writes_files() -> None:
 
         settings_path = agent_path / agent_home.CLAUDE_DIRNAME / agent_home.CLAUDE_SETTINGS_FILENAME
         assert settings_path.exists()
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        command = payload["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        assert command == shlex.quote(str(hook_path))
+
+
+def test_ensure_claude_compat_session_start_command_uses_agent_home_hook() -> None:
+    with tempfile.TemporaryDirectory(prefix="agent home ") as tmp:
+        root = Path(tmp)
+        agent_path = root / "agent home" / "worker"
+        agent_path.mkdir(parents=True)
+        project_dir = root / "project"
+        project_dir.mkdir(parents=True)
+        (project_dir / "AGENTS.md").write_text("# Project instructions\n", encoding="utf-8")
+        content = "# Agent Instructions\nRule: test\n"
+
+        agent_home.ensure_claude_compat(agent_path, content)
+
+        assert not (project_dir / ".claude" / "hooks" / agent_home.CLAUDE_HOOK_SCRIPT).exists()
+        hook_path = (
+            agent_path
+            / agent_home.CLAUDE_DIRNAME
+            / agent_home.CLAUDE_HOOKS_DIRNAME
+            / agent_home.CLAUDE_HOOK_SCRIPT
+        )
+        settings_path = agent_path / agent_home.CLAUDE_DIRNAME / agent_home.CLAUDE_SETTINGS_FILENAME
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        command = payload["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+
+        result = subprocess.run(
+            ["/bin/bash", "-lc", command],
+            cwd=project_dir,
+            env={**os.environ, "CLAUDE_PROJECT_DIR": str(project_dir)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert command == shlex.quote(str(hook_path))
+
+
+def test_ensure_claude_compat_rewrites_stale_project_relative_hook_command() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        agent_path = root / "agent"
+        agent_path.mkdir(parents=True)
+        claude_dir = agent_path / agent_home.CLAUDE_DIRNAME
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        settings_path = claude_dir / agent_home.CLAUDE_SETTINGS_FILENAME
+        stale_command = "$CLAUDE_PROJECT_DIR/.claude/hooks/append_agentsmd_context.sh"
+        stale_payload = {
+            "hooks": {
+                "SessionStart": [
+                    {
+                        "matcher": "startup",
+                        "hooks": [{"type": "command", "command": stale_command}],
+                    }
+                ]
+            }
+        }
+        settings_path.write_text(json.dumps(stale_payload, indent=2) + "\n", encoding="utf-8")
+
+        agent_home.ensure_claude_compat(agent_path, "# Agent Instructions\nRule: test\n")
+
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        command = payload["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        hook_path = (
+            agent_path
+            / agent_home.CLAUDE_DIRNAME
+            / agent_home.CLAUDE_HOOKS_DIRNAME
+            / agent_home.CLAUDE_HOOK_SCRIPT
+        )
+        assert command == shlex.quote(str(hook_path))
+        assert command != stale_command
 
 
 def test_ensure_claude_compat_serializes_concurrent_rewrites(

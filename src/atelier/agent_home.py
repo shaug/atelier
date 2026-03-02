@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import threading
@@ -612,6 +613,7 @@ done
         if not hook_path.exists() or hook_path.read_text(encoding="utf-8") != hook_body:
             write_text_atomic(hook_path, hook_body, mode=0o755)
 
+        hook_command = shlex.quote(str(hook_path))
         settings_path = claude_dir / CLAUDE_SETTINGS_FILENAME
         settings_payload = {
             "hooks": {
@@ -621,8 +623,7 @@ done
                         "hooks": [
                             {
                                 "type": "command",
-                                "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/"
-                                "append_agentsmd_context.sh",
+                                "command": hook_command,
                             }
                         ],
                     }
