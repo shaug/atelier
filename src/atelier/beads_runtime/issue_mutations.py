@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from .client import (
     FailureHandler,
     RuntimeBeadsClient,
     show_issue,
     update_issue_description,
 )
+
+ShowIssueFn = Callable[[RuntimeBeadsClient, str], dict[str, object] | None]
+UpdateIssueDescriptionFn = Callable[[RuntimeBeadsClient, str, str], None]
 
 
 def parse_description_fields(description: str | None) -> dict[str, str]:
@@ -75,6 +80,8 @@ def update_issue_description_fields(
     *,
     client: RuntimeBeadsClient,
     fail: FailureHandler,
+    show_issue_fn: ShowIssueFn = show_issue,
+    update_issue_description_fn: UpdateIssueDescriptionFn = update_issue_description,
     expected_current: dict[str, str | None] | None = None,
     require_expected_match: bool = False,
     description_update_max_attempts: int = 5,
@@ -82,7 +89,7 @@ def update_issue_description_fields(
     """Apply description field updates with optimistic retry + verification."""
     with client.issue_write_lock(issue_id):
         for _attempt in range(max(0, description_update_max_attempts)):
-            issue = show_issue(client, issue_id)
+            issue = show_issue_fn(client, issue_id)
             if issue is None:
                 fail(f"issue not found: {issue_id}")
                 raise RuntimeError("unreachable")
@@ -104,8 +111,8 @@ def update_issue_description_fields(
             if not changed:
                 return issue
 
-            update_issue_description(client, issue_id, updated)
-            candidate = show_issue(client, issue_id)
+            update_issue_description_fn(client, issue_id, updated)
+            candidate = show_issue_fn(client, issue_id)
             if candidate is None:
                 continue
             if expected_current and not _description_matches_expected(

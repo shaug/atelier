@@ -28,6 +28,7 @@ from . import (
     config,
     exec,
     git,
+    github_issues_provider,
     lifecycle,
     messages,
     paths,
@@ -35,6 +36,7 @@ from . import (
 )
 from . import log as atelier_log
 from .beads_runtime import agent_hooks as beads_agent_hooks
+from .beads_runtime import client as beads_runtime_client
 from .beads_runtime import external_reconcile as beads_external_reconcile
 from .beads_runtime import issue_mutations as beads_issue_mutations
 from .beads_runtime import queue_messages as beads_queue_messages
@@ -562,7 +564,7 @@ class _ExternalReconcileGithubClient:
     def github_issues(self, repo_slug: str) -> beads_external_reconcile.GithubTicketProvider:
         return cast(
             beads_external_reconcile.GithubTicketProvider,
-            beads_external_reconcile.GithubIssuesClient(repo_slug=repo_slug, github=self),
+            github_issues_provider.GithubIssuesProvider(repo=repo_slug),
         )
 
 
@@ -3931,6 +3933,26 @@ def _issue_description(issue: dict[str, object]) -> str:
     return description if isinstance(description, str) else ""
 
 
+def _facade_update_issue_description_callback(
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> beads_issue_mutations.UpdateIssueDescriptionFn:
+    def _update(
+        _client: beads_runtime_client.RuntimeBeadsClient,
+        issue_id: str,
+        description: str,
+    ) -> None:
+        _update_issue_description(
+            issue_id,
+            description,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+
+    return _update
+
+
 def _update_description_fields_optimistic(
     issue_id: str,
     *,
@@ -3941,11 +3963,16 @@ def _update_description_fields_optimistic(
     require_expected_match: bool = False,
 ) -> dict[str, object]:
     """Apply description field updates with optimistic retry + verification."""
+    update_issue_description_fn = _facade_update_issue_description_callback(
+        beads_root=beads_root,
+        cwd=cwd,
+    )
     return beads_issue_mutations.update_issue_description_fields(
         issue_id,
         fields,
         client=create_client(beads_root=beads_root, cwd=cwd),
         fail=die,
+        update_issue_description_fn=update_issue_description_fn,
         expected_current=expected_current,
         require_expected_match=require_expected_match,
         description_update_max_attempts=_DESCRIPTION_UPDATE_MAX_ATTEMPTS,
@@ -3993,11 +4020,16 @@ def update_issue_description_fields(
     Returns:
         Refreshed issue payload when available, otherwise the pre-update issue.
     """
+    update_issue_description_fn = _facade_update_issue_description_callback(
+        beads_root=beads_root,
+        cwd=cwd,
+    )
     return beads_issue_mutations.update_issue_description_fields(
         issue_id,
         fields,
         client=create_client(beads_root=beads_root, cwd=cwd),
         fail=die,
+        update_issue_description_fn=update_issue_description_fn,
         description_update_max_attempts=_DESCRIPTION_UPDATE_MAX_ATTEMPTS,
     )
 
@@ -4509,12 +4541,17 @@ def clear_agent_hook(
 ) -> None:
     """Clear the hooked epic id on the agent bead description."""
     runtime = create_client(beads_root=beads_root, cwd=cwd)
+    update_issue_description_fn = _facade_update_issue_description_callback(
+        beads_root=beads_root,
+        cwd=cwd,
+    )
     beads_agent_hooks.clear_agent_hook(
         agent_bead_id,
         expected_hook=expected_hook,
         client=runtime,
         fail=die,
         hook_slot_name=HOOK_SLOT_NAME,
+        update_issue_description_fn=update_issue_description_fn,
     )
 
 
@@ -4906,12 +4943,17 @@ def set_agent_hook(
 ) -> None:
     """Store the hooked epic id on the agent bead description."""
     runtime = create_client(beads_root=beads_root, cwd=cwd)
+    update_issue_description_fn = _facade_update_issue_description_callback(
+        beads_root=beads_root,
+        cwd=cwd,
+    )
     beads_agent_hooks.set_agent_hook(
         agent_bead_id,
         epic_id,
         client=runtime,
         fail=die,
         hook_slot_name=HOOK_SLOT_NAME,
+        update_issue_description_fn=update_issue_description_fn,
     )
 
 
@@ -4926,12 +4968,19 @@ def create_message_bead(
 ) -> dict[str, object]:
     """Create a message bead and return its data."""
     runtime = create_client(beads_root=beads_root, cwd=cwd)
+    create_issue_with_body_fn = lambda _client, args, description: _create_issue_with_body(
+        args,
+        description,
+        beads_root=beads_root,
+        cwd=cwd,
+    )
     return beads_queue_messages.create_message_bead(
         subject=subject,
         body=body,
         metadata=metadata,
         assignee=assignee,
         client=runtime,
+        create_issue_with_body_fn=create_issue_with_body_fn,
         label_message=issue_label(_LABEL_MESSAGE, beads_root=beads_root),
         label_unread=issue_label(_LABEL_UNREAD, beads_root=beads_root),
     )
@@ -4965,11 +5014,32 @@ def list_queue_messages(
 ) -> list[dict[str, object]]:
     """List queued message beads, optionally filtered by queue name."""
     runtime = create_client(beads_root=beads_root, cwd=cwd)
+    thread_issue_cache: dict[str, dict[str, object] | None] = {}
+
+    def _closed_active_pr_still_blocking(issue: dict[str, object]) -> bool:
+        return _closed_active_pr_condition_still_blocking(
+            issue,
+            thread_issue_cache=thread_issue_cache,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+
+    def _mark_resolved_messages(message_ids: set[str]) -> None:
+        _mark_messages_read_best_effort(
+            message_ids,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+
     return beads_queue_messages.list_queue_messages(
         queue=queue,
         unclaimed_only=unclaimed_only,
         unread_only=unread_only,
         client=runtime,
+        is_closed_active_pr_still_blocking=_closed_active_pr_still_blocking,
+        mark_messages_read_best_effort=_mark_resolved_messages,
+        needs_decision_subject_prefix=_NEEDS_DECISION_SUBJECT_PREFIX,
+        closed_active_pr_reason=_NEEDS_DECISION_CLOSED_ACTIVE_PR_REASON,
         label_message=issue_label(_LABEL_MESSAGE, beads_root=beads_root),
         label_unread=issue_label(_LABEL_UNREAD, beads_root=beads_root),
     )
@@ -5281,12 +5351,17 @@ def claim_queue_message(
 ) -> dict[str, object]:
     """Claim a queued message bead by setting claimed metadata."""
     runtime = create_client(beads_root=beads_root, cwd=cwd)
+    update_issue_description_fn = _facade_update_issue_description_callback(
+        beads_root=beads_root,
+        cwd=cwd,
+    )
     return beads_queue_messages.claim_queue_message(
         message_id,
         agent_id,
         queue=queue,
         client=runtime,
         fail=die,
+        update_issue_description_fn=update_issue_description_fn,
         description_update_max_attempts=_DESCRIPTION_UPDATE_MAX_ATTEMPTS,
     )
 

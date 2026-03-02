@@ -136,6 +136,9 @@ def clear_agent_hook(
     client: RuntimeBeadsClient,
     fail: FailureHandler,
     hook_slot_name: str,
+    update_issue_description_fn: issue_mutations.UpdateIssueDescriptionFn = (
+        issue_mutations.update_issue_description
+    ),
 ) -> None:
     """Clear the hooked epic id from slot and description state."""
     with client.issue_write_lock(agent_bead_id):
@@ -163,6 +166,7 @@ def clear_agent_hook(
             require_expected_match=True,
             client=client,
             fail=fail,
+            update_issue_description_fn=update_issue_description_fn,
         )
 
 
@@ -312,6 +316,9 @@ def set_agent_hook(
     client: RuntimeBeadsClient,
     fail: FailureHandler,
     hook_slot_name: str,
+    update_issue_description_fn: issue_mutations.UpdateIssueDescriptionFn = (
+        issue_mutations.update_issue_description
+    ),
 ) -> None:
     """Persist hook state for an agent bead in slot + description fields."""
     with client.issue_write_lock(agent_bead_id):
@@ -328,6 +335,7 @@ def set_agent_hook(
             fields={"hook_bead": epic_id},
             client=client,
             fail=fail,
+            update_issue_description_fn=update_issue_description_fn,
         )
 
 

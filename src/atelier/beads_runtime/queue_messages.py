@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable
 
 from .. import messages
 from .client import (
@@ -15,6 +16,11 @@ from .client import (
     update_issue_description,
 )
 
+CreateIssueWithBodyFn = Callable[[RuntimeBeadsClient, list[str], str], str]
+UpdateIssueDescriptionFn = Callable[[RuntimeBeadsClient, str, str], None]
+ClosedActivePrStillBlockingFn = Callable[[dict[str, object]], bool]
+MarkMessagesReadFn = Callable[[set[str]], None]
+
 
 def create_message_bead(
     *,
@@ -23,6 +29,7 @@ def create_message_bead(
     metadata: dict[str, object],
     assignee: str | None,
     client: RuntimeBeadsClient,
+    create_issue_with_body_fn: CreateIssueWithBodyFn = create_issue_with_body,
     label_message: str = "message",
     label_unread: str = "unread",
 ) -> dict[str, object]:
@@ -50,7 +57,7 @@ def create_message_bead(
     ]
     if assignee:
         args.extend(["--assignee", assignee])
-    issue_id = create_issue_with_body(client, args, description)
+    issue_id = create_issue_with_body_fn(client, args, description)
     issues = run_json(client, ["show", issue_id])
     return issues[0] if issues else {"id": issue_id, "title": subject}
 
@@ -85,6 +92,10 @@ def list_queue_messages(
     unclaimed_only: bool,
     unread_only: bool,
     client: RuntimeBeadsClient,
+    is_closed_active_pr_still_blocking: ClosedActivePrStillBlockingFn | None = None,
+    mark_messages_read_best_effort: MarkMessagesReadFn | None = None,
+    needs_decision_subject_prefix: str = "NEEDS-DECISION:",
+    closed_active_pr_reason: str = "needs-decision: closed changeset has active pr lifecycle",
     label_message: str = "message",
     label_unread: str = "unread",
 ) -> list[dict[str, object]]:
@@ -94,6 +105,9 @@ def list_queue_messages(
         args.extend(["--label", issue_label(client, label_unread)])
     issues = run_json(client, args)
     matches: list[dict[str, object]] = []
+    duplicate_groups: dict[tuple[str, str], dict[str, object]] = {}
+    duplicate_replaced_ids: set[str] = set()
+    stale_ids: set[str] = set()
     for issue in issues:
         description = issue.get("description")
         if not isinstance(description, str):
@@ -116,12 +130,72 @@ def list_queue_messages(
             (isinstance(claimed_by, str) and claimed_by.strip()) or assignee_claim
         ):
             continue
+        issue_id = str(issue.get("id") or "").strip()
         enriched = dict(issue)
         enriched["queue"] = queue_name
         enriched["claimed_by"] = (
             claimed_by if isinstance(claimed_by, str) and claimed_by.strip() else assignee_claim
         )
+        thread_id = payload_metadata.get("thread") if isinstance(payload_metadata, dict) else None
+        normalized_thread = (
+            thread_id.strip() if isinstance(thread_id, str) and thread_id.strip() else None
+        )
+        reason_key = _needs_decision_reason_key(
+            enriched.get("title"),
+            thread_id=normalized_thread,
+            subject_prefix=needs_decision_subject_prefix,
+        )
+        if normalized_thread and reason_key is not None:
+            dedupe_key = (normalized_thread, reason_key)
+            current = duplicate_groups.get(dedupe_key)
+            if current is None:
+                duplicate_groups[dedupe_key] = enriched
+            else:
+                if _issue_sorts_after(enriched, current):
+                    replaced_id = str(current.get("id") or "").strip()
+                    if replaced_id:
+                        duplicate_replaced_ids.add(replaced_id)
+                    duplicate_groups[dedupe_key] = enriched
+                elif issue_id:
+                    duplicate_replaced_ids.add(issue_id)
+            continue
         matches.append(enriched)
+
+    for dedupe_key, selected in duplicate_groups.items():
+        _thread_id, reason_key = dedupe_key
+        issue_id = str(selected.get("id") or "").strip()
+        if (
+            reason_key == closed_active_pr_reason
+            and is_closed_active_pr_still_blocking is not None
+            and not is_closed_active_pr_still_blocking(selected)
+        ):
+            if issue_id:
+                stale_ids.add(issue_id)
+            continue
+        matches.append(selected)
+
+    if unread_only:
+        resolved_ids = duplicate_replaced_ids | stale_ids
+        if resolved_ids:
+            if mark_messages_read_best_effort is not None:
+                mark_messages_read_best_effort(resolved_ids)
+            else:
+                unread_label = issue_label(client, label_unread)
+                for message_id in sorted(resolved_ids):
+                    cleaned_id = message_id.strip()
+                    if not cleaned_id:
+                        continue
+                    run_command(
+                        client,
+                        ["update", cleaned_id, "--remove-label", unread_label],
+                        allow_failure=True,
+                    )
+
+    if duplicate_replaced_ids or stale_ids:
+        hidden_ids = duplicate_replaced_ids | stale_ids
+        matches = [
+            issue for issue in matches if str(issue.get("id") or "").strip() not in hidden_ids
+        ]
     return matches
 
 
@@ -132,6 +206,7 @@ def claim_queue_message(
     queue: str | None,
     client: RuntimeBeadsClient,
     fail: FailureHandler,
+    update_issue_description_fn: UpdateIssueDescriptionFn = update_issue_description,
     description_update_max_attempts: int,
 ) -> dict[str, object]:
     """Claim a queued message bead by setting claim metadata."""
@@ -180,7 +255,7 @@ def claim_queue_message(
             payload_metadata["claimed_by"] = agent_id
             payload_metadata["claimed_at"] = dt.datetime.now(tz=dt.timezone.utc).isoformat()
             updated = messages.render_message(payload_metadata, payload_body)
-            update_issue_description(client, message_id, updated)
+            update_issue_description_fn(client, message_id, updated)
             refreshed = run_json(client, ["show", message_id])
             if not refreshed:
                 continue
@@ -219,6 +294,56 @@ def mark_message_read(
         client,
         ["update", message_id, "--remove-label", issue_label(client, label_unread)],
     )
+
+
+def _issue_sorts_after(candidate: dict[str, object], current: dict[str, object]) -> bool:
+    candidate_timestamp = _parse_issue_timestamp(candidate.get("created_at"))
+    current_timestamp = _parse_issue_timestamp(current.get("created_at"))
+    if candidate_timestamp is not None and current_timestamp is not None:
+        if candidate_timestamp != current_timestamp:
+            return candidate_timestamp > current_timestamp
+    elif candidate_timestamp is not None:
+        return True
+    elif current_timestamp is not None:
+        return False
+    candidate_id = str(candidate.get("id") or "").strip()
+    current_id = str(current.get("id") or "").strip()
+    return candidate_id > current_id
+
+
+def _parse_issue_timestamp(value: object) -> dt.datetime | None:
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = f"{raw[:-1]}+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def _needs_decision_reason_key(
+    subject: object,
+    *,
+    thread_id: str | None,
+    subject_prefix: str,
+) -> str | None:
+    if not isinstance(subject, str):
+        return None
+    normalized_subject = " ".join(subject.split())
+    if not normalized_subject.startswith(subject_prefix):
+        return None
+    if thread_id:
+        suffix = f"({thread_id})"
+        if normalized_subject.endswith(suffix):
+            normalized_subject = normalized_subject[: -len(suffix)].rstrip()
+    return normalized_subject.lower()
 
 
 def _issue_description(issue: dict[str, object]) -> str:
