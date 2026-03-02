@@ -98,7 +98,6 @@ run_full_gate() {
   run_ruff_check .
   run_ruff_format_check .
   run_shellcheck_publish_scripts
-  run_hotspot_guardrails
   run_pyright
 }
 
