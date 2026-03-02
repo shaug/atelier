@@ -282,22 +282,36 @@ def _global_changeset_records(
     startup_stage: str,
     emit_diagnostic: Callable[[str], None] | None,
 ) -> tuple[list[beads.BeadsIssueRecord], dict[str, str]]:
-    epics = _read_query_with_retry(
-        args=[
-            "list",
-            "--label",
-            beads.issue_label("epic", beads_root=beads_root),
-            "--all",
-            "--limit",
-            "0",
-        ],
-        beads_root=beads_root,
-        repo_root=repo_root,
-        startup_stage=startup_stage,
-        subject="active epic index",
-        emit_diagnostic=emit_diagnostic,
-    )
-    if epics is None:
+    epics: list[dict[str, object]] = []
+    seen_epic_ids: set[str] = set()
+    for epic_label in beads.issue_label_candidates("epic", beads_root=beads_root):
+        labeled_epics = _read_query_with_retry(
+            args=[
+                "list",
+                "--label",
+                epic_label,
+                "--all",
+                "--limit",
+                "0",
+            ],
+            beads_root=beads_root,
+            repo_root=repo_root,
+            startup_stage=startup_stage,
+            subject=f"active epic index ({epic_label})",
+            emit_diagnostic=emit_diagnostic,
+        )
+        if labeled_epics is None:
+            continue
+        for epic in labeled_epics:
+            if not isinstance(epic, dict):
+                continue
+            epic_id = str(epic.get("id") or "").strip()
+            if epic_id:
+                if epic_id in seen_epic_ids:
+                    continue
+                seen_epic_ids.add(epic_id)
+            epics.append(epic)
+    if not epics:
         return [], {}
     active_epics = [
         issue

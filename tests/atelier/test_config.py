@@ -319,3 +319,35 @@ def test_build_project_config_rejects_colliding_beads_prefix_override() -> None:
                 args,
                 allow_editor_empty=True,
             )
+
+
+def test_build_project_config_non_interactive_uses_available_suggested_beads_prefix() -> None:
+    args = SimpleNamespace(
+        branch_prefix="",
+        beads_prefix=None,
+        branch_pr_mode="draft",
+        branch_history="merge",
+        branch_pr_strategy="sequential",
+        agent="codex",
+        editor_edit="cat",
+        editor_work="cat",
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = Path(tmp) / "data"
+        with (
+            patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+            patch("atelier.agents.available_agent_names", return_value=("codex",)),
+            patch("atelier.config.discover_local_project_prefixes", return_value={"at"}),
+        ):
+            payload = config.build_project_config(
+                ProjectConfig(),
+                "/tmp/tuber-service",
+                None,
+                None,
+                args,
+                prompt_missing_only=True,
+                raw_existing={"beads": {"prefix": "at"}},
+                allow_editor_empty=True,
+            )
+
+    assert payload.beads.prefix == "ts"
