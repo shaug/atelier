@@ -1751,6 +1751,32 @@ def _update_runtime_metadata_dolt_database(*, beads_root: Path, database_name: s
     else:
         payload = {}
     existing_database_value = payload.get("dolt_database")
+    existing_database = _normalize_dolt_database_name(existing_database_value)
+    local_candidates = _local_dolt_database_candidates(beads_root)
+    if len(local_candidates) > 1:
+        choices = ", ".join(local_candidates)
+        if existing_database == database_name:
+            return True
+        if existing_database is None:
+            atelier_log.warning(
+                "Startup migration runtime DB reconciliation blocked: multiple local Dolt "
+                f"databases found ({choices}) and metadata has no configured dolt_database. "
+                "Set `.beads/metadata.json` `dolt_database` to the intended database and rerun."
+            )
+            return False
+        if existing_database not in local_candidates:
+            atelier_log.warning(
+                "Startup migration runtime DB reconciliation blocked: configured "
+                f"dolt_database={existing_database} is not one of local candidates ({choices}). "
+                "Set `.beads/metadata.json` `dolt_database` to the intended database and rerun."
+            )
+            return False
+        atelier_log.warning(
+            "Startup migration runtime DB reconciliation blocked: preserving configured "
+            f"dolt_database={existing_database} while `bd dolt show` reported {database_name}. "
+            "Set `.beads/metadata.json` `dolt_database` explicitly if switching is intended."
+        )
+        return False
     if isinstance(existing_database_value, str) and existing_database_value == database_name:
         return True
     payload["dolt_database"] = database_name

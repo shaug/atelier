@@ -1500,6 +1500,83 @@ def test_reconcile_startup_auto_migration_runtime_database_falls_back_to_metadat
     assert ["bd", "dolt", "set", "database", "beads_at", "--update-config"] in calls
 
 
+def test_reconcile_startup_auto_migration_runtime_database_preserves_configured_ambiguous_db(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_other" / ".dolt").mkdir(parents=True)
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text(
+        json.dumps({"backend": "dolt", "dolt_database": "beads_other"}),
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    calls: list[list[str]] = []
+    warnings: list[str] = []
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "dolt", "show", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"connection_ok":true,"database":"beads_at"}',
+                stderr="",
+            )
+        if argv == ["bd", "dolt", "set", "database", "beads_at", "--update-config"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr="unknown flag: --update-config",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+        patch("atelier.beads.atelier_log.warning", side_effect=warnings.append),
+    ):
+        beads._reconcile_startup_auto_migration_runtime_database(  # pyright: ignore[reportPrivateUsage]
+            beads_root=beads_root,
+            cwd=cwd,
+            env={},
+        )
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert payload["dolt_database"] == "beads_other"
+    assert ["bd", "dolt", "set", "database", "beads_at", "--update-config"] in calls
+    assert any("reconciliation blocked" in message for message in warnings)
+
+
+def test_update_runtime_metadata_dolt_database_accepts_ambiguous_explicit_selection(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_other" / ".dolt").mkdir(parents=True)
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text(
+        json.dumps({"backend": "dolt", "dolt_database": "beads_other/"}),
+        encoding="utf-8",
+    )
+
+    updated = beads._update_runtime_metadata_dolt_database(  # pyright: ignore[reportPrivateUsage]
+        beads_root=beads_root,
+        database_name="beads_other",
+    )
+
+    assert updated is True
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert payload["dolt_database"] == "beads_other/"
+
+
 def test_run_bd_command_prime_reports_skipped_healthy_dolt_diagnostic(
     tmp_path: Path,
 ) -> None:
