@@ -247,7 +247,7 @@ def test_initialize_project_service_orchestration_and_failure_mapping() -> None:
             return_value=Path("/project-data/.beads"),
         ),
         patch("atelier.services.project.initialize_project.beads.ensure_atelier_store"),
-        patch("atelier.services.project.initialize_project.beads.ensure_atelier_issue_prefix"),
+        patch("atelier.services.project.initialize_project.beads.ensure_issue_prefix"),
         patch("atelier.services.project.initialize_project.beads.run_bd_command"),
         patch("atelier.services.project.initialize_project.beads.ensure_atelier_types"),
     ):
@@ -381,7 +381,7 @@ def test_initialize_project_service_maps_boundary_failures_to_stable_service_err
                 return_value=Path("/project-data/.beads"),
             ),
             patch("atelier.services.project.initialize_project.beads.ensure_atelier_store"),
-            patch("atelier.services.project.initialize_project.beads.ensure_atelier_issue_prefix"),
+            patch("atelier.services.project.initialize_project.beads.ensure_issue_prefix"),
             patch(
                 "atelier.services.project.initialize_project.beads.run_bd_command",
                 side_effect=beads_side_effect,

@@ -47,7 +47,7 @@ def test_new_creates_project_and_starts_planning() -> None:
                     return_value=False,
                 ),
                 patch(
-                    "atelier.services.project.initialize_project.beads.ensure_atelier_issue_prefix",
+                    "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                     return_value=False,
                 ),
                 patch("atelier.paths.atelier_data_dir", return_value=data_dir),

@@ -572,7 +572,7 @@ def run_planner(args: object) -> None:
                     "repo_root": str(repo_root),
                     "project_data_dir": str(project_data_dir),
                     "beads_dir": str(beads_root),
-                    "beads_prefix": "at",
+                    "beads_prefix": config.resolve_beads_prefix(project_config),
                     "planner_worktree": str(worktree_path),
                     "planner_branch": planner_branch,
                     "default_branch": default_branch,
@@ -633,6 +633,9 @@ def run_planner(args: object) -> None:
                     default_branch=default_branch,
                 )
             )
+            env["BEADS_DIR"] = str(beads_root)
+            env["BEADS_DB"] = str(beads_root / "beads.db")
+            env["ATELIER_BEADS_PREFIX"] = config.resolve_beads_prefix(project_config)
             epic_id = getattr(args, "epic_id", None)
             if epic_id:
                 env["ATELIER_PLAN_EPIC"] = str(epic_id)

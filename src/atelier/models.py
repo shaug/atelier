@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -23,6 +24,7 @@ BEADS_LOCATION_VALUES = ("repo", "project")
 BeadsLocation = Literal["repo", "project"]
 BEADS_RUNTIME_MODE_VALUES = ("dolt-server",)
 BeadsRuntimeMode = Literal["dolt-server"]
+BEADS_PREFIX_PATTERN = re.compile(r"^[a-z][a-z0-9]{0,15}$")
 
 
 class BranchConfig(BaseModel):
@@ -353,6 +355,7 @@ class BeadsSection(BaseModel):
 
     location: BeadsLocation | None = None
     runtime_mode: BeadsRuntimeMode | None = None
+    prefix: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -361,10 +364,14 @@ class BeadsSection(BaseModel):
             return value
         payload = dict(value)
         if payload.get("runtime_mode") is not None:
+            if payload.get("prefix") is None and payload.get("issue_prefix") is not None:
+                payload["prefix"] = payload.get("issue_prefix")
             return payload
         legacy_runtime = payload.get("mode")
         if legacy_runtime is not None:
             payload["runtime_mode"] = legacy_runtime
+        if payload.get("prefix") is None and payload.get("issue_prefix") is not None:
+            payload["prefix"] = payload.get("issue_prefix")
         return payload
 
     @field_validator("location", mode="before")
@@ -392,6 +399,20 @@ class BeadsSection(BaseModel):
         if normalized in BEADS_RUNTIME_MODE_VALUES:
             return normalized
         raise ValueError("runtime_mode must be one of: " + ", ".join(BEADS_RUNTIME_MODE_VALUES))
+
+    @field_validator("prefix", mode="before")
+    @classmethod
+    def normalize_prefix(cls, value: object) -> object:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("prefix must be a string like at or ts2")
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if not BEADS_PREFIX_PATTERN.match(normalized):
+            raise ValueError("prefix must match ^[a-z][a-z0-9]{0,15}$ (for example: at, ts, ts2)")
+        return normalized
 
 
 class AtelierSection(BaseModel):

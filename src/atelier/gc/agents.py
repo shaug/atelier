@@ -18,7 +18,9 @@ def collect_agent_homes(
 ) -> list[GcAction]:
     actions: list[GcAction] = []
     agent_issues = beads.run_bd_json(
-        ["list", "--label", "at:agent"], beads_root=beads_root, cwd=repo_root
+        ["list", "--label", beads.issue_label("agent", beads_root=beads_root)],
+        beads_root=beads_root,
+        cwd=repo_root,
     )
     epics = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
     epics_by_id: dict[str, dict[str, object]] = {}

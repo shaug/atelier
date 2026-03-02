@@ -12,6 +12,7 @@ Example:
 import datetime as dt
 import hashlib
 import json
+import re
 import shlex
 import shutil
 from pathlib import Path
@@ -39,6 +40,9 @@ from .models import (
     ProjectUserConfig,
     UpgradePolicy,
 )
+
+DEFAULT_BEADS_PREFIX = "at"
+_BEADS_PREFIX_PATTERN = re.compile(r"^[a-z][a-z0-9]{0,15}$")
 
 
 def utc_now() -> str:
@@ -477,6 +481,121 @@ def resolve_beads_root(project_dir: Path, repo_root: Path) -> Path:
     """Resolve the Beads root directory for Atelier planning."""
     _ = repo_root
     return paths.project_beads_dir(project_dir)
+
+
+def _coerce_beads_prefix(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if not _BEADS_PREFIX_PATTERN.match(normalized):
+        return None
+    return normalized
+
+
+def normalize_beads_prefix(value: object, source: str = "beads.prefix") -> str:
+    """Normalize and validate a Beads issue prefix.
+
+    Args:
+        value: Raw prefix value.
+        source: Source label used in validation errors.
+
+    Returns:
+        Lower-case validated Beads prefix.
+    """
+    normalized = _coerce_beads_prefix(value)
+    if normalized is None:
+        die(f"{source} must match ^[a-z][a-z0-9]{{0,15}}$ (for example: at, ts, ts2)")
+    return normalized
+
+
+def resolve_beads_prefix(
+    config_payload: ProjectConfig | ProjectSystemConfig | dict | None = None,
+) -> str:
+    """Resolve the Beads issue prefix from config, defaulting to ``at``."""
+    if isinstance(config_payload, (ProjectConfig, ProjectSystemConfig)):
+        raw = config_payload.beads.prefix
+        coerced = _coerce_beads_prefix(raw)
+        if coerced:
+            return coerced
+        return DEFAULT_BEADS_PREFIX
+    if isinstance(config_payload, dict):
+        beads_payload = config_payload.get("beads")
+        if isinstance(beads_payload, dict):
+            for key in ("prefix", "issue_prefix"):
+                coerced = _coerce_beads_prefix(beads_payload.get(key))
+                if coerced:
+                    return coerced
+    return DEFAULT_BEADS_PREFIX
+
+
+def derive_beads_prefix_seed(enlistment_path: str, origin: str | None) -> str:
+    """Derive a deterministic Beads prefix seed from project identity."""
+    project_name = Path(enlistment_path).name.strip()
+    if not project_name and isinstance(origin, str):
+        project_name = origin.rsplit("/", 1)[-1].strip()
+    tokens = [part for part in re.split(r"[^a-z0-9]+", project_name.lower()) if part]
+    if len(tokens) >= 2:
+        candidate = "".join(token[0] for token in tokens[:4])
+    elif tokens:
+        token = tokens[0]
+        candidate = token[:2] if len(token) >= 2 else token
+    else:
+        candidate = DEFAULT_BEADS_PREFIX
+    if candidate and candidate[0].isdigit():
+        candidate = f"p{candidate}"
+    if len(candidate) > 16:
+        candidate = candidate[:16]
+    coerced = _coerce_beads_prefix(candidate)
+    return coerced or DEFAULT_BEADS_PREFIX
+
+
+def suggest_available_beads_prefix(seed: str, taken_prefixes: set[str]) -> str:
+    """Return a deterministic collision-free Beads prefix suggestion."""
+    base = _coerce_beads_prefix(seed) or DEFAULT_BEADS_PREFIX
+    taken = {entry for entry in (item.lower().strip() for item in taken_prefixes) if entry}
+    if base not in taken:
+        return base
+    for index in range(2, 1000):
+        suffix = str(index)
+        max_base_len = max(1, 16 - len(suffix))
+        candidate = f"{base[:max_base_len]}{suffix}"
+        if _coerce_beads_prefix(candidate) and candidate not in taken:
+            return candidate
+    return base
+
+
+def discover_local_project_prefixes(*, exclude_project_dir: Path | None = None) -> set[str]:
+    """Collect configured Beads prefixes from local Atelier projects."""
+    project_dirs_root = paths.projects_root()
+    if not project_dirs_root.exists():
+        return set()
+    excluded = exclude_project_dir.resolve() if exclude_project_dir else None
+    prefixes: set[str] = set()
+    for candidate in sorted(project_dirs_root.iterdir()):
+        if not candidate.is_dir():
+            continue
+        if excluded is not None and candidate.resolve() == excluded:
+            continue
+        payload: dict | None = None
+        for config_path in (
+            paths.project_config_sys_path(candidate),
+            paths.project_config_legacy_path(candidate),
+        ):
+            if not config_path.exists():
+                continue
+            try:
+                loaded = load_json(config_path)
+            except Exception:
+                loaded = None
+            if isinstance(loaded, dict):
+                payload = loaded
+                break
+        if payload is None:
+            continue
+        prefixes.add(resolve_beads_prefix(payload))
+    return prefixes
 
 
 def resolve_beads_runtime_mode(config_payload: ProjectConfig | dict | None = None) -> str:
@@ -930,6 +1049,34 @@ def build_project_config(
     else:
         branch_prefix = branch_config.prefix
 
+    project_dir = paths.project_dir_for_enlistment(enlistment_path, origin)
+    existing_beads_prefix = resolve_beads_prefix(existing_config)
+    taken_beads_prefixes = discover_local_project_prefixes(exclude_project_dir=project_dir)
+
+    def validate_unique_beads_prefix(raw: object, *, source: str) -> str:
+        resolved = normalize_beads_prefix(raw, source)
+        if resolved == existing_beads_prefix:
+            return resolved
+        if resolved in taken_beads_prefixes:
+            fallback = suggest_available_beads_prefix(resolved, taken_beads_prefixes)
+            die(
+                f"{source} collides with an existing Atelier project prefix: {resolved!r}. "
+                f"Suggested fallback: {fallback!r}"
+            )
+        return resolved
+
+    suggested_seed = derive_beads_prefix_seed(enlistment_path, origin)
+    suggested_prefix = suggest_available_beads_prefix(suggested_seed, taken_beads_prefixes)
+
+    beads_prefix_arg = read_arg(args, "beads_prefix")
+    if beads_prefix_arg is not None:
+        beads_prefix = validate_unique_beads_prefix(beads_prefix_arg, source="--beads-prefix")
+    elif should_prompt("beads", "prefix"):
+        beads_prefix_input = prompt("Beads issue prefix", suggested_prefix, required=True)
+        beads_prefix = validate_unique_beads_prefix(beads_prefix_input, source="beads.prefix")
+    else:
+        beads_prefix = validate_unique_beads_prefix(suggested_prefix, source="beads.prefix")
+
     branch_pr_mode_default = branch_config.pr_mode
     branch_history_default = branch_config.history
     branch_squash_message_default = branch_config.squash_message
@@ -1066,7 +1213,7 @@ def build_project_config(
     atelier_managed_files = dict(existing_config.atelier.managed_files)
     atelier_data_dir = existing_config.atelier.data_dir
     if not atelier_data_dir:
-        atelier_data_dir = str(paths.project_dir_for_enlistment(enlistment_path, origin))
+        atelier_data_dir = str(project_dir)
 
     agent_options = dict(existing_config.agent.options)
     agent_options.setdefault(agent_default, [])
@@ -1080,7 +1227,11 @@ def build_project_config(
     project_owner = existing_config.project.owner
 
     beads_section = existing_config.beads.model_copy(
-        update={"location": "project", "runtime_mode": "dolt-server"}
+        update={
+            "location": "project",
+            "runtime_mode": "dolt-server",
+            "prefix": beads_prefix,
+        }
     )
 
     branch_config = BranchConfig.model_validate(

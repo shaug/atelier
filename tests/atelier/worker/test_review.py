@@ -221,11 +221,18 @@ def test_select_global_review_feedback_changeset_retries_and_skips_failed_family
         del beads_root, cwd
         key = tuple(args)
         attempts[key] = attempts.get(key, 0) + 1
+        if key == ("list", "--label", "ts:epic", "--all", "--limit", "0"):
+            return (
+                [
+                    {"id": "at-1", "labels": ["ts:epic"], "status": "open"},
+                    {"id": "at-2", "labels": ["ts:epic"], "status": "in_progress"},
+                ],
+                None,
+            )
         if key == ("list", "--label", "at:epic", "--all", "--limit", "0"):
             return (
                 [
                     {"id": "at-1", "labels": ["at:epic"], "status": "open"},
-                    {"id": "at-2", "labels": ["at:epic"], "status": "in_progress"},
                     {"id": "at-3", "labels": ["at:epic"], "status": "deferred"},
                 ],
                 None,
@@ -260,6 +267,10 @@ def test_select_global_review_feedback_changeset_retries_and_skips_failed_family
             side_effect=fake_read_query,
         ),
         patch(
+            "atelier.worker.review.beads.issue_label_candidates",
+            return_value=("ts:epic", "at:epic"),
+        ),
+        patch(
             "atelier.worker.review.prs.lookup_github_pr_status",
             return_value=prs.GithubPrLookup(
                 outcome="found",
@@ -291,6 +302,9 @@ def test_select_global_review_feedback_changeset_retries_and_skips_failed_family
     assert selection is not None
     assert selection.epic_id == "at-1"
     assert selection.changeset_id == "at-1.1"
+    assert attempts[("list", "--label", "ts:epic", "--all", "--limit", "0")] == 1
+    assert attempts[("list", "--label", "at:epic", "--all", "--limit", "0")] == 1
+    assert attempts[("list", "--parent", "at-1")] == 1
     assert attempts[("list", "--parent", "at-2")] == 3
     assert ("list", "--parent", "at-3") not in attempts
     assert len(emitted) == 1

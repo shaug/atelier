@@ -29,6 +29,7 @@ def make_init_args(**overrides: object):
 
     data = {
         "branch_prefix": None,
+        "beads_prefix": "at",
         "branch_pr_mode": None,
         "branch_history": None,
         "branch_squash_message": None,
@@ -41,6 +42,7 @@ def make_init_args(**overrides: object):
     data = {**data, **overrides}
     return InitProjectArgs(
         branch_prefix=data.get("branch_prefix"),
+        beads_prefix=data.get("beads_prefix"),
         branch_pr_mode=data.get("branch_pr_mode"),
         branch_history=data.get("branch_history"),
         branch_squash_message=data.get("branch_squash_message"),

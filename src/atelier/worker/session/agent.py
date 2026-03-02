@@ -181,7 +181,7 @@ def prepare_agent_session(
                 "project_root": str(project_enlistment),
                 "project_data_dir": str(project_data_dir),
                 "beads_dir": str(beads_root),
-                "beads_prefix": "at",
+                "beads_prefix": config.resolve_beads_prefix(project_config),
                 "worker_worktree": str(changeset_worktree_path),
             },
         )
@@ -219,6 +219,7 @@ def prepare_agent_session(
         env["ATELIER_CHANGESET_ID"] = str(changeset_id)
     env["BEADS_DIR"] = str(beads_root)
     env["BEADS_DB"] = str(beads_root / "beads.db")
+    env["ATELIER_BEADS_PREFIX"] = config.resolve_beads_prefix(project_config)
     return AgentSessionPreparation(
         agent_spec=agent_spec,
         agent_options=agent_options,

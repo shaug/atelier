@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 from atelier.worker.context import ChangesetSelectionContext
 from atelier.worker.models_boundary import parse_issue_boundary
 from atelier.worker.session import runner
@@ -116,3 +119,71 @@ def test_select_changeset_keeps_startup_override_for_null_parent_id_payload() ->
 
     assert selected.issue == override_issue
     assert calls == []
+
+
+def test_find_active_root_branch_conflicts_queries_compatibility_epic_labels() -> None:
+    queries: list[list[str]] = []
+
+    class _FakeBeads:
+        def run_bd_json(
+            self,
+            args: list[str],
+            *,
+            beads_root: Path,
+            cwd: Path,
+        ) -> list[dict[str, object]]:
+            del beads_root, cwd
+            queries.append(args)
+            label = args[2]
+            if label == "ts:epic":
+                return [
+                    {
+                        "id": "ts-epic",
+                        "status": "in_progress",
+                        "title": "Current",
+                        "root_branch": "feat/root",
+                    },
+                    {
+                        "id": "shared-epic",
+                        "status": "open",
+                        "title": "Shared",
+                        "root_branch": "feat/root",
+                    },
+                ]
+            if label == "at:epic":
+                return [
+                    {
+                        "id": "shared-epic",
+                        "status": "open",
+                        "title": "Shared legacy",
+                        "root_branch": "feat/root",
+                    },
+                    {
+                        "id": "at-legacy",
+                        "status": "blocked",
+                        "title": "Legacy",
+                        "root_branch": "feat/root",
+                    },
+                ]
+            return []
+
+        def extract_workspace_root_branch(self, issue: dict[str, object]) -> str:
+            return str(issue.get("root_branch") or "")
+
+    with patch(
+        "atelier.worker.session.runner.beads_runtime.issue_label_candidates",
+        return_value=("ts:epic", "at:epic"),
+    ):
+        blocking = runner._find_active_root_branch_conflicts(  # pyright: ignore[reportPrivateUsage]
+            beads=_FakeBeads(),
+            root_branch="feat/root",
+            selected_epic="ts-epic",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert queries == [
+        ["list", "--label", "ts:epic", "--all", "--limit", "0"],
+        ["list", "--label", "at:epic", "--all", "--limit", "0"],
+    ]
+    assert [issue["id"] for issue in blocking] == ["shared-epic", "at-legacy"]

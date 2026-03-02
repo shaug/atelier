@@ -31,7 +31,7 @@ def resolve_epic_id_for_changeset(
             return None
         visited.add(issue_id)
         labels = issue_labels(current)
-        if "at:epic" in labels:
+        if beads.has_issue_label(labels, "epic", beads_root=beads_root):
             return issue_id
         parent_id = issue_parent_id(current)
         if not parent_id:

@@ -125,8 +125,7 @@ class TestInitProject:
                         return_value=False,
                     ),
                     patch(
-                        "atelier.services.project.initialize_project."
-                        "beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -179,12 +178,12 @@ class TestInitProject:
                     _capture("run_bd_command", beads_root=beads_root, cwd=cwd)
                     return CompletedProcess(args=["bd"], returncode=0, stdout="", stderr="")
 
-                def fake_ensure_store(*, beads_root: Path, cwd: Path) -> bool:
+                def fake_ensure_store(*_args: object, beads_root: Path, cwd: Path) -> bool:
                     _capture("ensure_atelier_store", beads_root=beads_root, cwd=cwd)
                     return False
 
-                def fake_ensure_prefix(*, beads_root: Path, cwd: Path) -> bool:
-                    _capture("ensure_atelier_issue_prefix", beads_root=beads_root, cwd=cwd)
+                def fake_ensure_prefix(*_args: object, beads_root: Path, cwd: Path) -> bool:
+                    _capture("ensure_issue_prefix", beads_root=beads_root, cwd=cwd)
                     return False
 
                 def fake_ensure_types(*, beads_root: Path, cwd: Path) -> bool:
@@ -209,8 +208,7 @@ class TestInitProject:
                         side_effect=fake_ensure_store,
                     ),
                     patch(
-                        "atelier.services.project.initialize_project."
-                        "beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                         side_effect=fake_ensure_prefix,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -254,8 +252,7 @@ class TestInitProject:
                         return_value=False,
                     ),
                     patch(
-                        "atelier.services.project.initialize_project."
-                        "beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                         return_value=False,
                     ),
                     patch(
@@ -317,8 +314,7 @@ class TestInitProject:
                         return_value=False,
                     ),
                     patch(
-                        "atelier.services.project.initialize_project."
-                        "beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                         return_value=False,
                     ),
                     patch(
@@ -413,8 +409,7 @@ class TestInitProject:
                         return_value=False,
                     ),
                     patch(
-                        "atelier.services.project.initialize_project."
-                        "beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                         return_value=False,
                     ),
                     patch(
@@ -478,8 +473,7 @@ class TestInitProject:
                         return_value=False,
                     ),
                     patch(
-                        "atelier.services.project.initialize_project."
-                        "beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -527,8 +521,7 @@ class TestInitProject:
                         return_value=False,
                     ),
                     patch(
-                        "atelier.services.project.initialize_project."
-                        "beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -610,8 +603,7 @@ class TestInitProject:
                         return_value=False,
                     ),
                     patch(
-                        "atelier.services.project.initialize_project."
-                        "beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                         return_value=False,
                     ),
                     patch("sys.stdin.isatty", return_value=True),
@@ -656,8 +648,7 @@ class TestInitProject:
                         return_value=False,
                     ),
                     patch(
-                        "atelier.services.project.initialize_project."
-                        "beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -745,8 +736,7 @@ class TestInitProject:
                         return_value=False,
                     ),
                     patch(
-                        "atelier.services.project.initialize_project."
-                        "beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),
@@ -827,8 +817,7 @@ class TestInitProject:
                         return_value=False,
                     ),
                     patch(
-                        "atelier.services.project.initialize_project."
-                        "beads.ensure_atelier_issue_prefix",
+                        "atelier.services.project.initialize_project.beads.ensure_issue_prefix",
                         return_value=False,
                     ),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),

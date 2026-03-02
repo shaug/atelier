@@ -120,7 +120,7 @@ stored as records with metadata, labels, and parent/child relationships.
 Atelier planning state is always stored in the project-scoped Beads directory
 (`<atelier-project-dir>/.beads`). Repository-local Beads stores are treated as
 external systems, not as the source of Atelier planning state. The issue prefix
-for this store is `at`.
+for this store comes from project config (`beads.prefix`, default `at`).
 
 External ticket linkage and sync semantics are defined in:
 

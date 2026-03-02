@@ -121,7 +121,13 @@ def has_blocking_messages(
     parse_issue_time: Callable[[object], dt.datetime | None],
 ) -> bool:
     issues = beads.run_bd_json(
-        ["list", "--label", "at:message", "--label", "at:unread"],
+        [
+            "list",
+            "--label",
+            beads.issue_label("message", beads_root=beads_root),
+            "--label",
+            beads.issue_label("unread", beads_root=beads_root),
+        ],
         beads_root=beads_root,
         cwd=repo_root,
     )

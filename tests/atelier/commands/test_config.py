@@ -29,7 +29,7 @@ class TestConfigCommand:
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(["team/", "none", "rebase", "codex", "vim -w", "vim", ""])
+                responses = iter(["team/", "at", "none", "rebase", "codex", "vim -w", "vim", ""])
                 with (
                     patch("builtins.input", lambda _: next(responses)),
                     patch(
@@ -71,7 +71,7 @@ class TestConfigCommand:
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(["team/", "none", "rebase", "vim -w", "vim", ""])
+                responses = iter(["team/", "at", "none", "rebase", "vim -w", "vim", ""])
                 call_count = {"count": 0}
 
                 def fake_input(_: str) -> str:
@@ -100,7 +100,7 @@ class TestConfigCommand:
                 updated = config.load_project_config(config_path)
                 assert updated is not None
                 assert updated.agent.default == "codex"
-                assert call_count["count"] == 5
+                assert call_count["count"] == 6
             finally:
                 os.chdir(original_cwd)
 
@@ -119,6 +119,7 @@ class TestConfigCommand:
                 responses = iter(
                     [
                         "team/",
+                        "at",
                         "maybe",
                         "none",
                         "sideways",
@@ -156,7 +157,7 @@ class TestConfigCommand:
                 config_path = paths.project_config_path(project_dir)
                 updated = config.load_project_config(config_path)
                 assert updated is not None
-                assert call_count["count"] == 8
+                assert call_count["count"] == 9
                 assert updated.branch.pr is False
                 assert updated.branch.history == "merge"
             finally:
@@ -220,7 +221,9 @@ class TestConfigCommand:
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(["prefs/", "draft", "merge", "", "codex", "code -w", "code", ""])
+                responses = iter(
+                    ["prefs/", "at", "draft", "merge", "", "codex", "code -w", "code", ""]
+                )
                 with (
                     patch("builtins.input", lambda _: next(responses)),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),

@@ -173,12 +173,13 @@ def gc(args: object) -> None:
             repo_root=repo_root,
         )
     )
-    for label, detail in [
-        ("at:changeset", "changeset role inferred from graph"),
-        ("at:subtask", "subtask role inferred from graph"),
-        ("at:ready", "readiness inferred from open status"),
-        ("at:draft", "draft state inferred from deferred status"),
+    for label_name, detail in [
+        ("changeset", "changeset role inferred from graph"),
+        ("subtask", "subtask role inferred from graph"),
+        ("ready", "readiness inferred from open status"),
+        ("draft", "draft state inferred from deferred status"),
     ]:
+        label = beads.issue_label(label_name, beads_root=beads_root)
         actions.extend(
             gc_labels.collect_remove_deprecated_label(
                 label=label,

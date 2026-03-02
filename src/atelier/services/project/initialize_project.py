@@ -176,6 +176,7 @@ class InitializeProjectService(BaseService[InitializeProjectRequest, InitializeP
             raise UnexpectedStateError("failed to persist project configuration") from exc
 
         beads_root = config.resolve_beads_root(project_dir, Path(enlistment))
+        beads_prefix = config.resolve_beads_prefix(payload)
         messages.extend(
             (
                 "Preparing Beads store...",
@@ -184,8 +185,8 @@ class InitializeProjectService(BaseService[InitializeProjectRequest, InitializeP
             )
         )
         try:
-            beads.ensure_atelier_store(beads_root=beads_root, cwd=project_dir)
-            beads.ensure_atelier_issue_prefix(beads_root=beads_root, cwd=project_dir)
+            beads.ensure_atelier_store(beads_prefix, beads_root=beads_root, cwd=project_dir)
+            beads.ensure_issue_prefix(beads_prefix, beads_root=beads_root, cwd=project_dir)
             beads.run_bd_command(["prime"], beads_root=beads_root, cwd=project_dir)
             beads.ensure_atelier_types(beads_root=beads_root, cwd=project_dir)
         except ServiceFailure:
