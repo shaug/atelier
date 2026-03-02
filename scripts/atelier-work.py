@@ -38,7 +38,6 @@ class RunnerConfig:
     update_policy: str
     install_command: str | None
     atelier_path: str
-    worker_command: str
     worker_yes: bool
     loop_interval_seconds: float
     max_cycles: int | None
@@ -127,15 +126,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip the install step.",
     )
     parser.add_argument(
-        "--worker-command",
-        default=None,
-        help=(
-            "Base worker command to run once per cycle. When omitted, the default "
-            "is '<atelier-path> work --run-mode once'. Arguments after '--' are "
-            "appended."
-        ),
-    )
-    parser.add_argument(
         "--yes",
         action="store_true",
         help="Pass --yes to the worker command.",
@@ -203,10 +193,6 @@ def _parse_args(argv: Sequence[str]) -> tuple[RunnerConfig, list[str]]:
         install_command = "just install"
 
     atelier_path = args.atelier_path.strip() or "atelier"
-    if args.worker_command:
-        worker_command = args.worker_command
-    else:
-        worker_command = f"{atelier_path} work --run-mode once"
 
     config = RunnerConfig(
         repo_path=Path(args.repo_path).expanduser().resolve(),
@@ -216,7 +202,6 @@ def _parse_args(argv: Sequence[str]) -> tuple[RunnerConfig, list[str]]:
         update_policy=args.update_policy,
         install_command=install_command,
         atelier_path=atelier_path,
-        worker_command=worker_command,
         worker_yes=args.yes,
         loop_interval_seconds=args.loop_interval_seconds,
         max_cycles=max_cycles,
@@ -475,8 +460,9 @@ def _run_worker_step(config: RunnerConfig, worker_passthrough: Sequence[str]) ->
       ``True`` when worker command exits zero.
     """
 
+    base_command = f"{config.atelier_path} work --run-mode once"
     command = _build_worker_command(
-        config.worker_command,
+        base_command,
         worker_passthrough,
         add_yes=config.worker_yes,
     )
