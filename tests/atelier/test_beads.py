@@ -4431,7 +4431,15 @@ def test_list_inbox_messages_filters_unread() -> None:
         result = beads.list_inbox_messages("alice", beads_root=Path("/beads"), cwd=Path("/repo"))
     assert result
     called_args = run_json.call_args.args[0]
-    assert called_args == ["list", "--label", "at:message", "--assignee", "alice", "--label", "at:unread"]
+    assert called_args == [
+        "list",
+        "--label",
+        "at:message",
+        "--assignee",
+        "alice",
+        "--label",
+        "at:unread",
+    ]
 
 
 def test_list_queue_messages_filters_unread_by_default() -> None:
