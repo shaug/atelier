@@ -602,13 +602,29 @@ def issue_label(
     return f"{resolved_prefix}:{cleaned_name}"
 
 
-def issue_label_candidates(name: str, *, beads_root: Path) -> tuple[str, ...]:
-    """Return primary + compatibility labels for a namespaced label name."""
+def issue_label_candidates(
+    name: str,
+    *,
+    beads_root: Path,
+    include_configured_prefix: bool = False,
+) -> tuple[str, ...]:
+    """Return label candidates for fixed namespace + optional configured prefix."""
     primary = issue_label(name)
+    if not include_configured_prefix:
+        return (primary,)
     compatibility = issue_label(name, prefix=configured_issue_prefix(beads_root=beads_root))
     if compatibility == primary:
         return (primary,)
     return (primary, compatibility)
+
+
+def _agent_label_candidates(*, beads_root: Path) -> tuple[str, ...]:
+    """Return agent label variants for legacy startup compatibility."""
+    return issue_label_candidates(
+        _LABEL_AGENT,
+        beads_root=beads_root,
+        include_configured_prefix=True,
+    )
 
 
 def has_issue_label(
@@ -627,33 +643,6 @@ def has_issue_label(
     if suffix == ":":
         return False
     return any(label.endswith(suffix) for label in label_values)
-
-
-def _list_issues_for_label(
-    label_name: str,
-    *,
-    beads_root: Path,
-    cwd: Path,
-    extra_args: list[str] | None = None,
-) -> list[dict[str, object]]:
-    """List issues for primary + compatibility label namespaces."""
-    args_tail = list(extra_args or ())
-    issues: list[dict[str, object]] = []
-    seen_ids: set[str] = set()
-    for label in issue_label_candidates(label_name, beads_root=beads_root):
-        label_issues = run_bd_json(
-            ["list", "--label", label, *args_tail],
-            beads_root=beads_root,
-            cwd=cwd,
-        )
-        for issue in label_issues:
-            issue_id = str(issue.get("id") or "").strip()
-            if issue_id:
-                if issue_id in seen_ids:
-                    continue
-                seen_ids.add(issue_id)
-            issues.append(issue)
-    return issues
 
 
 def _default_dolt_database_name(beads_root: Path) -> str:
@@ -3140,8 +3129,7 @@ def release_epic_assignment(
 
         args = ["update", epic_id, "--assignee", ""]
         if has_issue_label(labels, _LABEL_HOOKED, beads_root=beads_root):
-            for hooked_label in issue_label_candidates(_LABEL_HOOKED, beads_root=beads_root):
-                args.extend(["--remove-label", hooked_label])
+            args.extend(["--remove-label", issue_label(_LABEL_HOOKED)])
         if status and status not in {"closed", "done"}:
             args.extend(["--status", "open"])
         run_bd_command(args, beads_root=beads_root, cwd=cwd, allow_failure=True)
@@ -3263,7 +3251,7 @@ def list_epics(
 ) -> list[dict[str, object]]:
     """List epic beads for the epic pool.
 
-    Uses the configured epic discovery label with compatibility fallback to
+    Uses the fixed ``at:epic`` discovery label with `--all --limit 0` to
     avoid default list caps and ensure full enumeration.
 
     Args:
@@ -3276,20 +3264,9 @@ def list_epics(
     Returns:
         Epic issue payloads from Beads. Non-dict entries are discarded.
     """
-    result: list[dict[str, object]] = []
-    seen_ids: set[str] = set()
-    for epic_label in issue_label_candidates(_LABEL_EPIC, beads_root=beads_root):
-        args = ["list", "--label", epic_label, "--all", "--limit", "0"]
-        issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
-        for issue in issues:
-            if not isinstance(issue, dict):
-                continue
-            issue_id = str(issue.get("id") or "").strip()
-            if issue_id:
-                if issue_id in seen_ids:
-                    continue
-                seen_ids.add(issue_id)
-            result.append(issue)
+    args = ["list", "--label", issue_label(_LABEL_EPIC), "--all", "--limit", "0"]
+    issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
+    result = [issue for issue in issues if isinstance(issue, dict)]
     if not include_closed:
         result = [
             i for i in result if lifecycle.canonical_lifecycle_status(i.get("status")) != "closed"
@@ -4760,29 +4737,18 @@ def list_epics_by_workspace_label(
     root_branch: str, *, beads_root: Path, cwd: Path
 ) -> list[dict[str, object]]:
     """List epic beads with the workspace label."""
-    result: list[dict[str, object]] = []
-    seen_ids: set[str] = set()
-    for epic_label in issue_label_candidates(_LABEL_EPIC, beads_root=beads_root):
-        issues = run_bd_json(
-            [
-                "list",
-                "--label",
-                epic_label,
-                "--label",
-                workspace_label(root_branch),
-                "--all",
-            ],
-            beads_root=beads_root,
-            cwd=cwd,
-        )
-        for issue in issues:
-            issue_id = str(issue.get("id") or "").strip()
-            if issue_id:
-                if issue_id in seen_ids:
-                    continue
-                seen_ids.add(issue_id)
-            result.append(issue)
-    return result
+    return run_bd_json(
+        [
+            "list",
+            "--label",
+            issue_label(_LABEL_EPIC),
+            "--label",
+            workspace_label(root_branch),
+            "--all",
+        ],
+        beads_root=beads_root,
+        cwd=cwd,
+    )
 
 
 def find_epics_by_root_branch(
@@ -5160,30 +5126,21 @@ def _create_issue_with_body(
 
 def find_agent_bead(agent_id: str, *, beads_root: Path, cwd: Path) -> dict[str, object] | None:
     """Find an agent bead by agent identity."""
-    issues = _list_issues_for_label(
-        _LABEL_AGENT,
-        beads_root=beads_root,
-        cwd=cwd,
-        extra_args=["--title", agent_id],
-    )
-    for issue in issues:
-        title = issue.get("title")
-        if isinstance(title, str) and title == agent_id:
-            return issue
-    issues = _list_issues_for_label(
-        _LABEL_AGENT,
-        beads_root=beads_root,
-        cwd=cwd,
-    )
-    for issue in issues:
-        title = issue.get("title")
-        if isinstance(title, str) and title == agent_id:
-            return issue
-    for issue in issues:
-        description = issue.get("description")
-        fields = _parse_description_fields(description if isinstance(description, str) else "")
-        if fields.get("agent_id") == agent_id:
-            return issue
+    for label in _agent_label_candidates(beads_root=beads_root):
+        issues = run_bd_json(
+            ["list", "--label", label, "--title", agent_id],
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+        for issue in issues:
+            title = issue.get("title")
+            if isinstance(title, str) and title == agent_id:
+                return issue
+        for issue in issues:
+            description = issue.get("description")
+            fields = _parse_description_fields(description if isinstance(description, str) else "")
+            if fields.get("agent_id") == agent_id:
+                return issue
     return None
 
 
@@ -5573,19 +5530,10 @@ def list_inbox_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List message beads assigned to the agent."""
-    issues = _list_issues_for_label(
-        _LABEL_MESSAGE,
-        beads_root=beads_root,
-        cwd=cwd,
-        extra_args=["--assignee", agent_id],
-    )
-    if not unread_only:
-        return issues
-    return [
-        issue
-        for issue in issues
-        if has_issue_label(_issue_labels(issue), _LABEL_UNREAD, beads_root=beads_root)
-    ]
+    args = ["list", "--label", issue_label(_LABEL_MESSAGE), "--assignee", agent_id]
+    if unread_only:
+        args.extend(["--label", issue_label(_LABEL_UNREAD)])
+    return run_bd_json(args, beads_root=beads_root, cwd=cwd)
 
 
 def list_queue_messages(
@@ -5597,13 +5545,10 @@ def list_queue_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List queued message beads, optionally filtered by queue name."""
-    issues = _list_issues_for_label(_LABEL_MESSAGE, beads_root=beads_root, cwd=cwd)
+    args = ["list", "--label", issue_label(_LABEL_MESSAGE)]
     if unread_only:
-        issues = [
-            issue
-            for issue in issues
-            if has_issue_label(_issue_labels(issue), _LABEL_UNREAD, beads_root=beads_root)
-        ]
+        args.extend(["--label", issue_label(_LABEL_UNREAD)])
+    issues = run_bd_json(args, beads_root=beads_root, cwd=cwd)
     matches: list[dict[str, object]] = []
     for issue in issues:
         description = issue.get("description")
@@ -5709,11 +5654,8 @@ def mark_message_read(
     cwd: Path,
 ) -> None:
     """Mark a message bead as read."""
-    args = ["update", message_id]
-    for unread_label in issue_label_candidates(_LABEL_UNREAD, beads_root=beads_root):
-        args.extend(["--remove-label", unread_label])
     run_bd_command(
-        args,
+        ["update", message_id, "--remove-label", issue_label(_LABEL_UNREAD)],
         beads_root=beads_root,
         cwd=cwd,
     )
