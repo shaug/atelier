@@ -20,6 +20,10 @@ def _bootstrap_source_import() -> None:
 _bootstrap_source_import()
 
 from atelier import auto_export, beads  # noqa: E402
+from atelier.executable_work_validation import (  # noqa: E402
+    compact_excerpt,
+    validate_executable_work_payload,
+)
 
 _STATUS_UPDATE_ATTEMPTS = 2
 _FAIL_CLOSED_REASON = "automatic fail-closed: unable to set deferred status after create"
@@ -170,6 +174,35 @@ def _apply_status_with_fail_closed(
     raise SystemExit(1)
 
 
+def _fail_invalid_payload(*, title: str, description: str) -> None:
+    failures = validate_executable_work_payload(
+        title=title,
+        scope_text=description,
+        scope_field_name="description",
+        scope_optional=True,
+    )
+    if not failures:
+        return
+
+    print("error: invalid executable work payload for changeset creation", file=sys.stderr)
+    for failure in failures:
+        print(
+            f"- {failure.field_name}: [{failure.code}] {failure.detail}",
+            file=sys.stderr,
+        )
+    print(
+        "action: provide a concrete title/description, then rerun plan-changesets",
+        file=sys.stderr,
+    )
+    print(
+        "planner-context: NEEDS-DECISION: rejected low-information changeset "
+        "payload "
+        f"(title='{compact_excerpt(title)}'; description='{compact_excerpt(description)}')",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epic-id", required=True, help="Parent epic bead id")
@@ -202,6 +235,9 @@ def main() -> None:
         help="Beads directory override (defaults to project config)",
     )
     args = parser.parse_args()
+    description = str(args.description).strip()
+
+    _fail_invalid_payload(title=args.title, description=description)
 
     context = auto_export.resolve_auto_export_context()
     beads_dir = str(args.beads_dir).strip()
@@ -220,7 +256,6 @@ def main() -> None:
         args.acceptance,
         "--silent",
     ]
-    description = str(args.description).strip()
     if description:
         create_args.extend(["--description", description])
     if args.no_export:

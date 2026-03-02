@@ -19,6 +19,10 @@ def _bootstrap_source_import() -> None:
 _bootstrap_source_import()
 
 from atelier import auto_export, beads  # noqa: E402
+from atelier.executable_work_validation import (  # noqa: E402
+    compact_excerpt,
+    validate_executable_work_payload,
+)
 
 _STATUS_UPDATE_ATTEMPTS = 2
 _FAIL_CLOSED_REASON = "automatic fail-closed: unable to set deferred status after create"
@@ -82,6 +86,34 @@ def _description(scope: str, changeset_strategy: str | None) -> str:
     return "\n\n".join(parts).strip()
 
 
+def _fail_invalid_payload(*, title: str, scope: str) -> None:
+    failures = validate_executable_work_payload(
+        title=title,
+        scope_text=scope,
+        scope_field_name="scope",
+        scope_optional=False,
+    )
+    if not failures:
+        return
+
+    print("error: invalid executable work payload for epic creation", file=sys.stderr)
+    for failure in failures:
+        print(
+            f"- {failure.field_name}: [{failure.code}] {failure.detail}",
+            file=sys.stderr,
+        )
+    print(
+        "action: provide a concrete title and scope, then rerun plan-create-epic",
+        file=sys.stderr,
+    )
+    print(
+        "planner-context: NEEDS-DECISION: rejected low-information epic payload "
+        f"(title='{compact_excerpt(title)}'; scope='{compact_excerpt(scope)}')",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--title", required=True, help="Epic title")
@@ -103,6 +135,8 @@ def main() -> None:
         help="Beads directory override (defaults to project config)",
     )
     args = parser.parse_args()
+
+    _fail_invalid_payload(title=args.title, scope=args.scope)
 
     context = auto_export.resolve_auto_export_context()
     beads_dir = str(args.beads_dir).strip()

@@ -583,3 +583,120 @@ def test_create_changeset_fails_when_create_adds_multiple_new_children(
     assert all(not (command and command[0] == "update") for command in commands)
     assert all(not (command and command[0] == "close") for command in commands)
     assert export_calls == []
+
+
+def test_create_changeset_rejects_low_information_description(
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    commands: list[list[str]] = []
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+
+    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+
+    def fake_run_bd(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        raise AssertionError("bd create must not run when payload validation fails")
+
+    monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_changeset.py",
+            "--epic-id",
+            "at-epic",
+            "--title",
+            "Prevent malformed work beads",
+            "--acceptance",
+            "Malformed executable work records are rejected before create.",
+            "--description",
+            "/",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert "invalid executable work payload for changeset creation" in captured.err
+    assert "- description: [placeholder_value]" in captured.err
+    assert "planner-context: NEEDS-DECISION" in captured.err
+    assert commands == []
+
+
+@pytest.mark.parametrize(
+    ("incident_id", "title", "description"),
+    [
+        ("at-5j4z", "/", "/"),
+        ("at-adjt", "/", "Investigate dependency drift in planner handoff"),
+        ("at-b22t", "Fix worker startup contract", "/"),
+        ("at-dc89", "x", "y"),
+    ],
+)
+def test_create_changeset_rejects_incident_placeholder_shapes(
+    incident_id: str,
+    title: str,
+    description: str,
+    monkeypatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    commands: list[list[str]] = []
+    context = SimpleNamespace(
+        project_dir=tmp_path / "project",
+        beads_root=tmp_path / ".beads",
+    )
+
+    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+
+    def fake_run_bd(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        raise AssertionError(
+            f"incident {incident_id} should fail validation before any bd create/update"
+        )
+
+    monkeypatch.setattr(module.beads, "run_bd_command", fake_run_bd)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_changeset.py",
+            "--epic-id",
+            "at-epic",
+            "--title",
+            title,
+            "--acceptance",
+            f"Regression guard for {incident_id} malformed payload shape.",
+            "--description",
+            description,
+        ],
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        module.main()
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert "invalid executable work payload for changeset creation" in captured.err
+    assert "planner-context: NEEDS-DECISION" in captured.err
+    assert commands == []
