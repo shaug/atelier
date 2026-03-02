@@ -214,7 +214,25 @@ def agent_environment(
         env["ATELIER_AGENT_ID"] = agent_id
         env["BD_ACTOR"] = agent_id
         env["BEADS_AGENT_NAME"] = agent_id
+    _inject_atelier_pythonpath(env)
     return env
+
+
+def _inject_atelier_pythonpath(env: dict[str, str]) -> None:
+    """Ensure child tool invocations can import the installed atelier package."""
+    import_root = str(Path(__file__).resolve().parent.parent)
+    if not import_root:
+        return
+    current = env.get("PYTHONPATH", "")
+    entries = [entry for entry in current.split(os.pathsep) if entry] if current else []
+    merged = [import_root]
+    seen = {import_root}
+    for entry in entries:
+        if entry in seen:
+            continue
+        seen.add(entry)
+        merged.append(entry)
+    env["PYTHONPATH"] = os.pathsep.join(merged)
 
 
 @contextmanager
