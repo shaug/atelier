@@ -2112,17 +2112,25 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
     host_value = payload.get("dolt_server_host")
     host = host_value.strip() if isinstance(host_value, str) and host_value.strip() else "127.0.0.1"
     port = _parse_dolt_runtime_port(payload.get("dolt_server_port"))
+    database_value = payload.get("dolt_database")
+    configured_database = _normalize_dolt_database_name(database_value)
     discovered_database, discovery_detail = _resolve_project_scoped_dolt_database_name(
         beads_root,
         strict=True,
     )
     ownership_error = discovery_detail
+    if configured_database and ownership_error:
+        local_candidates = _local_dolt_database_candidates(beads_root)
+        if configured_database in local_candidates:
+            discovered_database = configured_database
+            ownership_error = None
+        else:
+            ownership_error = (
+                f"{ownership_error}; configured dolt_database={configured_database} does not "
+                "match any discovered local candidate"
+            )
     if discovered_database is None:
         discovered_database = _default_dolt_database_name(beads_root)
-    database_value = payload.get("dolt_database")
-    configured_database = (
-        database_value.strip() if isinstance(database_value, str) and database_value.strip() else ""
-    )
     if configured_database and not ownership_error and configured_database != discovered_database:
         ownership_error = (
             "dolt server ownership mismatch: metadata.json configures "

@@ -267,6 +267,48 @@ def test_resolve_dolt_server_runtime_flags_ambiguous_database_ownership(
     assert "ownership is ambiguous" in runtime.ownership_error
 
 
+def test_resolve_dolt_server_runtime_allows_configured_database_when_ambiguous(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_other" / ".dolt").mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt", "dolt_database": "beads_other/"}),
+        encoding="utf-8",
+    )
+
+    runtime = beads._resolve_dolt_server_runtime(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+
+    assert runtime.database == "beads_other"
+    assert runtime.ownership_error is None
+
+
+def test_resolve_dolt_server_runtime_rejects_non_candidate_configured_database(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "dolt" / "beads_other" / ".dolt").mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt", "dolt_database": "beads_unknown"}),
+        encoding="utf-8",
+    )
+
+    runtime = beads._resolve_dolt_server_runtime(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+
+    expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+    assert runtime.database == expected_database
+    assert runtime.ownership_error is not None
+    assert "does not match any discovered local candidate" in runtime.ownership_error
+
+
 def test_run_bd_command_fails_closed_for_ambiguous_dolt_database_ownership(
     tmp_path: Path,
 ) -> None:
