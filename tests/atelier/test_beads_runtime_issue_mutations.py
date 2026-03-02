@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -10,37 +11,24 @@ from atelier.beads_runtime import issue_mutations
 
 
 @dataclass
-class _IssueMutationsClient(issue_mutations.IssueMutationsClient):
+class _IssueMutationsClient:
     issues: dict[str, dict[str, object]]
     interleaved: list[str] = field(default_factory=list)
     writes: int = 0
+    beads_root: Path = Path("/beads")
+    cwd: Path = Path("/repo")
 
-    def issue_write_lock(self, issue_id: str, beads_root: Path):
-        del issue_id, beads_root
+    def issue_write_lock(self, issue_id: str):
+        del issue_id
         return nullcontext()
 
-    def read_issue(
-        self,
-        issue_id: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> dict[str, object] | None:
-        del beads_root, cwd
+    def show_issue(self, issue_id: str) -> dict[str, object] | None:
         issue = self.issues.get(issue_id)
         if issue is None:
             return None
         return dict(issue)
 
-    def update_issue_description(
-        self,
-        issue_id: str,
-        description: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> None:
-        del beads_root, cwd
+    def update_issue_description(self, issue_id: str, description: str) -> None:
         self.writes += 1
         if self.interleaved:
             self.issues[issue_id] = {
@@ -50,8 +38,9 @@ class _IssueMutationsClient(issue_mutations.IssueMutationsClient):
             return
         self.issues[issue_id] = {"id": issue_id, "description": description}
 
-    def die(self, message: str) -> None:
-        raise RuntimeError(message)
+
+def _fail(message: str) -> NoReturn:
+    raise RuntimeError(message)
 
 
 def test_parse_description_fields_reads_key_values() -> None:
@@ -71,9 +60,8 @@ def test_update_issue_description_fields_retries_after_interleaved_overwrite() -
     updated = issue_mutations.update_issue_description_fields(
         "agent-1",
         {"hook_bead": "epic-2"},
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
         client=client,
+        fail=_fail,
         description_update_max_attempts=3,
     )
 
@@ -93,9 +81,8 @@ def test_update_issue_description_fields_fails_closed_after_retry_exhaustion() -
         issue_mutations.update_issue_description_fields(
             "agent-1",
             {"hook_bead": "epic-2"},
-            beads_root=Path("/beads"),
-            cwd=Path("/repo"),
             client=client,
+            fail=_fail,
             description_update_max_attempts=3,
         )
 
@@ -105,8 +92,6 @@ def test_issue_description_fields_returns_empty_for_missing_issue() -> None:
 
     result = issue_mutations.issue_description_fields(
         "missing",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
         client=client,
     )
 

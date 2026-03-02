@@ -5,48 +5,43 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from subprocess import CompletedProcess
+from typing import NoReturn
 
 import pytest
 
-from atelier.beads_runtime import agent_hooks, issue_mutations
+from atelier.beads_runtime import agent_hooks
 
 
 @dataclass
-class _AgentHooksClient(agent_hooks.AgentHooksClient):
+class _AgentHooksClient:
     issues: dict[str, dict[str, object]]
     children: dict[str, list[dict[str, object]]] = field(default_factory=dict)
     slots: dict[str, str] = field(default_factory=dict)
     commands: list[list[str]] = field(default_factory=list)
     claim_assignee: str = "agent"
+    beads_root: Path = Path("/beads")
+    cwd: Path = Path("/repo")
 
-    def issue_write_lock(self, issue_id: str, beads_root: Path):
-        del issue_id, beads_root
+    def issue_write_lock(self, issue_id: str):
+        del issue_id
         return nullcontext()
 
-    def run_bd_json(
+    def run(
         self,
         args: list[str],
         *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> list[dict[str, object]]:
-        del beads_root, cwd
-        if args[:1] == ["show"] and len(args) >= 2:
-            issue = self.issues.get(args[1])
-            return [dict(issue)] if issue else []
-        if args[:2] == ["list", "--parent"] and len(args) >= 3:
-            return [dict(child) for child in self.children.get(args[2], [])]
-        return []
-
-    def run_bd_command(
-        self,
-        args: list[str],
-        *,
-        beads_root: Path,
-        cwd: Path,
+        json_mode: bool = False,
         allow_failure: bool = False,
-    ) -> object:
-        del beads_root, cwd, allow_failure
+    ) -> CompletedProcess[str] | list[dict[str, object]]:
+        del allow_failure
+        if json_mode:
+            if args[:1] == ["show"] and len(args) >= 2:
+                issue = self.issues.get(args[1])
+                return [dict(issue)] if issue else []
+            if args[:2] == ["list", "--parent"] and len(args) >= 3:
+                return [dict(child) for child in self.children.get(args[2], [])]
+            return []
+
         self.commands.append(list(args))
 
         if args[:2] == ["slot", "show"] and len(args) >= 3:
@@ -82,47 +77,19 @@ class _AgentHooksClient(agent_hooks.AgentHooksClient):
 
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
+    def show_issue(self, issue_id: str) -> dict[str, object] | None:
+        issue = self.issues.get(issue_id)
+        return dict(issue) if issue is not None else None
+
+    def update_issue_description(self, issue_id: str, description: str) -> None:
+        self.issues[issue_id]["description"] = description
+
     def issue_label(self, name: str) -> str:
         return f"at:{name}"
 
-    def die(self, message: str) -> None:
-        raise RuntimeError(message)
 
-
-@dataclass
-class _DescriptionClient(issue_mutations.IssueMutationsClient):
-    issues: dict[str, dict[str, object]]
-
-    def issue_write_lock(self, issue_id: str, beads_root: Path):
-        del issue_id, beads_root
-        return nullcontext()
-
-    def read_issue(
-        self,
-        issue_id: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> dict[str, object] | None:
-        del beads_root, cwd
-        issue = self.issues.get(issue_id)
-        if issue is None:
-            return None
-        return dict(issue)
-
-    def update_issue_description(
-        self,
-        issue_id: str,
-        description: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> None:
-        del beads_root, cwd
-        self.issues[issue_id]["description"] = description
-
-    def die(self, message: str) -> None:
-        raise RuntimeError(message)
+def _fail(message: str) -> NoReturn:
+    raise RuntimeError(message)
 
 
 def test_get_agent_hook_backfills_slot_from_description() -> None:
@@ -132,8 +99,6 @@ def test_get_agent_hook_backfills_slot_from_description() -> None:
 
     hook = agent_hooks.get_agent_hook(
         "agent-1",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
         client=client,
         hook_slot_name="hook",
     )
@@ -159,10 +124,9 @@ def test_claim_epic_backfills_epic_label_for_standalone_changeset() -> None:
     claimed = agent_hooks.claim_epic(
         "epic-1",
         "agent",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
         allow_takeover_from=None,
         client=client,
+        fail=_fail,
         hooked_label="at:hooked",
         epic_label="at:epic",
     )
@@ -191,10 +155,9 @@ def test_claim_epic_rejects_planner_owned_executable_work() -> None:
         agent_hooks.claim_epic(
             "epic-1",
             "atelier/worker/codex/p222",
-            beads_root=Path("/beads"),
-            cwd=Path("/repo"),
             allow_takeover_from=None,
             client=client,
+            fail=_fail,
             hooked_label="at:hooked",
             epic_label="at:epic",
         )
@@ -203,15 +166,12 @@ def test_claim_epic_rejects_planner_owned_executable_work() -> None:
 def test_set_agent_hook_updates_slot_and_description() -> None:
     issues = {"agent-1": {"id": "agent-1", "description": "role: worker\n"}}
     client = _AgentHooksClient(issues=issues)
-    description_client = _DescriptionClient(issues=issues)
 
     agent_hooks.set_agent_hook(
         "agent-1",
         "epic-9",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
         client=client,
-        description_client=description_client,
+        fail=_fail,
         hook_slot_name="hook",
     )
 

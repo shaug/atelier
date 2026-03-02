@@ -2,42 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
-from pathlib import Path
-from typing import Protocol
-
-
-class IssueMutationsClient(Protocol):
-    """External-system client boundary for issue description mutations."""
-
-    def issue_write_lock(self, issue_id: str, beads_root: Path) -> AbstractContextManager[None]:
-        """Acquire a scoped write lock for an issue."""
-        ...
-
-    def read_issue(
-        self,
-        issue_id: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> dict[str, object] | None:
-        """Read a single issue payload by id."""
-        ...
-
-    def update_issue_description(
-        self,
-        issue_id: str,
-        description: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> None:
-        """Persist a full issue description."""
-        ...
-
-    def die(self, message: str) -> None:
-        """Abort execution with a deterministic user-facing message."""
-        ...
+from .client import FailureHandler, RuntimeBeadsClient
 
 
 def parse_description_fields(description: str | None) -> dict[str, str]:
@@ -90,12 +55,10 @@ def update_description_field(description: str | None, *, key: str, value: str | 
 def issue_description_fields(
     issue_id: str,
     *,
-    beads_root: Path,
-    cwd: Path,
-    client: IssueMutationsClient,
+    client: RuntimeBeadsClient,
 ) -> dict[str, str]:
     """Read parsed description fields for a bead."""
-    issue = client.read_issue(issue_id, beads_root=beads_root, cwd=cwd)
+    issue = client.show_issue(issue_id)
     if issue is None:
         return {}
     return parse_description_fields(_issue_description(issue))
@@ -105,19 +68,18 @@ def update_issue_description_fields(
     issue_id: str,
     fields: dict[str, str | None],
     *,
-    beads_root: Path,
-    cwd: Path,
-    client: IssueMutationsClient,
+    client: RuntimeBeadsClient,
+    fail: FailureHandler,
     expected_current: dict[str, str | None] | None = None,
     require_expected_match: bool = False,
     description_update_max_attempts: int = 5,
 ) -> dict[str, object]:
     """Apply description field updates with optimistic retry + verification."""
-    with client.issue_write_lock(issue_id, beads_root):
+    with client.issue_write_lock(issue_id):
         for _attempt in range(max(0, description_update_max_attempts)):
-            issue = client.read_issue(issue_id, beads_root=beads_root, cwd=cwd)
+            issue = client.show_issue(issue_id)
             if issue is None:
-                client.die(f"issue not found: {issue_id}")
+                fail(f"issue not found: {issue_id}")
                 raise RuntimeError("unreachable")
             if expected_current and not _description_matches_expected(
                 issue,
@@ -137,8 +99,8 @@ def update_issue_description_fields(
             if not changed:
                 return issue
 
-            client.update_issue_description(issue_id, updated, beads_root=beads_root, cwd=cwd)
-            candidate = client.read_issue(issue_id, beads_root=beads_root, cwd=cwd)
+            client.update_issue_description(issue_id, updated)
+            candidate = client.show_issue(issue_id)
             if candidate is None:
                 continue
             if expected_current and not _description_matches_expected(
@@ -150,7 +112,7 @@ def update_issue_description_fields(
                 continue
             if _description_matches_updates(candidate, fields=fields):
                 return candidate
-    client.die(f"concurrent description update conflict for {issue_id}")
+    fail(f"concurrent description update conflict for {issue_id}")
     raise RuntimeError("unreachable")
 
 

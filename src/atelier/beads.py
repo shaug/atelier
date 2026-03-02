@@ -18,12 +18,23 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Literal, TextIO
+from typing import Literal, TextIO, cast, overload
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import bd_invocation, changesets, config, exec, git, lifecycle, messages, paths, prs
+from . import (
+    bd_invocation,
+    changesets,
+    config,
+    exec,
+    git,
+    github_issues_provider,
+    lifecycle,
+    messages,
+    paths,
+    prs,
+)
 from . import log as atelier_log
 from .beads_runtime import agent_hooks as beads_agent_hooks
 from .beads_runtime import external_reconcile as beads_external_reconcile
@@ -300,88 +311,6 @@ def _issue_write_lock(issue_id: str, *, beads_root: Path) -> Iterator[None]:
             local_lock.release()
 
 
-@dataclass(frozen=True)
-class _BeadsRuntimeClient:
-    """Runtime adapter for Beads-domain modules with external client boundaries."""
-
-    beads_root: Path
-
-    def issue_write_lock(self, issue_id: str, beads_root: Path) -> AbstractContextManager[None]:
-        return _issue_write_lock(issue_id, beads_root=beads_root)
-
-    def run_bd_json(
-        self, args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        return run_bd_json(args, beads_root=beads_root, cwd=cwd)
-
-    def run_bd_command(
-        self, args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ) -> subprocess.CompletedProcess[str]:
-        return run_bd_command(args, beads_root=beads_root, cwd=cwd, allow_failure=allow_failure)
-
-    def issue_label(self, name: str) -> str:
-        return issue_label(name, beads_root=self.beads_root)
-
-    def die(self, message: str) -> None:
-        die(message)
-
-
-@dataclass(frozen=True)
-class _BeadsIssueMutationsClient:
-    """Runtime adapter for issue description mutation helpers."""
-
-    def issue_write_lock(self, issue_id: str, beads_root: Path) -> AbstractContextManager[None]:
-        return _issue_write_lock(issue_id, beads_root=beads_root)
-
-    def read_issue(
-        self,
-        issue_id: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> dict[str, object] | None:
-        issues = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
-        return issues[0] if issues else None
-
-    def update_issue_description(
-        self,
-        issue_id: str,
-        description: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> None:
-        _update_issue_description(issue_id, description, beads_root=beads_root, cwd=cwd)
-
-    def die(self, message: str) -> None:
-        die(message)
-
-
-@dataclass(frozen=True)
-class _BeadsQueueMessagesClient(_BeadsRuntimeClient):
-    """Runtime adapter for queue/message operations."""
-
-    def create_issue_with_body(
-        self,
-        args: list[str],
-        description: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> str:
-        return _create_issue_with_body(args, description, beads_root=beads_root, cwd=cwd)
-
-    def update_issue_description(
-        self,
-        issue_id: str,
-        description: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-    ) -> None:
-        _update_issue_description(issue_id, description, beads_root=beads_root, cwd=cwd)
-
-
 class _IssueTypeModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -439,12 +368,38 @@ class BeadsClient:
     beads_root: Path
     cwd: Path
 
-    def run_command(
+    def issue_write_lock(self, issue_id: str) -> AbstractContextManager[None]:
+        """Acquire an issue-scoped write lock."""
+        return _issue_write_lock(issue_id, beads_root=self.beads_root)
+
+    @overload
+    def run(
         self,
         args: list[str],
         *,
+        json_mode: Literal[False] = False,
         allow_failure: bool = False,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> subprocess.CompletedProcess[str]: ...
+
+    @overload
+    def run(
+        self,
+        args: list[str],
+        *,
+        json_mode: Literal[True],
+        allow_failure: bool = False,
+    ) -> list[dict[str, object]]: ...
+
+    def run(
+        self,
+        args: list[str],
+        *,
+        json_mode: bool = False,
+        allow_failure: bool = False,
+    ) -> subprocess.CompletedProcess[str] | list[dict[str, object]]:
+        """Run a Beads command in raw or JSON mode."""
+        if json_mode:
+            return run_bd_json(args, beads_root=self.beads_root, cwd=self.cwd)
         return run_bd_command(
             args,
             beads_root=self.beads_root,
@@ -452,18 +407,112 @@ class BeadsClient:
             allow_failure=allow_failure,
         )
 
+    def run_command(
+        self,
+        args: list[str],
+        *,
+        allow_failure: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        return self.run(args, allow_failure=allow_failure)
+
     def run_json(self, args: list[str]) -> list[dict[str, object]]:
-        return run_bd_json(args, beads_root=self.beads_root, cwd=self.cwd)
+        return self.run(args, json_mode=True)
+
+    @overload
+    def show_issue(self, issue_id: str) -> dict[str, object] | None: ...
+
+    @overload
+    def show_issue(self, issue_id: str, *, source: str) -> BeadsIssueRecord | None: ...
+
+    def show_issue(
+        self,
+        issue_id: str,
+        *,
+        source: str | None = None,
+    ) -> dict[str, object] | BeadsIssueRecord | None:
+        """Return one issue payload in raw or validated record form."""
+        if source is None:
+            issues = self.run(["show", issue_id], json_mode=True)
+            return issues[0] if issues else None
+        records = self.issue_records(["show", issue_id], source=source)
+        return records[0] if records else None
+
+    def issue_label(self, name: str) -> str:
+        """Build a namespaced issue label for this project."""
+        return issue_label(name, beads_root=self.beads_root)
+
+    def create_issue_with_body(self, args: list[str], description: str) -> str:
+        """Create an issue with a body and return the issue id."""
+        return _create_issue_with_body(args, description, beads_root=self.beads_root, cwd=self.cwd)
+
+    def update_issue_description(self, issue_id: str, description: str) -> None:
+        """Persist a full issue description text."""
+        _update_issue_description(
+            issue_id,
+            description,
+            beads_root=self.beads_root,
+            cwd=self.cwd,
+        )
+
+    def parse_external_tickets(self, description: str | None) -> list[ExternalTicketRef]:
+        """Parse external ticket metadata from an issue description."""
+        return parse_external_tickets(description)
+
+    def github_repo_from_ticket_url(self, url: str | None) -> str | None:
+        """Resolve GitHub repository slug from a ticket URL."""
+        return _github_repo_from_ticket_url(url)
+
+    def github_provider(self, repo_slug: str) -> beads_external_reconcile.GithubTicketProvider:
+        """Return a GitHub issues provider instance for a repository."""
+        provider = github_issues_provider.GithubIssuesProvider(repo=repo_slug)
+        return cast(beads_external_reconcile.GithubTicketProvider, provider)
+
+    def merge_ticket_state(
+        self,
+        ticket: ExternalTicketRef,
+        refreshed: ExternalTicketRef,
+        *,
+        assume_closed: bool = False,
+    ) -> ExternalTicketRef:
+        """Merge provider ticket state into local metadata."""
+        return _merge_ticket_state(ticket, refreshed, assume_closed=assume_closed)
+
+    def update_external_tickets(
+        self,
+        issue_id: str,
+        tickets: list[ExternalTicketRef],
+    ) -> dict[str, object]:
+        """Persist external ticket metadata on an issue."""
+        return update_external_tickets(
+            issue_id,
+            tickets,
+            beads_root=self.beads_root,
+            cwd=self.cwd,
+        )
+
+    def append_external_close_note(self, issue_id: str, note: str) -> None:
+        """Append a close reconciliation note on an issue."""
+        _append_external_close_note(
+            issue_id,
+            note,
+            beads_root=self.beads_root,
+            cwd=self.cwd,
+        )
+
+    def append_external_reopen_note(self, issue_id: str, note: str) -> None:
+        """Append a reopen reconciliation note on an issue."""
+        _append_external_reopen_note(
+            issue_id,
+            note,
+            beads_root=self.beads_root,
+            cwd=self.cwd,
+        )
 
     def issue_records(self, args: list[str], *, source: str) -> list[BeadsIssueRecord]:
         return run_bd_issue_records(args, beads_root=self.beads_root, cwd=self.cwd, source=source)
 
     def issues(self, args: list[str], *, source: str) -> list[BeadsIssueBoundary]:
         return run_bd_issues(args, beads_root=self.beads_root, cwd=self.cwd, source=source)
-
-    def show_issue(self, issue_id: str, *, source: str) -> BeadsIssueRecord | None:
-        records = self.issue_records(["show", issue_id], source=source)
-        return records[0] if records else None
 
 
 def create_client(*, beads_root: Path, cwd: Path) -> BeadsClient:
@@ -3106,11 +3155,9 @@ def release_epic_assignment(
     expected_hooked: bool | None = None,
 ) -> bool:
     """Release epic ownership with optional assignee/hook preconditions."""
-    runtime = _BeadsRuntimeClient(beads_root=beads_root)
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     return beads_agent_hooks.release_epic_assignment(
         epic_id,
-        beads_root=beads_root,
-        cwd=cwd,
         expected_assignee=expected_assignee,
         expected_hooked=expected_hooked,
         client=runtime,
@@ -3907,9 +3954,8 @@ def _update_description_fields_optimistic(
     return beads_issue_mutations.update_issue_description_fields(
         issue_id,
         fields,
-        beads_root=beads_root,
-        cwd=cwd,
-        client=_BeadsIssueMutationsClient(),
+        client=create_client(beads_root=beads_root, cwd=cwd),
+        fail=die,
         expected_current=expected_current,
         require_expected_match=require_expected_match,
         description_update_max_attempts=_DESCRIPTION_UPDATE_MAX_ATTEMPTS,
@@ -3935,9 +3981,7 @@ def issue_description_fields(
     """
     return beads_issue_mutations.issue_description_fields(
         issue_id,
-        beads_root=beads_root,
-        cwd=cwd,
-        client=_BeadsIssueMutationsClient(),
+        client=create_client(beads_root=beads_root, cwd=cwd),
     )
 
 
@@ -3962,9 +4006,8 @@ def update_issue_description_fields(
     return beads_issue_mutations.update_issue_description_fields(
         issue_id,
         fields,
-        beads_root=beads_root,
-        cwd=cwd,
-        client=_BeadsIssueMutationsClient(),
+        client=create_client(beads_root=beads_root, cwd=cwd),
+        fail=die,
         description_update_max_attempts=_DESCRIPTION_UPDATE_MAX_ATTEMPTS,
     )
 
@@ -3976,11 +4019,9 @@ def get_agent_hook(
     cwd: Path,
 ) -> str | None:
     """Return the currently hooked epic id for an agent bead."""
-    runtime = _BeadsRuntimeClient(beads_root=beads_root)
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     return beads_agent_hooks.get_agent_hook(
         agent_bead_id,
-        beads_root=beads_root,
-        cwd=cwd,
         client=runtime,
         hook_slot_name=HOOK_SLOT_NAME,
     )
@@ -4079,19 +4120,6 @@ def _github_repo_from_ticket_url(url: str | None) -> str | None:
     return f"{owner}/{repo}"
 
 
-def _close_action_for_ticket(ticket: ExternalTicketRef) -> str:
-    # Keep context and explicit opt-out links untouched on local close.
-    if ticket.relation == "context" or ticket.on_close == "none":
-        return "none"
-    if ticket.on_close in {"close", "comment"}:
-        return "close"
-    if ticket.on_close == "sync":
-        return "sync"
-    if ticket.direction != "exported":
-        return "none"
-    return "close"
-
-
 def _merge_ticket_state(
     ticket: ExternalTicketRef,
     refreshed: ExternalTicketRef,
@@ -4152,17 +4180,10 @@ def reconcile_closed_issue_exported_github_tickets(
     Exported GitHub links default to close-on-bead-close unless the ticket is
     `relation=context` or explicitly sets `on_close=none`.
     """
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     return beads_external_reconcile.reconcile_closed_issue_exported_github_tickets(
         issue_id,
-        beads_root=beads_root,
-        cwd=cwd,
-        run_bd_json=run_bd_json,
-        parse_external_tickets=parse_external_tickets,
-        close_action_for_ticket=_close_action_for_ticket,
-        github_repo_from_ticket_url=_github_repo_from_ticket_url,
-        merge_ticket_state=_merge_ticket_state,
-        update_external_tickets=update_external_tickets,
-        append_external_close_note=_append_external_close_note,
+        client=runtime,
         result_factory=ExternalTicketReconcileResult,
     )
 
@@ -4184,16 +4205,10 @@ def reconcile_reopened_issue_exported_github_tickets(
         Reconciliation result including stale/reconciled counts and any
         decision-required notes.
     """
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     return beads_external_reconcile.reconcile_reopened_issue_exported_github_tickets(
         issue_id,
-        beads_root=beads_root,
-        cwd=cwd,
-        run_bd_json=run_bd_json,
-        parse_external_tickets=parse_external_tickets,
-        github_repo_from_ticket_url=_github_repo_from_ticket_url,
-        merge_ticket_state=_merge_ticket_state,
-        update_external_tickets=update_external_tickets,
-        append_external_reopen_note=_append_external_reopen_note,
+        client=runtime,
         result_factory=ExternalTicketReconcileResult,
     )
 
@@ -4562,14 +4577,12 @@ def clear_agent_hook(
     expected_hook: str | None = None,
 ) -> None:
     """Clear the hooked epic id on the agent bead description."""
-    runtime = _BeadsRuntimeClient(beads_root=beads_root)
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     beads_agent_hooks.clear_agent_hook(
         agent_bead_id,
-        beads_root=beads_root,
-        cwd=cwd,
         expected_hook=expected_hook,
         client=runtime,
-        description_client=_BeadsIssueMutationsClient(),
+        fail=die,
         hook_slot_name=HOOK_SLOT_NAME,
     )
 
@@ -4797,14 +4810,13 @@ def claim_epic(
     allow_takeover_from: str | None = None,
 ) -> dict[str, object]:
     """Claim an epic by assigning it to the agent."""
-    runtime = _BeadsRuntimeClient(beads_root=beads_root)
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     return beads_agent_hooks.claim_epic(
         epic_id,
         agent_id,
-        beads_root=beads_root,
-        cwd=cwd,
         allow_takeover_from=allow_takeover_from,
         client=runtime,
+        fail=die,
         hooked_label=issue_label(_LABEL_HOOKED, beads_root=beads_root),
         epic_label=issue_label(_LABEL_EPIC, beads_root=beads_root),
     )
@@ -4962,14 +4974,12 @@ def set_agent_hook(
     cwd: Path,
 ) -> None:
     """Store the hooked epic id on the agent bead description."""
-    runtime = _BeadsRuntimeClient(beads_root=beads_root)
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     beads_agent_hooks.set_agent_hook(
         agent_bead_id,
         epic_id,
-        beads_root=beads_root,
-        cwd=cwd,
         client=runtime,
-        description_client=_BeadsIssueMutationsClient(),
+        fail=die,
         hook_slot_name=HOOK_SLOT_NAME,
     )
 
@@ -4984,14 +4994,12 @@ def create_message_bead(
     cwd: Path,
 ) -> dict[str, object]:
     """Create a message bead and return its data."""
-    runtime = _BeadsQueueMessagesClient(beads_root=beads_root)
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     return beads_queue_messages.create_message_bead(
         subject=subject,
         body=body,
         metadata=metadata,
         assignee=assignee,
-        beads_root=beads_root,
-        cwd=cwd,
         client=runtime,
         label_message=_LABEL_MESSAGE,
         label_unread=_LABEL_UNREAD,
@@ -5006,11 +5014,9 @@ def list_inbox_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List message beads assigned to the agent."""
-    runtime = _BeadsQueueMessagesClient(beads_root=beads_root)
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     return beads_queue_messages.list_inbox_messages(
         agent_id,
-        beads_root=beads_root,
-        cwd=cwd,
         unread_only=unread_only,
         client=runtime,
         label_message=_LABEL_MESSAGE,
@@ -5027,10 +5033,8 @@ def list_queue_messages(
     unread_only: bool = True,
 ) -> list[dict[str, object]]:
     """List queued message beads, optionally filtered by queue name."""
-    runtime = _BeadsQueueMessagesClient(beads_root=beads_root)
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     return beads_queue_messages.list_queue_messages(
-        beads_root=beads_root,
-        cwd=cwd,
         queue=queue,
         unclaimed_only=unclaimed_only,
         unread_only=unread_only,
@@ -5345,14 +5349,13 @@ def claim_queue_message(
     queue: str | None = None,
 ) -> dict[str, object]:
     """Claim a queued message bead by setting claimed metadata."""
-    runtime = _BeadsQueueMessagesClient(beads_root=beads_root)
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     return beads_queue_messages.claim_queue_message(
         message_id,
         agent_id,
-        beads_root=beads_root,
-        cwd=cwd,
         queue=queue,
         client=runtime,
+        fail=die,
         description_update_max_attempts=_DESCRIPTION_UPDATE_MAX_ATTEMPTS,
     )
 
@@ -5364,11 +5367,9 @@ def mark_message_read(
     cwd: Path,
 ) -> None:
     """Mark a message bead as read."""
-    runtime = _BeadsQueueMessagesClient(beads_root=beads_root)
+    runtime = create_client(beads_root=beads_root, cwd=cwd)
     beads_queue_messages.mark_message_read(
         message_id,
-        beads_root=beads_root,
-        cwd=cwd,
         client=runtime,
         label_unread=_LABEL_UNREAD,
     )
