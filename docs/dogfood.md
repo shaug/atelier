@@ -35,9 +35,8 @@ source of truth and that changesets remain reviewable.
 
 ## Self-Updating Worker Supervisor
 
-For Atelier-on-Atelier development, use
-`scripts/atelier-work.py` to run one-shot worker cycles while
-refreshing the local checkout between cycles.
+For Atelier-on-Atelier development, use `scripts/atelier-work.py` to run
+one-shot worker cycles while refreshing the local checkout between cycles.
 
 Example:
 
@@ -50,7 +49,8 @@ scripts/atelier-work.py \
 
 Defaults:
 
-- install runs after update (`just install`); use `--install COMMAND` to override or `--no-install` to skip
+- install runs after update (`just install`); use `--install COMMAND` to
+  override or `--no-install` to skip
 - update policy is fast-forward-only (`--update-policy ff-only`)
 - worker command runs once (`atelier work --run-mode once`)
 - dry-run mode (`--dry-run`) prints planned update/install/worker actions
