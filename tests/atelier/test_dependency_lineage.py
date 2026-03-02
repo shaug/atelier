@@ -217,6 +217,34 @@ def test_resolve_parent_lineage_ignores_parent_child_string_dependency_entries()
     assert resolution.effective_parent_branch == "feat/root"
 
 
+def test_resolve_parent_lineage_ignores_heritage_epic_dependency_without_work_branch() -> None:
+    issue = {
+        "id": "at-epic.1",
+        "parent": "at-epic",
+        "description": ("changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root\n"),
+        "dependencies": ["at-epic"],
+    }
+
+    resolution = dependency_lineage.resolve_parent_lineage(
+        issue,
+        root_branch="feat/root",
+        lookup_issue=lambda issue_id: (
+            {
+                "id": "at-epic",
+                "issue_type": "epic",
+                "description": "workspace.parent_branch: main\n",
+            }
+            if issue_id == "at-epic"
+            else None
+        ),
+    )
+
+    assert resolution.blocked is False
+    assert resolution.dependency_ids == ()
+    assert resolution.dependency_parent_id is None
+    assert resolution.effective_parent_branch == "feat/root"
+
+
 def test_resolve_parent_lineage_prefers_unique_transitive_frontier_dependency() -> None:
     issue = {
         "description": (
