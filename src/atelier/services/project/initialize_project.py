@@ -15,6 +15,7 @@ from ..errors import (
     IoFailedError,
     ServiceFailure,
     UnexpectedStateError,
+    ValidationFailedError,
 )
 from .compose_project_config import (
     BuildProjectConfig,
@@ -186,6 +187,23 @@ class InitializeProjectService(BaseService[InitializeProjectRequest, InitializeP
         )
         try:
             beads.ensure_atelier_store(beads_prefix, beads_root=beads_root, cwd=project_dir)
+            if request.interactive:
+                rename_preview = beads.preview_issue_prefix_rename(
+                    beads_prefix,
+                    beads_root=beads_root,
+                    cwd=project_dir,
+                )
+                if rename_preview:
+                    issue_word = "issue" if rename_preview.count == 1 else "issues"
+                    prompt = (
+                        f"{rename_preview.detail}\n"
+                        f"Continue with prefix rename affecting {rename_preview.count} {issue_word}?"
+                    )
+                    if not self._confirm_choice(prompt, False):
+                        raise ValidationFailedError(
+                            "prefix rename cancelled",
+                            recovery_hint="rerun init with --yes to skip confirmation",
+                        )
             beads.ensure_issue_prefix(beads_prefix, beads_root=beads_root, cwd=project_dir)
             beads.run_bd_command(["prime"], beads_root=beads_root, cwd=project_dir)
             beads.ensure_atelier_types(beads_root=beads_root, cwd=project_dir)

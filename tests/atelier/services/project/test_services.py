@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
+import atelier.beads as beads
 from atelier.external_registry import PlannerProviderResolution
 from atelier.models import ProjectConfig, ProjectSection
 from atelier.services import (
@@ -391,6 +393,295 @@ def test_initialize_project_service_handles_beads_prefix_noop_and_migration(
     assert outcome.messages[-1] == "Initialized Atelier project"
     ensure_issue_prefix.assert_called_once_with(
         "ts",
+        beads_root=Path("/project-data/.beads"),
+        cwd=Path("/project-data"),
+    )
+
+
+def test_initialize_project_service_prompts_before_prefix_rename_when_interactive() -> None:
+    payload = ProjectConfig(project=ProjectSection(origin="github.com/acme/widgets"))
+    compose_service = SimpleNamespace(
+        run=lambda _request: ComposeProjectConfigOutcome(payload=payload)
+    )
+    provider_service = SimpleNamespace(
+        run=lambda _request: ResolveExternalProviderOutcome(
+            payload=payload,
+            selected_provider="github",
+            messages=(),
+        )
+    )
+    preview = beads.IssuePrefixRenamePreview(
+        count=3,
+        current_prefix="at",
+        target_prefix="as",
+        detail="DRY RUN: Would rename 3 issues from prefix 'at' to 'as'",
+    )
+    confirm_calls: list[str] = []
+
+    def fake_confirm_choice(text: str, default: bool = False) -> bool:
+        confirm_calls.append(text)
+        return False
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.git.resolve_repo_enlistment",
+                return_value=(Path("/repo"), "/repo", None, payload.project.origin),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.paths.project_dir_for_enlistment",
+                return_value=Path("/project-data"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.paths.project_config_path",
+                return_value=Path("/project-data/config.json"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.paths.project_config_user_path",
+                return_value=Path("/project-data/config.user.json"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.config.load_project_config",
+                return_value=None,
+            )
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.config.load_json", return_value=None)
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.project.ensure_project_dirs")
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.config.resolve_upgrade_policy",
+                return_value="ask",
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.skills.sync_project_skills",
+                return_value=SimpleNamespace(action="up_to_date"),
+            )
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.config.write_project_config")
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.project.ensure_project_scaffold")
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.config.resolve_beads_root",
+                return_value=Path("/project-data/.beads"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.config.resolve_beads_prefix",
+                return_value="as",
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.policy.edit_policy_text",
+                return_value="",
+            )
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.beads.ensure_atelier_store")
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.beads.list_policy_beads",
+                return_value=[],
+            )
+        )
+        preview_mock = stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.beads.preview_issue_prefix_rename",
+                return_value=preview,
+            )
+        )
+        ensure_prefix = stack.enter_context(
+            patch("atelier.services.project.initialize_project.beads.ensure_issue_prefix")
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.beads.run_bd_command")
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.beads.ensure_atelier_types")
+        )
+        service = InitializeProjectService(
+            compose_config_service=compose_service,
+            resolve_provider_service=provider_service,
+            confirm_choice=fake_confirm_choice,
+        )
+        with pytest.raises(ValidationFailedError) as exc_info:
+            service(
+                InitializeProjectRequest(
+                    args=InitProjectArgs(yes=False),
+                    cwd=Path("/repo"),
+                    stdin_isatty=True,
+                    stdout_isatty=True,
+                )
+            )
+    ensure_prefix.assert_not_called()
+    preview_mock.assert_called_once_with(
+        "as",
+        beads_root=Path("/project-data/.beads"),
+        cwd=Path("/project-data"),
+    )
+    assert confirm_calls
+    assert preview.detail in confirm_calls[0]
+    assert str(preview.count) in confirm_calls[0]
+    assert exc_info.value.recovery_hint == "rerun init with --yes to skip confirmation"
+
+
+def test_initialize_project_service_runs_prefix_rename_after_confirmation() -> None:
+    payload = ProjectConfig(project=ProjectSection(origin="github.com/acme/widgets"))
+    compose_service = SimpleNamespace(
+        run=lambda _request: ComposeProjectConfigOutcome(payload=payload)
+    )
+    provider_service = SimpleNamespace(
+        run=lambda _request: ResolveExternalProviderOutcome(
+            payload=payload,
+            selected_provider="github",
+            messages=(),
+        )
+    )
+    preview = beads.IssuePrefixRenamePreview(
+        count=1,
+        current_prefix="at",
+        target_prefix="as",
+        detail="DRY RUN: Would rename 1 issue from prefix 'at' to 'as'",
+    )
+
+    def fake_confirm_choice(text: str, default: bool = False) -> bool:
+        del text, default
+        return True
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.git.resolve_repo_enlistment",
+                return_value=(Path("/repo"), "/repo", None, payload.project.origin),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.paths.project_dir_for_enlistment",
+                return_value=Path("/project-data"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.paths.project_config_path",
+                return_value=Path("/project-data/config.json"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.paths.project_config_user_path",
+                return_value=Path("/project-data/config.user.json"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.config.load_project_config",
+                return_value=None,
+            )
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.config.load_json", return_value=None)
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.project.ensure_project_dirs")
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.config.resolve_upgrade_policy",
+                return_value="ask",
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.skills.sync_project_skills",
+                return_value=SimpleNamespace(action="up_to_date"),
+            )
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.config.write_project_config")
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.project.ensure_project_scaffold")
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.config.resolve_beads_root",
+                return_value=Path("/project-data/.beads"),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.config.resolve_beads_prefix",
+                return_value="as",
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.policy.edit_policy_text",
+                return_value="",
+            )
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.beads.ensure_atelier_store")
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.beads.list_policy_beads",
+                return_value=[],
+            )
+        )
+        stack.enter_context(
+            patch(
+                "atelier.services.project.initialize_project.beads.preview_issue_prefix_rename",
+                return_value=preview,
+            )
+        )
+        ensure_prefix = stack.enter_context(
+            patch("atelier.services.project.initialize_project.beads.ensure_issue_prefix")
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.beads.run_bd_command")
+        )
+        stack.enter_context(
+            patch("atelier.services.project.initialize_project.beads.ensure_atelier_types")
+        )
+        service = InitializeProjectService(
+            compose_config_service=compose_service,
+            resolve_provider_service=provider_service,
+            confirm_choice=fake_confirm_choice,
+        )
+        outcome = service(
+            InitializeProjectRequest(
+                args=InitProjectArgs(yes=False),
+                cwd=Path("/repo"),
+                stdin_isatty=True,
+                stdout_isatty=True,
+            )
+        )
+
+    assert outcome.messages[-1] == "Initialized Atelier project"
+    ensure_prefix.assert_called_once_with(
+        "as",
         beads_root=Path("/project-data/.beads"),
         cwd=Path("/project-data"),
     )

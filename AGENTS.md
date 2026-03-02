@@ -45,6 +45,38 @@ Atelier manages *other* projects — not itself.
 
 ______________________________________________________________________
 
+## Architecture
+
+**CLI layer**: `src/atelier/cli.py` defines the Typer app. Commands in
+`src/atelier/commands/` are thin controllers that parse inputs, orchestrate
+calls, and render output — domain logic lives in separate modules.
+
+**Beads data store** (`src/atelier/beads.py`): Large wrapper around the `bd`
+tool for task/issue management. Uses Pydantic boundary models, Dolt databases,
+and concurrency-safe atomic writes. Core concepts: epics (top-level work),
+changesets (leaf work nodes), lifecycle statuses
+(`deferred|open|in_progress|blocked|closed`).
+
+**Worker runtime** (`src/atelier/worker/`): Multi-module subsystem managing
+changeset execution — branching, PR creation, integration, and linear rebase
+after merge. Key files: `runtime.py` (orchestrator), `integration_service.py`
+(PR logic), `reconcile.py` (restack/rebase), `changeset_state.py` (state
+machine).
+
+**Skills system** (`src/atelier/skills/`): 30+ skill directories with
+frontmatter-based metadata, projected into workspace `.atelier-skills/` at
+session launch. Validated by `atelier.skill_frontmatter_validation`.
+
+**Configuration** (`src/atelier/config.py`, `models.py`): Pydantic models for
+project config. Two files per project: `config.sys.json` (system-managed) and
+`config.user.json` (user-editable), stored in
+`~/.local/share/atelier/projects/<project-key>/`.
+
+**Worktree/session management** (`worktrees.py`, `sessions.py`): Maps workspaces
+to git worktrees and manages agent session discovery/resumption.
+
+______________________________________________________________________
+
 ## Scope of Work
 
 When working in this repository, you may:
@@ -94,7 +126,7 @@ ______________________________________________________________________
 
 - Implement Atelier in **Python 3.11+**
 - Use **uv** for dependency and packaging management
-- Produce an **installable CLI** (`atelier`)
+- Produce an **installable CLI** (`atelier`), built with hatchling + hatch-vcs
 - Prefer standard library functionality where possible
 - In runtime orchestration code, avoid `Any` and `Callable[..., ...]`; prefer
   explicit `Protocol`/typed call signatures and validated boundary models.
@@ -220,6 +252,39 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
+## Build & Development Commands
+
+```bash
+# Install for development (local venv)
+just install-dev
+
+# Install editable globally
+just install-editable
+
+# Run full test suite (pytest + shell tests + skill frontmatter validation)
+just test
+
+# Run a single test file
+uv run pytest tests/atelier/test_beads.py -v
+
+# Run a single test by name
+uv run pytest -k test_name
+
+# Run shell tests only
+bash tests/shell/run.sh
+
+# Lint (ruff format/check + pyright + shellcheck)
+just lint
+
+# Auto-format (ruff + mdformat)
+just format
+
+# Type checking only
+just typecheck
+```
+
+______________________________________________________________________
+
 ## Verification
 
 After the workspace goals are met, run:
@@ -232,6 +297,14 @@ Doctests are collected only for curated modules listed in `tests/conftest.py`.
 
 If any command is missing or fails due to missing tooling, do not substitute
 alternatives; record the failure and reason.
+
+### Testing Notes
+
+- `conftest.py` auto-patches: agent names mocked to `("codex", "claude")`,
+  questionary disabled, `input()` raises on unexpected prompts, git network
+  prompts disabled
+- Property-based tests use Hypothesis
+- Integration tests (`just test-integration`) require `codex` CLI on PATH
 
 ______________________________________________________________________
 
@@ -246,6 +319,8 @@ ______________________________________________________________________
 - Keep `just test` as the canonical full test command; `pre-push` should invoke
   it, with CI as the backstop.
 - Ensure `just lint` and `just test` pass before shipping changes.
+- CI requires both `ci / lint` and `ci / test` to pass. The canonical lint gate
+  is `bash scripts/lint-gate.sh`.
 - When merging PRs to `main`, keep merge commit messages non-Conventional (use
   the default “Merge pull request #...” message) so Release Please does not
   double-count changelog entries.
@@ -277,3 +352,92 @@ complete until `git push` succeeds.
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
+
+<!-- BEGIN BEADS INTEGRATION -->
+
+## Issue Tracking with bd (beads)
+
+**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT
+use markdown TODOs, task lists, or other tracking methods.
+
+### Why bd?
+
+- Dependency-aware: Track blockers and relationships between issues
+- Git-friendly: Auto-syncs to JSONL for version control
+- Agent-optimized: JSON output, ready work detection, discovered-from links
+- Prevents duplicate tracking systems and confusion
+
+### Quick Start
+
+**Check for ready work:**
+
+```bash
+bd ready --json
+```
+
+**Create new issues:**
+
+```bash
+bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
+bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
+```
+
+**Claim and update:**
+
+```bash
+bd update bd-42 --status in_progress --json
+bd update bd-42 --priority 1 --json
+```
+
+**Complete work:**
+
+```bash
+bd close bd-42 --reason "Completed" --json
+```
+
+### Issue Types
+
+- `bug` - Something broken
+- `feature` - New functionality
+- `task` - Work item (tests, docs, refactoring)
+- `epic` - Large feature with subtasks
+- `chore` - Maintenance (dependencies, tooling)
+
+### Priorities
+
+- `0` - Critical (security, data loss, broken builds)
+- `1` - High (major features, important bugs)
+- `2` - Medium (default, nice-to-have)
+- `3` - Low (polish, optimization)
+- `4` - Backlog (future ideas)
+
+### Workflow for AI Agents
+
+1. **Check ready work**: `bd ready` shows unblocked issues
+1. **Claim your task**: `bd update <id> --status in_progress`
+1. **Work on it**: Implement, test, document
+1. **Discover new work?** Create linked issue:
+   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
+1. **Complete**: `bd close <id> --reason "Done"`
+
+### Auto-Sync
+
+bd automatically syncs with git:
+
+- Exports to `.beads/issues.jsonl` after changes (5s debounce)
+- Imports from JSONL when newer (e.g., after `git pull`)
+- No manual export/import needed!
+
+### Important Rules
+
+- ✅ Use bd for ALL task tracking
+- ✅ Always use `--json` flag for programmatic use
+- ✅ Link discovered work with `discovered-from` dependencies
+- ✅ Check `bd ready` before asking "what should I work on?"
+- ❌ Do NOT create markdown TODO lists
+- ❌ Do NOT use external issue trackers
+- ❌ Do NOT duplicate tracking systems
+
+For more details, see README.md and docs/QUICKSTART.md.
+
+<!-- END BEADS INTEGRATION -->

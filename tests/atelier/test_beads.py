@@ -41,6 +41,16 @@ def test_beads_env_sets_beads_db() -> None:
     assert env["BEADS_DB"] == "/tmp/project/.beads/beads.db"
 
 
+def test_dolt_server_supervision_bypasses_rename_prefix() -> None:
+    assert not beads._is_dolt_server_supervision_target(
+        [
+            "rename-prefix",
+            "as-",
+            "--repair",
+        ]
+    )
+
+
 def test_default_dolt_database_name_is_prefix_only_and_prefix_aware(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -228,6 +238,43 @@ def test_normalize_dolt_runtime_metadata_once_preserves_database_when_expected_m
     assert any(f"do not include expected {expected_database}" in message for message in messages)
 
 
+def test_normalize_dolt_runtime_metadata_once_skips_expected_missing_warning_when_configured(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    expected_database = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    metadata_path = beads_root / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "backend": "dolt",
+                "dolt_mode": "server",
+                "dolt_server_host": "127.0.0.1",
+                "dolt_server_port": 3307,
+                "dolt_server_user": "root",
+                "dolt_database": expected_database,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    beads._DOLT_RUNTIME_NORMALIZED.clear()  # pyright: ignore[reportPrivateUsage]
+    with patch("atelier.beads.atelier_log.warning") as warning_log:
+        beads._normalize_dolt_runtime_metadata_once(  # pyright: ignore[reportPrivateUsage]
+            beads_root=beads_root
+        )
+
+    messages = [str(call.args[0]) for call in warning_log.call_args_list if call.args]
+    assert not any(
+        f"do not include expected {expected_database}" in message for message in messages
+    )
+
+
 def test_normalize_dolt_runtime_metadata_once_sets_expected_db_with_multiple_candidates(
     tmp_path: Path,
 ) -> None:
@@ -308,7 +355,7 @@ def test_resolve_dolt_server_runtime_uses_prefix_database_by_default(
     assert runtime.ownership_error is None
 
 
-def test_resolve_dolt_server_runtime_rejects_configured_database_mismatch(
+def test_resolve_dolt_server_runtime_uses_configured_database_when_present(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
@@ -326,13 +373,11 @@ def test_resolve_dolt_server_runtime_rejects_configured_database_mismatch(
         beads_root
     )
 
-    assert runtime.database == expected_database
-    assert runtime.ownership_error is not None
-    assert "metadata.json configures dolt_database=beads_other" in runtime.ownership_error
-    assert f"expected {expected_database}" in runtime.ownership_error
+    assert runtime.database == "beads_other"
+    assert runtime.ownership_error is None
 
 
-def test_resolve_dolt_server_runtime_rejects_non_candidate_configured_database(
+def test_resolve_dolt_server_runtime_uses_non_candidate_configured_database(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
@@ -351,10 +396,8 @@ def test_resolve_dolt_server_runtime_rejects_non_candidate_configured_database(
         beads_root
     )
 
-    assert runtime.database == expected_database
-    assert runtime.ownership_error is not None
-    assert "metadata.json configures dolt_database=beads_unknown" in runtime.ownership_error
-    assert f"expected {expected_database}" in runtime.ownership_error
+    assert runtime.database == "beads_unknown"
+    assert runtime.ownership_error is None
 
 
 def test_resolve_dolt_server_runtime_fails_closed_when_expected_db_missing(
@@ -382,6 +425,58 @@ def test_resolve_dolt_server_runtime_fails_closed_when_expected_db_missing(
     assert runtime.ownership_error is not None
     assert "local databases (beads_at, beads_other)" in runtime.ownership_error
     assert f"do not include expected {expected_database}" in runtime.ownership_error
+
+
+def test_resolve_dolt_server_runtime_adopts_single_local_database_when_expected_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+    adopted_database = "beads_at"
+    (beads_root / "dolt" / adopted_database / ".dolt").mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt", "dolt_database": expected_database}),
+        encoding="utf-8",
+    )
+
+    runtime = beads._resolve_dolt_server_runtime(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+
+    assert expected_database == "beads_ts"
+    assert runtime.database == expected_database
+    assert runtime.ownership_error is None
+
+
+def test_resolve_dolt_server_runtime_adopts_single_local_database_when_unconfigured(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+    adopted_database = "beads_at"
+    (beads_root / "dolt" / adopted_database / ".dolt").mkdir(parents=True)
+    (beads_root / "metadata.json").write_text(
+        json.dumps({"backend": "dolt"}),
+        encoding="utf-8",
+    )
+
+    runtime = beads._resolve_dolt_server_runtime(  # pyright: ignore[reportPrivateUsage]
+        beads_root
+    )
+
+    assert expected_database == "beads_ts"
+    assert runtime.database == adopted_database
+    assert runtime.ownership_error is None
 
 
 def test_run_bd_command_fails_closed_when_server_reports_other_project_database(
@@ -617,6 +712,95 @@ def test_run_bd_command_repairs_issue_prefix_without_jsonl_init(tmp_path: Path) 
     init_calls = [call for call in calls if call[:4] == ["bd", "init", "--prefix", "at"]]
     assert init_calls == [["bd", "init", "--prefix", "at"]]
     assert calls[-1] == ["bd", "list", "--json"]
+
+
+def test_run_bd_command_repairs_missing_store_for_rename_prefix_error(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / "project" / ".beads"
+    beads_root.mkdir(parents=True)
+    cwd = tmp_path / "repo"
+    cwd.mkdir(parents=True)
+    calls: list[list[str]] = []
+
+    missing_store_error = (
+        "Error: failed to get current prefix: <nil>\n"
+        "Startup Beads state: classification=startup_state_unknown; migration_eligible=no; "
+        "configured_backend=dolt; dolt_store=missing; legacy_sqlite=present; "
+        "dolt_issue_total=0; dolt_count_source=bd_stats_without_dolt_store; "
+        "legacy_issue_total=0; legacy_count_source=bd_stats_legacy_sqlite; "
+        "reason=dolt_store_missing_without_recoverable_legacy_data"
+    )
+
+    def fake_run_with_runner(
+        request: exec_util.CommandRequest,
+    ) -> exec_util.CommandResult | None:
+        argv = list(request.argv)
+        calls.append(argv)
+        if argv == ["bd", "rename-prefix", "as-", "--repair"] and len(calls) == 1:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=1,
+                stdout="",
+                stderr=missing_store_error,
+            )
+        if argv[:3] == ["bd", "doctor", "--fix"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="fixed",
+                stderr="",
+            )
+        if argv[:4] == ["bd", "init", "--prefix", "at"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="initialized",
+                stderr="",
+            )
+        if argv[:5] == ["bd", "config", "set", "issue_prefix", "at"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="ok",
+                stderr="",
+            )
+        if argv[:5] == ["bd", "config", "set", "beads.role", "maintainer"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="ok",
+                stderr="",
+            )
+        if argv[:5] == ["bd", "config", "get", "issue_prefix", "--json"]:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout='{"value":"at"}',
+                stderr="",
+            )
+        if argv == ["bd", "rename-prefix", "as-", "--repair"] and len(calls) > 1:
+            return exec_util.CommandResult(
+                argv=request.argv,
+                returncode=0,
+                stdout="renamed",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {argv}")
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
+    ):
+        result = beads.run_bd_command(
+            ["rename-prefix", "as-", "--repair"], beads_root=beads_root, cwd=cwd
+        )
+
+    assert result.returncode == 0
+    assert calls[0] == ["bd", "rename-prefix", "as-", "--repair"]
+    assert ["bd", "doctor", "--fix", "--yes"] in calls
+    assert ["bd", "init", "--prefix", "at"] in calls
+    assert calls[-1] == ["bd", "rename-prefix", "as-", "--repair"]
 
 
 def test_run_bd_json_retries_embedded_backend_panic_with_explicit_db(
@@ -3449,8 +3633,59 @@ def test_ensure_issue_prefix_reconciles_runtime_metadata_when_prefix_changes(
     assert calls == [["rename-prefix", "ops-", "--repair"]]
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     expected_database = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
-    assert expected_database == "beads_ops"
     assert payload["dolt_database"] == expected_database
+    assert expected_database == "beads_ops"
+
+
+def test_preview_issue_prefix_rename_skips_when_prefix_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(beads, "_current_issue_prefix", lambda *, beads_root, cwd: "at")
+
+    def fake_run(*args: object, **kwargs: object) -> CompletedProcess[str]:
+        raise AssertionError("bd rename-prefix should not run when preview is skipped")
+
+    monkeypatch.setattr(beads, "run_bd_command", fake_run)
+    preview = beads.preview_issue_prefix_rename(
+        "at",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    assert preview is None
+
+
+def test_preview_issue_prefix_rename_parses_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    detail = (
+        "DRY RUN: Would rename 2 issues from prefix 'old' to 'new'\n\n"
+        "Sample changes:\n"
+        "  old-one -> new-one\n"
+        "  old-two -> new-two\n"
+    )
+
+    def fake_run(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        return CompletedProcess(args=args, returncode=0, stdout=detail, stderr="")
+
+    monkeypatch.setattr(beads, "_current_issue_prefix", lambda *, beads_root, cwd: "old")
+    monkeypatch.setattr(beads, "run_bd_command", fake_run)
+
+    preview = beads.preview_issue_prefix_rename(
+        "new",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+
+    assert preview is not None
+    assert preview.count == 2
+    assert preview.current_prefix == "old"
+    assert preview.target_prefix == "new"
+    assert detail.strip() == preview.detail
 
 
 def test_claim_epic_updates_assignee_and_status() -> None:

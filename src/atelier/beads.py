@@ -60,6 +60,8 @@ _DOLT_RUNTIME_NORMALIZED: set[Path] = set()
 _STORE_REPAIR_ERROR_MARKERS = (
     "no beads database found",
     "database not initialized: issue_prefix config is missing",
+    "failed to get current prefix: <nil>",
+    "dolt_store_missing_without_recoverable_legacy_data",
     "fresh clone detected",
 )
 _EMBEDDED_BACKEND_PANIC_MARKERS = (
@@ -113,6 +115,7 @@ _DOLT_SERVER_PRECHECK_BYPASS_COMMANDS = {
     "setup",
     "upgrade",
     "version",
+    "rename-prefix",
 }
 _DOLT_SERVER_ERROR_MARKERS = (
     "can't connect to mysql server",
@@ -130,6 +133,19 @@ _DOLT_SERVER_ERROR_MARKERS = (
     "no such host",
     "unknown database",
 )
+_DRY_RUN_RENAME_PREFIX_SUMMARY = re.compile(
+    r"DRY RUN: Would rename (\d+) issues from prefix '([^']+)' to '([^']+)'"
+)
+
+
+@dataclass(frozen=True)
+class IssuePrefixRenamePreview:
+    count: int
+    current_prefix: str
+    target_prefix: str
+    detail: str
+
+
 _DOLT_AUTO_COMMIT_MODES = {"off", "on", "batch"}
 _DOLT_DIRECT_RUNTIME_MODES = {"direct"}
 _DOLT_COMMIT_SKIP_MESSAGE_PREFIX = "Skipping `bd dolt commit`:"
@@ -802,8 +818,14 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
 
     expected_database = _default_dolt_database_name(beads_root)
     local_candidates = _local_dolt_database_candidates(beads_root)
+    raw_database = updated.get("dolt_database")
+    current_database = _normalize_dolt_database_name(raw_database)
     preserve_database = False
-    if local_candidates and expected_database not in local_candidates:
+    if (
+        local_candidates
+        and expected_database not in local_candidates
+        and (not current_database or current_database != expected_database)
+    ):
         choices = ", ".join(local_candidates)
         remediation = _dolt_database_remediation(expected_database=expected_database)
         atelier_log.warning(
@@ -812,8 +834,6 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
             f"{expected_database}. {remediation}"
         )
         preserve_database = True
-    raw_database = updated.get("dolt_database")
-    current_database = _normalize_dolt_database_name(raw_database)
     if not preserve_database and (
         current_database != expected_database or raw_database != expected_database
     ):
@@ -2196,9 +2216,19 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
     expected_database = _default_dolt_database_name(beads_root)
     local_candidates = _local_dolt_database_candidates(beads_root)
     configured_database = _normalize_dolt_database_name(payload.get("dolt_database"))
+    runtime_database = configured_database or expected_database
     ownership_error = _prefix_collision_ownership_error(beads_root)
     if ownership_error is not None:
         pass
+    elif configured_database:
+        runtime_database = configured_database
+    elif local_candidates and expected_database in local_candidates:
+        runtime_database = expected_database
+    elif len(local_candidates) == 1:
+        # Legacy stores may keep a single local database whose name predates the
+        # current prefix. Prefer that unambiguous local database and reconcile
+        # metadata later instead of failing preflight.
+        runtime_database = local_candidates[0]
     elif local_candidates and expected_database not in local_candidates:
         choices = ", ".join(local_candidates)
         remediation = _dolt_database_remediation(expected_database=expected_database)
@@ -2206,14 +2236,7 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
             "dolt server ownership mismatch: local databases "
             f"({choices}) do not include expected {expected_database}. {remediation}"
         )
-    elif configured_database and configured_database != expected_database:
-        remediation = _dolt_database_remediation(expected_database=expected_database)
-        ownership_error = (
-            "dolt server ownership mismatch: metadata.json configures "
-            f"dolt_database={configured_database}, expected {expected_database}. "
-            f"{remediation}"
-        )
-    database = expected_database
+    database = runtime_database
     dolt_root = beads_root / "dolt"
     return DoltServerRuntime(
         dolt_root=dolt_root,
@@ -3570,6 +3593,43 @@ def _current_issue_prefix(*, beads_root: Path, cwd: Path) -> str:
         if isinstance(value, str):
             return value.strip()
     return ""
+
+
+def preview_issue_prefix_rename(
+    prefix: str,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> IssuePrefixRenamePreview | None:
+    expected = prefix.strip().lower()
+    if not expected:
+        return None
+    current = _current_issue_prefix(beads_root=beads_root, cwd=cwd)
+    if current == expected:
+        return None
+    result = run_bd_command(
+        ["rename-prefix", f"{expected}-", "--repair", "--dry-run"],
+        beads_root=beads_root,
+        cwd=cwd,
+        allow_failure=True,
+    )
+    if result.returncode != 0:
+        return None
+    detail = (result.stdout or "").strip()
+    if not detail:
+        return None
+    match = _DRY_RUN_RENAME_PREFIX_SUMMARY.search(detail)
+    if not match:
+        return None
+    count = int(match.group(1))
+    current_prefix = match.group(2)
+    target_prefix = match.group(3)
+    return IssuePrefixRenamePreview(
+        count=count,
+        current_prefix=current_prefix,
+        target_prefix=target_prefix,
+        detail=detail,
+    )
 
 
 def ensure_issue_prefix(
