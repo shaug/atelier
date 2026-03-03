@@ -8,9 +8,20 @@ import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Literal, Mapping
+from typing import Iterable, Iterator, Literal, Mapping, Sequence
 
 WorkingDirMode = Literal["cwd", "flag"]
+LaunchRole = Literal["planner", "worker"]
+
+LAUNCH_ROLE_VALUES: tuple[LaunchRole, ...] = ("planner", "worker")
+_LAUNCH_ROLE_ALIASES = {
+    "plan": "planner",
+    "planner": "planner",
+    "work": "worker",
+    "worker": "worker",
+}
+_CLAUDE_WORKER_DEFAULT_OPTIONS: tuple[str, ...] = ("--print", "--output-format=stream-json")
+_LONG_FLAGS_ALLOW_SINGLE_DASH_VALUES: frozenset[str] = frozenset({"--append-system-prompt"})
 
 
 @dataclass(frozen=True)
@@ -140,6 +151,25 @@ def normalize_agent_name(value: str | None) -> str:
     if value is None:
         return ""
     return value.strip().lower()
+
+
+def normalize_launch_role(value: str | None) -> str:
+    """Normalize a launch role string.
+
+    Args:
+        value: Raw role value, for example ``planner``, ``plan``,
+            ``worker``, or ``work``.
+
+    Returns:
+        Canonical role name when supported, otherwise an empty string.
+    """
+    if value is None:
+        return ""
+    normalized = value.strip().lower()
+    if not normalized:
+        return ""
+    resolved = _LAUNCH_ROLE_ALIASES.get(normalized)
+    return resolved or ""
 
 
 def supported_agents() -> tuple[AgentSpec, ...]:
@@ -278,11 +308,118 @@ def find_resume_session(
 def apply_yolo_options(agent: AgentSpec, options: list[str]) -> list[str]:
     """Return agent options with any yolo flags appended once."""
     if not agent.yolo_flags:
-        return list(options)
-    merged = list(options)
-    for flag in agent.yolo_flags:
-        if flag not in merged:
-            merged.append(flag)
+        return merge_cli_options(options)
+    return merge_cli_options(options, agent.yolo_flags)
+
+
+@dataclass(frozen=True)
+class _OptionTokens:
+    tokens: tuple[str, ...]
+    key: str | None
+
+
+def _consume_option_tokens(
+    options: Sequence[str], index: int, *, stop_option_parsing: bool
+) -> tuple[_OptionTokens, int, bool]:
+    token = options[index]
+    if stop_option_parsing:
+        return _OptionTokens(tokens=(token,), key=None), 1, stop_option_parsing
+    if token == "--":
+        return _OptionTokens(tokens=("--",), key=None), 1, True
+    if not token.startswith("-") or token == "-":
+        return _OptionTokens(tokens=(token,), key=None), 1, stop_option_parsing
+    if token.startswith("--") and "=" in token:
+        flag = token.split("=", 1)[0]
+        return _OptionTokens(tokens=(token,), key=flag), 1, stop_option_parsing
+    if index + 1 < len(options):
+        candidate_value = options[index + 1]
+        if (
+            token in _LONG_FLAGS_ALLOW_SINGLE_DASH_VALUES
+            and candidate_value != "--"
+            and candidate_value.startswith("-")
+            and not candidate_value.startswith("--")
+        ):
+            return (
+                _OptionTokens(tokens=(token, candidate_value), key=token),
+                2,
+                stop_option_parsing,
+            )
+        if not candidate_value.startswith("-"):
+            return (
+                _OptionTokens(tokens=(token, candidate_value), key=token),
+                2,
+                stop_option_parsing,
+            )
+    return _OptionTokens(tokens=(token,), key=token), 1, stop_option_parsing
+
+
+def merge_cli_options(*groups: Sequence[str]) -> list[str]:
+    """Merge CLI option groups using last-wins semantics for option flags.
+
+    Args:
+        groups: Option token groups ordered from low to high precedence.
+
+    Returns:
+        Deduplicated option tokens with higher-precedence groups overriding
+        lower-precedence values for the same flag.
+    """
+    entries: list[_OptionTokens] = []
+    stop_option_parsing = False
+    for group in groups:
+        normalized_group = [str(token) for token in group]
+        index = 0
+        while index < len(normalized_group):
+            entry, consumed, stop_option_parsing = _consume_option_tokens(
+                normalized_group,
+                index,
+                stop_option_parsing=stop_option_parsing,
+            )
+            if entry.key is not None:
+                entries = [item for item in entries if item.key != entry.key]
+            entries.append(entry)
+            index += consumed
+    merged: list[str] = []
+    for entry in entries:
+        merged.extend(entry.tokens)
+    return merged
+
+
+def resolve_launch_options(
+    *,
+    agent_name: str,
+    role: str,
+    global_options: Mapping[str, list[str]] | None = None,
+    launch_options: Mapping[str, Mapping[str, list[str]]] | None = None,
+) -> list[str]:
+    """Resolve launch options for one role/agent pair.
+
+    Deterministic precedence:
+    1) built-in worker defaults (Claude-only)
+    2) legacy global `agent.options[agent]`
+    3) role-scoped `agent.launch_options[role][agent]`
+
+    Args:
+        agent_name: Agent name to resolve, for example ``codex``.
+        role: Launch role (``planner``/``worker`` or aliases ``plan``/``work``).
+        global_options: Legacy per-agent options map.
+        launch_options: Role-scoped per-agent options map.
+
+    Returns:
+        Effective launch option tokens for the selected role and agent.
+
+    Raises:
+        ValueError: If role is unsupported.
+    """
+    normalized_agent = normalize_agent_name(agent_name)
+    normalized_role = normalize_launch_role(role)
+    if normalized_role not in LAUNCH_ROLE_VALUES:
+        raise ValueError("role must be one of: planner, worker")
+    base_options = list((global_options or {}).get(normalized_agent, []))
+    scoped_by_agent = (launch_options or {}).get(normalized_role, {})
+    scoped_options = list(scoped_by_agent.get(normalized_agent, []))
+    merged = merge_cli_options(base_options, scoped_options)
+    if normalized_role == "worker" and normalized_agent == "claude":
+        merged = merge_cli_options(_CLAUDE_WORKER_DEFAULT_OPTIONS, merged)
     return merged
 
 

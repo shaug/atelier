@@ -148,6 +148,83 @@ class TestAgentSpec:
         config = AgentConfig(default="Codex", options={"codex": []})
         assert config.default == "codex"
 
+    def test_agent_config_accepts_role_scoped_launch_options(self) -> None:
+        config = AgentConfig(
+            default="codex",
+            options={"codex": []},
+            launch_options={
+                "plan": {"codex": ["--model", "gpt-5"]},
+                "worker": {"claude": ["--print"]},
+            },
+        )
+        assert config.launch_options["planner"]["codex"] == ["--model", "gpt-5"]
+        assert config.launch_options["worker"]["claude"] == ["--print"]
+
+    def test_agent_config_rejects_unsupported_role_scoped_launch_options(self) -> None:
+        with pytest.raises(ValidationError):
+            AgentConfig(
+                default="codex",
+                options={"codex": []},
+                launch_options={"unknown": {"codex": ["--flag"]}},
+            )
+
+    def test_agent_config_rejects_unsupported_agents_in_launch_options(self) -> None:
+        with pytest.raises(ValidationError):
+            AgentConfig(
+                default="codex",
+                options={"codex": []},
+                launch_options={"worker": {"unsupported": ["--flag"]}},
+            )
+
+    def test_merge_cli_options_uses_last_wins_for_flag_values(self) -> None:
+        merged = agents.merge_cli_options(
+            ["--model", "haiku", "--print"],
+            ["--model=sonnet", "--output-format", "json"],
+        )
+        assert merged == ["--print", "--model=sonnet", "--output-format", "json"]
+
+    def test_merge_cli_options_overrides_single_dash_values_without_leaking(self) -> None:
+        merged = agents.merge_cli_options(
+            ["--append-system-prompt", "-a"],
+            ["--append-system-prompt", "-b"],
+        )
+        assert merged == ["--append-system-prompt", "-b"]
+
+    def test_merge_cli_options_does_not_swallow_short_flags_after_boolean_long_flag(self) -> None:
+        merged = agents.merge_cli_options(
+            ["--print", "-x"],
+            ["--print"],
+        )
+        assert merged == ["-x", "--print"]
+
+    def test_resolve_launch_options_prefers_role_scoped_over_global(self) -> None:
+        resolved = agents.resolve_launch_options(
+            agent_name="codex",
+            role="planner",
+            global_options={"codex": ["--model", "gpt-4"]},
+            launch_options={"planner": {"codex": ["--model", "gpt-5"]}},
+        )
+        assert resolved == ["--model", "gpt-5"]
+
+    def test_resolve_launch_options_adds_claude_worker_print_defaults(self) -> None:
+        resolved = agents.resolve_launch_options(
+            agent_name="claude",
+            role="worker",
+            global_options={"claude": ["--model", "sonnet"]},
+            launch_options={},
+        )
+        assert "--print" in resolved
+        assert "--output-format=stream-json" in resolved
+
+    def test_resolve_launch_options_keeps_claude_planner_interactive(self) -> None:
+        resolved = agents.resolve_launch_options(
+            agent_name="claude",
+            role="planner",
+            global_options={"claude": ["--model", "sonnet"]},
+            launch_options={},
+        )
+        assert "--print" not in resolved
+
     def test_aider_chat_history_path_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             workspace_dir = Path(tmp)

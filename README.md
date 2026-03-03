@@ -156,6 +156,42 @@ Atelier validates that the configured agent is available on your PATH (using
 - Best-effort session resumption when the agent CLI supports it
 - Opening prompt containing the workspace ID (Codex only)
 
+### Role-scoped launch options
+
+Agent options support both legacy global settings and role-scoped overrides:
+
+- `agent.options.<agent>` applies to both `atelier plan` and `atelier work`.
+- `agent.launch_options.planner.<agent>` applies only to planner sessions.
+- `agent.launch_options.worker.<agent>` applies only to worker sessions.
+
+Precedence is deterministic: worker/planner scoped options override legacy
+global options for the same flag.
+
+Example:
+
+```json
+{
+  "agent": {
+    "default": "claude",
+    "options": {
+      "claude": ["--model", "sonnet"]
+    },
+    "launch_options": {
+      "planner": {
+        "claude": ["--model", "opus"]
+      },
+      "worker": {
+        "claude": ["--print", "--output-format=stream-json"]
+      }
+    }
+  }
+}
+```
+
+Claude worker sessions default to print-mode with `--output-format=stream-json`
+unless explicitly overridden, while planner Claude sessions remain interactive
+by default.
+
 ## Workspace identity environment variables
 
 Atelier sets these environment variables when launching editors, shells, and

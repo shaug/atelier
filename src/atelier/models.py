@@ -247,7 +247,9 @@ class AgentConfig(BaseModel):
 
     Attributes:
         default: Default agent name.
-        options: Mapping of agent names to argument lists.
+        options: Legacy global mapping of agent names to argument lists.
+        launch_options: Role-scoped options keyed by ``planner``/``worker``,
+            then agent name.
 
     Example:
         >>> AgentConfig(
@@ -262,6 +264,7 @@ class AgentConfig(BaseModel):
     default: str = "codex"
     identity: str | None = None
     options: dict[str, list[str]] = Field(default_factory=dict)
+    launch_options: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
 
     @field_validator("default", mode="before")
     @classmethod
@@ -308,6 +311,52 @@ class AgentConfig(BaseModel):
         if unsupported:
             unsupported_str = ", ".join(sorted(unsupported))
             raise ValueError(f"unsupported agent options: {unsupported_str}")
+        return value
+
+    @field_validator("launch_options", mode="before")
+    @classmethod
+    def normalize_launch_options(cls, value: object) -> dict[str, dict[str, list[str]]]:
+        if not isinstance(value, dict):
+            return {}
+        normalized: dict[str, dict[str, list[str]]] = {}
+        for role, role_options in value.items():
+            normalized_role = agents.normalize_launch_role(str(role))
+            if not normalized_role:
+                supported = ", ".join(agents.LAUNCH_ROLE_VALUES)
+                raise ValueError(f"unsupported launch option role {role!r}; supported: {supported}")
+            if not isinstance(role_options, dict):
+                continue
+            normalized_agents: dict[str, list[str]] = {}
+            for agent_name, options in role_options.items():
+                if not isinstance(options, list):
+                    continue
+                normalized_agent = str(agent_name).strip().lower()
+                if not normalized_agent:
+                    continue
+                normalized_agents[normalized_agent] = [str(item) for item in options]
+            normalized[normalized_role] = normalized_agents
+        return normalized
+
+    @field_validator("launch_options", mode="after")
+    @classmethod
+    def validate_launch_options(
+        cls, value: dict[str, dict[str, list[str]]]
+    ) -> dict[str, dict[str, list[str]]]:
+        unsupported_roles = [role for role in value if role not in agents.LAUNCH_ROLE_VALUES]
+        if unsupported_roles:
+            supported = ", ".join(agents.LAUNCH_ROLE_VALUES)
+            unsupported = ", ".join(sorted(unsupported_roles))
+            raise ValueError(
+                f"unsupported launch option roles: {unsupported} (supported: {supported})"
+            )
+        unsupported_agents: set[str] = set()
+        for role_options in value.values():
+            unsupported_agents.update(
+                name for name in role_options if not agents.is_supported_agent(name)
+            )
+        if unsupported_agents:
+            unsupported_str = ", ".join(sorted(unsupported_agents))
+            raise ValueError(f"unsupported launch option agents: {unsupported_str}")
         return value
 
 

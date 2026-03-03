@@ -909,7 +909,11 @@ def default_user_config() -> ProjectUserConfig:
         update={
             "git": base.git,
             "branch": base.branch,
-            "agent": AgentConfig(default=agents.DEFAULT_AGENT, options=agent_options),
+            "agent": AgentConfig(
+                default=agents.DEFAULT_AGENT,
+                options=agent_options,
+                launch_options={},
+            ),
             "editor": EditorConfig(
                 edit=editor_edit_default,
                 work=editor_work_default,
@@ -1217,6 +1221,7 @@ def build_project_config(
 
     agent_options = dict(existing_config.agent.options)
     agent_options.setdefault(agent_default, [])
+    launch_options = dict(existing_config.agent.launch_options)
 
     project_origin = origin or existing_config.project.origin
     project_repo_url = origin_raw or existing_config.project.repo_url
@@ -1257,7 +1262,11 @@ def build_project_config(
         ),
         git=existing_config.git,
         branch=branch_config,
-        agent=AgentConfig(default=agent_default, options=agent_options),
+        agent=AgentConfig(
+            default=agent_default,
+            options=agent_options,
+            launch_options=launch_options,
+        ),
         editor=EditorConfig(edit=editor_edit, work=editor_work),
         beads=beads_section,
         atelier=AtelierSection(
