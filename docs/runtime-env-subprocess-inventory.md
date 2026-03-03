@@ -13,53 +13,91 @@ when launching planner/worker/editor/shell subprocesses.
 
 ## Variable inventory
 
-| Variable | Owner (set path) | Primary consumers | Class | | --- | --- | --- |
---- | | `ATELIER_AGENT_ID` | `src/atelier/agents.py::agent_environment` |
-`src/atelier/agent_home.py`, `src/atelier/beads.py`,
-`src/atelier/planner_sync.py`, `src/atelier/worker/work_finalization_state.py`,
-`src/atelier/skills/planner-startup-check/scripts/refresh_overview.py` | session
-identity | | `ATELIER_WORKSPACE` |
-`src/atelier/workspace.py::workspace_environment` | downstream shell/editor
-commands launched by `atelier open` / `atelier edit` | workspace context | |
-`ATELIER_PROJECT` | `src/atelier/workspace.py::workspace_environment` |
-`src/atelier/beads_context.py::resolve_runtime_repo_dir_hint` (legacy fallback),
-`src/atelier/auto_export.py::resolve_auto_export_context` (indirect via beads
-context helper) | project routing | | `ATELIER_WORKSPACE_DIR` |
-`src/atelier/workspace.py::workspace_environment` |
-`src/atelier/beads_context.py::resolve_runtime_repo_dir_hint` | project routing
-| | `ATELIER_HOOKS_PATH` | `src/atelier/hooks.py::ensure_hooks_path` |
-hook-capable runtimes (Claude/Gemini/OpenCode/Copilot) | hook handoff | |
-`ATELIER_EPIC_ID` | `src/atelier/worker/session/agent.py::prepare_agent_session`
-| `src/atelier/commands/hook.py` | hook/session context | |
-`ATELIER_CHANGESET_ID` |
-`src/atelier/worker/session/agent.py::prepare_agent_session` |
-`src/atelier/commands/hook.py` | hook/session context | | `ATELIER_PLAN_EPIC` |
-`src/atelier/commands/plan.py::run_planner` | planner-agent skill flows and
-prompts | planner context | | `ATELIER_BEADS_PREFIX` |
-`src/atelier/commands/plan.py::run_planner`,
-`src/atelier/worker/session/agent.py::prepare_agent_session` |
-`src/atelier/beads.py` runtime label/prefix resolution | beads routing | |
-`ATELIER_EXTERNAL_PROVIDERS` |
-`src/atelier/external_registry.py::planner_provider_environment` |
-`src/atelier/skills/tickets/SKILL.md` workflows | provider routing | |
-`ATELIER_EXTERNAL_PROVIDER` |
-`src/atelier/external_registry.py::planner_provider_environment` |
-skills/provider selection flows | provider routing | |
-`ATELIER_EXTERNAL_AUTO_EXPORT` |
-`src/atelier/external_registry.py::planner_provider_environment` | external
-export behavior hints for runtime scripts | provider routing | |
-`ATELIER_GITHUB_REPO` |
-`src/atelier/external_registry.py::planner_provider_environment` |
-`src/atelier/skills/tickets/SKILL.md` workflows | provider routing | |
-`ATELIER_PLANNER_SYNC_ENABLED` |
-`src/atelier/planner_sync.py::runtime_environment` |
-`src/atelier/planner_sync.py::maybe_sync_from_hook` | planner sync routing | |
-`ATELIER_AGENT_BEAD_ID` | `src/atelier/planner_sync.py::runtime_environment` |
-`src/atelier/planner_sync.py::maybe_sync_from_hook`, `src/atelier/beads.py` |
-planner sync routing | | `ATELIER_PLANNER_WORKTREE` |
-`src/atelier/planner_sync.py::runtime_environment` |
-`src/atelier/planner_sync.py::maybe_sync_from_hook` | planner sync routing | |
-`ATELIER_PLANNER_BRANCH` | `src/atelier/planner_sync.py::runtime_environment` |
-`src/atelier/planner_sync.py::maybe_sync_from_hook` | planner sync routing | |
-`ATELIER_DEFAULT_BRANCH` | `src/atelier/planner_sync.py::runtime_environment` |
-`src/atelier/planner_sync.py::maybe_sync_from_hook` | planner sync routing |
+- `ATELIER_AGENT_ID`
+  - Owner (set path): `src/atelier/agents.py::agent_environment`
+  - Primary consumers: `src/atelier/agent_home.py`, `src/atelier/beads.py`,
+    `src/atelier/planner_sync.py`,
+    `src/atelier/worker/work_finalization_state.py`,
+    `src/atelier/skills/planner-startup-check/scripts/refresh_overview.py`
+  - Class: session identity
+- `ATELIER_WORKSPACE`
+  - Owner (set path): `src/atelier/workspace.py::workspace_environment`
+  - Primary consumers: downstream shell/editor commands launched by
+    `atelier open` / `atelier edit`
+  - Class: workspace context
+- `ATELIER_PROJECT`
+  - Owner (set path): `src/atelier/workspace.py::workspace_environment`
+  - Primary consumers:
+    `src/atelier/beads_context.py::resolve_runtime_repo_dir_hint` (legacy
+    fallback), `src/atelier/auto_export.py::resolve_auto_export_context`
+    (indirect via beads context helper)
+  - Class: project routing
+- `ATELIER_WORKSPACE_DIR`
+  - Owner (set path): `src/atelier/workspace.py::workspace_environment`
+  - Primary consumers:
+    `src/atelier/beads_context.py::resolve_runtime_repo_dir_hint`
+  - Class: project routing
+- `ATELIER_HOOKS_PATH`
+  - Owner (set path): `src/atelier/hooks.py::ensure_hooks_path`
+  - Primary consumers: hook-capable runtimes (Claude/Gemini/OpenCode/Copilot)
+  - Class: hook handoff
+- `ATELIER_EPIC_ID`
+  - Owner (set path):
+    `src/atelier/worker/session/agent.py::prepare_agent_session`
+  - Primary consumers: `src/atelier/commands/hook.py`
+  - Class: hook/session context
+- `ATELIER_CHANGESET_ID`
+  - Owner (set path):
+    `src/atelier/worker/session/agent.py::prepare_agent_session`
+  - Primary consumers: `src/atelier/commands/hook.py`
+  - Class: hook/session context
+- `ATELIER_PLAN_EPIC`
+  - Owner (set path): `src/atelier/commands/plan.py::run_planner`
+  - Primary consumers: planner-agent skill flows and prompts
+  - Class: planner context
+- `ATELIER_BEADS_PREFIX`
+  - Owner (set path): `src/atelier/commands/plan.py::run_planner`,
+    `src/atelier/worker/session/agent.py::prepare_agent_session`
+  - Primary consumers: `src/atelier/beads.py` runtime label/prefix resolution
+  - Class: beads routing
+- `ATELIER_EXTERNAL_PROVIDERS`
+  - Owner (set path):
+    `src/atelier/external_registry.py::planner_provider_environment`
+  - Primary consumers: `src/atelier/skills/tickets/SKILL.md` workflows
+  - Class: provider routing
+- `ATELIER_EXTERNAL_PROVIDER`
+  - Owner (set path):
+    `src/atelier/external_registry.py::planner_provider_environment`
+  - Primary consumers: skills/provider selection flows
+  - Class: provider routing
+- `ATELIER_EXTERNAL_AUTO_EXPORT`
+  - Owner (set path):
+    `src/atelier/external_registry.py::planner_provider_environment`
+  - Primary consumers: external export behavior hints for runtime scripts
+  - Class: provider routing
+- `ATELIER_GITHUB_REPO`
+  - Owner (set path):
+    `src/atelier/external_registry.py::planner_provider_environment`
+  - Primary consumers: `src/atelier/skills/tickets/SKILL.md` workflows
+  - Class: provider routing
+- `ATELIER_PLANNER_SYNC_ENABLED`
+  - Owner (set path): `src/atelier/planner_sync.py::runtime_environment`
+  - Primary consumers: `src/atelier/planner_sync.py::maybe_sync_from_hook`
+  - Class: planner sync routing
+- `ATELIER_AGENT_BEAD_ID`
+  - Owner (set path): `src/atelier/planner_sync.py::runtime_environment`
+  - Primary consumers: `src/atelier/planner_sync.py::maybe_sync_from_hook`,
+    `src/atelier/beads.py`
+  - Class: planner sync routing
+- `ATELIER_PLANNER_WORKTREE`
+  - Owner (set path): `src/atelier/planner_sync.py::runtime_environment`
+  - Primary consumers: `src/atelier/planner_sync.py::maybe_sync_from_hook`
+  - Class: planner sync routing
+- `ATELIER_PLANNER_BRANCH`
+  - Owner (set path): `src/atelier/planner_sync.py::runtime_environment`
+  - Primary consumers: `src/atelier/planner_sync.py::maybe_sync_from_hook`
+  - Class: planner sync routing
+- `ATELIER_DEFAULT_BRANCH`
+  - Owner (set path): `src/atelier/planner_sync.py::runtime_environment`
+  - Primary consumers: `src/atelier/planner_sync.py::maybe_sync_from_hook`
+  - Class: planner sync routing
