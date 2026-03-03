@@ -405,6 +405,24 @@ def test_extract_codex_error_message_from_error_field() -> None:
     assert output_codex.extract_error_message(event) == "API rate limit exceeded"
 
 
+def test_extract_codex_tool_activity_command_execution() -> None:
+    """Command execution tool events include a compact command label."""
+    event = output_codex.CodexEvent(
+        type="item.completed",
+        item={"type": "command_execution", "command": "bash -lc ls -la"},
+    )
+    assert output_codex.extract_tool_activity(event) == "command: bash -lc ls -la"
+
+
+def test_extract_codex_tool_activity_mcp_tool_call() -> None:
+    """MCP tool call events include server/tool identity."""
+    event = output_codex.CodexEvent(
+        type="item.started",
+        item={"type": "mcp_tool_call", "server": "linear", "name": "list_issues"},
+    )
+    assert output_codex.extract_tool_activity(event) == "tool: linear/list_issues"
+
+
 def test_agent_output_capture_codex_json_counts_events() -> None:
     """Feed Codex JSON lines; verify event and tool counts."""
     capture = AgentOutputCapture(agent_name="codex")
@@ -418,6 +436,21 @@ def test_agent_output_capture_codex_json_counts_events() -> None:
     assert "Agent output (codex):" in summary[0]
     assert "events=2" in summary[0]
     assert any("Assistant preview: Done" in line for line in summary)
+
+
+def test_agent_output_capture_codex_latest_tool_activity_dedupes_repeats() -> None:
+    """Repeated identical tool events should not create new activity markers."""
+    capture = AgentOutputCapture(agent_name="codex")
+    capture.feed_stdout_line(
+        '{"type":"item.completed","item":{"type":"command_execution","command":"bash -lc ls"}}'
+    )
+    first = capture.latest_tool_activity()
+    assert first is not None
+    capture.feed_stdout_line(
+        '{"type":"item.completed","item":{"type":"command_execution","command":"bash -lc ls"}}'
+    )
+    second = capture.latest_tool_activity()
+    assert second == first
 
 
 def test_agent_output_capture_codex_fixture(

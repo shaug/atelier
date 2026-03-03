@@ -53,9 +53,11 @@ class _StructuredLiveProgress:
     """Track low-noise progress signals while structured events stream."""
 
     label: str
+    show_tool_activity: bool = False
     seen_structured: bool = False
     next_tool_threshold: int = _STRUCTURED_TOOL_PROGRESS_INTERVAL
     preview_emitted: bool = False
+    last_tool_activity_seq: int = 0
 
 
 @dataclass(frozen=True)
@@ -106,7 +108,14 @@ def _emit_structured_live_progress(
         progress.seen_structured = True
         session_control.say(f"{progress.label} stream: receiving structured events.")
 
-    if capture.tool_event_count >= progress.next_tool_threshold:
+    if progress.show_tool_activity:
+        tool_activity = capture.latest_tool_activity()
+        if tool_activity is not None:
+            tool_seq, activity = tool_activity
+            if tool_seq > progress.last_tool_activity_seq:
+                progress.last_tool_activity_seq = tool_seq
+                session_control.say(f"{progress.label} tool: {activity}")
+    elif capture.tool_event_count >= progress.next_tool_threshold:
         session_control.say(f"{progress.label} progress: tool events={capture.tool_event_count}")
         while capture.tool_event_count >= progress.next_tool_threshold:
             progress.next_tool_threshold += _STRUCTURED_TOOL_PROGRESS_INTERVAL
@@ -450,7 +459,10 @@ def start_agent_session(
     trace_agent_output = session_output.trace_output_requested(env)
     output_capture = session_output.AgentOutputCapture(agent_name=agent_spec.name)
     if agent_spec.name in {"codex", "claude"} and not trace_agent_output:
-        live_progress = _StructuredLiveProgress(label=agent_spec.display_name)
+        live_progress = _StructuredLiveProgress(
+            label=agent_spec.display_name,
+            show_tool_activity=agent_spec.name == "codex",
+        )
 
         def _handle_structured_output_line(raw_line: str) -> None:
             output_capture.feed_stdout_line(raw_line)

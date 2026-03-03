@@ -42,6 +42,8 @@ class AgentOutputCapture:
     _seen_lines: dict[str, int] = field(default_factory=dict)
     _assistant_preview: str = ""
     _assistant_char_count: int = 0
+    _tool_activity_seq: int = 0
+    _latest_tool_activity: str = ""
 
     def feed_stdout_line(self, raw_line: str) -> None:
         """Consume one stdout line from the agent process."""
@@ -83,6 +85,13 @@ class AgentOutputCapture:
             return "." * max_chars
         clipped = preview[: max_chars - 3].rstrip()
         return f"{clipped}..."
+
+    def latest_tool_activity(self) -> tuple[int, str] | None:
+        """Return the most recently captured tool activity marker."""
+        activity = self._latest_tool_activity.strip()
+        if not activity:
+            return None
+        return self._tool_activity_seq, activity
 
     def _feed_line(self, raw_line: str, *, source: str) -> None:
         line = _normalize_line(raw_line)
@@ -133,6 +142,10 @@ class AgentOutputCapture:
         self.structured_event_count += 1
         if output_codex.is_tool_event(event):
             self.tool_event_count += 1
+            tool_activity = output_codex.extract_tool_activity(event)
+            if tool_activity and tool_activity != self._latest_tool_activity:
+                self._tool_activity_seq += 1
+                self._latest_tool_activity = tool_activity
         err_msg = output_codex.extract_error_message(event)
         if err_msg:
             self._append_unique(self._diagnostics, err_msg)

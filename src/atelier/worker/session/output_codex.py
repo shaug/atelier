@@ -13,6 +13,7 @@ _CODEX_TOOL_ITEM_TYPES = frozenset(
 )
 # Codex item types that carry agent text for preview
 _CODEX_TEXT_ITEM_TYPES = frozenset({"agent_message", "reasoning"})
+_MAX_TOOL_ACTIVITY_CHARS = 140
 
 
 class CodexEvent(BaseModel):
@@ -92,3 +93,50 @@ def extract_error_message(event: CodexEvent) -> str | None:
     if text and "failed" in (event.type or "").lower():
         return text
     return None
+
+
+def extract_tool_activity(event: CodexEvent) -> str | None:
+    """Extract concise tool activity text from a Codex event."""
+    if event.item is None:
+        return None
+    item_type = (event.item.get("type") or "").lower()
+    if item_type == "command_execution":
+        command = event.item.get("command")
+        if isinstance(command, str) and command.strip():
+            return _clip_activity(f"command: {' '.join(command.split())}")
+        return "command"
+    if item_type == "mcp_tool_call":
+        name = _first_string(event.item.get("name"), event.item.get("tool_name"))
+        server = _first_string(event.item.get("server"), event.item.get("server_name"))
+        if name and server:
+            return _clip_activity(f"tool: {server}/{name}")
+        if name:
+            return _clip_activity(f"tool: {name}")
+        return "tool call"
+    if item_type == "web_search":
+        query = _first_string(event.item.get("query"), event.item.get("text"))
+        if query:
+            return _clip_activity(f"search: {' '.join(query.split())}")
+        return "web search"
+    if item_type == "file_change":
+        path = _first_string(event.item.get("path"), event.item.get("file_path"))
+        if path:
+            return _clip_activity(f"file: {path}")
+        return "file change"
+    if "tool" in item_type or "command" in item_type:
+        return _clip_activity(item_type.replace("_", " "))
+    return None
+
+
+def _first_string(*values: object) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _clip_activity(value: str) -> str:
+    text = " ".join(value.split())
+    if len(text) <= _MAX_TOOL_ACTIVITY_CHARS:
+        return text
+    return f"{text[: _MAX_TOOL_ACTIVITY_CHARS - 3].rstrip()}..."
