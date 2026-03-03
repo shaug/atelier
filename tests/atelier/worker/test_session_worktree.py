@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import pytest
 
@@ -92,12 +92,12 @@ def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: 
         {
             "id": "at-gnc",
             "labels": ["at:epic"],
-            "description": "workspace.root_branch: feat/gnc\n",
+            "description": "workspace.root_branch: feat/gnc\nworktree_path: worktrees/at-gnc\n",
         },
         {
             "id": "at-1my",
             "labels": ["at:epic"],
-            "description": "workspace.root_branch: feat/1my\n",
+            "description": "workspace.root_branch: feat/1my\nworktree_path: worktrees/at-1my\n",
         },
     ]
     descendants_by_epic = {
@@ -188,8 +188,140 @@ def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: 
             "at-gnc": "feat/gnc",
             "at-1my": "feat/1my",
         },
+        epic_worktree_paths={
+            "at-gnc": "worktrees/at-gnc",
+            "at-1my": "worktrees/at-1my",
+        },
+        synthesis_diagnostics=ANY,
     )
     assert any("Reconciled mapping ownership: at-1my, at-gnc" in line for line in logs)
+
+
+def test_prepare_worktrees_review_feedback_resume_logs_lineage_mapping_path_synthesis(
+    tmp_path: Path,
+) -> None:
+    logs: list[str] = []
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    changeset_worktree_path = tmp_path / "worktrees" / "at-legacy.1"
+    changeset_worktree_path.mkdir(parents=True)
+    (changeset_worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+
+    mapping = worktrees.WorktreeMapping(
+        epic_id="ts-new",
+        worktree_path="worktrees/at-legacy",
+        root_branch="feat/legacy",
+        changesets={"ts-new.1": "feat/legacy-ts-new.1"},
+        changeset_worktrees={"ts-new.1": "worktrees/at-legacy.1"},
+    )
+    epics = [
+        {
+            "id": "ts-new",
+            "labels": ["at:epic"],
+            "description": "workspace.root_branch: feat/new\n",
+        },
+        {
+            "id": "at-legacy",
+            "labels": ["at:epic"],
+            "description": "workspace.root_branch: feat/legacy\nworktree_path: worktrees/at-legacy\n",
+        },
+    ]
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:2] == ["list", "--parent"] and len(args) >= 3:
+            parent = args[2]
+            if parent == "ts-new":
+                return [{"id": "ts-new.1", "labels": ["review-feedback"], "type": "task"}]
+            return []
+        if "at:epic" in args:
+            return epics
+        return []
+
+    def fake_descendants(
+        parent_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        include_closed: bool = False,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd, include_closed
+        if parent_id == "ts-new":
+            return [{"id": "ts-new.1"}]
+        return []
+
+    def fake_reconcile(
+        project_data_dir: Path,
+        *,
+        owner_by_changeset: dict[str, str],
+        epic_root_branches: dict[str, str],
+        epic_worktree_paths: dict[str, str],
+        synthesis_diagnostics: dict[str, worktrees.MappingSynthesisDiagnostic],
+    ) -> tuple[str, ...]:
+        del project_data_dir, owner_by_changeset, epic_root_branches, epic_worktree_paths
+        synthesis_diagnostics["ts-new"] = worktrees.MappingSynthesisDiagnostic(
+            epic_id="ts-new",
+            worktree_path="worktrees/at-legacy",
+            worktree_path_source="lineage",
+            root_branch="feat/new",
+            root_branch_source="metadata",
+        )
+        return ("ts-new",)
+
+    with (
+        patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.worker.session.worktree.beads.list_descendant_changesets",
+            side_effect=fake_descendants,
+        ),
+        patch(
+            "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership",
+            side_effect=fake_reconcile,
+        ),
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_git_worktree",
+            return_value=tmp_path / "worktrees" / "at-legacy",
+        ),
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_changeset_branch",
+            return_value=("feat/legacy-ts-new.1", mapping),
+        ),
+        patch("atelier.worker.session.worktree.beads.update_worktree_path"),
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_changeset_worktree",
+            return_value=changeset_worktree_path,
+        ),
+        patch("atelier.worker.session.worktree.worktrees.ensure_changeset_checkout"),
+        patch("atelier.worker.session.worktree.git.git_rev_parse", return_value="abc1234"),
+        patch("atelier.worker.session.worktree.beads.update_changeset_branch_metadata"),
+    ):
+        worktree.prepare_worktrees(
+            context=worktree.WorktreePreparationContext(
+                dry_run=False,
+                project_data_dir=tmp_path,
+                repo_root=repo_root,
+                beads_root=tmp_path / "beads",
+                selected_epic="ts-new",
+                changeset_id="ts-new.1",
+                root_branch_value="feat/new",
+                changeset_parent_branch="feat/new",
+                allow_parent_branch_override=False,
+                git_path="git",
+            ),
+            control=_TestControl(logs),
+        )
+
+    assert any("Reconciled mapping ownership: ts-new" in line for line in logs)
+    assert any(
+        "Mapping path synthesis for ts-new: preserved from source mapping lineage "
+        "(worktrees/at-legacy)" in line
+        for line in logs
+    )
 
 
 def test_prepare_worktrees_aligns_child_workspace_parent_branch_from_epic(tmp_path: Path) -> None:

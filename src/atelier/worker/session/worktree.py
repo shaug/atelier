@@ -48,9 +48,10 @@ def _issue_labels(issue: dict[str, object]) -> set[str]:
 
 def _mapping_ownership_from_beads(
     *, beads_root: Path, repo_root: Path
-) -> tuple[dict[str, str], dict[str, str]]:
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     owner_by_changeset: dict[str, str] = {}
     epic_root_branches: dict[str, str] = {}
+    epic_worktree_paths: dict[str, str] = {}
     epic_issues = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
     for issue in epic_issues:
         issue_id = issue.get("id")
@@ -62,6 +63,9 @@ def _mapping_ownership_from_beads(
         root_branch = beads.extract_workspace_root_branch(issue)
         if root_branch:
             epic_root_branches[epic_id] = root_branch
+        worktree_path = beads.extract_worktree_path(issue)
+        if worktree_path:
+            epic_worktree_paths[epic_id] = worktree_path
         work_children = beads.list_work_children(
             epic_id,
             beads_root=beads_root,
@@ -84,7 +88,7 @@ def _mapping_ownership_from_beads(
             if not normalized_descendant:
                 continue
             owner_by_changeset.setdefault(normalized_descendant, epic_id)
-    return owner_by_changeset, epic_root_branches
+    return owner_by_changeset, epic_root_branches, epic_worktree_paths
 
 
 def _normalize_branch(value: object) -> str | None:
@@ -297,17 +301,31 @@ def prepare_worktrees(
             branch=branch,
         )
 
-    owner_by_changeset, epic_root_branches = _mapping_ownership_from_beads(
+    owner_by_changeset, epic_root_branches, epic_worktree_paths = _mapping_ownership_from_beads(
         beads_root=beads_root,
         repo_root=repo_root,
     )
+    synthesis_diagnostics: dict[str, worktrees.MappingSynthesisDiagnostic] = {}
     changed_mappings = worktrees.reconcile_mapping_ownership(
         project_data_dir,
         owner_by_changeset=owner_by_changeset,
         epic_root_branches=epic_root_branches,
+        epic_worktree_paths=epic_worktree_paths,
+        synthesis_diagnostics=synthesis_diagnostics,
     )
     if changed_mappings:
         control.say("Reconciled mapping ownership: " + ", ".join(changed_mappings))
+    for epic_id in sorted(synthesis_diagnostics):
+        diagnostic = synthesis_diagnostics[epic_id]
+        if diagnostic.worktree_path_source == "metadata":
+            path_note = "preserved from issue metadata"
+        elif diagnostic.worktree_path_source == "lineage":
+            path_note = "preserved from source mapping lineage"
+        else:
+            path_note = "synthesized default"
+        control.say(
+            f"Mapping path synthesis for {epic_id}: {path_note} ({diagnostic.worktree_path})"
+        )
 
     epic_worktree_path = worktrees.ensure_git_worktree(
         project_data_dir,
