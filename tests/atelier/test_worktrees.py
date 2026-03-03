@@ -336,6 +336,113 @@ def test_ensure_worktree_mapping_reconcile_blocks_ambiguous_branch_state() -> No
                 )
 
 
+def test_ensure_worktree_mapping_reconcile_materializes_missing_new_root_from_old() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        repo_root = Path(tmp) / "repo"
+        repo_root.mkdir(parents=True)
+        mapped_path = project_dir / "worktrees" / "epic"
+        mapped_path.mkdir(parents=True)
+        (mapped_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+
+        mapping_file = worktrees.mapping_path(project_dir, "epic")
+        mapping_file.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_file,
+            worktrees.WorktreeMapping(
+                epic_id="epic",
+                worktree_path="worktrees/epic",
+                root_branch="feat/old",
+                changesets={"epic": "feat/old", "epic.1": "feat/old-epic.1"},
+                changeset_worktrees={},
+            ),
+        )
+
+        refs = {"refs/heads/feat/old"}
+        recorded_commands: list[list[str]] = []
+
+        def fake_ref_exists(_repo: Path, ref: str, *, git_path: str | None = None) -> bool:
+            return ref in refs
+
+        def fake_run(cmd: list[str], *, capture_output: bool = False) -> None:
+            assert capture_output is True
+            recorded_commands.append(cmd)
+            if "branch" in cmd and "feat/new" in cmd:
+                refs.add("refs/heads/feat/new")
+
+        with (
+            patch("atelier.worktrees.git.git_current_branch", return_value="feat/old"),
+            patch("atelier.worktrees.git.git_status_porcelain", return_value=[]),
+            patch("atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists),
+            patch("atelier.worktrees.exec_util.run_command", side_effect=fake_run),
+        ):
+            mapping = worktrees.ensure_worktree_mapping(
+                project_dir,
+                "epic",
+                "feat/new",
+                repo_root=repo_root,
+                git_path="git",
+            )
+
+        assert mapping.root_branch == "feat/new"
+        assert mapping.changesets["epic"] == "feat/new"
+        assert any("branch" in command and "feat/new" in command for command in recorded_commands)
+        assert any("checkout" in command and "feat/new" in command for command in recorded_commands)
+
+
+def test_ensure_worktree_mapping_reconcile_materializes_new_root_without_worktree_checkout() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        repo_root = Path(tmp) / "repo"
+        repo_root.mkdir(parents=True)
+
+        mapping_file = worktrees.mapping_path(project_dir, "epic")
+        mapping_file.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_file,
+            worktrees.WorktreeMapping(
+                epic_id="epic",
+                worktree_path="worktrees/epic",
+                root_branch="feat/old",
+                changesets={"epic": "feat/old"},
+                changeset_worktrees={},
+            ),
+        )
+
+        refs = {"refs/heads/feat/old"}
+        recorded_commands: list[list[str]] = []
+
+        def fake_ref_exists(_repo: Path, ref: str, *, git_path: str | None = None) -> bool:
+            return ref in refs
+
+        def fake_run(cmd: list[str], *, capture_output: bool = False) -> None:
+            assert capture_output is True
+            recorded_commands.append(cmd)
+            if "branch" in cmd and "feat/new" in cmd:
+                refs.add("refs/heads/feat/new")
+
+        with (
+            patch("atelier.worktrees.git.git_ref_exists", side_effect=fake_ref_exists),
+            patch("atelier.worktrees.exec_util.run_command", side_effect=fake_run),
+        ):
+            mapping = worktrees.ensure_worktree_mapping(
+                project_dir,
+                "epic",
+                "feat/new",
+                repo_root=repo_root,
+                git_path="git",
+            )
+
+        assert mapping.root_branch == "feat/new"
+        assert mapping.changesets["epic"] == "feat/new"
+        assert len(recorded_commands) == 1
+        command = recorded_commands[0]
+        assert "branch" in command
+        assert "feat/new" in command
+
+
 def test_reconcile_mapping_ownership_migrates_cross_epic_entries() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)

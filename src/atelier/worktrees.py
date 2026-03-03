@@ -437,6 +437,48 @@ def _branch_exists(repo_root: Path, branch: str, *, git_path: str | None = None)
     return git.git_ref_exists(repo_root, remote_ref, git_path=git_path)
 
 
+def _materialize_branch_from_source(
+    repo_root: Path,
+    target_branch: str,
+    source_branch: str,
+    *,
+    git_path: str | None = None,
+) -> None:
+    """Create a missing target branch from an existing source branch."""
+    if _branch_exists(repo_root, target_branch, git_path=git_path):
+        return
+    local_source_ref = f"refs/heads/{source_branch}"
+    remote_source_ref = f"refs/remotes/origin/{source_branch}"
+    source_ref = (
+        source_branch
+        if git.git_ref_exists(repo_root, local_source_ref, git_path=git_path)
+        else (
+            f"origin/{source_branch}"
+            if git.git_ref_exists(repo_root, remote_source_ref, git_path=git_path)
+            else None
+        )
+    )
+    if source_ref is None:
+        die(
+            "worktree mapping migration blocked: "
+            f"unable to create {target_branch!r} because source root branch "
+            f"{source_branch!r} does not exist locally or on origin."
+        )
+    exec_util.run_command(
+        git.git_command(
+            [
+                "-C",
+                str(repo_root),
+                "branch",
+                target_branch,
+                source_ref,
+            ],
+            git_path=git_path,
+        ),
+        capture_output=True,
+    )
+
+
 def _checkout_branch_for_mapping_migration(
     worktree_path: Path,
     root_branch: str,
@@ -494,6 +536,7 @@ def reconcile_worktree_mapping_root_branch(
             return current_mapping
 
         mapped_path = _resolve_mapping_worktree_path(project_dir, current_mapping)
+        should_checkout_new_root = False
         if mapped_path.exists():
             if not (mapped_path / ".git").exists():
                 die(
@@ -516,24 +559,35 @@ def reconcile_worktree_mapping_root_branch(
                         f"{mapped_path} has local changes on {old_root!r}. "
                         "Commit/stash/discard changes, then rerun."
                     )
-                if not _branch_exists(repo_root, new_root, git_path=git_path):
-                    die(
-                        "worktree mapping migration blocked: "
-                        f"target root branch {new_root!r} does not exist "
-                        f"(current mapping root is {old_root!r})."
-                    )
-                _checkout_branch_for_mapping_migration(
-                    mapped_path,
-                    new_root,
-                    repo_root=repo_root,
-                    git_path=git_path,
-                )
+                should_checkout_new_root = True
             elif current_branch != new_root:
                 die(
                     "worktree mapping migration blocked: "
                     f"{mapped_path} is on {current_branch!r}, expected {old_root!r} "
                     f"or {new_root!r}. Resolve branch state manually, then rerun."
                 )
+
+        if not _branch_exists(repo_root, new_root, git_path=git_path):
+            if not _branch_exists(repo_root, old_root, git_path=git_path):
+                die(
+                    "worktree mapping migration blocked: "
+                    f"target root branch {new_root!r} does not exist "
+                    f"(current mapping root is {old_root!r})."
+                )
+            _materialize_branch_from_source(
+                repo_root,
+                new_root,
+                old_root,
+                git_path=git_path,
+            )
+
+        if should_checkout_new_root:
+            _checkout_branch_for_mapping_migration(
+                mapped_path,
+                new_root,
+                repo_root=repo_root,
+                git_path=git_path,
+            )
 
         updated_changesets = dict(current_mapping.changesets)
         if updated_changesets.get(epic_id) == old_root:
