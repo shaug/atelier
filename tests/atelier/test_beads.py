@@ -4478,6 +4478,7 @@ def test_list_inbox_messages_auto_resolves_stale_review_feedback_message() -> No
     closed_message = dict(inbox_issue)
     closed_message["status"] = "closed"
     message_show_count = 0
+
     def fake_read_only(
         args: list[str],
         *,
