@@ -167,20 +167,29 @@ def _resolve_mapping_issue(
             candidate_scores[epic_id] += 1
     if candidate_scores:
         ranked = sorted(candidate_scores.items(), key=lambda item: (-item[1], item[0]))
-        resolved_epic_id = ranked[0][0]
-        resolved_issue = index.epics_by_id.get(resolved_epic_id)
-        if resolved_issue is not None:
-            source = (
-                f"metadata(worktree+branch) score={ranked[0][1]}"
-                if mapping_worktree
-                else f"metadata(branch) score={ranked[0][1]}"
-            )
-            if resolved_epic_id != mapping.epic_id:
-                log_debug(
-                    "resolved mapping epic id "
-                    f"{mapping.epic_id!r} -> {resolved_epic_id!r} via {source}"
+        top_score = ranked[0][1]
+        top_candidates = [epic_id for epic_id, score in ranked if score == top_score]
+        if len(top_candidates) == 1:
+            resolved_epic_id = top_candidates[0]
+            resolved_issue = index.epics_by_id.get(resolved_epic_id)
+            if resolved_issue is not None:
+                source = (
+                    f"metadata(worktree+branch) score={top_score}"
+                    if mapping_worktree
+                    else f"metadata(branch) score={top_score}"
                 )
-            return _MappingIssueLookup(issue=resolved_issue, source=source)
+                if resolved_epic_id != mapping.epic_id:
+                    log_debug(
+                        "resolved mapping epic id "
+                        f"{mapping.epic_id!r} -> {resolved_epic_id!r} via {source}"
+                    )
+                return _MappingIssueLookup(issue=resolved_issue, source=source)
+        else:
+            log_debug(
+                "ambiguous mapping metadata resolution "
+                f"epic_id={mapping.epic_id!r} score={top_score} "
+                f"candidates={','.join(sorted(top_candidates))}"
+            )
 
     direct = index.epics_by_id.get(mapping.epic_id)
     if direct is not None:

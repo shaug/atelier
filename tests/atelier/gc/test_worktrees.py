@@ -403,6 +403,67 @@ def test_collect_resolved_epic_artifacts_continues_when_mapping_epic_missing() -
         assert actions[0].description == "Prune resolved epic artifacts for at-closed"
 
 
+def test_collect_resolved_epic_artifacts_skips_ambiguous_branch_only_metadata_match() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        mapping_path = worktrees.mapping_path(project_dir, "at-legacy")
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_path,
+            worktrees.WorktreeMapping(
+                epic_id="at-legacy",
+                worktree_path="worktrees/at-legacy",
+                root_branch="feat/shared",
+                changesets={},
+                changeset_worktrees={},
+            ),
+        )
+        refs = {
+            "refs/heads/main",
+            "refs/remotes/origin/main",
+            "refs/heads/feat/shared",
+            "refs/remotes/origin/feat/shared",
+        }
+        first_epic = {
+            "id": "at-001",
+            "status": "closed",
+            "description": ("workspace.root_branch: feat/shared\nworkspace.parent_branch: main\n"),
+            "labels": ["at:epic"],
+        }
+        second_epic = {
+            "id": "at-002",
+            "status": "closed",
+            "description": ("workspace.root_branch: feat/shared\nworkspace.parent_branch: main\n"),
+            "labels": ["at:epic"],
+        }
+
+        with (
+            patch("atelier.beads.list_epics", return_value=[first_epic, second_epic]),
+            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch("atelier.gc.worktrees.try_show_issue", return_value=None),
+            patch("atelier.git.git_default_branch", return_value="main"),
+            patch(
+                "atelier.git.git_ref_exists",
+                side_effect=lambda repo, ref, git_path=None: ref in refs,
+            ),
+            patch("atelier.git.git_is_ancestor", return_value=True),
+            patch("atelier.git.git_branch_fully_applied", return_value=False),
+        ):
+            actions = gc_worktrees.collect_resolved_epic_artifacts(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+                assume_yes=False,
+            )
+
+        assert actions == []
+
+
 def test_collect_orphan_worktrees_resolves_prefix_migrated_mapping_by_metadata() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
