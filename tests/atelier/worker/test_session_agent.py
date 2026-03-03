@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from atelier import agent_home
@@ -329,6 +330,64 @@ def test_prepare_agent_session_claude_worker_output_override_avoids_forced_verbo
     assert "--print" in prep.agent_options
     assert "--output-format=json" in prep.agent_options
     assert "--verbose" not in prep.agent_options
+
+
+def test_run_streaming_capture_command_retains_only_bounded_tail() -> None:
+    stdout_seen: list[str] = []
+    stderr_seen: list[str] = []
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import sys;"
+            "[sys.stdout.write(f'out-{i}\\n') for i in range(2000)];"
+            "[sys.stderr.write(f'err-{i}\\n') for i in range(2000)]"
+        ),
+    ]
+
+    result = session_agent._run_streaming_capture_command(
+        cmd=command,
+        cwd=None,
+        env={},
+        stdout_line_handler=stdout_seen.append,
+        stderr_line_handler=stderr_seen.append,
+    )
+
+    assert result is not None
+    assert result.returncode == 0
+    assert len(stdout_seen) == 2000
+    assert len(stderr_seen) == 2000
+    assert "out-0" not in result.stdout
+    assert "err-0" not in result.stderr
+    assert "out-1999" in result.stdout
+    assert "err-1999" in result.stderr
+    assert len(result.stdout.splitlines()) <= session_agent._STREAM_CAPTURE_TAIL_MAX_LINES
+    assert len(result.stderr.splitlines()) <= session_agent._STREAM_CAPTURE_TAIL_MAX_LINES
+
+
+def test_run_streaming_capture_command_flushes_pending_partial_lines() -> None:
+    stdout_seen: list[str] = []
+    stderr_seen: list[str] = []
+    command = [
+        sys.executable,
+        "-c",
+        "import sys;sys.stdout.write('one\\ntwo\\nthree');sys.stderr.write('warn\\npartial')",
+    ]
+
+    result = session_agent._run_streaming_capture_command(
+        cmd=command,
+        cwd=None,
+        env={},
+        stdout_line_handler=stdout_seen.append,
+        stderr_line_handler=stderr_seen.append,
+    )
+
+    assert result is not None
+    assert result.returncode == 0
+    assert stdout_seen == ["one", "two", "three"]
+    assert stderr_seen == ["warn", "partial"]
+    assert result.stdout.splitlines() == ["one", "two", "three"]
+    assert result.stderr.splitlines() == ["warn", "partial"]
 
 
 def test_start_agent_session_dry_run_returns_none() -> None:
@@ -740,7 +799,7 @@ def test_start_agent_session_claude_stream_json_renders_summary(
     monkeypatch,
     claude_session_fixture_content: str,
 ) -> None:
-    """Claude fixture stdout renders a summary with events and preview text."""
+    """Claude fixture stdout still renders summary/event/preview lines."""
     seen_cmds: list[list[str]] = []
 
     def _run_streaming_capture_command(

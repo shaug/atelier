@@ -7,7 +7,8 @@ import os
 import selectors
 import subprocess
 import sys
-from dataclasses import dataclass
+from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -29,6 +30,9 @@ from . import output as session_output
 
 _STRUCTURED_TOOL_PROGRESS_INTERVAL = 10
 _STRUCTURED_LIVE_PREVIEW_CHARS = 140
+_STRUCTURED_REASONING_EMIT_LIMIT = 4
+_STREAM_CAPTURE_TAIL_MAX_LINES = 256
+_STREAM_CAPTURE_TAIL_MAX_CHARS = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,29 @@ class _StreamedCommandResult:
     returncode: int
     stdout: str
     stderr: str
+
+
+@dataclass
+class _BoundedLineCapture:
+    """Capture only a bounded tail of newline-separated stream output."""
+
+    _lines: deque[str] = field(default_factory=deque, repr=False)
+    _char_count: int = 0
+
+    def append(self, line: str) -> None:
+        """Append one line and evict oldest lines beyond tail limits."""
+        self._lines.append(line)
+        self._char_count += len(line)
+        while (
+            len(self._lines) > _STREAM_CAPTURE_TAIL_MAX_LINES
+            or self._char_count > _STREAM_CAPTURE_TAIL_MAX_CHARS
+        ):
+            removed = self._lines.popleft()
+            self._char_count -= len(removed)
+
+    def render(self) -> str:
+        """Return the captured bounded tail as newline-separated text."""
+        return "\n".join(self._lines)
 
 
 class AgentSessionControl(Protocol):
@@ -180,7 +207,7 @@ def _consume_stream_chunk(
     *,
     chunk: bytes,
     pending: str,
-    target: list[str],
+    target: _BoundedLineCapture,
     line_handler: Callable[[str], None] | None,
 ) -> str:
     """Decode one stream chunk and emit complete lines to capture buffers."""
@@ -199,7 +226,7 @@ def _consume_stream_chunk(
 def _flush_stream_tail(
     *,
     pending: str,
-    target: list[str],
+    target: _BoundedLineCapture,
     line_handler: Callable[[str], None] | None,
 ) -> None:
     """Flush a final partial line from an incrementally captured stream."""
@@ -238,8 +265,8 @@ def _run_streaming_capture_command(
     selector.register(process.stdout, selectors.EVENT_READ, data="stdout")
     selector.register(process.stderr, selectors.EVENT_READ, data="stderr")
 
-    stdout_lines: list[str] = []
-    stderr_lines: list[str] = []
+    stdout_lines = _BoundedLineCapture()
+    stderr_lines = _BoundedLineCapture()
     stdout_pending = ""
     stderr_pending = ""
 
@@ -284,8 +311,8 @@ def _run_streaming_capture_command(
     )
     return _StreamedCommandResult(
         returncode=returncode,
-        stdout="\n".join(stdout_lines),
-        stderr="\n".join(stderr_lines),
+        stdout=stdout_lines.render(),
+        stderr=stderr_lines.render(),
     )
 
 
