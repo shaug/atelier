@@ -181,16 +181,16 @@ Example:
         "claude": ["--model", "opus"]
       },
       "worker": {
-        "claude": ["--print", "--output-format=stream-json"]
+        "claude": ["--print", "--output-format=stream-json", "--verbose"]
       }
     }
   }
 }
 ```
 
-Claude worker sessions default to print-mode with `--output-format=stream-json`
-unless explicitly overridden, while planner Claude sessions remain interactive
-by default.
+Claude worker sessions default to print-mode with
+`--output-format=stream-json --verbose` unless explicitly overridden, while
+planner Claude sessions remain interactive by default.
 
 ## Workspace identity environment variables
 

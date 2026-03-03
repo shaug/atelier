@@ -100,8 +100,9 @@ Agent launch options:
 - `agent.launch_options.planner.<agent>` and
   `agent.launch_options.worker.<agent>` provide role-scoped overrides.
 - No migration is required; existing `agent.options` config continues to work.
-- For Claude workers, Atelier defaults to `--print --output-format=stream-json`
-  unless worker-scoped options override those flags.
+- For Claude workers, Atelier defaults to
+  `--print --output-format=stream-json --verbose` unless worker-scoped options
+  override those flags.
 
 Branch prefix:
 

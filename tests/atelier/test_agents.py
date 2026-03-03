@@ -215,6 +215,32 @@ class TestAgentSpec:
         )
         assert "--print" in resolved
         assert "--output-format=stream-json" in resolved
+        assert "--verbose" in resolved
+
+    def test_resolve_launch_options_adds_verbose_for_stream_json_split_tokens(self) -> None:
+        resolved = agents.resolve_launch_options(
+            agent_name="claude",
+            role="worker",
+            global_options={"claude": ["--model", "sonnet"]},
+            launch_options={"worker": {"claude": ["--output-format", "stream-json"]}},
+        )
+        assert "--print" in resolved
+        assert "--output-format" in resolved
+        assert "stream-json" in resolved
+        assert "--verbose" in resolved
+
+    def test_resolve_launch_options_does_not_force_verbose_when_output_format_is_not_stream_json(
+        self,
+    ) -> None:
+        resolved = agents.resolve_launch_options(
+            agent_name="claude",
+            role="worker",
+            global_options={"claude": ["--model", "sonnet"]},
+            launch_options={"worker": {"claude": ["--output-format=json"]}},
+        )
+        assert "--print" in resolved
+        assert "--output-format=json" in resolved
+        assert "--verbose" not in resolved
 
     def test_resolve_launch_options_keeps_claude_planner_interactive(self) -> None:
         resolved = agents.resolve_launch_options(

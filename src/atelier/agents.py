@@ -384,6 +384,25 @@ def merge_cli_options(*groups: Sequence[str]) -> list[str]:
     return merged
 
 
+def _claude_output_format(options: Sequence[str]) -> str | None:
+    """Return the configured Claude output format from option tokens."""
+    for index, token in enumerate(options):
+        if token.startswith("--output-format="):
+            return token.split("=", 1)[1] or None
+        if token == "--output-format" and index + 1 < len(options):
+            return options[index + 1]
+    return None
+
+
+def _claude_requires_verbose(options: Sequence[str]) -> bool:
+    """Return whether Claude stream-json print mode requires ``--verbose``."""
+    return (
+        "--print" in options
+        and _claude_output_format(options) == "stream-json"
+        and "--verbose" not in options
+    )
+
+
 def resolve_launch_options(
     *,
     agent_name: str,
@@ -420,6 +439,8 @@ def resolve_launch_options(
     merged = merge_cli_options(base_options, scoped_options)
     if normalized_role == "worker" and normalized_agent == "claude":
         merged = merge_cli_options(_CLAUDE_WORKER_DEFAULT_OPTIONS, merged)
+        if _claude_requires_verbose(merged):
+            merged = merge_cli_options(merged, ("--verbose",))
     return merged
 
 
