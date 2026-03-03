@@ -21,6 +21,7 @@ _LAUNCH_ROLE_ALIASES = {
     "worker": "worker",
 }
 _CLAUDE_WORKER_DEFAULT_OPTIONS: tuple[str, ...] = ("--print", "--output-format=stream-json")
+_LONG_FLAGS_ALLOW_SINGLE_DASH_VALUES: frozenset[str] = frozenset({"--append-system-prompt"})
 
 
 @dataclass(frozen=True)
@@ -332,12 +333,10 @@ def _consume_option_tokens(
         return _OptionTokens(tokens=(token,), key=flag), 1, stop_option_parsing
     if index + 1 < len(options):
         candidate_value = options[index + 1]
-        # Treat single-dash tokens as values for long-form flags so overrides
-        # can replace values like "-a" without leaking stale lower-precedence
-        # tokens.
         if (
-            token.startswith("--")
+            token in _LONG_FLAGS_ALLOW_SINGLE_DASH_VALUES
             and candidate_value != "--"
+            and candidate_value.startswith("-")
             and not candidate_value.startswith("--")
         ):
             return (

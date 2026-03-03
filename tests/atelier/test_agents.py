@@ -190,6 +190,13 @@ class TestAgentSpec:
         )
         assert merged == ["--append-system-prompt", "-b"]
 
+    def test_merge_cli_options_does_not_swallow_short_flags_after_boolean_long_flag(self) -> None:
+        merged = agents.merge_cli_options(
+            ["--print", "-x"],
+            ["--print"],
+        )
+        assert merged == ["-x", "--print"]
+
     def test_resolve_launch_options_prefers_role_scoped_over_global(self) -> None:
         resolved = agents.resolve_launch_options(
             agent_name="codex",
