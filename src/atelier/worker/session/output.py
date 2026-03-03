@@ -146,7 +146,7 @@ class AgentOutputCapture:
         if _is_noise_line(line):
             self.suppressed_line_count += 1
             return
-        if source == "stderr" or _ERROR_LINE_RE.search(line):
+        if _ERROR_LINE_RE.search(line):
             self._append_unique(self._diagnostics, line)
             return
         self._append_unique(self._actionable, line)

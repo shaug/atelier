@@ -10,7 +10,7 @@ _REASONING_PREFIX = re.compile(
     r"^(?:thinking|reasoning|analysis|analyzing|plan|planning|considering)\s*[:\-]\s*(.+)$",
     re.IGNORECASE,
 )
-_COMMAND_PREFIX = re.compile(r"^(?:\$|#)\s+(.+)$")
+_COMMAND_PREFIX = re.compile(r"^\$\s+(.+)$")
 _COMMAND_VERB_PREFIX = re.compile(
     r"^(?:running|ran|executing|execute|command)\s*[:\-]\s*(.+)$",
     re.IGNORECASE,
@@ -38,9 +38,6 @@ def adapt_plain_text_line(line: str, *, source: str) -> AdapterOutput | None:
     text = normalize_render_text(line)
     if not text:
         return None
-
-    if source == "stderr":
-        return _error_output(text)
 
     if _ERROR_RE.search(text):
         return _error_output(text)
