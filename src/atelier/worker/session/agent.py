@@ -29,6 +29,7 @@ from . import output as session_output
 
 _STRUCTURED_TOOL_PROGRESS_INTERVAL = 10
 _STRUCTURED_LIVE_PREVIEW_CHARS = 140
+_STRUCTURED_REASONING_EMIT_LIMIT = 4
 
 
 @dataclass(frozen=True)
@@ -54,10 +55,13 @@ class _StructuredLiveProgress:
 
     label: str
     show_tool_activity: bool = False
+    show_reasoning_activity: bool = False
     seen_structured: bool = False
     next_tool_threshold: int = _STRUCTURED_TOOL_PROGRESS_INTERVAL
     preview_emitted: bool = False
     last_tool_activity_seq: int = 0
+    last_reasoning_activity_seq: int = 0
+    reasoning_emitted: int = 0
 
 
 @dataclass(frozen=True)
@@ -120,12 +124,25 @@ def _emit_structured_live_progress(
         while capture.tool_event_count >= progress.next_tool_threshold:
             progress.next_tool_threshold += _STRUCTURED_TOOL_PROGRESS_INTERVAL
 
-    if progress.preview_emitted:
+    if not progress.preview_emitted:
+        preview = capture.assistant_preview_text(max_chars=_STRUCTURED_LIVE_PREVIEW_CHARS)
+        if preview:
+            progress.preview_emitted = True
+            session_control.say(f"{progress.label} preview: {preview}")
+
+    if not progress.show_reasoning_activity:
         return
-    preview = capture.assistant_preview_text(max_chars=_STRUCTURED_LIVE_PREVIEW_CHARS)
-    if preview:
-        progress.preview_emitted = True
-        session_control.say(f"{progress.label} preview: {preview}")
+    if progress.reasoning_emitted >= _STRUCTURED_REASONING_EMIT_LIMIT:
+        return
+    reasoning_activity = capture.latest_reasoning_activity()
+    if reasoning_activity is None:
+        return
+    reasoning_seq, reasoning = reasoning_activity
+    if reasoning_seq <= progress.last_reasoning_activity_seq:
+        return
+    progress.last_reasoning_activity_seq = reasoning_seq
+    progress.reasoning_emitted += 1
+    session_control.say(f"{progress.label} reasoning: {reasoning}")
 
 
 def _consume_stream_chunk(
@@ -462,6 +479,7 @@ def start_agent_session(
         live_progress = _StructuredLiveProgress(
             label=agent_spec.display_name,
             show_tool_activity=agent_spec.name == "codex",
+            show_reasoning_activity=agent_spec.name == "codex",
         )
 
         def _handle_structured_output_line(raw_line: str) -> None:

@@ -44,6 +44,8 @@ class AgentOutputCapture:
     _assistant_char_count: int = 0
     _tool_activity_seq: int = 0
     _latest_tool_activity: str = ""
+    _reasoning_activity_seq: int = 0
+    _latest_reasoning_activity: str = ""
 
     def feed_stdout_line(self, raw_line: str) -> None:
         """Consume one stdout line from the agent process."""
@@ -92,6 +94,13 @@ class AgentOutputCapture:
         if not activity:
             return None
         return self._tool_activity_seq, activity
+
+    def latest_reasoning_activity(self) -> tuple[int, str] | None:
+        """Return the most recently captured reasoning activity marker."""
+        activity = self._latest_reasoning_activity.strip()
+        if not activity:
+            return None
+        return self._reasoning_activity_seq, activity
 
     def _feed_line(self, raw_line: str, *, source: str) -> None:
         line = _normalize_line(raw_line)
@@ -154,6 +163,10 @@ class AgentOutputCapture:
             self._assistant_char_count += len(preview)
             if len(self._assistant_preview) < _MAX_PREVIEW_CHARS:
                 self._append_assistant_preview(preview)
+        reasoning_activity = output_codex.extract_reasoning_activity(event)
+        if reasoning_activity and reasoning_activity != self._latest_reasoning_activity:
+            self._reasoning_activity_seq += 1
+            self._latest_reasoning_activity = reasoning_activity
         return True
 
     def _append_assistant_preview(self, message: str) -> None:

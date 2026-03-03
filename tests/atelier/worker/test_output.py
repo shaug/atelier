@@ -423,6 +423,15 @@ def test_extract_codex_tool_activity_mcp_tool_call() -> None:
     assert output_codex.extract_tool_activity(event) == "tool: linear/list_issues"
 
 
+def test_extract_codex_reasoning_activity_reasoning_item() -> None:
+    """Reasoning events expose concise reasoning activity text."""
+    event = output_codex.CodexEvent(
+        type="item.completed",
+        item={"type": "reasoning", "text": "Planning update strategy"},
+    )
+    assert output_codex.extract_reasoning_activity(event) == "Planning update strategy"
+
+
 def test_agent_output_capture_codex_json_counts_events() -> None:
     """Feed Codex JSON lines; verify event and tool counts."""
     capture = AgentOutputCapture(agent_name="codex")
@@ -436,6 +445,21 @@ def test_agent_output_capture_codex_json_counts_events() -> None:
     assert "Agent output (codex):" in summary[0]
     assert "events=2" in summary[0]
     assert any("Assistant preview: Done" in line for line in summary)
+
+
+def test_agent_output_capture_codex_latest_reasoning_activity_dedupes_repeats() -> None:
+    """Repeated identical reasoning events should not create new markers."""
+    capture = AgentOutputCapture(agent_name="codex")
+    capture.feed_stdout_line(
+        '{"type":"item.completed","item":{"type":"reasoning","text":"Inspecting files"}}'
+    )
+    first = capture.latest_reasoning_activity()
+    assert first is not None
+    capture.feed_stdout_line(
+        '{"type":"item.completed","item":{"type":"reasoning","text":"Inspecting files"}}'
+    )
+    second = capture.latest_reasoning_activity()
+    assert second == first
 
 
 def test_agent_output_capture_codex_latest_tool_activity_dedupes_repeats() -> None:
