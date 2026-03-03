@@ -9,12 +9,14 @@ from atelier.agent_home import AgentHome
 from atelier.commands import work as work_cmd
 
 
-def _project_config() -> config.ProjectConfig:
-    return config.ProjectConfig(
+def _project_config(*, worker_select: str = "oldest-feedback") -> config.ProjectConfig:
+    project_cfg = config.ProjectConfig(
         project=config.ProjectSection(enlistment="/repo", origin="org/repo"),
         branch=config.BranchConfig(),
         agent=config.AgentConfig(default="codex", options={"codex": []}),
     )
+    setattr(project_cfg, "worker", SimpleNamespace(select=worker_select))
+    return project_cfg
 
 
 def test_start_worker_dry_run_skips_project_resolution() -> None:
@@ -143,6 +145,19 @@ def test_start_worker_invalid_mode_exits() -> None:
         )
 
 
+def test_start_worker_invalid_startup_select_exits() -> None:
+    with pytest.raises(SystemExit):
+        work_cmd.start_worker(
+            SimpleNamespace(
+                epic_id=None,
+                mode="auto",
+                select="invalid",
+                run_mode="once",
+                dry_run=True,
+            )
+        )
+
+
 def test_start_worker_invalid_work_yes_env_exits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -217,3 +232,105 @@ def test_start_worker_ignores_legacy_watch_interval_env(
     interval_fn = captured["watch_interval_seconds"]
     assert callable(interval_fn)
     assert interval_fn() == 60
+
+
+def test_start_worker_uses_project_worker_select_default_non_dry_run(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    repo_root = tmp_path / "repo"
+    project_root.mkdir()
+    repo_root.mkdir()
+    project_cfg = _project_config(worker_select="first-eligible")
+    session_agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p1",
+        role="worker",
+        path=tmp_path / "agents" / "worker" / "codex" / "p1",
+        session_key="p1",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run_worker_sessions(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    with (
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(project_root, project_cfg, str(repo_root), repo_root),
+        ),
+        patch(
+            "atelier.commands.work.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.work.agent_home.preview_agent_home",
+            return_value=session_agent,
+        ),
+        patch(
+            "atelier.commands.work.worker_runtime.run_worker_sessions",
+            side_effect=fake_run_worker_sessions,
+        ),
+        patch("atelier.commands.work.agent_home.cleanup_agent_home"),
+    ):
+        work_cmd.start_worker(
+            SimpleNamespace(
+                epic_id=None,
+                mode="auto",
+                select=None,
+                run_mode="once",
+                dry_run=False,
+                yes=False,
+            )
+        )
+
+    assert captured["args"].select == "first-eligible"
+
+
+def test_start_worker_cli_select_overrides_project_default_non_dry_run(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    repo_root = tmp_path / "repo"
+    project_root.mkdir()
+    repo_root.mkdir()
+    project_cfg = _project_config(worker_select="oldest-feedback")
+    session_agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p1",
+        role="worker",
+        path=tmp_path / "agents" / "worker" / "codex" / "p1",
+        session_key="p1",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run_worker_sessions(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    with (
+        patch(
+            "atelier.commands.work.resolve_current_project_with_repo_root",
+            return_value=(project_root, project_cfg, str(repo_root), repo_root),
+        ),
+        patch(
+            "atelier.commands.work.config.resolve_project_data_dir",
+            return_value=tmp_path,
+        ),
+        patch(
+            "atelier.commands.work.agent_home.preview_agent_home",
+            return_value=session_agent,
+        ),
+        patch(
+            "atelier.commands.work.worker_runtime.run_worker_sessions",
+            side_effect=fake_run_worker_sessions,
+        ),
+        patch("atelier.commands.work.agent_home.cleanup_agent_home"),
+    ):
+        work_cmd.start_worker(
+            SimpleNamespace(
+                epic_id=None,
+                mode="auto",
+                select="first-eligible",
+                run_mode="once",
+                dry_run=False,
+                yes=False,
+            )
+        )
+
+    assert captured["args"].select == "first-eligible"

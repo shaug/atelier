@@ -520,6 +520,7 @@ def run_worker_once(
         queue_only = bool(getattr(args, "queue", False))
         assume_yes = bool(getattr(args, "yes", False))
         should_reconcile = bool(getattr(args, "reconcile", False))
+        startup_select = str(getattr(args, "select", "oldest-feedback") or "oldest-feedback")
 
         if should_reconcile:
             finishstep = control.step("Reconcile blocked changesets", timings=timings, trace=trace)
@@ -583,6 +584,7 @@ def run_worker_once(
                     branch_pr_strategy=project_config.branch.pr_strategy,
                     git_path=git_path,
                     worker_queue_name=_WORKER_QUEUE_NAME,
+                    select=startup_select,
                     resume_review=explicit_resume_requested,
                     excluded_epic_ids=tuple(sorted(claim_conflict_excluded_epics)),
                 )

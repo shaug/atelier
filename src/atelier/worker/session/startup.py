@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 from ... import changeset_fields, lifecycle, pr_strategy
 from ... import log as atelier_log
@@ -14,6 +15,8 @@ from .. import selection as worker_selection
 from ..models import StartupContractResult
 from ..models_boundary import parse_issue_boundary
 from ..review import MergeConflictSelection, ReviewFeedbackSelection
+
+_StageResult = TypeVar("_StageResult")
 
 
 @dataclass(frozen=True)
@@ -365,6 +368,7 @@ class StartupContractContext:
     branch_pr_strategy: object
     git_path: str | None
     worker_queue_name: str
+    select: str = "oldest-feedback"
     resume_review: bool = False
     excluded_epic_ids: tuple[str, ...] = ()
 
@@ -509,10 +513,24 @@ def run_startup_contract_service(
     branch_pr_strategy = context.branch_pr_strategy
     git_path = context.git_path
     worker_queue_name = context.worker_queue_name
+    select_mode = str(context.select or "oldest-feedback").strip().lower().replace("_", "-")
+    if select_mode not in {"first-eligible", "oldest-feedback"}:
+        service.die("select must be one of: first-eligible, oldest-feedback")
+    select_first_eligible = select_mode == "first-eligible"
     resume_review = context.resume_review
     excluded_epics = {
         str(epic_id).strip() for epic_id in context.excluded_epic_ids if str(epic_id).strip()
     }
+    atelier_log.debug(f"startup selector policy select={select_mode}")
+
+    def stage_call(stage: str, callback: Callable[[], _StageResult]) -> _StageResult:
+        started = time.perf_counter()
+        result = callback()
+        elapsed = time.perf_counter() - started
+        atelier_log.debug(
+            f"startup timing stage={stage} elapsed={elapsed:.4f}s select={select_mode}"
+        )
+        return result
 
     """Apply startup-contract skill ordering to select the next epic."""
     selected_epic: str | None = None
@@ -598,9 +616,12 @@ def run_startup_contract_service(
                     reason="explicit_epic_assigned",
                 )
         if branch_pr and repo_slug:
-            explicit_conflict = service.select_conflicted_changeset(
-                epic_id=selected_epic,
-                repo_slug=repo_slug,
+            explicit_conflict = stage_call(
+                "explicit.merge-conflict",
+                lambda: service.select_conflicted_changeset(
+                    epic_id=selected_epic,
+                    repo_slug=repo_slug,
+                ),
             )
             if explicit_conflict is not None:
                 return StartupContractResult(
@@ -610,9 +631,12 @@ def run_startup_contract_service(
                     reason="merge_conflict",
                     reassign_from=explicit_reassign_from,
                 )
-            explicit_feedback = service.select_review_feedback_changeset(
-                epic_id=selected_epic,
-                repo_slug=repo_slug,
+            explicit_feedback = stage_call(
+                "explicit.review-feedback",
+                lambda: service.select_review_feedback_changeset(
+                    epic_id=selected_epic,
+                    repo_slug=repo_slug,
+                ),
             )
             if explicit_feedback is not None:
                 return StartupContractResult(
@@ -622,13 +646,16 @@ def run_startup_contract_service(
                     reason="review_feedback",
                     reassign_from=explicit_reassign_from,
                 )
-        explicit_next_changeset = service.next_changeset(
-            epic_id=selected_epic,
-            repo_slug=repo_slug,
-            branch_pr=branch_pr,
-            branch_pr_strategy=branch_pr_strategy,
-            git_path=git_path,
-            resume_review=resume_review,
+        explicit_next_changeset = stage_call(
+            "explicit.next-changeset",
+            lambda: service.next_changeset(
+                epic_id=selected_epic,
+                repo_slug=repo_slug,
+                branch_pr=branch_pr,
+                branch_pr_strategy=branch_pr_strategy,
+                git_path=git_path,
+                resume_review=resume_review,
+            ),
         )
         if explicit_next_changeset is None:
             if status in {"in_progress", "hooked"}:
@@ -674,7 +701,7 @@ def run_startup_contract_service(
             epic_id=None, changeset_id=None, should_exit=True, reason="queue_only"
         )
 
-    issues = service.list_epics()
+    issues = stage_call("load.epics", service.list_epics)
     actionable_cache: dict[str, bool] = {}
     review_feedback_ownership_blockers: set[str] = set()
 
@@ -682,23 +709,29 @@ def run_startup_contract_service(
         cached = actionable_cache.get(epic_id)
         if cached is not None:
             return cached
-        actionable = (
-            service.next_changeset(
-                epic_id=epic_id,
-                repo_slug=repo_slug,
-                branch_pr=branch_pr,
-                branch_pr_strategy=branch_pr_strategy,
-                git_path=git_path,
-                resume_review=resume_review and explicit_epic_id is not None,
-            )
-            is not None
+        actionable = stage_call(
+            f"next-changeset:{epic_id}",
+            lambda: (
+                service.next_changeset(
+                    epic_id=epic_id,
+                    repo_slug=repo_slug,
+                    branch_pr=branch_pr,
+                    branch_pr_strategy=branch_pr_strategy,
+                    git_path=git_path,
+                    resume_review=resume_review and explicit_epic_id is not None,
+                )
+                is not None
+            ),
         )
         actionable_cache[epic_id] = actionable
         return actionable
 
     hooked_epic = None
     if agent_bead_id:
-        hooked_epic = service.resolve_hooked_epic(agent_bead_id, agent_id)
+        hooked_epic = stage_call(
+            "resolve.hooked-epic",
+            lambda: service.resolve_hooked_epic(agent_bead_id, agent_id),
+        )
     elif dry_run:
         service.dry_run_log("Would create agent bead before checking for hooks.")
     assigned = worker_selection.filter_epics(
@@ -706,7 +739,10 @@ def run_startup_contract_service(
     )
     assigned = worker_selection.sort_by_created_at(assigned)
 
-    stale_assigned = service.stale_family_assigned_epics(issues, agent_id=agent_id)
+    stale_assigned = stage_call(
+        "scan.stale-assignments",
+        lambda: service.stale_family_assigned_epics(issues, agent_id=agent_id),
+    )
     stale_assignee_by_epic = {
         str(issue.get("id")): str(issue.get("assignee"))
         for issue in stale_assigned
@@ -812,11 +848,16 @@ def run_startup_contract_service(
             seen_epics.add(epic_id)
             if is_excluded(epic_id, stage="merge-conflict"):
                 continue
-            selection = service.select_conflicted_changeset(
-                epic_id=epic_id,
-                repo_slug=repo_slug,
+            selection = stage_call(
+                f"scan.merge-conflict:{epic_id}",
+                lambda: service.select_conflicted_changeset(
+                    epic_id=epic_id,
+                    repo_slug=repo_slug,
+                ),
             )
             if selection is not None:
+                if select_first_eligible:
+                    return selection
                 conflict_candidates.append(selection)
         if not conflict_candidates:
             return None
@@ -860,11 +901,16 @@ def run_startup_contract_service(
                 continue
             if not is_claimable(epic_id, stage="review-feedback"):
                 continue
-            feedback_selection = service.select_review_feedback_changeset(
-                epic_id=epic_id,
-                repo_slug=repo_slug,
+            feedback_selection = stage_call(
+                f"scan.review-feedback:{epic_id}",
+                lambda: service.select_review_feedback_changeset(
+                    epic_id=epic_id,
+                    repo_slug=repo_slug,
+                ),
             )
             if feedback_selection is not None:
+                if select_first_eligible:
+                    return feedback_selection
                 feedback_candidates.append(feedback_selection)
         if not feedback_candidates:
             return None
@@ -952,7 +998,10 @@ def run_startup_contract_service(
         conflict = select_conflict_candidate(unhooked_epics)
         if conflict is not None:
             return resume_conflict(conflict)
-        global_conflict = service.select_global_conflicted_changeset(repo_slug=repo_slug)
+        global_conflict = stage_call(
+            "scan.global-merge-conflict",
+            lambda: service.select_global_conflicted_changeset(repo_slug=repo_slug),
+        )
         if global_conflict is not None and is_excluded(
             global_conflict.epic_id, stage="global-merge-conflict"
         ):
@@ -962,7 +1011,10 @@ def run_startup_contract_service(
         feedback = select_feedback_candidate(unhooked_epics)
         if feedback is not None:
             return resume_feedback(feedback)
-        global_feedback = service.select_global_review_feedback_changeset(repo_slug=repo_slug)
+        global_feedback = stage_call(
+            "scan.global-review-feedback",
+            lambda: service.select_global_review_feedback_changeset(repo_slug=repo_slug),
+        )
         if global_feedback is not None and not is_excluded(
             global_feedback.epic_id, stage="global-review-feedback"
         ):

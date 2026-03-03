@@ -305,6 +305,7 @@ def test_select_global_review_feedback_changeset_retries_and_skips_failed_family
     assert attempts[("list", "--label", "ts:epic", "--all", "--limit", "0")] == 1
     assert attempts[("list", "--label", "at:epic", "--all", "--limit", "0")] == 1
     assert attempts[("list", "--parent", "at-1")] == 1
+    assert attempts[("list", "--parent", "at-1.1")] == 1
     assert attempts[("list", "--parent", "at-2")] == 3
     assert ("list", "--parent", "at-3") not in attempts
     assert len(emitted) == 1
@@ -562,7 +563,84 @@ def test_select_global_conflicted_changeset_uses_active_epic_scan() -> None:
     assert selection.epic_id == "at-1"
     assert selection.changeset_id == "at-1.1"
     assert selection.pr_url == "https://github.com/org/repo/pull/44"
+    assert attempts[("list", "--parent", "at-1.1")] == 1
     assert ("list", "--parent", "at-2") not in attempts
+
+
+def test_select_global_startup_candidates_returns_conflict_and_feedback() -> None:
+    attempts: dict[tuple[str, ...], int] = {}
+
+    def fake_read_query(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> tuple[list[dict[str, object]], str | None]:
+        del beads_root, cwd
+        key = tuple(args)
+        attempts[key] = attempts.get(key, 0) + 1
+        if key == ("list", "--label", "at:epic", "--all", "--limit", "0"):
+            return ([{"id": "at-1", "labels": ["at:epic"], "status": "open"}], None)
+        if key == ("list", "--parent", "at-1"):
+            return (
+                [
+                    {
+                        "id": "at-1.1",
+                        "labels": [],
+                        "parent_id": "at-1",
+                        "issue_type": "task",
+                        "status": "in_progress",
+                        "updated_at": "2026-02-20T10:00:00Z",
+                        "description": (
+                            "changeset.work_branch: feat/a\n"
+                            "pr_state: in-review\n"
+                            "review.last_feedback_seen_at: 2026-02-20T09:00:00Z\n"
+                        ),
+                    }
+                ],
+                None,
+            )
+        if key == ("list", "--parent", "at-1.1"):
+            return ([], None)
+        raise AssertionError(f"unexpected query: {args}")
+
+    with (
+        patch("atelier.worker.review.beads.run_bd_json_read_only", side_effect=fake_read_query),
+        patch(
+            "atelier.worker.review.beads.issue_label_candidates",
+            return_value=("at:epic",),
+        ),
+        patch(
+            "atelier.worker.review.prs.read_github_pr_status",
+            return_value={
+                "number": 55,
+                "state": "OPEN",
+                "isDraft": False,
+                "url": "https://github.com/org/repo/pull/55",
+                "updatedAt": "2026-02-20T10:00:00Z",
+                "reviewRequests": [{"requestedReviewer": {"login": "alice"}}],
+                "mergeStateStatus": "DIRTY",
+            },
+        ),
+        patch(
+            "atelier.worker.review.prs.latest_feedback_timestamp_with_inline_comments",
+            return_value="2026-02-20T12:00:00Z",
+        ),
+        patch("atelier.worker.review.prs.unresolved_review_thread_count", return_value=1),
+    ):
+        selections = review.select_global_startup_candidates(
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selections.conflict is not None
+    assert selections.conflict.changeset_id == "at-1.1"
+    assert selections.feedback is not None
+    assert selections.feedback.changeset_id == "at-1.1"
+    assert attempts[("list", "--label", "at:epic", "--all", "--limit", "0")] == 1
+    assert attempts[("list", "--parent", "at-1")] == 1
+    assert attempts[("list", "--parent", "at-1.1")] == 1
 
 
 def test_select_conflicted_changeset_skips_unknown_mergeability() -> None:

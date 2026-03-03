@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,8 +28,15 @@ class MergeConflictSelection:
     pr_url: str | None
 
 
+@dataclass(frozen=True)
+class GlobalStartupSelections:
+    conflict: MergeConflictSelection | None
+    feedback: ReviewFeedbackSelection | None
+
+
 _GLOBAL_SCAN_ACTIVE_STATUSES = frozenset({"open", "in_progress", "blocked"})
 _GLOBAL_SCAN_QUERY_MAX_ATTEMPTS = 3
+_SIGNAL_SCAN_MAX_WORKERS = 8
 
 
 def _feedback_cursor(issue: dict[str, object]):
@@ -61,57 +69,80 @@ def _selection_candidates(
     repo_slug: str,
     resolve_epic_id: Callable[[dict[str, object]], str | None],
 ) -> list[ReviewFeedbackSelection]:
-    candidates: list[ReviewFeedbackSelection] = []
-    for record in records:
-        hydrated = load_record(record.issue.id) or record
-        raw_issue = hydrated.raw
-        issue = hydrated.issue
-        changeset_id = issue.id
-        work_branch = changeset_fields.work_branch(raw_issue)
-        if not work_branch:
-            continue
-        pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
-        live_state = None
-        if pr_payload:
-            live_state = prs.lifecycle_state(
+    hydrated_records = [load_record(record.issue.id) or record for record in records]
+
+    def evaluate_record(record: beads.BeadsIssueRecord) -> ReviewFeedbackSelection | None:
+        try:
+            raw_issue = record.raw
+            issue = record.issue
+            changeset_id = issue.id
+            work_branch = changeset_fields.work_branch(raw_issue)
+            if not work_branch:
+                return None
+            pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+            live_state = None
+            if pr_payload:
+                live_state = prs.lifecycle_state(
+                    pr_payload,
+                    pushed=False,
+                    review_requested=prs.has_review_requests(pr_payload),
+                )
+            if not _is_in_review_candidate(
+                issue,
+                raw_issue=raw_issue,
+                live_state=live_state,
+                has_work_children=False,
+            ):
+                return None
+            feedback_at = prs.latest_feedback_timestamp_with_inline_comments(
                 pr_payload,
-                pushed=False,
-                review_requested=prs.has_review_requests(pr_payload),
+                repo=repo_slug,
             )
-        if not _is_in_review_candidate(
-            issue,
-            raw_issue=raw_issue,
-            live_state=live_state,
-            has_work_children=False,
-        ):
-            continue
-        feedback_at = prs.latest_feedback_timestamp_with_inline_comments(pr_payload, repo=repo_slug)
-        if not feedback_at:
-            continue
-        feedback_time = prs.parse_timestamp(feedback_at)
-        if feedback_time is None:
-            continue
-        cursor = _feedback_cursor(raw_issue)
-        status = str(issue.status or "").strip().lower()
-        if status != "blocked" and cursor is not None and feedback_time <= cursor:
-            continue
-        if isinstance(pr_payload, dict):
-            pr_boundary = prs.parse_pr_boundary(pr_payload, source="_selection_candidates:pr")
-            pr_number = pr_boundary.number if pr_boundary is not None else None
-            if pr_number is not None:
-                unresolved_threads = prs.unresolved_review_thread_count(repo_slug, pr_number)
-                if unresolved_threads == 0:
-                    continue
-        epic_id = resolve_epic_id(raw_issue)
-        if not epic_id:
-            continue
-        candidates.append(
-            ReviewFeedbackSelection(
+            if not feedback_at:
+                return None
+            feedback_time = prs.parse_timestamp(feedback_at)
+            if feedback_time is None:
+                return None
+            cursor = _feedback_cursor(raw_issue)
+            status = str(issue.status or "").strip().lower()
+            if status != "blocked" and cursor is not None and feedback_time <= cursor:
+                return None
+            if isinstance(pr_payload, dict):
+                pr_boundary = prs.parse_pr_boundary(pr_payload, source="_selection_candidates:pr")
+                pr_number = pr_boundary.number if pr_boundary is not None else None
+                if pr_number is not None:
+                    unresolved_threads = prs.unresolved_review_thread_count(repo_slug, pr_number)
+                    if unresolved_threads == 0:
+                        return None
+            epic_id = resolve_epic_id(raw_issue)
+            if not epic_id:
+                return None
+            return ReviewFeedbackSelection(
                 epic_id=epic_id,
                 changeset_id=changeset_id,
                 feedback_at=feedback_at,
             )
-        )
+        except Exception as exc:
+            atelier_log.warning(
+                "startup stage=review-feedback candidate="
+                f"{record.issue.id} reason=signal-check-error detail={exc}"
+            )
+            return None
+
+    candidates: list[ReviewFeedbackSelection] = []
+    max_workers = min(_SIGNAL_SCAN_MAX_WORKERS, len(hydrated_records))
+    if max_workers <= 1:
+        for record in hydrated_records:
+            candidate = evaluate_record(record)
+            if candidate is not None:
+                candidates.append(candidate)
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(evaluate_record, record) for record in hydrated_records]
+            for future in as_completed(futures):
+                candidate = future.result()
+                if candidate is not None:
+                    candidates.append(candidate)
     sentinel = datetime.max.replace(tzinfo=timezone.utc)
     candidates.sort(key=lambda item: prs.parse_timestamp(item.feedback_at) or sentinel)
     return candidates
@@ -237,10 +268,10 @@ def _list_descendant_changesets_read_only(
 ) -> tuple[list[dict[str, object]], bool] | None:
     descendants: list[dict[str, object]] = []
     seen: set[str] = set()
-    queue = [epic_id]
+    queue: list[tuple[str, dict[str, object] | None]] = [(epic_id, None)]
     has_root_work_children = False
     while queue:
-        current = queue.pop(0)
+        current, current_issue = queue.pop(0)
         work_children = _list_work_children_read_only(
             parent_id=current,
             beads_root=beads_root,
@@ -252,6 +283,8 @@ def _list_descendant_changesets_read_only(
             return None
         if current == epic_id:
             has_root_work_children = bool(work_children)
+        elif not work_children and current_issue is not None:
+            descendants.append(current_issue)
         for issue in work_children:
             issue_id = issue.get("id")
             if not isinstance(issue_id, str) or not issue_id.strip():
@@ -260,18 +293,7 @@ def _list_descendant_changesets_read_only(
             if normalized_issue_id in seen:
                 continue
             seen.add(normalized_issue_id)
-            grandchild_work = _list_work_children_read_only(
-                parent_id=normalized_issue_id,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                startup_stage=startup_stage,
-                emit_diagnostic=emit_diagnostic,
-            )
-            if grandchild_work is None:
-                return None
-            if not grandchild_work:
-                descendants.append(issue)
-            queue.append(normalized_issue_id)
+            queue.append((normalized_issue_id, issue))
     return descendants, has_root_work_children
 
 
@@ -361,57 +383,125 @@ def _conflict_selection_candidates(
     repo_slug: str,
     resolve_epic_id: Callable[[dict[str, object]], str | None],
 ) -> list[MergeConflictSelection]:
-    candidates: list[MergeConflictSelection] = []
-    for record in records:
-        hydrated = load_record(record.issue.id) or record
-        raw_issue = hydrated.raw
-        issue = hydrated.issue
-        work_branch = changeset_fields.work_branch(raw_issue)
-        if not work_branch:
-            continue
-        pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
-        review_requested = prs.has_review_requests(pr_payload)
-        live_state = prs.lifecycle_state(
-            pr_payload,
-            pushed=False,
-            review_requested=review_requested,
-        )
-        if not _is_in_review_candidate(
-            issue,
-            raw_issue=raw_issue,
-            live_state=live_state,
-            has_work_children=False,
-        ):
-            continue
-        if prs.default_branch_has_merge_conflict(pr_payload) is not True:
-            continue
-        epic_id = resolve_epic_id(raw_issue)
-        if not epic_id:
-            continue
-        observed_at = None
-        pr_url = None
-        if isinstance(pr_payload, dict):
-            raw_updated = pr_payload.get("updatedAt")
-            if isinstance(raw_updated, str) and raw_updated.strip():
-                observed_at = raw_updated.strip()
-            raw_url = pr_payload.get("url")
-            if isinstance(raw_url, str) and raw_url.strip():
-                pr_url = raw_url.strip()
-        if observed_at is None:
-            issue_updated = raw_issue.get("updated_at")
-            if isinstance(issue_updated, str) and issue_updated.strip():
-                observed_at = issue_updated.strip()
-        candidates.append(
-            MergeConflictSelection(
+    hydrated_records = [load_record(record.issue.id) or record for record in records]
+
+    def evaluate_record(record: beads.BeadsIssueRecord) -> MergeConflictSelection | None:
+        try:
+            raw_issue = record.raw
+            issue = record.issue
+            work_branch = changeset_fields.work_branch(raw_issue)
+            if not work_branch:
+                return None
+            pr_payload = prs.read_github_pr_status(repo_slug, work_branch)
+            review_requested = prs.has_review_requests(pr_payload)
+            live_state = prs.lifecycle_state(
+                pr_payload,
+                pushed=False,
+                review_requested=review_requested,
+            )
+            if not _is_in_review_candidate(
+                issue,
+                raw_issue=raw_issue,
+                live_state=live_state,
+                has_work_children=False,
+            ):
+                return None
+            if prs.default_branch_has_merge_conflict(pr_payload) is not True:
+                return None
+            epic_id = resolve_epic_id(raw_issue)
+            if not epic_id:
+                return None
+            observed_at = None
+            pr_url = None
+            if isinstance(pr_payload, dict):
+                raw_updated = pr_payload.get("updatedAt")
+                if isinstance(raw_updated, str) and raw_updated.strip():
+                    observed_at = raw_updated.strip()
+                raw_url = pr_payload.get("url")
+                if isinstance(raw_url, str) and raw_url.strip():
+                    pr_url = raw_url.strip()
+            if observed_at is None:
+                issue_updated = raw_issue.get("updated_at")
+                if isinstance(issue_updated, str) and issue_updated.strip():
+                    observed_at = issue_updated.strip()
+            return MergeConflictSelection(
                 epic_id=epic_id,
                 changeset_id=issue.id,
                 observed_at=observed_at,
                 pr_url=pr_url,
             )
-        )
+        except Exception as exc:
+            atelier_log.warning(
+                "startup stage=merge-conflict candidate="
+                f"{record.issue.id} reason=signal-check-error detail={exc}"
+            )
+            return None
+
+    candidates: list[MergeConflictSelection] = []
+    max_workers = min(_SIGNAL_SCAN_MAX_WORKERS, len(hydrated_records))
+    if max_workers <= 1:
+        for record in hydrated_records:
+            candidate = evaluate_record(record)
+            if candidate is not None:
+                candidates.append(candidate)
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(evaluate_record, record) for record in hydrated_records]
+            for future in as_completed(futures):
+                candidate = future.result()
+                if candidate is not None:
+                    candidates.append(candidate)
     sentinel = datetime.max.replace(tzinfo=timezone.utc)
     candidates.sort(key=lambda item: prs.parse_timestamp(item.observed_at) or sentinel)
     return candidates
+
+
+def select_global_startup_candidates(
+    *,
+    repo_slug: str | None,
+    beads_root: Path,
+    repo_root: Path,
+    emit_diagnostic: Callable[[str], None] | None = None,
+) -> GlobalStartupSelections:
+    """Select global merge-conflict and review-feedback candidates in one scan.
+
+    Returns both candidate types so startup can avoid repeating the global scan.
+    """
+    if not repo_slug:
+        return GlobalStartupSelections(conflict=None, feedback=None)
+    started = datetime.now(tz=timezone.utc)
+    records, epic_by_changeset = _global_changeset_records(
+        beads_root=beads_root,
+        repo_root=repo_root,
+        startup_stage="global-startup-candidates",
+        emit_diagnostic=emit_diagnostic,
+    )
+
+    def resolve_epic(issue: dict[str, object]) -> str | None:
+        return epic_by_changeset.get(str(issue.get("id") or "").strip())
+
+    conflict_candidates = _conflict_selection_candidates(
+        records=records,
+        load_record=lambda _issue_id: None,
+        repo_slug=repo_slug,
+        resolve_epic_id=resolve_epic,
+    )
+    feedback_candidates = _selection_candidates(
+        records=records,
+        load_record=lambda _issue_id: None,
+        repo_slug=repo_slug,
+        resolve_epic_id=resolve_epic,
+    )
+    finished = datetime.now(tz=timezone.utc)
+    atelier_log.debug(
+        "startup stage=global-startup-candidates "
+        f"records={len(records)} "
+        f"elapsed={(finished - started).total_seconds():.4f}s"
+    )
+    return GlobalStartupSelections(
+        conflict=conflict_candidates[0] if conflict_candidates else None,
+        feedback=feedback_candidates[0] if feedback_candidates else None,
+    )
 
 
 def select_review_feedback_changeset(

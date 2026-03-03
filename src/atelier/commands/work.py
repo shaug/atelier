@@ -15,6 +15,7 @@ from ..worker.work_command_helpers import (
     list_reconcile_epic_candidates,
     normalize_mode,
     normalize_run_mode,
+    normalize_startup_select,
     reconcile_blocked_merged_changesets,
     report_translated_cli_default,
     report_worker_summary,
@@ -63,6 +64,7 @@ def start_worker(args: object) -> None:
     session_key = agent_home.generate_session_key()
     cleanup_agent: agent_home.AgentHome | None = None
     cleanup_project_dir = None
+    configured_select_default: str | None = None
     if not dry_run:
         (
             cleanup_project_root,
@@ -70,6 +72,7 @@ def start_worker(args: object) -> None:
             _cleanup_enlistment,
             _cleanup_repo_root,
         ) = resolve_current_project_with_repo_root()
+        configured_select_default = cleanup_project_config.worker.select
         cleanup_project_dir = config.resolve_project_data_dir(
             cleanup_project_root, cleanup_project_config
         )
@@ -79,6 +82,11 @@ def start_worker(args: object) -> None:
             role="worker",
             session_key=session_key,
         )
+    select = normalize_startup_select(
+        getattr(args, "select", None),
+        configured_default=configured_select_default,
+    )
+    setattr(args, "select", select)
     try:
         worker_runtime.run_worker_sessions(
             args=args,

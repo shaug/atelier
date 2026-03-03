@@ -14,6 +14,7 @@ from ..worker.models import WorkerRunSummary
 from ..worker.models_boundary import parse_issue_boundary
 
 _MODE_VALUES = {"prompt", "auto"}
+_STARTUP_SELECT_VALUES = {"first-eligible", "oldest-feedback"}
 
 _RUN_MODE_VALUES = {"once", "default", "watch"}
 _WATCH_INTERVAL_SECONDS = 60
@@ -279,6 +280,24 @@ def normalize_mode(value: str | None) -> str:
     return normalized
 
 
+def normalize_startup_select(value: str | None, *, configured_default: str | None = None) -> str:
+    """Normalize startup candidate selector policy.
+
+    Args:
+        value: Optional explicit selector mode from CLI args.
+        configured_default: Optional configured selector default.
+
+    Returns:
+        Normalized selector mode.
+    """
+    if value is None:
+        value = configured_default or "oldest-feedback"
+    normalized = value.strip().lower().replace("_", "-")
+    if normalized not in _STARTUP_SELECT_VALUES:
+        die("select must be one of: first-eligible, oldest-feedback")
+    return normalized
+
+
 def normalize_run_mode(value: str | None) -> str:
     """Normalize worker run mode.
 
@@ -401,6 +420,7 @@ __all__ = [
     "normalize_branch_value",
     "normalize_mode",
     "normalize_run_mode",
+    "normalize_startup_select",
     "parse_issue_time",
     "report_timings",
     "report_translated_cli_default",

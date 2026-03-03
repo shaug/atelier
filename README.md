@@ -278,6 +278,7 @@ Start a worker session (one changeset per session):
 atelier work
 atelier work at-epic123
 atelier work --mode auto
+atelier work --select first-eligible
 atelier work --run-mode once
 atelier work --run-mode watch
 atelier work --run-mode watch --watch-interval 30
@@ -500,6 +501,8 @@ atelier work --mode auto
 Options:
 
 - `--mode`: Worker selection mode (`prompt` or `auto`).
+- `--select`: Startup selector policy (`first-eligible` or `oldest-feedback`).
+  Defaults to `worker.select` in config, then `oldest-feedback`.
 - `--run-mode`: Worker loop mode (`once`, `default`, or `watch`).
 - `--yes`: Accept defaults for interactive choices (`ATELIER_WORK_YES`).
 - Watch polling defaults to `ATELIER_WATCH_INTERVAL` (seconds) in watch mode.

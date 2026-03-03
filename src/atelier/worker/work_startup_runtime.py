@@ -32,6 +32,7 @@ from .work_runtime_common import (
 
 ReviewFeedbackSelection = worker_review.ReviewFeedbackSelection
 MergeConflictSelection = worker_review.MergeConflictSelection
+GlobalStartupSelections = worker_review.GlobalStartupSelections
 
 _WORKER_QUEUE_NAME = "worker"
 
@@ -562,6 +563,21 @@ class _StartupContractService(worker_startup.StartupContractService):
         self._beads_root = beads_root
         self._repo_root = repo_root
         self._dry_run = dry_run
+        self._global_startup_selection_cache: dict[str, GlobalStartupSelections] = {}
+
+    def _global_startup_candidates(self, *, repo_slug: str | None) -> GlobalStartupSelections:
+        cache_key = str(repo_slug or "")
+        cached = self._global_startup_selection_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        cached = worker_review.select_global_startup_candidates(
+            repo_slug=repo_slug,
+            beads_root=self._beads_root,
+            repo_root=self._repo_root,
+            emit_diagnostic=say,
+        )
+        self._global_startup_selection_cache[cache_key] = cached
+        return cached
 
     def handle_queue_before_claim(
         self,
@@ -740,11 +756,7 @@ class _StartupContractService(worker_startup.StartupContractService):
     def select_global_conflicted_changeset(
         self, *, repo_slug: str | None
     ) -> MergeConflictSelection | None:
-        return select_global_conflicted_changeset(
-            repo_slug=repo_slug,
-            beads_root=self._beads_root,
-            repo_root=self._repo_root,
-        )
+        return self._global_startup_candidates(repo_slug=repo_slug).conflict
 
     def select_review_feedback_changeset(
         self, *, epic_id: str, repo_slug: str | None
@@ -759,11 +771,7 @@ class _StartupContractService(worker_startup.StartupContractService):
     def select_global_review_feedback_changeset(
         self, *, repo_slug: str | None
     ) -> ReviewFeedbackSelection | None:
-        return select_global_review_feedback_changeset(
-            repo_slug=repo_slug,
-            beads_root=self._beads_root,
-            repo_root=self._repo_root,
-        )
+        return self._global_startup_candidates(repo_slug=repo_slug).feedback
 
     def check_inbox_before_claim(self, agent_id: str) -> bool:
         return check_inbox_before_claim(
