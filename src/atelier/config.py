@@ -120,7 +120,7 @@ def _backup_legacy_config(path: Path) -> None:
 
 def _split_project_payload(payload: dict) -> tuple[dict, dict]:
     user_payload: dict = {}
-    for key in ("branch", "agent", "editor", "git"):
+    for key in ("branch", "worker", "agent", "editor", "git"):
         if key in payload:
             user_payload[key] = payload.get(key)
     project_payload = payload.get("project")
@@ -136,7 +136,7 @@ def _split_project_payload(payload: dict) -> tuple[dict, dict]:
     if "atelier" in payload and "upgrade" in payload.get("atelier", {}):
         user_payload["atelier"] = {"upgrade": upgrade}
     system_payload = dict(payload)
-    for key in ("branch", "agent", "editor", "git"):
+    for key in ("branch", "worker", "agent", "editor", "git"):
         system_payload.pop(key, None)
     project_system = dict(system_payload.get("project", {}) or {})
     for key in ("provider", "provider_url", "owner"):
@@ -225,7 +225,7 @@ def merge_project_configs(
     system_payload = system_config.model_dump()
     user_payload = (user_config or ProjectUserConfig()).model_dump()
     merged = dict(system_payload)
-    for key in ("branch", "agent", "editor", "git"):
+    for key in ("branch", "worker", "agent", "editor", "git"):
         merged[key] = user_payload.get(key, {})
     system_project = system_payload.get("project", {}) if system_payload else {}
     user_project = user_payload.get("project", {}) if user_payload else {}
@@ -772,6 +772,7 @@ def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
         project = config.project
         git_config = config.git
         branch = config.branch
+        worker = config.worker
         agent = config.agent
         editor_config = config.editor
         upgrade = config.atelier.upgrade
@@ -779,6 +780,7 @@ def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
         project = config.project
         git_config = config.git
         branch = config.branch
+        worker = config.worker
         agent = config.agent
         editor_config = config.editor
         upgrade = config.atelier.upgrade
@@ -789,6 +791,7 @@ def user_config_payload(config: ProjectConfig | ProjectUserConfig) -> dict:
     }
     payload = {
         "branch": branch.model_dump(),
+        "worker": worker.model_dump(),
         "git": git_config.model_dump(),
         "agent": agent.model_dump(),
         "editor": editor_config.model_dump(),
@@ -1262,6 +1265,7 @@ def build_project_config(
         ),
         git=existing_config.git,
         branch=branch_config,
+        worker=existing_config.worker,
         agent=AgentConfig(
             default=agent_default,
             options=agent_options,

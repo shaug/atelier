@@ -12,6 +12,7 @@ def test_work_passes_yolo_flag_to_command() -> None:
     def fake_start_worker(args: SimpleNamespace) -> None:
         captured["epic_id"] = args.epic_id
         captured["mode"] = args.mode
+        captured["select"] = args.select
         captured["run_mode"] = args.run_mode
         captured["yes"] = args.yes
         captured["reconcile"] = args.reconcile
@@ -26,6 +27,8 @@ def test_work_passes_yolo_flag_to_command() -> None:
                 "at-epic",
                 "--mode",
                 "auto",
+                "--select",
+                "first-eligible",
                 "--run-mode",
                 "once",
                 "--yes",
@@ -38,6 +41,7 @@ def test_work_passes_yolo_flag_to_command() -> None:
     assert captured == {
         "epic_id": "at-epic",
         "mode": "auto",
+        "select": "first-eligible",
         "run_mode": "once",
         "yes": True,
         "reconcile": True,

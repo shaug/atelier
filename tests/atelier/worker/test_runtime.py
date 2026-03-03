@@ -579,6 +579,44 @@ def test_startup_service_lists_only_non_closed_epics() -> None:
     )
 
 
+def test_startup_service_caches_global_signal_scan() -> None:
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+    conflict = work_startup_runtime.MergeConflictSelection(
+        epic_id="at-1",
+        changeset_id="at-1.2",
+        observed_at="2026-03-01T00:00:00Z",
+        pr_url="https://github.com/org/repo/pull/99",
+    )
+    feedback = work_startup_runtime.ReviewFeedbackSelection(
+        epic_id="at-1",
+        changeset_id="at-1.3",
+        feedback_at="2026-03-02T00:00:00Z",
+    )
+    selections = work_startup_runtime.GlobalStartupSelections(
+        conflict=conflict,
+        feedback=feedback,
+    )
+
+    with patch(
+        "atelier.worker.work_startup_runtime.worker_review.select_global_startup_candidates",
+        return_value=selections,
+    ) as select_global:
+        selected_conflict = service.select_global_conflicted_changeset(repo_slug="org/repo")
+        selected_feedback = service.select_global_review_feedback_changeset(repo_slug="org/repo")
+
+    assert selected_conflict == conflict
+    assert selected_feedback == feedback
+    select_global.assert_called_once_with(
+        repo_slug="org/repo",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        emit_diagnostic=work_startup_runtime.say,
+    )
+
+
 def test_next_changeset_service_passes_beads_root_to_review_waiting_gate() -> None:
     issue = {"id": "at-1.2"}
     service = work_startup_runtime._NextChangesetService(  # pyright: ignore[reportPrivateUsage]

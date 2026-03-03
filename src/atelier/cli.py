@@ -587,6 +587,16 @@ def work_command(
             help="worker selection mode: prompt or auto (default: prompt)",
         ),
     ] = None,
+    select: Annotated[
+        str | None,
+        typer.Option(
+            "--select",
+            help=(
+                "startup selector policy: first-eligible or oldest-feedback "
+                "(default: config worker.select, then oldest-feedback)"
+            ),
+        ),
+    ] = None,
     run_mode: Annotated[
         str | None,
         typer.Option(
@@ -643,6 +653,7 @@ def work_command(
         SimpleNamespace(
             epic_id=epic_id,
             mode=mode,
+            select=select,
             run_mode=run_mode,
             watch_interval=watch_interval,
             queue=queue,

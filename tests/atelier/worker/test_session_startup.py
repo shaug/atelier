@@ -272,6 +272,7 @@ def _startup_context_service(
         "branch_pr_strategy": "on-ready",
         "git_path": "git",
         "worker_queue_name": "worker",
+        "select": "oldest-feedback",
     }
     context_values = dict(context_defaults)
     for key in list(context_defaults):
@@ -780,6 +781,108 @@ def test_run_startup_contract_prioritizes_review_feedback() -> None:
     assert next_changeset_calls == 0
 
 
+def test_run_startup_contract_first_eligible_short_circuits_review_feedback() -> None:
+    select_calls: list[str] = []
+
+    def select_review_feedback_changeset(
+        *, epic_id: str, repo_slug: str | None
+    ) -> ReviewFeedbackSelection | None:
+        _ = repo_slug
+        select_calls.append(epic_id)
+        if epic_id == "at-early":
+            return ReviewFeedbackSelection(
+                epic_id=epic_id,
+                changeset_id=f"{epic_id}.1",
+                feedback_at="2026-02-22T00:00:00Z",
+            )
+        if epic_id == "at-oldest":
+            return ReviewFeedbackSelection(
+                epic_id=epic_id,
+                changeset_id=f"{epic_id}.1",
+                feedback_at="2026-02-20T00:00:00Z",
+            )
+        return None
+
+    result = _run_startup(
+        select="first-eligible",
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [
+            {
+                "id": "at-early",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": None,
+                "created_at": "2026-02-20T00:00:00Z",
+            },
+            {
+                "id": "at-oldest",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": None,
+                "created_at": "2026-02-21T00:00:00Z",
+            },
+        ],
+        next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.2"},
+        select_review_feedback_changeset=select_review_feedback_changeset,
+    )
+
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "at-early"
+    assert select_calls == ["at-early"]
+
+
+def test_run_startup_contract_oldest_feedback_scans_for_global_oldest() -> None:
+    select_calls: list[str] = []
+
+    def select_review_feedback_changeset(
+        *, epic_id: str, repo_slug: str | None
+    ) -> ReviewFeedbackSelection | None:
+        _ = repo_slug
+        select_calls.append(epic_id)
+        if epic_id == "at-early":
+            return ReviewFeedbackSelection(
+                epic_id=epic_id,
+                changeset_id=f"{epic_id}.1",
+                feedback_at="2026-02-22T00:00:00Z",
+            )
+        if epic_id == "at-oldest":
+            return ReviewFeedbackSelection(
+                epic_id=epic_id,
+                changeset_id=f"{epic_id}.1",
+                feedback_at="2026-02-20T00:00:00Z",
+            )
+        return None
+
+    result = _run_startup(
+        select="oldest-feedback",
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [
+            {
+                "id": "at-early",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": None,
+                "created_at": "2026-02-20T00:00:00Z",
+            },
+            {
+                "id": "at-oldest",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": None,
+                "created_at": "2026-02-21T00:00:00Z",
+            },
+        ],
+        next_changeset=lambda **kwargs: {"id": f"{kwargs['epic_id']}.2"},
+        select_review_feedback_changeset=select_review_feedback_changeset,
+    )
+
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "at-oldest"
+    assert select_calls == ["at-early", "at-oldest"]
+
+
 def test_run_startup_contract_prioritizes_merge_conflict() -> None:
     conflict = MergeConflictSelection(
         epic_id="at-epic",
@@ -1206,7 +1309,7 @@ def test_run_startup_contract_sends_needs_decision_when_no_eligible_epics() -> N
 
 
 def test_no_eligible_summary_reports_true_epic_pool_counts() -> None:
-    """Regression: no-eligible summary must report counts from the true epic pool."""
+    """Regression: no-eligible summary reports true epic-pool counts."""
     epics = [
         {"id": "at-e1", "status": "open", "labels": ["at:epic"], "assignee": "other"},
         {"id": "at-e2", "status": "deferred", "labels": ["at:epic"], "assignee": None},
@@ -1222,3 +1325,15 @@ def test_no_eligible_summary_reports_true_epic_pool_counts() -> None:
     assert len(sent) == 1
     issues = sent[0].get("issues") or []
     assert len(issues) == 2
+
+
+def test_run_startup_contract_emits_stage_timing_diagnostics() -> None:
+    debug_messages: list[str] = []
+
+    with patch(
+        "atelier.worker.session.startup.atelier_log.debug",
+        side_effect=debug_messages.append,
+    ):
+        _run_startup(list_epics=lambda: [])
+
+    assert any("startup timing stage=load.epics" in line for line in debug_messages)

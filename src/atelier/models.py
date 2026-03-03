@@ -16,6 +16,8 @@ BRANCH_SQUASH_MESSAGE_VALUES = ("deterministic", "agent")
 BranchSquashMessage = Literal["deterministic", "agent"]
 BRANCH_PR_MODE_VALUES = ("none", "draft", "ready")
 BranchPrMode = Literal["none", "draft", "ready"]
+WORKER_SELECT_VALUES = ("first-eligible", "oldest-feedback")
+WorkerSelectMode = Literal["first-eligible", "oldest-feedback"]
 
 UPGRADE_POLICY_VALUES = ("always", "ask", "manual")
 UpgradePolicy = Literal["always", "ask", "manual"]
@@ -134,6 +136,37 @@ class BranchConfig(BaseModel):
     def pr(self) -> bool:
         """Return whether pull requests are enabled for this branch policy."""
         return self.pr_mode != "none"
+
+
+class WorkerConfig(BaseModel):
+    """Worker startup selection policy configuration.
+
+    Attributes:
+        select: Startup selector policy
+            (first-eligible|oldest-feedback).
+
+    Example:
+        >>> WorkerConfig(select="first-eligible")
+        WorkerConfig(...)
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    select: WorkerSelectMode = "oldest-feedback"
+
+    @field_validator("select", mode="before")
+    @classmethod
+    def normalize_select(cls, value: object) -> object:
+        if value is None:
+            return "oldest-feedback"
+        if not isinstance(value, str):
+            raise ValueError("select must be one of: " + ", ".join(WORKER_SELECT_VALUES))
+        normalized = value.strip().lower().replace("_", "-")
+        if not normalized:
+            return "oldest-feedback"
+        if normalized in WORKER_SELECT_VALUES:
+            return normalized
+        raise ValueError("select must be one of: " + ", ".join(WORKER_SELECT_VALUES))
 
 
 class GitSection(BaseModel):
@@ -594,6 +627,7 @@ class ProjectConfig(BaseModel):
         project: Project metadata section.
         git: Git configuration section.
         branch: Branch policy section.
+        worker: Worker policy section.
         agent: Agent configuration section.
         editor: Editor configuration section.
         atelier: Atelier metadata section.
@@ -608,6 +642,7 @@ class ProjectConfig(BaseModel):
     project: ProjectSection = Field(default_factory=ProjectSection)
     git: GitSection = Field(default_factory=GitSection)
     branch: BranchConfig = Field(default_factory=BranchConfig)
+    worker: WorkerConfig = Field(default_factory=WorkerConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     beads: BeadsSection = Field(default_factory=BeadsSection)
@@ -632,6 +667,7 @@ class ProjectUserConfig(BaseModel):
     project: ProjectProviderSection = Field(default_factory=ProjectProviderSection)
     git: GitSection = Field(default_factory=GitSection)
     branch: BranchConfig = Field(default_factory=BranchConfig)
+    worker: WorkerConfig = Field(default_factory=WorkerConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     editor: EditorConfig = Field(default_factory=EditorConfig)
     atelier: AtelierUserSection = Field(default_factory=AtelierUserSection)
