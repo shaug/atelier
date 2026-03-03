@@ -20,9 +20,9 @@ class _FakeAgentSpec:
         self.yolo_flags = yolo_flags
 
     def build_start_command(
-        self, _agent_home: Path, _options: list[str], prompt: str
+        self, _agent_home: Path, options: list[str], prompt: str
     ) -> tuple[list[str], Path]:
-        return ["codex", prompt], Path("/tmp/agent")
+        return [self.name, *options, prompt], Path("/tmp/agent")
 
 
 class _TestControl:
@@ -276,6 +276,56 @@ def test_prepare_agent_session_adds_claude_worker_print_defaults(monkeypatch) ->
 
     assert "--print" in prep.agent_options
     assert "--output-format=stream-json" in prep.agent_options
+    assert "--verbose" in prep.agent_options
+
+
+def test_prepare_agent_session_claude_worker_output_override_avoids_forced_verbose(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        session_agent.agents,
+        "get_agent",
+        lambda _name: _FakeAgentSpec(name="claude"),
+    )
+    project_config = _project_config().model_copy(
+        update={
+            "agent": _project_config().agent.model_copy(
+                update={
+                    "default": "claude",
+                    "options": {"claude": ["--model", "sonnet"]},
+                    "launch_options": {"worker": {"claude": ["--output-format=json"]}},
+                }
+            )
+        }
+    )
+    agent = agent_home.AgentHome(
+        name="claude",
+        agent_id="atelier/worker/claude/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+
+    prep = session_agent.prepare_agent_session(
+        project_config=project_config,
+        project_data_dir=Path("/project-data"),
+        repo_root=Path("/repo"),
+        beads_root=Path("/beads"),
+        agent=agent,
+        changeset_worktree_path=Path("/worktree"),
+        selected_epic="at-epic",
+        changeset_id="at-epic.1",
+        root_branch_value="feat/root",
+        enlistment_path=Path("/repo"),
+        yes=True,
+        yolo=False,
+        dry_run=True,
+        session_control=_TestControl(),
+        command_ops=_TestCommandOps(),
+    )
+
+    assert "--print" in prep.agent_options
+    assert "--output-format=json" in prep.agent_options
+    assert "--verbose" not in prep.agent_options
 
 
 def test_start_agent_session_dry_run_returns_none() -> None:
@@ -302,6 +352,35 @@ def test_start_agent_session_dry_run_returns_none() -> None:
 
     assert result is None
     assert any("Agent command:" in msg for msg in control.logs)
+
+
+def test_start_agent_session_dry_run_logs_claude_worker_compatible_flags() -> None:
+    control = _TestControl()
+    agent = agent_home.AgentHome(
+        name="claude",
+        agent_id="atelier/worker/claude/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+    spec = _FakeAgentSpec(name="claude", display_name="Claude")
+
+    result = session_agent.start_agent_session(
+        dry_run=True,
+        agent=agent,
+        agent_spec=spec,
+        agent_options=["--print", "--output-format=stream-json", "--verbose"],
+        opening_prompt="hello",
+        env={},
+        command_ops=_TestCommandOps(),
+        session_control=control,
+        blocked_handler=_TestBlockedHandler(),
+    )
+
+    assert result is None
+    command_logs = [msg for msg in control.logs if msg.startswith("Agent command:")]
+    assert len(command_logs) == 1
+    assert "--output-format=stream-json" in command_logs[0]
+    assert "--verbose" in command_logs[0]
 
 
 def test_start_agent_session_runs_codex_success(monkeypatch) -> None:

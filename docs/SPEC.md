@@ -100,8 +100,9 @@ Key fields include:
 Launch option precedence is deterministic: role-scoped launch options override
 legacy global options for the same flag.
 
-Claude worker launches default to `--print --output-format=stream-json` unless
-explicitly overridden by worker-scoped options.
+Claude worker launches default to
+`--print --output-format=stream-json --verbose` unless explicitly overridden by
+worker-scoped options.
 
 Agent sessions inherit identity env vars:
 
