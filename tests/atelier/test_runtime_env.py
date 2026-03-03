@@ -11,6 +11,7 @@ def test_sanitize_subprocess_environment_drops_runtime_routing_keys() -> None:
             "ATELIER_PROJECT": "/tmp/other",
             "ATELIER_WORKSPACE": "other/workspace",
             "ATELIER_MODE": "auto",
+            "ATELIER_WORK_AGENT_TRACE": "1",
             "PATH": "/usr/bin",
         }
     )
@@ -18,6 +19,7 @@ def test_sanitize_subprocess_environment_drops_runtime_routing_keys() -> None:
     assert "ATELIER_PROJECT" not in env
     assert "ATELIER_WORKSPACE" not in env
     assert env["ATELIER_MODE"] == "auto"
+    assert env["ATELIER_WORK_AGENT_TRACE"] == "1"
     assert env["PATH"] == "/usr/bin"
     assert removed == ("ATELIER_PROJECT", "ATELIER_WORKSPACE")
 
