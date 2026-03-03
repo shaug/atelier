@@ -5942,12 +5942,20 @@ def _resolve_stale_messages_best_effort(
                     cwd=cwd,
                     allow_failure=True,
                 )
-            run_bd_command(
-                ["update", cleaned_id, "--remove-label", unread_label],
-                beads_root=beads_root,
-                cwd=cwd,
-                allow_failure=True,
-            )
+                refreshed_issue_payload, _error = run_bd_json_read_only(
+                    ["show", cleaned_id],
+                    beads_root=beads_root,
+                    cwd=cwd,
+                )
+                refreshed_issue = refreshed_issue_payload[0] if refreshed_issue_payload else {}
+                status = lifecycle.canonical_lifecycle_status(refreshed_issue.get("status"))
+            if status == "closed":
+                run_bd_command(
+                    ["update", cleaned_id, "--remove-label", unread_label],
+                    beads_root=beads_root,
+                    cwd=cwd,
+                    allow_failure=True,
+                )
 
 
 def _mark_messages_read_best_effort(
