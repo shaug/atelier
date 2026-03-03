@@ -798,6 +798,63 @@ def ensure_changeset_branch(
         return branch, updated
 
 
+def reconcile_changeset_lineage_entries(
+    project_dir: Path,
+    epic_id: str,
+    changeset_id: str,
+    *,
+    work_branch: str,
+    worktree_relpath: str,
+) -> tuple[WorktreeMapping, bool]:
+    """Repair one changeset lineage entry inside an epic mapping.
+
+    Args:
+        project_dir: Project data directory that stores worktree metadata.
+        epic_id: Epic id that owns the mapping file.
+        changeset_id: Changeset id whose lineage entry should be reconciled.
+        work_branch: Canonical changeset work branch to persist.
+        worktree_relpath: Canonical changeset worktree path to persist.
+
+    Returns:
+        Tuple ``(mapping, changed)`` where ``mapping`` is the resulting mapping
+        payload and ``changed`` indicates whether a write occurred.
+    """
+    cleaned_epic_id = epic_id.strip()
+    cleaned_changeset_id = changeset_id.strip()
+    cleaned_branch = work_branch.strip()
+    cleaned_relpath = worktree_relpath.strip()
+    if not cleaned_epic_id:
+        die("epic id must not be empty")
+    if not cleaned_changeset_id:
+        die("changeset id must not be empty")
+    if not cleaned_branch:
+        die("changeset work branch must not be empty")
+    if not cleaned_relpath:
+        die("changeset worktree path must not be empty")
+
+    with worktree_state_lock(project_dir):
+        path = mapping_path(project_dir, cleaned_epic_id)
+        mapping = load_mapping(path)
+        if mapping is None:
+            die(f"worktree mapping not found for epic {cleaned_epic_id!r}")
+        current_branch = mapping.changesets.get(cleaned_changeset_id)
+        current_relpath = mapping.changeset_worktrees.get(cleaned_changeset_id)
+        if current_branch == cleaned_branch and current_relpath == cleaned_relpath:
+            return mapping, False
+        updated = WorktreeMapping(
+            epic_id=mapping.epic_id,
+            worktree_path=mapping.worktree_path,
+            root_branch=mapping.root_branch,
+            changesets={**mapping.changesets, cleaned_changeset_id: cleaned_branch},
+            changeset_worktrees={
+                **mapping.changeset_worktrees,
+                cleaned_changeset_id: cleaned_relpath,
+            },
+        )
+        write_mapping(path, updated)
+        return updated, True
+
+
 def changeset_worktree_relpath(changeset_id: str) -> str:
     """Return the default worktree path for a changeset."""
     if not changeset_id:

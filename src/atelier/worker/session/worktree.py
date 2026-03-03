@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ... import beads, changeset_fields, git, worktrees
+from ... import beads, changeset_fields, git, prs, worktrees
 
 
 @dataclass(frozen=True)
@@ -92,6 +92,15 @@ def _mapping_ownership_from_beads(
 
 
 def _normalize_branch(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized or normalized.lower() == "null":
+        return None
+    return normalized
+
+
+def _normalize_relpath(value: object) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.strip()
@@ -232,6 +241,230 @@ def _reconcile_epic_changeset_lineage(
         )
 
 
+@dataclass(frozen=True)
+class _LineageRepairDecision:
+    root_branch: str
+    parent_branch: str
+    work_branch: str
+    work_branch_source: str
+    worktree_relpath: str
+    worktree_source: str
+    metadata_changed: bool
+    mapping_changed: bool
+
+    @property
+    def changed(self) -> bool:
+        return self.metadata_changed or self.mapping_changed
+
+
+def _mapped_worktree_lineage(
+    *,
+    project_data_dir: Path,
+    mapping: worktrees.WorktreeMapping,
+    changeset_id: str,
+    git_path: str | None,
+) -> tuple[str | None, str | None]:
+    mapped_relpath = _normalize_relpath(mapping.changeset_worktrees.get(changeset_id))
+    if mapped_relpath is None:
+        return None, None
+    mapped_path_raw = Path(mapped_relpath)
+    mapped_path = (
+        mapped_path_raw if mapped_path_raw.is_absolute() else project_data_dir / mapped_path_raw
+    )
+    if not mapped_path.exists() or not (mapped_path / ".git").exists():
+        return None, mapped_relpath
+    branch = _normalize_branch(git.git_current_branch(mapped_path, git_path=git_path))
+    if branch is None or branch == "HEAD":
+        return None, mapped_relpath
+    return branch, mapped_relpath
+
+
+def _unique_branches(*values: str | None) -> tuple[str, ...]:
+    ordered: list[str] = []
+    for value in values:
+        if value is None:
+            continue
+        if value in ordered:
+            continue
+        ordered.append(value)
+    return tuple(ordered)
+
+
+def _lookup_open_pr_head(
+    *,
+    repo_slug: str | None,
+    branch_candidates: tuple[str, ...],
+) -> str | None:
+    if repo_slug is None:
+        return None
+    for candidate in branch_candidates:
+        lookup = prs.lookup_github_pr_status(repo_slug, candidate)
+        if lookup.failed:
+            lookup = prs.lookup_github_pr_status(repo_slug, candidate, refresh=True)
+        payload = lookup.payload if lookup.found else None
+        if not isinstance(payload, dict):
+            continue
+        state = str(payload.get("state") or "").strip().upper()
+        if state != "OPEN":
+            continue
+        head_branch = _normalize_branch(payload.get("headRefName"))
+        if head_branch is not None:
+            return head_branch
+    return None
+
+
+def _resolve_lineage_repair(
+    *,
+    project_data_dir: Path,
+    repo_slug: str | None,
+    changeset_id: str,
+    root_branch_value: str,
+    parent_branch_value: str,
+    mapping: worktrees.WorktreeMapping,
+    issue: dict[str, object],
+    git_path: str | None,
+) -> _LineageRepairDecision:
+    metadata_root = _normalize_branch(changeset_fields.root_branch(issue))
+    metadata_parent = _normalize_branch(changeset_fields.parent_branch(issue))
+    metadata_work = _normalize_branch(changeset_fields.work_branch(issue))
+    mapping_work = _normalize_branch(mapping.changesets.get(changeset_id))
+    mapping_relpath = _normalize_relpath(mapping.changeset_worktrees.get(changeset_id))
+    mapped_branch, mapped_relpath = _mapped_worktree_lineage(
+        project_data_dir=project_data_dir,
+        mapping=mapping,
+        changeset_id=changeset_id,
+        git_path=git_path,
+    )
+    normalized_root = _normalize_branch(root_branch_value) or _normalize_branch(mapping.root_branch)
+    if normalized_root is None:
+        raise RuntimeError("changeset lineage repair blocked: missing canonical root branch")
+    normalized_parent = _normalize_branch(parent_branch_value) or metadata_parent or normalized_root
+    derived_work = worktrees.derive_changeset_branch(normalized_root, changeset_id)
+    pr_head = _lookup_open_pr_head(
+        repo_slug=repo_slug,
+        branch_candidates=_unique_branches(
+            metadata_work, mapping_work, derived_work, mapped_branch
+        ),
+    )
+
+    if pr_head is not None:
+        canonical_work = pr_head
+        work_source = "open-pr-head"
+    elif mapped_branch is not None:
+        canonical_work = mapped_branch
+        work_source = "checked-out-worktree"
+    elif mapping_work is not None:
+        canonical_work = mapping_work
+        work_source = "mapping"
+    elif metadata_work is not None:
+        canonical_work = metadata_work
+        work_source = "metadata"
+    else:
+        canonical_work = derived_work
+        work_source = "derived"
+
+    if mapped_relpath is not None:
+        canonical_relpath = mapped_relpath
+        relpath_source = "checked-out-worktree"
+    elif mapping_relpath is not None:
+        canonical_relpath = mapping_relpath
+        relpath_source = "mapping"
+    else:
+        canonical_relpath = worktrees.changeset_worktree_relpath(changeset_id)
+        relpath_source = "default"
+
+    metadata_changed = (
+        metadata_root != normalized_root
+        or metadata_parent != normalized_parent
+        or metadata_work != canonical_work
+    )
+    mapping_changed = mapping_work != canonical_work or mapping_relpath != canonical_relpath
+    return _LineageRepairDecision(
+        root_branch=normalized_root,
+        parent_branch=normalized_parent,
+        work_branch=canonical_work,
+        work_branch_source=work_source,
+        worktree_relpath=canonical_relpath,
+        worktree_source=relpath_source,
+        metadata_changed=metadata_changed,
+        mapping_changed=mapping_changed,
+    )
+
+
+def _repair_non_epic_changeset_lineage(
+    *,
+    project_data_dir: Path,
+    beads_root: Path,
+    repo_root: Path,
+    repo_slug: str | None,
+    selected_epic: str,
+    changeset_id: str,
+    current_branch: str,
+    root_branch_value: str,
+    parent_branch_value: str,
+    mapping: worktrees.WorktreeMapping,
+    git_path: str | None,
+    control: WorktreePreparationControl,
+) -> tuple[str, worktrees.WorktreeMapping]:
+    try:
+        issues = beads.run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=repo_root)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        control.say(
+            "Skipped non-epic lineage repair for "
+            f"{changeset_id}: unable to load metadata (bd show exit {code})"
+        )
+        return current_branch, mapping
+    if not issues:
+        control.say(
+            f"Skipped non-epic lineage repair for {changeset_id}: metadata not found in beads"
+        )
+        return current_branch, mapping
+    try:
+        decision = _resolve_lineage_repair(
+            project_data_dir=project_data_dir,
+            repo_slug=repo_slug,
+            changeset_id=changeset_id,
+            root_branch_value=root_branch_value,
+            parent_branch_value=parent_branch_value,
+            mapping=mapping,
+            issue=issues[0],
+            git_path=git_path,
+        )
+    except RuntimeError as exc:
+        control.say(f"Skipped non-epic lineage repair for {changeset_id}: {exc}")
+        return current_branch, mapping
+    if not decision.changed:
+        return decision.work_branch, mapping
+
+    if decision.metadata_changed:
+        beads.update_changeset_branch_metadata(
+            changeset_id,
+            root_branch=decision.root_branch,
+            parent_branch=decision.parent_branch,
+            work_branch=decision.work_branch,
+            beads_root=beads_root,
+            cwd=repo_root,
+            allow_override=True,
+        )
+    updated_mapping = mapping
+    if decision.mapping_changed:
+        updated_mapping, _changed = worktrees.reconcile_changeset_lineage_entries(
+            project_data_dir,
+            selected_epic,
+            changeset_id,
+            work_branch=decision.work_branch,
+            worktree_relpath=decision.worktree_relpath,
+        )
+    control.say(
+        f"Repaired changeset lineage for {changeset_id}: "
+        f"root={decision.root_branch}, parent={decision.parent_branch}, "
+        f"work={decision.work_branch} ({decision.work_branch_source}), "
+        f"worktree={decision.worktree_relpath} ({decision.worktree_source})"
+    )
+    return decision.work_branch, updated_mapping
+
+
 def prepare_worktrees(
     *,
     context: WorktreePreparationContext,
@@ -327,6 +560,7 @@ def prepare_worktrees(
             f"Mapping path synthesis for {epic_id}: {path_note} ({diagnostic.worktree_path})"
         )
 
+    repo_slug = prs.github_repo_slug(git.git_origin_url(repo_root))
     epic_worktree_path = worktrees.ensure_git_worktree(
         project_data_dir,
         repo_root,
@@ -355,6 +589,21 @@ def prepare_worktrees(
             canonical_root_branch=root_branch_value,
             beads_root=beads_root,
             repo_root=repo_root,
+            control=control,
+        )
+    else:
+        branch, mapping = _repair_non_epic_changeset_lineage(
+            project_data_dir=project_data_dir,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            repo_slug=repo_slug,
+            selected_epic=selected_epic,
+            changeset_id=changeset_id,
+            current_branch=branch,
+            root_branch_value=root_branch_value,
+            parent_branch_value=changeset_parent_branch,
+            mapping=mapping,
+            git_path=git_path,
             control=control,
         )
     if epic_is_changeset:
