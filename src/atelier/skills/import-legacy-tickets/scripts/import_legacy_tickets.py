@@ -4,24 +4,40 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
 from atelier import beads
-from atelier.beads_context import resolve_skill_beads_context
+from atelier.beads_context import resolve_runtime_repo_dir_hint, resolve_skill_beads_context
 
 _MISSING_DOLT = "missing_dolt_with_legacy_sqlite"
 _INSUFFICIENT_DOLT = "insufficient_dolt_vs_legacy_data"
 _HEALTHY_DOLT = "healthy_dolt"
 
 
-def _resolve_context(*, beads_dir: str | None) -> tuple[Path, Path, str | None]:
+def _merge_warnings(*messages: str | None) -> str | None:
+    lines = [message for message in messages if isinstance(message, str) and message.strip()]
+    if not lines:
+        return None
+    return "\n".join(lines)
+
+
+def _resolve_context(
+    *, beads_dir: str | None, repo_dir: str | None
+) -> tuple[Path, Path, str | None]:
+    repo_hint, runtime_warning = resolve_runtime_repo_dir_hint(repo_dir=repo_dir)
     context = resolve_skill_beads_context(
         beads_dir=beads_dir,
-        repo_dir=os.environ.get("ATELIER_PROJECT", "").strip() or None,
+        repo_dir=repo_hint,
     )
-    return context.beads_root, context.repo_root, context.override_warning
+    return (
+        context.beads_root,
+        context.repo_root,
+        _merge_warnings(
+            runtime_warning,
+            context.override_warning,
+        ),
+    )
 
 
 def _status_reason(state: beads.StartupBeadsState) -> str:
@@ -61,9 +77,17 @@ def main() -> None:
         default="",
         help="explicit beads root override (defaults to project-scoped store)",
     )
+    parser.add_argument(
+        "--repo-dir",
+        default="",
+        help="explicit repo root override (defaults to ./worktree, then cwd)",
+    )
     args = parser.parse_args()
 
-    beads_root, repo_root, override_warning = _resolve_context(beads_dir=args.beads_dir)
+    beads_root, repo_root, override_warning = _resolve_context(
+        beads_dir=args.beads_dir,
+        repo_dir=str(args.repo_dir).strip() or None,
+    )
     if override_warning:
         print(override_warning, file=sys.stderr)
     if not beads_root.exists():

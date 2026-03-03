@@ -10,12 +10,15 @@ description: >-
 
 - show_drafts: Optional boolean to include deferred epics.
 - beads_dir: Optional Beads store path (defaults to project-scoped Beads root).
+- repo_dir: Optional repo root override. Defaults to `./worktree` then cwd.
 
 ## Steps
 
 1. Run the formatter script:
    - `python3 scripts/list_epics.py` (or
      `python3 scripts/list_epics.py --show-drafts`)
+   - Add `--repo-dir ./worktree` when running from an agent home without repo
+     cwd.
    - Epic discovery is indexed by `at:epic`; this required label defines the
      epic list pool.
 1. Do not rewrite the script output. Return it verbatim so the overseer sees a

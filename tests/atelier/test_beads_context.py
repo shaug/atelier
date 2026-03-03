@@ -138,3 +138,35 @@ def test_resolve_skill_beads_context_raises_without_explicit_override_when_proje
 
     with pytest.raises(RuntimeError, match="broken project config"):
         beads_context.resolve_skill_beads_context(beads_dir=None)
+
+
+def test_resolve_runtime_repo_dir_hint_prefers_agent_home_worktree(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    agent_home = tmp_path / "agent-home"
+    agent_home.mkdir(parents=True)
+    (agent_home / "worktree").symlink_to(repo_root)
+
+    hint, warning = beads_context.resolve_runtime_repo_dir_hint(
+        repo_dir=None,
+        cwd=agent_home,
+        env={},
+    )
+
+    assert hint == str(repo_root.resolve())
+    assert warning is None
+
+
+def test_resolve_runtime_repo_dir_hint_warns_on_legacy_atelier_project_fallback() -> None:
+    hint, warning = beads_context.resolve_runtime_repo_dir_hint(
+        repo_dir=None,
+        cwd=Path("/tmp"),
+        env={"ATELIER_PROJECT": "/repo/from-env"},
+    )
+
+    assert hint == "/repo/from-env"
+    assert warning is not None
+    assert "ATELIER_PROJECT" in warning
+    assert "2026-07-01" in warning

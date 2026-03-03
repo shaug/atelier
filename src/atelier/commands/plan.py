@@ -657,11 +657,18 @@ def run_planner(args: object) -> None:
                     finish()
                     updated_content = planner_agents_path.read_text(encoding="utf-8")
                     agent_home.ensure_claude_compat(agent.path, updated_content)
+            warning_messages: list[str] = []
+            agent_base_env = agents.agent_environment(
+                agent.agent_id,
+                warn=warning_messages.append,
+            )
+            for message in warning_messages:
+                say(message)
             env = workspace.workspace_environment(
                 project_enlistment,
                 planner_branch,
                 worktree_path,
-                base_env=agents.agent_environment(agent.agent_id),
+                base_env=agent_base_env,
             )
             env.update(
                 external_registry.planner_provider_environment(

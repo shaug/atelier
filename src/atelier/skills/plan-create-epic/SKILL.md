@@ -19,11 +19,12 @@ Do not request approval to create or edit deferred beads.
 - design: Optional design notes or links.
 - no_export: Optional per-bead opt-out from default auto-export.
 - beads_dir: Optional Beads store path.
+- repo_dir: Optional repo root override. Defaults to `./worktree` then cwd.
 
 ## Steps
 
 1. Create the epic with the script:
-   - `python skills/plan-create-epic/scripts/create_epic.py --title "<title>" --scope "<scope>" --acceptance "<acceptance>" [--changeset-strategy "<changeset_strategy>"] [--design "<design>"] [--beads-dir "<beads_dir>"] [--no-export]`
+   - `python skills/plan-create-epic/scripts/create_epic.py --title "<title>" --scope "<scope>" --acceptance "<acceptance>" [--changeset-strategy "<changeset_strategy>"] [--design "<design>"] [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"] [--no-export]`
    - This is the canonical top-level executable-work creation path; it sets both
      `issue_type=epic` and the required `at:epic` discovery label.
 1. The script creates the bead, applies auto-export when enabled by project

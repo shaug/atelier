@@ -21,6 +21,7 @@ create/edit deferred work.
 - guardrails: Size and decomposition rules (line counts, subsystem splits).
 - no_export: Optional per-bead opt-out from default auto-export.
 - beads_dir: Optional Beads store path.
+- repo_dir: Optional repo root override. Defaults to `./worktree` then cwd.
 
 ## Guardrails
 
@@ -55,7 +56,7 @@ create/edit deferred work.
 ## Steps
 
 1. For each changeset, create a bead with the script:
-   - `python skills/plan-changesets/scripts/create_changeset.py --epic-id <epic_id> --title "<title>" --acceptance "<acceptance>" [--status deferred|open] [--description "<scope/guardrails>"] [--notes "<notes>"] [--beads-dir "<beads_dir>"] [--no-export]`
+   - `python skills/plan-changesets/scripts/create_changeset.py --epic-id <epic_id> --title "<title>" --acceptance "<acceptance>" [--status deferred|open] [--description "<scope/guardrails>"] [--notes "<notes>"] [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"] [--no-export]`
 1. If decomposition would produce exactly one child changeset, stop and either:
    - keep the epic as the executable changeset, or
    - record explicit decomposition rationale in epic/changeset notes before

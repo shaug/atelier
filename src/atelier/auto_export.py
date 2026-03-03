@@ -8,7 +8,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import beads, config, external_registry, git, lifecycle, paths
+from . import beads, beads_context, config, external_registry, git, lifecycle, paths
 from .external_providers import ExternalProvider, ExternalTicketCreateRequest
 from .external_tickets import ExternalTicketRef
 from .models import ProjectConfig
@@ -71,8 +71,9 @@ def resolve_auto_export_context(*, repo_hint: Path | None = None) -> AutoExportC
 
     Args:
         repo_hint: Optional filesystem path used to locate the Git enlistment.
-            When omitted, the resolver uses `ATELIER_PROJECT`,
-            `ATELIER_WORKSPACE_DIR`, then the current working directory.
+            When omitted, the resolver uses runtime repo hint resolution
+            (`./worktree`, `ATELIER_WORKSPACE_DIR`, legacy
+            `ATELIER_PROJECT`), then the current working directory.
 
     Returns:
         A resolved context containing project config, project data dir,
@@ -83,12 +84,11 @@ def resolve_auto_export_context(*, repo_hint: Path | None = None) -> AutoExportC
     """
     hint = repo_hint
     if hint is None:
-        project_env = os.environ.get("ATELIER_PROJECT", "").strip()
-        workspace_env = os.environ.get("ATELIER_WORKSPACE_DIR", "").strip()
-        if project_env:
-            hint = Path(project_env)
-        elif workspace_env:
-            hint = Path(workspace_env)
+        runtime_repo_hint, _runtime_warning = beads_context.resolve_runtime_repo_dir_hint(
+            repo_dir=None,
+        )
+        if runtime_repo_hint:
+            hint = Path(runtime_repo_hint)
         else:
             hint = Path.cwd()
     repo_root, enlistment_path, _origin_raw, origin = git.resolve_repo_enlistment(hint)

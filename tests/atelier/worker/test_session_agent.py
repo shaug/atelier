@@ -109,6 +109,40 @@ def test_prepare_agent_session_dry_run_sets_workspace_env(monkeypatch) -> None:
     assert any("Would prepare workspace environment variables." in msg for msg in control.logs)
 
 
+def test_prepare_agent_session_sanitizes_inherited_runtime_routing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        session_agent.agents, "get_agent", lambda _name: _FakeAgentSpec(name="codex")
+    )
+    monkeypatch.setenv("ATELIER_PROJECT", "/repo-from-other-session")
+    monkeypatch.setenv("ATELIER_WORKSPACE", "other/workspace")
+    agent = agent_home.AgentHome(
+        name="codex",
+        agent_id="atelier/worker/codex/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+    prep = session_agent.prepare_agent_session(
+        project_config=_project_config(),
+        project_data_dir=Path("/project-data"),
+        repo_root=Path("/repo"),
+        beads_root=Path("/beads"),
+        agent=agent,
+        changeset_worktree_path=Path("/worktree"),
+        selected_epic="at-epic",
+        changeset_id="at-epic.1",
+        root_branch_value="feat/root",
+        enlistment_path=Path("/repo"),
+        yes=True,
+        yolo=False,
+        dry_run=True,
+        session_control=_TestControl(),
+        command_ops=_TestCommandOps(),
+    )
+    assert prep.env["ATELIER_PROJECT"] == "/repo"
+    assert prep.env["ATELIER_WORKSPACE"] == "feat/root"
+    assert prep.env["ATELIER_CHANGESET_ID"] == "at-epic.1"
+
+
 def test_prepare_agent_session_applies_yolo_options(monkeypatch) -> None:
     monkeypatch.setattr(
         session_agent.agents,

@@ -35,7 +35,9 @@ def test_create_epic_defaults_to_deferred_status(monkeypatch, tmp_path: Path) ->
         beads_root=tmp_path / ".beads",
     )
 
-    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
 
     def fake_run_bd(
         args: list[str],
@@ -103,7 +105,9 @@ def test_create_epic_fails_closed_when_deferred_update_fails(
         beads_root=tmp_path / ".beads",
     )
 
-    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
 
     def fake_run_bd(
         args: list[str],
@@ -188,7 +192,9 @@ def test_create_epic_rejects_low_information_payload(
         beads_root=tmp_path / ".beads",
     )
 
-    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
 
     def fake_run_bd(
         args: list[str],

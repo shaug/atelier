@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .io import die
+from .runtime_env import sanitize_subprocess_environment
 
 
 def workspace_environment(
@@ -15,7 +16,7 @@ def workspace_environment(
     base_env: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Build environment variables for workspace-aware subprocesses."""
-    env = dict(base_env or os.environ)
+    env, _removed = sanitize_subprocess_environment(base_env=base_env or os.environ)
     env["ATELIER_WORKSPACE"] = workspace_branch
     env["ATELIER_PROJECT"] = project_enlistment
     env["ATELIER_WORKSPACE_DIR"] = str(workspace_dir)

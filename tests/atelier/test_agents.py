@@ -289,3 +289,28 @@ class TestAgentSpec:
             base_env={"PYTHONPATH": os.pathsep.join(existing)},
         )
         assert env["PYTHONPATH"].split(os.pathsep) == [expected_root, "/tmp/one", "/tmp/two"]
+
+    def test_agent_environment_drops_inherited_runtime_routing_keys(self) -> None:
+        env = agents.agent_environment(
+            "planner/test-session",
+            base_env={
+                "ATELIER_PROJECT": "/tmp/other-repo",
+                "ATELIER_WORKSPACE": "other/workspace",
+                "ATELIER_MODE": "auto",
+            },
+        )
+        assert "ATELIER_PROJECT" not in env
+        assert "ATELIER_WORKSPACE" not in env
+        assert env["ATELIER_MODE"] == "auto"
+        assert env["ATELIER_AGENT_ID"] == "planner/test-session"
+
+    def test_agent_environment_warns_when_inherited_routing_keys_are_sanitized(self) -> None:
+        warnings: list[str] = []
+        agents.agent_environment(
+            "planner/test-session",
+            base_env={"ATELIER_PROJECT": "/tmp/other-repo"},
+            warn=warnings.append,
+        )
+        assert len(warnings) == 1
+        assert "ATELIER_PROJECT" in warnings[0]
+        assert "2026-07-01" in warnings[0]

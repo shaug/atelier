@@ -36,7 +36,9 @@ def _configure_script_mocks(module, monkeypatch, tmp_path: Path) -> list[list[st
         beads_root=tmp_path / ".beads",
     )
 
-    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
 
     def fake_run_bd(
         args: list[str],
@@ -160,7 +162,9 @@ def test_create_changeset_fails_closed_when_deferred_update_fails(
         beads_root=tmp_path / ".beads",
     )
 
-    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
 
     def fake_run_bd(
         args: list[str],
@@ -261,7 +265,9 @@ def test_create_changeset_uses_new_child_id_when_create_output_is_noisy(
         beads_root=tmp_path / ".beads",
     )
 
-    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
 
     def fake_run_bd(
         args: list[str],
@@ -345,7 +351,9 @@ def test_create_changeset_lists_all_children_for_large_epic(
     existing_ids = [f"at-{index}" for index in range(200, 255)]
     created_id = "at-255"
 
-    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
 
     def fake_run_bd(
         args: list[str],
@@ -436,7 +444,9 @@ def test_create_changeset_fails_when_create_does_not_add_new_child(
         beads_root=tmp_path / ".beads",
     )
 
-    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
 
     def fake_run_bd(
         args: list[str],
@@ -513,7 +523,9 @@ def test_create_changeset_fails_when_create_adds_multiple_new_children(
         beads_root=tmp_path / ".beads",
     )
 
-    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
 
     def fake_run_bd(
         args: list[str],
@@ -597,7 +609,9 @@ def test_create_changeset_rejects_low_information_description(
         beads_root=tmp_path / ".beads",
     )
 
-    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
 
     def fake_run_bd(
         args: list[str],
@@ -661,7 +675,9 @@ def test_create_changeset_rejects_incident_placeholder_shapes(
         beads_root=tmp_path / ".beads",
     )
 
-    monkeypatch.setattr(module.auto_export, "resolve_auto_export_context", lambda: context)
+    monkeypatch.setattr(
+        module.auto_export, "resolve_auto_export_context", lambda **_kwargs: context
+    )
 
     def fake_run_bd(
         args: list[str],

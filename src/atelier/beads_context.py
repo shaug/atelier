@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import config, git
 from .commands.resolve import resolve_current_project_with_repo_root, resolve_project_for_enlistment
+
+LEGACY_ATELIER_PROJECT_FALLBACK_REMOVAL_DATE = "2026-07-01"
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,49 @@ def _resolve_project_context(*, repo_dir: str | None) -> tuple[Path, config.Proj
     return project_root, project_config, repo_root
 
 
+def resolve_runtime_repo_dir_hint(
+    *,
+    repo_dir: str | None,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> tuple[str | None, str | None]:
+    """Resolve runtime repo-dir hint without depending on ambient ATELIER_PROJECT.
+
+    Args:
+        repo_dir: Optional explicit repo dir argument.
+        cwd: Optional working directory override for deterministic testing.
+        env: Optional environment override for deterministic testing.
+
+    Returns:
+        Tuple of ``(repo_dir_hint, warning)`` where warning is emitted when the
+        legacy ``ATELIER_PROJECT`` fallback was needed.
+    """
+    explicit = str(repo_dir or "").strip()
+    if explicit:
+        return explicit, None
+
+    current_dir = (cwd or Path.cwd()).resolve()
+    worktree_link = current_dir / "worktree"
+    if worktree_link.exists():
+        return str(worktree_link.resolve()), None
+
+    runtime_env = env if env is not None else os.environ
+    workspace_dir = str(runtime_env.get("ATELIER_WORKSPACE_DIR", "")).strip()
+    if workspace_dir:
+        return workspace_dir, None
+
+    project_dir = str(runtime_env.get("ATELIER_PROJECT", "")).strip()
+    if project_dir:
+        return (
+            project_dir,
+            "warning: deprecated runtime fallback via ATELIER_PROJECT; pass "
+            "--repo-dir or run from an agent home with ./worktree. Legacy "
+            "fallback compatibility is scheduled for removal after "
+            f"{LEGACY_ATELIER_PROJECT_FALLBACK_REMOVAL_DATE}.",
+        )
+    return None, None
+
+
 def resolve_skill_beads_context(
     *, beads_dir: str | None, repo_dir: str | None = None
 ) -> BeadsContext:
@@ -42,7 +89,7 @@ def resolve_skill_beads_context(
 
     Args:
         beads_dir: Optional explicit ``--beads-dir`` value.
-        repo_dir: Optional explicit repository directory (for ``ATELIER_PROJECT``).
+        repo_dir: Optional explicit repository directory.
 
     Returns:
         Resolved Beads context. Defaults to the project-scoped Beads root and

@@ -425,11 +425,21 @@ def prepare_agent_session(
                 agent_home.ensure_claude_compat(agent.path, updated_content)
 
     env_workspace_path = changeset_worktree_path or (project_data_dir / "worktrees" / "unknown")
+    warning_messages: list[str] = []
+    agent_base_env = agents.agent_environment(
+        agent.agent_id,
+        warn=warning_messages.append,
+    )
+    for message in warning_messages:
+        if dry_run:
+            session_control.dry_run_log(f"Would emit runtime env warning: {message}")
+        else:
+            session_control.say(message)
     env = workspace.workspace_environment(
         str(project_enlistment),
         workspace_branch,
         env_workspace_path,
-        base_env=agents.agent_environment(agent.agent_id),
+        base_env=agent_base_env,
     )
     env["ATELIER_EPIC_ID"] = selected_epic
     if changeset_id:

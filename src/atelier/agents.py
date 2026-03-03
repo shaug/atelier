@@ -5,10 +5,13 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator, Literal, Mapping, Sequence
+
+from . import runtime_env
 
 WorkingDirMode = Literal["cwd", "flag"]
 LaunchRole = Literal["planner", "worker"]
@@ -237,10 +240,26 @@ def available_agent_names() -> tuple[str, ...]:
 
 
 def agent_environment(
-    agent_id: str, *, base_env: Mapping[str, str] | None = None
+    agent_id: str,
+    *,
+    base_env: Mapping[str, str] | None = None,
+    warn: Callable[[str], None] | None = None,
 ) -> dict[str, str]:
-    """Return environment variables for agent identity injection."""
-    env = dict(base_env or os.environ)
+    """Return environment variables for agent identity injection.
+
+    Args:
+        agent_id: Agent identity string to inject.
+        base_env: Optional environment source map.
+        warn: Optional warning emitter for inherited runtime-routing keys that
+            were removed during sanitization.
+
+    Returns:
+        Sanitized launch environment with required identity variables injected.
+    """
+    env, removed = runtime_env.sanitize_subprocess_environment(base_env=base_env)
+    warning = runtime_env.format_ambient_env_warning(removed)
+    if warning and warn is not None:
+        warn(warning)
     if agent_id:
         env["ATELIER_AGENT_ID"] = agent_id
         env["BD_ACTOR"] = agent_id

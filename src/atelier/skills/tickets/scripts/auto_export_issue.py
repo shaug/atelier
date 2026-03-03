@@ -18,6 +18,7 @@ def _bootstrap_source_import() -> None:
 _bootstrap_source_import()
 
 from atelier import auto_export  # noqa: E402
+from atelier.beads_context import resolve_runtime_repo_dir_hint  # noqa: E402
 
 
 def main() -> None:
@@ -30,13 +31,25 @@ def main() -> None:
         help="Beads directory override (defaults to project config)",
     )
     parser.add_argument(
+        "--repo-dir",
+        default="",
+        help="Repo root override (defaults to ./worktree, then cwd)",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Bypass project auto-export toggle",
     )
     args = parser.parse_args()
 
-    context = auto_export.resolve_auto_export_context()
+    repo_hint_raw, runtime_warning = resolve_runtime_repo_dir_hint(
+        repo_dir=str(args.repo_dir).strip() or None
+    )
+    if runtime_warning:
+        print(runtime_warning, file=sys.stderr)
+    context = auto_export.resolve_auto_export_context(
+        repo_hint=Path(repo_hint_raw) if repo_hint_raw else None
+    )
     beads_dir = str(args.beads_dir).strip()
     if beads_dir:
         context = replace(context, beads_root=Path(beads_dir))

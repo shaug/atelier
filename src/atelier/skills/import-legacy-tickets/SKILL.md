@@ -11,6 +11,8 @@ description: >-
 
 - beads_dir: Optional explicit Beads store override. Default is the
   project-scoped Beads root.
+- repo_dir: Optional explicit repo root override. Defaults to `./worktree` then
+  cwd.
 
 ## Steps
 
@@ -18,6 +20,7 @@ description: >-
    - `python3 skills/import-legacy-tickets/scripts/import_legacy_tickets.py`
    - or
      `python3 skills/import-legacy-tickets/scripts/import_legacy_tickets.py --beads-dir "<path>"`
+   - add `--repo-dir ./worktree` when running from an agent home.
 1. Return the script output verbatim so operators can see migration/import
    diagnostics and startup state before/after.
 
