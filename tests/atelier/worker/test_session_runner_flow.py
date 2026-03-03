@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import subprocess
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, call
+from unittest.mock import Mock, call, patch
 
 from atelier import config
 from atelier.agent_home import AgentHome
@@ -332,6 +333,170 @@ def test_run_worker_once_forwards_epic_id_for_missing_root_branch_prompt() -> No
         "feat/collision-proof-startup-at-uuzc",
         beads_root=Path("/project/.atelier/.beads"),
         cwd=Path("/repo"),
+    )
+
+
+def test_run_worker_once_auto_confirms_unique_bead_suffix_root_branch() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p1autoc",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p1autoc",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-uuzc",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.infra.beads.claim_epic = Mock(
+        return_value={"id": "at-uuzc", "title": "Collision proof startup"}
+    )
+    deps.infra.beads.extract_workspace_root_branch = Mock(return_value="")
+    deps.lifecycle.extract_changeset_root_branch = lambda _issue: ""
+    deps.infra.root_branch.prompt_root_branch = Mock(
+        side_effect=AssertionError("prompt_root_branch should not be called")
+    )
+    local_refs = subprocess.CompletedProcess(
+        args=["git", "for-each-ref"],
+        returncode=0,
+        stdout="feat/collision-proof-startup-at-uuzc.1\n",
+        stderr="",
+    )
+
+    with patch("atelier.exec.try_run_command", return_value=local_refs):
+        summary = runner.run_worker_once(
+            SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+            run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p1autoc"),
+            deps=deps,
+        )
+
+    assert summary.started is False
+    assert summary.reason == "no_ready_changesets"
+    assert summary.epic_id == "at-uuzc"
+    deps.infra.beads.update_workspace_root_branch.assert_called_once_with(
+        "at-uuzc",
+        "feat/collision-proof-startup-at-uuzc.1",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+    )
+    assert any(
+        "auto-confirmed via bead-suffix rule" in str(call.args[0])
+        for call in deps.control._say.call_args_list
+    )
+
+
+def test_run_worker_once_multiple_bead_suffix_matches_fall_back_to_prompt() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p1multi",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p1multi",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-uuzc",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.infra.beads.claim_epic = Mock(
+        return_value={"id": "at-uuzc", "title": "Collision proof startup"}
+    )
+    deps.infra.beads.extract_workspace_root_branch = Mock(return_value="")
+    deps.lifecycle.extract_changeset_root_branch = lambda _issue: ""
+    deps.infra.root_branch.prompt_root_branch = Mock(
+        return_value="feat/collision-proof-startup-at-uuzc.2"
+    )
+    local_refs = subprocess.CompletedProcess(
+        args=["git", "for-each-ref"],
+        returncode=0,
+        stdout=("feat/collision-proof-startup-at-uuzc\nfeat/collision-proof-startup-at-uuzc.1\n"),
+        stderr="",
+    )
+
+    with patch("atelier.exec.try_run_command", return_value=local_refs):
+        summary = runner.run_worker_once(
+            SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+            run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p1multi"),
+            deps=deps,
+        )
+
+    assert summary.started is False
+    assert summary.reason == "no_ready_changesets"
+    assert summary.epic_id == "at-uuzc"
+    deps.infra.root_branch.prompt_root_branch.assert_called_once()
+    deps.infra.beads.update_workspace_root_branch.assert_called_once_with(
+        "at-uuzc",
+        "feat/collision-proof-startup-at-uuzc.2",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+    )
+    assert any(
+        "multiple local bead-suffix matches" in str(call.args[0])
+        for call in deps.control._say.call_args_list
+    )
+
+
+def test_run_worker_once_nonmatching_suffix_falls_back_to_prompt() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p1nomatch",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p1nomatch",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-uuzc",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    deps.infra.beads.claim_epic = Mock(
+        return_value={"id": "at-uuzc", "title": "Collision proof startup"}
+    )
+    deps.infra.beads.extract_workspace_root_branch = Mock(return_value="")
+    deps.lifecycle.extract_changeset_root_branch = lambda _issue: ""
+    deps.infra.root_branch.prompt_root_branch = Mock(
+        return_value="feat/collision-proof-startup-at-uuzc"
+    )
+    local_refs = subprocess.CompletedProcess(
+        args=["git", "for-each-ref"],
+        returncode=0,
+        stdout="feat/unrelated\n",
+        stderr="",
+    )
+
+    with patch("atelier.exec.try_run_command", return_value=local_refs):
+        summary = runner.run_worker_once(
+            SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+            run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p1nomatch"),
+            deps=deps,
+        )
+
+    assert summary.started is False
+    assert summary.reason == "no_ready_changesets"
+    assert summary.epic_id == "at-uuzc"
+    deps.infra.root_branch.prompt_root_branch.assert_called_once()
+    deps.infra.beads.update_workspace_root_branch.assert_called_once_with(
+        "at-uuzc",
+        "feat/collision-proof-startup-at-uuzc",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+    )
+    assert any(
+        "no local bead-suffix match for at-uuzc" in str(call.args[0])
+        for call in deps.control._say.call_args_list
     )
 
 
