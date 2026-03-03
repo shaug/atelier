@@ -4461,6 +4461,63 @@ def test_list_inbox_messages_filters_unread() -> None:
     ]
 
 
+def test_list_inbox_messages_auto_resolves_stale_review_feedback_message() -> None:
+    inbox_issue = {
+        "id": "msg-review-feedback",
+        "title": "NEEDS-DECISION: Review feedback unchanged (at-epic.1)",
+        "description": "---\nthread: at-epic.1\n---\n\nBody\n",
+        "assignee": "planner",
+    }
+    thread_issue = {
+        "id": "at-epic.1",
+        "status": "in_progress",
+        "description": "pr_state: pr-open\npr_number: 42\n",
+    }
+    open_message = dict(inbox_issue)
+    open_message["status"] = "open"
+    closed_message = dict(inbox_issue)
+    closed_message["status"] = "closed"
+    message_show_count = 0
+
+    def fake_read_only(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> tuple[list[dict[str, object]], str | None]:
+        del beads_root, cwd
+        nonlocal message_show_count
+        if args == ["show", "at-epic.1"]:
+            return [thread_issue], None
+        if args == ["show", "msg-review-feedback"]:
+            message_show_count += 1
+            if message_show_count == 1:
+                return [open_message], None
+            return [closed_message], None
+        return [], None
+
+    with (
+        patch("atelier.beads.run_bd_json", return_value=[inbox_issue]),
+        patch("atelier.beads.run_bd_json_read_only", side_effect=fake_read_only),
+        patch("atelier.beads._repo_slug_for_gate", return_value="owner/repo"),
+        patch("atelier.beads.prs.unresolved_review_thread_count", return_value=0),
+        patch("atelier.beads.run_bd_command") as run_command,
+    ):
+        queued = beads.list_inbox_messages("planner", beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert queued == []
+    assert [call.args[0] for call in run_command.call_args_list] == [
+        [
+            "update",
+            "msg-review-feedback",
+            "--append-notes",
+            "auto-resolved stale NEEDS-DECISION: unresolved review threads=0 (pr #42)",
+        ],
+        ["close", "msg-review-feedback"],
+        ["update", "msg-review-feedback", "--remove-label", "at:unread"],
+    ]
+
+
 def test_list_queue_messages_filters_unread_by_default() -> None:
     with patch("atelier.beads.run_bd_json", return_value=[]) as run_json:
         beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
@@ -4521,6 +4578,203 @@ def test_list_queue_messages_auto_resolves_stale_closed_active_pr_lifecycle() ->
         "status": "in_progress",
         "description": "pr_state: pr-open\n",
     }
+    open_message = dict(queue_issue)
+    open_message["status"] = "open"
+    closed_message = dict(queue_issue)
+    closed_message["status"] = "closed"
+    message_show_count = 0
+
+    def fake_run_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:1] == ["list"]:
+            return [queue_issue]
+        return []
+
+    def fake_read_only(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> tuple[list[dict[str, object]], str | None]:
+        del beads_root, cwd
+        nonlocal message_show_count
+        if args == ["show", "at-epic.1"]:
+            return [thread_issue], None
+        if args == ["show", "msg-closed-active"]:
+            message_show_count += 1
+            if message_show_count == 1:
+                return [open_message], None
+            return [closed_message], None
+        return [], None
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_json),
+        patch("atelier.beads.run_bd_json_read_only", side_effect=fake_read_only),
+        patch("atelier.beads.run_bd_command") as run_command,
+    ):
+        queued = beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert queued == []
+    assert [call.args[0] for call in run_command.call_args_list] == [
+        [
+            "update",
+            "msg-closed-active",
+            "--append-notes",
+            "auto-resolved stale NEEDS-DECISION: changeset status=in_progress",
+        ],
+        ["close", "msg-closed-active"],
+        ["update", "msg-closed-active", "--remove-label", "at:unread"],
+    ]
+
+
+def test_list_queue_messages_auto_resolves_review_feedback_when_threads_resolved() -> None:
+    queue_issue = {
+        "id": "msg-review-feedback",
+        "title": "NEEDS-DECISION: Review feedback unchanged (at-epic.1)",
+        "created_at": "2026-03-02T02:00:00Z",
+        "description": "---\nqueue: planner\nthread: at-epic.1\n---\n\nBody\n",
+        "assignee": None,
+    }
+    thread_issue = {
+        "id": "at-epic.1",
+        "status": "blocked",
+        "description": "pr_state: in-review\npr_number: 42\n",
+    }
+    open_message = dict(queue_issue)
+    open_message["status"] = "open"
+    closed_message = dict(queue_issue)
+    closed_message["status"] = "closed"
+    message_show_count = 0
+
+    def fake_run_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:1] == ["list"]:
+            return [queue_issue]
+        return []
+
+    def fake_read_only(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> tuple[list[dict[str, object]], str | None]:
+        del beads_root, cwd
+        nonlocal message_show_count
+        if args == ["show", "at-epic.1"]:
+            return [thread_issue], None
+        if args == ["show", "msg-review-feedback"]:
+            message_show_count += 1
+            if message_show_count == 1:
+                return [open_message], None
+            return [closed_message], None
+        return [], None
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_json),
+        patch("atelier.beads.run_bd_json_read_only", side_effect=fake_read_only),
+        patch("atelier.beads._repo_slug_for_gate", return_value="owner/repo"),
+        patch("atelier.beads.prs.unresolved_review_thread_count", return_value=0),
+        patch("atelier.beads.run_bd_command") as run_command,
+    ):
+        queued = beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert queued == []
+    assert [call.args[0] for call in run_command.call_args_list] == [
+        [
+            "update",
+            "msg-review-feedback",
+            "--append-notes",
+            "auto-resolved stale NEEDS-DECISION: unresolved review threads=0 (pr #42)",
+        ],
+        ["close", "msg-review-feedback"],
+        ["update", "msg-review-feedback", "--remove-label", "at:unread"],
+    ]
+
+
+def test_list_queue_messages_keeps_unread_label_when_stale_close_not_confirmed() -> None:
+    queue_issue = {
+        "id": "msg-review-feedback",
+        "title": "NEEDS-DECISION: Review feedback unchanged (at-epic.1)",
+        "created_at": "2026-03-02T02:00:00Z",
+        "description": "---\nqueue: planner\nthread: at-epic.1\n---\n\nBody\n",
+        "assignee": None,
+    }
+    thread_issue = {
+        "id": "at-epic.1",
+        "status": "blocked",
+        "description": "pr_state: in-review\npr_number: 42\n",
+    }
+    open_message = dict(queue_issue)
+    open_message["status"] = "open"
+
+    def fake_run_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:1] == ["list"]:
+            return [queue_issue]
+        return []
+
+    def fake_read_only(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> tuple[list[dict[str, object]], str | None]:
+        del beads_root, cwd
+        if args == ["show", "at-epic.1"]:
+            return [thread_issue], None
+        if args == ["show", "msg-review-feedback"]:
+            return [open_message], None
+        return [], None
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_json),
+        patch("atelier.beads.run_bd_json_read_only", side_effect=fake_read_only),
+        patch("atelier.beads._repo_slug_for_gate", return_value="owner/repo"),
+        patch("atelier.beads.prs.unresolved_review_thread_count", return_value=0),
+        patch("atelier.beads.run_bd_command") as run_command,
+    ):
+        queued = beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert queued == []
+    assert [call.args[0] for call in run_command.call_args_list] == [
+        [
+            "update",
+            "msg-review-feedback",
+            "--append-notes",
+            "auto-resolved stale NEEDS-DECISION: unresolved review threads=0 (pr #42)",
+        ],
+        ["close", "msg-review-feedback"],
+    ]
+
+
+def test_list_queue_messages_keeps_review_feedback_when_threads_unresolved() -> None:
+    queue_issue = {
+        "id": "msg-review-feedback",
+        "title": "NEEDS-DECISION: Review feedback unchanged (at-epic.1)",
+        "created_at": "2026-03-02T02:00:00Z",
+        "description": "---\nqueue: planner\nthread: at-epic.1\n---\n\nBody\n",
+        "assignee": None,
+    }
+    thread_issue = {
+        "id": "at-epic.1",
+        "status": "blocked",
+        "description": "pr_state: in-review\npr_number: 42\n",
+    }
 
     def fake_run_json(
         args: list[str],
@@ -4536,17 +4790,14 @@ def test_list_queue_messages_auto_resolves_stale_closed_active_pr_lifecycle() ->
     with (
         patch("atelier.beads.run_bd_json", side_effect=fake_run_json),
         patch("atelier.beads.run_bd_json_read_only", return_value=([thread_issue], None)),
+        patch("atelier.beads._repo_slug_for_gate", return_value="owner/repo"),
+        patch("atelier.beads.prs.unresolved_review_thread_count", return_value=2),
         patch("atelier.beads.run_bd_command") as run_command,
     ):
         queued = beads.list_queue_messages(beads_root=Path("/beads"), cwd=Path("/repo"))
 
-    assert queued == []
-    run_command.assert_called_once_with(
-        ["update", "msg-closed-active", "--remove-label", "at:unread"],
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-        allow_failure=True,
-    )
+    assert [item["id"] for item in queued] == ["msg-review-feedback"]
+    run_command.assert_not_called()
 
 
 def test_list_queue_messages_keeps_latest_active_closed_pr_lifecycle_notification() -> None:

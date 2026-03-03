@@ -190,6 +190,7 @@ _RuntimeMetadataReconcileOutcome = Literal[
 ]
 _NEEDS_DECISION_SUBJECT_PREFIX = "NEEDS-DECISION:"
 _NEEDS_DECISION_CLOSED_ACTIVE_PR_REASON = "needs-decision: closed changeset has active pr lifecycle"
+_NEEDS_DECISION_REVIEW_FEEDBACK_UNCHANGED_REASON = "needs-decision: review feedback unchanged"
 
 try:
     import fcntl  # type: ignore[attr-defined]
@@ -5546,7 +5547,35 @@ def list_inbox_messages(
     args = ["list", "--label", issue_label(_LABEL_MESSAGE), "--assignee", agent_id]
     if unread_only:
         args.extend(["--label", issue_label(_LABEL_UNREAD)])
-    return run_bd_json(args, beads_root=beads_root, cwd=cwd)
+    messages_for_agent = run_bd_json(args, beads_root=beads_root, cwd=cwd)
+    matches: list[dict[str, object]] = []
+    thread_issue_cache: dict[str, dict[str, object] | None] = {}
+    repo_slug_cache: dict[str, str | None] = {}
+    stale_reasons: dict[str, str] = {}
+    for issue in messages_for_agent:
+        issue_id = str(issue.get("id") or "").strip()
+        thread_id = _message_thread_id(issue)
+        reason_key = _needs_decision_reason_key(issue.get("title"), thread_id=thread_id)
+        stale_reason = _needs_decision_stale_reason(
+            reason_key,
+            thread_id=thread_id,
+            thread_issue_cache=thread_issue_cache,
+            repo_slug_cache=repo_slug_cache,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+        if stale_reason is not None:
+            if issue_id:
+                stale_reasons[issue_id] = stale_reason
+            continue
+        matches.append(issue)
+    if stale_reasons:
+        _resolve_stale_messages_best_effort(
+            stale_reasons,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+    return matches
 
 
 def list_queue_messages(
@@ -5566,7 +5595,8 @@ def list_queue_messages(
     duplicate_groups: dict[tuple[str, str], dict[str, object]] = {}
     duplicate_replaced_ids: set[str] = set()
     thread_issue_cache: dict[str, dict[str, object] | None] = {}
-    stale_ids: set[str] = set()
+    repo_slug_cache: dict[str, str | None] = {}
+    stale_reasons: dict[str, str] = {}
     for issue in issues:
         description = issue.get("description")
         if not isinstance(description, str):
@@ -5616,30 +5646,35 @@ def list_queue_messages(
             continue
         matches.append(enriched)
     for dedupe_key, selected in duplicate_groups.items():
-        _thread_id, reason_key = dedupe_key
+        thread_id, reason_key = dedupe_key
         issue_id = str(selected.get("id") or "").strip()
-        if (
-            reason_key == _NEEDS_DECISION_CLOSED_ACTIVE_PR_REASON
-            and not _closed_active_pr_condition_still_blocking(
-                selected,
-                thread_issue_cache=thread_issue_cache,
-                beads_root=beads_root,
-                cwd=cwd,
-            )
-        ):
-            if issue_id:
-                stale_ids.add(issue_id)
-            continue
-        matches.append(selected)
-    if unread_only:
-        resolved_ids = duplicate_replaced_ids | stale_ids
-        _mark_messages_read_best_effort(
-            resolved_ids,
+        stale_reason = _needs_decision_stale_reason(
+            reason_key,
+            thread_id=thread_id,
+            thread_issue_cache=thread_issue_cache,
+            repo_slug_cache=repo_slug_cache,
             beads_root=beads_root,
             cwd=cwd,
         )
-    if duplicate_replaced_ids or stale_ids:
-        hidden_ids = duplicate_replaced_ids | stale_ids
+        if stale_reason is not None:
+            if issue_id:
+                stale_reasons[issue_id] = stale_reason
+            continue
+        matches.append(selected)
+    if unread_only:
+        _mark_messages_read_best_effort(
+            duplicate_replaced_ids,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+    if stale_reasons:
+        _resolve_stale_messages_best_effort(
+            stale_reasons,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+    if duplicate_replaced_ids or stale_reasons:
+        hidden_ids = duplicate_replaced_ids | set(stale_reasons)
         matches = [
             issue for issue in matches if str(issue.get("id") or "").strip() not in hidden_ids
         ]
@@ -5691,21 +5726,24 @@ def _needs_decision_reason_key(subject: object, *, thread_id: str | None) -> str
     return normalized_subject.lower()
 
 
-def _closed_active_pr_condition_still_blocking(
-    issue: dict[str, object],
+def _message_thread_id(issue: dict[str, object]) -> str | None:
+    payload = messages.parse_message(_issue_description(issue))
+    thread_value = payload.metadata.get("thread")
+    if not isinstance(thread_value, str):
+        return None
+    normalized = thread_value.strip()
+    if not normalized:
+        return None
+    return normalized
+
+
+def _thread_issue_for_message(
+    thread_id: str,
     *,
     thread_issue_cache: dict[str, dict[str, object] | None],
     beads_root: Path,
     cwd: Path,
-) -> bool:
-    description = issue.get("description")
-    payload = messages.parse_message(description if isinstance(description, str) else "")
-    thread_value = payload.metadata.get("thread")
-    thread_id = (
-        thread_value.strip() if isinstance(thread_value, str) and thread_value.strip() else ""
-    )
-    if not thread_id:
-        return True
+) -> dict[str, object] | None:
     if thread_id not in thread_issue_cache:
         thread_issues, _error = run_bd_json_read_only(
             ["show", thread_id],
@@ -5713,15 +5751,211 @@ def _closed_active_pr_condition_still_blocking(
             cwd=cwd,
         )
         thread_issue_cache[thread_id] = thread_issues[0] if thread_issues else None
-    thread_issue = thread_issue_cache.get(thread_id)
-    if not isinstance(thread_issue, dict):
-        return True
+    candidate = thread_issue_cache.get(thread_id)
+    if isinstance(candidate, dict):
+        return candidate
+    return None
+
+
+def _resolve_repo_slug_cached(
+    *,
+    repo_slug_cache: dict[str, str | None],
+    cwd: Path,
+) -> str | None:
+    if "value" not in repo_slug_cache:
+        repo_slug_cache["value"] = _repo_slug_for_gate(cwd)
+    return repo_slug_cache["value"]
+
+
+def _format_pr_timestamp(value: object) -> str | None:
+    parsed = prs.parse_timestamp(value)
+    if parsed is None:
+        return None
+    return parsed.isoformat().replace("+00:00", "Z")
+
+
+def _pr_terminal_stale_reason(
+    thread_issue: dict[str, object],
+    *,
+    repo_slug_cache: dict[str, str | None],
+    cwd: Path,
+) -> str | None:
+    review = changesets.parse_review_metadata(_issue_description(thread_issue))
+    review_state = lifecycle.normalize_review_state(review.pr_state)
+    if review_state not in {"merged", "closed", "abandoned"}:
+        return None
+
+    fields = _parse_description_fields(_issue_description(thread_issue))
+    work_branch = fields.get("changeset.work_branch")
+    if isinstance(work_branch, str) and work_branch.strip():
+        repo_slug = _resolve_repo_slug_cached(repo_slug_cache=repo_slug_cache, cwd=cwd)
+        if repo_slug:
+            pr_payload = prs.read_github_pr_status(repo_slug, work_branch.strip())
+            if isinstance(pr_payload, dict):
+                if review_state == "merged":
+                    merged_at = _format_pr_timestamp(pr_payload.get("mergedAt"))
+                    if merged_at:
+                        return f"PR merged at {merged_at}"
+                closed_at = _format_pr_timestamp(pr_payload.get("closedAt"))
+                if closed_at:
+                    return f"PR closed at {closed_at}"
+    return f"pr_state={review_state}"
+
+
+def _parse_pr_number(raw_number: str | None) -> int | None:
+    if raw_number is None:
+        return None
+    normalized = raw_number.strip()
+    if not normalized or not normalized.isdigit():
+        return None
+    parsed = int(normalized)
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _closed_active_pr_stale_reason(
+    thread_issue: dict[str, object],
+    *,
+    repo_slug_cache: dict[str, str | None],
+    cwd: Path,
+) -> str | None:
     status = lifecycle.canonical_lifecycle_status(thread_issue.get("status"))
     if status != "closed":
-        return False
-    thread_fields = _parse_description_fields(_issue_description(thread_issue))
-    review_state = lifecycle.normalize_review_state(thread_fields.get("pr_state"))
-    return lifecycle.is_active_pr_lifecycle_state(review_state)
+        return f"changeset status={status}"
+    terminal_reason = _pr_terminal_stale_reason(
+        thread_issue,
+        repo_slug_cache=repo_slug_cache,
+        cwd=cwd,
+    )
+    if terminal_reason is not None:
+        return terminal_reason
+    review = changesets.parse_review_metadata(_issue_description(thread_issue))
+    review_state = lifecycle.normalize_review_state(review.pr_state)
+    if lifecycle.is_active_pr_lifecycle_state(review_state):
+        return None
+    return f"pr_state={review_state or 'none'}"
+
+
+def _review_feedback_unchanged_stale_reason(
+    thread_issue: dict[str, object],
+    *,
+    repo_slug_cache: dict[str, str | None],
+    cwd: Path,
+) -> str | None:
+    terminal_reason = _pr_terminal_stale_reason(
+        thread_issue,
+        repo_slug_cache=repo_slug_cache,
+        cwd=cwd,
+    )
+    if terminal_reason is not None:
+        return terminal_reason
+
+    review = changesets.parse_review_metadata(_issue_description(thread_issue))
+    pr_number = _parse_pr_number(review.pr_number)
+    if pr_number is None:
+        return None
+    repo_slug = _resolve_repo_slug_cached(repo_slug_cache=repo_slug_cache, cwd=cwd)
+    if not repo_slug:
+        return None
+    unresolved_threads = prs.unresolved_review_thread_count(repo_slug, pr_number)
+    if unresolved_threads != 0:
+        return None
+    return f"unresolved review threads=0 (pr #{pr_number})"
+
+
+def _needs_decision_stale_reason(
+    reason_key: str | None,
+    *,
+    thread_id: str | None,
+    thread_issue_cache: dict[str, dict[str, object] | None],
+    repo_slug_cache: dict[str, str | None],
+    beads_root: Path,
+    cwd: Path,
+) -> str | None:
+    if reason_key is None or thread_id is None:
+        return None
+    if reason_key not in {
+        _NEEDS_DECISION_CLOSED_ACTIVE_PR_REASON,
+        _NEEDS_DECISION_REVIEW_FEEDBACK_UNCHANGED_REASON,
+    }:
+        return None
+    thread_issue = _thread_issue_for_message(
+        thread_id,
+        thread_issue_cache=thread_issue_cache,
+        beads_root=beads_root,
+        cwd=cwd,
+    )
+    if thread_issue is None:
+        return None
+    if reason_key == _NEEDS_DECISION_CLOSED_ACTIVE_PR_REASON:
+        return _closed_active_pr_stale_reason(
+            thread_issue,
+            repo_slug_cache=repo_slug_cache,
+            cwd=cwd,
+        )
+    if reason_key == _NEEDS_DECISION_REVIEW_FEEDBACK_UNCHANGED_REASON:
+        return _review_feedback_unchanged_stale_reason(
+            thread_issue,
+            repo_slug_cache=repo_slug_cache,
+            cwd=cwd,
+        )
+    return None
+
+
+def _resolve_stale_messages_best_effort(
+    stale_reasons: dict[str, str],
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> None:
+    unread_label = issue_label(_LABEL_UNREAD, beads_root=beads_root)
+    for message_id in sorted(stale_reasons):
+        cleaned_id = message_id.strip()
+        if not cleaned_id:
+            continue
+        stale_reason = stale_reasons[message_id].strip()
+        with _issue_write_lock(cleaned_id, beads_root=beads_root):
+            issue_payload, _error = run_bd_json_read_only(
+                ["show", cleaned_id],
+                beads_root=beads_root,
+                cwd=cwd,
+            )
+            issue = issue_payload[0] if issue_payload else {}
+            status = lifecycle.canonical_lifecycle_status(issue.get("status"))
+            if status != "closed":
+                note_reason = stale_reason or "stale condition satisfied"
+                run_bd_command(
+                    [
+                        "update",
+                        cleaned_id,
+                        "--append-notes",
+                        f"auto-resolved stale NEEDS-DECISION: {note_reason}",
+                    ],
+                    beads_root=beads_root,
+                    cwd=cwd,
+                    allow_failure=True,
+                )
+                run_bd_command(
+                    ["close", cleaned_id],
+                    beads_root=beads_root,
+                    cwd=cwd,
+                    allow_failure=True,
+                )
+                refreshed_issue_payload, _error = run_bd_json_read_only(
+                    ["show", cleaned_id],
+                    beads_root=beads_root,
+                    cwd=cwd,
+                )
+                refreshed_issue = refreshed_issue_payload[0] if refreshed_issue_payload else {}
+                status = lifecycle.canonical_lifecycle_status(refreshed_issue.get("status"))
+            if status == "closed":
+                run_bd_command(
+                    ["update", cleaned_id, "--remove-label", unread_label],
+                    beads_root=beads_root,
+                    cwd=cwd,
+                    allow_failure=True,
+                )
 
 
 def _mark_messages_read_best_effort(
