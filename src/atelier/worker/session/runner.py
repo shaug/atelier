@@ -34,6 +34,10 @@ _TRANSIENT_PREPARE_WORKTREES_MARKERS = (
     "timed out",
 )
 _FOLLOWUP_STARTUP_REASONS = frozenset({"review_feedback", "merge_conflict"})
+_FOLLOWUP_DEPENDENCY_GATE_SOFT_FAILURE_MARKERS = (
+    "no issue found matching",
+    "no issues found matching the provided ids",
+)
 
 
 def _list_local_branches(*, repo_root: Path, git_path: str | None) -> tuple[str, ...]:
@@ -338,6 +342,13 @@ def _is_transient_prepare_worktrees_error(error: BaseException) -> bool:
     return any(marker in detail for marker in _TRANSIENT_PREPARE_WORKTREES_MARKERS)
 
 
+def _is_followup_dependency_gate_soft_failure(error: BaseException) -> bool:
+    if not isinstance(error, SystemExit):
+        return False
+    detail = _format_preparation_error_detail(error).lower()
+    return any(marker in detail for marker in _FOLLOWUP_DEPENDENCY_GATE_SOFT_FAILURE_MARKERS)
+
+
 def _dependency_has_work_children(
     *,
     beads: BeadsService,
@@ -437,7 +448,9 @@ def _startup_transition_decision(
             beads_root=beads_root,
             repo_root=repo_root,
         )
-    except SystemExit:
+    except SystemExit as exc:
+        if not _is_followup_dependency_gate_soft_failure(exc):
+            raise
         return _StartupTransitionDecision(
             False,
             "follow-up dependency gate unavailable (skipping status transition)",
@@ -1195,15 +1208,34 @@ def run_worker_once(
         finishstep = control.step("Mark changeset in progress", timings=timings, trace=trace)
         mark_step_extra = "skipped"
         if changeset_id:
-            transition = _startup_transition_decision(
-                issue=changeset,
-                dependency_ids=changeset_boundary.dependency_ids,
-                startup_reason=startup_result.reason,
-                branch_pr_strategy=project_config.branch.pr_strategy,
-                beads=infra.beads,
-                beads_root=beads_root,
-                repo_root=repo_root,
-            )
+            try:
+                transition = _startup_transition_decision(
+                    issue=changeset,
+                    dependency_ids=changeset_boundary.dependency_ids,
+                    startup_reason=startup_result.reason,
+                    branch_pr_strategy=project_config.branch.pr_strategy,
+                    beads=infra.beads,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                )
+            except SystemExit as exc:
+                finishstep(extra=f"bd read failed (exit={exc.code})")
+                return finish(
+                    _abort_startup_read_failure(
+                        beads=infra.beads,
+                        lifecycle=lifecycle,
+                        control=control,
+                        selected_epic=selected_epic,
+                        agent_id=agent.agent_id,
+                        agent_bead_id=agent_bead_id_required,
+                        beads_root=beads_root,
+                        repo_root=repo_root,
+                        dry_run=dry_run,
+                        stage="evaluate startup dependency gate",
+                        verification_issue_id=str(changeset_id),
+                        reason="changeset_dependency_gate_read_failed",
+                    )
+                )
             if not transition.should_transition:
                 if dry_run:
                     control.dry_run_log(
