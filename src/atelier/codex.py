@@ -16,7 +16,7 @@ import termios
 import tty
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .io import die
 
@@ -97,10 +97,11 @@ def parse_codex_resume_line(line: str) -> tuple[str | None, str | None]:
 class CodexSessionCapture:
     """Capture Codex session metadata from streamed output."""
 
-    def __init__(self) -> None:
+    def __init__(self, line_handler: Callable[[str], None] | None = None) -> None:
         self.session_id: str | None = None
         self.resume_command: str | None = None
         self._buffer: str = ""
+        self._line_handler = line_handler
 
     def feed(self, data: bytes) -> None:
         if not data:
@@ -120,6 +121,8 @@ class CodexSessionCapture:
             self._buffer = ""
 
     def _handle_line(self, line: str) -> None:
+        if self._line_handler is not None:
+            self._line_handler(line)
         session_id, resume_command = parse_codex_resume_line(line)
         if resume_command:
             self.resume_command = resume_command
@@ -133,14 +136,22 @@ def run_codex_command(
     cwd: Path | None = None,
     allow_missing: bool = False,
     env: Mapping[str, str] | None = None,
+    stream_output: bool = True,
+    line_handler: Callable[[str], None] | None = None,
 ) -> CodexRunResult | None:
     """Run Codex with a PTY and capture session metadata."""
     if shutil.which(cmd[0]) is None:
         if allow_missing:
             return None
         die(f"missing required command: {cmd[0]}")
-    capture = CodexSessionCapture()
-    returncode = _run_pty_command(cmd, cwd=cwd, capture=capture, env=env)
+    capture = CodexSessionCapture(line_handler=line_handler)
+    returncode = _run_pty_command(
+        cmd,
+        cwd=cwd,
+        capture=capture,
+        env=env,
+        stream_output=stream_output,
+    )
     capture.finalize()
     return CodexRunResult(
         returncode=returncode,
@@ -155,6 +166,7 @@ def _run_pty_command(
     cwd: Path | None,
     capture: CodexSessionCapture,
     env: Mapping[str, str] | None,
+    stream_output: bool,
 ) -> int:
     pid, master_fd = pty.fork()
     if pid == 0:
@@ -175,7 +187,7 @@ def _run_pty_command(
         restore = False
         mode = None
     try:
-        _copy_with_capture(master_fd, capture)
+        _copy_with_capture(master_fd, capture, stream_output=stream_output)
     finally:
         if restore and mode is not None:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, mode)
@@ -185,17 +197,22 @@ def _run_pty_command(
     return os.waitstatus_to_exitcode(status)
 
 
-def _copy_with_capture(master_fd: int, capture: CodexSessionCapture) -> None:
+def _copy_with_capture(
+    master_fd: int,
+    capture: CodexSessionCapture,
+    *,
+    stream_output: bool,
+) -> None:
     if os.get_blocking(master_fd):
         os.set_blocking(master_fd, False)
         try:
-            _copy_with_capture(master_fd, capture)
+            _copy_with_capture(master_fd, capture, stream_output=stream_output)
         finally:
             os.set_blocking(master_fd, True)
         return
     high_waterlevel = 4096
     stdin_avail = master_fd != 0
-    stdout_avail = master_fd != 1
+    stdout_avail = stream_output and master_fd != 1
     i_buf = b""
     o_buf = b""
     while True:
@@ -204,6 +221,8 @@ def _copy_with_capture(master_fd: int, capture: CodexSessionCapture) -> None:
         if stdin_avail and len(i_buf) < high_waterlevel:
             rfds.append(0)
         if stdout_avail and len(o_buf) < high_waterlevel:
+            rfds.append(master_fd)
+        elif not stdout_avail:
             rfds.append(master_fd)
         if stdout_avail and o_buf:
             wfds.append(1)
@@ -226,7 +245,8 @@ def _copy_with_capture(master_fd: int, capture: CodexSessionCapture) -> None:
             if not data:
                 return
             capture.feed(data)
-            o_buf += data
+            if stdout_avail:
+                o_buf += data
         if master_fd in wfds and i_buf:
             written = os.write(master_fd, i_buf)
             i_buf = i_buf[written:]

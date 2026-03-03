@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from atelier import agent_home, codex
+from atelier import exec as atelier_exec
 from atelier.models import ProjectConfig
+from atelier.worker import work_command_helpers
 from atelier.worker.session import agent as session_agent
 
 
@@ -28,6 +30,7 @@ class _FakeAgentSpec:
 class _TestControl:
     def __init__(self) -> None:
         self.logs: list[str] = []
+        self.say_messages: list[str] = []
 
     def confirm(self, _prompt: str, *, default: bool = False) -> bool:
         return default
@@ -38,8 +41,8 @@ class _TestControl:
     def die(self, _message: str) -> None:
         return None
 
-    def say(self, _message: str) -> None:
-        return None
+    def say(self, message: str) -> None:
+        self.say_messages.append(message)
 
 
 class _TestCommandOps:
@@ -384,12 +387,28 @@ def test_start_agent_session_dry_run_logs_claude_worker_compatible_flags() -> No
 
 
 def test_start_agent_session_runs_codex_success(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def _run_codex(
+        _cmd: list[str],
+        *,
+        cwd: Path | None,
+        env: dict[str, str] | None,
+        stream_output: bool = True,
+        line_handler=None,
+    ) -> codex.CodexRunResult:
+        seen["cwd"] = cwd
+        seen["env"] = env
+        seen["stream_output"] = stream_output
+        if line_handler is not None:
+            line_handler("thinking")
+            line_handler("Implemented worker output summarization")
+        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+
     monkeypatch.setattr(
         codex,
         "run_codex_command",
-        lambda _cmd, *, cwd, env: codex.CodexRunResult(
-            returncode=0, session_id=None, resume_command=None
-        ),
+        _run_codex,
     )
     agent = agent_home.AgentHome(
         name="codex",
@@ -398,6 +417,239 @@ def test_start_agent_session_runs_codex_success(monkeypatch) -> None:
         path=Path("/tmp/agent-home"),
     )
     spec = _FakeAgentSpec(name="codex")
+    control = _TestControl()
+
+    result = session_agent.start_agent_session(
+        dry_run=False,
+        agent=agent,
+        agent_spec=spec,
+        agent_options=[],
+        opening_prompt="hello",
+        env={},
+        command_ops=_TestCommandOps(),
+        session_control=control,
+        blocked_handler=_TestBlockedHandler(),
+    )
+
+    assert result is not None
+    assert result.returncode == 0
+    assert seen["stream_output"] is False
+    assert any("Agent output (codex): completed" in line for line in control.say_messages)
+    assert all("thinking" not in line for line in control.say_messages)
+
+
+class _RealCommandOps:
+    """Command ops using actual worker helpers (for integration-style tests)."""
+
+    def with_codex_exec(self, cmd: list[str], prompt: str) -> list[str]:
+        return work_command_helpers.with_codex_exec(cmd, prompt)
+
+    def strip_flag_with_value(self, args: list[str], flag: str) -> list[str]:
+        return work_command_helpers.strip_flag_with_value(args, flag)
+
+    def ensure_exec_subcommand_flag(self, args: list[str], flag: str) -> list[str]:
+        return work_command_helpers.ensure_exec_subcommand_flag(args, flag)
+
+
+def test_start_agent_session_codex_includes_json_flag(monkeypatch) -> None:
+    """Codex worker sessions must pass --json for structured output parsing."""
+    seen_cmd: list[str] = []
+
+    def _run_codex(
+        cmd: list[str],
+        *,
+        cwd: Path | None,
+        env: dict[str, str] | None,
+        stream_output: bool = True,
+        line_handler=None,
+    ) -> codex.CodexRunResult:
+        seen_cmd[:] = cmd
+        if line_handler is not None:
+            line_handler('{"type":"turn.completed","usage":{"output_tokens":1}}')
+        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+
+    monkeypatch.setattr(codex, "run_codex_command", _run_codex)
+    agent = agent_home.AgentHome(
+        name="codex",
+        agent_id="atelier/worker/codex/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+
+    session_agent.start_agent_session(
+        dry_run=False,
+        agent=agent,
+        agent_spec=_FakeAgentSpec(name="codex"),
+        agent_options=[],
+        opening_prompt="hello",
+        env={},
+        command_ops=_RealCommandOps(),
+        session_control=_TestControl(),
+        blocked_handler=_TestBlockedHandler(),
+    )
+
+    assert "--json" in seen_cmd
+
+
+def test_start_agent_session_codex_trace_streams_raw_output(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def _run_codex(
+        _cmd: list[str],
+        *,
+        cwd: Path | None,
+        env: dict[str, str] | None,
+        stream_output: bool = True,
+        line_handler=None,
+    ) -> codex.CodexRunResult:
+        seen["stream_output"] = stream_output
+        if line_handler is not None:
+            line_handler("Implemented worker output summarization")
+        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+
+    monkeypatch.setattr(codex, "run_codex_command", _run_codex)
+    agent = agent_home.AgentHome(
+        name="codex",
+        agent_id="atelier/worker/codex/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+    spec = _FakeAgentSpec(name="codex")
+    control = _TestControl()
+
+    result = session_agent.start_agent_session(
+        dry_run=False,
+        agent=agent,
+        agent_spec=spec,
+        agent_options=[],
+        opening_prompt="hello",
+        env={"ATELIER_WORK_AGENT_TRACE": "1"},
+        command_ops=_TestCommandOps(),
+        session_control=control,
+        blocked_handler=_TestBlockedHandler(),
+    )
+
+    assert result is not None
+    assert result.returncode == 0
+    assert seen["stream_output"] is True
+    assert not any("Agent output (codex):" in line for line in control.say_messages)
+
+
+def test_start_agent_session_claude_stream_json_renders_summary(
+    monkeypatch,
+    claude_session_fixture_content: str,
+) -> None:
+    """Claude session uses fixture stdout; summary includes events and preview."""
+    seen_requests: list[atelier_exec.CommandRequest] = []
+
+    def _run_with_runner(
+        request: atelier_exec.CommandRequest, *, runner=None
+    ) -> atelier_exec.CommandResult | None:
+        del runner
+        seen_requests.append(request)
+        return atelier_exec.CommandResult(
+            argv=request.argv,
+            returncode=0,
+            stdout=claude_session_fixture_content,
+            stderr="",
+        )
+
+    monkeypatch.setattr(session_agent.exec, "run_with_runner", _run_with_runner)
+    agent = agent_home.AgentHome(
+        name="claude",
+        agent_id="atelier/worker/claude/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+    spec = _FakeAgentSpec(name="claude", display_name="Claude")
+    control = _TestControl()
+
+    result = session_agent.start_agent_session(
+        dry_run=False,
+        agent=agent,
+        agent_spec=spec,
+        agent_options=["--print", "--output-format=stream-json", "--verbose"],
+        opening_prompt="hello",
+        env={},
+        command_ops=_TestCommandOps(),
+        session_control=control,
+        blocked_handler=_TestBlockedHandler(),
+    )
+
+    assert result is not None
+    assert result.returncode == 0
+    assert len(seen_requests) == 1
+    assert seen_requests[0].capture_output is True
+    assert seen_requests[0].text is True
+    assert any("Agent output (claude): completed" in line for line in control.say_messages)
+    assert any("Assistant preview:" in line for line in control.say_messages)
+    assert any("events=" in line for line in control.say_messages)
+    assert any("tools=" in line for line in control.say_messages)
+
+
+def test_start_agent_session_claude_failure_reports_diagnostic(monkeypatch) -> None:
+    def _run_with_runner(
+        request: atelier_exec.CommandRequest, *, runner=None
+    ) -> atelier_exec.CommandResult | None:
+        del runner
+        return atelier_exec.CommandResult(
+            argv=request.argv,
+            returncode=1,
+            stdout='{"type":"error","error":{"message":"tool call failed"}}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(session_agent.exec, "run_with_runner", _run_with_runner)
+    agent = agent_home.AgentHome(
+        name="claude",
+        agent_id="atelier/worker/claude/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+    spec = _FakeAgentSpec(name="claude", display_name="Claude")
+    control = _TestControl()
+
+    result = session_agent.start_agent_session(
+        dry_run=False,
+        agent=agent,
+        agent_spec=spec,
+        agent_options=["--print", "--output-format=stream-json", "--verbose"],
+        opening_prompt="hello",
+        env={},
+        command_ops=_TestCommandOps(),
+        session_control=control,
+        blocked_handler=_TestBlockedHandler(),
+    )
+
+    assert result is None
+    assert any("Agent output (claude): failed" in line for line in control.say_messages)
+    assert any("Diagnostic: tool call failed" in line for line in control.say_messages)
+    assert any("ATELIER_WORK_AGENT_TRACE=1" in line for line in control.say_messages)
+
+
+def test_start_agent_session_non_claude_preserves_passthrough_mode(monkeypatch) -> None:
+    seen_requests: list[atelier_exec.CommandRequest] = []
+
+    def _run_with_runner(
+        request: atelier_exec.CommandRequest, *, runner=None
+    ) -> atelier_exec.CommandResult | None:
+        del runner
+        seen_requests.append(request)
+        return atelier_exec.CommandResult(
+            argv=request.argv,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(session_agent.exec, "run_with_runner", _run_with_runner)
+    agent = agent_home.AgentHome(
+        name="gemini",
+        agent_id="atelier/worker/gemini/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+    spec = _FakeAgentSpec(name="gemini", display_name="Gemini")
 
     result = session_agent.start_agent_session(
         dry_run=False,
@@ -413,3 +665,6 @@ def test_start_agent_session_runs_codex_success(monkeypatch) -> None:
 
     assert result is not None
     assert result.returncode == 0
+    assert len(seen_requests) == 1
+    assert seen_requests[0].capture_output is False
+    assert seen_requests[0].text is False

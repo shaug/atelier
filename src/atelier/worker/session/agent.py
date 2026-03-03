@@ -23,6 +23,7 @@ from ... import (
     templates,
     workspace,
 )
+from . import output as session_output
 
 
 @dataclass(frozen=True)
@@ -274,6 +275,7 @@ def start_agent_session(
     if agent_spec.name == "codex":
         start_cmd = command_ops.with_codex_exec(start_cmd, opening_prompt)
         start_cmd = command_ops.strip_flag_with_value(start_cmd, "--cd")
+        start_cmd = command_ops.ensure_exec_subcommand_flag(start_cmd, "--json")
         start_cmd = command_ops.ensure_exec_subcommand_flag(start_cmd, "--skip-git-repo-check")
         start_cwd = agent.path
     if dry_run:
@@ -284,12 +286,46 @@ def start_agent_session(
     session_control.say(f"Starting {agent_spec.display_name} session")
     started_at = dt.datetime.now(tz=dt.timezone.utc)
     returncode = 0
+    trace_agent_output = session_output.trace_output_requested(env)
+    output_capture = session_output.AgentOutputCapture(agent_name=agent_spec.name)
     if agent_spec.name == "codex":
-        result = codex.run_codex_command(start_cmd, cwd=start_cwd, env=env)
+        result = codex.run_codex_command(
+            start_cmd,
+            cwd=start_cwd,
+            env=env,
+            stream_output=trace_agent_output,
+            line_handler=output_capture.feed_stdout_line,
+        )
         if result is None:
             blocked_handler.mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
             session_control.die(f"missing required command: {start_cmd[0]}")
             return None
+        if not trace_agent_output:
+            for line in output_capture.render_summary_lines(failed=result.returncode != 0):
+                session_control.say(line)
+        if result.returncode != 0:
+            returncode = result.returncode
+            blocked_handler.mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
+            session_control.die(f"command failed: {' '.join(start_cmd)}")
+            return None
+    elif agent_spec.name == "claude" and not trace_agent_output:
+        result = exec.run_with_runner(
+            exec.CommandRequest(
+                argv=tuple(start_cmd),
+                cwd=start_cwd,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+        )
+        if result is None:
+            blocked_handler.mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
+            session_control.die(f"missing required command: {start_cmd[0]}")
+            return None
+        output_capture.feed_stdout_text(result.stdout or "")
+        output_capture.feed_stderr_text(result.stderr or "")
+        for line in output_capture.render_summary_lines(failed=result.returncode != 0):
+            session_control.say(line)
         if result.returncode != 0:
             returncode = result.returncode
             blocked_handler.mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
