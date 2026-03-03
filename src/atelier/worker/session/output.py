@@ -70,6 +70,20 @@ class AgentOutputCapture:
             return self._render_structured_summary(label="codex", failed=failed)
         return self._render_text_summary(label=label, failed=failed)
 
+    def assistant_preview_text(self, *, max_chars: int | None = None) -> str | None:
+        """Return captured assistant preview text, optionally truncated."""
+        preview = self._assistant_preview.strip()
+        if not preview:
+            return None
+        if max_chars is None or max_chars <= 0:
+            return preview
+        if len(preview) <= max_chars:
+            return preview
+        if max_chars <= 3:
+            return "." * max_chars
+        clipped = preview[: max_chars - 3].rstrip()
+        return f"{clipped}..."
+
     def _feed_line(self, raw_line: str, *, source: str) -> None:
         line = _normalize_line(raw_line)
         if not line:

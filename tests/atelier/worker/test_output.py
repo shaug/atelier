@@ -253,6 +253,17 @@ def test_agent_output_capture_feed_stdout_text() -> None:
     assert any("Assistant preview: Done" in line for line in summary)
 
 
+def test_agent_output_capture_assistant_preview_text_truncates() -> None:
+    """assistant_preview_text returns clipped text when max_chars is provided."""
+    capture = AgentOutputCapture(agent_name="codex")
+    capture.feed_stdout_line(
+        '{"type":"item.completed","item":{"type":"agent_message","text":"'
+        'This is a long assistant message preview for clipping behavior."}}'
+    )
+    preview = capture.assistant_preview_text(max_chars=24)
+    assert preview == "This is a long assist..."
+
+
 def test_agent_output_capture_error_event_adds_diagnostic() -> None:
     """Error events add to diagnostics."""
     capture = AgentOutputCapture(agent_name="claude")

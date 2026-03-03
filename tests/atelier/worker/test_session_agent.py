@@ -438,6 +438,53 @@ def test_start_agent_session_runs_codex_success(monkeypatch) -> None:
     assert all("thinking" not in line for line in control.say_messages)
 
 
+def test_start_agent_session_codex_emits_live_progress_updates(monkeypatch) -> None:
+    def _run_codex(
+        _cmd: list[str],
+        *,
+        cwd: Path | None,
+        env: dict[str, str] | None,
+        stream_output: bool = True,
+        line_handler=None,
+    ) -> codex.CodexRunResult:
+        del cwd, env, stream_output
+        if line_handler is not None:
+            line_handler('{"type":"thread.started","thread_id":"thread_1"}')
+            for _ in range(10):
+                line_handler('{"type":"item.completed","item":{"type":"command_execution"}}')
+            line_handler(
+                '{"type":"item.completed","item":{"type":"agent_message","text":"Applied fix"}}'
+            )
+        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+
+    monkeypatch.setattr(codex, "run_codex_command", _run_codex)
+    agent = agent_home.AgentHome(
+        name="codex",
+        agent_id="atelier/worker/codex/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+    control = _TestControl()
+
+    result = session_agent.start_agent_session(
+        dry_run=False,
+        agent=agent,
+        agent_spec=_FakeAgentSpec(name="codex"),
+        agent_options=[],
+        opening_prompt="hello",
+        env={},
+        command_ops=_TestCommandOps(),
+        session_control=control,
+        blocked_handler=_TestBlockedHandler(),
+    )
+
+    assert result is not None
+    assert any("Codex stream: receiving structured events." in m for m in control.say_messages)
+    assert any("Codex progress: tool events=10" in m for m in control.say_messages)
+    assert any("Codex preview: Applied fix" in m for m in control.say_messages)
+    assert any("Agent output (codex): completed" in m for m in control.say_messages)
+
+
 class _RealCommandOps:
     """Command ops using actual worker helpers (for integration-style tests)."""
 
@@ -540,21 +587,32 @@ def test_start_agent_session_claude_stream_json_renders_summary(
     claude_session_fixture_content: str,
 ) -> None:
     """Claude session uses fixture stdout; summary includes events and preview."""
-    seen_requests: list[atelier_exec.CommandRequest] = []
+    seen_cmds: list[list[str]] = []
 
-    def _run_with_runner(
-        request: atelier_exec.CommandRequest, *, runner=None
-    ) -> atelier_exec.CommandResult | None:
-        del runner
-        seen_requests.append(request)
-        return atelier_exec.CommandResult(
-            argv=request.argv,
+    def _run_streaming_capture_command(
+        *,
+        cmd: list[str],
+        cwd: Path | None,
+        env: dict[str, str],
+        stdout_line_handler=None,
+        stderr_line_handler=None,
+    ) -> session_agent._StreamedCommandResult | None:
+        del cwd, env, stderr_line_handler
+        seen_cmds.append(list(cmd))
+        if stdout_line_handler is not None:
+            for line in claude_session_fixture_content.splitlines():
+                stdout_line_handler(line)
+        return session_agent._StreamedCommandResult(
             returncode=0,
             stdout=claude_session_fixture_content,
             stderr="",
         )
 
-    monkeypatch.setattr(session_agent.exec, "run_with_runner", _run_with_runner)
+    monkeypatch.setattr(
+        session_agent,
+        "_run_streaming_capture_command",
+        _run_streaming_capture_command,
+    )
     agent = agent_home.AgentHome(
         name="claude",
         agent_id="atelier/worker/claude/p100",
@@ -578,9 +636,11 @@ def test_start_agent_session_claude_stream_json_renders_summary(
 
     assert result is not None
     assert result.returncode == 0
-    assert len(seen_requests) == 1
-    assert seen_requests[0].capture_output is True
-    assert seen_requests[0].text is True
+    assert len(seen_cmds) == 1
+    assert seen_cmds[0][0] == "claude"
+    assert any(
+        "Claude stream: receiving structured events." in line for line in control.say_messages
+    )
     assert any("Agent output (claude): completed" in line for line in control.say_messages)
     assert any("Assistant preview:" in line for line in control.say_messages)
     assert any("events=" in line for line in control.say_messages)
@@ -588,18 +648,28 @@ def test_start_agent_session_claude_stream_json_renders_summary(
 
 
 def test_start_agent_session_claude_failure_reports_diagnostic(monkeypatch) -> None:
-    def _run_with_runner(
-        request: atelier_exec.CommandRequest, *, runner=None
-    ) -> atelier_exec.CommandResult | None:
-        del runner
-        return atelier_exec.CommandResult(
-            argv=request.argv,
+    def _run_streaming_capture_command(
+        *,
+        cmd: list[str],
+        cwd: Path | None,
+        env: dict[str, str],
+        stdout_line_handler=None,
+        stderr_line_handler=None,
+    ) -> session_agent._StreamedCommandResult | None:
+        del cmd, cwd, env, stderr_line_handler
+        if stdout_line_handler is not None:
+            stdout_line_handler('{"type":"error","error":{"message":"tool call failed"}}')
+        return session_agent._StreamedCommandResult(
             returncode=1,
             stdout='{"type":"error","error":{"message":"tool call failed"}}\n',
             stderr="",
         )
 
-    monkeypatch.setattr(session_agent.exec, "run_with_runner", _run_with_runner)
+    monkeypatch.setattr(
+        session_agent,
+        "_run_streaming_capture_command",
+        _run_streaming_capture_command,
+    )
     agent = agent_home.AgentHome(
         name="claude",
         agent_id="atelier/worker/claude/p100",

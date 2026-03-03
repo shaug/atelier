@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
+import selectors
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from ... import (
     agent_home,
@@ -25,6 +28,9 @@ from ... import (
 )
 from . import output as session_output
 
+_STRUCTURED_TOOL_PROGRESS_INTERVAL = 10
+_STRUCTURED_LIVE_PREVIEW_CHARS = 140
+
 
 @dataclass(frozen=True)
 class AgentSessionPreparation:
@@ -41,6 +47,25 @@ class AgentSessionRunResult:
     returncode: int
     start_cmd: list[str]
     start_cwd: Path
+
+
+@dataclass
+class _StructuredLiveProgress:
+    """Track low-noise progress signals while structured events stream."""
+
+    label: str
+    seen_structured: bool = False
+    next_tool_threshold: int = _STRUCTURED_TOOL_PROGRESS_INTERVAL
+    preview_emitted: bool = False
+
+
+@dataclass(frozen=True)
+class _StreamedCommandResult:
+    """Result from a command captured incrementally from stdout/stderr pipes."""
+
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 class AgentSessionControl(Protocol):
@@ -69,6 +94,143 @@ class AgentSessionBlockedHandler(Protocol):
     """Changeset-state hooks used when session startup fails."""
 
     def mark_changeset_blocked(self, reason: str) -> None: ...
+
+
+def _emit_structured_live_progress(
+    *,
+    capture: session_output.AgentOutputCapture,
+    progress: _StructuredLiveProgress,
+    session_control: AgentSessionControl,
+) -> None:
+    """Render low-noise live progress lines for structured JSON streams."""
+    if not progress.seen_structured and capture.structured_event_count > 0:
+        progress.seen_structured = True
+        session_control.say(f"{progress.label} stream: receiving structured events.")
+
+    if capture.tool_event_count >= progress.next_tool_threshold:
+        session_control.say(f"{progress.label} progress: tool events={capture.tool_event_count}")
+        while capture.tool_event_count >= progress.next_tool_threshold:
+            progress.next_tool_threshold += _STRUCTURED_TOOL_PROGRESS_INTERVAL
+
+    if progress.preview_emitted:
+        return
+    preview = capture.assistant_preview_text(max_chars=_STRUCTURED_LIVE_PREVIEW_CHARS)
+    if preview:
+        progress.preview_emitted = True
+        session_control.say(f"{progress.label} preview: {preview}")
+
+
+def _consume_stream_chunk(
+    *,
+    chunk: bytes,
+    pending: str,
+    target: list[str],
+    line_handler: Callable[[str], None] | None,
+) -> str:
+    """Decode one stream chunk and emit complete lines to capture buffers."""
+    decoded = chunk.decode("utf-8", errors="ignore").replace("\r", "\n")
+    if not decoded:
+        return pending
+    buffer = f"{pending}{decoded}"
+    while "\n" in buffer:
+        line, buffer = buffer.split("\n", 1)
+        target.append(line)
+        if line_handler is not None:
+            line_handler(line)
+    return buffer
+
+
+def _flush_stream_tail(
+    *,
+    pending: str,
+    target: list[str],
+    line_handler: Callable[[str], None] | None,
+) -> None:
+    """Flush a final partial line from an incrementally captured stream."""
+    if not pending:
+        return
+    target.append(pending)
+    if line_handler is not None:
+        line_handler(pending)
+
+
+def _run_streaming_capture_command(
+    *,
+    cmd: list[str],
+    cwd: Path | None,
+    env: dict[str, str],
+    stdout_line_handler: Callable[[str], None] | None = None,
+    stderr_line_handler: Callable[[str], None] | None = None,
+) -> _StreamedCommandResult | None:
+    """Run a command and capture stdout/stderr incrementally via selectors."""
+    try:
+        process = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return None
+
+    if process.stdout is None or process.stderr is None:
+        raise RuntimeError("command capture streams unavailable")
+
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ, data="stdout")
+    selector.register(process.stderr, selectors.EVENT_READ, data="stderr")
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    stdout_pending = ""
+    stderr_pending = ""
+
+    while selector.get_map():
+        events = selector.select()
+        for key, _ in events:
+            stream = key.data
+            handle = key.fileobj
+            if isinstance(handle, int):
+                fd = handle
+            else:
+                fd = handle.fileno()
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                selector.unregister(handle)
+                continue
+            if stream == "stdout":
+                stdout_pending = _consume_stream_chunk(
+                    chunk=chunk,
+                    pending=stdout_pending,
+                    target=stdout_lines,
+                    line_handler=stdout_line_handler,
+                )
+                continue
+            stderr_pending = _consume_stream_chunk(
+                chunk=chunk,
+                pending=stderr_pending,
+                target=stderr_lines,
+                line_handler=stderr_line_handler,
+            )
+
+    returncode = process.wait()
+    _flush_stream_tail(
+        pending=stdout_pending,
+        target=stdout_lines,
+        line_handler=stdout_line_handler,
+    )
+    _flush_stream_tail(
+        pending=stderr_pending,
+        target=stderr_lines,
+        line_handler=stderr_line_handler,
+    )
+    return _StreamedCommandResult(
+        returncode=returncode,
+        stdout="\n".join(stdout_lines),
+        stderr="\n".join(stderr_lines),
+    )
 
 
 def prepare_agent_session(
@@ -289,12 +451,28 @@ def start_agent_session(
     trace_agent_output = session_output.trace_output_requested(env)
     output_capture = session_output.AgentOutputCapture(agent_name=agent_spec.name)
     if agent_spec.name == "codex":
+        live_progress = (
+            _StructuredLiveProgress(label=agent_spec.display_name)
+            if not trace_agent_output
+            else None
+        )
+
+        def _handle_codex_output_line(raw_line: str) -> None:
+            output_capture.feed_stdout_line(raw_line)
+            if live_progress is None:
+                return
+            _emit_structured_live_progress(
+                capture=output_capture,
+                progress=live_progress,
+                session_control=session_control,
+            )
+
         result = codex.run_codex_command(
             start_cmd,
             cwd=start_cwd,
             env=env,
             stream_output=trace_agent_output,
-            line_handler=output_capture.feed_stdout_line,
+            line_handler=_handle_codex_output_line,
         )
         if result is None:
             blocked_handler.mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
@@ -309,21 +487,27 @@ def start_agent_session(
             session_control.die(f"command failed: {' '.join(start_cmd)}")
             return None
     elif agent_spec.name == "claude" and not trace_agent_output:
-        result = exec.run_with_runner(
-            exec.CommandRequest(
-                argv=tuple(start_cmd),
-                cwd=start_cwd,
-                env=env,
-                capture_output=True,
-                text=True,
+        live_progress = _StructuredLiveProgress(label=agent_spec.display_name)
+
+        def _handle_claude_output_line(raw_line: str) -> None:
+            output_capture.feed_stdout_line(raw_line)
+            _emit_structured_live_progress(
+                capture=output_capture,
+                progress=live_progress,
+                session_control=session_control,
             )
+
+        result = _run_streaming_capture_command(
+            cmd=start_cmd,
+            cwd=start_cwd,
+            env=env,
+            stdout_line_handler=_handle_claude_output_line,
+            stderr_line_handler=output_capture.feed_stderr_line,
         )
         if result is None:
             blocked_handler.mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
             session_control.die(f"missing required command: {start_cmd[0]}")
             return None
-        output_capture.feed_stdout_text(result.stdout or "")
-        output_capture.feed_stderr_text(result.stderr or "")
         for line in output_capture.render_summary_lines(failed=result.returncode != 0):
             session_control.say(line)
         if result.returncode != 0:
