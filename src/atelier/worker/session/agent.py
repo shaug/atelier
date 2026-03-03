@@ -29,7 +29,6 @@ from . import output as session_output
 
 _STRUCTURED_TOOL_PROGRESS_INTERVAL = 10
 _STRUCTURED_LIVE_PREVIEW_CHARS = 140
-_STRUCTURED_REASONING_EMIT_LIMIT = 4
 
 
 @dataclass(frozen=True)
@@ -61,7 +60,6 @@ class _StructuredLiveProgress:
     preview_emitted: bool = False
     last_tool_activity_seq: int = 0
     last_reasoning_activity_seq: int = 0
-    reasoning_emitted: int = 0
 
 
 @dataclass(frozen=True)
@@ -110,7 +108,7 @@ def _emit_structured_live_progress(
     """Render low-noise live progress lines for structured JSON streams."""
     if not progress.seen_structured and capture.structured_event_count > 0:
         progress.seen_structured = True
-        session_control.say(f"{progress.label} stream: receiving structured events.")
+        session_control.say(_format_stream_connected_line(progress.label))
 
     if progress.show_tool_activity:
         tool_activity = capture.latest_tool_activity()
@@ -118,7 +116,7 @@ def _emit_structured_live_progress(
             tool_seq, activity = tool_activity
             if tool_seq > progress.last_tool_activity_seq:
                 progress.last_tool_activity_seq = tool_seq
-                session_control.say(f"{progress.label} tool: {activity}")
+                session_control.say(_format_tool_activity_line(progress.label, activity))
     elif capture.tool_event_count >= progress.next_tool_threshold:
         session_control.say(f"{progress.label} progress: tool events={capture.tool_event_count}")
         while capture.tool_event_count >= progress.next_tool_threshold:
@@ -128,11 +126,9 @@ def _emit_structured_live_progress(
         preview = capture.assistant_preview_text(max_chars=_STRUCTURED_LIVE_PREVIEW_CHARS)
         if preview:
             progress.preview_emitted = True
-            session_control.say(f"{progress.label} preview: {preview}")
+            session_control.say(_format_preview_line(progress.label, preview))
 
     if not progress.show_reasoning_activity:
-        return
-    if progress.reasoning_emitted >= _STRUCTURED_REASONING_EMIT_LIMIT:
         return
     reasoning_activity = capture.latest_reasoning_activity()
     if reasoning_activity is None:
@@ -141,8 +137,43 @@ def _emit_structured_live_progress(
     if reasoning_seq <= progress.last_reasoning_activity_seq:
         return
     progress.last_reasoning_activity_seq = reasoning_seq
-    progress.reasoning_emitted += 1
-    session_control.say(f"{progress.label} reasoning: {reasoning}")
+    session_control.say(_format_reasoning_line(progress.label, reasoning))
+
+
+def _format_stream_connected_line(label: str) -> str:
+    """Render a stream-connected progress line."""
+    if label.lower() == "codex":
+        return "• Codex stream connected"
+    return f"{label} stream: receiving structured events."
+
+
+def _format_preview_line(label: str, preview: str) -> str:
+    """Render a preview progress line."""
+    if label.lower() == "codex":
+        return f"• Preview: {preview}"
+    return f"{label} preview: {preview}"
+
+
+def _format_reasoning_line(label: str, reasoning: str) -> str:
+    """Render a reasoning progress line."""
+    if label.lower() == "codex":
+        return f"• Reasoning: {reasoning}"
+    return f"{label} reasoning: {reasoning}"
+
+
+def _format_tool_activity_line(label: str, activity: str) -> str:
+    """Render a tool-activity progress line."""
+    if label.lower() != "codex":
+        return f"{label} tool: {activity}"
+    if activity.startswith("command: "):
+        return f"• Ran {activity.removeprefix('command: ')}"
+    if activity.startswith("tool: "):
+        return f"• Tool: {activity.removeprefix('tool: ')}"
+    if activity.startswith("search: "):
+        return f"• Search: {activity.removeprefix('search: ')}"
+    if activity.startswith("file: "):
+        return f"• File: {activity.removeprefix('file: ')}"
+    return f"• Tool: {activity}"
 
 
 def _consume_stream_chunk(

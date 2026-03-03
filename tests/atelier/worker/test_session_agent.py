@@ -463,10 +463,19 @@ def test_start_agent_session_codex_emits_live_progress_updates(monkeypatch) -> N
                 '{"type":"item.completed","item":{"type":"command_execution","command":"bash -lc ls"}}'
             )
             stdout_line_handler(
+                '{"type":"item.completed","item":{"type":"reasoning","text":"Inspecting history"}}'
+            )
+            stdout_line_handler(
                 '{"type":"item.completed","item":{"type":"command_execution","command":"git status"}}'
             )
             stdout_line_handler(
                 '{"type":"item.completed","item":{"type":"reasoning","text":"Preparing patch"}}'
+            )
+            stdout_line_handler(
+                '{"type":"item.completed","item":{"type":"reasoning","text":"Validating diff"}}'
+            )
+            stdout_line_handler(
+                '{"type":"item.completed","item":{"type":"reasoning","text":"Ready to summarize"}}'
             )
             stdout_line_handler(
                 '{"type":"item.completed","item":{"type":"agent_message","text":"Applied fix"}}'
@@ -499,12 +508,14 @@ def test_start_agent_session_codex_emits_live_progress_updates(monkeypatch) -> N
     )
 
     assert result is not None
-    assert any("Codex stream: receiving structured events." in m for m in control.say_messages)
-    assert any("Codex tool: command: bash -lc ls" in m for m in control.say_messages)
-    assert any("Codex tool: command: git status" in m for m in control.say_messages)
-    assert any("Codex reasoning: Assessing scope" in m for m in control.say_messages)
-    assert any("Codex reasoning: Preparing patch" in m for m in control.say_messages)
-    assert any("Codex preview:" in m for m in control.say_messages)
+    assert any("• Codex stream connected" in m for m in control.say_messages)
+    assert any("• Ran bash -lc ls" in m for m in control.say_messages)
+    assert any("• Ran git status" in m for m in control.say_messages)
+    reasoning_lines = [m for m in control.say_messages if m.startswith("• Reasoning: ")]
+    assert len(reasoning_lines) == 5
+    assert any("• Reasoning: Assessing scope" in m for m in control.say_messages)
+    assert any("• Reasoning: Ready to summarize" in m for m in control.say_messages)
+    assert any("• Preview:" in m for m in control.say_messages)
     assert any("Agent output (codex): completed" in m for m in control.say_messages)
 
 
