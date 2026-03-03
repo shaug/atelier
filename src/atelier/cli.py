@@ -462,7 +462,7 @@ def open_command(
     workspace_name: Annotated[
         str | None,
         typer.Argument(
-            help="workspace branch to open (prompted when omitted)",
+            help="changeset id (preferred) or workspace/branch alias to open",
             autocompletion=_workspace_only_shell_complete,
         ),
     ] = None,
