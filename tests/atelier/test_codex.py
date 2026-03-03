@@ -25,3 +25,57 @@ def test_parse_codex_resume_line_strips_ansi() -> None:
     session_id, resume_command = codex.parse_codex_resume_line(line)
     assert session_id == "sess-999"
     assert resume_command == "codex resume sess-999"
+
+
+def test_run_codex_command_disables_stdin_passthrough_when_not_streaming(monkeypatch) -> None:
+    seen: dict[str, bool] = {}
+
+    def _run_pty_command(
+        cmd: list[str],
+        *,
+        cwd,
+        capture,
+        env,
+        stream_output: bool,
+        passthrough_stdin: bool,
+    ) -> int:
+        del cmd, cwd, capture, env
+        seen["stream_output"] = stream_output
+        seen["passthrough_stdin"] = passthrough_stdin
+        return 0
+
+    monkeypatch.setattr(codex.shutil, "which", lambda _cmd: "/usr/bin/codex")
+    monkeypatch.setattr(codex, "_run_pty_command", _run_pty_command)
+
+    result = codex.run_codex_command(["codex", "exec", "hello"], stream_output=False)
+
+    assert result is not None
+    assert seen["stream_output"] is False
+    assert seen["passthrough_stdin"] is False
+
+
+def test_run_codex_command_enables_stdin_passthrough_when_streaming(monkeypatch) -> None:
+    seen: dict[str, bool] = {}
+
+    def _run_pty_command(
+        cmd: list[str],
+        *,
+        cwd,
+        capture,
+        env,
+        stream_output: bool,
+        passthrough_stdin: bool,
+    ) -> int:
+        del cmd, cwd, capture, env
+        seen["stream_output"] = stream_output
+        seen["passthrough_stdin"] = passthrough_stdin
+        return 0
+
+    monkeypatch.setattr(codex.shutil, "which", lambda _cmd: "/usr/bin/codex")
+    monkeypatch.setattr(codex, "_run_pty_command", _run_pty_command)
+
+    result = codex.run_codex_command(["codex", "exec", "hello"], stream_output=True)
+
+    assert result is not None
+    assert seen["stream_output"] is True
+    assert seen["passthrough_stdin"] is True

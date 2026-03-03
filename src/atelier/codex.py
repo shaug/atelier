@@ -151,6 +151,7 @@ def run_codex_command(
         capture=capture,
         env=env,
         stream_output=stream_output,
+        passthrough_stdin=stream_output,
     )
     capture.finalize()
     return CodexRunResult(
@@ -167,6 +168,7 @@ def _run_pty_command(
     capture: CodexSessionCapture,
     env: Mapping[str, str] | None,
     stream_output: bool,
+    passthrough_stdin: bool,
 ) -> int:
     pid, master_fd = pty.fork()
     if pid == 0:
@@ -179,15 +181,24 @@ def _run_pty_command(
     _apply_winsize(master_fd, pid)
     previous_winch = signal.getsignal(signal.SIGWINCH)
     signal.signal(signal.SIGWINCH, lambda signum, frame: _apply_winsize(master_fd, pid))
-    try:
-        mode = termios.tcgetattr(sys.stdin.fileno())
-        tty.setraw(sys.stdin.fileno())
-        restore = True
-    except termios.error:
+    if passthrough_stdin:
+        try:
+            mode = termios.tcgetattr(sys.stdin.fileno())
+            tty.setraw(sys.stdin.fileno())
+            restore = True
+        except termios.error:
+            restore = False
+            mode = None
+    else:
         restore = False
         mode = None
     try:
-        _copy_with_capture(master_fd, capture, stream_output=stream_output)
+        _copy_with_capture(
+            master_fd,
+            capture,
+            stream_output=stream_output,
+            passthrough_stdin=passthrough_stdin,
+        )
     finally:
         if restore and mode is not None:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, mode)
@@ -202,16 +213,22 @@ def _copy_with_capture(
     capture: CodexSessionCapture,
     *,
     stream_output: bool,
+    passthrough_stdin: bool,
 ) -> None:
     if os.get_blocking(master_fd):
         os.set_blocking(master_fd, False)
         try:
-            _copy_with_capture(master_fd, capture, stream_output=stream_output)
+            _copy_with_capture(
+                master_fd,
+                capture,
+                stream_output=stream_output,
+                passthrough_stdin=passthrough_stdin,
+            )
         finally:
             os.set_blocking(master_fd, True)
         return
     high_waterlevel = 4096
-    stdin_avail = master_fd != 0
+    stdin_avail = passthrough_stdin and master_fd != 0
     stdout_avail = stream_output and master_fd != 1
     i_buf = b""
     o_buf = b""
