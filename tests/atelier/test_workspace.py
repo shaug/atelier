@@ -54,3 +54,23 @@ def test_workspace_environment_drops_ambient_agent_identity(
     )
 
     assert "ATELIER_AGENT_ID" not in env
+
+
+def test_workspace_environment_empty_base_env_does_not_inherit_ambient(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("ATELIER_MODE", "auto")
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    env = workspace.workspace_environment(
+        "/Users/scott/code/atelier",
+        "scott/feature/test",
+        tmp_path,
+        base_env={},
+    )
+
+    assert env == {
+        "ATELIER_PROJECT": "/Users/scott/code/atelier",
+        "ATELIER_WORKSPACE": "scott/feature/test",
+        "ATELIER_WORKSPACE_DIR": str(tmp_path),
+    }

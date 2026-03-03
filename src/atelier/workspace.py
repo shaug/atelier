@@ -1,6 +1,5 @@
 """Workspace helpers for naming and environment setup."""
 
-import os
 from pathlib import Path
 from typing import Mapping
 
@@ -20,7 +19,7 @@ def workspace_environment(
     if base_env is not None and "ATELIER_AGENT_ID" in base_env:
         preserve_keys = ("ATELIER_AGENT_ID",)
     env, _removed = sanitize_subprocess_environment(
-        base_env=base_env or os.environ,
+        base_env=base_env,
         preserve_keys=preserve_keys,
     )
     env["ATELIER_WORKSPACE"] = workspace_branch

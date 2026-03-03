@@ -41,7 +41,7 @@ def sanitize_subprocess_environment(
         the inherited ``ATELIER_*`` runtime-routing variables dropped from the
         environment before launch.
     """
-    env = dict(base_env or os.environ)
+    env = dict(os.environ if base_env is None else base_env)
     allowed = set(USER_DEFAULT_ENV_KEYS)
     allowed.update(str(key) for key in preserve_keys if str(key).strip())
     removed: list[str] = []
