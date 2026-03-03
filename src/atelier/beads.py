@@ -4937,13 +4937,41 @@ def list_inbox_messages(
 ) -> list[dict[str, object]]:
     """List message beads assigned to the agent."""
     runtime = create_client(beads_root=beads_root, cwd=cwd)
-    return beads_queue_messages.list_inbox_messages(
+    messages_for_agent = beads_queue_messages.list_inbox_messages(
         agent_id,
         unread_only=unread_only,
         client=runtime,
         label_message=issue_label(_LABEL_MESSAGE, beads_root=beads_root),
         label_unread=issue_label(_LABEL_UNREAD, beads_root=beads_root),
     )
+    matches: list[dict[str, object]] = []
+    thread_issue_cache: dict[str, dict[str, object] | None] = {}
+    repo_slug_cache: dict[str, str | None] = {}
+    stale_reasons: dict[str, str] = {}
+    for issue in messages_for_agent:
+        issue_id = str(issue.get("id") or "").strip()
+        thread_id = _message_thread_id(issue)
+        reason_key = _needs_decision_reason_key(issue.get("title"), thread_id=thread_id)
+        stale_reason = _needs_decision_stale_reason(
+            reason_key,
+            thread_id=thread_id,
+            thread_issue_cache=thread_issue_cache,
+            repo_slug_cache=repo_slug_cache,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+        if stale_reason is not None:
+            if issue_id:
+                stale_reasons[issue_id] = stale_reason
+            continue
+        matches.append(issue)
+    if stale_reasons:
+        _resolve_stale_messages_best_effort(
+            stale_reasons,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+    return matches
 
 
 def list_queue_messages(
@@ -4956,35 +4984,43 @@ def list_queue_messages(
 ) -> list[dict[str, object]]:
     """List queued message beads, optionally filtered by queue name."""
     runtime = create_client(beads_root=beads_root, cwd=cwd)
-    thread_issue_cache: dict[str, dict[str, object] | None] = {}
-
-    def _closed_active_pr_still_blocking(issue: dict[str, object]) -> bool:
-        return _closed_active_pr_condition_still_blocking(
-            issue,
-            thread_issue_cache=thread_issue_cache,
-            beads_root=beads_root,
-            cwd=cwd,
-        )
-
-    def _mark_resolved_messages(message_ids: set[str]) -> None:
-        _mark_messages_read_best_effort(
-            message_ids,
-            beads_root=beads_root,
-            cwd=cwd,
-        )
-
-    return beads_queue_messages.list_queue_messages(
+    queue_messages = beads_queue_messages.list_queue_messages(
         queue=queue,
         unclaimed_only=unclaimed_only,
         unread_only=unread_only,
         client=runtime,
-        is_closed_active_pr_still_blocking=_closed_active_pr_still_blocking,
-        mark_messages_read_best_effort=_mark_resolved_messages,
         needs_decision_subject_prefix=_NEEDS_DECISION_SUBJECT_PREFIX,
-        closed_active_pr_reason=_NEEDS_DECISION_CLOSED_ACTIVE_PR_REASON,
         label_message=issue_label(_LABEL_MESSAGE, beads_root=beads_root),
         label_unread=issue_label(_LABEL_UNREAD, beads_root=beads_root),
     )
+    matches: list[dict[str, object]] = []
+    thread_issue_cache: dict[str, dict[str, object] | None] = {}
+    repo_slug_cache: dict[str, str | None] = {}
+    stale_reasons: dict[str, str] = {}
+    for issue in queue_messages:
+        issue_id = str(issue.get("id") or "").strip()
+        thread_id = _message_thread_id(issue)
+        reason_key = _needs_decision_reason_key(issue.get("title"), thread_id=thread_id)
+        stale_reason = _needs_decision_stale_reason(
+            reason_key,
+            thread_id=thread_id,
+            thread_issue_cache=thread_issue_cache,
+            repo_slug_cache=repo_slug_cache,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+        if stale_reason is not None:
+            if issue_id:
+                stale_reasons[issue_id] = stale_reason
+            continue
+        matches.append(issue)
+    if stale_reasons:
+        _resolve_stale_messages_best_effort(
+            stale_reasons,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
+    return matches
 
 
 def _issue_sorts_after(candidate: dict[str, object], current: dict[str, object]) -> bool:
