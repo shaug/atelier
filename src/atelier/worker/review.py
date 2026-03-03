@@ -44,6 +44,24 @@ def _feedback_cursor(issue: dict[str, object]):
     return prs.parse_timestamp(fields.get("review.last_feedback_seen_at"))
 
 
+def _review_feedback_sort_key(item: ReviewFeedbackSelection) -> tuple[datetime, str, str]:
+    sentinel = datetime.max.replace(tzinfo=timezone.utc)
+    return (
+        prs.parse_timestamp(item.feedback_at) or sentinel,
+        item.epic_id,
+        item.changeset_id,
+    )
+
+
+def _merge_conflict_sort_key(item: MergeConflictSelection) -> tuple[datetime, str, str]:
+    sentinel = datetime.max.replace(tzinfo=timezone.utc)
+    return (
+        prs.parse_timestamp(item.observed_at) or sentinel,
+        item.epic_id,
+        item.changeset_id,
+    )
+
+
 def _is_in_review_candidate(
     issue: BeadsIssueBoundary,
     *,
@@ -143,8 +161,7 @@ def _selection_candidates(
                 candidate = future.result()
                 if candidate is not None:
                     candidates.append(candidate)
-    sentinel = datetime.max.replace(tzinfo=timezone.utc)
-    candidates.sort(key=lambda item: prs.parse_timestamp(item.feedback_at) or sentinel)
+    candidates.sort(key=_review_feedback_sort_key)
     return candidates
 
 
@@ -451,8 +468,7 @@ def _conflict_selection_candidates(
                 candidate = future.result()
                 if candidate is not None:
                     candidates.append(candidate)
-    sentinel = datetime.max.replace(tzinfo=timezone.utc)
-    candidates.sort(key=lambda item: prs.parse_timestamp(item.observed_at) or sentinel)
+    candidates.sort(key=_merge_conflict_sort_key)
     return candidates
 
 

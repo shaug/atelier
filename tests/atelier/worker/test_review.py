@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -83,6 +84,86 @@ def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
     assert selection is not None
     assert selection.epic_id == "at-1"
     assert selection.changeset_id == "at-1.2"
+
+
+def test_select_review_feedback_changeset_tie_breaks_by_ids_after_parallel_scan() -> None:
+    issues = [
+        {
+            "id": "at-1.1",
+            "labels": [],
+            "status": "in_progress",
+            "description": (
+                "changeset.work_branch: feat/a\n"
+                "pr_state: in-review\n"
+                "review.last_feedback_seen_at: 2026-02-20T10:00:00Z\n"
+            ),
+        },
+        {
+            "id": "at-1.2",
+            "labels": [],
+            "status": "in_progress",
+            "description": (
+                "changeset.work_branch: feat/b\n"
+                "pr_state: in-review\n"
+                "review.last_feedback_seen_at: 2026-02-20T10:00:00Z\n"
+            ),
+        },
+    ]
+    record_by_id = {
+        record.issue.id: record
+        for record in beads.parse_issue_records(issues, source="review_tie_break_test")
+    }
+
+    def fake_lookup(repo: str, branch: str, *, refresh: bool = False) -> prs.GithubPrLookup:
+        del repo, refresh
+        number = 11 if branch == "feat/a" else 22
+        return prs.GithubPrLookup(
+            outcome="found",
+            payload={
+                "number": number,
+                "state": "OPEN",
+                "isDraft": False,
+                "reviewDecision": None,
+                "reviewRequests": [{"requestedReviewer": {"login": "alice"}}],
+            },
+        )
+
+    def fake_feedback(payload: dict[str, object] | None, *, repo: str) -> str | None:
+        del repo
+        if not payload:
+            return None
+        if payload.get("number") == 11:
+            time.sleep(0.03)
+        return "2026-02-20T11:00:00Z"
+
+    with (
+        patch(
+            "atelier.worker.review.beads.list_descendant_changesets",
+            return_value=issues,
+        ),
+        patch(
+            "atelier.worker.review.beads.BeadsClient.show_issue",
+            side_effect=lambda issue_id, *, source: record_by_id.get(issue_id),
+        ),
+        patch("atelier.worker.review.prs.lookup_github_pr_status", side_effect=fake_lookup),
+        patch(
+            "atelier.worker.review.prs.latest_feedback_timestamp_with_inline_comments",
+            side_effect=fake_feedback,
+        ),
+        patch(
+            "atelier.worker.review.prs.unresolved_review_thread_count",
+            return_value=1,
+        ),
+    ):
+        selection = review.select_review_feedback_changeset(
+            epic_id="at-1",
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selection is not None
+    assert selection.changeset_id == "at-1.1"
 
 
 def test_select_review_feedback_changeset_includes_standalone_epic_changeset() -> None:
@@ -443,6 +524,61 @@ def test_select_conflicted_changeset_picks_oldest_conflict() -> None:
     assert selection.epic_id == "at-1"
     assert selection.changeset_id == "at-1.2"
     assert selection.pr_url == "https://github.com/org/repo/pull/2"
+
+
+def test_select_conflicted_changeset_tie_breaks_by_ids_after_parallel_scan() -> None:
+    issues = [
+        {
+            "id": "at-1.1",
+            "labels": [],
+            "status": "in_progress",
+            "description": "changeset.work_branch: feat/a\npr_state: in-review\n",
+            "updated_at": "2026-02-20T10:00:00Z",
+        },
+        {
+            "id": "at-1.2",
+            "labels": [],
+            "status": "in_progress",
+            "description": "changeset.work_branch: feat/b\npr_state: in-review\n",
+            "updated_at": "2026-02-20T10:00:00Z",
+        },
+    ]
+    record_by_id = {
+        record.issue.id: record
+        for record in beads.parse_issue_records(issues, source="conflict_tie_break_test")
+    }
+
+    def fake_pr_status(_repo: str, branch: str) -> dict[str, object] | None:
+        if branch == "feat/a":
+            time.sleep(0.03)
+        return {
+            "state": "OPEN",
+            "isDraft": False,
+            "url": f"https://github.com/org/repo/pull/{1 if branch == 'feat/a' else 2}",
+            "updatedAt": "2026-02-20T10:00:00Z",
+            "mergeStateStatus": "DIRTY",
+        }
+
+    with (
+        patch(
+            "atelier.worker.review.beads.list_descendant_changesets",
+            return_value=issues,
+        ),
+        patch(
+            "atelier.worker.review.beads.BeadsClient.show_issue",
+            side_effect=lambda issue_id, *, source: record_by_id.get(issue_id),
+        ),
+        patch("atelier.worker.review.prs.read_github_pr_status", side_effect=fake_pr_status),
+    ):
+        selection = review.select_conflicted_changeset(
+            epic_id="at-1",
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selection is not None
+    assert selection.changeset_id == "at-1.1"
 
 
 def test_select_conflicted_changeset_includes_standalone_epic_changeset() -> None:
