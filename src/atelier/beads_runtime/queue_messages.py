@@ -51,7 +51,7 @@ def create_message_bead(
         "--type",
         "task",
         "--labels",
-        ",".join([issue_label(client, label_message), issue_label(client, label_unread)]),
+        ",".join([issue_label(label_message), issue_label(label_unread)]),
         "--title",
         subject,
     ]
@@ -80,9 +80,9 @@ def list_inbox_messages(
     Returns:
         Matching message issues.
     """
-    args = ["list", "--label", issue_label(client, label_message), "--assignee", agent_id]
+    args = ["list", "--label", issue_label(label_message), "--assignee", agent_id]
     if unread_only:
-        args.extend(["--label", issue_label(client, label_unread)])
+        args.extend(["--label", issue_label(label_unread)])
     return run_json(client, args)
 
 
@@ -100,9 +100,9 @@ def list_queue_messages(
     label_unread: str = "unread",
 ) -> list[dict[str, object]]:
     """List queued message beads with optional queue filtering."""
-    args = ["list", "--label", issue_label(client, label_message)]
+    args = ["list", "--label", issue_label(label_message)]
     if unread_only:
-        args.extend(["--label", issue_label(client, label_unread)])
+        args.extend(["--label", issue_label(label_unread)])
     issues = run_json(client, args)
     matches: list[dict[str, object]] = []
     duplicate_groups: dict[tuple[str, str], dict[str, object]] = {}
@@ -180,7 +180,7 @@ def list_queue_messages(
             if mark_messages_read_best_effort is not None:
                 mark_messages_read_best_effort(resolved_ids)
             else:
-                unread_label = issue_label(client, label_unread)
+                unread_label = issue_label(label_unread)
                 for message_id in sorted(resolved_ids):
                     cleaned_id = message_id.strip()
                     if not cleaned_id:
@@ -292,7 +292,7 @@ def mark_message_read(
     """Mark a message bead as read by removing the unread label."""
     run_command(
         client,
-        ["update", message_id, "--remove-label", issue_label(client, label_unread)],
+        ["update", message_id, "--remove-label", issue_label(label_unread)],
     )
 
 

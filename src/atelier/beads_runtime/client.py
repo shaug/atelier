@@ -75,9 +75,8 @@ def show_issue(client: RuntimeBeadsClient, issue_id: str) -> dict[str, object] |
     return issues[0] if issues else None
 
 
-def issue_label(client: RuntimeBeadsClient, name: str) -> str:
+def issue_label(name: str) -> str:
     """Build a namespaced issue label."""
-    del client
     cleaned = name.strip()
     if not cleaned:
         return cleaned
