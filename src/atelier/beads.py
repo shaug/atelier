@@ -570,11 +570,6 @@ def configured_issue_prefix(*, beads_root: Path) -> str:
     cached = _ISSUE_PREFIX_CACHE.get(key)
     if cached:
         return cached
-    env_prefix_raw = os.environ.get(_RUNTIME_BEADS_PREFIX_ENV)
-    if isinstance(env_prefix_raw, str) and env_prefix_raw.strip():
-        resolved = config.resolve_beads_prefix({"beads": {"prefix": env_prefix_raw}})
-        _ISSUE_PREFIX_CACHE[key] = resolved
-        return resolved
     config_payload = config.load_json(paths.project_config_sys_path(beads_root.parent))
     if config_payload is None:
         config_payload = config.load_json(paths.project_config_legacy_path(beads_root.parent))
@@ -841,7 +836,15 @@ def _normalize_dolt_runtime_metadata_once(*, beads_root: Path) -> None:
     raw_database = updated.get("dolt_database")
     current_database = _normalize_dolt_database_name(raw_database)
     preserve_database = False
-    if (
+    if current_database and current_database != expected_database:
+        remediation = _dolt_database_remediation(expected_database=expected_database)
+        atelier_log.warning(
+            "Dolt runtime metadata convergence blocked for "
+            f"{metadata_path}: configured database {current_database} does not match "
+            f"project-scoped expected database {expected_database}. {remediation}"
+        )
+        preserve_database = True
+    elif (
         local_candidates
         and expected_database not in local_candidates
         and (not current_database or current_database != expected_database)
@@ -2236,10 +2239,18 @@ def _resolve_dolt_server_runtime(beads_root: Path) -> DoltServerRuntime:
     expected_database = _default_dolt_database_name(beads_root)
     local_candidates = _local_dolt_database_candidates(beads_root)
     configured_database = _normalize_dolt_database_name(payload.get("dolt_database"))
-    runtime_database = configured_database or expected_database
+    runtime_database = expected_database
     ownership_error = _prefix_collision_ownership_error(beads_root)
     if ownership_error is not None:
         pass
+    elif configured_database and configured_database != expected_database:
+        remediation = _dolt_database_remediation(expected_database=expected_database)
+        ownership_error = (
+            "dolt server ownership mismatch: runtime metadata configures "
+            f"{configured_database}, but project-scoped expected database is "
+            f"{expected_database}. {remediation}"
+        )
+        runtime_database = configured_database
     elif configured_database:
         runtime_database = configured_database
     elif local_candidates and expected_database in local_candidates:
