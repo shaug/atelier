@@ -275,6 +275,7 @@ def start_agent_session(
     if agent_spec.name == "codex":
         start_cmd = command_ops.with_codex_exec(start_cmd, opening_prompt)
         start_cmd = command_ops.strip_flag_with_value(start_cmd, "--cd")
+        start_cmd = command_ops.ensure_exec_subcommand_flag(start_cmd, "--json")
         start_cmd = command_ops.ensure_exec_subcommand_flag(start_cmd, "--skip-git-repo-check")
         start_cwd = agent.path
     if dry_run:

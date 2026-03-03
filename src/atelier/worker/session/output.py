@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from ... import codex
+from . import output_claude, output_codex
 
 _TRUTHY_VALUES = {"1", "true", "yes", "on"}
 _DIFF_MARKERS = ("diff --git ", "@@ ", "+++ ", "--- ", "```diff")
@@ -25,69 +25,6 @@ _ERROR_LINE_RE = re.compile(r"\b(error|failed|exception|traceback)\b", re.IGNORE
 _MAX_SNIPPETS = 4
 _MAX_TAIL = 24
 _MAX_PREVIEW_CHARS = 280
-
-
-def trace_output_requested(env: Mapping[str, str] | None) -> bool:
-    """Return whether the worker should stream full raw agent output."""
-    if env is None:
-        return False
-    for key in ("ATELIER_WORK_AGENT_TRACE", "ATELIER_WORK_TRACE"):
-        value = env.get(key, "").strip().lower()
-        if value in _TRUTHY_VALUES:
-            return True
-    return False
-
-
-def _normalize_line(raw_line: str) -> str:
-    return codex.strip_ansi(raw_line).replace("\r", "").strip()
-
-
-def _is_noise_line(line: str) -> bool:
-    if not line:
-        return True
-    lowered = line.lower()
-    if lowered.startswith(_NOISE_PREFIXES):
-        return True
-    if lowered.startswith(_DIFF_MARKERS):
-        return True
-    if set(lowered) <= {"-", "=", "*", "_"} and len(lowered) >= 4:
-        return True
-    return False
-
-
-def _first_string(value: object) -> str | None:
-    if isinstance(value, str):
-        cleaned = " ".join(value.split())
-        return cleaned or None
-    if isinstance(value, list):
-        for item in value:
-            candidate = _first_string(item)
-            if candidate:
-                return candidate
-        return None
-    if isinstance(value, dict):
-        preferred_keys = (
-            "text",
-            "message",
-            "content",
-            "output",
-            "result",
-            "summary",
-            "error",
-        )
-        for key in preferred_keys:
-            if key not in value:
-                continue
-            candidate = _first_string(value.get(key))
-            if candidate:
-                return candidate
-        for nested in value.values():
-            if not isinstance(nested, (dict, list)):
-                continue
-            candidate = _first_string(nested)
-            if candidate:
-                return candidate
-    return None
 
 
 @dataclass
@@ -128,7 +65,9 @@ class AgentOutputCapture:
         """Render deterministic output summary lines for worker thread logs."""
         label = self.agent_name.strip() or "agent"
         if label == "claude" and self.structured_event_count > 0:
-            return self._render_claude_summary(failed=failed)
+            return self._render_structured_summary(label="claude", failed=failed)
+        if label == "codex" and self.structured_event_count > 0:
+            return self._render_structured_summary(label="codex", failed=failed)
         return self._render_text_summary(label=label, failed=failed)
 
     def _feed_line(self, raw_line: str, *, source: str) -> None:
@@ -138,6 +77,8 @@ class AgentOutputCapture:
         self.raw_line_count += 1
         self._tail.append(line)
         if self.agent_name == "claude" and self._consume_claude_event(line):
+            return
+        if self.agent_name == "codex" and self._consume_codex_event(line):
             return
         seen_count = self._seen_lines.get(line, 0)
         self._seen_lines[line] = seen_count + 1
@@ -153,27 +94,39 @@ class AgentOutputCapture:
         self._append_unique(self._actionable, line)
 
     def _consume_claude_event(self, line: str) -> bool:
-        if not line.startswith("{"):
-            return False
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            return False
-        if not isinstance(payload, dict):
-            return False
-        event_type = payload.get("type")
-        if not isinstance(event_type, str) or not event_type:
+        """Parse and consume a Claude JSON event; return True if consumed."""
+        event = output_claude.parse_claude_event(line)
+        if event is None:
             return False
         self.structured_event_count += 1
-        if "tool" in event_type:
+        if output_claude.is_tool_event(event):
             self.tool_event_count += 1
-        message = _first_string(payload)
-        if message and "error" in event_type:
-            self._append_unique(self._diagnostics, message)
-        if message and event_type in {"content_block_delta", "assistant", "message"}:
-            self._assistant_char_count += len(message)
+        err_msg = output_claude.extract_error_message(event)
+        if err_msg:
+            self._append_unique(self._diagnostics, err_msg)
+        preview = output_claude.extract_preview_text(event)
+        if preview:
+            self._assistant_char_count += len(preview)
             if len(self._assistant_preview) < _MAX_PREVIEW_CHARS:
-                self._append_assistant_preview(message)
+                self._append_assistant_preview(preview)
+        return True
+
+    def _consume_codex_event(self, line: str) -> bool:
+        """Parse and consume a Codex JSON event; return True if consumed."""
+        event = output_codex.parse_codex_event(line)
+        if event is None:
+            return False
+        self.structured_event_count += 1
+        if output_codex.is_tool_event(event):
+            self.tool_event_count += 1
+        err_msg = output_codex.extract_error_message(event)
+        if err_msg:
+            self._append_unique(self._diagnostics, err_msg)
+        preview = output_codex.extract_preview_text(event)
+        if preview:
+            self._assistant_char_count += len(preview)
+            if len(self._assistant_preview) < _MAX_PREVIEW_CHARS:
+                self._append_assistant_preview(preview)
         return True
 
     def _append_assistant_preview(self, message: str) -> None:
@@ -195,10 +148,10 @@ class AgentOutputCapture:
             return
         target.append(line)
 
-    def _render_claude_summary(self, *, failed: bool) -> list[str]:
+    def _render_structured_summary(self, *, label: str, failed: bool) -> list[str]:
         status = "failed" if failed else "completed"
         first_line = (
-            f"Agent output (claude): {status}; events={self.structured_event_count}; "
+            f"Agent output ({label}): {status}; events={self.structured_event_count}; "
             f"tools={self.tool_event_count}; suppressed={self.suppressed_line_count}"
         )
         lines = [first_line]
@@ -236,3 +189,31 @@ class AgentOutputCapture:
                 continue
             return line
         return None
+
+
+def trace_output_requested(env: Mapping[str, str] | None) -> bool:
+    """Return whether the worker should stream full raw agent output."""
+    if env is None:
+        return False
+    for key in ("ATELIER_WORK_AGENT_TRACE", "ATELIER_WORK_TRACE"):
+        value = env.get(key, "").strip().lower()
+        if value in _TRUTHY_VALUES:
+            return True
+    return False
+
+
+def _normalize_line(raw_line: str) -> str:
+    return codex.strip_ansi(raw_line).replace("\r", "").strip()
+
+
+def _is_noise_line(line: str) -> bool:
+    if not line:
+        return True
+    lowered = line.lower()
+    if lowered.startswith(_NOISE_PREFIXES):
+        return True
+    if lowered.startswith(_DIFF_MARKERS):
+        return True
+    if set(lowered) <= {"-", "=", "*", "_"} and len(lowered) >= 4:
+        return True
+    return False
