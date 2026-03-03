@@ -235,7 +235,7 @@ def reconcile_mapping_ownership(
         epic_root_branches: Optional epic-to-root-branch values used when a
             migration creates a missing destination mapping.
         epic_worktree_paths: Optional epic-to-worktree-path values used when a
-            migration creates a missing destination mapping.
+            migration creates or repairs destination mappings.
         synthesis_diagnostics: Optional mutable output mapping populated for
             destination mappings synthesized during reconciliation.
 
@@ -338,9 +338,15 @@ def reconcile_mapping_ownership(
                 )
                 changed_epics.add(epic_id)
 
-        destination_epics = sorted(set(moved_changesets) | set(moved_worktrees))
-        for epic_id in destination_epics:
+        destination_epics = set(moved_changesets) | set(moved_worktrees)
+        for epic_id, mapping in mappings.items():
+            metadata_worktree_path = worktree_path_map.get(epic_id, "")
+            if metadata_worktree_path and mapping.worktree_path != metadata_worktree_path:
+                destination_epics.add(epic_id)
+
+        for epic_id in sorted(destination_epics):
             current = mappings.get(epic_id)
+            resolved_worktree_path = ""
             if current is None:
                 lineage_paths = tuple(sorted(lineage_worktree_paths.get(epic_id, set())))
                 metadata_worktree_path = worktree_path_map.get(epic_id, "")
@@ -381,6 +387,17 @@ def reconcile_mapping_ownership(
                         root_branch=resolved_root_branch,
                         root_branch_source=resolved_root_branch_source,
                     )
+            else:
+                metadata_worktree_path = worktree_path_map.get(epic_id, "")
+                if metadata_worktree_path:
+                    resolved_worktree_path = metadata_worktree_path
+                else:
+                    lineage_paths = tuple(sorted(lineage_worktree_paths.get(epic_id, set())))
+                    default_worktree_path = f"{paths.WORKTREES_DIRNAME}/{epic_id}"
+                    if len(lineage_paths) == 1 and current.worktree_path == default_worktree_path:
+                        resolved_worktree_path = lineage_paths[0]
+                    else:
+                        resolved_worktree_path = current.worktree_path
 
             merged_changesets = dict(current.changesets)
             for changeset_id, branch in moved_changesets.get(epic_id, {}).items():
@@ -397,7 +414,7 @@ def reconcile_mapping_ownership(
                     resolved_root = lineage_roots[0]
             updated = WorktreeMapping(
                 epic_id=current.epic_id,
-                worktree_path=current.worktree_path,
+                worktree_path=resolved_worktree_path,
                 root_branch=resolved_root,
                 changesets=merged_changesets,
                 changeset_worktrees=merged_worktrees,

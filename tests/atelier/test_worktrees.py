@@ -616,6 +616,48 @@ def test_reconcile_mapping_ownership_synthesizes_destination_from_lineage_path()
         )
 
 
+def test_reconcile_mapping_ownership_repairs_existing_destination_path_from_metadata() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        meta_dir = worktrees.worktrees_root(project_dir) / worktrees.METADATA_DIRNAME
+        meta_dir.mkdir(parents=True, exist_ok=True)
+
+        worktrees.write_mapping(
+            worktrees.mapping_path(project_dir, "ts-new"),
+            worktrees.WorktreeMapping(
+                epic_id="ts-new",
+                worktree_path="worktrees/ts-new",
+                root_branch="feat/new",
+                changesets={
+                    "ts-new": "feat/new",
+                    "ts-new.1": "feat/new-ts-new.1",
+                },
+                changeset_worktrees={"ts-new.1": "worktrees/ts-new.1"},
+            ),
+        )
+
+        changed = worktrees.reconcile_mapping_ownership(
+            project_dir,
+            owner_by_changeset={
+                "ts-new": "ts-new",
+                "ts-new.1": "ts-new",
+            },
+            epic_root_branches={"ts-new": "feat/new"},
+            epic_worktree_paths={"ts-new": "worktrees/at-legacy"},
+        )
+
+        assert changed == ("ts-new",)
+        repaired_mapping = worktrees.load_mapping(worktrees.mapping_path(project_dir, "ts-new"))
+        assert repaired_mapping is not None
+        assert repaired_mapping.worktree_path == "worktrees/at-legacy"
+        assert repaired_mapping.root_branch == "feat/new"
+        assert repaired_mapping.changesets == {
+            "ts-new": "feat/new",
+            "ts-new.1": "feat/new-ts-new.1",
+        }
+        assert repaired_mapping.changeset_worktrees == {"ts-new.1": "worktrees/ts-new.1"}
+
+
 def test_remove_git_worktree_noop_when_missing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"
