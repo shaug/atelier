@@ -1116,3 +1116,237 @@ def test_run_worker_once_passes_opening_prompt_to_non_codex_agents() -> None:
     assert prep_kwargs["yolo"] is True
     start_kwargs = deps.infra.worker_session_agent.start_agent_session.call_args.kwargs
     assert start_kwargs["opening_prompt"] == "open-prompt"
+
+
+def test_run_worker_once_skips_redundant_mark_in_progress_for_in_progress_changeset() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p9",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p9",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    changeset_issue = {
+        "id": "at-epic.1",
+        "title": "Changeset",
+        "status": "in_progress",
+        "labels": [],
+        "description": "",
+    }
+    deps.lifecycle.next_changeset = lambda **_kwargs: changeset_issue
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [changeset_issue] if args[:2] == ["show", "at-epic.1"] else []
+        )
+    )
+    deps.lifecycle.mark_changeset_in_progress = Mock()
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        return_value=SimpleNamespace(
+            epic_worktree_path=Path("/tmp/epic"),
+            changeset_worktree_path=Path("/tmp/changeset"),
+            branch="feat/root-at-epic.1",
+        )
+    )
+    deps.infra.worker_session_agent.prepare_agent_session = Mock(
+        return_value=SimpleNamespace(
+            agent_spec=SimpleNamespace(name="demo", display_name="Demo"),
+            agent_options=[],
+            project_enlistment=Path("/repo"),
+            workspace_branch="feat/root",
+            env={},
+        )
+    )
+    deps.infra.worker_session_agent.start_agent_session = Mock(
+        return_value=SimpleNamespace(
+            started_at=dt.datetime.now(dt.timezone.utc),
+            returncode=0,
+        )
+    )
+    deps.lifecycle.finalize_changeset = lambda **_kwargs: FinalizeResult(
+        continue_running=False,
+        reason="done",
+    )
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p9"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "done"
+    deps.lifecycle.mark_changeset_in_progress.assert_not_called()
+    deps.infra.worker_session_agent.start_agent_session.assert_called_once()
+
+
+def test_run_worker_once_followup_dependency_gate_skip_is_non_blocking() -> None:
+    for startup_reason in ("review_feedback", "merge_conflict"):
+        agent = AgentHome(
+            name="worker",
+            agent_id=f"atelier/worker/codex/p9b-{startup_reason}",
+            role="worker",
+            path=Path("/tmp/worker"),
+            session_key=f"p9b-{startup_reason}",
+        )
+        deps = _build_runner_deps(
+            startup_result=StartupContractResult(
+                epic_id="at-epic",
+                changeset_id="at-epic.2",
+                should_exit=False,
+                reason=startup_reason,
+            ),
+            preview_agent=agent,
+        )
+        selected_changeset = {
+            "id": "at-epic.2",
+            "title": "Follow-up",
+            "status": "open",
+            "labels": [],
+            "description": "",
+            "dependencies": ["at-epic.1"],
+        }
+        dependency_issue = {
+            "id": "at-epic.1",
+            "title": "Blocking dependency",
+            "status": "in_progress",
+            "labels": [],
+            "description": "",
+        }
+
+        def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
+            if args[:2] == ["show", "at-epic.2"]:
+                return [selected_changeset]
+            if args[:2] == ["show", "at-epic.1"]:
+                return [dependency_issue]
+            if args[:4] == ["list", "--parent", "at-epic.1", "--all"]:
+                return []
+            return []
+
+        deps.infra.beads.run_bd_json = Mock(side_effect=run_bd_json)
+        deps.lifecycle.resolve_epic_id_for_changeset = lambda _issue, **_kwargs: "at-epic"
+        deps.lifecycle.mark_changeset_in_progress = Mock()
+        deps.lifecycle.capture_review_feedback_snapshot = Mock(return_value=SimpleNamespace())
+        deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+            return_value=SimpleNamespace(
+                epic_worktree_path=Path("/tmp/epic"),
+                changeset_worktree_path=Path("/tmp/changeset"),
+                branch="feat/root-at-epic.2",
+            )
+        )
+        deps.infra.worker_session_agent.prepare_agent_session = Mock(
+            return_value=SimpleNamespace(
+                agent_spec=SimpleNamespace(name="demo", display_name="Demo"),
+                agent_options=[],
+                project_enlistment=Path("/repo"),
+                workspace_branch="feat/root",
+                env={},
+            )
+        )
+        deps.infra.worker_session_agent.start_agent_session = Mock(
+            return_value=SimpleNamespace(
+                started_at=dt.datetime.now(dt.timezone.utc),
+                returncode=0,
+            )
+        )
+        deps.lifecycle.finalize_changeset = lambda **_kwargs: FinalizeResult(
+            continue_running=False,
+            reason="done",
+        )
+
+        summary = runner.run_worker_once(
+            SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+            run_context=WorkerRunContext(
+                mode="auto", dry_run=False, session_key=f"p9b-{startup_reason}"
+            ),
+            deps=deps,
+        )
+
+        assert summary.started is False
+        assert summary.reason == "done"
+        deps.lifecycle.mark_changeset_in_progress.assert_not_called()
+        deps.infra.worker_session_agent.start_agent_session.assert_called_once()
+        assert any(
+            "follow-up dependency gate still active" in str(call.args[0])
+            for call in deps.control._say.call_args_list
+        )
+
+
+def test_run_worker_once_releases_epic_when_dependency_gate_read_fails() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p9c",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p9c",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id="at-epic.2",
+            should_exit=False,
+            reason="review_feedback",
+        ),
+        preview_agent=agent,
+    )
+    selected_changeset = {
+        "id": "at-epic.2",
+        "title": "Follow-up",
+        "status": "open",
+        "labels": [],
+        "description": "",
+        "dependencies": ["at-epic.1"],
+    }
+
+    def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
+        if args[:2] == ["show", "at-epic.2"]:
+            return [selected_changeset]
+        if args[:2] == ["show", "at-epic.1"]:
+            raise SystemExit(1)
+        return []
+
+    deps.infra.beads.run_bd_json = Mock(side_effect=run_bd_json)
+    deps.lifecycle.resolve_epic_id_for_changeset = lambda _issue, **_kwargs: "at-epic"
+    deps.lifecycle.mark_changeset_in_progress = Mock()
+    deps.lifecycle.capture_review_feedback_snapshot = Mock(return_value=SimpleNamespace())
+    deps.lifecycle.release_epic_assignment = Mock()
+    deps.lifecycle.send_planner_notification = Mock()
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        return_value=SimpleNamespace(
+            epic_worktree_path=Path("/tmp/epic"),
+            changeset_worktree_path=Path("/tmp/changeset"),
+            branch="feat/root-at-epic.2",
+        )
+    )
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p9c"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "changeset_dependency_gate_read_failed"
+    assert summary.epic_id == "at-epic"
+    deps.lifecycle.send_planner_notification.assert_called_once()
+    deps.lifecycle.release_epic_assignment.assert_called_once_with(
+        "at-epic",
+        beads_root=Path("/project/.atelier/.beads"),
+        repo_root=Path("/repo"),
+    )
+    deps.infra.beads.clear_agent_hook.assert_called_once_with(
+        "at-agent",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+        expected_hook="at-epic",
+    )
+    deps.lifecycle.mark_changeset_in_progress.assert_not_called()
+    deps.infra.worker_session_agent.start_agent_session.assert_not_called()
