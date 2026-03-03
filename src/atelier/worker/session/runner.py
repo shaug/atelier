@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from ... import beads as beads_runtime
-from ... import changeset_fields, lifecycle
+from ... import changeset_fields, git, lifecycle
+from ... import exec as exec_util
 from ... import root_branch as root_branch_runtime
 from ...pr_strategy import PrStrategy
 from ..context import ChangesetSelectionContext, WorkerRunContext
@@ -31,6 +33,45 @@ _TRANSIENT_PREPARE_WORKTREES_MARKERS = (
     "resource temporarily unavailable",
     "timed out",
 )
+
+
+def _list_local_branches(*, repo_root: Path, git_path: str | None) -> tuple[str, ...]:
+    """Return local branch names from ``refs/heads``.
+
+    Returns an empty tuple when git cannot be executed or the branch list cannot
+    be read (fail-closed for startup auto-confirm decisions).
+    """
+    result = exec_util.try_run_command(
+        git.git_command(
+            [
+                "-C",
+                str(repo_root),
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads",
+            ],
+            git_path=git_path,
+        )
+    )
+    if result is None or result.returncode != 0:
+        return ()
+    branches = {
+        line.strip()
+        for line in (result.stdout or "").splitlines()
+        if isinstance(line, str) and line.strip()
+    }
+    return tuple(sorted(branches))
+
+
+def _deterministic_bead_suffix_candidates(
+    *, branches: tuple[str, ...], bead_id: str
+) -> tuple[str, ...]:
+    """Return branch names that end with ``-<bead-id>`` or ``-<bead-id>.<n>``."""
+    normalized_bead_id = bead_id.strip()
+    if not normalized_bead_id:
+        return ()
+    pattern = re.compile(rf"-{re.escape(normalized_bead_id)}(?:\.\d+)?$")
+    return tuple(sorted(branch for branch in branches if pattern.search(branch)))
 
 
 @dataclass(frozen=True)
@@ -666,6 +707,47 @@ def run_worker_once(
         if not root_branch_value:
             root_branch_value = lifecycle.extract_changeset_root_branch(epic_issue)
         suggested_root_branch = None
+        if not root_branch_value:
+            deterministic_candidates = _deterministic_bead_suffix_candidates(
+                branches=_list_local_branches(repo_root=repo_root, git_path=git_path),
+                bead_id=selected_epic,
+            )
+            if len(deterministic_candidates) == 1:
+                root_branch_value = deterministic_candidates[0]
+                persist_prompted_root_branch = True
+                if dry_run:
+                    control.dry_run_log(
+                        "Root branch auto-confirm would apply via bead-suffix rule: "
+                        f"{root_branch_value!r} (bead {selected_epic})."
+                    )
+                else:
+                    control.say(
+                        "Root branch auto-confirmed via bead-suffix rule: "
+                        f"{root_branch_value!r} (bead {selected_epic})."
+                    )
+            elif len(deterministic_candidates) > 1:
+                candidate_list = ", ".join(repr(name) for name in deterministic_candidates)
+                if dry_run:
+                    control.dry_run_log(
+                        "Root branch auto-confirm skipped: multiple local bead-suffix matches "
+                        f"for {selected_epic} ({candidate_list})."
+                    )
+                else:
+                    control.say(
+                        "Root branch auto-confirm skipped: multiple local bead-suffix matches "
+                        f"for {selected_epic} ({candidate_list})."
+                    )
+            else:
+                if dry_run:
+                    control.dry_run_log(
+                        "Root branch auto-confirm skipped: no local bead-suffix match for "
+                        f"{selected_epic}."
+                    )
+                else:
+                    control.say(
+                        "Root branch auto-confirm skipped: no local bead-suffix match for "
+                        f"{selected_epic}."
+                    )
         if not root_branch_value:
             suggested_root_branch = infra.branching.suggest_root_branch(
                 str(epic_issue.get("title") or selected_epic),
