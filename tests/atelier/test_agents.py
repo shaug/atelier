@@ -183,6 +183,13 @@ class TestAgentSpec:
         )
         assert merged == ["--print", "--model=sonnet", "--output-format", "json"]
 
+    def test_merge_cli_options_overrides_single_dash_values_without_leaking(self) -> None:
+        merged = agents.merge_cli_options(
+            ["--append-system-prompt", "-a"],
+            ["--append-system-prompt", "-b"],
+        )
+        assert merged == ["--append-system-prompt", "-b"]
+
     def test_resolve_launch_options_prefers_role_scoped_over_global(self) -> None:
         resolved = agents.resolve_launch_options(
             agent_name="codex",

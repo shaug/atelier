@@ -332,6 +332,19 @@ def _consume_option_tokens(
         return _OptionTokens(tokens=(token,), key=flag), 1, stop_option_parsing
     if index + 1 < len(options):
         candidate_value = options[index + 1]
+        # Treat single-dash tokens as values for long-form flags so overrides
+        # can replace values like "-a" without leaking stale lower-precedence
+        # tokens.
+        if (
+            token.startswith("--")
+            and candidate_value != "--"
+            and not candidate_value.startswith("--")
+        ):
+            return (
+                _OptionTokens(tokens=(token, candidate_value), key=token),
+                2,
+                stop_option_parsing,
+            )
         if not candidate_value.startswith("-"):
             return (
                 _OptionTokens(tokens=(token, candidate_value), key=token),
