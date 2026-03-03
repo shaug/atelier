@@ -34,6 +34,15 @@ def _redirect_virtual_beads_issue_locks(
     monkeypatch.setattr(beads, "_issue_write_lock_path", redirected_lock_path)
 
 
+def _write_beads_prefix_config(beads_root: Path, prefix: str) -> None:
+    project_dir = beads_root.parent
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "config.sys.json").write_text(
+        json.dumps({"beads": {"prefix": prefix}}),
+        encoding="utf-8",
+    )
+
+
 def test_beads_env_sets_beads_db() -> None:
     env = beads.beads_env(Path("/tmp/project/.beads"))
 
@@ -41,13 +50,24 @@ def test_beads_env_sets_beads_db() -> None:
     assert env["BEADS_DB"] == "/tmp/project/.beads/beads.db"
 
 
-def test_issue_label_uses_fixed_at_namespace_with_custom_issue_prefix(
+def test_configured_issue_prefix_ignores_runtime_env_override(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
-    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    _write_beads_prefix_config(beads_root, "ts")
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "at")
+    beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+
+    assert beads.configured_issue_prefix(beads_root=beads_root) == "ts"
+    assert beads._default_dolt_database_name(beads_root) == "beads_ts"  # pyright: ignore[reportPrivateUsage]
+
+
+def test_issue_label_uses_fixed_at_namespace_with_custom_issue_prefix(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    beads_root.mkdir()
+    _write_beads_prefix_config(beads_root, "ts")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
 
     assert beads.issue_label("epic", beads_root=beads_root) == "at:epic"
@@ -69,10 +89,7 @@ def test_dolt_server_supervision_bypasses_rename_prefix() -> None:
     )
 
 
-def test_default_dolt_database_name_is_prefix_only_and_prefix_aware(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_default_dolt_database_name_is_prefix_only_and_prefix_aware(tmp_path: Path) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
 
@@ -89,20 +106,17 @@ def test_default_dolt_database_name_is_prefix_only_and_prefix_aware(
     )
     assert relocated_default == default_name
 
-    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
+    _write_beads_prefix_config(beads_root, "ops")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     ops_name = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     assert ops_name == "beads_ops"
     assert default_name != ops_name
 
 
-def test_normalize_dolt_runtime_metadata_once_converges_to_project_database(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_normalize_dolt_runtime_metadata_once_converges_to_project_database(tmp_path: Path) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
-    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
+    _write_beads_prefix_config(beads_root, "ops")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     expected_database = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     (beads_root / "dolt" / expected_database / ".dolt").mkdir(parents=True)
@@ -186,13 +200,14 @@ def test_normalize_dolt_runtime_metadata_once_skips_invalid_json(
     assert metadata_path.read_text(encoding="utf-8") == "{not-json"
 
 
-def test_normalize_dolt_runtime_metadata_once_overrides_configured_db_when_ambiguous(
+def test_normalize_dolt_runtime_metadata_once_preserves_database_for_env_contamination_mismatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
-    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
+    _write_beads_prefix_config(beads_root, "ts")
+    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "at")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     preferred = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     (beads_root / "dolt" / preferred / ".dolt").mkdir(parents=True)
@@ -212,14 +227,17 @@ def test_normalize_dolt_runtime_metadata_once_overrides_configured_db_when_ambig
     )
 
     beads._DOLT_RUNTIME_NORMALIZED.clear()  # pyright: ignore[reportPrivateUsage]
-    beads._normalize_dolt_runtime_metadata_once(  # pyright: ignore[reportPrivateUsage]
-        beads_root=beads_root
-    )
+    with patch("atelier.beads.atelier_log.warning") as warning_log:
+        beads._normalize_dolt_runtime_metadata_once(  # pyright: ignore[reportPrivateUsage]
+            beads_root=beads_root
+        )
 
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-    assert payload["dolt_database"] == preferred
+    assert payload["dolt_database"] == "beads_at"
     assert (beads_root / "dolt" / preferred / ".dolt").is_dir()
     assert (beads_root / "dolt" / "beads_at" / ".dolt").is_dir()
+    messages = [str(call.args[0]) for call in warning_log.call_args_list if call.args]
+    assert any("does not match project-scoped expected database" in message for message in messages)
 
 
 def test_normalize_dolt_runtime_metadata_once_preserves_database_when_expected_missing(
@@ -253,16 +271,15 @@ def test_normalize_dolt_runtime_metadata_once_preserves_database_when_expected_m
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert payload["dolt_database"] == "beads"
     messages = [str(call.args[0]) for call in warning_log.call_args_list if call.args]
-    assert any(f"do not include expected {expected_database}" in message for message in messages)
+    assert any("does not match project-scoped expected database" in message for message in messages)
 
 
 def test_normalize_dolt_runtime_metadata_once_skips_expected_missing_warning_when_configured(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
-    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    _write_beads_prefix_config(beads_root, "ts")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     expected_database = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
     (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
@@ -373,7 +390,7 @@ def test_resolve_dolt_server_runtime_uses_prefix_database_by_default(
     assert runtime.ownership_error is None
 
 
-def test_resolve_dolt_server_runtime_uses_configured_database_when_present(
+def test_resolve_dolt_server_runtime_fails_closed_when_metadata_database_differs_from_project(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
@@ -392,10 +409,11 @@ def test_resolve_dolt_server_runtime_uses_configured_database_when_present(
     )
 
     assert runtime.database == "beads_other"
-    assert runtime.ownership_error is None
+    assert runtime.ownership_error is not None
+    assert "runtime metadata configures beads_other" in runtime.ownership_error
 
 
-def test_resolve_dolt_server_runtime_uses_non_candidate_configured_database(
+def test_resolve_dolt_server_runtime_fails_closed_when_metadata_database_is_unknown(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
@@ -415,15 +433,15 @@ def test_resolve_dolt_server_runtime_uses_non_candidate_configured_database(
     )
 
     assert runtime.database == "beads_unknown"
-    assert runtime.ownership_error is None
+    assert runtime.ownership_error is not None
+    assert "runtime metadata configures beads_unknown" in runtime.ownership_error
 
 
 def test_resolve_dolt_server_runtime_fails_closed_when_expected_db_missing(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     beads_root = tmp_path / ".beads"
-    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ops")
+    _write_beads_prefix_config(beads_root, "ops")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
         beads_root
@@ -447,10 +465,9 @@ def test_resolve_dolt_server_runtime_fails_closed_when_expected_db_missing(
 
 def test_resolve_dolt_server_runtime_adopts_single_local_database_when_expected_missing(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     beads_root = tmp_path / ".beads"
-    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    _write_beads_prefix_config(beads_root, "ts")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
         beads_root
@@ -473,10 +490,9 @@ def test_resolve_dolt_server_runtime_adopts_single_local_database_when_expected_
 
 def test_resolve_dolt_server_runtime_adopts_single_local_database_when_unconfigured(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     beads_root = tmp_path / ".beads"
-    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    _write_beads_prefix_config(beads_root, "ts")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     expected_database = beads._default_dolt_database_name(  # pyright: ignore[reportPrivateUsage]
         beads_root
@@ -3150,12 +3166,11 @@ def test_find_agent_bead_falls_back_to_description_agent_id() -> None:
 
 
 def test_find_agent_bead_reads_compatibility_label_namespace(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
     beads_root.mkdir()
-    monkeypatch.setenv("ATELIER_BEADS_PREFIX", "ts")
+    _write_beads_prefix_config(beads_root, "ts")
     beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
     calls: list[list[str]] = []
 
@@ -3640,7 +3655,7 @@ def test_ensure_issue_prefix_sets_config_if_rename_does_not_update_it() -> None:
     assert calls == [["rename-prefix", "at-", "--repair"], ["config", "set", "issue_prefix", "at"]]
 
 
-def test_ensure_issue_prefix_reconciles_runtime_metadata_when_prefix_changes(
+def test_ensure_issue_prefix_preserves_runtime_metadata_on_database_mismatch(
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
@@ -3668,9 +3683,11 @@ def test_ensure_issue_prefix_reconciles_runtime_metadata_when_prefix_changes(
         calls.append(args)
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
+    warnings: list[str] = []
     with (
         patch("atelier.beads._current_issue_prefix", side_effect=["atelier", "ops"]),
         patch("atelier.beads.run_bd_command", side_effect=fake_command),
+        patch("atelier.beads.atelier_log.warning", side_effect=warnings.append),
     ):
         beads._ISSUE_PREFIX_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
         beads._DOLT_RUNTIME_NORMALIZED.clear()  # pyright: ignore[reportPrivateUsage]
@@ -3679,9 +3696,11 @@ def test_ensure_issue_prefix_reconciles_runtime_metadata_when_prefix_changes(
     assert changed is True
     assert calls == [["rename-prefix", "ops-", "--repair"]]
     payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-    expected_database = beads._default_dolt_database_name(beads_root)  # pyright: ignore[reportPrivateUsage]
-    assert payload["dolt_database"] == expected_database
-    assert expected_database == "beads_ops"
+    assert payload["dolt_database"] == "beads_at"
+    assert any(
+        "does not match project-scoped expected database beads_ops" in message
+        for message in warnings
+    )
 
 
 def test_preview_issue_prefix_rename_skips_when_prefix_matches(
