@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 
 from .. import beads, git, worktrees
@@ -28,6 +30,172 @@ def _noop_gc_action() -> None:
     return None
 
 
+@dataclass(frozen=True)
+class _MappingIssueLookupIndex:
+    epics_by_id: dict[str, dict[str, object]]
+    worktree_to_epics: dict[str, set[str]]
+    branch_to_epics: dict[str, set[str]]
+
+
+@dataclass(frozen=True)
+class _MappingIssueLookup:
+    issue: dict[str, object] | None
+    source: str
+
+
+def _normalize_mapping_worktree_key(*, project_dir: Path, worktree_path: str | None) -> str | None:
+    if not worktree_path:
+        return None
+    cleaned = worktree_path.strip()
+    if not cleaned or cleaned.lower() == "null":
+        return None
+    candidate = Path(cleaned)
+    if candidate.is_absolute():
+        try:
+            candidate = candidate.relative_to(project_dir)
+        except ValueError:
+            pass
+    return candidate.as_posix().lstrip("./")
+
+
+def _issue_metadata_worktree_key(issue: dict[str, object], *, project_dir: Path) -> str | None:
+    return _normalize_mapping_worktree_key(
+        project_dir=project_dir,
+        worktree_path=beads.extract_worktree_path(issue),
+    )
+
+
+def _issue_metadata_branches(issue: dict[str, object]) -> set[str]:
+    branches: set[str] = set()
+    description = issue.get("description")
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
+    workspace_root = normalize_branch(fields.get("workspace.root_branch"))
+    if workspace_root:
+        branches.add(workspace_root)
+    metadata_root = normalize_branch(fields.get("changeset.root_branch"))
+    if metadata_root:
+        branches.add(metadata_root)
+    metadata_work = normalize_branch(fields.get("changeset.work_branch"))
+    if metadata_work:
+        branches.add(metadata_work)
+    label_branch = workspace_branch_from_labels(issue_labels(issue))
+    if label_branch:
+        branches.add(label_branch)
+    return branches
+
+
+def _build_mapping_issue_lookup_index(
+    *,
+    project_dir: Path,
+    beads_root: Path,
+    repo_root: Path,
+) -> _MappingIssueLookupIndex:
+    epics = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
+    epics_by_id: dict[str, dict[str, object]] = {}
+    worktree_to_epics: dict[str, set[str]] = defaultdict(set)
+    branch_to_epics: dict[str, set[str]] = defaultdict(set)
+    for epic in epics:
+        issue_id = epic.get("id")
+        if not isinstance(issue_id, str):
+            continue
+        epic_id = issue_id.strip()
+        if not epic_id:
+            continue
+        epics_by_id[epic_id] = epic
+        worktree_key = _issue_metadata_worktree_key(epic, project_dir=project_dir)
+        if worktree_key:
+            worktree_to_epics[worktree_key].add(epic_id)
+        for branch in _issue_metadata_branches(epic):
+            branch_to_epics[branch].add(epic_id)
+        descendants = beads.list_descendant_changesets(
+            epic_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=True,
+        )
+        for descendant in descendants:
+            for branch in _issue_metadata_branches(descendant):
+                branch_to_epics[branch].add(epic_id)
+    return _MappingIssueLookupIndex(
+        epics_by_id=epics_by_id,
+        worktree_to_epics=dict(worktree_to_epics),
+        branch_to_epics=dict(branch_to_epics),
+    )
+
+
+def _is_non_bead_mapping(
+    *, mapping: worktrees.WorktreeMapping, index: _MappingIssueLookupIndex
+) -> bool:
+    _ = index
+    mapping_id = mapping.epic_id.strip().lower()
+    if mapping_id.startswith("planner-"):
+        return True
+    worktree_name = Path(mapping.worktree_path).name.strip().lower()
+    if worktree_name.startswith("planner-"):
+        return True
+    root_branch = (normalize_branch(mapping.root_branch) or "").lower()
+    if "-planner-" in root_branch:
+        return True
+    return False
+
+
+def _mapping_lookup_branches(mapping: worktrees.WorktreeMapping) -> tuple[str, ...]:
+    values = [mapping.root_branch, *mapping.changesets.values()]
+    branches = sorted({value for value in (normalize_branch(v) for v in values) if value})
+    return tuple(branches)
+
+
+def _resolve_mapping_issue(
+    *,
+    mapping: worktrees.WorktreeMapping,
+    index: _MappingIssueLookupIndex,
+    project_dir: Path,
+    beads_root: Path,
+    repo_root: Path,
+) -> _MappingIssueLookup:
+    candidate_scores: dict[str, int] = defaultdict(int)
+    mapping_worktree = _normalize_mapping_worktree_key(
+        project_dir=project_dir,
+        worktree_path=mapping.worktree_path,
+    )
+    if mapping_worktree:
+        for epic_id in index.worktree_to_epics.get(mapping_worktree, set()):
+            candidate_scores[epic_id] += 10
+    branch_values = _mapping_lookup_branches(mapping)
+    for branch in branch_values:
+        for epic_id in index.branch_to_epics.get(branch, set()):
+            candidate_scores[epic_id] += 1
+    if candidate_scores:
+        ranked = sorted(candidate_scores.items(), key=lambda item: (-item[1], item[0]))
+        resolved_epic_id = ranked[0][0]
+        resolved_issue = index.epics_by_id.get(resolved_epic_id)
+        if resolved_issue is not None:
+            source = (
+                f"metadata(worktree+branch) score={ranked[0][1]}"
+                if mapping_worktree
+                else f"metadata(branch) score={ranked[0][1]}"
+            )
+            if resolved_epic_id != mapping.epic_id:
+                log_debug(
+                    "resolved mapping epic id "
+                    f"{mapping.epic_id!r} -> {resolved_epic_id!r} via {source}"
+                )
+            return _MappingIssueLookup(issue=resolved_issue, source=source)
+
+    direct = index.epics_by_id.get(mapping.epic_id)
+    if direct is not None:
+        return _MappingIssueLookup(issue=direct, source="direct-index")
+
+    if _is_non_bead_mapping(mapping=mapping, index=index):
+        log_debug(f"skip non-bead mapping key {mapping.epic_id!r} at {mapping.worktree_path!r}")
+        return _MappingIssueLookup(issue=None, source="skip-non-bead")
+
+    issue = try_show_issue(mapping.epic_id, beads_root=beads_root, cwd=repo_root)
+    if issue is not None:
+        return _MappingIssueLookup(issue=issue, source="direct-bd-show")
+    return _MappingIssueLookup(issue=None, source="unresolved")
+
+
 def _cleanup_override_labels(labels: set[str]) -> set[str]:
     return {label for label in labels if label in ABANDONED_EPIC_CLEANUP_LABELS}
 
@@ -44,17 +212,31 @@ def collect_resolved_epic_artifacts(
     meta_dir = worktrees.worktrees_root(project_dir) / worktrees.METADATA_DIRNAME
     if not meta_dir.exists():
         return actions
+    lookup_index = _build_mapping_issue_lookup_index(
+        project_dir=project_dir,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
     default_branch = git.git_default_branch(repo_root, git_path=git_path) or ""
     for path in meta_dir.glob("*.json"):
         mapping = worktrees.load_mapping(path)
         if not mapping:
             continue
-        epic_id = mapping.epic_id
-        if not epic_id:
+        mapping_epic_id = mapping.epic_id
+        if not mapping_epic_id:
             continue
-        epic = try_show_issue(epic_id, beads_root=beads_root, cwd=repo_root)
+        lookup = _resolve_mapping_issue(
+            mapping=mapping,
+            index=lookup_index,
+            project_dir=project_dir,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        epic = lookup.issue
         if not epic:
             continue
+        epic_id_raw = epic.get("id")
+        epic_id = epic_id_raw.strip() if isinstance(epic_id_raw, str) else mapping_epic_id
         status = str(epic.get("status") or "").strip().lower()
         if status not in {"closed", "done"}:
             continue
@@ -435,6 +617,11 @@ def collect_orphan_worktrees(
     meta_dir = worktrees.worktrees_root(project_dir) / worktrees.METADATA_DIRNAME
     if not meta_dir.exists():
         return actions
+    lookup_index = _build_mapping_issue_lookup_index(
+        project_dir=project_dir,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
     for path in meta_dir.glob("*.json"):
         mapping = worktrees.load_mapping(path)
         if not mapping:
@@ -442,8 +629,16 @@ def collect_orphan_worktrees(
         epic_id = mapping.epic_id
         if not epic_id:
             continue
-        epic = try_show_issue(epic_id, beads_root=beads_root, cwd=repo_root)
-        if epic is not None:
+        lookup = _resolve_mapping_issue(
+            mapping=mapping,
+            index=lookup_index,
+            project_dir=project_dir,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        if lookup.issue is not None:
+            continue
+        if lookup.source == "skip-non-bead":
             continue
         description = f"Remove orphaned worktree for epic {epic_id}"
 

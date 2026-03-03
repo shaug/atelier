@@ -52,6 +52,8 @@ def test_collect_resolved_epic_artifacts_prunes_worktrees_and_branches() -> None
         commands: list[list[str]] = []
 
         with (
+            patch("atelier.beads.list_epics", return_value=[epic_issue]),
+            patch("atelier.beads.list_descendant_changesets", return_value=[]),
             patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
             patch(
                 "atelier.beads.epic_changeset_summary",
@@ -130,6 +132,8 @@ def test_collect_resolved_epic_artifacts_skips_when_not_integrated() -> None:
         }
 
         with (
+            patch("atelier.beads.list_epics", return_value=[epic_issue]),
+            patch("atelier.beads.list_descendant_changesets", return_value=[]),
             patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
             patch(
                 "atelier.beads.epic_changeset_summary",
@@ -198,6 +202,8 @@ def test_collect_resolved_epic_artifacts_allows_explicit_abandoned_cleanup() -> 
         }
 
         with (
+            patch("atelier.beads.list_epics", return_value=[epic_issue]),
+            patch("atelier.beads.list_descendant_changesets", return_value=[]),
             patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
             patch("atelier.git.git_default_branch", return_value="main"),
             patch(
@@ -266,6 +272,8 @@ def test_collect_resolved_epic_artifacts_reports_drift_for_closed_merged_state()
         }
 
         with (
+            patch("atelier.beads.list_epics", return_value=[epic_issue]),
+            patch("atelier.beads.list_descendant_changesets", return_value=[]),
             patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
             patch("atelier.git.git_default_branch", return_value="main"),
             patch(
@@ -333,6 +341,11 @@ def test_collect_resolved_epic_artifacts_continues_when_mapping_epic_missing() -
             "refs/heads/feat/closed",
             "refs/remotes/origin/feat/closed",
         }
+        closed_epic_issue = {
+            "id": closed_epic_id,
+            "status": "closed",
+            "description": "workspace.parent_branch: main\n",
+        }
 
         def fake_bd_show(
             args: list[str],
@@ -365,6 +378,8 @@ def test_collect_resolved_epic_artifacts_continues_when_mapping_epic_missing() -
             raise AssertionError(f"unexpected issue lookup: {args[1]}")
 
         with (
+            patch("atelier.beads.list_epics", return_value=[closed_epic_issue]),
+            patch("atelier.beads.list_descendant_changesets", return_value=[]),
             patch("atelier.gc.common.beads.run_bd_command", side_effect=fake_bd_show),
             patch("atelier.git.git_default_branch", return_value="main"),
             patch(
@@ -386,6 +401,90 @@ def test_collect_resolved_epic_artifacts_continues_when_mapping_epic_missing() -
 
         assert len(actions) == 1
         assert actions[0].description == "Prune resolved epic artifacts for at-closed"
+
+
+def test_collect_orphan_worktrees_resolves_prefix_migrated_mapping_by_metadata() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        mapping_path = worktrees.mapping_path(project_dir, "at-legacy")
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_path,
+            worktrees.WorktreeMapping(
+                epic_id="at-legacy",
+                worktree_path="worktrees/gs-new",
+                root_branch="feat/gs-new",
+                changesets={},
+                changeset_worktrees={},
+            ),
+        )
+        resolved_epic = {
+            "id": "gs-new",
+            "status": "in_progress",
+            "description": (
+                "workspace.root_branch: feat/gs-new\nworktree_path: worktrees/gs-new\n"
+            ),
+            "labels": ["at:epic", "workspace:feat/gs-new"],
+        }
+
+        with (
+            patch("atelier.beads.list_epics", return_value=[resolved_epic]),
+            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch(
+                "atelier.gc.worktrees.try_show_issue",
+                side_effect=AssertionError("direct lookup should not be used for migrated mapping"),
+            ),
+        ):
+            actions = gc_worktrees.collect_orphan_worktrees(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+            )
+
+        assert actions == []
+
+
+def test_collect_orphan_worktrees_skips_non_bead_planner_mapping() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        mapping_path = worktrees.mapping_path(project_dir, "planner-codex")
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_path,
+            worktrees.WorktreeMapping(
+                epic_id="planner-codex",
+                worktree_path="worktrees/planner-codex",
+                root_branch="main-planner-codex",
+                changesets={},
+                changeset_worktrees={},
+            ),
+        )
+
+        with (
+            patch("atelier.beads.list_epics", return_value=[]),
+            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch(
+                "atelier.gc.worktrees.try_show_issue",
+                side_effect=AssertionError("non-bead planner mapping should skip direct lookup"),
+            ),
+        ):
+            actions = gc_worktrees.collect_orphan_worktrees(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+            )
+
+        assert actions == []
 
 
 def test_collect_closed_workspace_branches_without_mapping_prunes_integrated_root() -> None:
