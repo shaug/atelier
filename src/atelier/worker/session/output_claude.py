@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from .output_contract import AdapterOutput, RenderEvent, RenderEventKind
+
 # Event types that carry assistant text for preview (session format)
 _ASSISTANT_PREVIEW_TYPES = frozenset({"assistant", "message"})
 # Event types that carry stream-format text deltas
@@ -140,4 +142,111 @@ def extract_error_message(event: ClaudeEvent) -> str | None:
     text = extract_preview_text(event)
     if text and ("error" in (event.type or "").lower() or "failed" in (event.type or "").lower()):
         return text
+    return None
+
+
+def extract_tool_activity(event: ClaudeEvent) -> tuple[RenderEventKind, str] | None:
+    """Extract normalized tool or command activity from a Claude event."""
+    candidates = _tool_candidates(event)
+    for candidate in candidates:
+        name = candidate.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        name = name.strip()
+        tool_input = candidate.get("input")
+        command = _extract_command_from_tool_input(tool_input)
+        if command is not None:
+            return RenderEventKind.COMMAND, command
+        return RenderEventKind.TOOL, name
+    return None
+
+
+def extract_reasoning_activity(event: ClaudeEvent) -> str | None:
+    """Extract concise reasoning text from Claude thinking content blocks."""
+    if event.message is None:
+        return None
+    content = event.message.get("content")
+    if not isinstance(content, list):
+        return None
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        block_type = str(block.get("type") or "").lower()
+        if block_type != "thinking":
+            continue
+        thinking = block.get("thinking")
+        if isinstance(thinking, str) and thinking.strip():
+            return " ".join(thinking.split())
+    return None
+
+
+def adapt_claude_line(line: str) -> AdapterOutput | None:
+    """Adapt one Claude JSONL line to the shared render-event contract."""
+    event = parse_claude_event(line)
+    if event is None:
+        return None
+
+    events: list[RenderEvent] = []
+    tool_activity = extract_tool_activity(event)
+    if tool_activity is not None:
+        kind, text = tool_activity
+        events.append(RenderEvent(kind=kind, text=text))
+    reasoning_activity = extract_reasoning_activity(event)
+    if reasoning_activity:
+        events.append(RenderEvent(kind=RenderEventKind.REASONING, text=reasoning_activity))
+    diagnostic = extract_error_message(event)
+    if diagnostic:
+        events.append(RenderEvent(kind=RenderEventKind.ERROR, text=diagnostic))
+
+    return AdapterOutput(
+        consumed=True,
+        structured=True,
+        tool_event=is_tool_event(event),
+        events=tuple(events),
+        preview=extract_preview_text(event),
+        diagnostic=diagnostic,
+    )
+
+
+def _tool_candidates(event: ClaudeEvent) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    if event.message is not None:
+        content = event.message.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                block_type = str(block.get("type") or "").lower()
+                if block_type == "tool_use":
+                    candidates.append(block)
+    event_type = str(event.type or "").lower()
+    if event_type in _TOOL_EVENT_TYPES:
+        candidate: dict[str, Any] = {}
+        event_name = getattr(event, "name", None)
+        event_input = getattr(event, "input", None)
+        if isinstance(event_name, str) and event_name.strip():
+            candidate["name"] = event_name
+        if event_input is not None:
+            candidate["input"] = event_input
+        if isinstance(event.message, dict):
+            if candidate.get("name") is None:
+                candidate["name"] = event.message.get("name")
+            if candidate.get("input") is None:
+                candidate["input"] = event.message.get("input")
+        if isinstance(event.delta, dict):
+            if candidate.get("name") is None:
+                candidate["name"] = event.delta.get("name")
+            if candidate.get("input") is None:
+                candidate["input"] = event.delta.get("input")
+        if candidate.get("name") is not None:
+            candidates.append(candidate)
+    return candidates
+
+
+def _extract_command_from_tool_input(tool_input: object) -> str | None:
+    if not isinstance(tool_input, dict):
+        return None
+    command = tool_input.get("command")
+    if isinstance(command, str) and command.strip():
+        return " ".join(command.split())
     return None

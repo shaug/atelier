@@ -5,8 +5,10 @@ from __future__ import annotations
 from atelier.worker.session import output_claude, output_codex
 from atelier.worker.session.output import (
     AgentOutputCapture,
+    render_live_event,
     trace_output_requested,
 )
+from atelier.worker.session.output_contract import RenderEventKind
 
 # ---------------------------------------------------------------------------
 # _parse_claude_event
@@ -223,6 +225,35 @@ def test_extract_error_message_no_error_returns_none() -> None:
     """Event without error returns None."""
     event = output_claude.ClaudeEvent(type="assistant", message=None)
     assert output_claude.extract_error_message(event) is None
+
+
+def test_extract_claude_tool_activity_command_from_tool_use_block() -> None:
+    """Bash tool_use blocks normalize to command activity."""
+    event = output_claude.ClaudeEvent(
+        type="assistant",
+        message={
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "Bash",
+                    "input": {"command": "bash -lc git status --short"},
+                }
+            ]
+        },
+    )
+    assert output_claude.extract_tool_activity(event) == (
+        output_claude.RenderEventKind.COMMAND,
+        "bash -lc git status --short",
+    )
+
+
+def test_extract_claude_reasoning_activity_from_thinking_block() -> None:
+    """Thinking blocks expose normalized reasoning activity."""
+    event = output_claude.ClaudeEvent(
+        type="assistant",
+        message={"content": [{"type": "thinking", "thinking": "Reviewing code paths now."}]},
+    )
+    assert output_claude.extract_reasoning_activity(event) == "Reviewing code paths now."
 
 
 # ---------------------------------------------------------------------------
@@ -516,3 +547,85 @@ def test_agent_output_capture_codex_fixture(
     assert "events=" in summary[0]
     assert "tools=" in summary[0]
     assert any("Assistant preview:" in line for line in summary)
+
+
+def test_agent_output_capture_fallback_classifies_reasoning_command_result_and_error() -> None:
+    """Plain-text fallback emits normalized render events for non-JSON agents."""
+    capture = AgentOutputCapture(agent_name="gemini")
+    capture.feed_stdout_line("Reasoning: inspect current renderer pipeline")
+    capture.feed_stdout_line("$ git status --short")
+    capture.feed_stdout_line("Result: patched output contract")
+    capture.feed_stderr_line("Error: command failed with exit code 1")
+
+    _cursor, events = capture.render_events_since()
+    rendered = [render_live_event(event) for event in events]
+    assert "• Reasoning: inspect current renderer pipeline" in rendered
+    assert "• Command: git status --short" in rendered
+    assert "• Result: patched output contract" in rendered
+    assert "• Error: Error: command failed with exit code 1" in rendered
+
+    summary = capture.render_summary_lines(failed=True)
+    assert "Agent output (gemini): failed; meaningful=" in summary[0]
+    assert any("command failed with exit code 1" in line for line in summary)
+
+
+def test_agent_output_capture_fallback_does_not_treat_markdown_heading_as_command() -> None:
+    """Fallback mode should not classify markdown headings as command events."""
+    capture = AgentOutputCapture(agent_name="gemini")
+    capture.feed_stdout_line("# Summary")
+
+    _cursor, events = capture.render_events_since()
+    assert not any(event.kind is RenderEventKind.COMMAND for event in events)
+
+    summary = capture.render_summary_lines(failed=False)
+    assert any("# Summary" in line for line in summary)
+
+
+def test_agent_output_capture_fallback_stderr_progress_is_not_error_event() -> None:
+    """Fallback mode should classify stderr as error only on explicit failure signals."""
+    capture = AgentOutputCapture(agent_name="gemini")
+    capture.feed_stderr_line("Downloading dependency index...")
+
+    _cursor, events = capture.render_events_since()
+    assert not any(event.kind is RenderEventKind.ERROR for event in events)
+
+    summary = capture.render_summary_lines(failed=True)
+    assert any("Downloading dependency index..." in line for line in summary)
+    assert not any("Diagnostic:" in line for line in summary)
+
+
+def test_cross_agent_contract_renders_equivalent_reasoning_and_command_lines() -> None:
+    """Codex, Claude, and fallback adapters share one rendered event style."""
+    codex_capture = AgentOutputCapture(agent_name="codex")
+    codex_capture.feed_stdout_line(
+        '{"type":"item.completed","item":{"type":"reasoning","text":"Assessing scope"}}'
+    )
+    codex_capture.feed_stdout_line(
+        '{"type":"item.completed","item":{"type":"command_execution","command":"bash -lc git status --short"}}'
+    )
+
+    claude_capture = AgentOutputCapture(agent_name="claude")
+    claude_capture.feed_stdout_line(
+        '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Assessing scope"},'
+        '{"type":"tool_use","name":"Bash","input":{"command":"bash -lc git status --short"}}]}}'
+    )
+
+    fallback_capture = AgentOutputCapture(agent_name="gemini")
+    fallback_capture.feed_stdout_line("Reasoning: Assessing scope")
+    fallback_capture.feed_stdout_line("$ bash -lc git status --short")
+
+    _codex_cursor, codex_events = codex_capture.render_events_since()
+    _claude_cursor, claude_events = claude_capture.render_events_since()
+    _fallback_cursor, fallback_events = fallback_capture.render_events_since()
+
+    codex_lines = [render_live_event(event) for event in codex_events]
+    claude_lines = [render_live_event(event) for event in claude_events]
+    fallback_lines = [render_live_event(event) for event in fallback_events]
+
+    expected = {
+        "• Reasoning: Assessing scope",
+        "• Command: bash -lc git status --short",
+    }
+    assert expected.issubset(set(codex_lines))
+    assert expected.issubset(set(claude_lines))
+    assert expected.issubset(set(fallback_lines))

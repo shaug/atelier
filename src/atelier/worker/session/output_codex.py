@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from .output_contract import AdapterOutput, RenderEvent, RenderEventKind
+
 # Codex item types that represent tool/command execution
 _CODEX_TOOL_ITEM_TYPES = frozenset(
     {"command_execution", "mcp_tool_call", "web_search", "file_change"}
@@ -142,11 +144,51 @@ def extract_reasoning_activity(event: CodexEvent) -> str | None:
     return _clip_reasoning(" ".join(text.split()))
 
 
+def adapt_codex_line(line: str) -> AdapterOutput | None:
+    """Adapt one Codex JSONL line to the shared render-event contract."""
+    event = parse_codex_event(line)
+    if event is None:
+        return None
+
+    events: list[RenderEvent] = []
+    tool_activity = extract_tool_activity(event)
+    if tool_activity:
+        kind, text = _render_event_from_tool_activity(tool_activity)
+        events.append(RenderEvent(kind=kind, text=text))
+    reasoning_activity = extract_reasoning_activity(event)
+    if reasoning_activity:
+        events.append(RenderEvent(kind=RenderEventKind.REASONING, text=reasoning_activity))
+    diagnostic = extract_error_message(event)
+    if diagnostic:
+        events.append(RenderEvent(kind=RenderEventKind.ERROR, text=diagnostic))
+
+    return AdapterOutput(
+        consumed=True,
+        structured=True,
+        tool_event=is_tool_event(event),
+        events=tuple(events),
+        preview=extract_preview_text(event),
+        diagnostic=diagnostic,
+    )
+
+
 def _first_string(*values: object) -> str | None:
     for value in values:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _render_event_from_tool_activity(activity: str) -> tuple[RenderEventKind, str]:
+    if activity.startswith("command: "):
+        return RenderEventKind.COMMAND, activity.removeprefix("command: ")
+    if activity.startswith("tool: "):
+        return RenderEventKind.TOOL, activity.removeprefix("tool: ")
+    if activity.startswith("search: "):
+        return RenderEventKind.TOOL, activity.removeprefix("search: ")
+    if activity.startswith("file: "):
+        return RenderEventKind.TOOL, activity.removeprefix("file: ")
+    return RenderEventKind.TOOL, activity
 
 
 def _clip_activity(value: str) -> str:
