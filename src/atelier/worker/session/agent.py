@@ -28,7 +28,6 @@ from ... import (
 )
 from . import output as session_output
 
-_STRUCTURED_TOOL_PROGRESS_INTERVAL = 10
 _STRUCTURED_LIVE_PREVIEW_CHARS = 140
 _STRUCTURED_REASONING_EMIT_LIMIT = 4
 _STREAM_CAPTURE_TAIL_MAX_LINES = 256
@@ -55,16 +54,13 @@ class AgentSessionRunResult:
 
 @dataclass
 class _StructuredLiveProgress:
-    """Track low-noise progress signals while structured events stream."""
+    """Track low-noise progress signals while output events stream."""
 
     label: str
-    show_tool_activity: bool = False
-    show_reasoning_activity: bool = False
-    seen_structured: bool = False
-    next_tool_threshold: int = _STRUCTURED_TOOL_PROGRESS_INTERVAL
+    stream_connected: bool = False
     preview_emitted: bool = False
-    last_tool_activity_seq: int = 0
-    last_reasoning_activity_seq: int = 0
+    last_event_seq: int = 0
+    emitted_reasoning_lines: int = 0
 
 
 @dataclass(frozen=True)
@@ -133,22 +129,22 @@ def _emit_structured_live_progress(
     progress: _StructuredLiveProgress,
     session_control: AgentSessionControl,
 ) -> None:
-    """Render low-noise live progress lines for structured JSON streams."""
-    if not progress.seen_structured and capture.structured_event_count > 0:
-        progress.seen_structured = True
+    """Render low-noise live progress lines for normalized output events."""
+    if not progress.stream_connected and capture.raw_line_count > 0:
+        progress.stream_connected = True
         session_control.say(_format_stream_connected_line(progress.label))
 
-    if progress.show_tool_activity:
-        tool_activity = capture.latest_tool_activity()
-        if tool_activity is not None:
-            tool_seq, activity = tool_activity
-            if tool_seq > progress.last_tool_activity_seq:
-                progress.last_tool_activity_seq = tool_seq
-                session_control.say(_format_tool_activity_line(progress.label, activity))
-    elif capture.tool_event_count >= progress.next_tool_threshold:
-        session_control.say(f"{progress.label} progress: tool events={capture.tool_event_count}")
-        while capture.tool_event_count >= progress.next_tool_threshold:
-            progress.next_tool_threshold += _STRUCTURED_TOOL_PROGRESS_INTERVAL
+    next_cursor, events = capture.render_events_since(after_seq=progress.last_event_seq)
+    for event in events:
+        if (
+            event.kind == session_output.RenderEventKind.REASONING
+            and progress.emitted_reasoning_lines >= _STRUCTURED_REASONING_EMIT_LIMIT
+        ):
+            continue
+        if event.kind == session_output.RenderEventKind.REASONING:
+            progress.emitted_reasoning_lines += 1
+        session_control.say(session_output.render_live_event(event))
+    progress.last_event_seq = next_cursor
 
     if not progress.preview_emitted:
         preview = capture.assistant_preview_text(max_chars=_STRUCTURED_LIVE_PREVIEW_CHARS)
@@ -156,52 +152,16 @@ def _emit_structured_live_progress(
             progress.preview_emitted = True
             session_control.say(_format_preview_line(progress.label, preview))
 
-    if not progress.show_reasoning_activity:
-        return
-    reasoning_activity = capture.latest_reasoning_activity()
-    if reasoning_activity is None:
-        return
-    reasoning_seq, reasoning = reasoning_activity
-    if reasoning_seq <= progress.last_reasoning_activity_seq:
-        return
-    progress.last_reasoning_activity_seq = reasoning_seq
-    session_control.say(_format_reasoning_line(progress.label, reasoning))
-
 
 def _format_stream_connected_line(label: str) -> str:
     """Render a stream-connected progress line."""
-    if label.lower() == "codex":
-        return "• Codex stream connected"
-    return f"{label} stream: receiving structured events."
+    return f"• {label} stream connected"
 
 
 def _format_preview_line(label: str, preview: str) -> str:
     """Render a preview progress line."""
-    if label.lower() == "codex":
-        return f"• Preview: {preview}"
-    return f"{label} preview: {preview}"
-
-
-def _format_reasoning_line(label: str, reasoning: str) -> str:
-    """Render a reasoning progress line."""
-    if label.lower() == "codex":
-        return f"• Reasoning: {reasoning}"
-    return f"{label} reasoning: {reasoning}"
-
-
-def _format_tool_activity_line(label: str, activity: str) -> str:
-    """Render a tool-activity progress line."""
-    if label.lower() != "codex":
-        return f"{label} tool: {activity}"
-    if activity.startswith("command: "):
-        return f"• Ran {activity.removeprefix('command: ')}"
-    if activity.startswith("tool: "):
-        return f"• Tool: {activity.removeprefix('tool: ')}"
-    if activity.startswith("search: "):
-        return f"• Search: {activity.removeprefix('search: ')}"
-    if activity.startswith("file: "):
-        return f"• File: {activity.removeprefix('file: ')}"
-    return f"• Tool: {activity}"
+    del label
+    return f"• Preview: {preview}"
 
 
 def _consume_stream_chunk(
@@ -536,27 +496,30 @@ def start_agent_session(
     returncode = 0
     trace_agent_output = session_output.trace_output_requested(env)
     output_capture = session_output.AgentOutputCapture(agent_name=agent_spec.name)
-    if agent_spec.name in {"codex", "claude"} and not trace_agent_output:
-        live_progress = _StructuredLiveProgress(
-            label=agent_spec.display_name,
-            show_tool_activity=agent_spec.name == "codex",
-            show_reasoning_activity=agent_spec.name == "codex",
-        )
+    if not trace_agent_output:
+        live_progress = _StructuredLiveProgress(label=agent_spec.display_name)
 
-        def _handle_structured_output_line(raw_line: str) -> None:
-            output_capture.feed_stdout_line(raw_line)
+        def _emit_live_progress() -> None:
             _emit_structured_live_progress(
                 capture=output_capture,
                 progress=live_progress,
                 session_control=session_control,
             )
 
+        def _handle_stdout_line(raw_line: str) -> None:
+            output_capture.feed_stdout_line(raw_line)
+            _emit_live_progress()
+
+        def _handle_stderr_line(raw_line: str) -> None:
+            output_capture.feed_stderr_line(raw_line)
+            _emit_live_progress()
+
         result = _run_streaming_capture_command(
             cmd=start_cmd,
             cwd=start_cwd,
             env=env,
-            stdout_line_handler=_handle_structured_output_line,
-            stderr_line_handler=output_capture.feed_stderr_line,
+            stdout_line_handler=_handle_stdout_line,
+            stderr_line_handler=_handle_stderr_line,
         )
         if result is None:
             blocked_handler.mark_changeset_blocked(f"missing required command: {start_cmd[0]}")

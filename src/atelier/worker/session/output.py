@@ -1,4 +1,4 @@
-"""Structured capture and concise rendering for worker agent output."""
+"""Structured capture and shared rendering for worker agent output."""
 
 from __future__ import annotations
 
@@ -8,7 +8,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from ... import codex
-from . import output_claude, output_codex
+from . import output_claude, output_codex, output_fallback
+from .output_contract import (
+    AdapterOutput,
+    RenderEvent,
+    RenderEventKind,
+    event_summary_snippet,
+    normalize_render_text,
+    render_event_line,
+)
 
 _TRUTHY_VALUES = {"1", "true", "yes", "on"}
 _DIFF_MARKERS = ("diff --git ", "@@ ", "+++ ", "--- ", "```diff")
@@ -25,11 +33,12 @@ _ERROR_LINE_RE = re.compile(r"\b(error|failed|exception|traceback)\b", re.IGNORE
 _MAX_SNIPPETS = 4
 _MAX_TAIL = 24
 _MAX_PREVIEW_CHARS = 280
+_MAX_RENDER_EVENTS = 96
 
 
 @dataclass
 class AgentOutputCapture:
-    """Capture agent output and synthesize concise, deterministic summaries."""
+    """Capture output and emit normalized render events across agent adapters."""
 
     agent_name: str
     raw_line_count: int = 0
@@ -46,6 +55,11 @@ class AgentOutputCapture:
     _latest_tool_activity: str = ""
     _reasoning_activity_seq: int = 0
     _latest_reasoning_activity: str = ""
+    _render_event_seq: int = 0
+    _render_events: deque[tuple[int, RenderEvent]] = field(
+        default_factory=lambda: deque(maxlen=_MAX_RENDER_EVENTS)
+    )
+    _last_render_text_by_kind: dict[RenderEventKind, str] = field(default_factory=dict)
 
     def feed_stdout_line(self, raw_line: str) -> None:
         """Consume one stdout line from the agent process."""
@@ -68,10 +82,8 @@ class AgentOutputCapture:
     def render_summary_lines(self, *, failed: bool) -> list[str]:
         """Render deterministic output summary lines for worker thread logs."""
         label = self.agent_name.strip() or "agent"
-        if label == "claude" and self.structured_event_count > 0:
-            return self._render_structured_summary(label="claude", failed=failed)
-        if label == "codex" and self.structured_event_count > 0:
-            return self._render_structured_summary(label="codex", failed=failed)
+        if self.structured_event_count > 0:
+            return self._render_structured_summary(label=label, failed=failed)
         return self._render_text_summary(label=label, failed=failed)
 
     def assistant_preview_text(self, *, max_chars: int | None = None) -> str | None:
@@ -89,18 +101,29 @@ class AgentOutputCapture:
         return f"{clipped}..."
 
     def latest_tool_activity(self) -> tuple[int, str] | None:
-        """Return the most recently captured tool activity marker."""
+        """Return the most recently captured tool/command marker."""
         activity = self._latest_tool_activity.strip()
         if not activity:
             return None
         return self._tool_activity_seq, activity
 
     def latest_reasoning_activity(self) -> tuple[int, str] | None:
-        """Return the most recently captured reasoning activity marker."""
+        """Return the most recently captured reasoning marker."""
         activity = self._latest_reasoning_activity.strip()
         if not activity:
             return None
         return self._reasoning_activity_seq, activity
+
+    def render_events_since(self, *, after_seq: int = 0) -> tuple[int, tuple[RenderEvent, ...]]:
+        """Return normalized render events after a given sequence cursor."""
+        cursor = after_seq
+        events: list[RenderEvent] = []
+        for sequence, event in self._render_events:
+            if sequence <= after_seq:
+                continue
+            cursor = sequence
+            events.append(event)
+        return cursor, tuple(events)
 
     def _feed_line(self, raw_line: str, *, source: str) -> None:
         line = _normalize_line(raw_line)
@@ -108,10 +131,13 @@ class AgentOutputCapture:
             return
         self.raw_line_count += 1
         self._tail.append(line)
-        if self.agent_name == "claude" and self._consume_claude_event(line):
-            return
-        if self.agent_name == "codex" and self._consume_codex_event(line):
-            return
+
+        adapted = self._adapt_line(line, source=source)
+        if adapted is not None:
+            self._consume_adapter_output(adapted)
+            if adapted.consumed:
+                return
+
         seen_count = self._seen_lines.get(line, 0)
         self._seen_lines[line] = seen_count + 1
         if seen_count >= 2:
@@ -125,49 +151,64 @@ class AgentOutputCapture:
             return
         self._append_unique(self._actionable, line)
 
-    def _consume_claude_event(self, line: str) -> bool:
-        """Parse and consume a Claude JSON event; return True if consumed."""
-        event = output_claude.parse_claude_event(line)
-        if event is None:
-            return False
-        self.structured_event_count += 1
-        if output_claude.is_tool_event(event):
-            self.tool_event_count += 1
-        err_msg = output_claude.extract_error_message(event)
-        if err_msg:
-            self._append_unique(self._diagnostics, err_msg)
-        preview = output_claude.extract_preview_text(event)
-        if preview:
-            self._assistant_char_count += len(preview)
-            if len(self._assistant_preview) < _MAX_PREVIEW_CHARS:
-                self._append_assistant_preview(preview)
-        return True
+    def _adapt_line(self, line: str, *, source: str) -> AdapterOutput | None:
+        label = self.agent_name.strip().lower()
+        if label == "claude":
+            adapted = output_claude.adapt_claude_line(line)
+            if adapted is not None:
+                return adapted
+        if label == "codex":
+            adapted = output_codex.adapt_codex_line(line)
+            if adapted is not None:
+                return adapted
+        return output_fallback.adapt_plain_text_line(line, source=source)
 
-    def _consume_codex_event(self, line: str) -> bool:
-        """Parse and consume a Codex JSON event; return True if consumed."""
-        event = output_codex.parse_codex_event(line)
-        if event is None:
-            return False
-        self.structured_event_count += 1
-        if output_codex.is_tool_event(event):
+    def _consume_adapter_output(self, adapted: AdapterOutput) -> None:
+        if adapted.structured:
+            self.structured_event_count += 1
+        if adapted.tool_event:
             self.tool_event_count += 1
-            tool_activity = output_codex.extract_tool_activity(event)
-            if tool_activity and tool_activity != self._latest_tool_activity:
-                self._tool_activity_seq += 1
-                self._latest_tool_activity = tool_activity
-        err_msg = output_codex.extract_error_message(event)
-        if err_msg:
-            self._append_unique(self._diagnostics, err_msg)
-        preview = output_codex.extract_preview_text(event)
-        if preview:
-            self._assistant_char_count += len(preview)
+        if adapted.diagnostic:
+            self._append_unique(self._diagnostics, adapted.diagnostic)
+        if adapted.preview:
+            self._assistant_char_count += len(adapted.preview)
             if len(self._assistant_preview) < _MAX_PREVIEW_CHARS:
-                self._append_assistant_preview(preview)
-        reasoning_activity = output_codex.extract_reasoning_activity(event)
-        if reasoning_activity and reasoning_activity != self._latest_reasoning_activity:
+                self._append_assistant_preview(adapted.preview)
+        for event in adapted.events:
+            self._record_render_event(event)
+
+    def _record_render_event(self, event: RenderEvent) -> None:
+        text = normalize_render_text(event.text)
+        if not text:
+            return
+        if self._last_render_text_by_kind.get(event.kind) == text:
+            return
+        normalized_event = RenderEvent(kind=event.kind, text=text)
+        self._last_render_text_by_kind[event.kind] = text
+        self._render_event_seq += 1
+        self._render_events.append((self._render_event_seq, normalized_event))
+
+        if event.kind == RenderEventKind.REASONING:
             self._reasoning_activity_seq += 1
-            self._latest_reasoning_activity = reasoning_activity
-        return True
+            self._latest_reasoning_activity = text
+            self._append_unique(self._actionable, event_summary_snippet(normalized_event))
+            return
+        if event.kind == RenderEventKind.COMMAND:
+            self._tool_activity_seq += 1
+            self._latest_tool_activity = f"command: {text}"
+            self._append_unique(self._actionable, event_summary_snippet(normalized_event))
+            return
+        if event.kind == RenderEventKind.TOOL:
+            self._tool_activity_seq += 1
+            self._latest_tool_activity = f"tool: {text}"
+            self._append_unique(self._actionable, event_summary_snippet(normalized_event))
+            return
+        if event.kind == RenderEventKind.RESULT:
+            self._append_unique(self._actionable, event_summary_snippet(normalized_event))
+            return
+        if event.kind == RenderEventKind.ERROR:
+            self._append_unique(self._diagnostics, text)
+            return
 
     def _append_assistant_preview(self, message: str) -> None:
         remaining = _MAX_PREVIEW_CHARS - len(self._assistant_preview)
@@ -240,6 +281,11 @@ def trace_output_requested(env: Mapping[str, str] | None) -> bool:
         if value in _TRUTHY_VALUES:
             return True
     return False
+
+
+def render_live_event(event: RenderEvent) -> str:
+    """Render a normalized live-progress line for one adapter event."""
+    return render_event_line(event)
 
 
 def _normalize_line(raw_line: str) -> str:
