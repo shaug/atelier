@@ -33,6 +33,7 @@ _STRUCTURED_LIVE_PREVIEW_CHARS = 140
 _STRUCTURED_REASONING_EMIT_LIMIT = 4
 _STREAM_CAPTURE_TAIL_MAX_LINES = 256
 _STREAM_CAPTURE_TAIL_MAX_CHARS = 64 * 1024
+_STREAM_CAPTURE_PENDING_MAX_CHARS = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -220,6 +221,8 @@ def _consume_stream_chunk(
         target.append(line)
         if line_handler is not None:
             line_handler(line)
+    if len(buffer) > _STREAM_CAPTURE_PENDING_MAX_CHARS:
+        buffer = buffer[-_STREAM_CAPTURE_PENDING_MAX_CHARS:]
     return buffer
 
 

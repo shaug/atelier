@@ -620,6 +620,36 @@ def test_consume_stream_chunk_flushes_split_lines_deterministically() -> None:
     ]
 
 
+def test_consume_stream_chunk_caps_pending_without_newlines() -> None:
+    captured: list[str] = []
+    handled: list[str] = []
+    max_pending = session_agent._STREAM_CAPTURE_PENDING_MAX_CHARS
+    source = "".join(str(i % 10) for i in range(max_pending + 128))
+
+    pending = session_agent._consume_stream_chunk(
+        chunk=source.encode(),
+        pending="",
+        target=captured,
+        line_handler=handled.append,
+    )
+
+    assert captured == []
+    assert handled == []
+    assert len(pending) == max_pending
+    assert pending == source[-max_pending:]
+
+    pending = session_agent._consume_stream_chunk(
+        chunk=b"\n",
+        pending=pending,
+        target=captured,
+        line_handler=handled.append,
+    )
+
+    assert pending == ""
+    assert captured == [source[-max_pending:]]
+    assert handled == [source[-max_pending:]]
+
+
 class _RealCommandOps:
     """Command ops using actual worker helpers (for integration-style tests)."""
 
