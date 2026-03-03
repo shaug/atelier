@@ -170,3 +170,16 @@ def test_resolve_runtime_repo_dir_hint_warns_on_legacy_atelier_project_fallback(
     assert warning is not None
     assert "ATELIER_PROJECT" in warning
     assert "2026-07-01" in warning
+
+
+def test_resolve_runtime_repo_dir_hint_warns_on_legacy_workspace_dir_fallback() -> None:
+    hint, warning = beads_context.resolve_runtime_repo_dir_hint(
+        repo_dir=None,
+        cwd=Path("/tmp"),
+        env={"ATELIER_WORKSPACE_DIR": "/repo/from-workspace-dir"},
+    )
+
+    assert hint == "/repo/from-workspace-dir"
+    assert warning is not None
+    assert "ATELIER_WORKSPACE_DIR" in warning
+    assert "2026-07-01" in warning

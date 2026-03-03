@@ -11,6 +11,7 @@ from . import config, git
 from .commands.resolve import resolve_current_project_with_repo_root, resolve_project_for_enlistment
 
 LEGACY_ATELIER_PROJECT_FALLBACK_REMOVAL_DATE = "2026-07-01"
+LEGACY_ATELIER_WORKSPACE_DIR_FALLBACK_REMOVAL_DATE = "2026-07-01"
 
 
 @dataclass(frozen=True)
@@ -68,7 +69,13 @@ def resolve_runtime_repo_dir_hint(
     runtime_env = env if env is not None else os.environ
     workspace_dir = str(runtime_env.get("ATELIER_WORKSPACE_DIR", "")).strip()
     if workspace_dir:
-        return workspace_dir, None
+        return (
+            workspace_dir,
+            "warning: deprecated runtime fallback via ATELIER_WORKSPACE_DIR; "
+            "pass --repo-dir or run from an agent home with ./worktree. Legacy "
+            "fallback compatibility is scheduled for removal after "
+            f"{LEGACY_ATELIER_WORKSPACE_DIR_FALLBACK_REMOVAL_DATE}.",
+        )
 
     project_dir = str(runtime_env.get("ATELIER_PROJECT", "")).strip()
     if project_dir:
