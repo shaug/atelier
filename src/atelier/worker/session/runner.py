@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ... import beads as beads_runtime
-from ... import changeset_fields, git, lifecycle
+from ... import changeset_fields, git, lifecycle, pr_strategy
 from ... import exec as exec_util
 from ... import root_branch as root_branch_runtime
 from ...pr_strategy import PrStrategy
@@ -33,6 +33,7 @@ _TRANSIENT_PREPARE_WORKTREES_MARKERS = (
     "resource temporarily unavailable",
     "timed out",
 )
+_FOLLOWUP_STARTUP_REASONS = frozenset({"review_feedback", "merge_conflict"})
 
 
 def _list_local_branches(*, repo_root: Path, git_path: str | None) -> tuple[str, ...]:
@@ -66,7 +67,7 @@ def _list_local_branches(*, repo_root: Path, git_path: str | None) -> tuple[str,
 def _deterministic_bead_suffix_candidates(
     *, branches: tuple[str, ...], bead_id: str
 ) -> tuple[str, ...]:
-    """Return branch names that end with ``-<bead-id>`` or ``-<bead-id>.<n>``."""
+    """Return branch names ending with ``-<bead-id>`` or ``-<bead-id>.<n>``."""
     normalized_bead_id = bead_id.strip()
     if not normalized_bead_id:
         return ()
@@ -335,6 +336,115 @@ def _format_preparation_error_detail(error: BaseException) -> str:
 def _is_transient_prepare_worktrees_error(error: BaseException) -> bool:
     detail = _format_preparation_error_detail(error).lower()
     return any(marker in detail for marker in _TRANSIENT_PREPARE_WORKTREES_MARKERS)
+
+
+def _dependency_has_work_children(
+    *,
+    beads: BeadsService,
+    dependency_id: str,
+    beads_root: Path,
+    repo_root: Path,
+) -> bool:
+    children = beads.run_bd_json(
+        ["list", "--parent", dependency_id, "--all"],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    return any(
+        lifecycle.is_work_issue(
+            labels=lifecycle.normalized_labels(child.get("labels")),
+            issue_type=lifecycle.issue_payload_type(child),
+        )
+        for child in children
+        if isinstance(child, dict)
+    )
+
+
+def _dependency_gate_ready_for_transition(
+    *,
+    dependency_ids: tuple[str, ...],
+    branch_pr_strategy: PrStrategy,
+    beads: BeadsService,
+    beads_root: Path,
+    repo_root: Path,
+) -> bool:
+    if not dependency_ids:
+        return True
+    try:
+        require_integrated = pr_strategy.normalize_pr_strategy(branch_pr_strategy) == "sequential"
+    except ValueError:
+        require_integrated = True
+    for dependency_id in dependency_ids:
+        dependency_issues = beads.run_bd_json(
+            ["show", dependency_id],
+            beads_root=beads_root,
+            cwd=repo_root,
+        )
+        if not dependency_issues:
+            return False
+        dependency_issue = dependency_issues[0]
+        dependency_labels = lifecycle.normalized_labels(dependency_issue.get("labels"))
+        has_work_children = _dependency_has_work_children(
+            beads=beads,
+            dependency_id=dependency_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        if lifecycle.dependency_issue_satisfied(
+            status=dependency_issue.get("status"),
+            labels=dependency_labels,
+            require_integrated=require_integrated,
+            review_state=changeset_fields.review_state(dependency_issue),
+            issue_type=lifecycle.issue_payload_type(dependency_issue),
+            has_work_children=has_work_children,
+        ):
+            continue
+        return False
+    return True
+
+
+@dataclass(frozen=True)
+class _StartupTransitionDecision:
+    should_transition: bool
+    note: str
+
+
+def _startup_transition_decision(
+    *,
+    issue: dict[str, object],
+    dependency_ids: tuple[str, ...],
+    startup_reason: str,
+    branch_pr_strategy: PrStrategy,
+    beads: BeadsService,
+    beads_root: Path,
+    repo_root: Path,
+) -> _StartupTransitionDecision:
+    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
+    if canonical_status == "in_progress":
+        return _StartupTransitionDecision(False, "already in progress")
+    if startup_reason not in _FOLLOWUP_STARTUP_REASONS:
+        return _StartupTransitionDecision(True, "transition required")
+    if canonical_status == "blocked":
+        return _StartupTransitionDecision(False, "follow-up keeps blocked status")
+    review_state = changeset_fields.review_state(issue)
+    if lifecycle.is_active_pr_lifecycle_state(review_state):
+        return _StartupTransitionDecision(False, "follow-up keeps active review lifecycle")
+    try:
+        dependency_ready = _dependency_gate_ready_for_transition(
+            dependency_ids=dependency_ids,
+            branch_pr_strategy=branch_pr_strategy,
+            beads=beads,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+    except SystemExit:
+        return _StartupTransitionDecision(
+            False,
+            "follow-up dependency gate unavailable (skipping status transition)",
+        )
+    if dependency_ids and not dependency_ready:
+        return _StartupTransitionDecision(False, "follow-up dependency gate still active")
+    return _StartupTransitionDecision(True, "transition required")
 
 
 @dataclass(frozen=True)
@@ -1083,14 +1193,36 @@ def run_worker_once(
         changeset_worktree_path = worktree_prep.changeset_worktree_path
         finishstep()
         finishstep = control.step("Mark changeset in progress", timings=timings, trace=trace)
+        mark_step_extra = "skipped"
         if changeset_id:
-            if dry_run:
+            transition = _startup_transition_decision(
+                issue=changeset,
+                dependency_ids=changeset_boundary.dependency_ids,
+                startup_reason=startup_result.reason,
+                branch_pr_strategy=project_config.branch.pr_strategy,
+                beads=infra.beads,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            if not transition.should_transition:
+                if dry_run:
+                    control.dry_run_log(
+                        f"Would skip in-progress transition for {changeset_id}: {transition.note}."
+                    )
+                else:
+                    control.say(
+                        f"Skipping status transition for {changeset_id}: {transition.note}."
+                    )
+                mark_step_extra = transition.note
+            elif dry_run:
                 control.dry_run_log(f"Would mark changeset {changeset_id} in progress.")
+                mark_step_extra = "dry run"
             else:
                 lifecycle.mark_changeset_in_progress(
                     changeset_id, beads_root=beads_root, repo_root=repo_root
                 )
-        finishstep()
+                mark_step_extra = "marked in progress"
+        finishstep(extra=mark_step_extra)
 
         finishstep = control.step("Prepare agent session", timings=timings, trace=trace)
         agent_prep = None
