@@ -166,6 +166,75 @@ def test_status_json_summary() -> None:
         assert epic["ownership_policy_violation"] is False
 
 
+def test_status_json_includes_prefix_migration_drift_report() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+
+        project_config = config.ProjectConfig.model_validate(
+            {"project": {"enlistment": str(repo_root), "origin": "github.com/org/repo"}}
+        )
+        epic = {
+            "id": "epic-1",
+            "title": "Epic",
+            "status": "open",
+            "labels": ["at:epic"],
+        }
+
+        def fake_run_bd_json(
+            args: list[str], *, beads_root: Path, cwd: Path
+        ) -> list[dict[str, object]]:
+            if args[:3] == ["list", "--label", "at:epic"]:
+                return [epic]
+            if args[:3] == ["list", "--label", "at:agent"]:
+                return []
+            if args[:3] == ["list", "--label", "at:message"]:
+                return []
+            if args and args[0] == "list" and "--parent" in args:
+                return []
+            if args and args[0] == "ready" and "--parent" in args:
+                return []
+            if args[:2] == ["show", "epic-1"]:
+                return [epic]
+            return []
+
+        drift_report = [
+            {
+                "epic_id": "epic-1",
+                "changeset_id": "epic-1.2",
+                "drift_class": "work-branch-conflict",
+                "values": {
+                    "metadata.changeset.work_branch": "feat/new",
+                    "mapping.work_branch": "feat/old",
+                },
+            }
+        ]
+
+        with (
+            patch(
+                "atelier.commands.status.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, str(repo_root), repo_root),
+            ),
+            patch("atelier.commands.status.beads.run_bd_command", return_value=DummyResult()),
+            patch("atelier.commands.status.beads.run_bd_json", side_effect=fake_run_bd_json),
+            patch("atelier.commands.status.worktrees.load_mapping", return_value=None),
+            patch(
+                "atelier.commands.status.prefix_migration_drift.scan_prefix_migration_drift",
+                return_value=drift_report,
+            ),
+        ):
+            buffer = io.StringIO()
+            with patch("sys.stdout", buffer):
+                status_cmd(SimpleNamespace(format="json"))
+
+        payload = json.loads(buffer.getvalue())
+        assert payload["prefix_migration_drift"] == drift_report
+        assert payload["counts"]["changesets_drifted"] == 1
+
+
 def test_status_includes_changeset_signals() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

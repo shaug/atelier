@@ -11,7 +11,17 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .. import beads, config, git, lifecycle, messages, pr_strategy, prs, worktrees
+from .. import (
+    beads,
+    config,
+    git,
+    lifecycle,
+    messages,
+    pr_strategy,
+    prefix_migration_drift,
+    prs,
+    worktrees,
+)
 from ..io import die, say
 from ..worker import selection as worker_selection
 from ..worker.finalization import pr_gate as worker_pr_gate
@@ -29,6 +39,7 @@ def status(args: object) -> None:
     project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
+    git_path = config.resolve_git_path(project_config)
 
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
 
@@ -57,6 +68,13 @@ def status(args: object) -> None:
         beads_root=beads_root,
         repo_root=repo_root,
     )
+    drift_report = prefix_migration_drift.scan_prefix_migration_drift(
+        project_data_dir=project_data_dir,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        repo_slug=repo_slug,
+        git_path=git_path,
+    )
 
     epics = sorted(
         epics,
@@ -68,6 +86,13 @@ def status(args: object) -> None:
     agents = sorted(agents, key=lambda item: str(item.get("agent_id") or ""))
 
     counts = _status_counts(epics, agents, queues)
+    counts["changesets_drifted"] = len(
+        {
+            str(record.get("changeset_id") or "")
+            for record in drift_report
+            if isinstance(record, dict) and str(record.get("changeset_id") or "")
+        }
+    )
     project_info = {
         "project_dir": str(project_root),
         "repo_root": str(repo_root),
@@ -80,6 +105,7 @@ def status(args: object) -> None:
         "epics": epics,
         "agents": agents,
         "queues": queues,
+        "prefix_migration_drift": drift_report,
     }
 
     if format_value == "json":
@@ -547,6 +573,7 @@ def _render_status(
     overview.add_row("Stale agents", _display_value(counts.get("agents_stale")))
     overview.add_row("Changesets", _display_value(counts.get("changesets")))
     overview.add_row("Ready changesets", _display_value(counts.get("changesets_ready")))
+    overview.add_row("Drifted changesets", _display_value(counts.get("changesets_drifted")))
     overview.add_row("Reclaimable epics", _display_value(counts.get("epics_reclaimable")))
     overview.add_row(
         "Ownership violations",
