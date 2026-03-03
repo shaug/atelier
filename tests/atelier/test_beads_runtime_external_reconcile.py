@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from dataclasses import dataclass, field
+from pathlib import Path
+from subprocess import CompletedProcess
 
 from atelier.beads_runtime import external_reconcile
 from atelier.external_tickets import ExternalTicketRef
@@ -17,74 +20,72 @@ class _Result:
 
 
 @dataclass
-class _Provider:
-    close_result: ExternalTicketRef | None = None
-    reopen_result: ExternalTicketRef | None = None
-
-    def close_ticket(
-        self,
-        ticket: ExternalTicketRef,
-        *,
-        comment: str | None = None,
-    ) -> ExternalTicketRef:
-        del ticket, comment
-        if self.close_result is not None:
-            return self.close_result
-        raise RuntimeError("close unavailable")
-
-    def sync_state(self, ticket: ExternalTicketRef) -> ExternalTicketRef:
-        return ticket
-
-    def reopen_ticket(
-        self,
-        ticket: ExternalTicketRef,
-        *,
-        comment: str | None = None,
-    ) -> ExternalTicketRef:
-        del ticket, comment
-        if self.reopen_result is not None:
-            return self.reopen_result
-        raise RuntimeError("reopen unavailable")
-
-
-@dataclass
-class _IssueStore:
+class _ReconcileClient:
     issue: dict[str, object] | None
     notes: list[str]
-    updated_tickets: list[ExternalTicketRef] | None = None
+    beads_root: Path = Path("/beads")
+    cwd: Path = Path("/repo")
+    commands: list[list[str]] = field(default_factory=list)
+
+    def issue_write_lock(self, issue_id: str):
+        del issue_id
+        return nullcontext()
 
     def show_issue(self, issue_id: str) -> dict[str, object] | None:
         del issue_id
-        return self.issue
+        if self.issue is None:
+            return None
+        return dict(self.issue)
 
-    def update_external_tickets(
+    def create_issue_with_body(self, args: list[str], description: str) -> str:
+        del args, description
+        raise RuntimeError("not used")
+
+    def update_issue_description(self, issue_id: str, description: str) -> None:
+        del issue_id
+        if self.issue is not None:
+            self.issue["description"] = description
+
+    def bd(
         self,
-        issue_id: str,
-        tickets: list[ExternalTicketRef],
-    ) -> dict[str, object]:
-        del issue_id
-        self.updated_tickets = list(tickets)
-        return {}
-
-    def append_external_close_note(self, issue_id: str, note: str) -> None:
-        del issue_id
-        self.notes.append(note)
-
-    def append_external_reopen_note(self, issue_id: str, note: str) -> None:
-        del issue_id
-        self.notes.append(note)
-
-
-@dataclass
-class _GithubClient:
-    provider: _Provider = field(default_factory=_Provider)
-
-    def github_repo_from_ticket_url(self, url: str | None) -> str | None:
-        return external_reconcile.github_repo_from_ticket_url(url)
-
-    def github_issues(self, repo_slug: str) -> _Provider:
-        del repo_slug
-        return self.provider
+        args: list[str],
+        *,
+        json_mode: bool = False,
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str] | list[dict[str, object]]:
+        del allow_failure
+        if json_mode:
+            if args[:1] == ["show"] and self.issue is not None:
+                return [dict(self.issue)]
+            return []
+        self.commands.append(list(args))
+        if self.issue is not None and args[:1] == ["update"]:
+            if "--append-notes" in args:
+                self.notes.append(str(args[-1]))
+            labels_raw = self.issue.get("labels")
+            labels = set()
+            if isinstance(labels_raw, list):
+                labels = {
+                    label.strip().lower()
+                    for label in labels_raw
+                    if isinstance(label, str) and label.strip()
+                }
+            add_indices = [
+                idx + 1
+                for idx, value in enumerate(args)
+                if value == "--add-label" and idx + 1 < len(args)
+            ]
+            remove_indices = [
+                idx + 1
+                for idx, value in enumerate(args)
+                if value == "--remove-label" and idx + 1 < len(args)
+            ]
+            for index in add_indices:
+                labels.add(str(args[index]).strip().lower())
+            for index in remove_indices:
+                labels.discard(str(args[index]).strip().lower())
+            self.issue["labels"] = sorted(labels)
+        return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
 
 @dataclass
@@ -95,6 +96,8 @@ class _GhBoundary:
 
     def gh(self, args: list[str], *, json_mode: bool = False) -> object | None:
         self.calls.append((list(args), json_mode))
+        if args[:2] in (["issue", "close"], ["issue", "reopen"]):
+            return None
         if args == ["api", "repos/org/repo/issues/7"]:
             return self.issue_payload
         if args == ["api", "repos/org/repo/issues/7/parent"]:
@@ -109,12 +112,13 @@ def _issue_with_tickets(*, status: str, tickets: list[dict[str, object]]) -> dic
         "id": "at-1",
         "status": status,
         "description": f"external_tickets: {json.dumps(tickets)}\n",
+        "labels": ["ext:github", "ext:jira"],
     }
 
 
 def test_reconcile_closed_issue_records_missing_repo_note() -> None:
     notes: list[str] = []
-    issue_store = _IssueStore(
+    client = _ReconcileClient(
         issue=_issue_with_tickets(
             status="closed",
             tickets=[
@@ -132,8 +136,8 @@ def test_reconcile_closed_issue_records_missing_repo_note() -> None:
 
     result = external_reconcile.reconcile_closed_issue_exported_github_tickets(
         "at-1",
-        issue_store=issue_store,
-        github=_GithubClient(),
+        client=client,
+        github=_GhBoundary(issue_payload={}, parent_payload={}),
         result_factory=_Result,
     )
 
@@ -146,7 +150,7 @@ def test_reconcile_closed_issue_records_missing_repo_note() -> None:
 
 def test_reconcile_reopened_issue_records_missing_repo_note() -> None:
     notes: list[str] = []
-    issue_store = _IssueStore(
+    client = _ReconcileClient(
         issue=_issue_with_tickets(
             status="in_progress",
             tickets=[
@@ -164,8 +168,8 @@ def test_reconcile_reopened_issue_records_missing_repo_note() -> None:
 
     result = external_reconcile.reconcile_reopened_issue_exported_github_tickets(
         "at-1",
-        issue_store=issue_store,
-        github=_GithubClient(),
+        client=client,
+        github=_GhBoundary(issue_payload={}, parent_payload={}),
         result_factory=_Result,
     )
 
@@ -174,6 +178,54 @@ def test_reconcile_reopened_issue_records_missing_repo_note() -> None:
     assert result.updated is False
     assert notes
     assert "cannot reopen exported ticket state" in notes[0]
+
+
+def test_reconcile_closed_issue_updates_ticket_metadata_and_labels() -> None:
+    notes: list[str] = []
+    client = _ReconcileClient(
+        issue=_issue_with_tickets(
+            status="closed",
+            tickets=[
+                {
+                    "provider": "github",
+                    "id": "7",
+                    "url": "https://github.com/org/repo/issues/7",
+                    "direction": "exported",
+                    "state": "open",
+                    "relation": "primary",
+                }
+            ],
+        ),
+        notes=notes,
+    )
+    boundary = _GhBoundary(
+        issue_payload={
+            "number": 7,
+            "url": "https://github.com/org/repo/issues/7",
+            "state": "CLOSED",
+            "stateReason": "completed",
+            "updatedAt": "2026-03-02T00:00:00Z",
+        },
+        parent_payload={"number": 1},
+    )
+
+    result = external_reconcile.reconcile_closed_issue_exported_github_tickets(
+        "at-1",
+        client=client,
+        github=boundary,
+        result_factory=_Result,
+    )
+
+    assert result.stale_exported_github_tickets == 1
+    assert result.reconciled_tickets == 1
+    assert result.updated is True
+    assert result.needs_decision_notes == tuple()
+    assert client.issue is not None
+    assert client.issue.get("labels") == ["ext:github"]
+    refreshed = external_reconcile.parse_external_tickets(str(client.issue.get("description")))
+    assert len(refreshed) == 1
+    assert refreshed[0].state == "closed"
+    assert refreshed[0].parent_id == "1"
 
 
 def test_github_issues_client_sync_state_ignores_missing_parent_endpoint() -> None:
@@ -213,14 +265,17 @@ def test_github_issues_client_close_ticket_routes_through_gh_boundary() -> None:
 
     refreshed = client.close_ticket(ticket, comment="closing from test")
 
-    assert boundary.calls[0][0] == [
-        "issue",
-        "close",
-        "7",
-        "--repo",
-        "org/repo",
-        "--comment",
-        "closing from test",
-    ]
+    assert boundary.calls[0] == (
+        [
+            "issue",
+            "close",
+            "7",
+            "--repo",
+            "org/repo",
+            "--comment",
+            "closing from test",
+        ],
+        False,
+    )
     assert refreshed.state == "closed"
     assert refreshed.parent_id == "1"

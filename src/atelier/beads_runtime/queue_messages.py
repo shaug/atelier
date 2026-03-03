@@ -9,15 +9,11 @@ from .. import messages
 from .client import (
     FailureHandler,
     RuntimeBeadsClient,
-    create_issue_with_body,
     issue_label,
     run_command,
     run_json,
-    update_issue_description,
 )
 
-CreateIssueWithBodyFn = Callable[[RuntimeBeadsClient, list[str], str], str]
-UpdateIssueDescriptionFn = Callable[[RuntimeBeadsClient, str, str], None]
 ClosedActivePrStillBlockingFn = Callable[[dict[str, object]], bool]
 MarkMessagesReadFn = Callable[[set[str]], None]
 
@@ -29,7 +25,6 @@ def create_message_bead(
     metadata: dict[str, object],
     assignee: str | None,
     client: RuntimeBeadsClient,
-    create_issue_with_body_fn: CreateIssueWithBodyFn = create_issue_with_body,
     label_message: str = "message",
     label_unread: str = "unread",
 ) -> dict[str, object]:
@@ -57,7 +52,7 @@ def create_message_bead(
     ]
     if assignee:
         args.extend(["--assignee", assignee])
-    issue_id = create_issue_with_body_fn(client, args, description)
+    issue_id = client.create_issue_with_body(args, description)
     issues = run_json(client, ["show", issue_id])
     return issues[0] if issues else {"id": issue_id, "title": subject}
 
@@ -206,7 +201,6 @@ def claim_queue_message(
     queue: str | None,
     client: RuntimeBeadsClient,
     fail: FailureHandler,
-    update_issue_description_fn: UpdateIssueDescriptionFn = update_issue_description,
     description_update_max_attempts: int,
 ) -> dict[str, object]:
     """Claim a queued message bead by setting claim metadata."""
@@ -255,7 +249,7 @@ def claim_queue_message(
             payload_metadata["claimed_by"] = agent_id
             payload_metadata["claimed_at"] = dt.datetime.now(tz=dt.timezone.utc).isoformat()
             updated = messages.render_message(payload_metadata, payload_body)
-            update_issue_description_fn(client, message_id, updated)
+            client.update_issue_description(message_id, updated)
             refreshed = run_json(client, ["show", message_id])
             if not refreshed:
                 continue

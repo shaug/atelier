@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from pathlib import Path
 from subprocess import CompletedProcess
-from tempfile import NamedTemporaryFile
 from typing import Literal, NoReturn, Protocol, overload
 
 FailureHandler = Callable[[str], NoReturn]
@@ -17,6 +15,18 @@ class RuntimeBeadsClient(Protocol):
 
     def issue_write_lock(self, issue_id: str) -> AbstractContextManager[None]:
         """Acquire an issue-scoped write lock context."""
+        ...
+
+    def show_issue(self, issue_id: str) -> dict[str, object] | None:
+        """Load one issue payload by id."""
+        ...
+
+    def create_issue_with_body(self, args: list[str], description: str) -> str:
+        """Create an issue from a body string and return the new id."""
+        ...
+
+    def update_issue_description(self, issue_id: str, description: str) -> None:
+        """Persist a full issue description body."""
         ...
 
     @overload
@@ -71,8 +81,7 @@ def run_command(
 
 def show_issue(client: RuntimeBeadsClient, issue_id: str) -> dict[str, object] | None:
     """Load one issue payload by id."""
-    issues = run_json(client, ["show", issue_id])
-    return issues[0] if issues else None
+    return client.show_issue(issue_id)
 
 
 def issue_label(name: str) -> str:
@@ -91,15 +100,7 @@ def create_issue_with_body(
     description: str,
 ) -> str:
     """Create an issue using a body-file workflow and return the issue id."""
-    temp_path = _write_temp_body_file(description)
-    try:
-        result = run_command(client, [*args, "--body-file", str(temp_path), "--silent"])
-    finally:
-        temp_path.unlink(missing_ok=True)
-    issue_id = (result.stdout or "").strip()
-    if not issue_id:
-        raise RuntimeError("failed to create bead")
-    return issue_id
+    return client.create_issue_with_body(args, description)
 
 
 def update_issue_description(
@@ -108,14 +109,4 @@ def update_issue_description(
     description: str,
 ) -> None:
     """Persist full issue description text via ``bd update --body-file``."""
-    temp_path = _write_temp_body_file(description)
-    try:
-        run_command(client, ["update", issue_id, "--body-file", str(temp_path)])
-    finally:
-        temp_path.unlink(missing_ok=True)
-
-
-def _write_temp_body_file(description: str) -> Path:
-    with NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
-        handle.write(description)
-        return Path(handle.name)
+    client.update_issue_description(issue_id, description)

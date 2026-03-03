@@ -25,6 +25,22 @@ class _QueueClient:
         del issue_id
         return nullcontext()
 
+    def show_issue(self, issue_id: str) -> dict[str, object] | None:
+        issue = self.issues.get(issue_id)
+        return dict(issue) if issue else None
+
+    def create_issue_with_body(self, args: list[str], description: str) -> str:
+        self.create_args = [*args, "--body-file", "/tmp/unused"]
+        self.create_description = description
+        issue_id = "msg-created"
+        title = args[args.index("--title") + 1]
+        self.issues[issue_id] = {"id": issue_id, "title": title, "description": description}
+        return issue_id
+
+    def update_issue_description(self, issue_id: str, description: str) -> None:
+        issue = self.issues[issue_id]
+        issue["description"] = description
+
     def bd(
         self,
         args: list[str],
@@ -57,8 +73,10 @@ class _QueueClient:
         if args[:1] == ["update"] and "--body-file" in args and len(args) >= 2:
             issue_id = args[1]
             body_file = args[args.index("--body-file") + 1]
-            issue = self.issues[issue_id]
-            issue["description"] = Path(body_file).read_text(encoding="utf-8")
+            self.update_issue_description(
+                issue_id,
+                Path(body_file).read_text(encoding="utf-8"),
+            )
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
 

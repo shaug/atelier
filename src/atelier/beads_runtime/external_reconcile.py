@@ -7,18 +7,25 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Literal, Protocol, TypeVar, overload
+from typing import Literal, NoReturn, Protocol, TypeVar, overload
 from urllib.parse import urlparse
 
-from .. import github_issues_provider
-from ..external_tickets import ExternalTicketRef, normalize_external_ticket_entry
-from .issue_mutations import parse_description_fields
+from .. import github_issues_provider, lifecycle
+from ..external_tickets import (
+    ExternalTicketRef,
+    external_ticket_payload,
+    normalize_external_ticket_entry,
+)
+from . import issue_mutations
+from .client import RuntimeBeadsClient, run_command
 
 ReconcileResultT = TypeVar("ReconcileResultT")
 EXTERNAL_TICKETS_KEY = "external_tickets"
 _GITHUB_API_ISSUE_PATH = re.compile(r"^/repos/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
 _GITHUB_WEB_ISSUE_PATH = re.compile(r"^/(?P<owner>[^/]+)/(?P<repo>[^/]+)/issues/[^/]+$")
 _NOT_FOUND_PATTERN = re.compile(r"(^|\D)404(\D|$)")
+_EXTERNAL_CLOSE_NOTE_PREFIX = "external_close_pending:"
+_EXTERNAL_REOPEN_NOTE_PREFIX = "external_reopen_pending:"
 
 
 class GithubClient(Protocol):
@@ -110,47 +117,11 @@ class GithubIssuesClient:
         return self.sync_state(ticket)
 
 
-class ExternalReconcileIssueStore(Protocol):
-    """Issue metadata persistence boundary for reconcile flows."""
-
-    def show_issue(self, issue_id: str) -> dict[str, object] | None:
-        """Load issue payload by id."""
-        ...
-
-    def update_external_tickets(
-        self,
-        issue_id: str,
-        tickets: list[ExternalTicketRef],
-    ) -> dict[str, object]:
-        """Persist updated external ticket metadata for an issue."""
-        ...
-
-    def append_external_close_note(self, issue_id: str, note: str) -> None:
-        """Append a close reconciliation note for operator follow-up."""
-        ...
-
-    def append_external_reopen_note(self, issue_id: str, note: str) -> None:
-        """Append a reopen reconciliation note for operator follow-up."""
-        ...
-
-
-class ExternalReconcileGithubClient(Protocol):
-    """GitHub provider boundary for reconcile flows."""
-
-    def github_repo_from_ticket_url(self, url: str | None) -> str | None:
-        """Resolve a GitHub repo slug from a ticket URL."""
-        ...
-
-    def github_issues(self, repo_slug: str) -> GithubTicketProvider:
-        """Return a GitHub issues client for the given repository."""
-        ...
-
-
 def parse_external_tickets(description: str | None) -> list[ExternalTicketRef]:
     """Parse external ticket references from issue description text."""
     if not description:
         return []
-    fields = parse_description_fields(description)
+    fields = issue_mutations.parse_description_fields(description)
     tickets_raw = fields.get(EXTERNAL_TICKETS_KEY)
     if not tickets_raw or tickets_raw.lower() == "null":
         return []
@@ -229,12 +200,12 @@ def _close_action_for_ticket(ticket: ExternalTicketRef) -> str:
 def reconcile_closed_issue_exported_github_tickets(
     issue_id: str,
     *,
-    issue_store: ExternalReconcileIssueStore,
-    github: ExternalReconcileGithubClient,
+    client: RuntimeBeadsClient,
+    github: GithubClient,
     result_factory: Callable[..., ReconcileResultT],
 ) -> ReconcileResultT:
     """Reconcile stale exported GitHub ticket metadata for a closed bead."""
-    issue = issue_store.show_issue(issue_id)
+    issue = client.show_issue(issue_id)
     if issue is None:
         return result_factory(
             issue_id=issue_id,
@@ -267,7 +238,7 @@ def reconcile_closed_issue_exported_github_tickets(
     reconciled = 0
     updated = False
     notes: list[str] = []
-    provider_cache: dict[str, GithubTicketProvider] = {}
+    provider_cache: dict[str, GithubIssuesClient] = {}
     merged_tickets: list[ExternalTicketRef] = []
     for ticket in existing_tickets:
         if ticket.provider != "github" or ticket.direction != "exported":
@@ -281,7 +252,7 @@ def reconcile_closed_issue_exported_github_tickets(
         if action == "none":
             merged_tickets.append(ticket)
             continue
-        repo_slug = github.github_repo_from_ticket_url(ticket.url)
+        repo_slug = github_repo_from_ticket_url(ticket.url)
         if not repo_slug:
             notes.append(
                 f"github:{ticket.ticket_id} missing repo slug; "
@@ -291,7 +262,7 @@ def reconcile_closed_issue_exported_github_tickets(
             continue
         provider = provider_cache.get(repo_slug)
         if provider is None:
-            provider = github.github_issues(repo_slug)
+            provider = GithubIssuesClient(repo_slug=repo_slug, github=github)
             provider_cache[repo_slug] = provider
         close_comment = None
         if ticket.on_close == "comment":
@@ -313,7 +284,7 @@ def reconcile_closed_issue_exported_github_tickets(
             updated = True
 
     if updated:
-        issue_store.update_external_tickets(issue_id, merged_tickets)
+        _update_external_tickets(client=client, issue_id=issue_id, tickets=merged_tickets)
 
     unique_notes: list[str] = []
     seen_notes: set[str] = set()
@@ -322,7 +293,7 @@ def reconcile_closed_issue_exported_github_tickets(
             continue
         seen_notes.add(note)
         unique_notes.append(note)
-        issue_store.append_external_close_note(issue_id, note)
+        _append_external_close_note(client=client, issue_id=issue_id, note=note)
 
     return result_factory(
         issue_id=issue_id,
@@ -336,12 +307,12 @@ def reconcile_closed_issue_exported_github_tickets(
 def reconcile_reopened_issue_exported_github_tickets(
     issue_id: str,
     *,
-    issue_store: ExternalReconcileIssueStore,
-    github: ExternalReconcileGithubClient,
+    client: RuntimeBeadsClient,
+    github: GithubClient,
     result_factory: Callable[..., ReconcileResultT],
 ) -> ReconcileResultT:
     """Reopen stale exported GitHub tickets when a local bead reopens."""
-    issue = issue_store.show_issue(issue_id)
+    issue = client.show_issue(issue_id)
     if issue is None:
         return result_factory(
             issue_id=issue_id,
@@ -374,7 +345,7 @@ def reconcile_reopened_issue_exported_github_tickets(
     reconciled = 0
     updated = False
     notes: list[str] = []
-    provider_cache: dict[str, GithubTicketProvider] = {}
+    provider_cache: dict[str, GithubIssuesClient] = {}
     merged_tickets: list[ExternalTicketRef] = []
     for ticket in existing_tickets:
         if ticket.provider != "github" or ticket.direction != "exported":
@@ -384,7 +355,7 @@ def reconcile_reopened_issue_exported_github_tickets(
             merged_tickets.append(ticket)
             continue
         stale += 1
-        repo_slug = github.github_repo_from_ticket_url(ticket.url)
+        repo_slug = github_repo_from_ticket_url(ticket.url)
         if not repo_slug:
             notes.append(
                 f"github:{ticket.ticket_id} missing repo slug; cannot reopen exported ticket state"
@@ -393,7 +364,7 @@ def reconcile_reopened_issue_exported_github_tickets(
             continue
         provider = provider_cache.get(repo_slug)
         if provider is None:
-            provider = github.github_issues(repo_slug)
+            provider = GithubIssuesClient(repo_slug=repo_slug, github=github)
             provider_cache[repo_slug] = provider
         try:
             refreshed = provider.reopen_ticket(
@@ -411,7 +382,7 @@ def reconcile_reopened_issue_exported_github_tickets(
             updated = True
 
     if updated:
-        issue_store.update_external_tickets(issue_id, merged_tickets)
+        _update_external_tickets(client=client, issue_id=issue_id, tickets=merged_tickets)
 
     unique_notes: list[str] = []
     seen_notes: set[str] = set()
@@ -420,7 +391,7 @@ def reconcile_reopened_issue_exported_github_tickets(
             continue
         seen_notes.add(note)
         unique_notes.append(note)
-        issue_store.append_external_reopen_note(issue_id, note)
+        _append_external_reopen_note(client=client, issue_id=issue_id, note=note)
 
     return result_factory(
         issue_id=issue_id,
@@ -429,6 +400,73 @@ def reconcile_reopened_issue_exported_github_tickets(
         updated=updated,
         needs_decision_notes=tuple(unique_notes),
     )
+
+
+def _update_external_tickets(
+    *,
+    client: RuntimeBeadsClient,
+    issue_id: str,
+    tickets: list[ExternalTicketRef],
+) -> dict[str, object]:
+    with client.issue_write_lock(issue_id):
+        issue = client.show_issue(issue_id)
+        if issue is None:
+            raise RuntimeError(f"issue not found: {issue_id}")
+        payload = [external_ticket_payload(ticket) for ticket in tickets]
+        serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        desired_labels = {f"ext:{ticket.provider}" for ticket in tickets}
+        labels = sorted(_issue_labels(issue))
+        remove_labels = [
+            label for label in labels if label.startswith("ext:") and label not in desired_labels
+        ]
+        add_labels = [label for label in desired_labels if label not in labels]
+        if add_labels or remove_labels:
+            args = ["update", issue_id]
+            for label in add_labels:
+                args.extend(["--add-label", label])
+            for label in remove_labels:
+                args.extend(["--remove-label", label])
+            run_command(client, args)
+        return issue_mutations.update_issue_description_fields(
+            issue_id,
+            {EXTERNAL_TICKETS_KEY: serialized},
+            client=client,
+            fail=_raise_runtime_error,
+        )
+
+
+def _append_external_close_note(
+    *,
+    client: RuntimeBeadsClient,
+    issue_id: str,
+    note: str,
+) -> None:
+    run_command(
+        client,
+        ["update", issue_id, "--append-notes", f"{_EXTERNAL_CLOSE_NOTE_PREFIX} {note}"],
+        allow_failure=True,
+    )
+
+
+def _append_external_reopen_note(
+    *,
+    client: RuntimeBeadsClient,
+    issue_id: str,
+    note: str,
+) -> None:
+    run_command(
+        client,
+        ["update", issue_id, "--append-notes", f"{_EXTERNAL_REOPEN_NOTE_PREFIX} {note}"],
+        allow_failure=True,
+    )
+
+
+def _issue_labels(issue: dict[str, object]) -> set[str]:
+    return lifecycle.normalized_labels(issue.get("labels"))
+
+
+def _raise_runtime_error(message: str) -> NoReturn:
+    raise RuntimeError(message)
 
 
 def _load_parent_ticket_id(

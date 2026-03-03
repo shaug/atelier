@@ -5716,35 +5716,79 @@ def test_reconcile_closed_issue_exported_github_tickets_closes_and_updates() -> 
         "status": "closed",
         "description": f"external_tickets: {ticket_json}\n",
     }
-    refreshed = beads.ExternalTicketRef(
-        provider="github",
-        ticket_id="175",
-        url="https://github.com/acme/widgets/issues/175",
-        state="closed",
-        raw_state="completed",
-        state_updated_at="2026-02-25T21:00:00Z",
-        parent_id="200",
-    )
-    captured: dict[str, object] = {}
+    state = {
+        "description": issue["description"],
+        "labels": ["ext:github"],
+    }
+    gh_calls: list[tuple[str, ...]] = []
 
-    def fake_update(
-        issue_id: str,
-        tickets: list[beads.ExternalTicketRef],
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:2] == ["show", "at-4kv"]:
+            return [
+                {
+                    "id": "at-4kv",
+                    "status": "closed",
+                    "description": state["description"],
+                    "labels": list(state["labels"]),
+                }
+            ]
+        return []
+
+    def fake_command(
+        args: list[str],
         *,
         beads_root: Path,
         cwd: Path,
-    ) -> dict[str, object]:
-        captured["issue_id"] = issue_id
-        captured["tickets"] = tickets
-        return {}
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        if "--add-label" in args or "--remove-label" in args:
+            labels = set(state["labels"])
+            if "--add-label" in args:
+                labels.add(args[args.index("--add-label") + 1])
+            if "--remove-label" in args:
+                labels.discard(args[args.index("--remove-label") + 1])
+            state["labels"] = sorted(labels)
+        return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
+        del issue_id, beads_root, cwd
+        state["description"] = description
+
+    def fake_run_with_runner(request: object) -> CompletedProcess[str]:
+        argv = tuple(getattr(request, "argv"))
+        gh_calls.append(argv)
+        if argv[:5] == ("gh", "issue", "close", "175", "--repo"):
+            return CompletedProcess(args=list(argv), returncode=0, stdout="", stderr="")
+        if argv == ("gh", "api", "repos/acme/widgets/issues/175"):
+            payload = {
+                "number": 175,
+                "url": "https://github.com/acme/widgets/issues/175",
+                "state": "CLOSED",
+                "stateReason": "completed",
+                "updatedAt": "2026-02-25T21:00:00Z",
+            }
+            return CompletedProcess(
+                args=list(argv),
+                returncode=0,
+                stdout=json.dumps(payload),
+                stderr="",
+            )
+        if argv == ("gh", "api", "repos/acme/widgets/issues/175/parent"):
+            return CompletedProcess(
+                args=list(argv),
+                returncode=0,
+                stdout=json.dumps({"number": 200}),
+                stderr="",
+            )
+        raise AssertionError(f"unexpected gh call: {argv}")
 
     with (
-        patch("atelier.beads.run_bd_json", return_value=[issue]),
-        patch("atelier.beads.update_external_tickets", side_effect=fake_update),
-        patch(
-            "atelier.github_issues_provider.GithubIssuesProvider.close_ticket",
-            return_value=refreshed,
-        ),
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
+        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
     ):
         result = beads.reconcile_closed_issue_exported_github_tickets(
             "at-4kv",
@@ -5756,9 +5800,8 @@ def test_reconcile_closed_issue_exported_github_tickets_closes_and_updates() -> 
     assert result.reconciled_tickets == 1
     assert result.updated is True
     assert result.needs_decision_notes == tuple()
-    assert captured["issue_id"] == "at-4kv"
-    updated_tickets = captured["tickets"]
-    assert isinstance(updated_tickets, list)
+    assert any(call[:4] == ("gh", "issue", "close", "175") for call in gh_calls)
+    updated_tickets = beads.parse_external_tickets(state["description"])
     assert updated_tickets[0].state == "closed"
     assert updated_tickets[0].state_updated_at == "2026-02-25T21:00:00Z"
     assert updated_tickets[0].parent_id == "200"
@@ -5798,7 +5841,6 @@ def test_reconcile_closed_issue_exported_github_tickets_adds_note_on_missing_rep
     with (
         patch("atelier.beads.run_bd_json", return_value=[issue]),
         patch("atelier.beads.run_bd_command", side_effect=fake_command),
-        patch("atelier.beads.update_external_tickets") as update_external,
     ):
         result = beads.reconcile_closed_issue_exported_github_tickets(
             "at-4kv",
@@ -5812,7 +5854,6 @@ def test_reconcile_closed_issue_exported_github_tickets_adds_note_on_missing_rep
     assert result.needs_decision_notes
     assert any("missing repo slug" in note for note in result.needs_decision_notes)
     assert any(note.startswith("external_close_pending:") for note in notes)
-    update_external.assert_not_called()
 
 
 def test_reconcile_closed_issue_exported_github_tickets_skips_policy_opt_outs() -> None:
@@ -5846,8 +5887,7 @@ def test_reconcile_closed_issue_exported_github_tickets_skips_policy_opt_outs() 
     }
     with (
         patch("atelier.beads.run_bd_json", return_value=[issue]),
-        patch("atelier.beads.update_external_tickets") as update_external,
-        patch("atelier.github_issues_provider.GithubIssuesProvider.close_ticket") as close_ticket,
+        patch("atelier.beads.exec.run_with_runner") as gh_runner,
     ):
         result = beads.reconcile_closed_issue_exported_github_tickets(
             "at-4kv",
@@ -5859,8 +5899,7 @@ def test_reconcile_closed_issue_exported_github_tickets_skips_policy_opt_outs() 
     assert result.reconciled_tickets == 0
     assert result.updated is False
     assert result.needs_decision_notes == tuple()
-    close_ticket.assert_not_called()
-    update_external.assert_not_called()
+    gh_runner.assert_not_called()
 
 
 def test_reconcile_reopened_issue_exported_github_tickets_reopens_and_updates() -> None:
@@ -5883,35 +5922,79 @@ def test_reconcile_reopened_issue_exported_github_tickets_reopens_and_updates() 
         "status": "in_progress",
         "description": f"external_tickets: {ticket_json}\n",
     }
-    refreshed = beads.ExternalTicketRef(
-        provider="github",
-        ticket_id="179",
-        url="https://github.com/acme/widgets/issues/179",
-        state="open",
-        raw_state="open",
-        state_updated_at="2026-02-25T22:00:00Z",
-        parent_id="200",
-    )
-    captured: dict[str, object] = {}
+    state = {
+        "description": issue["description"],
+        "labels": ["ext:github"],
+    }
+    gh_calls: list[tuple[str, ...]] = []
 
-    def fake_update(
-        issue_id: str,
-        tickets: list[beads.ExternalTicketRef],
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:2] == ["show", "at-4kv"]:
+            return [
+                {
+                    "id": "at-4kv",
+                    "status": "in_progress",
+                    "description": state["description"],
+                    "labels": list(state["labels"]),
+                }
+            ]
+        return []
+
+    def fake_command(
+        args: list[str],
         *,
         beads_root: Path,
         cwd: Path,
-    ) -> dict[str, object]:
-        captured["issue_id"] = issue_id
-        captured["tickets"] = tickets
-        return {}
+        allow_failure: bool = False,
+    ) -> CompletedProcess[str]:
+        del beads_root, cwd, allow_failure
+        if "--add-label" in args or "--remove-label" in args:
+            labels = set(state["labels"])
+            if "--add-label" in args:
+                labels.add(args[args.index("--add-label") + 1])
+            if "--remove-label" in args:
+                labels.discard(args[args.index("--remove-label") + 1])
+            state["labels"] = sorted(labels)
+        return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
+        del issue_id, beads_root, cwd
+        state["description"] = description
+
+    def fake_run_with_runner(request: object) -> CompletedProcess[str]:
+        argv = tuple(getattr(request, "argv"))
+        gh_calls.append(argv)
+        if argv[:5] == ("gh", "issue", "reopen", "179", "--repo"):
+            return CompletedProcess(args=list(argv), returncode=0, stdout="", stderr="")
+        if argv == ("gh", "api", "repos/acme/widgets/issues/179"):
+            payload = {
+                "number": 179,
+                "url": "https://github.com/acme/widgets/issues/179",
+                "state": "OPEN",
+                "stateReason": "reopened",
+                "updatedAt": "2026-02-25T22:00:00Z",
+            }
+            return CompletedProcess(
+                args=list(argv),
+                returncode=0,
+                stdout=json.dumps(payload),
+                stderr="",
+            )
+        if argv == ("gh", "api", "repos/acme/widgets/issues/179/parent"):
+            return CompletedProcess(
+                args=list(argv),
+                returncode=0,
+                stdout=json.dumps({"number": 200}),
+                stderr="",
+            )
+        raise AssertionError(f"unexpected gh call: {argv}")
 
     with (
-        patch("atelier.beads.run_bd_json", return_value=[issue]),
-        patch("atelier.beads.update_external_tickets", side_effect=fake_update),
-        patch(
-            "atelier.github_issues_provider.GithubIssuesProvider.reopen_ticket",
-            return_value=refreshed,
-        ),
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads.run_bd_command", side_effect=fake_command),
+        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fake_run_with_runner),
     ):
         result = beads.reconcile_reopened_issue_exported_github_tickets(
             "at-4kv",
@@ -5923,9 +6006,8 @@ def test_reconcile_reopened_issue_exported_github_tickets_reopens_and_updates() 
     assert result.reconciled_tickets == 1
     assert result.updated is True
     assert result.needs_decision_notes == tuple()
-    assert captured["issue_id"] == "at-4kv"
-    updated_tickets = captured["tickets"]
-    assert isinstance(updated_tickets, list)
+    assert any(call[:4] == ("gh", "issue", "reopen", "179") for call in gh_calls)
+    updated_tickets = beads.parse_external_tickets(state["description"])
     assert updated_tickets[0].state == "open"
     assert updated_tickets[0].state_updated_at == "2026-02-25T22:00:00Z"
     assert updated_tickets[0].parent_id == "200"
@@ -5965,7 +6047,6 @@ def test_reconcile_reopened_issue_exported_github_tickets_adds_note_on_missing_r
     with (
         patch("atelier.beads.run_bd_json", return_value=[issue]),
         patch("atelier.beads.run_bd_command", side_effect=fake_command),
-        patch("atelier.beads.update_external_tickets") as update_external,
     ):
         result = beads.reconcile_reopened_issue_exported_github_tickets(
             "at-4kv",
@@ -5979,7 +6060,6 @@ def test_reconcile_reopened_issue_exported_github_tickets_adds_note_on_missing_r
     assert result.needs_decision_notes
     assert any("missing repo slug" in note for note in result.needs_decision_notes)
     assert any(note.startswith("external_reopen_pending:") for note in notes)
-    update_external.assert_not_called()
 
 
 def test_merge_description_preserving_metadata_keeps_external_tickets() -> None:

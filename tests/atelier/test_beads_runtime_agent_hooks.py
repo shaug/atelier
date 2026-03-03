@@ -26,6 +26,17 @@ class _AgentHooksClient:
         del issue_id
         return nullcontext()
 
+    def show_issue(self, issue_id: str) -> dict[str, object] | None:
+        issue = self.issues.get(issue_id)
+        return dict(issue) if issue else None
+
+    def create_issue_with_body(self, args: list[str], description: str) -> str:
+        del args, description
+        raise RuntimeError("not used")
+
+    def update_issue_description(self, issue_id: str, description: str) -> None:
+        self.issues[issue_id]["description"] = description
+
     def bd(
         self,
         args: list[str],
@@ -78,7 +89,10 @@ class _AgentHooksClient:
         if args[:1] == ["update"] and "--body-file" in args and len(args) >= 2:
             issue_id = args[1]
             body_file = args[args.index("--body-file") + 1]
-            self.issues[issue_id]["description"] = Path(body_file).read_text(encoding="utf-8")
+            self.update_issue_description(
+                issue_id,
+                Path(body_file).read_text(encoding="utf-8"),
+            )
             return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
         return CompletedProcess(args=args, returncode=0, stdout="", stderr="")
