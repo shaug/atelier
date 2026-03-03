@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from atelier.worker.session import output_claude, output_codex
 from atelier.worker.session.output import (
     AgentOutputCapture,
@@ -254,7 +252,7 @@ def test_agent_output_capture_feed_stdout_text() -> None:
 
 
 def test_agent_output_capture_assistant_preview_text_truncates() -> None:
-    """assistant_preview_text returns clipped text when max_chars is provided."""
+    """assistant_preview_text clips preview text when max_chars is set."""
     capture = AgentOutputCapture(agent_name="codex")
     capture.feed_stdout_line(
         '{"type":"item.completed","item":{"type":"agent_message","text":"'
@@ -444,6 +442,34 @@ def test_agent_output_capture_codex_json_counts_events() -> None:
     summary = capture.render_summary_lines(failed=False)
     assert "Agent output (codex):" in summary[0]
     assert "events=2" in summary[0]
+    assert any("Assistant preview: Done" in line for line in summary)
+
+
+def test_agent_output_capture_codex_mixed_json_text_interleaving_is_deterministic() -> None:
+    """Mixed plain-text and JSON lines stay deterministic."""
+    capture = AgentOutputCapture(agent_name="codex")
+    capture.feed_stdout_line("status: bootstrapping workspace")
+    capture.feed_stdout_line('{"type":"thread.started","thread_id":"thread_1"}')
+    capture.feed_stdout_line('{"type":"schema.evolved","meta":{"version":2}}')
+    capture.feed_stdout_line(
+        '{"type":"item.completed","item":{"type":"command_execution","command":"bash -lc ls"}}'
+    )
+    capture.feed_stdout_line("assistant: hidden protocol noise")
+    capture.feed_stdout_line(
+        '{"type":"item.completed","item":{"type":"agent_message","text":"Done"}}'
+    )
+
+    assert capture.raw_line_count == 6
+    assert capture.structured_event_count == 4
+    assert capture.tool_event_count == 1
+    assert capture.suppressed_line_count == 1
+
+    summary = capture.render_summary_lines(failed=False)
+    assert "Agent output (codex): completed" in summary[0]
+    assert "events=4" in summary[0]
+    assert "tools=1" in summary[0]
+    assert "suppressed=1" in summary[0]
+    assert "meaningful=" not in summary[0]
     assert any("Assistant preview: Done" in line for line in summary)
 
 

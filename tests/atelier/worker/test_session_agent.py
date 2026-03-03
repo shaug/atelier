@@ -519,6 +519,48 @@ def test_start_agent_session_codex_emits_live_progress_updates(monkeypatch) -> N
     assert any("Agent output (codex): completed" in m for m in control.say_messages)
 
 
+def test_consume_stream_chunk_flushes_split_lines_deterministically() -> None:
+    captured: list[str] = []
+    handled: list[str] = []
+
+    pending = session_agent._consume_stream_chunk(
+        chunk=b'{"type":"turn.started"}\npartial',
+        pending="",
+        target=captured,
+        line_handler=handled.append,
+    )
+    assert pending == "partial"
+    assert captured == ['{"type":"turn.started"}']
+    assert handled == ['{"type":"turn.started"}']
+
+    pending = session_agent._consume_stream_chunk(
+        chunk=b' line\n{"type":"turn.completed","usage":{"output_tokens":1}}',
+        pending=pending,
+        target=captured,
+        line_handler=handled.append,
+    )
+    assert pending == '{"type":"turn.completed","usage":{"output_tokens":1}}'
+    assert captured == ['{"type":"turn.started"}', "partial line"]
+    assert handled == ['{"type":"turn.started"}', "partial line"]
+
+    session_agent._flush_stream_tail(
+        pending=pending,
+        target=captured,
+        line_handler=handled.append,
+    )
+
+    assert captured == [
+        '{"type":"turn.started"}',
+        "partial line",
+        '{"type":"turn.completed","usage":{"output_tokens":1}}',
+    ]
+    assert handled == [
+        '{"type":"turn.started"}',
+        "partial line",
+        '{"type":"turn.completed","usage":{"output_tokens":1}}',
+    ]
+
+
 class _RealCommandOps:
     """Command ops using actual worker helpers (for integration-style tests)."""
 
@@ -638,11 +680,67 @@ def test_start_agent_session_codex_trace_streams_raw_output(monkeypatch) -> None
     assert not any("Agent output (codex):" in line for line in control.say_messages)
 
 
+def test_start_agent_session_codex_failure_with_truncated_tail_uses_tail_diagnostic(
+    monkeypatch,
+) -> None:
+    def _run_streaming_capture_command(
+        *,
+        cmd: list[str],
+        cwd: Path | None,
+        env: dict[str, str],
+        stdout_line_handler=None,
+        stderr_line_handler=None,
+    ) -> session_agent._StreamedCommandResult | None:
+        del cmd, cwd, env, stderr_line_handler
+        if stdout_line_handler is not None:
+            stdout_line_handler(
+                '{"type":"item.completed","item":{"type":"agent_message","text":"Working"}}'
+            )
+            stdout_line_handler(
+                '{"type":"item.completed","item":{"type":"agent_message","text":"incomplete"'
+            )
+        return session_agent._StreamedCommandResult(returncode=1, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        session_agent,
+        "_run_streaming_capture_command",
+        _run_streaming_capture_command,
+    )
+    agent = agent_home.AgentHome(
+        name="codex",
+        agent_id="atelier/worker/codex/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+    control = _TestControl()
+
+    result = session_agent.start_agent_session(
+        dry_run=False,
+        agent=agent,
+        agent_spec=_FakeAgentSpec(name="codex"),
+        agent_options=[],
+        opening_prompt="hello",
+        env={},
+        command_ops=_TestCommandOps(),
+        session_control=control,
+        blocked_handler=_TestBlockedHandler(),
+    )
+
+    assert result is None
+    assert any("Agent output (codex): failed" in line for line in control.say_messages)
+    assert any(
+        'Diagnostic: {"type":"item.completed","item":{"type":"agent_message","text":"incomplete"'
+        in line
+        for line in control.say_messages
+    )
+    assert any("ATELIER_WORK_AGENT_TRACE=1" in line for line in control.say_messages)
+
+
 def test_start_agent_session_claude_stream_json_renders_summary(
     monkeypatch,
     claude_session_fixture_content: str,
 ) -> None:
-    """Claude session uses fixture stdout; summary includes events and preview."""
+    """Claude fixture stdout renders a summary with events and preview text."""
     seen_cmds: list[list[str]] = []
 
     def _run_streaming_capture_command(
