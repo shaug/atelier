@@ -103,6 +103,8 @@ def test_scan_prefix_migration_drift_reports_conflicts_deterministically(tmp_pat
     assert branch_conflict["values"]["metadata.changeset.work_branch"] == "feat/new-branch"
     assert branch_conflict["values"]["mapping.work_branch"] == "feat/legacy-branch"
     assert branch_conflict["values"]["pr.head_ref"] == "feat/pr-head"
+    assert branch_conflict["values"]["filesystem.worktree_branch"] is None
+    assert "(unset)" not in branch_conflict["values"].values()
     path_conflict = first[1]
     assert path_conflict["values"]["mapping.worktree_path"] == "worktrees/at-legacy.1"
     assert path_conflict["values"]["filesystem.path_for_metadata_branch"] == "worktrees/ts-epic.1"
@@ -143,6 +145,11 @@ def test_scan_prefix_migration_drift_returns_empty_when_metadata_mapping_and_wor
         project_data_dir / "worktrees" / "ts-epic.1",
         "feat/new-branch",
     )
+    lookup_calls: list[tuple[str, str]] = []
+
+    def fake_lookup(repo: str, branch: str) -> SimpleNamespace:
+        lookup_calls.append((repo, branch))
+        return SimpleNamespace(found=False, failed=False, payload=None)
 
     with (
         patch("atelier.prefix_migration_drift.beads.list_epics", return_value=[epic_issue]),
@@ -165,7 +172,9 @@ def test_scan_prefix_migration_drift_returns_empty_when_metadata_mapping_and_wor
             project_data_dir=project_data_dir,
             beads_root=tmp_path / ".beads",
             repo_root=repo_root,
-            repo_slug=None,
+            repo_slug="org/repo",
+            lookup_pr_status=fake_lookup,
         )
 
     assert records == []
+    assert lookup_calls == []

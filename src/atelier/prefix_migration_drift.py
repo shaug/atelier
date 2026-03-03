@@ -129,10 +129,6 @@ def _collect_git_worktree_index(
     )
 
 
-def _as_display_value(value: str | None) -> str:
-    return value if value is not None else "(unset)"
-
-
 def _distinct_values(*values: str | None) -> tuple[str, ...]:
     return tuple(sorted({value for value in values if value is not None}))
 
@@ -195,7 +191,7 @@ def _record(
         "epic_id": epic_id,
         "changeset_id": changeset_id,
         "drift_class": drift_class,
-        "values": {key: _as_display_value(values[key]) for key in sorted(values)},
+        "values": {key: values[key] for key in sorted(values)},
     }
 
 
@@ -340,35 +336,6 @@ def scan_prefix_migration_drift(
                         },
                     )
                 )
-            elif repo_slug:
-                candidate_branches = tuple(
-                    sorted(
-                        {
-                            value
-                            for value in (metadata_work_branch, mapping_work_branch)
-                            if value is not None
-                        }
-                    )
-                )
-                pr_head_branch, pr_lookup_branch = _lookup_pr_head_branch(
-                    repo_slug=repo_slug,
-                    candidate_branches=candidate_branches,
-                    lookup_pr_status=lookup_pr_status,
-                )
-                if pr_head_branch is not None and pr_head_branch not in candidate_branches:
-                    records.append(
-                        _record(
-                            epic_id=epic_id,
-                            changeset_id=changeset_id,
-                            drift_class="pr-head-conflict",
-                            values={
-                                "metadata.changeset.work_branch": metadata_work_branch,
-                                "mapping.work_branch": mapping_work_branch,
-                                "pr.head_ref": pr_head_branch,
-                                "pr.lookup_branch": pr_lookup_branch,
-                            },
-                        )
-                    )
 
             path_conflict = _distinct_values(
                 metadata_worktree_path,
