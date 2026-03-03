@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from atelier import agent_home, codex
+from atelier import agent_home
 from atelier import exec as atelier_exec
 from atelier.models import ProjectConfig
 from atelier.worker import work_command_helpers
@@ -389,26 +389,33 @@ def test_start_agent_session_dry_run_logs_claude_worker_compatible_flags() -> No
 def test_start_agent_session_runs_codex_success(monkeypatch) -> None:
     seen: dict[str, object] = {}
 
-    def _run_codex(
-        _cmd: list[str],
+    def _run_streaming_capture_command(
         *,
+        cmd: list[str],
         cwd: Path | None,
-        env: dict[str, str] | None,
-        stream_output: bool = True,
-        line_handler=None,
-    ) -> codex.CodexRunResult:
+        env: dict[str, str],
+        stdout_line_handler=None,
+        stderr_line_handler=None,
+    ) -> session_agent._StreamedCommandResult | None:
+        del stderr_line_handler
+        seen["cmd"] = list(cmd)
         seen["cwd"] = cwd
         seen["env"] = env
-        seen["stream_output"] = stream_output
-        if line_handler is not None:
-            line_handler("thinking")
-            line_handler("Implemented worker output summarization")
-        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+        if stdout_line_handler is not None:
+            stdout_line_handler('{"type":"turn.started"}')
+            stdout_line_handler(
+                '{"type":"item.completed","item":{"type":"agent_message","text":"Implemented"}}'
+            )
+        return session_agent._StreamedCommandResult(
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
 
     monkeypatch.setattr(
-        codex,
-        "run_codex_command",
-        _run_codex,
+        session_agent,
+        "_run_streaming_capture_command",
+        _run_streaming_capture_command,
     )
     agent = agent_home.AgentHome(
         name="codex",
@@ -433,31 +440,34 @@ def test_start_agent_session_runs_codex_success(monkeypatch) -> None:
 
     assert result is not None
     assert result.returncode == 0
-    assert seen["stream_output"] is False
+    assert "exec" in seen["cmd"]
     assert any("Agent output (codex): completed" in line for line in control.say_messages)
-    assert all("thinking" not in line for line in control.say_messages)
 
 
 def test_start_agent_session_codex_emits_live_progress_updates(monkeypatch) -> None:
-    def _run_codex(
-        _cmd: list[str],
+    def _run_streaming_capture_command(
         *,
+        cmd: list[str],
         cwd: Path | None,
-        env: dict[str, str] | None,
-        stream_output: bool = True,
-        line_handler=None,
-    ) -> codex.CodexRunResult:
-        del cwd, env, stream_output
-        if line_handler is not None:
-            line_handler('{"type":"thread.started","thread_id":"thread_1"}')
+        env: dict[str, str],
+        stdout_line_handler=None,
+        stderr_line_handler=None,
+    ) -> session_agent._StreamedCommandResult | None:
+        del cmd, cwd, env, stderr_line_handler
+        if stdout_line_handler is not None:
+            stdout_line_handler('{"type":"thread.started","thread_id":"thread_1"}')
             for _ in range(10):
-                line_handler('{"type":"item.completed","item":{"type":"command_execution"}}')
-            line_handler(
+                stdout_line_handler('{"type":"item.completed","item":{"type":"command_execution"}}')
+            stdout_line_handler(
                 '{"type":"item.completed","item":{"type":"agent_message","text":"Applied fix"}}'
             )
-        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+        return session_agent._StreamedCommandResult(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(codex, "run_codex_command", _run_codex)
+    monkeypatch.setattr(
+        session_agent,
+        "_run_streaming_capture_command",
+        _run_streaming_capture_command,
+    )
     agent = agent_home.AgentHome(
         name="codex",
         agent_id="atelier/worker/codex/p100",
@@ -502,20 +512,25 @@ def test_start_agent_session_codex_includes_json_flag(monkeypatch) -> None:
     """Codex worker sessions must pass --json for structured output parsing."""
     seen_cmd: list[str] = []
 
-    def _run_codex(
-        cmd: list[str],
+    def _run_streaming_capture_command(
         *,
+        cmd: list[str],
         cwd: Path | None,
-        env: dict[str, str] | None,
-        stream_output: bool = True,
-        line_handler=None,
-    ) -> codex.CodexRunResult:
+        env: dict[str, str],
+        stdout_line_handler=None,
+        stderr_line_handler=None,
+    ) -> session_agent._StreamedCommandResult | None:
+        del cwd, env, stderr_line_handler
         seen_cmd[:] = cmd
-        if line_handler is not None:
-            line_handler('{"type":"turn.completed","usage":{"output_tokens":1}}')
-        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+        if stdout_line_handler is not None:
+            stdout_line_handler('{"type":"turn.completed","usage":{"output_tokens":1}}')
+        return session_agent._StreamedCommandResult(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(codex, "run_codex_command", _run_codex)
+    monkeypatch.setattr(
+        session_agent,
+        "_run_streaming_capture_command",
+        _run_streaming_capture_command,
+    )
     agent = agent_home.AgentHome(
         name="codex",
         agent_id="atelier/worker/codex/p100",
@@ -539,22 +554,37 @@ def test_start_agent_session_codex_includes_json_flag(monkeypatch) -> None:
 
 
 def test_start_agent_session_codex_trace_streams_raw_output(monkeypatch) -> None:
-    seen: dict[str, object] = {}
+    seen_requests: list[atelier_exec.CommandRequest] = []
 
-    def _run_codex(
-        _cmd: list[str],
+    def _run_with_runner(
+        request: atelier_exec.CommandRequest, *, runner=None
+    ) -> atelier_exec.CommandResult | None:
+        del runner
+        seen_requests.append(request)
+        return atelier_exec.CommandResult(
+            argv=request.argv,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    def _run_streaming_capture_command(
         *,
+        cmd: list[str],
         cwd: Path | None,
-        env: dict[str, str] | None,
-        stream_output: bool = True,
-        line_handler=None,
-    ) -> codex.CodexRunResult:
-        seen["stream_output"] = stream_output
-        if line_handler is not None:
-            line_handler("Implemented worker output summarization")
-        return codex.CodexRunResult(returncode=0, session_id=None, resume_command=None)
+        env: dict[str, str],
+        stdout_line_handler=None,
+        stderr_line_handler=None,
+    ) -> session_agent._StreamedCommandResult | None:
+        del cmd, cwd, env, stdout_line_handler, stderr_line_handler
+        raise AssertionError("streaming capture should not be used in trace mode")
 
-    monkeypatch.setattr(codex, "run_codex_command", _run_codex)
+    monkeypatch.setattr(session_agent.exec, "run_with_runner", _run_with_runner)
+    monkeypatch.setattr(
+        session_agent,
+        "_run_streaming_capture_command",
+        _run_streaming_capture_command,
+    )
     agent = agent_home.AgentHome(
         name="codex",
         agent_id="atelier/worker/codex/p100",
@@ -578,7 +608,9 @@ def test_start_agent_session_codex_trace_streams_raw_output(monkeypatch) -> None
 
     assert result is not None
     assert result.returncode == 0
-    assert seen["stream_output"] is True
+    assert len(seen_requests) == 1
+    assert seen_requests[0].capture_output is False
+    assert seen_requests[0].text is False
     assert not any("Agent output (codex):" in line for line in control.say_messages)
 
 

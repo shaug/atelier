@@ -15,7 +15,6 @@ from ... import (
     agent_home,
     agents,
     beads,
-    codex,
     config,
     exec,
     hooks,
@@ -450,46 +449,10 @@ def start_agent_session(
     returncode = 0
     trace_agent_output = session_output.trace_output_requested(env)
     output_capture = session_output.AgentOutputCapture(agent_name=agent_spec.name)
-    if agent_spec.name == "codex":
-        live_progress = (
-            _StructuredLiveProgress(label=agent_spec.display_name)
-            if not trace_agent_output
-            else None
-        )
-
-        def _handle_codex_output_line(raw_line: str) -> None:
-            output_capture.feed_stdout_line(raw_line)
-            if live_progress is None:
-                return
-            _emit_structured_live_progress(
-                capture=output_capture,
-                progress=live_progress,
-                session_control=session_control,
-            )
-
-        result = codex.run_codex_command(
-            start_cmd,
-            cwd=start_cwd,
-            env=env,
-            stream_output=trace_agent_output,
-            line_handler=_handle_codex_output_line,
-        )
-        if result is None:
-            blocked_handler.mark_changeset_blocked(f"missing required command: {start_cmd[0]}")
-            session_control.die(f"missing required command: {start_cmd[0]}")
-            return None
-        if not trace_agent_output:
-            for line in output_capture.render_summary_lines(failed=result.returncode != 0):
-                session_control.say(line)
-        if result.returncode != 0:
-            returncode = result.returncode
-            blocked_handler.mark_changeset_blocked(f"command failed: {' '.join(start_cmd)}")
-            session_control.die(f"command failed: {' '.join(start_cmd)}")
-            return None
-    elif agent_spec.name == "claude" and not trace_agent_output:
+    if agent_spec.name in {"codex", "claude"} and not trace_agent_output:
         live_progress = _StructuredLiveProgress(label=agent_spec.display_name)
 
-        def _handle_claude_output_line(raw_line: str) -> None:
+        def _handle_structured_output_line(raw_line: str) -> None:
             output_capture.feed_stdout_line(raw_line)
             _emit_structured_live_progress(
                 capture=output_capture,
@@ -501,7 +464,7 @@ def start_agent_session(
             cmd=start_cmd,
             cwd=start_cwd,
             env=env,
-            stdout_line_handler=_handle_claude_output_line,
+            stdout_line_handler=_handle_structured_output_line,
             stderr_line_handler=output_capture.feed_stderr_line,
         )
         if result is None:
