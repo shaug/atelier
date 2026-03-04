@@ -198,6 +198,61 @@ def test_plan_starts_agent_session(tmp_path: Path) -> None:
     )
 
 
+def test_plan_runs_runtime_teardown_on_exit(tmp_path: Path) -> None:
+    worktree_path = tmp_path / "worktrees" / "planner"
+    agent = AgentHome(
+        name="planner",
+        agent_id="atelier/planner/planner",
+        role="planner",
+        path=Path("/project/agents/planner"),
+    )
+
+    class DummyResult:
+        stdout = ""
+        returncode = 0
+
+    with (
+        patch(
+            "atelier.commands.plan.resolve_current_project_with_repo_root",
+            return_value=(Path("/project"), _fake_project_payload(), "/repo", Path("/repo")),
+        ),
+        patch("atelier.commands.plan.config.resolve_project_data_dir", return_value=tmp_path),
+        patch("atelier.commands.plan.config.resolve_beads_root", return_value=Path("/beads")),
+        patch("atelier.commands.plan.agent_home.resolve_agent_home", return_value=agent),
+        patch("atelier.commands.plan.beads.ensure_agent_bead", return_value={"id": "at-agent"}),
+        patch("atelier.commands.plan.beads.run_bd_command", return_value=DummyResult()),
+        patch("atelier.commands.plan.beads.run_bd_json", return_value=[]),
+        patch("atelier.commands.plan.beads.list_inbox_messages", return_value=[]),
+        patch("atelier.commands.plan.beads.list_queue_messages", return_value=[]),
+        patch("atelier.commands.plan.policy.sync_agent_home_policy"),
+        patch("atelier.commands.plan.git.git_default_branch", return_value="main"),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncService",
+            side_effect=_DummyPlannerSyncService,
+        ),
+        patch(
+            "atelier.commands.plan.planner_sync.PlannerSyncMonitor",
+            side_effect=_DummyPlannerSyncMonitor,
+        ),
+        patch("atelier.commands.plan.worktrees.ensure_git_worktree", return_value=worktree_path),
+        patch(
+            "atelier.commands.plan.codex.run_codex_command",
+            return_value=codex.CodexRunResult(returncode=0, session_id=None, resume_command=None),
+        ),
+        patch("atelier.commands.plan.agent_home.cleanup_agent_home"),
+        patch("atelier.commands.plan.agent_teardown.teardown_agent_runtime") as teardown_runtime,
+        patch("atelier.commands.plan.say"),
+    ):
+        plan_cmd.run_planner(SimpleNamespace(epic_id=None))
+
+    teardown_runtime.assert_called_once_with(
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        agent_id=agent.agent_id,
+        close_agent_bead=True,
+    )
+
+
 def test_plan_applies_yolo_flag_to_agent_options(tmp_path: Path) -> None:
     worktree_path = tmp_path / "worktrees" / "planner"
     agent = AgentHome(

@@ -10,6 +10,7 @@ from typing import Literal, Protocol
 
 from .. import (
     agent_home,
+    agent_teardown,
     agents,
     beads,
     codex,
@@ -802,4 +803,10 @@ def run_planner(args: object) -> None:
             finally:
                 sync_monitor.stop()
     finally:
+        agent_teardown.teardown_agent_runtime(
+            beads_root=beads_root,
+            repo_root=repo_root,
+            agent_id=agent.agent_id,
+            close_agent_bead=True,
+        )
         agent_home.cleanup_agent_home(agent, project_dir=project_data_dir)

@@ -149,6 +149,8 @@ Atelier planning state. They are treated as external ticket sources.
     planner run.
   - Installs a read-only guardrail hook for planner worktrees and warns on dirty
     working trees.
+  - Runs deterministic planner teardown on exit: release owned hook/claim state
+    and close the session agent bead.
   - Planner sessions can refresh the same read-only startup overview on demand
     via the `planner-startup-check` skill script.
   - Startup overview output is deterministic and template-rendered, including a
@@ -166,6 +168,8 @@ Atelier planning state. They are treated as external ticket sources.
   - Creates/records the changeset branch mapping.
   - Uses `--run-mode` to decide whether to run once, loop while work is ready,
     or watch for new work.
+  - Runs deterministic worker teardown on exit: release owned hook/claim state
+    and close the session agent bead.
 
 - `atelier edit`
 

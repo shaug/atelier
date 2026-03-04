@@ -5142,7 +5142,7 @@ def find_agent_bead(agent_id: str, *, beads_root: Path, cwd: Path) -> dict[str, 
     """Find an agent bead by agent identity."""
     for label in _agent_label_candidates(beads_root=beads_root):
         issues = run_bd_json(
-            ["list", "--label", label, "--title", agent_id],
+            ["list", "--label", label, "--title", agent_id, "--all"],
             beads_root=beads_root,
             cwd=cwd,
         )
@@ -5168,6 +5168,17 @@ def ensure_agent_bead(
     """Ensure an agent bead exists for the given identity."""
     existing = find_agent_bead(agent_id, beads_root=beads_root, cwd=cwd)
     if existing:
+        issue_id = _clean_text(existing.get("id"))
+        if issue_id and lifecycle.canonical_lifecycle_status(existing.get("status")) == "closed":
+            run_bd_command(
+                ["update", issue_id, "--status", "open"],
+                beads_root=beads_root,
+                cwd=cwd,
+                allow_failure=True,
+            )
+            refreshed = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+            if refreshed:
+                return refreshed[0]
         return existing
     description = f"agent_id: {agent_id}\n"
     if role:

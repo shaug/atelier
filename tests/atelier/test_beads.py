@@ -3118,6 +3118,24 @@ def test_ensure_agent_bead_returns_existing() -> None:
     assert result == existing
 
 
+def test_ensure_agent_bead_reopens_closed_existing() -> None:
+    existing = {"id": "atelier-1", "title": "agent", "status": "closed"}
+    with (
+        patch("atelier.beads.find_agent_bead", return_value=existing),
+        patch("atelier.beads.run_bd_command") as run_command,
+        patch("atelier.beads.run_bd_json", return_value=[{"id": "atelier-1", "status": "open"}]),
+    ):
+        result = beads.ensure_agent_bead("agent", beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    run_command.assert_called_once_with(
+        ["update", "atelier-1", "--status", "open"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_failure=True,
+    )
+    assert result == {"id": "atelier-1", "status": "open"}
+
+
 def test_find_agent_bead_uses_title_filter_and_exact_match() -> None:
     seen: dict[str, object] = {}
 
@@ -3140,6 +3158,7 @@ def test_find_agent_bead_uses_title_filter_and_exact_match() -> None:
         "at:agent",
         "--title",
         "atelier/worker/codex/p123",
+        "--all",
     ]
 
 
@@ -3177,9 +3196,9 @@ def test_find_agent_bead_reads_compatibility_label_namespace(
     def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         del beads_root, cwd
         calls.append(args)
-        if args == ["list", "--label", "at:agent", "--title", "agent-7"]:
+        if args == ["list", "--label", "at:agent", "--title", "agent-7", "--all"]:
             return []
-        if args == ["list", "--label", "ts:agent", "--title", "agent-7"]:
+        if args == ["list", "--label", "ts:agent", "--title", "agent-7", "--all"]:
             return [{"id": "ts-agent", "title": "agent-7", "labels": ["ts:agent"]}]
         raise AssertionError(f"unexpected args: {args}")
 
@@ -3188,8 +3207,8 @@ def test_find_agent_bead_reads_compatibility_label_namespace(
 
     assert result == {"id": "ts-agent", "title": "agent-7", "labels": ["ts:agent"]}
     assert calls == [
-        ["list", "--label", "at:agent", "--title", "agent-7"],
-        ["list", "--label", "ts:agent", "--title", "agent-7"],
+        ["list", "--label", "at:agent", "--title", "agent-7", "--all"],
+        ["list", "--label", "ts:agent", "--title", "agent-7", "--all"],
     ]
 
 

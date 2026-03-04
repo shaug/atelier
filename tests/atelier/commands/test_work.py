@@ -65,6 +65,7 @@ def test_start_worker_non_dry_run_previews_and_cleans_agent_home(
             return_value=session_agent,
         ) as preview_agent_home,
         patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions,
+        patch("atelier.commands.work.agent_teardown.teardown_agent_runtime") as teardown_runtime,
         patch("atelier.commands.work.agent_home.cleanup_agent_home") as cleanup_agent_home,
     ):
         work_cmd.start_worker(
@@ -73,6 +74,12 @@ def test_start_worker_non_dry_run_previews_and_cleans_agent_home(
 
     preview_agent_home.assert_called_once()
     run_sessions.assert_called_once()
+    teardown_runtime.assert_called_once_with(
+        beads_root=tmp_path / ".beads",
+        repo_root=repo_root,
+        agent_id=session_agent.agent_id,
+        close_agent_bead=True,
+    )
     cleanup_agent_home.assert_called_once_with(session_agent, project_dir=tmp_path)
 
 

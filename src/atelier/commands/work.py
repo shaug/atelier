@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
-from .. import agent_home, cli_defaults, config
+from .. import agent_home, agent_teardown, cli_defaults, config
 from ..io import confirm, die, say
 from ..worker import models as worker_models
 from ..worker import runtime as worker_runtime
@@ -63,19 +64,22 @@ def start_worker(args: object) -> None:
     dry_run = bool(getattr(args, "dry_run", False))
     session_key = agent_home.generate_session_key()
     cleanup_agent: agent_home.AgentHome | None = None
-    cleanup_project_dir = None
+    cleanup_project_dir: Path | None = None
+    cleanup_beads_root: Path | None = None
+    cleanup_repo_root: Path | None = None
     configured_select_default: str | None = None
     if not dry_run:
         (
             cleanup_project_root,
             cleanup_project_config,
             _cleanup_enlistment,
-            _cleanup_repo_root,
+            cleanup_repo_root,
         ) = resolve_current_project_with_repo_root()
         configured_select_default = cleanup_project_config.worker.select
         cleanup_project_dir = config.resolve_project_data_dir(
             cleanup_project_root, cleanup_project_config
         )
+        cleanup_beads_root = config.resolve_beads_root(cleanup_project_dir, cleanup_repo_root)
         cleanup_agent = agent_home.preview_agent_home(
             cleanup_project_dir,
             cleanup_project_config,
@@ -104,5 +108,16 @@ def start_worker(args: object) -> None:
             sleep_fn=time.sleep,
         )
     finally:
+        if (
+            cleanup_agent is not None
+            and cleanup_beads_root is not None
+            and cleanup_repo_root is not None
+        ):
+            agent_teardown.teardown_agent_runtime(
+                beads_root=cleanup_beads_root,
+                repo_root=cleanup_repo_root,
+                agent_id=cleanup_agent.agent_id,
+                close_agent_bead=True,
+            )
         if cleanup_agent is not None and cleanup_project_dir is not None:
             agent_home.cleanup_agent_home(cleanup_agent, project_dir=cleanup_project_dir)
