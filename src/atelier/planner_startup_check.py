@@ -76,6 +76,15 @@ class StartupIssueSummary:
 
 
 @dataclass(frozen=True)
+class StartupCollectionFailure:
+    """Structured startup collection failure used by deterministic fallback."""
+
+    phase: str
+    error_type: str
+    detail: str
+
+
+@dataclass(frozen=True)
 class StartupDeferredChangesetGroup:
     """Deferred changesets grouped under one active epic."""
 
@@ -96,6 +105,7 @@ class StartupTriageDiagnostics:
     missing_from_index: tuple[str, ...]
     deferred_scan_limit: int
     deferred_scan_skipped_epics: int
+    startup_failures: tuple[StartupCollectionFailure, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -251,6 +261,68 @@ def build_startup_triage_model(
     )
 
 
+def _normalize_startup_error_detail(error: BaseException) -> str:
+    raw_detail = str(error).strip()
+    if not raw_detail:
+        raw_detail = "startup collection failed without additional detail"
+    first_line = raw_detail.splitlines()[0].strip()
+    collapsed = " ".join(first_line.split())
+    return collapsed or "startup collection failed without additional detail"
+
+
+def _fallback_epic_list_markdown(epic_list_markdown: str | None) -> str:
+    normalized = str(epic_list_markdown or "").strip()
+    if normalized:
+        return normalized
+    return "Epics by state:\n- unavailable (startup triage failed before epic rendering)"
+
+
+def build_startup_triage_failure_model(
+    *,
+    beads_root: Path,
+    phase: str,
+    error: BaseException,
+    epic_list_markdown: str | None = None,
+) -> StartupTriageModel:
+    """Build a deterministic startup triage model for fallback/error paths.
+
+    Args:
+        beads_root: Beads root path used by startup triage.
+        phase: Stable failure phase identifier.
+        error: Original startup collection/rendering error.
+        epic_list_markdown: Optional pre-rendered epic-list section.
+
+    Returns:
+        Startup triage model that preserves a deterministic output shape while
+        reporting structured failure details.
+    """
+
+    failure = StartupCollectionFailure(
+        phase=str(phase).strip() or "startup_collection",
+        error_type=(type(error).__name__ or "Exception"),
+        detail=_normalize_startup_error_detail(error),
+    )
+    diagnostics = StartupTriageDiagnostics(
+        beads_root=str(beads_root),
+        total_epics=0,
+        active_top_level_work_count=0,
+        indexed_active_epic_count=0,
+        in_parity=False,
+        identity_violations=(),
+        missing_from_index=(),
+        deferred_scan_limit=0,
+        deferred_scan_skipped_epics=0,
+        startup_failures=(failure,),
+    )
+    return StartupTriageModel(
+        inbox_messages=(),
+        queued_messages=(),
+        deferred_changesets=(),
+        diagnostics=diagnostics,
+        epic_list_markdown=_fallback_epic_list_markdown(epic_list_markdown),
+    )
+
+
 def render_startup_triage_markdown(model: StartupTriageModel) -> str:
     """Render deterministic startup markdown from a typed triage model.
 
@@ -265,6 +337,14 @@ def render_startup_triage_markdown(model: StartupTriageModel) -> str:
         "Planner startup overview",
         f"- Beads root: {model.diagnostics.beads_root}",
     ]
+    diagnostics = model.diagnostics
+
+    if diagnostics.startup_failures:
+        lines.append("Startup collection fallback (deterministic):")
+        for failure in diagnostics.startup_failures:
+            lines.append(
+                f"- phase={failure.phase} error={failure.error_type} detail={failure.detail}"
+            )
 
     if model.inbox_messages:
         lines.append("Unread messages:")
@@ -288,7 +368,6 @@ def render_startup_triage_markdown(model: StartupTriageModel) -> str:
     else:
         lines.append("No queued messages.")
 
-    diagnostics = model.diagnostics
     lines.append(f"- Total epics: {diagnostics.total_epics}")
     lines.append(
         "- Active top-level work (open/in_progress/blocked): "

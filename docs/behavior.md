@@ -151,6 +151,8 @@ Atelier planning state. They are treated as external ticket sources.
     working trees.
   - Planner sessions can refresh the same read-only startup overview on demand
     via the `planner-startup-check` skill script.
+  - Startup overview output is deterministic and template-rendered, including a
+    structured fallback section when startup collection fails.
 
 - `atelier policy`
 
