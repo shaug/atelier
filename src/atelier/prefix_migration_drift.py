@@ -673,6 +673,11 @@ def _resolve_repair_action(
             lookup_pr_status=lookup_pr_status,
         )
 
+    filesystem_path_for_metadata_branch = None
+    if metadata_work_branch is not None:
+        filesystem_path_for_metadata_branch = _filesystem_path_for_branch(
+            git_index, metadata_work_branch
+        )
     filesystem_path_for_canonical_branch = None
     if changeset_id == epic_id:
         filesystem_path_for_canonical_branch = _filesystem_path_for_branch(
