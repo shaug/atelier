@@ -86,8 +86,8 @@ Use this decision order for operational triage:
 1. If `required` is `false`, stop; no migration repair action is needed.
 1. If `required` is `true`, capture backups first (Beads root and
    `worktrees/.meta`).
-1. Apply `atelier doctor --fix` only when no active hooks are present, or when
-   `--force` is explicitly justified.
+1. Apply `atelier doctor --fix`. Active-hook-owned epics are deferred by
+   default; use `--force` only when overriding those deferrals is justified.
 1. Re-run `atelier doctor` and verify `prefix_normalization.required` is
    `false`.
 
@@ -99,16 +99,17 @@ Mutation is never implicit. Apply only with `--fix`:
 atelier doctor --fix
 ```
 
-By default, `--fix` refuses to run while active agent hooks are present to avoid
-racing worker startup/finalization writes. Use `--force` only when you have
-confirmed this override is safe:
+By default, `--fix` defers repairs for epics owned by active agent hooks to
+avoid racing worker startup/finalization writes. Use `--force` only when you
+have confirmed this override is safe:
 
 ```bash
 atelier doctor --fix --force
 ```
 
 The command updates only affected records (changeset lineage metadata and
-worktree mapping entries). Unaffected changesets are not modified.
+worktree mapping entries), plus non-active branch/worktree artifact convergence
+when safe. Unaffected changesets are not modified.
 
 ### Rollback
 

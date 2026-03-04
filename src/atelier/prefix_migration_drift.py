@@ -56,6 +56,7 @@ class PrefixMigrationRepairAction:
     update_changeset_worktree_path: bool
     update_mapping: bool
     applied: bool
+    deferred_reason: str | None = None
 
     @property
     def changed(self) -> bool:
@@ -86,6 +87,7 @@ class PrefixMigrationRepairAction:
             "update_changeset_worktree_path": self.update_changeset_worktree_path,
             "update_mapping": self.update_mapping,
             "applied": self.applied,
+            "deferred_reason": self.deferred_reason,
         }
 
 
@@ -179,6 +181,287 @@ def _collect_git_worktree_index(
         path_to_branch=dict(sorted(path_to_branch.items(), key=lambda item: item[0])),
         branch_to_paths=stable_branch_index,
     )
+
+
+def _local_branch_exists(repo_root: Path, branch: str, *, git_path: str | None) -> bool:
+    return git.git_ref_exists(repo_root, f"refs/heads/{branch}", git_path=git_path)
+
+
+def _remote_branch_exists(repo_root: Path, branch: str, *, git_path: str | None) -> bool:
+    return git.git_ref_exists(repo_root, f"refs/remotes/origin/{branch}", git_path=git_path)
+
+
+def _run_git_checked(
+    *,
+    repo_root: Path,
+    args: list[str],
+    git_path: str | None,
+    detail: str,
+) -> None:
+    result = exec_util.try_run_command(
+        git.git_command(["-C", str(repo_root), *args], git_path=git_path)
+    )
+    if result is None:
+        raise RuntimeError(f"{detail}: missing required command: git")
+    if result.returncode == 0:
+        return
+    stderr = (result.stderr or "").strip()
+    stdout = (result.stdout or "").strip()
+    reason = stderr or stdout or "git command failed"
+    raise RuntimeError(f"{detail}: {reason}")
+
+
+def _candidate_worktree_relpaths(
+    *,
+    project_data_dir: Path,
+    metadata_worktree_path: str | None,
+    mapping_worktree_path: str | None,
+    filesystem_path_for_metadata_branch: str | None,
+    filesystem_path_for_mapping_branch: str | None,
+) -> tuple[str, ...]:
+    values = (
+        mapping_worktree_path,
+        metadata_worktree_path,
+        filesystem_path_for_mapping_branch,
+        filesystem_path_for_metadata_branch,
+    )
+    deduped: list[str] = []
+    for value in values:
+        normalized = _normalize_worktree_path(value, project_data_dir=project_data_dir)
+        if normalized is None:
+            continue
+        if normalized in deduped:
+            continue
+        deduped.append(normalized)
+    return tuple(deduped)
+
+
+def _resolve_existing_worktree(
+    *,
+    project_data_dir: Path,
+    relpaths: tuple[str, ...],
+) -> tuple[str | None, Path | None]:
+    matches: list[tuple[str, Path]] = []
+    for relpath in relpaths:
+        candidate = project_data_dir / relpath
+        if candidate.exists() and (candidate / ".git").exists():
+            matches.append((relpath, candidate))
+    if not matches:
+        return None, None
+    if len(matches) > 1:
+        candidates = ", ".join(f"{relpath!r}" for relpath, _ in matches)
+        raise RuntimeError(
+            "ambiguous existing changeset worktree candidates; "
+            f"multiple paths exist and cannot be selected safely: {candidates}"
+        )
+    return matches[0]
+
+
+def _choose_branch_source(
+    *,
+    canonical_branch: str,
+    mapping_work_branch: str | None,
+    metadata_work_branch: str | None,
+    mapped_branch: str | None,
+    pr_head_ref: str | None,
+) -> str | None:
+    for value in (mapped_branch, mapping_work_branch, metadata_work_branch, pr_head_ref):
+        if value is None or value == canonical_branch:
+            continue
+        return value
+    return None
+
+
+def _ensure_canonical_branch(
+    *,
+    repo_root: Path,
+    canonical_branch: str,
+    source_branch: str | None,
+    git_path: str | None,
+) -> None:
+    if _local_branch_exists(repo_root, canonical_branch, git_path=git_path):
+        return
+    if _remote_branch_exists(repo_root, canonical_branch, git_path=git_path):
+        source_ref = f"origin/{canonical_branch}"
+    else:
+        if source_branch is None:
+            return
+        if _local_branch_exists(repo_root, source_branch, git_path=git_path):
+            source_ref = source_branch
+        elif _remote_branch_exists(repo_root, source_branch, git_path=git_path):
+            source_ref = f"origin/{source_branch}"
+        else:
+            return
+    _run_git_checked(
+        repo_root=repo_root,
+        args=["branch", canonical_branch, source_ref],
+        git_path=git_path,
+        detail=(
+            "failed to materialize canonical changeset branch "
+            f"{canonical_branch!r} from {source_ref!r}"
+        ),
+    )
+    if _local_branch_exists(repo_root, canonical_branch, git_path=git_path):
+        return
+    raise RuntimeError(
+        f"failed to verify canonical changeset branch materialization for {canonical_branch!r}"
+    )
+
+
+def _checkout_canonical_branch(
+    *,
+    worktree_path: Path,
+    canonical_branch: str,
+    git_path: str | None,
+) -> None:
+    current = _normalize_branch_ref(git.git_current_branch(worktree_path, git_path=git_path))
+    if current == canonical_branch:
+        return
+    if _local_branch_exists(worktree_path, canonical_branch, git_path=git_path):
+        args = ["checkout", canonical_branch]
+    elif _remote_branch_exists(worktree_path, canonical_branch, git_path=git_path):
+        args = ["checkout", "-B", canonical_branch, f"origin/{canonical_branch}"]
+    else:
+        raise RuntimeError(
+            "unable to checkout canonical branch in changeset worktree because "
+            f"{canonical_branch!r} does not exist"
+        )
+    _run_git_checked(
+        repo_root=worktree_path,
+        args=args,
+        git_path=git_path,
+        detail=(
+            f"failed to checkout canonical changeset branch {canonical_branch!r} in {worktree_path}"
+        ),
+    )
+    current = _normalize_branch_ref(git.git_current_branch(worktree_path, git_path=git_path))
+    if current == canonical_branch:
+        return
+    raise RuntimeError(
+        "failed to verify canonical changeset branch checkout for "
+        f"{canonical_branch!r} in {worktree_path}"
+    )
+
+
+def _converge_changeset_artifacts(
+    *,
+    project_data_dir: Path,
+    repo_root: Path,
+    action: PrefixMigrationRepairAction,
+    changeset_issue: dict[str, object],
+    mapping: worktrees.WorktreeMapping | None,
+    git_index: _GitWorktreeIndex,
+    git_path: str | None,
+) -> None:
+    if action.changeset_id == action.epic_id:
+        return
+    metadata_fields = changeset_fields.issue_fields(changeset_issue)
+    metadata_work_branch = _normalize_text(
+        changeset_fields.normalized_field(metadata_fields, "changeset.work_branch")
+    )
+    metadata_worktree_path = _normalize_worktree_path(
+        metadata_fields.get("worktree_path"),
+        project_data_dir=project_data_dir,
+    )
+    mapping_work_branch = (
+        _normalize_text(mapping.changesets.get(action.changeset_id))
+        if mapping is not None
+        else None
+    )
+    mapping_worktree_path = (
+        _normalize_worktree_path(
+            mapping.changeset_worktrees.get(action.changeset_id),
+            project_data_dir=project_data_dir,
+        )
+        if mapping is not None
+        else None
+    )
+    filesystem_path_for_metadata_branch = None
+    if metadata_work_branch is not None:
+        paths = git_index.branch_to_paths.get(metadata_work_branch)
+        if paths:
+            filesystem_path_for_metadata_branch = paths[0]
+    filesystem_path_for_mapping_branch = None
+    if mapping_work_branch is not None:
+        paths = git_index.branch_to_paths.get(mapping_work_branch)
+        if paths:
+            filesystem_path_for_mapping_branch = paths[0]
+
+    canonical_relpath = _normalize_worktree_path(
+        action.canonical_worktree_path,
+        project_data_dir=project_data_dir,
+    )
+    if canonical_relpath is None:
+        raise RuntimeError("missing canonical changeset worktree path")
+    canonical_path = project_data_dir / canonical_relpath
+
+    source_relpaths = _candidate_worktree_relpaths(
+        project_data_dir=project_data_dir,
+        metadata_worktree_path=metadata_worktree_path,
+        mapping_worktree_path=mapping_worktree_path,
+        filesystem_path_for_metadata_branch=filesystem_path_for_metadata_branch,
+        filesystem_path_for_mapping_branch=filesystem_path_for_mapping_branch,
+    )
+    source_relpath, source_path = _resolve_existing_worktree(
+        project_data_dir=project_data_dir,
+        relpaths=source_relpaths,
+    )
+
+    if canonical_path.exists() and not (canonical_path / ".git").exists():
+        raise RuntimeError(
+            "canonical changeset worktree path exists but is not a git worktree: "
+            f"{canonical_relpath!r}"
+        )
+    move_worktree = (
+        source_path is not None
+        and source_relpath is not None
+        and source_relpath != canonical_relpath
+        and not canonical_path.exists()
+    )
+    if move_worktree:
+        assert source_path is not None
+        active_worktree_path = source_path
+    elif canonical_path.exists():
+        active_worktree_path = canonical_path
+    else:
+        return
+
+    branch_source = _choose_branch_source(
+        canonical_branch=action.canonical_work_branch,
+        mapping_work_branch=mapping_work_branch,
+        metadata_work_branch=metadata_work_branch,
+        mapped_branch=_normalize_text(
+            git.git_current_branch(active_worktree_path, git_path=git_path)
+        ),
+        pr_head_ref=action.pr_head_ref,
+    )
+    _ensure_canonical_branch(
+        repo_root=repo_root,
+        canonical_branch=action.canonical_work_branch,
+        source_branch=branch_source,
+        git_path=git_path,
+    )
+    _checkout_canonical_branch(
+        worktree_path=active_worktree_path,
+        canonical_branch=action.canonical_work_branch,
+        git_path=git_path,
+    )
+    if move_worktree:
+        assert source_path is not None
+        assert source_relpath is not None
+        _run_git_checked(
+            repo_root=repo_root,
+            args=["worktree", "move", str(source_path), str(canonical_path)],
+            git_path=git_path,
+            detail=(
+                f"failed to rename changeset worktree {source_relpath!r} -> {canonical_relpath!r}"
+            ),
+        )
+        if not canonical_path.exists() or not (canonical_path / ".git").exists():
+            raise RuntimeError(
+                "failed to verify changeset worktree rename "
+                f"{source_relpath!r} -> {canonical_relpath!r}"
+            )
 
 
 def _mapped_worktree_lineage(
@@ -417,6 +700,11 @@ def _resolve_repair_action(
             lookup_pr_status=lookup_pr_status,
         )
 
+    filesystem_path_for_metadata_branch = None
+    if metadata_work_branch is not None:
+        filesystem_path_for_metadata_branch = _filesystem_path_for_branch(
+            git_index, metadata_work_branch
+        )
     filesystem_path_for_canonical_branch = None
     if changeset_id == epic_id:
         filesystem_path_for_canonical_branch = _filesystem_path_for_branch(
@@ -439,49 +727,47 @@ def _resolve_repair_action(
             canonical_worktree = worktrees.changeset_worktree_relpath(changeset_id)
             worktree_source = "default"
     else:
+        preferred_work_branch = derived_work_branch
         if pr_head_ref is not None:
             canonical_work_branch = pr_head_ref
             work_branch_source = "open-pr-head"
-        elif mapped_branch is not None:
-            canonical_work_branch = mapped_branch
-            work_branch_source = "checked-out-worktree"
-        elif mapping_work_branch is not None:
-            canonical_work_branch = mapping_work_branch
-            work_branch_source = "mapping"
-        elif metadata_work_branch is not None:
-            canonical_work_branch = metadata_work_branch
-            work_branch_source = "metadata"
         else:
-            canonical_work_branch = derived_work_branch
-            work_branch_source = "derived"
+            canonical_work_branch = preferred_work_branch
+            work_branch_source = "derived-canonical"
 
         filesystem_path_for_canonical_branch = _filesystem_path_for_branch(
             git_index, canonical_work_branch
         )
 
-        if filesystem_path_for_canonical_branch is not None:
-            canonical_worktree = filesystem_path_for_canonical_branch
-            worktree_source = "filesystem-canonical-branch"
-        elif mapped_branch == canonical_work_branch and mapped_relpath is not None:
-            canonical_worktree = mapped_relpath
-            worktree_source = "checked-out-worktree"
-        elif metadata_work_branch == canonical_work_branch and metadata_worktree_path is not None:
-            canonical_worktree = metadata_worktree_path
-            worktree_source = "metadata"
-        elif mapping_work_branch == canonical_work_branch and mapping_worktree_path is not None:
-            canonical_worktree = mapping_worktree_path
-            worktree_source = "mapping"
-        else:
-            canonical_worktree = worktrees.changeset_worktree_relpath(changeset_id)
-            worktree_source = "default"
+        selected_worktree = worktrees.changeset_worktree_relpath(changeset_id)
+        selected_worktree_source = "derived-canonical"
+        if mapped_branch is not None and mapped_relpath is not None:
+            selected_worktree = mapped_relpath
+            selected_worktree_source = "checked-out-worktree"
+        elif filesystem_path_for_canonical_branch is not None:
+            selected_worktree = filesystem_path_for_canonical_branch
+            selected_worktree_source = "filesystem-canonical-branch"
+        elif filesystem_path_for_metadata_branch is not None:
+            selected_worktree = filesystem_path_for_metadata_branch
+            selected_worktree_source = "filesystem-metadata-branch"
+        elif mapping_worktree_path is not None:
+            selected_worktree = mapping_worktree_path
+            selected_worktree_source = "mapping"
+        elif metadata_worktree_path is not None:
+            selected_worktree = metadata_worktree_path
+            selected_worktree_source = "metadata"
+        canonical_worktree = worktrees.changeset_worktree_relpath(changeset_id)
+        worktree_source = (
+            selected_worktree_source
+            if selected_worktree == canonical_worktree
+            else "derived-canonical"
+        )
 
     update_workspace_root_branch = epic_root_branch is None
     update_changeset_metadata = (
         metadata_root_branch != canonical_root or metadata_work_branch != canonical_work_branch
     )
-    update_changeset_worktree_path = (
-        metadata_worktree_path is not None and metadata_worktree_path != canonical_worktree
-    )
+    update_changeset_worktree_path = metadata_worktree_path != canonical_worktree
     update_mapping = mapping is not None and (
         mapping_root_branch != canonical_root
         or mapping_work_branch != canonical_work_branch
@@ -593,6 +879,7 @@ def repair_prefix_migration_drift(
     repo_slug: str | None = None,
     git_path: str | None = None,
     lookup_pr_status: PrLookupStatus = prs.lookup_github_pr_status,
+    blocked_epics: Collection[str] | None = None,
     target_epic_id: str | None = None,
     target_changeset_ids: Collection[str] | None = None,
 ) -> list[PrefixMigrationRepairAction]:
@@ -606,6 +893,7 @@ def repair_prefix_migration_drift(
         repo_slug: Optional GitHub ``owner/name`` for PR-head evidence.
         git_path: Optional git executable override.
         lookup_pr_status: PR lookup adapter for tests and runtime injection.
+        blocked_epics: Optional epic ids that must not be mutated in this run.
         target_epic_id: Optional epic id to scope planned/applied actions.
         target_changeset_ids: Optional changeset ids to scope work within
             ``target_epic_id``.
@@ -614,6 +902,11 @@ def repair_prefix_migration_drift(
         Planned or applied actions for drifted changesets, sorted
         deterministically by changeset id and drift class set.
     """
+    blocked_epic_set = {
+        value
+        for value in (_normalize_text(epic_id) for epic_id in (blocked_epics or ()))
+        if value is not None
+    }
     drift_records = scan_prefix_migration_drift(
         project_data_dir=project_data_dir,
         beads_root=beads_root,
@@ -670,43 +963,60 @@ def repair_prefix_migration_drift(
                 continue
 
             applied = False
+            deferred_reason: str | None = None
             if apply and action.changed:
-                if action.update_workspace_root_branch:
-                    beads.update_workspace_root_branch(
-                        epic_id,
-                        action.canonical_root_branch,
-                        beads_root=beads_root,
-                        cwd=repo_root,
-                        allow_override=True,
-                    )
-                if action.update_changeset_metadata:
-                    beads.update_changeset_branch_metadata(
-                        changeset_id,
-                        root_branch=action.canonical_root_branch,
-                        parent_branch=None,
-                        work_branch=action.canonical_work_branch,
-                        beads_root=beads_root,
-                        cwd=repo_root,
-                        allow_override=True,
-                    )
-                if action.update_changeset_worktree_path:
-                    beads.update_worktree_path(
-                        changeset_id,
-                        action.canonical_worktree_path,
-                        beads_root=beads_root,
-                        cwd=repo_root,
-                        allow_override=True,
-                    )
-                if action.update_mapping:
-                    mapping, _changed = _update_mapping_lineage(
-                        project_data_dir=project_data_dir,
-                        epic_id=epic_id,
-                        changeset_id=changeset_id,
-                        canonical_root_branch=action.canonical_root_branch,
-                        canonical_work_branch=action.canonical_work_branch,
-                        canonical_worktree_path=action.canonical_worktree_path,
-                    )
-                applied = True
+                if epic_id in blocked_epic_set:
+                    deferred_reason = "active-hook"
+                else:
+                    try:
+                        _converge_changeset_artifacts(
+                            project_data_dir=project_data_dir,
+                            repo_root=repo_root,
+                            action=action,
+                            changeset_issue=changeset,
+                            mapping=mapping,
+                            git_index=git_index,
+                            git_path=git_path,
+                        )
+                    except RuntimeError as exc:
+                        deferred_reason = str(exc)
+                if deferred_reason is None:
+                    if action.update_workspace_root_branch:
+                        beads.update_workspace_root_branch(
+                            epic_id,
+                            action.canonical_root_branch,
+                            beads_root=beads_root,
+                            cwd=repo_root,
+                            allow_override=True,
+                        )
+                    if action.update_changeset_metadata:
+                        beads.update_changeset_branch_metadata(
+                            changeset_id,
+                            root_branch=action.canonical_root_branch,
+                            parent_branch=None,
+                            work_branch=action.canonical_work_branch,
+                            beads_root=beads_root,
+                            cwd=repo_root,
+                            allow_override=True,
+                        )
+                    if action.update_changeset_worktree_path:
+                        beads.update_worktree_path(
+                            changeset_id,
+                            action.canonical_worktree_path,
+                            beads_root=beads_root,
+                            cwd=repo_root,
+                            allow_override=True,
+                        )
+                    if action.update_mapping:
+                        mapping, _changed = _update_mapping_lineage(
+                            project_data_dir=project_data_dir,
+                            epic_id=epic_id,
+                            changeset_id=changeset_id,
+                            canonical_root_branch=action.canonical_root_branch,
+                            canonical_work_branch=action.canonical_work_branch,
+                            canonical_worktree_path=action.canonical_worktree_path,
+                        )
+                    applied = True
 
             actions.append(
                 PrefixMigrationRepairAction(
@@ -725,6 +1035,7 @@ def repair_prefix_migration_drift(
                     update_changeset_worktree_path=action.update_changeset_worktree_path,
                     update_mapping=action.update_mapping,
                     applied=applied,
+                    deferred_reason=deferred_reason,
                 )
             )
     return sorted(
@@ -807,10 +1118,25 @@ def scan_prefix_migration_drift(
         epic_root_branch = _normalize_text(beads.extract_workspace_root_branch(epic))
         mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, epic_id))
         mapping_root_branch = _normalize_text(mapping.root_branch) if mapping else None
+        owned_changeset_ids: set[str] = set()
+        if scoped_changeset_ids:
+            owned_changeset_ids = {
+                normalized
+                for normalized in (
+                    _normalize_text(changeset.get("id"))
+                    for changeset in _changesets_for_epic(
+                        epic_id,
+                        epic_issue=epic,
+                        beads_root=beads_root,
+                        repo_root=repo_root,
+                    )
+                )
+                if normalized is not None
+            }
         if scoped_changeset_ids:
             changesets = []
             for changeset_id in sorted(scoped_changeset_ids):
-                if changeset_id != epic_id and not changeset_id.startswith(f"{epic_id}."):
+                if changeset_id not in owned_changeset_ids:
                     continue
                 try:
                     scoped_changesets = beads.run_bd_json(
@@ -833,7 +1159,7 @@ def scan_prefix_migration_drift(
                     issue_id = _normalize_text(issue.get("id"))
                     if issue_id is None:
                         continue
-                    if issue_id != epic_id and not issue_id.startswith(f"{epic_id}."):
+                    if issue_id != changeset_id:
                         continue
                     changesets.append(issue)
         else:

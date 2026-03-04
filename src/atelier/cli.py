@@ -762,7 +762,7 @@ def doctor_command(
         bool,
         typer.Option(
             "--force",
-            help="override active-agent safety gate when used with --fix",
+            help="override active-hook deferrals when used with --fix",
         ),
     ] = False,
 ) -> None:

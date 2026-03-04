@@ -123,7 +123,11 @@ def resolve_epic_integration_cwd(
 ) -> Path:
     if project_data_dir is None or not epic_id:
         return repo_root
-    mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, epic_id))
+    mapping = worktrees.load_mapping_for_changeset(
+        project_data_dir,
+        epic_id=epic_id,
+        changeset_id=epic_id,
+    )
     if mapping is None or not mapping.worktree_path:
         return repo_root
     worktree_path = Path(mapping.worktree_path)
@@ -145,7 +149,11 @@ def resolve_changeset_worktree_path(
 ) -> Path | None:
     if project_data_dir is None or not epic_id or not changeset_id:
         return None
-    mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, epic_id))
+    mapping = worktrees.load_mapping_for_changeset(
+        project_data_dir,
+        epic_id=epic_id,
+        changeset_id=changeset_id,
+    )
     if mapping is None:
         return None
     relpath = mapping.changeset_worktrees.get(changeset_id)

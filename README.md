@@ -612,7 +612,7 @@ Options:
 
 - `--format=json`: Emit deterministic JSON output.
 - `--fix`: Apply drift repairs instead of read-only detection.
-- `--force`: Override active-agent safety gate when used with `--fix`.
+- `--force`: Override active-hook deferrals when used with `--fix`.
 
 ### `atelier list`
 

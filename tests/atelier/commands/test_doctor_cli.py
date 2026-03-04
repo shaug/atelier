@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import typer.main
 from typer.testing import CliRunner
 
 import atelier.cli as cli
@@ -23,3 +24,11 @@ class TestDoctorCommand:
         assert captured["format"] == "json"
         assert captured["fix"] is True
         assert captured["force"] is True
+
+    def test_doctor_help_describes_force_as_active_hook_override(self) -> None:
+        root_command = typer.main.get_command(cli.app)
+        doctor_command = root_command.commands["doctor"]
+        force_option = next(
+            parameter for parameter in doctor_command.params if parameter.name == "force"
+        )
+        assert force_option.help == "override active-hook deferrals when used with --fix"

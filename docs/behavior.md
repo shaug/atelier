@@ -198,7 +198,8 @@ Atelier planning state. They are treated as external ticket sources.
   - Uses `atelier doctor --fix` as the explicit mutation path.
   - Read-only output reports whether normalization is required as a
     deterministic yes/no with count.
-  - Blocks `--fix` when active hooks are detected unless `--force` is provided.
+  - Defers `--fix` mutations for active-hook-owned epics unless `--force` is
+    provided.
   - Includes rollback guidance based on `bd info --json` plus filesystem backups
     for Beads and mapping metadata.
   - Does not trigger `atelier gc`.
