@@ -8,8 +8,13 @@ import os
 import sys
 from pathlib import Path
 
-from atelier import beads, lifecycle, planner_overview
+from atelier import lifecycle, planner_overview
 from atelier.beads_context import resolve_skill_beads_context
+from atelier.planner_startup_check import (
+    StartupBeadsInvocationHelper,
+    StartupCommandResult,
+    execute_startup_command_plan,
+)
 
 DEFAULT_DEFERRED_EPIC_SCAN_LIMIT = 25
 
@@ -30,8 +35,7 @@ def _queue_claim_state(issue: dict[str, object]) -> str:
 def _deferred_descendant_changesets(
     epics: list[dict[str, object]],
     *,
-    beads_root: Path,
-    repo_root: Path,
+    helper: StartupBeadsInvocationHelper,
 ) -> tuple[list[tuple[dict[str, object], list[dict[str, object]]]], int, int]:
     scan_limit = _deferred_epic_scan_limit()
     groups: list[tuple[dict[str, object], list[dict[str, object]]]] = []
@@ -51,10 +55,8 @@ def _deferred_descendant_changesets(
     skipped_epics = max(0, len(active_epics) - len(scanned_epics))
     for epic in scanned_epics:
         epic_id = str(epic.get("id") or "").strip()
-        descendants = beads.list_descendant_changesets(
+        descendants = helper.list_descendant_changesets(
             epic_id,
-            beads_root=beads_root,
-            cwd=repo_root,
             include_closed=False,
         )
         deferred = [
@@ -82,13 +84,11 @@ def _append_deferred_changeset_summary(
     lines: list[str],
     epics: list[dict[str, object]],
     *,
-    beads_root: Path,
-    repo_root: Path,
+    helper: StartupBeadsInvocationHelper,
 ) -> None:
     groups, skipped_epics, scan_limit = _deferred_descendant_changesets(
         epics,
-        beads_root=beads_root,
-        repo_root=repo_root,
+        helper=helper,
     )
     if not groups:
         lines.append("No deferred changesets under open/in-progress/blocked epics.")
@@ -132,12 +132,19 @@ def _resolve_context(*, beads_dir: str | None) -> tuple[Path, Path, str | None]:
     return context.beads_root, context.repo_root, context.override_warning
 
 
+def _startup_helper(*, beads_root: Path, repo_root: Path) -> StartupBeadsInvocationHelper:
+    return StartupBeadsInvocationHelper(beads_root=beads_root, cwd=repo_root)
+
+
 def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path) -> str:
     lines: list[str] = ["Planner startup overview", f"- Beads root: {beads_root}"]
-
-    inbox = beads.list_inbox_messages(
-        agent_id, beads_root=beads_root, cwd=repo_root, unread_only=True
+    helper = _startup_helper(beads_root=beads_root, repo_root=repo_root)
+    command_result: StartupCommandResult = execute_startup_command_plan(
+        agent_id,
+        helper=helper,
     )
+
+    inbox = command_result.inbox_messages
     if inbox:
         lines.append("Unread messages:")
         for issue in sorted(inbox, key=_issue_sort_key):
@@ -145,12 +152,7 @@ def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path
     else:
         lines.append("No unread messages.")
 
-    queued = beads.list_queue_messages(
-        beads_root=beads_root,
-        cwd=repo_root,
-        unread_only=True,
-        unclaimed_only=False,
-    )
+    queued = command_result.queued_messages
     if queued:
         lines.append("Queued messages:")
         for issue in sorted(queued, key=_issue_sort_key):
@@ -161,13 +163,9 @@ def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path
     else:
         lines.append("No queued messages.")
 
-    epics = planner_overview.list_epics(beads_root=beads_root, repo_root=repo_root)
+    epics = command_result.epics
     lines.append(f"- Total epics: {len(epics)}")
-    parity = beads.epic_discovery_parity_report(
-        beads_root=beads_root,
-        cwd=repo_root,
-        indexed_epics=epics,
-    )
+    parity = command_result.parity_report
     lines.append(
         f"- Active top-level work (open/in_progress/blocked): {parity.active_top_level_work_count}"
     )
@@ -195,8 +193,7 @@ def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path
     _append_deferred_changeset_summary(
         lines,
         epics,
-        beads_root=beads_root,
-        repo_root=repo_root,
+        helper=helper,
     )
     lines.extend(planner_overview.render_epics(epics, show_drafts=True).splitlines())
     return "\n".join(lines)

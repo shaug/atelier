@@ -1,0 +1,311 @@
+"""Deterministic planner-startup command planning and Beads invocation helpers."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from . import beads, lifecycle, messages
+
+_SUPPORTED_LIST_FLAGS = frozenset({"--label", "--assignee", "--all", "--limit", "--parent"})
+_LIST_FLAGS_REQUIRING_VALUE = frozenset({"--label", "--assignee", "--limit", "--parent"})
+_FORBIDDEN_INVOCATION_PREFIXES = ("--db", "--db=", "--beads-dir", "--beads-dir=")
+
+
+@dataclass(frozen=True)
+class StartupCommandStep:
+    """Metadata for one fixed planner-startup command step.
+
+    Attributes:
+        name: Stable command identity used by the startup executor.
+        inputs: Explicit input names consumed by the command.
+        output: Explicit output field produced by the command.
+    """
+
+    name: str
+    inputs: tuple[str, ...]
+    output: str
+
+
+@dataclass(frozen=True)
+class StartupCommandResult:
+    """Structured outputs from the canonical startup command plan."""
+
+    inbox_messages: list[dict[str, object]]
+    queued_messages: list[dict[str, object]]
+    epics: list[dict[str, object]]
+    parity_report: beads.EpicDiscoveryParityReport
+
+
+_STARTUP_COMMAND_PLAN: tuple[StartupCommandStep, ...] = (
+    StartupCommandStep(
+        name="list_inbox_unread_messages",
+        inputs=("agent_id",),
+        output="inbox_messages",
+    ),
+    StartupCommandStep(
+        name="list_queue_unread_messages",
+        inputs=(),
+        output="queued_messages",
+    ),
+    StartupCommandStep(
+        name="list_indexed_epics",
+        inputs=(),
+        output="epics",
+    ),
+    StartupCommandStep(
+        name="compute_epic_discovery_parity",
+        inputs=("epics",),
+        output="parity_report",
+    ),
+)
+
+
+def startup_command_plan() -> tuple[StartupCommandStep, ...]:
+    """Return the canonical planner-startup command plan in execution order.
+
+    Returns:
+        Ordered startup command steps with explicit input and output contracts.
+    """
+
+    return _STARTUP_COMMAND_PLAN
+
+
+def validate_startup_list_invocation(args: list[str]) -> None:
+    """Validate a startup helper `bd list` invocation.
+
+    Args:
+        args: `bd` arguments without the leading binary name.
+
+    Raises:
+        ValueError: If the invocation uses unsupported syntax or forbidden flags.
+    """
+
+    if not args:
+        raise ValueError("startup helper requires a non-empty bd invocation")
+    if args[0] != "list":
+        raise ValueError("startup helper supports only `bd list` invocations")
+
+    index = 1
+    while index < len(args):
+        token = str(args[index]).strip()
+        lower = token.lower()
+        if any(
+            lower == blocked or lower.startswith(blocked)
+            for blocked in _FORBIDDEN_INVOCATION_PREFIXES
+        ):
+            raise ValueError(f"forbidden startup bd invocation flag: {token}")
+        if lower == "--json":
+            raise ValueError("startup helper manages JSON mode; do not pass --json")
+        if token.startswith("--"):
+            if token not in _SUPPORTED_LIST_FLAGS:
+                raise ValueError(f"unsupported startup bd list flag: {token}")
+            if token in _LIST_FLAGS_REQUIRING_VALUE:
+                if index + 1 >= len(args):
+                    raise ValueError(f"startup bd list flag requires a value: {token}")
+                value = str(args[index + 1]).strip()
+                if not value or value.startswith("--"):
+                    raise ValueError(f"startup bd list flag requires a value: {token}")
+                index += 2
+                continue
+        index += 1
+
+
+@dataclass(frozen=True)
+class StartupBeadsInvocationHelper:
+    """Shared Beads helper for planner-startup command execution."""
+
+    beads_root: Path
+    cwd: Path
+
+    def _run_list_query(self, args: list[str]) -> list[dict[str, object]]:
+        validate_startup_list_invocation(args)
+        return beads.run_bd_json(args, beads_root=self.beads_root, cwd=self.cwd)
+
+    def list_inbox_messages(
+        self,
+        agent_id: str,
+        *,
+        unread_only: bool = True,
+    ) -> list[dict[str, object]]:
+        """List planner inbox messages via the canonical startup helper path."""
+
+        args = [
+            "list",
+            "--label",
+            beads.issue_label("message", beads_root=self.beads_root),
+            "--assignee",
+            agent_id,
+        ]
+        if unread_only:
+            args.extend(["--label", beads.issue_label("unread", beads_root=self.beads_root)])
+        return self._run_list_query(args)
+
+    def list_queue_messages(
+        self,
+        *,
+        queue: str | None = None,
+        unclaimed_only: bool = True,
+        unread_only: bool = True,
+    ) -> list[dict[str, object]]:
+        """List queued message beads from deterministic startup queries."""
+
+        args = ["list", "--label", beads.issue_label("message", beads_root=self.beads_root)]
+        if unread_only:
+            args.extend(["--label", beads.issue_label("unread", beads_root=self.beads_root)])
+        issues = self._run_list_query(args)
+        matches: list[dict[str, object]] = []
+        for issue in issues:
+            description = issue.get("description")
+            if not isinstance(description, str):
+                continue
+            payload = messages.parse_message(description)
+            queue_name = payload.metadata.get("queue")
+            if not isinstance(queue_name, str) or not queue_name.strip():
+                continue
+            if queue is not None and queue_name != queue:
+                continue
+            claimed_by = payload.metadata.get("claimed_by")
+            assignee = issue.get("assignee")
+            assignee_claim = (
+                assignee.strip() if isinstance(assignee, str) and assignee.strip() else None
+            )
+            normalized_claim = (
+                claimed_by.strip()
+                if isinstance(claimed_by, str) and claimed_by.strip()
+                else assignee_claim
+            )
+            if unclaimed_only and normalized_claim:
+                continue
+            enriched = dict(issue)
+            enriched["queue"] = queue_name
+            enriched["claimed_by"] = normalized_claim
+            matches.append(enriched)
+        return matches
+
+    def list_epics(self, *, include_closed: bool = False) -> list[dict[str, object]]:
+        """List epic beads via fixed `<prefix>:epic` discovery."""
+
+        args = [
+            "list",
+            "--label",
+            beads.issue_label("epic", beads_root=self.beads_root),
+            "--all",
+            "--limit",
+            "0",
+        ]
+        issues = self._run_list_query(args)
+        if include_closed:
+            return issues
+        return [
+            issue
+            for issue in issues
+            if lifecycle.canonical_lifecycle_status(issue.get("status")) != "closed"
+        ]
+
+    def list_work_children(
+        self,
+        parent_id: str,
+        *,
+        include_closed: bool = False,
+    ) -> list[dict[str, object]]:
+        """List direct child work beads for a parent issue."""
+
+        args = ["list", "--parent", parent_id]
+        if include_closed:
+            args.append("--all")
+        issues = self._run_list_query(args)
+        return [
+            issue
+            for issue in issues
+            if lifecycle.is_work_issue(
+                labels=lifecycle.normalized_labels(issue.get("labels")),
+                issue_type=lifecycle.issue_payload_type(issue),
+            )
+        ]
+
+    def list_descendant_changesets(
+        self,
+        parent_id: str,
+        *,
+        include_closed: bool = False,
+    ) -> list[dict[str, object]]:
+        """List descendant changesets (leaf work beads under a parent)."""
+
+        descendants: list[dict[str, object]] = []
+        seen: set[str] = set()
+        queue = [parent_id]
+        while queue:
+            current = queue.pop(0)
+            children = self.list_work_children(current, include_closed=include_closed)
+            for issue in children:
+                issue_id = str(issue.get("id") or "").strip()
+                if not issue_id or issue_id in seen:
+                    continue
+                seen.add(issue_id)
+                grandchildren = self.list_work_children(issue_id, include_closed=include_closed)
+                if not grandchildren:
+                    descendants.append(issue)
+                queue.append(issue_id)
+        return descendants
+
+    def epic_discovery_parity_report(
+        self,
+        *,
+        indexed_epics: list[dict[str, object]],
+    ) -> beads.EpicDiscoveryParityReport:
+        """Return startup epic discovery parity diagnostics."""
+
+        return beads.epic_discovery_parity_report(
+            beads_root=self.beads_root,
+            cwd=self.cwd,
+            indexed_epics=indexed_epics,
+        )
+
+
+def execute_startup_command_plan(
+    agent_id: str,
+    *,
+    helper: StartupBeadsInvocationHelper,
+) -> StartupCommandResult:
+    """Execute the canonical startup command plan in fixed order.
+
+    Args:
+        agent_id: Planner agent id used for inbox lookup.
+        helper: Shared Beads invocation helper bound to beads root + repo cwd.
+
+    Returns:
+        Structured startup command outputs.
+
+    Raises:
+        RuntimeError: If the plan contains an unknown step.
+    """
+
+    inbox_messages: list[dict[str, object]] = []
+    queued_messages: list[dict[str, object]] = []
+    epics: list[dict[str, object]] = []
+    parity_report: beads.EpicDiscoveryParityReport | None = None
+
+    for step in startup_command_plan():
+        if step.name == "list_inbox_unread_messages":
+            inbox_messages = helper.list_inbox_messages(agent_id, unread_only=True)
+            continue
+        if step.name == "list_queue_unread_messages":
+            queued_messages = helper.list_queue_messages(unclaimed_only=False, unread_only=True)
+            continue
+        if step.name == "list_indexed_epics":
+            epics = helper.list_epics(include_closed=False)
+            continue
+        if step.name == "compute_epic_discovery_parity":
+            parity_report = helper.epic_discovery_parity_report(indexed_epics=epics)
+            continue
+        raise RuntimeError(f"unknown startup command step: {step.name}")
+
+    if parity_report is None:
+        parity_report = helper.epic_discovery_parity_report(indexed_epics=epics)
+    return StartupCommandResult(
+        inbox_messages=inbox_messages,
+        queued_messages=queued_messages,
+        epics=epics,
+        parity_report=parity_report,
+    )
