@@ -277,10 +277,16 @@ def test_doctor_json_includes_multi_check_health_report() -> None:
     assert "in_progress_ownership_hook_consistency" in checks
     assert "blocked_state_reason_consistency" in checks
     assert "worktree_branch_metadata_readiness" in checks
-    ownership_codes = {
-        finding["code"] for finding in checks["in_progress_ownership_hook_consistency"]["findings"]
-    }
+    ownership_findings = checks["in_progress_ownership_hook_consistency"]["findings"]
+    ownership_codes = {finding["code"] for finding in ownership_findings}
     assert "in-progress-epic-unhooked" in ownership_codes
+    stale_finding = next(
+        finding
+        for finding in ownership_findings
+        if finding["code"] == "in-progress-assignee-session-stale"
+    )
+    assert stale_finding["startup_blocker"] is False
+    assert checks["in_progress_ownership_hook_consistency"]["counts"]["startup_blockers"] == 1
     blocked_codes = {
         finding["code"] for finding in checks["blocked_state_reason_consistency"]["findings"]
     }
