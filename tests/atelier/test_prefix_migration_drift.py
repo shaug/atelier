@@ -783,6 +783,29 @@ def test_repair_prefix_migration_drift_apply_backfills_missing_mapping_lineage(
         "feat/new-branch",
     )
 
+    def set_description_field(issue: dict[str, object], key: str, value: str) -> None:
+        fields = beads.parse_description_fields(issue.get("description"))
+        fields[key] = value
+        issue["description"] = "".join(
+            f"{field_key}: {field_value}\n" for field_key, field_value in fields.items()
+        )
+
+    def fake_update_metadata(
+        changeset_id: str,
+        *,
+        root_branch: str | None,
+        parent_branch: str | None,
+        work_branch: str | None,
+        beads_root: Path,
+        cwd: Path,
+        allow_override: bool,
+    ) -> None:
+        del changeset_id, parent_branch, beads_root, cwd, allow_override
+        if root_branch is not None:
+            set_description_field(changeset_issue, "changeset.root_branch", root_branch)
+        if work_branch is not None:
+            set_description_field(changeset_issue, "changeset.work_branch", work_branch)
+
     with (
         patch("atelier.prefix_migration_drift.beads.list_epics", return_value=[epic_issue]),
         patch(
@@ -801,7 +824,8 @@ def test_repair_prefix_migration_drift_apply_backfills_missing_mapping_lineage(
         ),
         patch("atelier.prefix_migration_drift.beads.update_workspace_root_branch") as update_root,
         patch(
-            "atelier.prefix_migration_drift.beads.update_changeset_branch_metadata"
+            "atelier.prefix_migration_drift.beads.update_changeset_branch_metadata",
+            side_effect=fake_update_metadata,
         ) as update_metadata,
         patch("atelier.prefix_migration_drift.beads.update_worktree_path") as update_path,
     ):
@@ -823,18 +847,23 @@ def test_repair_prefix_migration_drift_apply_backfills_missing_mapping_lineage(
     assert action.changed is True
     assert action.applied is True
     assert action.update_mapping is True
-    assert action.update_changeset_metadata is False
+    assert action.update_changeset_metadata is True
     assert action.update_changeset_worktree_path is False
     assert "metadata-missing-mapping-work-branch" in action.drift_classes
     assert "metadata-missing-mapping-worktree-path" in action.drift_classes
-    assert second == []
+    assert len(second) == 1
+    assert second[0].changed is False
+    assert second[0].drift_classes == ("work-branch-conflict",)
 
     update_root.assert_not_called()
-    update_metadata.assert_not_called()
+    update_metadata.assert_called_once()
     update_path.assert_not_called()
     updated_mapping = worktrees.load_mapping(mapping_path)
     assert updated_mapping is not None
-    assert updated_mapping.changesets["ts-epic.1"] == "feat/new-branch"
+    assert updated_mapping.changesets["ts-epic.1"] == worktrees.derive_changeset_branch(
+        "feat/new-root",
+        "ts-epic.1",
+    )
     assert updated_mapping.changeset_worktrees["ts-epic.1"] == "worktrees/ts-epic.1"
 
 
