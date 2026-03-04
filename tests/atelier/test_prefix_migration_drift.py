@@ -260,7 +260,7 @@ def test_scan_prefix_migration_drift_scopes_to_selected_epic_and_changesets(
         "feat/new-branch",
     )
     list_epics = Mock()
-    list_descendants = Mock()
+    list_descendants = Mock(return_value=[changeset_issue])
     list_work_children = Mock()
 
     def fake_show(
@@ -301,7 +301,12 @@ def test_scan_prefix_migration_drift_scopes_to_selected_epic_and_changesets(
 
     assert records == []
     list_epics.assert_not_called()
-    list_descendants.assert_not_called()
+    list_descendants.assert_called_once_with(
+        "ts-epic",
+        beads_root=tmp_path / ".beads",
+        cwd=repo_root,
+        include_closed=True,
+    )
     list_work_children.assert_not_called()
 
 
@@ -419,7 +424,8 @@ def test_scan_prefix_migration_drift_scopes_explicit_changeset_without_epic_id_p
         patch("atelier.prefix_migration_drift.beads.run_bd_json", side_effect=fake_show),
         patch("atelier.prefix_migration_drift.beads.list_epics") as list_epics,
         patch(
-            "atelier.prefix_migration_drift.beads.list_descendant_changesets"
+            "atelier.prefix_migration_drift.beads.list_descendant_changesets",
+            return_value=[changeset_issue],
         ) as list_descendants,
         patch("atelier.prefix_migration_drift.beads.list_work_children") as list_work_children,
         patch(
@@ -443,7 +449,86 @@ def test_scan_prefix_migration_drift_scopes_explicit_changeset_without_epic_id_p
     assert records == []
     assert ["show", "legacy-child"] in show_calls
     list_epics.assert_not_called()
-    list_descendants.assert_not_called()
+    list_descendants.assert_called_once_with(
+        "ts-epic",
+        beads_root=tmp_path / ".beads",
+        cwd=repo_root,
+        include_closed=True,
+    )
+    list_work_children.assert_not_called()
+
+
+def test_scan_prefix_migration_drift_skips_targeted_changeset_outside_scoped_epic(
+    tmp_path: Path,
+) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    epic_issue = {
+        "id": "ts-epic",
+        "labels": ["at:epic"],
+        "description": "workspace.root_branch: feat/new-root\n",
+    }
+    descendant_issue = {
+        "id": "legacy-child",
+        "labels": [],
+        "type": "task",
+        "description": (
+            "changeset.root_branch: feat/new-root\nchangeset.work_branch: feat/new-branch\n"
+        ),
+    }
+    show_calls: list[list[str]] = []
+
+    def fake_show(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        show_calls.append(args)
+        if args == ["show", "ts-epic"]:
+            return [epic_issue]
+        if args == ["show", "other-epic.3"]:
+            raise AssertionError("non-descendant changeset should not be loaded")
+        raise AssertionError(f"unexpected bd command: {args!r}")
+
+    with (
+        patch("atelier.prefix_migration_drift.beads.run_bd_json", side_effect=fake_show),
+        patch("atelier.prefix_migration_drift.beads.list_epics") as list_epics,
+        patch(
+            "atelier.prefix_migration_drift.beads.list_descendant_changesets",
+            return_value=[descendant_issue],
+        ) as list_descendants,
+        patch("atelier.prefix_migration_drift.beads.list_work_children") as list_work_children,
+        patch(
+            "atelier.prefix_migration_drift.exec_util.try_run_command",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "worktree", "list", "--porcelain"],
+                returncode=0,
+                stdout="",
+                stderr="",
+            ),
+        ),
+    ):
+        records = prefix_migration_drift.scan_prefix_migration_drift(
+            project_data_dir=project_data_dir,
+            beads_root=tmp_path / ".beads",
+            repo_root=repo_root,
+            target_epic_id="ts-epic",
+            target_changeset_ids={"other-epic.3"},
+        )
+
+    assert records == []
+    assert show_calls == [["show", "ts-epic"]]
+    list_epics.assert_not_called()
+    list_descendants.assert_called_once_with(
+        "ts-epic",
+        beads_root=tmp_path / ".beads",
+        cwd=repo_root,
+        include_closed=True,
+    )
     list_work_children.assert_not_called()
 
 
@@ -478,7 +563,8 @@ def test_scan_prefix_migration_drift_records_targeted_changeset_read_failure(
         patch("atelier.prefix_migration_drift.beads.run_bd_json", side_effect=fake_show),
         patch("atelier.prefix_migration_drift.beads.list_epics") as list_epics,
         patch(
-            "atelier.prefix_migration_drift.beads.list_descendant_changesets"
+            "atelier.prefix_migration_drift.beads.list_descendant_changesets",
+            return_value=[{"id": "ts-epic.1"}],
         ) as list_descendants,
         patch("atelier.prefix_migration_drift.beads.list_work_children") as list_work_children,
         patch(
@@ -513,7 +599,12 @@ def test_scan_prefix_migration_drift_records_targeted_changeset_read_failure(
         }
     ]
     list_epics.assert_not_called()
-    list_descendants.assert_not_called()
+    list_descendants.assert_called_once_with(
+        "ts-epic",
+        beads_root=tmp_path / ".beads",
+        cwd=repo_root,
+        include_closed=True,
+    )
     list_work_children.assert_not_called()
 
 

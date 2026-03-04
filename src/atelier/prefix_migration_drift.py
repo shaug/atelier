@@ -1094,9 +1094,26 @@ def scan_prefix_migration_drift(
         epic_root_branch = _normalize_text(beads.extract_workspace_root_branch(epic))
         mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, epic_id))
         mapping_root_branch = _normalize_text(mapping.root_branch) if mapping else None
+        owned_changeset_ids: set[str] = set()
+        if scoped_changeset_ids:
+            owned_changeset_ids = {
+                normalized
+                for normalized in (
+                    _normalize_text(changeset.get("id"))
+                    for changeset in _changesets_for_epic(
+                        epic_id,
+                        epic_issue=epic,
+                        beads_root=beads_root,
+                        repo_root=repo_root,
+                    )
+                )
+                if normalized is not None
+            }
         if scoped_changeset_ids:
             changesets = []
             for changeset_id in sorted(scoped_changeset_ids):
+                if changeset_id not in owned_changeset_ids:
+                    continue
                 try:
                     scoped_changesets = beads.run_bd_json(
                         ["show", changeset_id],
