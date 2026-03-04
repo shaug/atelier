@@ -81,3 +81,5 @@ reject unsupported invocation forms.
 
 - Use the one-shot parity check and recovery playbook in
   `docs/beads-store-parity.md`.
+- For direct Beads diagnostics, use only supported raw forms:
+  `BEADS_DIR="<beads-root>" bd ...` or `bd --db "<beads-root>/beads.db" ...`.

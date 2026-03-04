@@ -94,6 +94,12 @@ def with_bd_mode(
     """Return a ``bd`` command with deterministic database selection."""
 
     del env
+    for argument in args:
+        if argument == "--beads-dir" or argument.startswith("--beads-dir="):
+            raise ValueError(
+                "unsupported bd flag in command arguments: --beads-dir. "
+                "Use BEADS_DIR=<path> bd ... or bd --db <path/to/beads.db> ..."
+            )
     command = ["bd"]
     has_db_flag = any(argument == "--db" or argument.startswith("--db=") for argument in args)
     if beads_dir and not has_db_flag:

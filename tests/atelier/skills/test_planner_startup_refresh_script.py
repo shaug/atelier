@@ -328,6 +328,7 @@ def test_render_startup_overview_reports_identity_guardrail_remediation(monkeypa
 
     assert "Identity guardrail violations (deterministic remediation):" in rendered
     assert "remediation: bd update at-missing --type epic --add-label at:epic" in rendered
+    assert "bd --beads-dir" not in rendered
 
 
 def test_render_startup_overview_passes_agent_id_to_command_plan(monkeypatch) -> None:

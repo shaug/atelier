@@ -32,6 +32,18 @@ emit a warning with both paths:
 - `project_beads_root=<project path>`
 - `override_beads_root=<override path>`
 
+## Safe raw `bd` invocation forms
+
+When running direct diagnostics against a specific Beads store, use one of:
+
+```bash
+BEADS_DIR="<beads-root>" bd show <issue-id> --json
+bd --db "<beads-root>/beads.db" show <issue-id> --json
+```
+
+Do not pass the long `--beads-dir` flag to `bd`; that flag is for Atelier helper
+scripts, not the `bd` CLI.
+
 ## Migration and recovery playbook
 
 1. Confirm the project-scoped store path:
