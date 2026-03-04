@@ -28,9 +28,9 @@ from .resolve import resolve_current_project_with_repo_root
 
 _FORMATS = {"table", "json"}
 _ACTIVE_HOOK_STALE_HOURS = 24.0
-_BLOCKED_NOTE_RE = re.compile(r"^blocked_at:\s*(?P<timestamp>\S+)\s+reason:\s*(?P<reason>.*)$")
 _STARTUP_BLOCKER_CODES = frozenset(
     {
+        "prefix-migration-drift",
         "in-progress-epic-unassigned",
         "in-progress-epic-unhooked",
         "in-progress-assignee-hook-mismatch",
@@ -42,7 +42,6 @@ _STARTUP_BLOCKER_CODES = frozenset(
         "metadata-worktree-path-conflict",
         "metadata-root-branch-conflict",
         "metadata-mapping-root-branch-conflict",
-        "prefix-migration-drift",
     }
 )
 
@@ -103,7 +102,7 @@ class _DoctorCheckFamily:
 
     @property
     def changesets_with_findings(self) -> int:
-        return len({f.changeset_id for f in self.findings if f.changeset_id})
+        return len({finding.changeset_id for finding in self.findings if finding.changeset_id})
 
     @property
     def startup_blockers(self) -> int:
@@ -177,6 +176,7 @@ def doctor(args: object) -> None:
         fix=fix,
     )
     counts = _doctor_counts(context=context, checks=checks, actions=actions)
+
     mode = "fix" if fix else "check"
     project_info = {
         "project_dir": str(project_root),
@@ -186,8 +186,8 @@ def doctor(args: object) -> None:
     payload = {
         "scope": "project",
         "scope_description": (
-            "project health report across drift, ownership/hooks, blocked reasons, "
-            "and branch/worktree metadata readiness"
+            "project health report covering prefix drift, startup-blocking lineage, "
+            "and in-progress ownership integrity"
         ),
         "mode": mode,
         "fix": fix,
@@ -197,9 +197,8 @@ def doctor(args: object) -> None:
             "check_mode_mutates": False,
             "fix_mode_mutating_checks": ["prefix_migration_drift"],
             "read_only_checks": [
-                "in_progress_ownership_hook_consistency",
-                "blocked_state_reason_consistency",
-                "worktree_branch_metadata_readiness",
+                "startup_blocking_lineage_consistency",
+                "in_progress_integrity_signals",
             ],
         },
         "checks": {check.check_id: check.as_dict() for check in checks},
@@ -210,7 +209,11 @@ def doctor(args: object) -> None:
         say(json.dumps(payload, indent=2, sort_keys=True))
         return
     _render_doctor(
-        project_info=project_info, counts=counts, checks=checks, actions=actions, fix=fix
+        project_info=project_info,
+        counts=counts,
+        checks=checks,
+        actions=actions,
+        fix=fix,
     )
 
 
@@ -222,6 +225,7 @@ def _doctor_counts(
 ) -> dict[str, int]:
     changed = sum(1 for action in actions if action.changed)
     applied = sum(1 for action in actions if action.applied and action.changed)
+
     status_counts: dict[str, int] = {}
     for issue in context.changesets:
         normalized = lifecycle.canonical_lifecycle_status(issue.get("status")) or "unknown"
@@ -229,11 +233,6 @@ def _doctor_counts(
 
     counts: dict[str, int] = {
         "changesets_total": len(context.changesets),
-        "changesets_active": sum(
-            count
-            for status, count in status_counts.items()
-            if status in lifecycle.ACTIVE_LIFECYCLE_STATUSES or status == "blocked"
-        ),
         "changesets_in_progress": status_counts.get("in_progress", 0),
         "changesets_blocked": status_counts.get("blocked", 0),
         "changesets_drifted": len(actions),
@@ -260,9 +259,12 @@ def _build_check_families(
 ) -> tuple[_DoctorCheckFamily, ...]:
     return (
         _build_prefix_migration_check(context=context, actions=actions, fix=fix),
-        _build_in_progress_hook_check(context=context, hook_map=hook_map, agent_index=agent_index),
-        _build_blocked_reason_check(context=context),
-        _build_metadata_readiness_check(context=context),
+        _build_startup_lineage_check(context=context),
+        _build_in_progress_integrity_check(
+            context=context,
+            hook_map=hook_map,
+            agent_index=agent_index,
+        ),
     )
 
 
@@ -298,7 +300,205 @@ def _build_prefix_migration_check(
     )
 
 
-def _build_in_progress_hook_check(
+def _build_startup_lineage_check(*, context: _DoctorContext) -> _DoctorCheckFamily:
+    findings: list[_DoctorFinding] = []
+    in_scope = [
+        issue
+        for issue in context.changesets
+        if (lifecycle.canonical_lifecycle_status(issue.get("status")) or "")
+        in (*lifecycle.ACTIVE_LIFECYCLE_STATUSES, "blocked")
+    ]
+    for issue in sorted(in_scope, key=lambda item: str(item.get("id") or "")):
+        changeset_id = _normalize_text(issue.get("id"))
+        if changeset_id is None:
+            continue
+        lifecycle_status = lifecycle.canonical_lifecycle_status(issue.get("status")) or ""
+        enforce_missing_metadata = lifecycle_status in {"in_progress", "blocked"}
+
+        epic_id = context.changeset_to_epic.get(changeset_id, changeset_id)
+        fields = context.fields_by_changeset.get(changeset_id, {})
+        metadata_root = _normalize_text(fields.get("changeset.root_branch"))
+        metadata_work = _normalize_text(fields.get("changeset.work_branch"))
+        issue_worktree = _normalize_worktree_path(
+            fields.get("worktree_path"),
+            project_data_dir=context.project_data_dir,
+        )
+
+        epic_issue = context.epics_by_id.get(epic_id, {})
+        epic_root = _normalize_text(beads.extract_workspace_root_branch(epic_issue))
+        mapping = context.mappings_by_epic.get(epic_id)
+        mapping_root = _normalize_text(mapping.root_branch if mapping else None)
+        mapping_work = _normalize_text(mapping.changesets.get(changeset_id) if mapping else None)
+        mapping_worktree = _normalize_worktree_path(
+            mapping.changeset_worktrees.get(changeset_id) if mapping else None,
+            project_data_dir=context.project_data_dir,
+        )
+
+        if enforce_missing_metadata and metadata_root is None:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-missing-root-branch",
+                    summary=f"{changeset_id} is missing changeset.root_branch.",
+                    remediation=(
+                        "Run worker startup to populate lineage metadata before continuing."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={},
+                )
+            )
+        if enforce_missing_metadata and metadata_work is None:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-missing-work-branch",
+                    summary=f"{changeset_id} is missing changeset.work_branch.",
+                    remediation=(
+                        "Run worker startup to populate work-branch metadata before execution."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={},
+                )
+            )
+
+        if mapping is None:
+            if enforce_missing_metadata:
+                findings.append(
+                    _DoctorFinding(
+                        code="metadata-missing-epic-mapping",
+                        summary=f"Epic {epic_id} has no worktree mapping metadata.",
+                        remediation=(
+                            "Re-run worker startup for this epic to synthesize mapping metadata."
+                        ),
+                        severity="error",
+                        epic_id=epic_id,
+                        changeset_id=changeset_id,
+                        details={"epic_id": epic_id},
+                    )
+                )
+            continue
+
+        if enforce_missing_metadata and changeset_id != epic_id and mapping_work is None:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-missing-mapping-work-branch",
+                    summary=f"{changeset_id} has no mapping work-branch entry.",
+                    remediation=("Re-run worker startup to reconcile changeset mapping entries."),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={"epic_id": epic_id},
+                )
+            )
+
+        if mapping_work and metadata_work and mapping_work != metadata_work:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-work-branch-conflict",
+                    summary=(
+                        f"{changeset_id} metadata work branch {metadata_work!r} conflicts "
+                        f"with mapping {mapping_work!r}."
+                    ),
+                    remediation=(
+                        "Run `atelier doctor --fix` to resolve work-branch override conflicts."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={
+                        "metadata_work_branch": metadata_work,
+                        "mapping_work_branch": mapping_work,
+                    },
+                )
+            )
+
+        if mapping_worktree and issue_worktree and mapping_worktree != issue_worktree:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-worktree-path-conflict",
+                    summary=(
+                        f"{changeset_id} metadata worktree path {issue_worktree!r} conflicts "
+                        f"with mapping {mapping_worktree!r}."
+                    ),
+                    remediation=(
+                        "Run `atelier doctor --fix` to reconcile worktree-path conflicts."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={
+                        "metadata_worktree_path": issue_worktree,
+                        "mapping_worktree_path": mapping_worktree,
+                    },
+                )
+            )
+
+        if epic_root and metadata_root and epic_root != metadata_root:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-root-branch-conflict",
+                    summary=(
+                        f"{changeset_id} metadata root branch {metadata_root!r} conflicts "
+                        f"with epic root {epic_root!r}."
+                    ),
+                    remediation=(
+                        "Run `atelier doctor --fix` or rerun startup to reconcile lineage metadata."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={
+                        "metadata_root_branch": metadata_root,
+                        "epic_root_branch": epic_root,
+                    },
+                )
+            )
+
+        if mapping_root and metadata_root and mapping_root != metadata_root:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-mapping-root-branch-conflict",
+                    summary=(
+                        f"{changeset_id} metadata root branch {metadata_root!r} conflicts "
+                        f"with mapping root {mapping_root!r}."
+                    ),
+                    remediation=(
+                        "Run `atelier doctor --fix` to align mapping and lineage root branches."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={
+                        "metadata_root_branch": metadata_root,
+                        "mapping_root_branch": mapping_root,
+                    },
+                )
+            )
+
+    return _DoctorCheckFamily(
+        check_id="startup_blocking_lineage_consistency",
+        title="Startup-Blocking Lineage Consistency",
+        description=(
+            "Detects startup-blocking lineage and mapping inconsistencies for "
+            "in-progress/blocked changesets; open changesets are checked for conflicts only."
+        ),
+        in_scope_changesets=len(in_scope),
+        findings=tuple(
+            sorted(
+                findings,
+                key=lambda item: (
+                    item.changeset_id or "",
+                    item.code,
+                    item.epic_id or "",
+                ),
+            )
+        ),
+    )
+
+
+def _build_in_progress_integrity_check(
     *,
     context: _DoctorContext,
     hook_map: Mapping[str, tuple[str, ...]],
@@ -310,6 +510,7 @@ def _build_in_progress_hook_check(
         for issue in context.changesets
         if lifecycle.canonical_lifecycle_status(issue.get("status")) == "in_progress"
     ]
+
     for issue in sorted(in_scope, key=lambda item: str(item.get("id") or "")):
         changeset_id = _normalize_text(issue.get("id"))
         if changeset_id is None:
@@ -333,6 +534,7 @@ def _build_in_progress_hook_check(
                     details={"epic_id": epic_id},
                 )
             )
+
         if not hooked_agents:
             findings.append(
                 _DoctorFinding(
@@ -347,6 +549,7 @@ def _build_in_progress_hook_check(
                     details={"epic_id": epic_id},
                 )
             )
+
         if assignee and hooked_agents and assignee not in hooked_agents:
             findings.append(
                 _DoctorFinding(
@@ -367,6 +570,7 @@ def _build_in_progress_hook_check(
                     },
                 )
             )
+
         if assignee:
             assignee_runtime = agent_index.get(assignee)
             if assignee_runtime and assignee_runtime.session_state == "stale":
@@ -391,332 +595,11 @@ def _build_in_progress_hook_check(
                 )
 
     return _DoctorCheckFamily(
-        check_id="in_progress_ownership_hook_consistency",
-        title="In-Progress Ownership/Hook Consistency",
+        check_id="in_progress_integrity_signals",
+        title="In-Progress Integrity Signals",
         description=(
-            "Checks whether in-progress changesets have aligned epic assignment and live hook state."
-        ),
-        in_scope_changesets=len(in_scope),
-        findings=tuple(
-            sorted(
-                findings,
-                key=lambda item: (
-                    item.changeset_id or "",
-                    item.code,
-                    item.epic_id or "",
-                ),
-            )
-        ),
-    )
-
-
-def _build_blocked_reason_check(*, context: _DoctorContext) -> _DoctorCheckFamily:
-    findings: list[_DoctorFinding] = []
-    in_scope = [
-        issue
-        for issue in context.changesets
-        if lifecycle.canonical_lifecycle_status(issue.get("status")) == "blocked"
-    ]
-    for issue in sorted(in_scope, key=lambda item: str(item.get("id") or "")):
-        changeset_id = _normalize_text(issue.get("id"))
-        if changeset_id is None:
-            continue
-        epic_id = context.changeset_to_epic.get(changeset_id, changeset_id)
-        blocked_line = _latest_blocked_note_line(issue.get("notes"))
-        if blocked_line is None:
-            findings.append(
-                _DoctorFinding(
-                    code="blocked-missing-reason-note",
-                    summary=f"{changeset_id} is blocked but has no blocked_at reason note.",
-                    remediation=(
-                        "Append a blocked note (`blocked_at: <timestamp> reason: <detail>`) "
-                        "or move the changeset out of blocked state."
-                    ),
-                    severity="warning",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={},
-                )
-            )
-            continue
-        timestamp, reason = _parse_blocked_note(blocked_line)
-        if timestamp is None:
-            findings.append(
-                _DoctorFinding(
-                    code="blocked-note-format-invalid",
-                    summary=f"{changeset_id} blocked note has invalid format.",
-                    remediation=(
-                        "Rewrite blocked note as `blocked_at: <rfc3339> reason: <detail>`."
-                    ),
-                    severity="warning",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={"blocked_note": blocked_line},
-                )
-            )
-            continue
-        if _parse_rfc3339(timestamp) is None:
-            findings.append(
-                _DoctorFinding(
-                    code="blocked-note-timestamp-invalid",
-                    summary=f"{changeset_id} blocked note has non-RFC3339 timestamp {timestamp!r}.",
-                    remediation="Store blocked_at timestamp in RFC3339 format.",
-                    severity="warning",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={"blocked_at": timestamp},
-                )
-            )
-        if reason is None:
-            findings.append(
-                _DoctorFinding(
-                    code="blocked-note-reason-empty",
-                    summary=f"{changeset_id} blocked note is missing a reason.",
-                    remediation=(
-                        "Provide actionable detail after `reason:` so workers/planners can unblock."
-                    ),
-                    severity="warning",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={"blocked_at": timestamp},
-                )
-            )
-
-    return _DoctorCheckFamily(
-        check_id="blocked_state_reason_consistency",
-        title="Blocked-State Reason Consistency",
-        description=(
-            "Validates blocked changesets carry parseable blocked reason notes for operator triage."
-        ),
-        in_scope_changesets=len(in_scope),
-        findings=tuple(
-            sorted(
-                findings,
-                key=lambda item: (
-                    item.changeset_id or "",
-                    item.code,
-                    item.epic_id or "",
-                ),
-            )
-        ),
-    )
-
-
-def _build_metadata_readiness_check(*, context: _DoctorContext) -> _DoctorCheckFamily:
-    findings: list[_DoctorFinding] = []
-    in_scope = [
-        issue
-        for issue in context.changesets
-        if (lifecycle.canonical_lifecycle_status(issue.get("status")) or "")
-        in (*lifecycle.ACTIVE_LIFECYCLE_STATUSES, "blocked")
-    ]
-    for issue in sorted(in_scope, key=lambda item: str(item.get("id") or "")):
-        changeset_id = _normalize_text(issue.get("id"))
-        if changeset_id is None:
-            continue
-        lifecycle_status = lifecycle.canonical_lifecycle_status(issue.get("status")) or ""
-        enforce_missing_metadata = lifecycle_status in {"in_progress", "blocked"}
-        epic_id = context.changeset_to_epic.get(changeset_id, changeset_id)
-        fields = context.fields_by_changeset.get(changeset_id, {})
-        metadata_root = _normalize_text(fields.get("changeset.root_branch"))
-        metadata_parent = _normalize_text(fields.get("changeset.parent_branch"))
-        metadata_work = _normalize_text(fields.get("changeset.work_branch"))
-        issue_worktree = _normalize_worktree_path(
-            fields.get("worktree_path"),
-            project_data_dir=context.project_data_dir,
-        )
-
-        epic_issue = context.epics_by_id.get(epic_id, {})
-        epic_root = _normalize_text(beads.extract_workspace_root_branch(epic_issue))
-        mapping = context.mappings_by_epic.get(epic_id)
-        mapping_root = _normalize_text(mapping.root_branch if mapping else None)
-        mapping_work = _normalize_text(mapping.changesets.get(changeset_id) if mapping else None)
-        mapping_worktree = _normalize_worktree_path(
-            mapping.changeset_worktrees.get(changeset_id) if mapping else None,
-            project_data_dir=context.project_data_dir,
-        )
-
-        if enforce_missing_metadata and metadata_root is None:
-            findings.append(
-                _DoctorFinding(
-                    code="metadata-missing-root-branch",
-                    summary=f"{changeset_id} is missing changeset.root_branch.",
-                    remediation=(
-                        "Run worker startup to populate lineage metadata or set root branch explicitly."
-                    ),
-                    severity="error",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={},
-                )
-            )
-        if enforce_missing_metadata and metadata_work is None:
-            findings.append(
-                _DoctorFinding(
-                    code="metadata-missing-work-branch",
-                    summary=f"{changeset_id} is missing changeset.work_branch.",
-                    remediation=(
-                        "Run worker startup to populate work branch metadata before execution."
-                    ),
-                    severity="error",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={},
-                )
-            )
-        if enforce_missing_metadata and changeset_id != epic_id and metadata_parent is None:
-            findings.append(
-                _DoctorFinding(
-                    code="metadata-missing-parent-branch",
-                    summary=f"{changeset_id} is missing changeset.parent_branch.",
-                    remediation=(
-                        "Populate parent lineage metadata to avoid ambiguous review/integration ancestry."
-                    ),
-                    severity="warning",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={},
-                )
-            )
-
-        if mapping is None:
-            if not enforce_missing_metadata:
-                continue
-            findings.append(
-                _DoctorFinding(
-                    code="metadata-missing-epic-mapping",
-                    summary=f"Epic {epic_id} has no worktree mapping metadata.",
-                    remediation=(
-                        "Re-run worker startup for this epic to synthesize mapping metadata."
-                    ),
-                    severity="error",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={"epic_id": epic_id},
-                )
-            )
-            continue
-
-        if enforce_missing_metadata and changeset_id != epic_id and mapping_work is None:
-            findings.append(
-                _DoctorFinding(
-                    code="metadata-missing-mapping-work-branch",
-                    summary=f"{changeset_id} has no mapping work-branch entry.",
-                    remediation=(
-                        "Re-run worker startup to reconcile changeset branch mapping entries."
-                    ),
-                    severity="error",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={"epic_id": epic_id},
-                )
-            )
-        if mapping_work and metadata_work and mapping_work != metadata_work:
-            findings.append(
-                _DoctorFinding(
-                    code="metadata-work-branch-conflict",
-                    summary=(
-                        f"{changeset_id} metadata work branch {metadata_work!r} conflicts "
-                        f"with mapping {mapping_work!r}."
-                    ),
-                    remediation=(
-                        "Run `atelier doctor --fix` to resolve work-branch override conflicts."
-                    ),
-                    severity="error",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={
-                        "metadata_work_branch": metadata_work,
-                        "mapping_work_branch": mapping_work,
-                    },
-                )
-            )
-        if (
-            enforce_missing_metadata
-            and changeset_id != epic_id
-            and mapping_worktree is None
-            and issue_worktree is None
-        ):
-            findings.append(
-                _DoctorFinding(
-                    code="metadata-missing-worktree-path",
-                    summary=f"{changeset_id} has no changeset worktree path metadata.",
-                    remediation=(
-                        "Run worker startup to register a deterministic changeset worktree path."
-                    ),
-                    severity="warning",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={},
-                )
-            )
-        if mapping_worktree and issue_worktree and mapping_worktree != issue_worktree:
-            findings.append(
-                _DoctorFinding(
-                    code="metadata-worktree-path-conflict",
-                    summary=(
-                        f"{changeset_id} metadata worktree path {issue_worktree!r} conflicts "
-                        f"with mapping {mapping_worktree!r}."
-                    ),
-                    remediation=(
-                        "Run `atelier doctor --fix` to reconcile worktree-path conflicts."
-                    ),
-                    severity="error",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={
-                        "metadata_worktree_path": issue_worktree,
-                        "mapping_worktree_path": mapping_worktree,
-                    },
-                )
-            )
-        if epic_root and metadata_root and epic_root != metadata_root:
-            findings.append(
-                _DoctorFinding(
-                    code="metadata-root-branch-conflict",
-                    summary=(
-                        f"{changeset_id} metadata root branch {metadata_root!r} conflicts "
-                        f"with epic root {epic_root!r}."
-                    ),
-                    remediation=(
-                        "Run `atelier doctor --fix` or re-run startup to reconcile lineage metadata."
-                    ),
-                    severity="error",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={
-                        "metadata_root_branch": metadata_root,
-                        "epic_root_branch": epic_root,
-                    },
-                )
-            )
-        if mapping_root and metadata_root and mapping_root != metadata_root:
-            findings.append(
-                _DoctorFinding(
-                    code="metadata-mapping-root-branch-conflict",
-                    summary=(
-                        f"{changeset_id} metadata root branch {metadata_root!r} conflicts "
-                        f"with mapping root {mapping_root!r}."
-                    ),
-                    remediation=(
-                        "Run `atelier doctor --fix` to align mapping and lineage root branches."
-                    ),
-                    severity="error",
-                    epic_id=epic_id,
-                    changeset_id=changeset_id,
-                    details={
-                        "metadata_root_branch": metadata_root,
-                        "mapping_root_branch": mapping_root,
-                    },
-                )
-            )
-
-    return _DoctorCheckFamily(
-        check_id="worktree_branch_metadata_readiness",
-        title="Worktree/Branch Metadata Readiness",
-        description=(
-            "Detects startup-blocking lineage and mapping inconsistencies for in-progress/blocked "
-            "changesets; open changesets are evaluated for conflicts only."
+            "Checks whether in-progress changesets have aligned epic assignment, "
+            "hook state, and live worker sessions."
         ),
         in_scope_changesets=len(in_scope),
         findings=tuple(
@@ -790,6 +673,7 @@ def _collect_doctor_context(
                 changesets.append(issue)
                 changeset_to_epic[changeset_id] = epic_id
             continue
+
         work_children = beads.list_work_children(
             epic_id,
             beads_root=beads_root,
@@ -798,12 +682,12 @@ def _collect_doctor_context(
         )
         if work_children:
             continue
-        changeset_id = epic_id
-        if changeset_id in seen_changesets:
+
+        if epic_id in seen_changesets:
             continue
-        seen_changesets.add(changeset_id)
+        seen_changesets.add(epic_id)
         changesets.append(epics_by_id[epic_id])
-        changeset_to_epic[changeset_id] = epic_id
+        changeset_to_epic[epic_id] = epic_id
 
     changesets = sorted(changesets, key=lambda issue: str(issue.get("id") or ""))
     fields_by_changeset: dict[str, dict[str, str]] = {}
@@ -846,8 +730,11 @@ def _collect_agent_runtime(
             agent_id = _normalize_text(issue.get("id"))
         if agent_id is None:
             continue
+
         hook_bead = _agent_hook_for_issue_no_write(
-            issue, beads_root=beads_root, repo_root=repo_root
+            issue,
+            beads_root=beads_root,
+            repo_root=repo_root,
         )
         heartbeat_at = (
             fields.get("heartbeat_at") if isinstance(fields.get("heartbeat_at"), str) else None
@@ -899,6 +786,7 @@ def _agent_hook_for_issue_no_write(
                 hook = _extract_hook_from_slot_payload(payload)
                 if hook:
                     return hook
+
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     return _normalize_text(fields.get("hook_bead"))
@@ -1001,7 +889,7 @@ def _render_doctor(
     overview.add_row("Repo root", _display_value(project_info.get("repo_root")))
     overview.add_row("Beads root", _display_value(project_info.get("beads_root")))
     overview.add_row("Mode", "fix" if fix else "check")
-    overview.add_row("Scope", "project health checks (read-only unless `--fix`)")
+    overview.add_row("Scope", "multi-check health report (read-only unless `--fix`)")
     overview.add_row("Changesets", _display_value(counts.get("changesets_total")))
     overview.add_row("In-progress changesets", _display_value(counts.get("changesets_in_progress")))
     overview.add_row("Blocked changesets", _display_value(counts.get("changesets_blocked")))
@@ -1011,16 +899,16 @@ def _render_doctor(
 
     summary = Table(title="Health Check Summary", box=box.SIMPLE)
     summary.add_column("Check", no_wrap=True)
+    summary.add_column("Scope", overflow="fold")
     summary.add_column("In Scope", justify="right")
     summary.add_column("Findings", justify="right")
-    summary.add_column("Changesets", justify="right")
     summary.add_column("Startup Blockers", justify="right")
     for check in checks:
         summary.add_row(
             check.title,
+            check.description,
             str(check.in_scope_changesets),
             str(len(check.findings)),
-            str(check.changesets_with_findings),
             str(check.startup_blockers),
         )
     console.print(summary)
@@ -1131,26 +1019,6 @@ def _normalize_worktree_path(value: object, *, project_data_dir: Path) -> str | 
         except ValueError:
             return candidate.as_posix()
     return candidate.as_posix().lstrip("./")
-
-
-def _latest_blocked_note_line(notes: object) -> str | None:
-    if not isinstance(notes, str):
-        return None
-    for line in reversed(notes.splitlines()):
-        cleaned = line.strip()
-        if cleaned.startswith("blocked_at:"):
-            return cleaned
-    return None
-
-
-def _parse_blocked_note(line: str) -> tuple[str | None, str | None]:
-    match = _BLOCKED_NOTE_RE.match(line.strip())
-    if not match:
-        return None, None
-    timestamp = _normalize_text(match.group("timestamp"))
-    raw_reason = match.group("reason")
-    reason = raw_reason.strip() if isinstance(raw_reason, str) else ""
-    return timestamp, reason or None
 
 
 def _display_value(value: object) -> str:

@@ -695,7 +695,7 @@ def status_command(
 
 @app.command(
     "doctor",
-    help="Run project health diagnostics; optionally repair prefix-migration drift.",
+    help="Run multi-check migration health diagnostics and optional drift repair.",
 )
 def doctor_command(
     format: Annotated[
@@ -720,7 +720,7 @@ def doctor_command(
         ),
     ] = False,
 ) -> None:
-    """Run project health diagnostics and optional prefix-drift repair."""
+    """Run migration-health diagnostics and optional prefix-drift repair."""
     doctor_cmd(SimpleNamespace(format=format, fix=fix, force=force))
 
 
