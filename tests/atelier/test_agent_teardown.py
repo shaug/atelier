@@ -249,6 +249,76 @@ def test_teardown_agent_runtime_does_not_close_when_close_time_check_fails() -> 
     assert result.agent_closed is False
 
 
+def test_teardown_agent_runtime_does_not_close_when_untracked_epic_still_owned() -> None:
+    with (
+        patch(
+            "atelier.agent_teardown.beads.find_agent_bead",
+            return_value={"id": "agent-7"},
+        ),
+        patch(
+            "atelier.agent_teardown.beads.get_agent_hook",
+            side_effect=[None, None],
+        ),
+        patch(
+            "atelier.agent_teardown.beads.list_epics",
+            return_value=[
+                {
+                    "id": "epic-stale",
+                    "assignee": "atelier/worker/codex/p7",
+                    "labels": ["at:epic", "at:hooked"],
+                    "status": "open",
+                }
+            ],
+        ) as list_epics,
+        patch("atelier.agent_teardown.beads.close_issue") as close_issue,
+    ):
+        result = agent_teardown.teardown_agent_runtime(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            agent_id="atelier/worker/codex/p7",
+            close_agent_bead=True,
+        )
+
+    list_epics.assert_called_once_with(
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        include_closed=False,
+    )
+    close_issue.assert_not_called()
+    assert result.released_epic is False
+    assert result.hook_cleared is True
+    assert result.agent_closed is False
+
+
+def test_teardown_agent_runtime_does_not_close_when_ownership_check_fails() -> None:
+    with (
+        patch(
+            "atelier.agent_teardown.beads.find_agent_bead",
+            return_value={"id": "agent-8"},
+        ),
+        patch(
+            "atelier.agent_teardown.beads.get_agent_hook",
+            side_effect=[None, None],
+        ),
+        patch(
+            "atelier.agent_teardown.beads.list_epics",
+            side_effect=SystemExit(1),
+        ),
+        patch("atelier.agent_teardown.beads.close_issue") as close_issue,
+    ):
+        result = agent_teardown.teardown_agent_runtime(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            agent_id="atelier/worker/codex/p8",
+            close_agent_bead=True,
+        )
+
+    close_issue.assert_not_called()
+    assert result.released_epic is False
+    assert result.hook_cleared is True
+    assert result.agent_closed is False
+
+
 def test_teardown_agent_runtime_verifies_closed_status_when_close_fails() -> None:
     close_result = CompletedProcess(args=["bd"], returncode=1, stdout="", stderr="")
     with (
@@ -257,6 +327,7 @@ def test_teardown_agent_runtime_verifies_closed_status_when_close_fails() -> Non
             return_value={"id": "agent-2"},
         ),
         patch("atelier.agent_teardown.beads.get_agent_hook", return_value=None),
+        patch("atelier.agent_teardown.beads.list_epics", return_value=[]),
         patch("atelier.agent_teardown.beads.close_issue", return_value=close_result),
         patch(
             "atelier.agent_teardown.beads.run_bd_json",

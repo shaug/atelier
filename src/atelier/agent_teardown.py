@@ -81,6 +81,44 @@ def _is_epic_assignment_released(
     return assignee is None and not hooked
 
 
+def _has_active_epic_ownership(
+    *,
+    agent_id: str,
+    beads_root: Path,
+    repo_root: Path,
+) -> bool | None:
+    """Return whether the agent still owns a non-closed epic.
+
+    Returns:
+        ``True`` when at least one non-closed epic is still assigned to the
+        runtime agent, ``False`` when none are found, and ``None`` when
+        ownership cannot be verified.
+    """
+    try:
+        epics = beads.list_epics(
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=False,
+        )
+    except SystemExit:
+        return None
+
+    for epic in epics:
+        if _clean_text(epic.get("assignee")) != agent_id:
+            continue
+        raw_labels = epic.get("labels")
+        labels = (
+            {label for label in raw_labels if isinstance(label, str)}
+            if isinstance(raw_labels, list)
+            else set()
+        )
+        if beads.has_issue_label(labels, "hooked", beads_root=beads_root):
+            return True
+        # Assigned ownership alone is sufficient to block close.
+        return True
+    return False
+
+
 def teardown_agent_runtime(
     *,
     beads_root: Path,
@@ -140,7 +178,7 @@ def teardown_agent_runtime(
     target_epic = expected_hook or _clean_text(current_hook)
 
     released_epic = False
-    epic_release_confirmed = target_epic is None
+    epic_release_confirmed = False
     if target_epic:
         if resolved_agent_id:
             try:
@@ -172,6 +210,13 @@ def teardown_agent_runtime(
             )
         except SystemExit:
             pass
+    elif resolved_agent_id:
+        has_active_ownership = _has_active_epic_ownership(
+            agent_id=resolved_agent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        epic_release_confirmed = has_active_ownership is False
 
     hook_known_after_cleanup, remaining_hook = _read_agent_hook(
         agent_bead_id=resolved_agent_bead_id,
