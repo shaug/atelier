@@ -3162,6 +3162,21 @@ def test_find_agent_bead_uses_title_filter_and_exact_match() -> None:
     ]
 
 
+def test_find_agent_bead_prefers_open_match_when_closed_duplicate_exists() -> None:
+    def fake_json(_args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        return [
+            {"id": "atelier-9", "title": "atelier/worker/codex/p123", "status": "closed"},
+            {"id": "atelier-2", "title": "atelier/worker/codex/p123", "status": "open"},
+        ]
+
+    with patch("atelier.beads.run_bd_json", side_effect=fake_json):
+        result = beads.find_agent_bead(
+            "atelier/worker/codex/p123", beads_root=Path("/beads"), cwd=Path("/repo")
+        )
+
+    assert result == {"id": "atelier-2", "title": "atelier/worker/codex/p123", "status": "open"}
+
+
 def test_find_agent_bead_falls_back_to_description_agent_id() -> None:
     def fake_json(_args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
         return [
