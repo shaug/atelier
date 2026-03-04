@@ -32,7 +32,6 @@ from .commands import hook as hook_cmd
 from .commands import init as init_cmd
 from .commands import list as list_cmd
 from .commands import new as new_cmd
-from .commands import normalize_prefix as normalize_prefix_cmd
 from .commands import open as open_cmd
 from .commands import plan as plan_cmd
 from .commands import policy as policy_cmd
@@ -723,46 +722,6 @@ def doctor_command(
 ) -> None:
     """Run migration-health diagnostics and optional prefix-drift repair."""
     doctor_cmd(SimpleNamespace(format=format, fix=fix, force=force))
-
-
-@app.command(
-    "normalize-prefix",
-    help="Run explicit prefix normalization with dry-run/apply modes.",
-)
-def normalize_prefix_command(
-    format: Annotated[
-        str,
-        typer.Option(
-            "--format",
-            help="output format (table|json)",
-        ),
-    ] = "table",
-    apply: Annotated[
-        bool,
-        typer.Option(
-            "--apply",
-            help="persist canonical normalization updates (default is dry-run)",
-        ),
-    ] = False,
-    force: Annotated[
-        bool,
-        typer.Option(
-            "--force",
-            help="override active-agent safety gate when used with --apply",
-        ),
-    ] = False,
-) -> None:
-    """Normalize legacy prefix metadata and mappings.
-
-    Args:
-        format: Output format (``table`` or ``json``).
-        apply: When true, persist canonical updates.
-        force: Override active-worker safety gate for apply mode.
-
-    Returns:
-        None.
-    """
-    normalize_prefix_cmd(SimpleNamespace(format=format, apply=apply, force=force))
 
 
 @app.command(

@@ -190,7 +190,7 @@ def _startup_worktree_preflight(
         "startup preflight blocked: read-only mode detected migration drift that requires "
         "explicit normalization.\n"
         f"epic={selected_epic} changeset={changeset_id}\n"
-        "Remediation: run `atelier normalize-prefix --apply`, verify drift is "
+        "Remediation: run `atelier doctor --fix`, verify drift is "
         "cleared, then rerun startup.\n"
         "Deterministic diagnostics:\n"
         f"{details}"

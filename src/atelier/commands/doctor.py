@@ -176,6 +176,8 @@ def doctor(args: object) -> None:
         fix=fix,
     )
     counts = _doctor_counts(context=context, checks=checks, actions=actions)
+    normalization_required_changesets = sum(1 for action in actions if action.changed)
+    rollback_guidance = _rollback_guidance(project_data_dir=project_data_dir, beads_root=beads_root)
 
     mode = "fix" if fix else "check"
     project_info = {
@@ -193,6 +195,10 @@ def doctor(args: object) -> None:
         "fix": fix,
         "project": project_info,
         "counts": counts,
+        "prefix_normalization": {
+            "required": normalization_required_changesets > 0,
+            "required_changesets": normalization_required_changesets,
+        },
         "check_contract": {
             "check_mode_mutates": False,
             "fix_mode_mutating_checks": ["prefix_migration_drift"],
@@ -205,6 +211,8 @@ def doctor(args: object) -> None:
         # Backward-compatible key kept for existing consumers.
         "prefix_migration_drift": [action.as_dict() for action in actions],
     }
+    if fix:
+        payload["rollback_guidance"] = rollback_guidance
     if format_value == "json":
         say(json.dumps(payload, indent=2, sort_keys=True))
         return
@@ -214,6 +222,7 @@ def doctor(args: object) -> None:
         checks=checks,
         actions=actions,
         fix=fix,
+        rollback_guidance=rollback_guidance if fix else None,
     )
 
 
@@ -402,8 +411,7 @@ def _build_startup_lineage_check(*, context: _DoctorContext) -> _DoctorCheckFami
                         f"with mapping {mapping_work!r}."
                     ),
                     remediation=(
-                        "Run `atelier normalize-prefix --apply` to resolve work-branch "
-                        "override conflicts."
+                        "Run `atelier doctor --fix` to resolve work-branch override conflicts."
                     ),
                     severity="error",
                     epic_id=epic_id,
@@ -424,8 +432,7 @@ def _build_startup_lineage_check(*, context: _DoctorContext) -> _DoctorCheckFami
                         f"with mapping {mapping_worktree!r}."
                     ),
                     remediation=(
-                        "Run `atelier normalize-prefix --apply` to reconcile worktree-path "
-                        "conflicts."
+                        "Run `atelier doctor --fix` to reconcile worktree-path conflicts."
                     ),
                     severity="error",
                     epic_id=epic_id,
@@ -446,8 +453,7 @@ def _build_startup_lineage_check(*, context: _DoctorContext) -> _DoctorCheckFami
                         f"with epic root {epic_root!r}."
                     ),
                     remediation=(
-                        "Run `atelier normalize-prefix --apply` or rerun startup to reconcile "
-                        "lineage metadata."
+                        "Run `atelier doctor --fix` or rerun startup to reconcile lineage metadata."
                     ),
                     severity="error",
                     epic_id=epic_id,
@@ -468,8 +474,7 @@ def _build_startup_lineage_check(*, context: _DoctorContext) -> _DoctorCheckFami
                         f"with mapping root {mapping_root!r}."
                     ),
                     remediation=(
-                        "Run `atelier normalize-prefix --apply` to align mapping and lineage "
-                        "root branches."
+                        "Run `atelier doctor --fix` to align mapping and lineage root branches."
                     ),
                     severity="error",
                     epic_id=epic_id,
@@ -629,7 +634,7 @@ def _prefix_drift_remediation(
         if fix:
             notes.append("repair applied in fix mode")
         else:
-            notes.append("run `atelier normalize-prefix --apply` to apply canonical repair")
+            notes.append("run `atelier doctor --fix` to apply canonical repair")
     else:
         notes.append("no persistent update required")
     if "work-branch-conflict" in action.drift_classes:
@@ -884,6 +889,7 @@ def _render_doctor(
     checks: tuple[_DoctorCheckFamily, ...],
     actions: list[prefix_migration_drift.PrefixMigrationRepairAction],
     fix: bool,
+    rollback_guidance: Mapping[str, str] | None,
 ) -> None:
     console = Console()
     overview = Table(title="Project Doctor", box=box.SIMPLE, show_header=False)
@@ -897,6 +903,12 @@ def _render_doctor(
     overview.add_row("Changesets", _display_value(counts.get("changesets_total")))
     overview.add_row("In-progress changesets", _display_value(counts.get("changesets_in_progress")))
     overview.add_row("Blocked changesets", _display_value(counts.get("changesets_blocked")))
+    normalization_required_changesets = sum(1 for action in actions if action.changed)
+    normalization_required = "yes" if normalization_required_changesets > 0 else "no"
+    overview.add_row(
+        "Normalization required",
+        f"{normalization_required} ({normalization_required_changesets})",
+    )
     overview.add_row("Findings", _display_value(counts.get("findings_total")))
     overview.add_row("Startup blockers", _display_value(counts.get("startup_blockers")))
     console.print(overview)
@@ -930,9 +942,12 @@ def _render_doctor(
         _render_check_findings(console, check)
 
     if not fix and any(action.changed for action in actions):
-        console.print(
-            "Run `atelier normalize-prefix --apply` to apply prefix-migration drift repairs."
-        )
+        console.print("Run `atelier doctor --fix` to apply prefix-migration drift repairs.")
+    if fix and rollback_guidance:
+        console.print("Rollback guidance:")
+        console.print(f"- Inspect Beads DB path: {rollback_guidance['beads_inspect']}")
+        console.print(f"- Backup Beads state: {rollback_guidance['beads_backup']}")
+        console.print(f"- Backup mapping metadata: {rollback_guidance['mapping_backup']}")
 
 
 def _render_prefix_drift_findings(
@@ -1031,6 +1046,18 @@ def _display_value(value: object) -> str:
     if value is None or value == "":
         return "unknown"
     return str(value)
+
+
+def _rollback_guidance(*, project_data_dir: Path, beads_root: Path) -> dict[str, str]:
+    timestamp = dt.datetime.now(tz=dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    meta_dir = project_data_dir / "worktrees" / ".meta"
+    meta_backup = project_data_dir / "worktrees" / f".meta.backup-{timestamp}"
+    beads_backup = beads_root.parent / f"{beads_root.name}.backup-{timestamp}"
+    return {
+        "beads_inspect": f'BEADS_DIR="{beads_root}" bd info --json',
+        "beads_backup": f'cp -R "{beads_root}" "{beads_backup}"',
+        "mapping_backup": f'cp -R "{meta_dir}" "{meta_backup}"',
+    }
 
 
 def _active_hook_blockers_message(blockers: list[_ActiveHookBlocker]) -> str:
