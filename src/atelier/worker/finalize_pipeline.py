@@ -26,6 +26,15 @@ def _normalized_sha(value: object) -> str | None:
     return normalized
 
 
+def _normalized_branch(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized or normalized.lower() == "null":
+        return None
+    return normalized
+
+
 def _recorded_integrated_sha(issue: Issue) -> str | None:
     description = issue.get("description")
     description_text = description if isinstance(description, str) else ""
@@ -71,32 +80,63 @@ def _persist_integrated_sha(
 
 def _block_missing_merged_integration(
     *,
+    issue: Issue,
     changeset_id: str,
     work_branch: str,
     agent_id: str,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
     service: "FinalizePipelineService",
 ) -> FinalizeResult:
-    service.mark_changeset_blocked(
-        changeset_id,
-        reason="missing integration signal for merged terminal state",
-    )
+    description = issue.get("description")
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
+    root_branch = _normalized_branch(fields.get("changeset.root_branch"))
+    workspace_parent = _normalized_branch(fields.get("workspace.parent_branch"))
+    default_branch = _normalized_branch(git.git_default_branch(repo_root, git_path=git_path))
+    expected_mainline = workspace_parent or default_branch
+    if expected_mainline and expected_mainline == root_branch:
+        expected_mainline = None
+
+    service.mark_changeset_in_progress(changeset_id)
+    body_lines = [
+        "Changeset resolved to merged PR lifecycle but no mainline integration proof was found.",
+        "Required proof: `changeset.integrated_sha` reachable from the canonical "
+        "mainline target, or branch ancestry/patch-equivalence into that target.",
+        f"Work branch: `{work_branch}`",
+    ]
+    if expected_mainline:
+        body_lines.append(f"Expected mainline branch: `{expected_mainline}`")
+    body_lines.append("Deterministic recovery for affected open child PRs:")
+    if repo_slug:
+        body_lines.append(f"- `gh pr list --repo {repo_slug} --state open --base {work_branch}`")
+    body_lines.append("- `git fetch --prune origin`")
+    if expected_mainline:
+        body_lines.extend(
+            [
+                (f"- `git rebase --onto {expected_mainline} {work_branch} <child-work-branch>`"),
+                "- `git push --force-with-lease origin <child-work-branch>`",
+            ]
+        )
+        if repo_slug:
+            body_lines.append(
+                f"- `gh pr edit <child-pr-number> --repo {repo_slug} --base {expected_mainline}`"
+            )
+    else:
+        body_lines.append(
+            "- `bd show <changeset-id>` and verify workspace/default parent branch metadata"
+        )
+        body_lines.append("- Rerun finalize after parent metadata is repaired")
+    body_lines.append("Action: rerun worker finalize after restack/retarget completes.")
     service.send_planner_notification(
         subject=f"NEEDS-DECISION: Missing integration signal ({changeset_id})",
-        body=(
-            "Changeset resolved to merged terminal state but no integration proof "
-            "against the target branch was found.\n"
-            "Required proof: `changeset.integrated_sha` reachable from the target branch, "
-            "or branch ancestry/patch-equivalence into the target branch.\n"
-            f"Work branch: `{work_branch}`\n"
-            "Action: integrate the branch and rerun finalize, or close as "
-            "`abandoned`/`superseded` when integration is intentionally absent."
-        ),
+        body="\n".join(body_lines),
         agent_id=agent_id,
         thread_id=changeset_id,
     )
     return FinalizeResult(
         continue_running=False,
-        reason="changeset_blocked_missing_integration",
+        reason="changeset_in_progress_missing_integration",
     )
 
 
@@ -130,9 +170,13 @@ def _finalize_from_pr_lifecycle(
         )
         if not integration_ok:
             return _block_missing_merged_integration(
+                issue=issue,
                 changeset_id=changeset_id,
                 work_branch=work_branch,
                 agent_id=agent_id,
+                repo_slug=repo_slug,
+                repo_root=context.repo_root,
+                git_path=git_path,
                 service=service,
             )
         return service.finalize_terminal_changeset(
@@ -441,9 +485,13 @@ def run_finalize_pipeline(
                 if recovered is not None:
                     return recovered
                 return _block_missing_merged_integration(
+                    issue=issue,
                     changeset_id=changeset_id,
                     work_branch=work_branch,
                     agent_id=agent_id,
+                    repo_slug=repo_slug,
+                    repo_root=repo_root,
+                    git_path=git_path,
                     service=service,
                 )
             _persist_integrated_sha(

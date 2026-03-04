@@ -88,8 +88,11 @@ def _integration_target_branches(
     *,
     repo_root: Path,
     git_path: str | None = None,
-) -> list[str]:
+) -> tuple[list[str], bool]:
     root_branch = _normalize_branch_field(fields.get("changeset.root_branch"))
+    parent_branch = _normalize_branch_field(fields.get("changeset.parent_branch"))
+    workspace_parent = _normalize_branch_field(fields.get("workspace.parent_branch"))
+    default_branch = _normalize_branch_field(git.git_default_branch(repo_root, git_path=git_path))
     candidates: list[str] = []
 
     def add_candidate(value: object) -> None:
@@ -101,10 +104,14 @@ def _integration_target_branches(
         if normalized not in candidates:
             candidates.append(normalized)
 
-    add_candidate(fields.get("changeset.parent_branch"))
-    add_candidate(fields.get("workspace.parent_branch"))
-    add_candidate(git.git_default_branch(repo_root, git_path=git_path))
-    return candidates
+    has_canonical_mainline_target = False
+    add_candidate(workspace_parent)
+    add_candidate(default_branch)
+    if candidates:
+        has_canonical_mainline_target = True
+    if not has_canonical_mainline_target:
+        add_candidate(parent_branch)
+    return candidates, has_canonical_mainline_target
 
 
 def _target_refs_for_branch(
@@ -266,13 +273,14 @@ def changeset_integration_signal(
                     pr_merged = bool(merged_at.strip())
                 elif merged_at is not None:
                     pr_merged = True
-        target_branches = _integration_target_branches(
+        target_branches, has_canonical_mainline_target = _integration_target_branches(
             fields,
             repo_root=repo_root,
             git_path=git_path,
         )
         if (
             pr_base_branch
+            and not has_canonical_mainline_target
             and pr_base_branch != root_branch
             and pr_base_branch not in target_branches
         ):

@@ -418,12 +418,18 @@ def test_run_finalize_pipeline_descendant_children_pending_without_promotion(
     assert notifications == []
 
 
-def test_run_finalize_pipeline_blocks_merged_pr_without_integration_proof(monkeypatch) -> None:
+def test_run_finalize_pipeline_keeps_in_progress_when_merged_pr_lacks_mainline_proof(
+    monkeypatch,
+) -> None:
     issue = {
         "id": "at-epic.1",
         "status": "in_progress",
         "labels": [],
-        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "workspace.parent_branch: main\n"
+            "changeset.work_branch: feat/root-at-epic.1\n"
+        ),
     }
     monkeypatch.setattr(
         finalize_pipeline.beads,
@@ -442,15 +448,14 @@ def test_run_finalize_pipeline_blocks_merged_pr_without_integration_proof(monkey
         "state": "MERGED",
         "mergedAt": "2026-02-28T00:00:00Z",
         "isDraft": False,
+        "baseRefName": "feat/root",
     }
     service.changeset_integration_signal_fn = lambda _issue, *, repo_slug, git_path: (False, None)
-    blocked_reasons: list[str] = []
-    notifications: list[str] = []
-    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked_reasons.append(
-        reason
-    )
+    reopened: list[str] = []
+    notifications: list[tuple[str, str]] = []
+    service.mark_changeset_in_progress_fn = lambda changeset_id: reopened.append(changeset_id)
     service.send_planner_notification_fn = lambda **kwargs: notifications.append(
-        str(kwargs.get("subject"))
+        (str(kwargs.get("subject")), str(kwargs.get("body")))
     )
     service.finalize_terminal_changeset_fn = lambda **_kwargs: (_ for _ in ()).throw(
         AssertionError("terminal finalize must not run without integration proof")
@@ -461,10 +466,15 @@ def test_run_finalize_pipeline_blocks_merged_pr_without_integration_proof(monkey
         service=service,
     )
 
-    assert result.reason == "changeset_blocked_missing_integration"
+    assert result.reason == "changeset_in_progress_missing_integration"
     assert result.continue_running is False
-    assert blocked_reasons == ["missing integration signal for merged terminal state"]
-    assert notifications == ["NEEDS-DECISION: Missing integration signal (at-epic.1)"]
+    assert reopened == ["at-epic.1"]
+    assert notifications
+    subject, body = notifications[0]
+    assert subject == "NEEDS-DECISION: Missing integration signal (at-epic.1)"
+    assert "Expected mainline branch: `main`" in body
+    assert "gh pr list --repo org/repo --state open --base feat/root-at-epic.1" in body
+    assert "git rebase --onto main feat/root-at-epic.1 <child-work-branch>" in body
 
 
 def test_run_finalize_pipeline_blocks_on_stack_integrity_preflight(monkeypatch) -> None:
