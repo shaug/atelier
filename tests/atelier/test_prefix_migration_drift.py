@@ -947,6 +947,102 @@ def test_repair_prefix_migration_drift_apply_updates_mapping_and_metadata(tmp_pa
     assert updated_mapping.changeset_worktrees["ts-epic.1"] == "worktrees/ts-epic.1"
 
 
+def test_repair_prefix_migration_drift_defers_checkout_failure_without_moving_worktree(
+    tmp_path: Path,
+) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    mapping_path = worktrees.mapping_path(project_data_dir, "ts-epic")
+    worktrees.write_mapping(
+        mapping_path,
+        worktrees.WorktreeMapping(
+            epic_id="ts-epic",
+            worktree_path="worktrees/ts-epic",
+            root_branch="feat/new-root",
+            changesets={"ts-epic.1": "feat/legacy-branch"},
+            changeset_worktrees={"ts-epic.1": "worktrees/at-legacy.1"},
+        ),
+    )
+    legacy_path = project_data_dir / "worktrees" / "at-legacy.1"
+    legacy_path.mkdir(parents=True)
+    (legacy_path / ".git").write_text("gitdir: /tmp/legacy\n", encoding="utf-8")
+
+    epic_issue = {
+        "id": "ts-epic",
+        "labels": ["at:epic"],
+        "description": "workspace.root_branch: feat/new-root\n",
+    }
+    changeset_issue = {
+        "id": "ts-epic.1",
+        "labels": [],
+        "type": "task",
+        "description": (
+            "changeset.root_branch: feat/new-root\n"
+            "changeset.work_branch: feat/new-branch\n"
+            "worktree_path: worktrees/ts-epic.1\n"
+        ),
+    }
+    worktree_output = _git_worktree_output(legacy_path, "feat/new-branch")
+
+    with (
+        patch("atelier.prefix_migration_drift.beads.list_epics", return_value=[epic_issue]),
+        patch(
+            "atelier.prefix_migration_drift.beads.list_descendant_changesets",
+            return_value=[changeset_issue],
+        ),
+        patch("atelier.prefix_migration_drift.beads.list_work_children", return_value=[]),
+        patch(
+            "atelier.prefix_migration_drift.exec_util.try_run_command",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "worktree", "list", "--porcelain"],
+                returncode=0,
+                stdout=worktree_output,
+                stderr="",
+            ),
+        ),
+        patch("atelier.prefix_migration_drift._ensure_canonical_branch"),
+        patch(
+            "atelier.prefix_migration_drift._checkout_canonical_branch",
+            side_effect=RuntimeError("dirty worktree"),
+        ),
+        patch("atelier.prefix_migration_drift._run_git_checked") as run_git_checked,
+        patch(
+            "atelier.prefix_migration_drift.git.git_current_branch", return_value="feat/new-branch"
+        ),
+        patch("atelier.prefix_migration_drift.beads.update_workspace_root_branch") as update_root,
+        patch(
+            "atelier.prefix_migration_drift.beads.update_changeset_branch_metadata"
+        ) as update_metadata,
+        patch("atelier.prefix_migration_drift.beads.update_worktree_path") as update_path,
+    ):
+        actions = prefix_migration_drift.repair_prefix_migration_drift(
+            project_data_dir=project_data_dir,
+            beads_root=tmp_path / ".beads",
+            repo_root=repo_root,
+            repo_slug="org/repo",
+            apply=True,
+            lookup_pr_status=lambda _repo, _branch: SimpleNamespace(
+                found=False, failed=False, payload=None
+            ),
+        )
+
+    assert len(actions) == 1
+    action = actions[0]
+    assert action.applied is False
+    assert action.changed is True
+    assert action.deferred_reason == "dirty worktree"
+    assert not run_git_checked.call_args_list
+    update_root.assert_not_called()
+    update_metadata.assert_not_called()
+    update_path.assert_not_called()
+    updated_mapping = worktrees.load_mapping(mapping_path)
+    assert updated_mapping is not None
+    assert updated_mapping.changesets["ts-epic.1"] == "feat/legacy-branch"
+    assert updated_mapping.changeset_worktrees["ts-epic.1"] == "worktrees/at-legacy.1"
+
+
 def test_repair_prefix_migration_drift_converges_duplicate_branch_paths_deterministically(
     tmp_path: Path,
 ) -> None:
