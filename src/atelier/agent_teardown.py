@@ -36,7 +36,10 @@ def _read_agent_hook(
     beads_root: Path,
     repo_root: Path,
 ) -> tuple[bool, str | None]:
-    """Read the current agent hook, returning whether the read was definitive."""
+    """Read the current agent hook.
+
+    Returns whether the read was definitive.
+    """
     try:
         hook = beads.get_agent_hook(
             agent_bead_id,
@@ -46,6 +49,34 @@ def _read_agent_hook(
     except SystemExit:
         return False, None
     return True, _clean_text(hook)
+
+
+def _is_epic_assignment_released(
+    *,
+    epic_id: str,
+    beads_root: Path,
+    repo_root: Path,
+) -> bool:
+    """Return whether an epic no longer has assignee/hooked ownership state."""
+    try:
+        issues = beads.run_bd_json(
+            ["show", epic_id],
+            beads_root=beads_root,
+            cwd=repo_root,
+        )
+    except SystemExit:
+        return False
+    if not issues:
+        return False
+
+    issue = issues[0]
+    assignee = _clean_text(issue.get("assignee"))
+    raw_labels = issue.get("labels")
+    labels = {label for label in raw_labels if isinstance(label, str)} if isinstance(
+        raw_labels, list
+    ) else set()
+    hooked = beads.has_issue_label(labels, "hooked", beads_root=beads_root)
+    return assignee is None and not hooked
 
 
 def teardown_agent_runtime(
@@ -107,6 +138,7 @@ def teardown_agent_runtime(
     target_epic = expected_hook or _clean_text(current_hook)
 
     released_epic = False
+    epic_release_confirmed = target_epic is None
     if target_epic:
         if resolved_agent_id:
             try:
@@ -119,6 +151,16 @@ def teardown_agent_runtime(
                 )
             except SystemExit:
                 released_epic = False
+        if released_epic:
+            epic_release_confirmed = True
+        else:
+            # Fail closed when release cannot be confirmed.
+            epic_release_confirmed = _is_epic_assignment_released(
+                epic_id=target_epic,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
+            released_epic = epic_release_confirmed
         try:
             beads.clear_agent_hook(
                 resolved_agent_bead_id,
@@ -137,7 +179,7 @@ def teardown_agent_runtime(
     hook_cleared = hook_known_after_cleanup and remaining_hook is None
 
     agent_closed = False
-    if close_agent_bead and hook_cleared:
+    if close_agent_bead and hook_cleared and epic_release_confirmed:
         close_result = None
         try:
             close_result = beads.close_issue(
