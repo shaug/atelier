@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -141,6 +142,78 @@ def test_prepare_agent_session_sanitizes_inherited_runtime_routing(monkeypatch) 
     assert prep.env["ATELIER_PROJECT"] == "/repo"
     assert prep.env["ATELIER_WORKSPACE"] == "feat/root"
     assert prep.env["ATELIER_CHANGESET_ID"] == "at-epic.1"
+
+
+def test_prepare_agent_session_does_not_warn_for_self_scoped_agent_id(monkeypatch) -> None:
+    monkeypatch.setattr(
+        session_agent.agents, "get_agent", lambda _name: _FakeAgentSpec(name="codex")
+    )
+    for key in list(os.environ):
+        if key.startswith("ATELIER_"):
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/worker/codex/p100")
+    agent = agent_home.AgentHome(
+        name="codex",
+        agent_id="atelier/worker/codex/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+    control = _TestControl()
+    session_agent.prepare_agent_session(
+        project_config=_project_config(),
+        project_data_dir=Path("/project-data"),
+        repo_root=Path("/repo"),
+        beads_root=Path("/beads"),
+        agent=agent,
+        changeset_worktree_path=Path("/worktree"),
+        selected_epic="at-epic",
+        changeset_id="at-epic.1",
+        root_branch_value="feat/root",
+        enlistment_path=Path("/repo"),
+        yes=True,
+        yolo=False,
+        dry_run=True,
+        session_control=control,
+        command_ops=_TestCommandOps(),
+    )
+
+    warning_logs = [msg for msg in control.logs if "Would emit runtime env warning:" in msg]
+    assert warning_logs == []
+
+
+def test_prepare_agent_session_warns_for_cross_session_agent_id(monkeypatch) -> None:
+    monkeypatch.setattr(
+        session_agent.agents, "get_agent", lambda _name: _FakeAgentSpec(name="codex")
+    )
+    monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/worker/codex/p999")
+    agent = agent_home.AgentHome(
+        name="codex",
+        agent_id="atelier/worker/codex/p100",
+        role="worker",
+        path=Path("/tmp/agent-home"),
+    )
+    control = _TestControl()
+    session_agent.prepare_agent_session(
+        project_config=_project_config(),
+        project_data_dir=Path("/project-data"),
+        repo_root=Path("/repo"),
+        beads_root=Path("/beads"),
+        agent=agent,
+        changeset_worktree_path=Path("/worktree"),
+        selected_epic="at-epic",
+        changeset_id="at-epic.1",
+        root_branch_value="feat/root",
+        enlistment_path=Path("/repo"),
+        yes=True,
+        yolo=False,
+        dry_run=True,
+        session_control=control,
+        command_ops=_TestCommandOps(),
+    )
+
+    warning_logs = [msg for msg in control.logs if "Would emit runtime env warning:" in msg]
+    assert len(warning_logs) == 1
+    assert "ATELIER_AGENT_ID" in warning_logs[0]
 
 
 def test_prepare_agent_session_applies_yolo_options(monkeypatch) -> None:
