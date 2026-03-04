@@ -1,0 +1,32 @@
+Planner startup overview
+- Beads root: /beads
+Unread messages:
+- at-msg-1 First
+- at-msg-2 Second
+Queued messages:
+- at-q-1 [planner] Queued first | claim: unclaimed
+- at-q-2 [planner] Queued second | claim: claimed by worker
+- Total epics: 3
+- Active top-level work (open/in_progress/blocked): 3
+- Indexed active epics (at:epic discovery): 2
+Identity guardrail violations (deterministic remediation):
+- at-missing-1 [status=missing type=missing] labels=(none)
+  remediation: (missing remediation command)
+- at-missing-2 [status=open type=epic] labels=alpha, zeta
+  remediation: bd update at-missing-2 --type epic --add-label at:epic
+Discovery index mismatch for executable top-level work:
+- at-a
+- at-z
+  remediation: run `bd prime`; if mismatch persists, run `bd doctor --fix --yes` and rerun startup.
+Deferred changesets under open/in-progress/blocked epics:
+- at-1 [open] Open epic
+  - at-1.1 [deferred] Alpha deferred
+- at-2 [blocked] Blocked epic
+  - at-2.1 [deferred] Deferred first
+  - at-2.2 [deferred] Deferred second
+Deferred changeset scan limited to first 1 active epics; skipped 2.
+Epics by state:
+Open epics:
+- at-1 [open] Open epic
+Blocked epics:
+- at-2 [blocked] Blocked epic

@@ -1,0 +1,11 @@
+Planner startup overview
+- Beads root: /beads
+No unread messages.
+No queued messages.
+- Total epics: 0
+- Active top-level work (open/in_progress/blocked): 0
+- Indexed active epics (at:epic discovery): 0
+Epic discovery parity: ok
+No deferred changesets under open/in-progress/blocked epics.
+Epics by state:
+- (none)
