@@ -317,8 +317,20 @@ class WorkerLifecycleAdapter:
             repo_root=repo_root,
         )
 
-    def release_epic_assignment(self, epic_id: str, *, beads_root: Path, repo_root: Path) -> None:
-        worker_work.release_epic_assignment(epic_id, beads_root=beads_root, repo_root=repo_root)
+    def release_epic_assignment(
+        self,
+        epic_id: str,
+        *,
+        agent_id: str,
+        beads_root: Path,
+        repo_root: Path,
+    ) -> None:
+        worker_work.release_epic_assignment(
+            epic_id,
+            agent_id=agent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
 
     def reconcile_blocked_merged_changesets(
         self,

@@ -322,6 +322,7 @@ def test_run_worker_once_blocks_on_active_root_branch_conflict() -> None:
     assert summary.epic_id == "at-epic"
     deps.lifecycle.release_epic_assignment.assert_called_once_with(
         "at-epic",
+        agent_id="atelier/worker/codex/p1root",
         beads_root=Path("/project/.atelier/.beads"),
         repo_root=Path("/repo"),
     )
@@ -740,6 +741,7 @@ def test_run_worker_once_releases_epic_when_changeset_selection_reads_fail() -> 
     assert "Startup state: Startup Beads state:" in str(notification.get("body"))
     deps.lifecycle.release_epic_assignment.assert_called_once_with(
         "at-epic",
+        agent_id="atelier/worker/codex/p5",
         beads_root=Path("/project/.atelier/.beads"),
         repo_root=Path("/repo"),
     )
@@ -794,6 +796,7 @@ def test_run_worker_once_releases_epic_when_selected_changeset_read_fails() -> N
     assert "Startup state: Startup Beads state:" in str(notification.get("body"))
     deps.lifecycle.release_epic_assignment.assert_called_once_with(
         "at-epic",
+        agent_id="atelier/worker/codex/p6",
         beads_root=Path("/project/.atelier/.beads"),
         repo_root=Path("/repo"),
     )
@@ -860,6 +863,7 @@ def test_run_worker_once_blocks_changeset_on_non_recoverable_worktree_prep_error
     assert subject == "NEEDS-DECISION: Startup preparation failed (at-epic.1)"
     deps.lifecycle.release_epic_assignment.assert_called_once_with(
         "at-epic",
+        agent_id="atelier/worker/codex/p6b",
         beads_root=Path("/project/.atelier/.beads"),
         repo_root=Path("/repo"),
     )
@@ -939,6 +943,7 @@ def test_run_worker_once_retries_transient_prepare_worktree_failures_before_bloc
     assert "index.lock" in notification_body
     deps.lifecycle.release_epic_assignment.assert_called_once_with(
         "at-epic",
+        agent_id="atelier/worker/codex/p6bt",
         beads_root=Path("/project/.atelier/.beads"),
         repo_root=Path("/repo"),
     )
@@ -1019,6 +1024,7 @@ def test_run_worker_once_reports_worker_template_load_failure_reason_code() -> N
     assert "fallback_attempts=" in notification_body
     deps.lifecycle.release_epic_assignment.assert_called_once_with(
         "at-epic",
+        agent_id="atelier/worker/codex/p6c",
         beads_root=Path("/project/.atelier/.beads"),
         repo_root=Path("/repo"),
     )
@@ -1533,6 +1539,7 @@ def test_run_worker_once_releases_epic_when_dependency_gate_read_fails() -> None
     deps.lifecycle.send_planner_notification.assert_called_once()
     deps.lifecycle.release_epic_assignment.assert_called_once_with(
         "at-epic",
+        agent_id="atelier/worker/codex/p9c",
         beads_root=Path("/project/.atelier/.beads"),
         repo_root=Path("/repo"),
     )

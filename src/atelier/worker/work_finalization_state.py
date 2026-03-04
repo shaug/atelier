@@ -103,23 +103,31 @@ def send_no_ready_changesets(
     )
 
 
-def release_epic_assignment(epic_id: str, *, beads_root: Path, repo_root: Path) -> None:
+def release_epic_assignment(
+    epic_id: str,
+    *,
+    agent_id: str,
+    beads_root: Path,
+    repo_root: Path,
+) -> None:
     """Release epic assignment.
 
     Args:
         epic_id: Value for `epic_id`.
+        agent_id: Value for `agent_id`.
         beads_root: Value for `beads_root`.
         repo_root: Value for `repo_root`.
 
     Returns:
         Function result.
     """
+    expected_assignee = agent_id.strip()
+    if not expected_assignee:
+        return
     issues = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
     if not issues:
         return
     issue = issues[0]
-    assignee_value = issue.get("assignee")
-    expected_assignee = assignee_value if isinstance(assignee_value, str) else ""
     beads.release_epic_assignment(
         epic_id,
         beads_root=beads_root,

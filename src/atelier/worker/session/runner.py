@@ -230,7 +230,12 @@ def _abort_startup_read_failure(
     except SystemExit:
         pass
     try:
-        lifecycle.release_epic_assignment(selected_epic, beads_root=beads_root, repo_root=repo_root)
+        lifecycle.release_epic_assignment(
+            selected_epic,
+            agent_id=agent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
     except SystemExit:
         pass
     try:
@@ -306,6 +311,7 @@ def _abort_startup_preparation_failure(
     try:
         lifecycle.release_epic_assignment(
             selected_epic,
+            agent_id=agent_id,
             beads_root=beads_root,
             repo_root=repo_root,
         )
@@ -953,6 +959,7 @@ def run_worker_once(
                 )
                 lifecycle.release_epic_assignment(
                     selected_epic,
+                    agent_id=agent.agent_id,
                     beads_root=beads_root,
                     repo_root=repo_root,
                 )
@@ -1062,7 +1069,10 @@ def run_worker_once(
                     )
                 )
             lifecycle.release_epic_assignment(
-                selected_epic, beads_root=beads_root, repo_root=repo_root
+                selected_epic,
+                agent_id=agent.agent_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
             )
             infra.beads.clear_agent_hook(
                 agent_bead_id_required,
