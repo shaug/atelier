@@ -65,6 +65,10 @@ def test_start_worker_cleans_up_agent_home_after_runtime_failure(
         ),
         patch("atelier.commands.work.agent_home.preview_agent_home", return_value=agent),
         patch(
+            "atelier.commands.work.beads.ensure_agent_bead",
+            return_value={"id": "at-agent"},
+        ),
+        patch(
             "atelier.commands.work.worker_runtime.run_worker_sessions",
             side_effect=RuntimeError("boom"),
         ),

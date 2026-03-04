@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from .. import agent_home, agent_teardown, cli_defaults, config
+from .. import agent_home, agent_teardown, beads, cli_defaults, config
 from ..io import confirm, die, say
 from ..worker import models as worker_models
 from ..worker import runtime as worker_runtime
@@ -67,6 +67,7 @@ def start_worker(args: object) -> None:
     cleanup_project_dir: Path | None = None
     cleanup_beads_root: Path | None = None
     cleanup_repo_root: Path | None = None
+    cleanup_agent_bead_id: str | None = None
     configured_select_default: str | None = None
     if not dry_run:
         (
@@ -86,6 +87,16 @@ def start_worker(args: object) -> None:
             role="worker",
             session_key=session_key,
         )
+        agent_bead = beads.ensure_agent_bead(
+            cleanup_agent.agent_id,
+            beads_root=cleanup_beads_root,
+            cwd=cleanup_repo_root,
+            role="worker",
+        )
+        bead_id = agent_bead.get("id")
+        cleanup_agent_bead_id = bead_id if isinstance(bead_id, str) and bead_id else None
+        if cleanup_agent_bead_id is not None:
+            setattr(args, "agent_bead_id", cleanup_agent_bead_id)
     select = normalize_startup_select(
         getattr(args, "select", None),
         configured_default=configured_select_default,
@@ -117,6 +128,7 @@ def start_worker(args: object) -> None:
                 beads_root=cleanup_beads_root,
                 repo_root=cleanup_repo_root,
                 agent_id=cleanup_agent.agent_id,
+                agent_bead_id=cleanup_agent_bead_id,
                 close_agent_bead=True,
             )
         if cleanup_agent is not None and cleanup_project_dir is not None:

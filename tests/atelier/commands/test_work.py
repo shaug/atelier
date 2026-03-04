@@ -64,6 +64,10 @@ def test_start_worker_non_dry_run_previews_and_cleans_agent_home(
             "atelier.commands.work.agent_home.preview_agent_home",
             return_value=session_agent,
         ) as preview_agent_home,
+        patch(
+            "atelier.commands.work.beads.ensure_agent_bead",
+            return_value={"id": "at-agent"},
+        ),
         patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions,
         patch("atelier.commands.work.agent_teardown.teardown_agent_runtime") as teardown_runtime,
         patch("atelier.commands.work.agent_home.cleanup_agent_home") as cleanup_agent_home,
@@ -78,6 +82,7 @@ def test_start_worker_non_dry_run_previews_and_cleans_agent_home(
         beads_root=tmp_path / ".beads",
         repo_root=repo_root,
         agent_id=session_agent.agent_id,
+        agent_bead_id="at-agent",
         close_agent_bead=True,
     )
     cleanup_agent_home.assert_called_once_with(session_agent, project_dir=tmp_path)
@@ -273,6 +278,10 @@ def test_start_worker_uses_project_worker_select_default_non_dry_run(tmp_path: P
             return_value=session_agent,
         ),
         patch(
+            "atelier.commands.work.beads.ensure_agent_bead",
+            return_value={"id": "at-agent"},
+        ),
+        patch(
             "atelier.commands.work.worker_runtime.run_worker_sessions",
             side_effect=fake_run_worker_sessions,
         ),
@@ -290,6 +299,7 @@ def test_start_worker_uses_project_worker_select_default_non_dry_run(tmp_path: P
         )
 
     assert captured["args"].select == "first-eligible"
+    assert captured["args"].agent_bead_id == "at-agent"
 
 
 def test_start_worker_cli_select_overrides_project_default_non_dry_run(tmp_path: Path) -> None:
@@ -324,6 +334,10 @@ def test_start_worker_cli_select_overrides_project_default_non_dry_run(tmp_path:
             return_value=session_agent,
         ),
         patch(
+            "atelier.commands.work.beads.ensure_agent_bead",
+            return_value={"id": "at-agent"},
+        ),
+        patch(
             "atelier.commands.work.worker_runtime.run_worker_sessions",
             side_effect=fake_run_worker_sessions,
         ),
@@ -341,3 +355,4 @@ def test_start_worker_cli_select_overrides_project_default_non_dry_run(tmp_path:
         )
 
     assert captured["args"].select == "first-eligible"
+    assert captured["args"].agent_bead_id == "at-agent"
