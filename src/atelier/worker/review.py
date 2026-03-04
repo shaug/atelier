@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .. import beads, changeset_fields, lifecycle, prs
+from .. import beads, changeset_fields, git, lifecycle, prs
+from .. import exec as exec_util
 from .. import log as atelier_log
 from .models_boundary import BeadsIssueBoundary
 
@@ -37,6 +39,190 @@ class GlobalStartupSelections:
 _GLOBAL_SCAN_ACTIVE_STATUSES = frozenset({"open", "in_progress", "blocked"})
 _GLOBAL_SCAN_QUERY_MAX_ATTEMPTS = 3
 _SIGNAL_SCAN_MAX_WORKERS = 8
+_LEAKED_REVIEW_BRANCH_PATTERN = re.compile(r"^pr-\d+(?:-review)?$")
+_REVIEW_BRANCH_CLEANUP_CACHE: set[tuple[str, str]] = set()
+_REVIEW_BRANCH_CLEANUP_MAX_ATTEMPTS = 2
+
+
+def _review_cleanup_cache_key(*, repo_root: Path, git_path: str | None) -> tuple[str, str]:
+    return (str(repo_root.resolve()), (git_path or "").strip())
+
+
+def _list_local_leaked_review_branches(
+    *, repo_root: Path, git_path: str | None
+) -> tuple[str, ...] | None:
+    result = exec_util.try_run_command(
+        git.git_command(
+            [
+                "-C",
+                str(repo_root),
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads/pr-*",
+            ],
+            git_path=git_path,
+        )
+    )
+    if result is None or result.returncode != 0:
+        return None
+    branches = [
+        line.strip()
+        for line in (result.stdout or "").splitlines()
+        if isinstance(line, str) and _LEAKED_REVIEW_BRANCH_PATTERN.fullmatch(line.strip())
+    ]
+    return tuple(sorted(set(branches)))
+
+
+def _active_worktree_branches(*, repo_root: Path, git_path: str | None) -> set[str] | None:
+    result = exec_util.try_run_command(
+        git.git_command(
+            ["-C", str(repo_root), "worktree", "list", "--porcelain"],
+            git_path=git_path,
+        )
+    )
+    if result is None or result.returncode != 0:
+        return None
+    active: set[str] = set()
+    prefix = "branch refs/heads/"
+    for line in (result.stdout or "").splitlines():
+        if not line.startswith(prefix):
+            continue
+        branch = line[len(prefix) :].strip()
+        if branch:
+            active.add(branch)
+    return active
+
+
+def _delete_local_branch_ref(
+    *,
+    repo_root: Path,
+    branch: str,
+    git_path: str | None,
+) -> tuple[bool, str | None]:
+    ref = f"refs/heads/{branch}"
+    for _attempt in range(_REVIEW_BRANCH_CLEANUP_MAX_ATTEMPTS):
+        result = exec_util.try_run_command(
+            git.git_command(
+                ["-C", str(repo_root), "update-ref", "-d", ref],
+                git_path=git_path,
+            )
+        )
+        if result is None:
+            return False, "missing required command: git"
+        if not git.git_ref_exists(repo_root, ref, git_path=git_path):
+            return True, None
+        if result.returncode == 0:
+            continue
+        detail = (result.stderr or result.stdout or "").strip()
+        if detail:
+            return False, detail
+        return False, f"update-ref returned exit {result.returncode}"
+    return False, "unable to verify branch ref deletion"
+
+
+def _cleanup_mainline_anchor_refs(*, repo_root: Path, git_path: str | None) -> tuple[str, ...]:
+    default_branch = git.git_default_branch(repo_root, git_path=git_path)
+    if not default_branch:
+        return ()
+    refs: list[str] = []
+    local_ref = f"refs/heads/{default_branch}"
+    remote_ref = f"refs/remotes/origin/{default_branch}"
+    if git.git_ref_exists(repo_root, local_ref, git_path=git_path):
+        refs.append(local_ref)
+    if git.git_ref_exists(repo_root, remote_ref, git_path=git_path):
+        refs.append(remote_ref)
+    return tuple(refs)
+
+
+def _branch_ref_safe_to_prune(
+    *,
+    repo_root: Path,
+    branch: str,
+    git_path: str | None,
+) -> tuple[bool, str | None]:
+    ref = f"refs/heads/{branch}"
+    branch_tip = git.git_rev_parse(repo_root, ref, git_path=git_path)
+    if not branch_tip:
+        return False, "unable to resolve branch tip"
+    anchors = _cleanup_mainline_anchor_refs(repo_root=repo_root, git_path=git_path)
+    if not anchors:
+        return False, "unable to determine mainline cleanup anchors"
+    for anchor in anchors:
+        reachable = git.git_is_ancestor(repo_root, branch_tip, anchor, git_path=git_path)
+        if reachable is True:
+            return True, None
+        if reachable is None:
+            return False, f"unable to verify reachability against {anchor!r}"
+    return False, "branch tip is not reachable from default-branch mainline refs"
+
+
+def _cleanup_leaked_pr_review_branches(
+    *,
+    repo_root: Path,
+    git_path: str | None,
+    emit_diagnostic: Callable[[str], None] | None = None,
+) -> tuple[str, ...]:
+    cache_key = _review_cleanup_cache_key(repo_root=repo_root, git_path=git_path)
+    if cache_key in _REVIEW_BRANCH_CLEANUP_CACHE:
+        return ()
+    if not repo_root.exists() or not (repo_root / ".git").exists():
+        _REVIEW_BRANCH_CLEANUP_CACHE.add(cache_key)
+        return ()
+
+    leaked = _list_local_leaked_review_branches(repo_root=repo_root, git_path=git_path)
+    if leaked is None:
+        return ()
+    if not leaked:
+        _REVIEW_BRANCH_CLEANUP_CACHE.add(cache_key)
+        return ()
+
+    active = _active_worktree_branches(repo_root=repo_root, git_path=git_path)
+    if active is None:
+        message = (
+            "startup stage=review-ref-cleanup skipped leaked pr-* branch cleanup: "
+            "unable to list active worktrees"
+        )
+        atelier_log.warning(message)
+        if emit_diagnostic is not None:
+            emit_diagnostic(message)
+        return ()
+
+    removed: list[str] = []
+    for branch in leaked:
+        if branch in active:
+            continue
+        safe_to_prune, reason = _branch_ref_safe_to_prune(
+            repo_root=repo_root,
+            branch=branch,
+            git_path=git_path,
+        )
+        if not safe_to_prune:
+            message = (
+                "startup stage=review-ref-cleanup skipped pruning leaked branch "
+                f"{branch!r}: {reason or 'unknown reason'}"
+            )
+            atelier_log.warning(message)
+            if emit_diagnostic is not None:
+                emit_diagnostic(message)
+            continue
+        deleted, detail = _delete_local_branch_ref(
+            repo_root=repo_root,
+            branch=branch,
+            git_path=git_path,
+        )
+        if deleted:
+            removed.append(branch)
+            continue
+        message = (
+            "startup stage=review-ref-cleanup failed to prune leaked branch "
+            f"{branch!r}: {detail or 'unknown failure'}"
+        )
+        atelier_log.warning(message)
+        if emit_diagnostic is not None:
+            emit_diagnostic(message)
+
+    _REVIEW_BRANCH_CLEANUP_CACHE.add(cache_key)
+    return tuple(sorted(removed))
 
 
 def _feedback_cursor(issue: dict[str, object]):
@@ -477,6 +663,7 @@ def select_global_startup_candidates(
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
+    git_path: str | None = None,
     emit_diagnostic: Callable[[str], None] | None = None,
 ) -> GlobalStartupSelections:
     """Select global merge-conflict and review-feedback candidates in one scan.
@@ -485,6 +672,19 @@ def select_global_startup_candidates(
     """
     if not repo_slug:
         return GlobalStartupSelections(conflict=None, feedback=None)
+    removed = _cleanup_leaked_pr_review_branches(
+        repo_root=repo_root,
+        git_path=git_path,
+        emit_diagnostic=emit_diagnostic,
+    )
+    if removed:
+        message = (
+            "startup stage=review-ref-cleanup pruned leaked local review branches: "
+            + ", ".join(sorted(removed))
+        )
+        atelier_log.info(message)
+        if emit_diagnostic is not None:
+            emit_diagnostic(message)
     started = datetime.now(tz=timezone.utc)
     records, epic_by_changeset = _global_changeset_records(
         beads_root=beads_root,
@@ -526,10 +726,15 @@ def select_review_feedback_changeset(
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
+    git_path: str | None = None,
 ) -> ReviewFeedbackSelection | None:
     """Select the oldest unresolved review-feedback candidate under one epic."""
     if not repo_slug:
         return None
+    _cleanup_leaked_pr_review_branches(
+        repo_root=repo_root,
+        git_path=git_path,
+    )
     client, records = _records_for_epic_changesets(
         epic_id=epic_id,
         beads_root=beads_root,
@@ -553,11 +758,25 @@ def select_global_review_feedback_changeset(
     beads_root: Path,
     repo_root: Path,
     resolve_epic_id_for_changeset: Callable[[dict[str, object]], str | None],
+    git_path: str | None = None,
     emit_diagnostic: Callable[[str], None] | None = None,
 ) -> ReviewFeedbackSelection | None:
     """Select the oldest unresolved review-feedback candidate globally."""
     if not repo_slug:
         return None
+    removed = _cleanup_leaked_pr_review_branches(
+        repo_root=repo_root,
+        git_path=git_path,
+        emit_diagnostic=emit_diagnostic,
+    )
+    if removed:
+        message = (
+            "startup stage=review-ref-cleanup pruned leaked local review branches: "
+            + ", ".join(sorted(removed))
+        )
+        atelier_log.info(message)
+        if emit_diagnostic is not None:
+            emit_diagnostic(message)
     del resolve_epic_id_for_changeset
     records, epic_by_changeset = _global_changeset_records(
         beads_root=beads_root,
@@ -580,10 +799,15 @@ def select_conflicted_changeset(
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
+    git_path: str | None = None,
 ) -> MergeConflictSelection | None:
     """Select the oldest merge-conflicted changeset under one epic."""
     if not repo_slug:
         return None
+    _cleanup_leaked_pr_review_branches(
+        repo_root=repo_root,
+        git_path=git_path,
+    )
     client, records = _records_for_epic_changesets(
         epic_id=epic_id,
         beads_root=beads_root,
@@ -607,11 +831,25 @@ def select_global_conflicted_changeset(
     beads_root: Path,
     repo_root: Path,
     resolve_epic_id_for_changeset: Callable[[dict[str, object]], str | None],
+    git_path: str | None = None,
     emit_diagnostic: Callable[[str], None] | None = None,
 ) -> MergeConflictSelection | None:
     """Select the oldest merge-conflicted changeset globally."""
     if not repo_slug:
         return None
+    removed = _cleanup_leaked_pr_review_branches(
+        repo_root=repo_root,
+        git_path=git_path,
+        emit_diagnostic=emit_diagnostic,
+    )
+    if removed:
+        message = (
+            "startup stage=review-ref-cleanup pruned leaked local review branches: "
+            + ", ".join(sorted(removed))
+        )
+        atelier_log.info(message)
+        if emit_diagnostic is not None:
+            emit_diagnostic(message)
     del resolve_epic_id_for_changeset
     records, epic_by_changeset = _global_changeset_records(
         beads_root=beads_root,

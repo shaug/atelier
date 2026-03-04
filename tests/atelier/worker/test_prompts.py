@@ -33,6 +33,8 @@ def test_worker_opening_prompt_review_feedback_avoids_label_reset_guidance() -> 
     assert (
         "Do not mark this changeset complete while review feedback remains unaddressed." in prompt
     )
+    assert "Do not create local pr-* branches for temporary PR inspection." in prompt
+    assert "refs/atelier/review/* refs and clean them up after use." in prompt
     assert (
         "Do not reset lifecycle labels to ready while feedback remains unaddressed." not in prompt
     )

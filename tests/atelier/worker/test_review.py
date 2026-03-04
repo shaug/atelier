@@ -1,3 +1,4 @@
+import subprocess
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -6,6 +7,142 @@ import pytest
 
 from atelier import beads, prs
 from atelier.worker import review
+
+
+def _run_git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=check,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _has_ref(repo: Path, ref: str) -> bool:
+    result = _run_git(repo, "show-ref", "--verify", "--quiet", ref, check=False)
+    return result.returncode == 0
+
+
+def test_cleanup_leaked_pr_review_branches_prunes_stale_and_keeps_active_worktree_branch(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    _run_git(repo_root, "init")
+    _run_git(repo_root, "config", "user.email", "worker@example.test")
+    _run_git(repo_root, "config", "user.name", "Worker Test")
+    (repo_root / "README.md").write_text("seed\n")
+    _run_git(repo_root, "add", "README.md")
+    _run_git(repo_root, "commit", "-m", "seed")
+    _run_git(repo_root, "branch", "pr-101")
+    _run_git(repo_root, "branch", "pr-202-review")
+    _run_git(repo_root, "branch", "pr-not-leaked")
+
+    worktree_path = tmp_path / "worktree-pr-101"
+    _run_git(repo_root, "worktree", "add", str(worktree_path), "pr-101")
+
+    review._REVIEW_BRANCH_CLEANUP_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    removed = review._cleanup_leaked_pr_review_branches(  # pyright: ignore[reportPrivateUsage]
+        repo_root=repo_root,
+        git_path=None,
+    )
+    removed_again = review._cleanup_leaked_pr_review_branches(  # pyright: ignore[reportPrivateUsage]
+        repo_root=repo_root,
+        git_path=None,
+    )
+
+    assert removed == ("pr-202-review",)
+    assert removed_again == ()
+    assert _has_ref(repo_root, "refs/heads/pr-101")
+    assert not _has_ref(repo_root, "refs/heads/pr-202-review")
+    assert _has_ref(repo_root, "refs/heads/pr-not-leaked")
+
+
+def test_cleanup_leaked_pr_review_branches_skips_branch_with_unique_local_commits(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    _run_git(repo_root, "init")
+    _run_git(repo_root, "config", "user.email", "worker@example.test")
+    _run_git(repo_root, "config", "user.name", "Worker Test")
+    (repo_root / "README.md").write_text("seed\n")
+    _run_git(repo_root, "add", "README.md")
+    _run_git(repo_root, "commit", "-m", "seed")
+
+    _run_git(repo_root, "checkout", "-b", "pr-303-review")
+    (repo_root / "REVIEW.md").write_text("local-only\n")
+    _run_git(repo_root, "add", "REVIEW.md")
+    _run_git(repo_root, "commit", "-m", "local-only change")
+    _run_git(repo_root, "checkout", "-")
+
+    review._REVIEW_BRANCH_CLEANUP_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    removed = review._cleanup_leaked_pr_review_branches(  # pyright: ignore[reportPrivateUsage]
+        repo_root=repo_root,
+        git_path=None,
+    )
+
+    assert removed == ()
+    assert _has_ref(repo_root, "refs/heads/pr-303-review")
+
+
+def test_select_review_feedback_changeset_runs_review_ref_hygiene() -> None:
+    issues = [
+        {
+            "id": "at-1.1",
+            "labels": [],
+            "status": "in_progress",
+            "description": "changeset.work_branch: feat/a\npr_state: in-review\n",
+        }
+    ]
+    record_by_id = {
+        record.issue.id: record
+        for record in beads.parse_issue_records(issues, source="review_hygiene_call_test")
+    }
+
+    with (
+        patch(
+            "atelier.worker.review._cleanup_leaked_pr_review_branches",
+            return_value=("pr-77-review",),
+        ) as cleanup,
+        patch(
+            "atelier.worker.review.beads.list_descendant_changesets",
+            return_value=issues,
+        ),
+        patch(
+            "atelier.worker.review.beads.BeadsClient.show_issue",
+            side_effect=lambda issue_id, *, source: record_by_id.get(issue_id),
+        ),
+        patch(
+            "atelier.worker.review.prs.lookup_github_pr_status",
+            return_value=prs.GithubPrLookup(
+                outcome="found",
+                payload={
+                    "number": 11,
+                    "state": "OPEN",
+                    "isDraft": False,
+                    "reviewDecision": None,
+                    "reviewRequests": [{"requestedReviewer": {"login": "alice"}}],
+                },
+            ),
+        ),
+        patch(
+            "atelier.worker.review.prs.latest_feedback_timestamp_with_inline_comments",
+            return_value="2026-02-20T12:00:00Z",
+        ),
+        patch(
+            "atelier.worker.review.prs.unresolved_review_thread_count",
+            return_value=1,
+        ),
+    ):
+        review.select_review_feedback_changeset(
+            epic_id="at-1",
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    cleanup.assert_called_once_with(repo_root=Path("/repo"), git_path=None)
 
 
 def test_select_review_feedback_changeset_picks_oldest_unseen() -> None:
