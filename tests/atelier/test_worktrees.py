@@ -685,6 +685,43 @@ def test_load_mapping_for_changeset_resolves_legacy_mapping_owner() -> None:
         assert resolved.changesets["ts-new.1"] == "feat/legacy-ts-new.1"
 
 
+def test_load_mapping_for_changeset_epic_lookup_ignores_mismatched_direct_mapping() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        meta_dir = worktrees.worktrees_root(project_dir) / worktrees.METADATA_DIRNAME
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            worktrees.mapping_path(project_dir, "ts-new"),
+            worktrees.WorktreeMapping(
+                epic_id="at-legacy",
+                worktree_path="worktrees/at-legacy",
+                root_branch="feat/legacy",
+                changesets={},
+                changeset_worktrees={},
+            ),
+        )
+        worktrees.write_mapping(
+            worktrees.mapping_path(project_dir, "at-shadow"),
+            worktrees.WorktreeMapping(
+                epic_id="ts-new",
+                worktree_path="worktrees/ts-new",
+                root_branch="feat/new",
+                changesets={"ts-new": "feat/new"},
+                changeset_worktrees={},
+            ),
+        )
+
+        resolved = worktrees.load_mapping_for_changeset(
+            project_dir,
+            epic_id="ts-new",
+            changeset_id="ts-new",
+        )
+
+        assert resolved is not None
+        assert resolved.epic_id == "ts-new"
+        assert resolved.root_branch == "feat/new"
+
+
 def test_load_mapping_for_changeset_fails_closed_on_ambiguous_ownership() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)

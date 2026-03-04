@@ -25,7 +25,10 @@ def test_resolve_epic_integration_cwd_uses_legacy_owner_mapping_lookup() -> None
         )
         expected_path = project_dir / "worktrees/at-legacy"
         expected_path.mkdir(parents=True, exist_ok=True)
-        (expected_path / ".git").mkdir(parents=True, exist_ok=True)
+        (expected_path / ".git").write_text(
+            "gitdir: /repo/.git/worktrees/at-legacy\n",
+            encoding="utf-8",
+        )
 
         with patch(
             "atelier.worker.integration_service.git.git_current_branch",
@@ -87,7 +90,10 @@ def test_resolve_changeset_worktree_path_uses_legacy_owner_mapping_lookup() -> N
         )
         expected_path = project_dir / "worktrees/at-legacy.1"
         expected_path.mkdir(parents=True, exist_ok=True)
-        (expected_path / ".git").mkdir(parents=True, exist_ok=True)
+        (expected_path / ".git").write_text(
+            "gitdir: /repo/.git/worktrees/at-legacy.1\n",
+            encoding="utf-8",
+        )
 
         resolved = integration_service.resolve_changeset_worktree_path(
             project_data_dir=project_dir,

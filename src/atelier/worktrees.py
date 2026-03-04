@@ -231,14 +231,19 @@ def load_mapping_for_changeset(
     ``changeset_worktrees`` ownership.
     """
     direct = load_mapping(mapping_path(project_dir, epic_id))
+    direct_matches_epic = direct is not None and direct.epic_id == epic_id
     if direct is not None:
-        if changeset_id == epic_id:
+        if changeset_id == epic_id and direct_matches_epic:
             return direct
-        if changeset_id in direct.changesets or changeset_id in direct.changeset_worktrees:
+        if direct_matches_epic and (
+            changeset_id in direct.changesets or changeset_id in direct.changeset_worktrees
+        ):
             return direct
 
     meta_dir = worktrees_root(project_dir) / METADATA_DIRNAME
     if not meta_dir.exists():
+        if changeset_id == epic_id and not direct_matches_epic:
+            return None
         return direct
 
     candidates: list[WorktreeMapping] = []
@@ -253,6 +258,8 @@ def load_mapping_for_changeset(
             candidates.append(mapping)
 
     if not candidates:
+        if changeset_id == epic_id and not direct_matches_epic:
+            return None
         return direct
     preferred = [mapping for mapping in candidates if mapping.epic_id == epic_id]
     if len(preferred) == 1:
