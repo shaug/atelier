@@ -4,6 +4,8 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from atelier.worker import finalize_pipeline
 from atelier.worker.models import FinalizeResult, PublishSignalDiagnostics
 
@@ -651,6 +653,189 @@ def test_run_finalize_pipeline_blocks_closed_changeset_while_pr_active(
 
     assert result.reason == "changeset_closed_pr_lifecycle_active"
     assert result.continue_running is False
+    assert reopened == ["at-epic.1"]
+    assert notifications == ["NEEDS-DECISION: Closed changeset has active PR lifecycle (at-epic.1)"]
+
+
+@pytest.mark.parametrize(
+    ("changeset_id", "pr_number", "merged_at", "message_at"),
+    [
+        ("at-fuqn.2", 494, "2026-03-04T06:49:22Z", "2026-03-04T06:52:25Z"),
+        ("at-z68t", 496, "2026-03-04T07:14:19Z", "2026-03-04T07:15:09Z"),
+    ],
+)
+def test_run_finalize_pipeline_recovers_stale_closed_active_lifecycle_after_refresh(
+    monkeypatch,
+    changeset_id: str,
+    pr_number: int,
+    merged_at: str,
+    message_at: str,
+) -> None:
+    issue = {
+        "id": changeset_id,
+        "status": "closed",
+        "labels": [],
+        "description": f"changeset.work_branch: feat/root-{changeset_id}\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+
+    service = _FinalizeServiceStub()
+    service.changeset_waiting_on_review_or_signals_fn = lambda _issue, *, context: True
+    service.lookup_pr_payload_fn = lambda _repo_slug, _branch: {
+        "number": pr_number,
+        "state": "OPEN",
+        "isDraft": False,
+        "updatedAt": message_at,
+    }
+    service.lookup_pr_payload_diagnostic_fn = lambda _repo_slug, _branch: (
+        {
+            "number": pr_number,
+            "state": "CLOSED",
+            "isDraft": False,
+            "mergedAt": merged_at,
+            "baseRefName": "main",
+        },
+        None,
+    )
+    service.changeset_integration_signal_fn = lambda _issue, *, repo_slug, git_path: (
+        True,
+        "abc1234",
+    )
+    finalized: list[tuple[str, str | None]] = []
+    notifications: list[str] = []
+    service.finalize_terminal_changeset_fn = lambda *, context, terminal_state, integrated_sha: (
+        finalized.append((terminal_state, integrated_sha))
+        or FinalizeResult(continue_running=True, reason="changeset_complete")
+    )
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("subject"))
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(changeset_id=changeset_id, repo_slug="org/repo"),
+        service=service,
+    )
+
+    assert result.reason == "changeset_closed_pr_lifecycle_stale_recovered"
+    assert result.continue_running is True
+    assert finalized == [("merged", "abc1234")]
+    assert notifications == []
+
+
+def test_run_finalize_pipeline_blocks_closed_active_lifecycle_when_refresh_fails(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "closed",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+
+    service = _FinalizeServiceStub()
+    service.changeset_waiting_on_review_or_signals_fn = lambda _issue, *, context: True
+    service.lookup_pr_payload_fn = lambda _repo_slug, _branch: {
+        "state": "OPEN",
+        "isDraft": False,
+    }
+    service.lookup_pr_payload_diagnostic_fn = lambda _repo_slug, _branch: (
+        None,
+        "rate limit exceeded",
+    )
+    blocked_reasons: list[str] = []
+    notifications: list[str] = []
+    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked_reasons.append(
+        reason
+    )
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("subject"))
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(repo_slug="org/repo"),
+        service=service,
+    )
+
+    assert result.reason == "changeset_closed_pr_lifecycle_refresh_failed"
+    assert result.continue_running is False
+    assert blocked_reasons == ["closed changeset PR lifecycle refresh failed"]
+    assert notifications == ["NEEDS-DECISION: PR status query failed (at-epic.1)"]
+
+
+def test_run_finalize_pipeline_escalates_closed_active_lifecycle_only_after_refresh(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "closed",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+
+    service = _FinalizeServiceStub()
+    refresh_calls = 0
+
+    def _diagnostic(_repo_slug: str | None, _branch: str) -> tuple[dict[str, object], None]:
+        nonlocal refresh_calls
+        refresh_calls += 1
+        return (
+            {
+                "state": "OPEN",
+                "isDraft": False,
+            },
+            None,
+        )
+
+    service.changeset_waiting_on_review_or_signals_fn = lambda _issue, *, context: True
+    service.lookup_pr_payload_fn = lambda _repo_slug, _branch: {
+        "state": "OPEN",
+        "isDraft": False,
+    }
+    service.lookup_pr_payload_diagnostic_fn = _diagnostic
+    reopened: list[str] = []
+    notifications: list[str] = []
+    service.mark_changeset_in_progress_fn = lambda changeset_id: reopened.append(changeset_id)
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("subject"))
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(repo_slug="org/repo"),
+        service=service,
+    )
+
+    assert result.reason == "changeset_closed_pr_lifecycle_active"
+    assert result.continue_running is False
+    assert refresh_calls == 1
     assert reopened == ["at-epic.1"]
     assert notifications == ["NEEDS-DECISION: Closed changeset has active PR lifecycle (at-epic.1)"]
 
