@@ -652,6 +652,10 @@ def _prefix_drift_remediation(
         notes.append("resolves startup work-branch override conflicts")
     if "worktree-path-conflict" in action.drift_classes:
         notes.append("converges worktree path to canonical branch-selected location")
+    if "metadata-missing-mapping-work-branch" in action.drift_classes:
+        notes.append("backfills missing mapping work-branch lineage")
+    if "metadata-missing-mapping-worktree-path" in action.drift_classes:
+        notes.append("backfills missing mapping worktree-path lineage")
     return "; ".join(notes)
 
 

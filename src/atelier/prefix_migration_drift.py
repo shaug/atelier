@@ -506,6 +506,51 @@ def _resolve_repair_action(
     )
 
 
+def _record_missing_mapping_lineage(
+    *,
+    records: list[dict[str, object]],
+    epic_id: str,
+    changeset_id: str,
+    metadata_work_branch: str | None,
+    mapping_work_branch: str | None,
+    metadata_worktree_path: str | None,
+    mapping_worktree_path: str | None,
+    filesystem_path_for_metadata_branch: str | None,
+) -> None:
+    """Record deterministic drift entries for missing mapping lineage fields."""
+    if changeset_id == epic_id:
+        return
+
+    if mapping_work_branch is None and metadata_work_branch is not None:
+        records.append(
+            _record(
+                epic_id=epic_id,
+                changeset_id=changeset_id,
+                drift_class="metadata-missing-mapping-work-branch",
+                values={
+                    "metadata.changeset.work_branch": metadata_work_branch,
+                    "mapping.work_branch": mapping_work_branch,
+                },
+            )
+        )
+
+    if mapping_worktree_path is None and (
+        metadata_worktree_path is not None or filesystem_path_for_metadata_branch is not None
+    ):
+        records.append(
+            _record(
+                epic_id=epic_id,
+                changeset_id=changeset_id,
+                drift_class="metadata-missing-mapping-worktree-path",
+                values={
+                    "metadata.worktree_path": metadata_worktree_path,
+                    "mapping.worktree_path": mapping_worktree_path,
+                    "filesystem.path_for_metadata_branch": filesystem_path_for_metadata_branch,
+                },
+            )
+        )
+
+
 def _update_mapping_lineage(
     *,
     project_data_dir: Path,
@@ -904,6 +949,19 @@ def scan_prefix_migration_drift(
                 filesystem_path_for_metadata_branch,
                 filesystem_path_for_mapping_branch,
             )
+
+            if mapping is not None:
+                _record_missing_mapping_lineage(
+                    records=records,
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    metadata_work_branch=metadata_work_branch,
+                    mapping_work_branch=mapping_work_branch,
+                    metadata_worktree_path=metadata_worktree_path,
+                    mapping_worktree_path=mapping_worktree_path,
+                    filesystem_path_for_metadata_branch=filesystem_path_for_metadata_branch,
+                )
+
             if len(path_conflict) > 1:
                 records.append(
                     _record(
