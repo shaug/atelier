@@ -82,6 +82,31 @@ def test_resolve_enlistment_path_uses_git_common_dir_parent() -> None:
         assert Path(enlistment_path) == Path("/tmp/enlistment").resolve()
 
 
+@pytest.mark.parametrize(
+    ("repo_root", "common_dir_raw", "expected_enlistment"),
+    [
+        (Path("/tmp/enlistment"), ".git", Path("/tmp/enlistment")),
+        (Path("/tmp/enlistment/worktrees/at-1"), "../../.git", Path("/tmp/enlistment")),
+    ],
+)
+def test_resolve_enlistment_path_handles_relative_git_common_dir(
+    repo_root: Path,
+    common_dir_raw: str,
+    expected_enlistment: Path,
+) -> None:
+    with patch(
+        "atelier.git._run_git_or_die",
+        return_value=subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=f"{common_dir_raw}\n",
+        ),
+    ):
+        enlistment_path = git.resolve_enlistment_path(repo_root)
+
+    assert Path(enlistment_path) == expected_enlistment.resolve()
+
+
 def test_resolve_enlistment_path_forwards_git_path_to_git_command() -> None:
     with (
         patch("atelier.git.git_command", return_value=["/custom/git"]) as git_command_mock,
