@@ -1322,7 +1322,7 @@ def test_changeset_stack_integrity_preflight_resolves_epic_parent_without_metada
     assert metadata_updates == []
 
 
-def test_release_epic_assignment_uses_runtime_agent_guard_when_available(monkeypatch) -> None:
+def test_release_epic_assignment_ignores_ambient_agent_identity(monkeypatch) -> None:
     monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/worker/codex/p100")
     monkeypatch.setattr(
         work_finalization_state.beads,
@@ -1347,7 +1347,7 @@ def test_release_epic_assignment_uses_runtime_agent_guard_when_available(monkeyp
             "epic_id": "at-epic",
             "beads_root": Path("/beads"),
             "cwd": Path("/repo"),
-            "expected_assignee": "atelier/worker/codex/p100",
+            "expected_assignee": "atelier/worker/codex/p200",
             "expected_hooked": False,
         }
     ]

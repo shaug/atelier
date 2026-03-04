@@ -45,42 +45,48 @@ def test_resolve_agent_home_creates_metadata_and_instructions() -> None:
         assert home.path == project_dir / "agents" / "worker" / "codex"
 
 
-def test_env_agent_id_overrides_default_name() -> None:
+def test_env_agent_id_is_ignored_for_resolve_agent_home() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"
         project_dir.mkdir(parents=True)
         with patch.dict(os.environ, {"ATELIER_AGENT_ID": "atelier/worker/alice"}):
             home = agent_home.resolve_agent_home(project_dir, ProjectConfig(), role="worker")
-        assert home.name == "alice"
-        assert home.agent_id == "atelier/worker/alice"
-        assert home.path == project_dir / "agents" / "worker" / "alice"
+        assert home.name == "codex"
+        assert home.agent_id == "atelier/worker/codex"
+        assert home.path == project_dir / "agents" / "worker" / "codex"
 
 
-def test_resolve_agent_home_rejects_env_role_mismatch() -> None:
+def test_preview_agent_home_ignores_env_role_mismatch() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"
         project_dir.mkdir(parents=True)
-        with (
-            patch.dict(os.environ, {"ATELIER_AGENT_ID": "atelier/planner/alice"}),
-            patch("atelier.agent_home.die", side_effect=RuntimeError("die called")) as die_fn,
-        ):
+        with patch.dict(os.environ, {"ATELIER_AGENT_ID": "atelier/planner/alice"}):
+            home = agent_home.preview_agent_home(project_dir, ProjectConfig(), role="worker")
+    assert home.agent_id == "atelier/worker/codex"
+    assert home.path == project_dir / "agents" / "worker" / "codex"
+
+
+def test_resolve_agent_home_rejects_config_role_mismatch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp) / "project"
+        project_dir.mkdir(parents=True)
+        payload = ProjectConfig(agent=AgentConfig(identity="atelier/planner/alice"))
+        with patch("atelier.agent_home.die", side_effect=RuntimeError("die called")) as die_fn:
             with pytest.raises(RuntimeError, match="die called"):
-                agent_home.resolve_agent_home(project_dir, ProjectConfig(), role="worker")
-    assert "ATELIER_AGENT_ID role mismatch" in str(die_fn.call_args.args[0])
+                agent_home.resolve_agent_home(project_dir, payload, role="worker")
+    assert "agent.identity role mismatch" in str(die_fn.call_args.args[0])
     assert "atelier/worker/<name>" in str(die_fn.call_args.args[0])
 
 
-def test_preview_agent_home_rejects_env_role_mismatch() -> None:
+def test_preview_agent_home_rejects_config_role_mismatch() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"
         project_dir.mkdir(parents=True)
-        with (
-            patch.dict(os.environ, {"ATELIER_AGENT_ID": "atelier/planner/alice"}),
-            patch("atelier.agent_home.die", side_effect=RuntimeError("die called")) as die_fn,
-        ):
+        payload = ProjectConfig(agent=AgentConfig(identity="atelier/planner/alice"))
+        with patch("atelier.agent_home.die", side_effect=RuntimeError("die called")) as die_fn:
             with pytest.raises(RuntimeError, match="die called"):
-                agent_home.preview_agent_home(project_dir, ProjectConfig(), role="worker")
-    assert "ATELIER_AGENT_ID role mismatch" in str(die_fn.call_args.args[0])
+                agent_home.preview_agent_home(project_dir, payload, role="worker")
+    assert "agent.identity role mismatch" in str(die_fn.call_args.args[0])
     assert "atelier/worker/<name>" in str(die_fn.call_args.args[0])
 
 
