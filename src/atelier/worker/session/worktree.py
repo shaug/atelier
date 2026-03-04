@@ -42,6 +42,7 @@ class WorktreePreparationControl(Protocol):
 
 _BLOCKING_PREFIX_DRIFT_CLASSES = frozenset(
     {
+        "metadata-read-failure",
         "root-branch-conflict",
         "work-branch-conflict",
         "worktree-path-conflict",

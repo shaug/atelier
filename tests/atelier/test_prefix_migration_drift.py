@@ -260,6 +260,76 @@ def test_scan_prefix_migration_drift_scopes_to_selected_epic_and_changesets(
     list_work_children.assert_not_called()
 
 
+def test_scan_prefix_migration_drift_records_targeted_changeset_read_failure(
+    tmp_path: Path,
+) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+
+    epic_issue = {
+        "id": "ts-epic",
+        "labels": ["at:epic"],
+        "description": "workspace.root_branch: feat/new-root\n",
+    }
+
+    def fake_show(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args == ["show", "ts-epic"]:
+            return [epic_issue]
+        if args == ["show", "ts-epic.1"]:
+            raise SystemExit(7)
+        raise AssertionError(f"unexpected bd command: {args!r}")
+
+    with (
+        patch("atelier.prefix_migration_drift.beads.run_bd_json", side_effect=fake_show),
+        patch("atelier.prefix_migration_drift.beads.list_epics") as list_epics,
+        patch(
+            "atelier.prefix_migration_drift.beads.list_descendant_changesets"
+        ) as list_descendants,
+        patch("atelier.prefix_migration_drift.beads.list_work_children") as list_work_children,
+        patch(
+            "atelier.prefix_migration_drift.exec_util.try_run_command",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "worktree", "list", "--porcelain"],
+                returncode=0,
+                stdout="",
+                stderr="",
+            ),
+        ),
+    ):
+        records = prefix_migration_drift.scan_prefix_migration_drift(
+            project_data_dir=project_data_dir,
+            beads_root=tmp_path / ".beads",
+            repo_root=repo_root,
+            target_epic_id="ts-epic",
+            target_changeset_ids={"ts-epic.1"},
+        )
+
+    assert records == [
+        {
+            "epic_id": "ts-epic",
+            "changeset_id": "ts-epic.1",
+            "drift_class": "metadata-read-failure",
+            "values": {
+                "bd.command": "show ts-epic.1",
+                "bd.exit_code": "7",
+                "lookup.target_id": "ts-epic.1",
+                "lookup.target_kind": "changeset",
+            },
+        }
+    ]
+    list_epics.assert_not_called()
+    list_descendants.assert_not_called()
+    list_work_children.assert_not_called()
+
+
 def test_repair_prefix_migration_drift_plans_updates_without_applying(tmp_path: Path) -> None:
     project_data_dir = tmp_path / "data"
     repo_root = tmp_path / "repo"

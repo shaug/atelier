@@ -274,6 +274,34 @@ def _record(
     }
 
 
+def _system_exit_code(exc: SystemExit) -> int:
+    code = exc.code
+    if isinstance(code, int):
+        return code
+    return 1
+
+
+def _metadata_read_failure_record(
+    *,
+    epic_id: str,
+    changeset_id: str,
+    target_kind: str,
+    target_id: str,
+    exit_code: int,
+) -> dict[str, object]:
+    return _record(
+        epic_id=epic_id,
+        changeset_id=changeset_id,
+        drift_class="metadata-read-failure",
+        values={
+            "bd.command": f"show {target_id}",
+            "bd.exit_code": str(exit_code),
+            "lookup.target_kind": target_kind,
+            "lookup.target_id": target_id,
+        },
+    )
+
+
 def _canonical_root_branch(*values: str | None) -> str | None:
     for value in values:
         if value is not None:
@@ -702,8 +730,16 @@ def scan_prefix_migration_drift(
                 beads_root=beads_root,
                 cwd=repo_root,
             )
-        except SystemExit:
-            scoped_epics = []
+        except SystemExit as exc:
+            return [
+                _metadata_read_failure_record(
+                    epic_id=scoped_epic_id,
+                    changeset_id=scoped_epic_id,
+                    target_kind="epic",
+                    target_id=scoped_epic_id,
+                    exit_code=_system_exit_code(exc),
+                )
+            ]
         epics = [
             issue for issue in scoped_epics if _normalize_text(issue.get("id")) == scoped_epic_id
         ]
@@ -726,7 +762,16 @@ def scan_prefix_migration_drift(
                         beads_root=beads_root,
                         cwd=repo_root,
                     )
-                except SystemExit:
+                except SystemExit as exc:
+                    records.append(
+                        _metadata_read_failure_record(
+                            epic_id=epic_id,
+                            changeset_id=changeset_id,
+                            target_kind="changeset",
+                            target_id=changeset_id,
+                            exit_code=_system_exit_code(exc),
+                        )
+                    )
                     continue
                 for issue in scoped_changesets:
                     issue_id = _normalize_text(issue.get("id"))
