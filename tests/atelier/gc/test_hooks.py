@@ -85,3 +85,53 @@ def test_release_epic_clears_assignee_and_hooked_label() -> None:
         expected_assignee="agent-1",
         expected_hooked=True,
     )
+
+
+def test_collect_hooks_scans_all_agent_pages_before_releasing_stale_hooks() -> None:
+    beads_root = Path("/beads")
+    repo_root = Path("/repo")
+    expected_args = ["list", "--label", "at:agent", "--all", "--limit", "0"]
+    total_agents = 75
+
+    agent_issues = [
+        {
+            "id": f"agent-{index}",
+            "title": f"atelier/worker/codex/p{index:04d}-t1",
+            "labels": ["at:agent"],
+            "description": f"agent_id: agent-{index}\nhook_bead: epic-{index}\n",
+        }
+        for index in range(total_agents)
+    ]
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args == expected_args:
+            return agent_issues
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json) as run_bd_json,
+        patch("atelier.beads.list_epics", return_value=[]),
+        patch(
+            "atelier.beads.get_agent_hook",
+            side_effect=lambda issue_id, *, beads_root, cwd: str(issue_id).replace("agent", "epic"),
+        ),
+        patch(
+            "atelier.gc.hooks.try_show_issue",
+            side_effect=lambda issue_id, **_kwargs: {"id": issue_id},
+        ),
+    ):
+        actions = gc_hooks.collect_hooks(
+            beads_root=beads_root,
+            repo_root=repo_root,
+            stale_hours=24.0,
+            include_missing_heartbeat=True,
+        )
+
+    assert len(actions) == total_agents
+    assert actions[0].description == "Release stale hook for agent-0 (epic epic-0)"
+    assert actions[-1].description == (
+        f"Release stale hook for agent-{total_agents - 1} (epic epic-{total_agents - 1})"
+    )
+    run_bd_json.assert_called_once_with(expected_args, beads_root=beads_root, cwd=repo_root)

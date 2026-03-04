@@ -18,7 +18,14 @@ def collect_agent_homes(
 ) -> list[GcAction]:
     actions: list[GcAction] = []
     agent_issues = beads.run_bd_json(
-        ["list", "--label", beads.issue_label("agent", beads_root=beads_root)],
+        [
+            "list",
+            "--label",
+            beads.issue_label("agent", beads_root=beads_root),
+            "--all",
+            "--limit",
+            "0",
+        ],
         beads_root=beads_root,
         cwd=repo_root,
     )
