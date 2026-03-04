@@ -4,12 +4,27 @@
 
 ### Overview
 
-This release hardens the planner/worker runtime contract with clearer
-role-scoped execution, stronger lifecycle gating, and faster startup triage. It
-also deepens Beads migration and doctor reliability with fail-closed
-ownership/prefix checks and safer recovery paths, while improving operator UX
-through lower-noise live output and more explicit diagnostics across startup and
-review flows.
+This release hardens planner/worker runtime behavior with clearer role-scoped
+execution, stronger lifecycle gating, and faster startup triage. For operators
+upgrading from 0.7.x, 0.8.0 also makes runtime requirements explicit: newer `bd`
+compatibility expectations, normalized Dolt server/runtime defaults, and
+project-scoped prefix/db identity checks that now fail closed instead of
+silently continuing on drift.
+
+Agent experience is materially improved in day-to-day runs: Codex/Claude output
+contracts are unified, Claude print-mode behavior is explicitly supported, and
+live stream output now surfaces concise progress/tool activity with lower noise.
+
+#### Operator impact
+
+- Startup/runtime migration handling is stricter and safer, with bounded
+  recovery and explicit degraded-mode diagnostics when legacy stores cannot be
+  auto-repaired.
+- Prefix normalization is now enforced across runtime and maintenance workflows;
+  `doctor --fix` and related diagnostics surface and repair migration/prefix
+  drift instead of deferring it.
+- Ownership and project-prefix contracts are validated as hard gates so
+  mis-scoped Beads/Dolt state fails fast with actionable guidance.
 
 ### Features
 
