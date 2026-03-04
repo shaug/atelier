@@ -249,6 +249,7 @@ def test_plan_runs_runtime_teardown_on_exit(tmp_path: Path) -> None:
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
         agent_id=agent.agent_id,
+        agent_bead_id="at-agent",
         close_agent_bead=True,
     )
 

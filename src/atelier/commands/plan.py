@@ -446,6 +446,7 @@ def run_planner(args: object) -> None:
         role="planner",
         session_key=session_key,
     )
+    agent_bead_id: str | None = None
 
     try:
         with agents.scoped_agent_env(agent.agent_id):
@@ -460,9 +461,10 @@ def run_planner(args: object) -> None:
             agent_bead = beads.ensure_agent_bead(
                 agent.agent_id, beads_root=beads_root, cwd=repo_root, role="planner"
             )
-            agent_bead_id = str(agent_bead.get("id") or "").strip()
-            if not agent_bead_id:
+            resolved_agent_bead_id = str(agent_bead.get("id") or "").strip()
+            if not resolved_agent_bead_id:
                 die("failed to determine planner agent bead id")
+            agent_bead_id = resolved_agent_bead_id
             saved_planner_session_id = _saved_planner_session_id(agent_bead)
             finish()
             if bool(getattr(args, "reconcile", False)):
@@ -807,6 +809,7 @@ def run_planner(args: object) -> None:
             beads_root=beads_root,
             repo_root=repo_root,
             agent_id=agent.agent_id,
+            agent_bead_id=agent_bead_id,
             close_agent_bead=True,
         )
         agent_home.cleanup_agent_home(agent, project_dir=project_data_dir)

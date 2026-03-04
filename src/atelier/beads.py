@@ -5209,8 +5209,12 @@ def ensure_agent_bead(
             )
             refreshed = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
             if refreshed:
-                return refreshed[0]
-        return existing
+                refreshed_issue = refreshed[0]
+                if lifecycle.canonical_lifecycle_status(refreshed_issue.get("status")) != "closed":
+                    return refreshed_issue
+            existing = None
+        if existing is not None:
+            return existing
     description = f"agent_id: {agent_id}\n"
     if role:
         description += f"role_type: {role}\n"

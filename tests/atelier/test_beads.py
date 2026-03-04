@@ -3136,6 +3136,37 @@ def test_ensure_agent_bead_reopens_closed_existing() -> None:
     assert result == {"id": "atelier-1", "status": "open"}
 
 
+def test_ensure_agent_bead_creates_when_reopen_remains_closed() -> None:
+    existing = {"id": "atelier-1", "title": "agent", "status": "closed"}
+
+    def fake_command(args: list[str], **_kwargs) -> CompletedProcess[str]:
+        if args[0] == "update":
+            return CompletedProcess(args=["bd"], returncode=1, stdout="", stderr="failed")
+        if args[0] == "create":
+            return CompletedProcess(args=["bd"], returncode=0, stdout="atelier-2\n", stderr="")
+        raise AssertionError(f"unexpected command: {args}")
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args == ["show", "atelier-1"]:
+            return [{"id": "atelier-1", "status": "closed"}]
+        if args == ["show", "atelier-2"]:
+            return [{"id": "atelier-2", "status": "open"}]
+        return []
+
+    with (
+        patch("atelier.beads.find_agent_bead", return_value=existing),
+        patch("atelier.beads._agent_issue_type", return_value="task"),
+        patch("atelier.beads.run_bd_command", side_effect=fake_command) as run_command,
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+    ):
+        result = beads.ensure_agent_bead("agent", beads_root=Path("/beads"), cwd=Path("/repo"))
+
+    assert result == {"id": "atelier-2", "status": "open"}
+    assert run_command.call_args_list[0].args[0] == ["update", "atelier-1", "--status", "open"]
+    assert run_command.call_args_list[1].args[0][0] == "create"
+
+
 def test_find_agent_bead_uses_title_filter_and_exact_match() -> None:
     seen: dict[str, object] = {}
 
