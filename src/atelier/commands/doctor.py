@@ -34,7 +34,6 @@ _STARTUP_BLOCKER_CODES = frozenset(
         "in-progress-epic-unassigned",
         "in-progress-epic-unhooked",
         "in-progress-assignee-hook-mismatch",
-        "in-progress-assignee-session-stale",
         "metadata-missing-root-branch",
         "metadata-missing-work-branch",
         "metadata-missing-epic-mapping",
@@ -515,6 +514,8 @@ def _build_metadata_readiness_check(*, context: _DoctorContext) -> _DoctorCheckF
         changeset_id = _normalize_text(issue.get("id"))
         if changeset_id is None:
             continue
+        lifecycle_status = lifecycle.canonical_lifecycle_status(issue.get("status")) or ""
+        enforce_missing_metadata = lifecycle_status in {"in_progress", "blocked"}
         epic_id = context.changeset_to_epic.get(changeset_id, changeset_id)
         fields = context.fields_by_changeset.get(changeset_id, {})
         metadata_root = _normalize_text(fields.get("changeset.root_branch"))
@@ -535,7 +536,7 @@ def _build_metadata_readiness_check(*, context: _DoctorContext) -> _DoctorCheckF
             project_data_dir=context.project_data_dir,
         )
 
-        if metadata_root is None:
+        if enforce_missing_metadata and metadata_root is None:
             findings.append(
                 _DoctorFinding(
                     code="metadata-missing-root-branch",
@@ -549,7 +550,7 @@ def _build_metadata_readiness_check(*, context: _DoctorContext) -> _DoctorCheckF
                     details={},
                 )
             )
-        if metadata_work is None:
+        if enforce_missing_metadata and metadata_work is None:
             findings.append(
                 _DoctorFinding(
                     code="metadata-missing-work-branch",
@@ -563,7 +564,7 @@ def _build_metadata_readiness_check(*, context: _DoctorContext) -> _DoctorCheckF
                     details={},
                 )
             )
-        if changeset_id != epic_id and metadata_parent is None:
+        if enforce_missing_metadata and changeset_id != epic_id and metadata_parent is None:
             findings.append(
                 _DoctorFinding(
                     code="metadata-missing-parent-branch",
@@ -579,6 +580,8 @@ def _build_metadata_readiness_check(*, context: _DoctorContext) -> _DoctorCheckF
             )
 
         if mapping is None:
+            if not enforce_missing_metadata:
+                continue
             findings.append(
                 _DoctorFinding(
                     code="metadata-missing-epic-mapping",
@@ -594,7 +597,7 @@ def _build_metadata_readiness_check(*, context: _DoctorContext) -> _DoctorCheckF
             )
             continue
 
-        if changeset_id != epic_id and mapping_work is None:
+        if enforce_missing_metadata and changeset_id != epic_id and mapping_work is None:
             findings.append(
                 _DoctorFinding(
                     code="metadata-missing-mapping-work-branch",
@@ -628,7 +631,12 @@ def _build_metadata_readiness_check(*, context: _DoctorContext) -> _DoctorCheckF
                     },
                 )
             )
-        if changeset_id != epic_id and mapping_worktree is None and issue_worktree is None:
+        if (
+            enforce_missing_metadata
+            and changeset_id != epic_id
+            and mapping_worktree is None
+            and issue_worktree is None
+        ):
             findings.append(
                 _DoctorFinding(
                     code="metadata-missing-worktree-path",
@@ -707,8 +715,8 @@ def _build_metadata_readiness_check(*, context: _DoctorContext) -> _DoctorCheckF
         check_id="worktree_branch_metadata_readiness",
         title="Worktree/Branch Metadata Readiness",
         description=(
-            "Detects startup-blocking lineage and mapping inconsistencies "
-            "(including work-branch override conflicts)."
+            "Detects startup-blocking lineage and mapping inconsistencies for in-progress/blocked "
+            "changesets; open changesets are evaluated for conflicts only."
         ),
         in_scope_changesets=len(in_scope),
         findings=tuple(

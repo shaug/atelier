@@ -198,8 +198,13 @@ def test_doctor_json_includes_multi_check_health_report() -> None:
                     "notes": "blocked without reason line",
                     "description": "changeset.work_branch: root-one-epic-1.2\n",
                 },
+                {
+                    "id": "epic-1.3",
+                    "status": "open",
+                    "description": "",
+                },
             ],
-            changeset_to_epic={"epic-1.1": "epic-1", "epic-1.2": "epic-1"},
+            changeset_to_epic={"epic-1.1": "epic-1", "epic-1.2": "epic-1", "epic-1.3": "epic-1"},
             fields_by_changeset={
                 "epic-1.1": {
                     "changeset.root_branch": "root-one",
@@ -221,10 +226,12 @@ def test_doctor_json_includes_multi_check_health_report() -> None:
                     changesets={
                         "epic-1.1": "root-one-epic-1.1",
                         "epic-1.2": "root-one-epic-1.2",
+                        "epic-1.3": "root-one-epic-1.3",
                     },
                     changeset_worktrees={
                         "epic-1.1": "worktrees/epic-1.1",
                         "epic-1.2": "worktrees/epic-1.2",
+                        "epic-1.3": "worktrees/epic-1.3",
                     },
                 )
             },
@@ -283,6 +290,11 @@ def test_doctor_json_includes_multi_check_health_report() -> None:
     }
     assert "metadata-work-branch-conflict" in readiness_codes
     assert "metadata-worktree-path-conflict" in readiness_codes
+    assert not any(
+        finding.get("changeset_id") == "epic-1.3"
+        and str(finding.get("code", "")).startswith("metadata-missing-")
+        for finding in checks["worktree_branch_metadata_readiness"]["findings"]
+    )
 
 
 def test_doctor_fix_mode_blocks_when_active_hooks_exist() -> None:
