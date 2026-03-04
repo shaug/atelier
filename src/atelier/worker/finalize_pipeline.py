@@ -100,6 +100,67 @@ def _block_missing_merged_integration(
     )
 
 
+def _finalize_from_pr_lifecycle(
+    *,
+    lifecycle_state: str | None,
+    issue: Issue,
+    changeset_id: str,
+    work_branch: str,
+    repo_slug: str | None,
+    git_path: str | None,
+    pr_payload: Issue | None,
+    pushed: bool,
+    context: "FinalizePipelineContext",
+    agent_id: str,
+    service: "FinalizePipelineService",
+) -> FinalizeResult | None:
+    """Finalize immediately for terminal PR lifecycle states when available."""
+    if lifecycle_state == "merged":
+        atelier_log.debug(f"changeset={changeset_id} finalize lifecycle=merged")
+        service.update_changeset_review_from_pr(
+            changeset_id,
+            pr_payload=pr_payload,
+            pushed=pushed,
+        )
+        integration_ok, integrated_sha = service.changeset_integration_signal(
+            issue,
+            repo_slug=repo_slug,
+            git_path=git_path,
+            require_target_branch_proof=True,
+        )
+        if not integration_ok:
+            return _block_missing_merged_integration(
+                changeset_id=changeset_id,
+                work_branch=work_branch,
+                agent_id=agent_id,
+                service=service,
+            )
+        return service.finalize_terminal_changeset(
+            context=context,
+            terminal_state="merged",
+            integrated_sha=integrated_sha,
+        )
+    if lifecycle_state == "closed":
+        atelier_log.debug(f"changeset={changeset_id} finalize lifecycle=closed")
+        service.update_changeset_review_from_pr(
+            changeset_id,
+            pr_payload=pr_payload,
+            pushed=pushed,
+        )
+        integration_ok, integrated_sha = service.changeset_integration_signal(
+            issue,
+            repo_slug=repo_slug,
+            git_path=git_path,
+            require_target_branch_proof=True,
+        )
+        return service.finalize_terminal_changeset(
+            context=context,
+            terminal_state="merged" if integration_ok else "abandoned",
+            integrated_sha=integrated_sha if integration_ok else None,
+        )
+    return None
+
+
 @dataclass(frozen=True)
 class FinalizePipelineContext:
     changeset_id: str
@@ -498,49 +559,21 @@ def run_finalize_pipeline(
         lifecycle_state = prs.lifecycle_state(
             pr_payload, pushed=pushed, review_requested=review_requested
         )
-    if lifecycle_state == "merged":
-        atelier_log.debug(f"changeset={changeset_id} finalize lifecycle=merged")
-        service.update_changeset_review_from_pr(
-            changeset_id,
-            pr_payload=pr_payload,
-            pushed=pushed,
-        )
-        integration_ok, integrated_sha = service.changeset_integration_signal(
-            issue,
-            repo_slug=repo_slug,
-            git_path=git_path,
-            require_target_branch_proof=True,
-        )
-        if not integration_ok:
-            return _block_missing_merged_integration(
-                changeset_id=changeset_id,
-                work_branch=work_branch,
-                agent_id=agent_id,
-                service=service,
-            )
-        return service.finalize_terminal_changeset(
-            context=context,
-            terminal_state="merged",
-            integrated_sha=integrated_sha,
-        )
-    if lifecycle_state == "closed":
-        atelier_log.debug(f"changeset={changeset_id} finalize lifecycle=closed")
-        service.update_changeset_review_from_pr(
-            changeset_id,
-            pr_payload=pr_payload,
-            pushed=pushed,
-        )
-        integration_ok, integrated_sha = service.changeset_integration_signal(
-            issue,
-            repo_slug=repo_slug,
-            git_path=git_path,
-            require_target_branch_proof=True,
-        )
-        return service.finalize_terminal_changeset(
-            context=context,
-            terminal_state="merged" if integration_ok else "abandoned",
-            integrated_sha=integrated_sha if integration_ok else None,
-        )
+    terminal_result = _finalize_from_pr_lifecycle(
+        lifecycle_state=lifecycle_state,
+        issue=issue,
+        changeset_id=changeset_id,
+        work_branch=work_branch,
+        repo_slug=repo_slug,
+        git_path=git_path,
+        pr_payload=pr_payload,
+        pushed=pushed,
+        context=context,
+        agent_id=agent_id,
+        service=service,
+    )
+    if terminal_result is not None:
+        return terminal_result
     if branch_pr and pushed and not pr_payload:
         integration_ok, integrated_sha = service.changeset_integration_signal(
             issue,
@@ -662,6 +695,36 @@ def run_finalize_pipeline(
             context=context,
         )
         if not aligned:
+            refreshed_payload, _refreshed_lookup_error = service.lookup_pr_payload_diagnostic(
+                repo_slug, work_branch
+            )
+            refreshed_lifecycle: str | None = None
+            if refreshed_payload is not None:
+                refreshed_lifecycle = prs.lifecycle_state(
+                    refreshed_payload,
+                    pushed=pushed,
+                    review_requested=prs.has_review_requests(refreshed_payload),
+                )
+            refreshed_terminal_result = _finalize_from_pr_lifecycle(
+                lifecycle_state=refreshed_lifecycle,
+                issue=issue,
+                changeset_id=changeset_id,
+                work_branch=work_branch,
+                repo_slug=repo_slug,
+                git_path=git_path,
+                pr_payload=refreshed_payload,
+                pushed=pushed,
+                context=context,
+                agent_id=agent_id,
+                service=service,
+            )
+            if refreshed_terminal_result is not None:
+                atelier_log.info(
+                    "changeset="
+                    f"{changeset_id} finalize bypassed PR base mismatch resolution after "
+                    f"terminal refresh ({refreshed_lifecycle})"
+                )
+                return refreshed_terminal_result
             service.mark_changeset_in_progress(changeset_id)
             body = (
                 "Detected a PR base mismatch but automatic base correction "

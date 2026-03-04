@@ -336,6 +336,50 @@ def _normalize_branch(value: object) -> str:
     return normalized
 
 
+def _worktree_path_for_checked_out_branch(
+    repo_root: Path,
+    branch: str,
+    *,
+    git_path: str | None,
+) -> Path | None:
+    """Return the worktree path where the local branch is currently checked out.
+
+    Args:
+        repo_root: Repository root used to query worktrees.
+        branch: Local branch name.
+        git_path: Optional git binary path override.
+
+    Returns:
+        Worktree path for ``branch`` when discoverable, else ``None``.
+    """
+    result = exec.try_run_command(
+        git.git_command(
+            ["-C", str(repo_root), "worktree", "list", "--porcelain"],
+            git_path=git_path,
+        )
+    )
+    if result is None or result.returncode != 0:
+        return None
+    active_worktree: str | None = None
+    active_branch: str | None = None
+    for raw_line in (result.stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            if active_worktree and active_branch == f"refs/heads/{branch}":
+                return Path(active_worktree)
+            active_worktree = None
+            active_branch = None
+            continue
+        if line.startswith("worktree "):
+            active_worktree = line.removeprefix("worktree ").strip()
+            continue
+        if line.startswith("branch "):
+            active_branch = line.removeprefix("branch ").strip()
+    if active_worktree and active_branch == f"refs/heads/{branch}":
+        return Path(active_worktree)
+    return None
+
+
 def _resolve_parent_lineage(
     issue: dict[str, object],
     *,
@@ -731,9 +775,9 @@ def align_existing_pr_base(
         notes when present.
     """
 
-    def run_git(args: list[str]) -> tuple[bool, str]:
+    def run_git(args: list[str], *, run_root: Path = repo_root) -> tuple[bool, str]:
         result = exec.try_run_command(
-            git.git_command(["-C", str(repo_root), *args], git_path=git_path)
+            git.git_command(["-C", str(run_root), *args], git_path=git_path)
         )
         if result is None:
             return False, "missing required command: git"
@@ -795,21 +839,38 @@ def align_existing_pr_base(
 
     rebased = False
     rebase_source_ref = branch_ref_for_lookup(repo_root, actual_branch, git_path=git_path)
-    current_branch = git.git_current_branch(repo_root, git_path=git_path)
+    rebase_repo_root = repo_root
+    branch_worktree = _worktree_path_for_checked_out_branch(
+        repo_root,
+        work_branch,
+        git_path=git_path,
+    )
+    if branch_worktree is not None:
+        rebase_repo_root = branch_worktree
+    original_rebase_branch = git.git_current_branch(rebase_repo_root, git_path=git_path)
+    switched_branch = False
     if rebase_source_ref:
-        ok, detail = run_git(["checkout", work_branch])
+        if original_rebase_branch != work_branch:
+            ok, detail = run_git(["checkout", work_branch], run_root=rebase_repo_root)
+            if not ok:
+                return False, detail
+            switched_branch = True
+        ok, detail = run_git(
+            ["rebase", "--onto", expected_branch, rebase_source_ref],
+            run_root=rebase_repo_root,
+        )
         if not ok:
-            return False, detail
-        ok, detail = run_git(["rebase", "--onto", expected_branch, rebase_source_ref, work_branch])
-        if not ok:
-            run_git(["rebase", "--abort"])
-            if current_branch and current_branch != work_branch:
-                run_git(["checkout", current_branch])
+            run_git(["rebase", "--abort"], run_root=rebase_repo_root)
+            if switched_branch and original_rebase_branch and original_rebase_branch != work_branch:
+                run_git(["checkout", original_rebase_branch], run_root=rebase_repo_root)
             return False, f"failed to restack {work_branch} onto {expected_branch}: {detail}"
         rebased = True
-        if current_branch and current_branch != work_branch:
-            run_git(["checkout", current_branch])
-        ok, detail = run_git(["push", "--force-with-lease", "origin", work_branch])
+        if switched_branch and original_rebase_branch and original_rebase_branch != work_branch:
+            run_git(["checkout", original_rebase_branch], run_root=rebase_repo_root)
+        ok, detail = run_git(
+            ["push", "--force-with-lease", "origin", work_branch],
+            run_root=rebase_repo_root,
+        )
         if not ok:
             return False, f"failed to force-push restacked branch {work_branch}: {detail}"
 

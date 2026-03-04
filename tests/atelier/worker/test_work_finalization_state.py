@@ -845,10 +845,7 @@ def test_align_existing_pr_base_rebases_and_retargets(monkeypatch) -> None:
     assert ok is True
     assert detail is not None
     assert "expected=main" in detail
-    assert any(
-        command[-5:] == ["rebase", "--onto", "main", "feat/parent", "feat/work"]
-        for command in commands
-    )
+    assert any(command[-4:] == ["rebase", "--onto", "main", "feat/parent"] for command in commands)
     assert any(
         command[-4:] == ["push", "--force-with-lease", "origin", "feat/work"]
         for command in commands
@@ -856,6 +853,99 @@ def test_align_existing_pr_base_rebases_and_retargets(monkeypatch) -> None:
     assert any(
         command[:7] == ["gh", "pr", "edit", "12", "--repo", "org/repo", "--base"]
         and command[-1] == "main"
+        for command in commands
+    )
+
+
+def test_align_existing_pr_base_rebases_from_checked_out_worktree(monkeypatch) -> None:
+    issue = {
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: feat/parent\n"
+            "changeset.work_branch: feat/work\n"
+            "workspace.parent_branch: main\n"
+        )
+    }
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(
+        work_finalization_state,
+        "changeset_base_branch",
+        lambda *_args, **_kwargs: "main",
+    )
+    monkeypatch.setattr(work_finalization_state.git, "git_is_clean", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        work_finalization_state,
+        "branch_ref_for_lookup",
+        lambda _repo_root, branch, **_kwargs: branch,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_current_branch",
+        lambda repo_path, **_kwargs: (
+            "feat/work" if str(repo_path) == "/worktrees/at-epic.2" else "main"
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_rev_parse",
+        lambda *_args, **_kwargs: "abc1234",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_branch_metadata",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "run_bd_command",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def _record_command(cmd: list[str]):
+        commands.append(list(cmd))
+        if cmd[:4] == ["git", "-C", "/repo", "worktree"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    "worktree /repo\n"
+                    "HEAD abc1234\n"
+                    "branch refs/heads/main\n\n"
+                    "worktree /worktrees/at-epic.2\n"
+                    "HEAD def5678\n"
+                    "branch refs/heads/feat/work\n"
+                ),
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(work_finalization_state.exec, "try_run_command", _record_command)
+
+    ok, detail = work_finalization_state.align_existing_pr_base(
+        issue=issue,
+        changeset_id="at-epic.2",
+        pr_payload={"number": 12, "baseRefName": "feat/parent"},
+        repo_slug="org/repo",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+
+    assert ok is True
+    assert detail is not None
+    assert "expected=main" in detail
+    assert any(
+        command[:3] == ["git", "-C", "/worktrees/at-epic.2"]
+        and command[3:] == ["rebase", "--onto", "main", "feat/parent"]
+        for command in commands
+    )
+    assert not any(
+        command[:3] == ["git", "-C", "/repo"] and command[3:5] == ["checkout", "feat/work"]
         for command in commands
     )
 
