@@ -58,6 +58,34 @@ def test_cleanup_leaked_pr_review_branches_prunes_stale_and_keeps_active_worktre
     assert _has_ref(repo_root, "refs/heads/pr-not-leaked")
 
 
+def test_cleanup_leaked_pr_review_branches_skips_branch_with_unique_local_commits(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    _run_git(repo_root, "init")
+    _run_git(repo_root, "config", "user.email", "worker@example.test")
+    _run_git(repo_root, "config", "user.name", "Worker Test")
+    (repo_root / "README.md").write_text("seed\n")
+    _run_git(repo_root, "add", "README.md")
+    _run_git(repo_root, "commit", "-m", "seed")
+
+    _run_git(repo_root, "checkout", "-b", "pr-303-review")
+    (repo_root / "REVIEW.md").write_text("local-only\n")
+    _run_git(repo_root, "add", "REVIEW.md")
+    _run_git(repo_root, "commit", "-m", "local-only change")
+    _run_git(repo_root, "checkout", "-")
+
+    review._REVIEW_BRANCH_CLEANUP_CACHE.clear()  # pyright: ignore[reportPrivateUsage]
+    removed = review._cleanup_leaked_pr_review_branches(  # pyright: ignore[reportPrivateUsage]
+        repo_root=repo_root,
+        git_path=None,
+    )
+
+    assert removed == ()
+    assert _has_ref(repo_root, "refs/heads/pr-303-review")
+
+
 def test_select_review_feedback_changeset_runs_review_ref_hygiene() -> None:
     issues = [
         {

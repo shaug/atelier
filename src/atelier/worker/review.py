@@ -120,6 +120,42 @@ def _delete_local_branch_ref(
     return False, "unable to verify branch ref deletion"
 
 
+def _cleanup_mainline_anchor_refs(*, repo_root: Path, git_path: str | None) -> tuple[str, ...]:
+    default_branch = git.git_default_branch(repo_root, git_path=git_path)
+    if not default_branch:
+        return ()
+    refs: list[str] = []
+    local_ref = f"refs/heads/{default_branch}"
+    remote_ref = f"refs/remotes/origin/{default_branch}"
+    if git.git_ref_exists(repo_root, local_ref, git_path=git_path):
+        refs.append(local_ref)
+    if git.git_ref_exists(repo_root, remote_ref, git_path=git_path):
+        refs.append(remote_ref)
+    return tuple(refs)
+
+
+def _branch_ref_safe_to_prune(
+    *,
+    repo_root: Path,
+    branch: str,
+    git_path: str | None,
+) -> tuple[bool, str | None]:
+    ref = f"refs/heads/{branch}"
+    branch_tip = git.git_rev_parse(repo_root, ref, git_path=git_path)
+    if not branch_tip:
+        return False, "unable to resolve branch tip"
+    anchors = _cleanup_mainline_anchor_refs(repo_root=repo_root, git_path=git_path)
+    if not anchors:
+        return False, "unable to determine mainline cleanup anchors"
+    for anchor in anchors:
+        reachable = git.git_is_ancestor(repo_root, branch_tip, anchor, git_path=git_path)
+        if reachable is True:
+            return True, None
+        if reachable is None:
+            return False, f"unable to verify reachability against {anchor!r}"
+    return False, "branch tip is not reachable from default-branch mainline refs"
+
+
 def _cleanup_leaked_pr_review_branches(
     *,
     repo_root: Path,
@@ -154,6 +190,20 @@ def _cleanup_leaked_pr_review_branches(
     removed: list[str] = []
     for branch in leaked:
         if branch in active:
+            continue
+        safe_to_prune, reason = _branch_ref_safe_to_prune(
+            repo_root=repo_root,
+            branch=branch,
+            git_path=git_path,
+        )
+        if not safe_to_prune:
+            message = (
+                "startup stage=review-ref-cleanup skipped pruning leaked branch "
+                f"{branch!r}: {reason or 'unknown reason'}"
+            )
+            atelier_log.warning(message)
+            if emit_diagnostic is not None:
+                emit_diagnostic(message)
             continue
         deleted, detail = _delete_local_branch_ref(
             repo_root=repo_root,
