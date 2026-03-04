@@ -73,6 +73,65 @@ def test_prepare_worktrees_dry_run_reuses_epic_worktree_for_epic_changeset(
     assert any("Changeset branch: feat/root" in line for line in logs)
 
 
+def test_prepare_worktrees_blocks_before_mutations_on_prefix_drift_for_selected_changeset() -> None:
+    logs: list[str] = []
+    reconcile_mapping = Mock()
+    ensure_epic_worktree = Mock()
+    ensure_changeset_branch = Mock()
+
+    with (
+        patch(
+            "atelier.worker.session.worktree.prefix_migration_drift.scan_prefix_migration_drift",
+            return_value=[
+                {
+                    "epic_id": "at-epic",
+                    "changeset_id": "at-epic.1",
+                    "drift_class": "work-branch-conflict",
+                    "values": {
+                        "metadata.changeset.work_branch": "feat/new-at-epic.1",
+                        "mapping.work_branch": "at/legacy-at-epic.1",
+                    },
+                }
+            ],
+        ),
+        patch("atelier.worker.session.worktree.git.git_origin_url", return_value=None),
+        patch("atelier.worker.session.worktree.prs.github_repo_slug", return_value=None),
+        patch(
+            "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership",
+            reconcile_mapping,
+        ),
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_git_worktree",
+            ensure_epic_worktree,
+        ),
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_changeset_branch",
+            ensure_changeset_branch,
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="startup preflight blocked"):
+            worktree.prepare_worktrees(
+                context=worktree.WorktreePreparationContext(
+                    dry_run=False,
+                    project_data_dir=Path("/project"),
+                    repo_root=Path("/repo"),
+                    beads_root=Path("/beads"),
+                    selected_epic="at-epic",
+                    changeset_id="at-epic.1",
+                    root_branch_value="feat/new",
+                    changeset_parent_branch="feat/new",
+                    allow_parent_branch_override=False,
+                    git_path="git",
+                ),
+                control=_TestControl(logs),
+            )
+
+    reconcile_mapping.assert_not_called()
+    ensure_epic_worktree.assert_not_called()
+    ensure_changeset_branch.assert_not_called()
+    assert not logs
+
+
 def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: Path) -> None:
     logs: list[str] = []
     repo_root = tmp_path / "repo"
@@ -690,7 +749,7 @@ def test_prepare_worktrees_skips_child_workspace_parent_alignment_on_beads_looku
     )
 
 
-def test_prepare_worktrees_reconciles_epic_changeset_metadata_before_checkout() -> None:
+def test_prepare_worktrees_fail_closed_when_epic_changeset_lineage_drift_is_detected() -> None:
     logs: list[str] = []
     project_data_dir = Path("/project")
     repo_root = Path("/repo")
@@ -752,36 +811,27 @@ def test_prepare_worktrees_reconciles_epic_changeset_metadata_before_checkout() 
         ensure_epic.return_value = Path("/project/worktrees/at-epic")
         ensure_branch.return_value = ("feat/root", mapping)
 
-        result = worktree.prepare_worktrees(
-            context=worktree.WorktreePreparationContext(
-                dry_run=False,
-                project_data_dir=project_data_dir,
-                repo_root=repo_root,
-                beads_root=Path("/beads"),
-                selected_epic="at-epic",
-                changeset_id="at-epic",
-                root_branch_value="feat/root",
-                changeset_parent_branch="main",
-                allow_parent_branch_override=False,
-                git_path="git",
-            ),
-            control=_TestControl(logs),
-        )
+        with pytest.raises(RuntimeError, match="startup preflight blocked"):
+            worktree.prepare_worktrees(
+                context=worktree.WorktreePreparationContext(
+                    dry_run=False,
+                    project_data_dir=project_data_dir,
+                    repo_root=repo_root,
+                    beads_root=Path("/beads"),
+                    selected_epic="at-epic",
+                    changeset_id="at-epic",
+                    root_branch_value="feat/root",
+                    changeset_parent_branch="main",
+                    allow_parent_branch_override=False,
+                    git_path="git",
+                ),
+                control=_TestControl(logs),
+            )
 
-    assert result.branch == "feat/root"
-    assert result.changeset_worktree_path == Path("/project/worktrees/at-epic")
-    assert update_metadata.call_count == 2
-    reconcile_call = update_metadata.call_args_list[0]
-    assert reconcile_call.kwargs["root_branch"] == "feat/root"
-    assert reconcile_call.kwargs["work_branch"] == "feat/root"
-    assert reconcile_call.kwargs["parent_branch"] is None
-    assert reconcile_call.kwargs["allow_override"] is True
-    finalize_call = update_metadata.call_args_list[1]
-    assert finalize_call.kwargs["root_branch"] == "feat/root"
-    assert finalize_call.kwargs["work_branch"] == "feat/root"
-    assert finalize_call.kwargs["parent_branch"] == "main"
-    assert finalize_call.kwargs["allow_override"] is False
-    assert any("Reconciled epic-as-changeset lineage for at-epic" in line for line in logs)
+    assert update_metadata.call_count == 0
+    ensure_epic.assert_not_called()
+    ensure_branch.assert_not_called()
+    assert not logs
 
 
 def test_prepare_worktrees_blocks_ambiguous_epic_changeset_lineage_drift() -> None:
@@ -842,7 +892,7 @@ def test_prepare_worktrees_blocks_ambiguous_epic_changeset_lineage_drift() -> No
         patch("atelier.worker.session.worktree.beads.update_changeset_branch_metadata") as update,
         patch("atelier.worker.session.worktree.worktrees.ensure_changeset_checkout", checkout),
     ):
-        with pytest.raises(RuntimeError, match="metadata drift blocked"):
+        with pytest.raises(RuntimeError, match="startup preflight blocked"):
             worktree.prepare_worktrees(
                 context=worktree.WorktreePreparationContext(
                     dry_run=False,

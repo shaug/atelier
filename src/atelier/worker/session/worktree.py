@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ... import beads, changeset_fields, git, prs, worktrees
+from ... import beads, changeset_fields, git, prefix_migration_drift, prs, worktrees
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,159 @@ class WorktreePreparationControl(Protocol):
     def say(self, message: str) -> None: ...
 
     def dry_run_log(self, message: str) -> None: ...
+
+
+_BLOCKING_PREFIX_DRIFT_CLASSES = frozenset(
+    {
+        "root-branch-conflict",
+        "work-branch-conflict",
+        "worktree-path-conflict",
+    }
+)
+
+
+def _normalize_drift_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        return normalized
+    return str(value)
+
+
+def _format_drift_values(raw: object) -> str:
+    values = raw if isinstance(raw, dict) else {}
+    normalized: dict[str, str | None] = {}
+    for key, value in values.items():
+        normalized[str(key)] = _normalize_drift_value(value)
+    return json.dumps(dict(sorted(normalized.items())), sort_keys=True, separators=(",", ":"))
+
+
+def _startup_worktree_preflight(
+    *,
+    project_data_dir: Path,
+    beads_root: Path,
+    repo_root: Path,
+    selected_epic: str,
+    changeset_id: str,
+    root_branch_value: str,
+    changeset_parent_branch: str,
+    allow_parent_branch_override: bool,
+    git_path: str | None,
+) -> None:
+    """Fail closed when startup detects blocking prefix-migration drift."""
+    repo_slug = prs.github_repo_slug(git.git_origin_url(repo_root))
+    target_changesets = {selected_epic.strip(), changeset_id.strip()}
+    target_changesets.discard("")
+    if not target_changesets:
+        return
+
+    drift_records = prefix_migration_drift.scan_prefix_migration_drift(
+        project_data_dir=project_data_dir,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        repo_slug=repo_slug,
+        git_path=git_path,
+    )
+    diagnostics: list[str] = []
+    for record in drift_records:
+        drift_class = _normalize_drift_value(record.get("drift_class"))
+        record_changeset_id = _normalize_drift_value(record.get("changeset_id"))
+        if drift_class is None or record_changeset_id is None:
+            continue
+        if drift_class not in _BLOCKING_PREFIX_DRIFT_CLASSES:
+            continue
+        if record_changeset_id not in target_changesets:
+            continue
+        record_epic_id = _normalize_drift_value(record.get("epic_id")) or "<unknown>"
+        values_json = _format_drift_values(record.get("values"))
+        diagnostics.append(
+            "check=prefix-migration-preflight "
+            f"epic={record_epic_id} "
+            f"changeset={record_changeset_id} "
+            f"drift_class={drift_class} "
+            f"values={values_json}"
+        )
+    mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, selected_epic))
+    expected_root_branch = _normalize_branch(root_branch_value)
+    expected_parent_branch = _normalize_branch(changeset_parent_branch)
+    expected_work_branch: str | None
+    if changeset_id == selected_epic:
+        expected_work_branch = expected_root_branch
+    else:
+        mapped_work_branch = (
+            _normalize_branch(mapping.changesets.get(changeset_id)) if mapping is not None else None
+        )
+        if expected_root_branch is None:
+            expected_work_branch = mapped_work_branch
+        else:
+            expected_work_branch = mapped_work_branch or worktrees.derive_changeset_branch(
+                expected_root_branch, changeset_id
+            )
+    if changeset_id == selected_epic:
+        try:
+            issues = beads.run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=repo_root)
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else 1
+            raise RuntimeError(
+                "startup preflight blocked: unable to read selected changeset metadata "
+                f"(bd show exit {code})"
+            ) from exc
+        issue = issues[0] if issues else None
+        if issue is not None:
+            lineage_fields = (
+                (
+                    "changeset.root_branch",
+                    _normalize_branch(changeset_fields.root_branch(issue)),
+                    expected_root_branch,
+                ),
+                (
+                    "changeset.parent_branch",
+                    _normalize_branch(changeset_fields.parent_branch(issue)),
+                    expected_parent_branch,
+                ),
+                (
+                    "changeset.work_branch",
+                    _normalize_branch(changeset_fields.work_branch(issue)),
+                    expected_work_branch,
+                ),
+            )
+            for field_name, current_value, expected_value in lineage_fields:
+                if current_value is None or expected_value is None:
+                    continue
+                if current_value == expected_value:
+                    continue
+                if field_name == "changeset.parent_branch" and allow_parent_branch_override:
+                    continue
+                diagnostics.append(
+                    "check=lineage-override-risk "
+                    f"epic={selected_epic} "
+                    f"changeset={changeset_id} "
+                    "drift_class=field-mismatch "
+                    "values="
+                    + _format_drift_values(
+                        {
+                            "field": field_name,
+                            "current": current_value,
+                            "expected": expected_value,
+                        }
+                    )
+                )
+    if not diagnostics:
+        return
+
+    ordered_diagnostics = tuple(sorted(diagnostics))
+    details = "\n".join(f"- {line}" for line in ordered_diagnostics)
+    raise RuntimeError(
+        "startup preflight blocked: read-only mode detected migration drift that requires "
+        "explicit normalization.\n"
+        f"epic={selected_epic} changeset={changeset_id}\n"
+        "Remediation: run `atelier doctor --fix`, verify drift is cleared, then rerun startup.\n"
+        "Deterministic diagnostics:\n"
+        f"{details}"
+    )
 
 
 def _issue_labels(issue: dict[str, object]) -> set[str]:
@@ -533,6 +687,18 @@ def prepare_worktrees(
             changeset_worktree_path=changeset_worktree_path,
             branch=branch,
         )
+
+    _startup_worktree_preflight(
+        project_data_dir=project_data_dir,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        selected_epic=selected_epic,
+        changeset_id=changeset_id,
+        root_branch_value=root_branch_value,
+        changeset_parent_branch=changeset_parent_branch,
+        allow_parent_branch_override=allow_parent_branch_override,
+        git_path=git_path,
+    )
 
     owner_by_changeset, epic_root_branches, epic_worktree_paths = _mapping_ownership_from_beads(
         beads_root=beads_root,
