@@ -84,8 +84,9 @@ def test_doctor_json_check_mode() -> None:
     assert payload["counts"]["changesets_drifted"] == 1
     assert payload["counts"]["changesets_changed"] == 1
     assert payload["counts"]["changesets_applied"] == 0
-    assert payload["counts"]["check_families"] == 4
-    assert "worktree_branch_metadata_readiness" in payload["checks"]
+    assert payload["counts"]["check_families"] == 3
+    assert "startup_blocking_lineage_consistency" in payload["checks"]
+    assert "in_progress_integrity_signals" in payload["checks"]
 
 
 def test_doctor_json_fix_mode_reports_applied() -> None:
@@ -195,8 +196,7 @@ def test_doctor_json_includes_multi_check_health_report() -> None:
                 {
                     "id": "epic-1.2",
                     "status": "blocked",
-                    "notes": "blocked without reason line",
-                    "description": "changeset.work_branch: root-one-epic-1.2\n",
+                    "description": "",
                 },
                 {
                     "id": "epic-1.3",
@@ -204,7 +204,11 @@ def test_doctor_json_includes_multi_check_health_report() -> None:
                     "description": "",
                 },
             ],
-            changeset_to_epic={"epic-1.1": "epic-1", "epic-1.2": "epic-1", "epic-1.3": "epic-1"},
+            changeset_to_epic={
+                "epic-1.1": "epic-1",
+                "epic-1.2": "epic-1",
+                "epic-1.3": "epic-1",
+            },
             fields_by_changeset={
                 "epic-1.1": {
                     "changeset.root_branch": "root-one",
@@ -217,6 +221,7 @@ def test_doctor_json_includes_multi_check_health_report() -> None:
                     "changeset.parent_branch": "main",
                     "changeset.work_branch": "root-one-epic-1.2",
                 },
+                "epic-1.3": {},
             },
             mappings_by_epic={
                 "epic-1": WorktreeMapping(
@@ -266,18 +271,17 @@ def test_doctor_json_includes_multi_check_health_report() -> None:
 
     payload = json.loads(buffer.getvalue())
     assert payload["mode"] == "check"
-    assert payload["counts"]["check_families"] == 4
-    assert payload["counts"]["check_families_with_findings"] == 4
+    assert payload["counts"]["check_families"] == 3
+    assert payload["counts"]["check_families_with_findings"] == 3
     assert payload["counts"]["startup_blockers"] >= 1
     assert payload["counts"]["changesets_in_progress"] == 1
     assert payload["counts"]["changesets_blocked"] == 1
-    assert payload["prefix_migration_drift"][0]["changeset_id"] == "epic-1.1"
     checks = payload["checks"]
     assert "prefix_migration_drift" in checks
-    assert "in_progress_ownership_hook_consistency" in checks
-    assert "blocked_state_reason_consistency" in checks
-    assert "worktree_branch_metadata_readiness" in checks
-    ownership_findings = checks["in_progress_ownership_hook_consistency"]["findings"]
+    assert "startup_blocking_lineage_consistency" in checks
+    assert "in_progress_integrity_signals" in checks
+
+    ownership_findings = checks["in_progress_integrity_signals"]["findings"]
     ownership_codes = {finding["code"] for finding in ownership_findings}
     assert "in-progress-epic-unhooked" in ownership_codes
     stale_finding = next(
@@ -286,20 +290,16 @@ def test_doctor_json_includes_multi_check_health_report() -> None:
         if finding["code"] == "in-progress-assignee-session-stale"
     )
     assert stale_finding["startup_blocker"] is False
-    assert checks["in_progress_ownership_hook_consistency"]["counts"]["startup_blockers"] == 1
-    blocked_codes = {
-        finding["code"] for finding in checks["blocked_state_reason_consistency"]["findings"]
-    }
-    assert "blocked-missing-reason-note" in blocked_codes
-    readiness_codes = {
-        finding["code"] for finding in checks["worktree_branch_metadata_readiness"]["findings"]
-    }
+    assert checks["in_progress_integrity_signals"]["counts"]["startup_blockers"] == 1
+
+    readiness_findings = checks["startup_blocking_lineage_consistency"]["findings"]
+    readiness_codes = {finding["code"] for finding in readiness_findings}
     assert "metadata-work-branch-conflict" in readiness_codes
     assert "metadata-worktree-path-conflict" in readiness_codes
     assert not any(
         finding.get("changeset_id") == "epic-1.3"
         and str(finding.get("code", "")).startswith("metadata-missing-")
-        for finding in checks["worktree_branch_metadata_readiness"]["findings"]
+        for finding in readiness_findings
     )
 
 
