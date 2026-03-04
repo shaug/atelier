@@ -6,14 +6,14 @@ import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import agent_home, beads, pr_strategy, work_feedback
+from .. import agent_home, beads, changeset_fields, pr_strategy, prs, work_feedback
 from ..io import die, prompt, say, select
 from ..work_feedback import ReviewFeedbackSnapshot
 from ..worker import prompts as worker_prompts
 from ..worker import queueing as worker_queueing
 from ..worker import review as worker_review
 from ..worker import selection as worker_selection
-from ..worker.models import StartupContractResult
+from ..worker.models import StartupContractResult, StartupFinalizePreflightResult
 from ..worker.session import startup as worker_startup
 from .work_finalization_runtime import (
     changeset_has_review_handoff_signal,
@@ -22,6 +22,7 @@ from .work_finalization_runtime import (
     has_open_descendant_changesets,
     is_changeset_in_progress,
     is_changeset_recovery_candidate,
+    lookup_pr_payload,
     resolve_epic_id_for_changeset,
 )
 from .work_finalization_state import mark_changeset_in_progress, mark_changeset_merged
@@ -35,6 +36,80 @@ MergeConflictSelection = worker_review.MergeConflictSelection
 GlobalStartupSelections = worker_review.GlobalStartupSelections
 
 _WORKER_QUEUE_NAME = "worker"
+
+
+def startup_finalize_preflight(
+    *,
+    issue: dict[str, object],
+    repo_slug: str | None,
+    branch_pr: bool,
+    repo_root: Path,
+    git_path: str | None,
+) -> StartupFinalizePreflightResult:
+    """Decide whether startup can skip agent launch and finalize mechanically.
+
+    The decision is intentionally fail-closed: on missing or ambiguous evidence,
+    startup continues through the normal worker session path.
+
+    Args:
+        issue: Candidate changeset issue payload selected during startup.
+        repo_slug: Optional GitHub ``owner/repo`` slug for PR lifecycle lookups.
+        branch_pr: Whether the project uses PR-mediated publishing.
+        repo_root: Repository root used for integration-signal validation.
+        git_path: Optional git executable override.
+
+    Returns:
+        Startup preflight decision with deterministic reason code.
+    """
+    integration_proven, _integrated_sha = changeset_integration_signal(
+        issue,
+        repo_slug=repo_slug,
+        repo_root=repo_root,
+        git_path=git_path,
+        require_target_branch_proof=True,
+    )
+    if not integration_proven:
+        return StartupFinalizePreflightResult(
+            should_finalize_only=False,
+            reason="normal_path:integration_unproven",
+        )
+    if not branch_pr:
+        return StartupFinalizePreflightResult(
+            should_finalize_only=True,
+            reason="finalize_only:non_pr_integration_proven",
+        )
+
+    work_branch = changeset_fields.work_branch(issue)
+    if not work_branch:
+        return StartupFinalizePreflightResult(
+            should_finalize_only=False,
+            reason="normal_path:missing_work_branch",
+        )
+    if not repo_slug:
+        return StartupFinalizePreflightResult(
+            should_finalize_only=False,
+            reason="normal_path:missing_repo_slug",
+        )
+
+    pr_payload = lookup_pr_payload(repo_slug, work_branch)
+    if pr_payload is None:
+        return StartupFinalizePreflightResult(
+            should_finalize_only=False,
+            reason="normal_path:pr_state_unavailable",
+        )
+    review_requested = prs.has_review_requests(pr_payload)
+    pr_lifecycle = prs.lifecycle_state(pr_payload, pushed=True, review_requested=review_requested)
+    if pr_lifecycle not in {"merged", "closed"}:
+        lifecycle_label = pr_lifecycle or "none"
+        return StartupFinalizePreflightResult(
+            should_finalize_only=False,
+            reason=f"normal_path:pr_lifecycle_{lifecycle_label}",
+        )
+
+    return StartupFinalizePreflightResult(
+        should_finalize_only=True,
+        reason=f"finalize_only:pr_lifecycle_{pr_lifecycle}_integration_proven",
+    )
 
 
 class _NextChangesetService(worker_startup.NextChangesetService):
@@ -866,5 +941,6 @@ __all__ = [
     "select_global_conflicted_changeset",
     "select_global_review_feedback_changeset",
     "select_review_feedback_changeset",
+    "startup_finalize_preflight",
     "worker_opening_prompt",
 ]

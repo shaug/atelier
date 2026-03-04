@@ -16,7 +16,12 @@ from ..config import ProjectConfig
 from ..models import BranchHistory, BranchPrMode, BranchSquashMessage
 from ..pr_strategy import PrStrategy
 from ..work_feedback import ReviewFeedbackSnapshot
-from .models import FinalizeResult, ReconcileResult, StartupContractResult
+from .models import (
+    FinalizeResult,
+    ReconcileResult,
+    StartupContractResult,
+    StartupFinalizePreflightResult,
+)
 from .session.agent import (
     AgentSessionBlockedHandler,
     AgentSessionCommandOps,
@@ -319,6 +324,16 @@ class WorkerLifecycleService(Protocol):
     def extract_changeset_root_branch(self, issue: Issue) -> str | None: ...
 
     def extract_workspace_parent_branch(self, issue: Issue) -> str | None: ...
+
+    def startup_finalize_preflight(
+        self,
+        *,
+        issue: Issue,
+        repo_slug: str | None,
+        branch_pr: bool,
+        repo_root: Path,
+        git_path: str | None,
+    ) -> StartupFinalizePreflightResult: ...
 
     def finalize_changeset(
         self,

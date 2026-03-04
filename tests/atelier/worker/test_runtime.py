@@ -648,6 +648,66 @@ def test_next_changeset_service_passes_beads_root_to_review_waiting_gate() -> No
     )
 
 
+def test_startup_finalize_preflight_short_circuits_terminal_pr_with_integration() -> None:
+    issue = {"description": "changeset.work_branch: feat/root-at-epic.1\n"}
+    with (
+        patch(
+            "atelier.worker.work_startup_runtime.changeset_integration_signal",
+            return_value=(True, "abc1234"),
+        ) as integration_signal,
+        patch(
+            "atelier.worker.work_startup_runtime.lookup_pr_payload",
+            return_value={"number": 42},
+        ) as lookup_pr,
+        patch("atelier.worker.work_startup_runtime.prs.has_review_requests", return_value=False),
+        patch("atelier.worker.work_startup_runtime.prs.lifecycle_state", return_value="merged"),
+    ):
+        result = work_startup_runtime.startup_finalize_preflight(
+            issue=issue,
+            repo_slug="org/repo",
+            branch_pr=True,
+            repo_root=Path("/repo"),
+            git_path="git",
+        )
+
+    assert result.should_finalize_only is True
+    assert result.reason == "finalize_only:pr_lifecycle_merged_integration_proven"
+    integration_signal.assert_called_once_with(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        require_target_branch_proof=True,
+    )
+    lookup_pr.assert_called_once_with("org/repo", "feat/root-at-epic.1")
+
+
+def test_startup_finalize_preflight_fails_closed_when_pr_not_terminal() -> None:
+    issue = {"description": "changeset.work_branch: feat/root-at-epic.1\n"}
+    with (
+        patch(
+            "atelier.worker.work_startup_runtime.changeset_integration_signal",
+            return_value=(True, "abc1234"),
+        ),
+        patch(
+            "atelier.worker.work_startup_runtime.lookup_pr_payload",
+            return_value={"number": 42},
+        ),
+        patch("atelier.worker.work_startup_runtime.prs.has_review_requests", return_value=False),
+        patch("atelier.worker.work_startup_runtime.prs.lifecycle_state", return_value="pr-open"),
+    ):
+        result = work_startup_runtime.startup_finalize_preflight(
+            issue=issue,
+            repo_slug="org/repo",
+            branch_pr=True,
+            repo_root=Path("/repo"),
+            git_path="git",
+        )
+
+    assert result.should_finalize_only is False
+    assert result.reason == "normal_path:pr_lifecycle_pr-open"
+
+
 def test_startup_service_reports_planner_owned_executable_violations() -> None:
     emitted: list[str] = []
     issues = [

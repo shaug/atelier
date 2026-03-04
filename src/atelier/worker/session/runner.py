@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -1110,9 +1111,11 @@ def run_worker_once(
                         )
                     )
                 if selected_changeset:
-                    current_parent_branch = changeset_fields.parent_branch(selected_changeset[0])
+                    selected_changeset_issue = selected_changeset[0]
+                    changeset = selected_changeset_issue
+                    current_parent_branch = changeset_fields.parent_branch(selected_changeset_issue)
                     parent_branch_for_changeset = lifecycle.changeset_parent_branch(
-                        selected_changeset[0],
+                        selected_changeset_issue,
                         root_branch=parent_branch_for_changeset,
                         beads_root=beads_root,
                         repo_root=repo_root,
@@ -1126,6 +1129,64 @@ def run_worker_once(
             control.dry_run_log(f"Next changeset: {changeset_id} {changeset_title}")
         else:
             control.say(f"Next changeset: {changeset_id} {changeset_title}")
+        finishstep = control.step("Startup finalize preflight", timings=timings, trace=trace)
+        preflight = lifecycle.startup_finalize_preflight(
+            issue=changeset,
+            repo_slug=repo_slug,
+            branch_pr=project_config.branch.pr,
+            repo_root=repo_root,
+            git_path=git_path,
+        )
+        finishstep(extra=preflight.reason)
+        if preflight.should_finalize_only:
+            control.say(
+                "Skipping worker agent startup; finalizing changeset via startup preflight "
+                f"({preflight.reason})."
+            )
+            finishstep = control.step(
+                "Finalize changeset (startup short-circuit)",
+                timings=timings,
+                trace=trace,
+            )
+            finalize_result = lifecycle.finalize_changeset(
+                changeset_id=changeset_id,
+                epic_id=selected_epic,
+                agent_id=agent.agent_id,
+                agent_bead_id=agent_bead_id_required,
+                started_at=dt.datetime.now(dt.timezone.utc),
+                repo_slug=repo_slug,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                branch_pr=project_config.branch.pr,
+                branch_pr_mode=project_config.branch.pr_mode,
+                branch_pr_strategy=project_config.branch.pr_strategy,
+                branch_history=project_config.branch.history,
+                branch_squash_message=project_config.branch.squash_message,
+                project_data_dir=project_data_dir,
+                squash_message_agent_spec=None,
+                squash_message_agent_options=[],
+                squash_message_agent_home=agent.path,
+                squash_message_agent_env={},
+                git_path=git_path,
+            )
+            finishstep(extra=finalize_result.reason)
+            if not finalize_result.continue_running:
+                return finish(
+                    WorkerRunSummary(
+                        started=False,
+                        reason=finalize_result.reason,
+                        epic_id=selected_epic,
+                        changeset_id=str(changeset_id) if changeset_id else None,
+                    )
+                )
+            return finish(
+                WorkerRunSummary(
+                    started=True,
+                    reason="startup_finalize_only",
+                    epic_id=selected_epic,
+                    changeset_id=str(changeset_id) if changeset_id else None,
+                )
+            )
         finishstep = control.step("Prepare worktrees", timings=timings, trace=trace)
         prep_failures: list[str] = []
         worktree_prep = None
