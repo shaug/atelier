@@ -49,6 +49,10 @@ Lifecycle authority:
 - `cs:*` lifecycle labels are not execution gates. `cs:merged` and
   `cs:abandoned` are used on closed changeset beads to indicate
   resolution/integration status.
+- Worker/planner session teardown is runtime-owned: release hook/claim state
+  that still belongs to the exiting agent and close its session agent bead.
+- `atelier gc` remains a safety net for stale state, not the primary teardown
+  path.
 
 ## Layering
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from .. import beads, config, hooks, planner_sync
+from .. import agent_teardown, beads, config, hooks, planner_sync
 from ..io import say
 from .resolve import resolve_current_project_with_repo_root
 
@@ -35,6 +35,14 @@ def run_hook(args: object) -> None:
             git_path=git_path,
             emit=say,
         )
+
+    if event == "stop":
+        agent_teardown.teardown_agent_runtime(
+            beads_root=beads_root,
+            repo_root=repo_root,
+            close_agent_bead=False,
+        )
+        return
 
     if event != "session-start":
         return

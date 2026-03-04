@@ -39,3 +39,33 @@ def test_hook_precompact_runs_prime_and_planner_sync(tmp_path: Path) -> None:
         git_path="git",
         emit=hook_cmd.say,
     )
+
+
+def test_hook_stop_runs_runtime_teardown(tmp_path: Path) -> None:
+    with (
+        patch(
+            "atelier.commands.hook.resolve_current_project_with_repo_root",
+            return_value=(
+                Path("/project"),
+                _fake_project_payload(),
+                "/repo",
+                Path("/repo"),
+            ),
+        ),
+        patch("atelier.commands.hook.config.resolve_project_data_dir", return_value=tmp_path),
+        patch("atelier.commands.hook.config.resolve_beads_root", return_value=Path("/beads")),
+        patch("atelier.commands.hook.config.resolve_git_path", return_value="git"),
+        patch("atelier.commands.hook.hooks.parse_hook_event", return_value="stop"),
+        patch("atelier.commands.hook.beads.run_bd_command") as run_bd_command,
+        patch("atelier.commands.hook.planner_sync.maybe_sync_from_hook") as maybe_sync,
+        patch("atelier.commands.hook.agent_teardown.teardown_agent_runtime") as teardown_runtime,
+    ):
+        hook_cmd.run_hook(SimpleNamespace(event="stop"))
+
+    run_bd_command.assert_not_called()
+    maybe_sync.assert_not_called()
+    teardown_runtime.assert_called_once_with(
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        close_agent_bead=False,
+    )

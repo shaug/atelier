@@ -5138,24 +5138,55 @@ def _create_issue_with_body(
     return issue_id
 
 
+def _agent_issue_sort_key(issue: dict[str, object]) -> tuple[str, str]:
+    """Provide deterministic ordering for competing agent-bead matches."""
+    issue_id = _clean_text(issue.get("id")) or ""
+    title = _clean_text(issue.get("title")) or ""
+    return (issue_id, title)
+
+
 def find_agent_bead(agent_id: str, *, beads_root: Path, cwd: Path) -> dict[str, object] | None:
     """Find an agent bead by agent identity."""
+    closed_title_match: dict[str, object] | None = None
+    closed_description_match: dict[str, object] | None = None
     for label in _agent_label_candidates(beads_root=beads_root):
         issues = run_bd_json(
-            ["list", "--label", label, "--title", agent_id],
+            ["list", "--label", label, "--title", agent_id, "--all"],
             beads_root=beads_root,
             cwd=cwd,
         )
+        title_open_matches: list[dict[str, object]] = []
+        title_closed_matches: list[dict[str, object]] = []
         for issue in issues:
             title = issue.get("title")
             if isinstance(title, str) and title == agent_id:
-                return issue
+                if lifecycle.canonical_lifecycle_status(issue.get("status")) == "closed":
+                    title_closed_matches.append(issue)
+                else:
+                    title_open_matches.append(issue)
+        if title_open_matches:
+            return sorted(title_open_matches, key=_agent_issue_sort_key)[0]
+        if title_closed_matches and closed_title_match is None:
+            closed_title_match = sorted(title_closed_matches, key=_agent_issue_sort_key)[0]
+        description_open_matches: list[dict[str, object]] = []
+        description_closed_matches: list[dict[str, object]] = []
         for issue in issues:
             description = issue.get("description")
             fields = _parse_description_fields(description if isinstance(description, str) else "")
             if fields.get("agent_id") == agent_id:
-                return issue
-    return None
+                if lifecycle.canonical_lifecycle_status(issue.get("status")) == "closed":
+                    description_closed_matches.append(issue)
+                else:
+                    description_open_matches.append(issue)
+        if description_open_matches:
+            return sorted(description_open_matches, key=_agent_issue_sort_key)[0]
+        if description_closed_matches and closed_description_match is None:
+            closed_description_match = sorted(
+                description_closed_matches, key=_agent_issue_sort_key
+            )[0]
+    if closed_title_match is not None:
+        return closed_title_match
+    return closed_description_match
 
 
 def ensure_agent_bead(
@@ -5168,7 +5199,22 @@ def ensure_agent_bead(
     """Ensure an agent bead exists for the given identity."""
     existing = find_agent_bead(agent_id, beads_root=beads_root, cwd=cwd)
     if existing:
-        return existing
+        issue_id = _clean_text(existing.get("id"))
+        if issue_id and lifecycle.canonical_lifecycle_status(existing.get("status")) == "closed":
+            run_bd_command(
+                ["update", issue_id, "--status", "open"],
+                beads_root=beads_root,
+                cwd=cwd,
+                allow_failure=True,
+            )
+            refreshed = run_bd_json(["show", issue_id], beads_root=beads_root, cwd=cwd)
+            if refreshed:
+                refreshed_issue = refreshed[0]
+                if lifecycle.canonical_lifecycle_status(refreshed_issue.get("status")) != "closed":
+                    return refreshed_issue
+            existing = None
+        if existing is not None:
+            return existing
     description = f"agent_id: {agent_id}\n"
     if role:
         description += f"role_type: {role}\n"

@@ -208,6 +208,43 @@ def test_run_worker_once_returns_startup_exit_summary() -> None:
     deps.lifecycle.run_startup_contract.assert_called_once()
 
 
+def test_run_worker_once_reuses_provided_agent_bead_id() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p1a",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p1a",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id=None,
+            changeset_id=None,
+            should_exit=True,
+            reason="no_eligible_epics",
+        ),
+        preview_agent=agent,
+    )
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(
+            epic_id=None,
+            queue=False,
+            yes=False,
+            reconcile=False,
+            agent_bead_id="at-provided-agent",
+        ),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p1a"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "no_eligible_epics"
+    deps.infra.beads.ensure_agent_bead.assert_not_called()
+    context = deps.lifecycle.run_startup_contract.call_args.kwargs["context"]
+    assert context.agent_bead_id == "at-provided-agent"
+
+
 def test_run_worker_once_skips_claim_for_non_actionable_explicit_epic() -> None:
     agent = AgentHome(
         name="worker",

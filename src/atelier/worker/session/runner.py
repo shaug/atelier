@@ -615,6 +615,7 @@ def run_worker_once(
     with infra.agents.scoped_agent_env(agent.agent_id):
         control.say("Worker session")
         agent_bead_id: str | None = None
+        provided_agent_bead_id = str(getattr(args, "agent_bead_id", "") or "").strip()
         finishstep = control.step("Prime beads", timings=timings, trace=trace)
         if dry_run:
             control.dry_run_log("Would run: bd prime")
@@ -622,7 +623,9 @@ def run_worker_once(
             infra.beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
         finishstep()
         finishstep = control.step("Ensure worker agent bead", timings=timings, trace=trace)
-        if dry_run:
+        if provided_agent_bead_id:
+            agent_bead_id = provided_agent_bead_id
+        elif dry_run:
             agent_bead = infra.beads.find_agent_bead(
                 agent.agent_id, beads_root=beads_root, cwd=repo_root
             )
