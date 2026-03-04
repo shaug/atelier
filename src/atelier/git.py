@@ -225,11 +225,12 @@ def resolve_repo_origin(start: Path, *, git_path: str | None = None) -> tuple[Pa
     return repo_root, origin_raw, origin
 
 
-def resolve_enlistment_path(repo_root: Path) -> str:
+def resolve_enlistment_path(repo_root: Path, *, git_path: str | None = None) -> str:
     """Resolve the enlistment path identifier for a repository.
 
     Args:
         repo_root: Path to the git repository root.
+        git_path: Optional git executable path override.
 
     Returns:
         Resolved absolute path string for the enlistment.
@@ -246,7 +247,8 @@ def resolve_enlistment_path(repo_root: Path) -> str:
                 str(repo_root),
                 "rev-parse",
                 "--git-common-dir",
-            ]
+            ],
+            git_path=git_path,
         )
     )
     if result.returncode != 0:
@@ -284,7 +286,7 @@ def resolve_repo_enlistment(
     repo_root = git_repo_root(start, git_path=git_path)
     if not repo_root:
         die("command must be run inside a git repository")
-    enlistment_path = resolve_enlistment_path(repo_root)
+    enlistment_path = resolve_enlistment_path(repo_root, git_path=git_path)
     origin_raw = git_origin_url(repo_root, git_path=git_path)
     origin = normalize_origin_url(origin_raw) if origin_raw else None
     return repo_root, enlistment_path, origin_raw, origin
