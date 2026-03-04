@@ -348,13 +348,12 @@ atelier doctor
 atelier doctor --format=json
 ```
 
-Run explicit prefix normalization (dry-run by default):
+Apply explicit prefix normalization repairs (operator-invoked):
 
 ```sh
-atelier normalize-prefix
-atelier normalize-prefix --apply
-atelier normalize-prefix --apply --force
-atelier normalize-prefix --format=json
+atelier doctor --fix
+atelier doctor --fix --force
+atelier doctor --fix --format=json
 ```
 
 List workspaces:
@@ -593,9 +592,8 @@ Options:
 ### `atelier doctor`
 
 Detect prefix-migration branch/worktree drift and report multi-check health.
-Read-only by default. For explicit mutation, use
-`atelier normalize-prefix --apply`. `--fix` is retained as a compatibility alias
-for the same repair engine.
+Read-only by default. Use `atelier doctor --fix` for explicit
+normalization/repair.
 
 Usage:
 
@@ -611,26 +609,6 @@ Options:
 - `--format=json`: Emit deterministic JSON output.
 - `--fix`: Apply drift repairs instead of read-only detection.
 - `--force`: Override active-agent safety gate when used with `--fix`.
-
-### `atelier normalize-prefix`
-
-Run explicit prefix normalization for legacy metadata and mapping artifacts.
-Dry-run by default; pass `--apply` to write canonical updates.
-
-Usage:
-
-```sh
-atelier normalize-prefix
-atelier normalize-prefix --format=json
-atelier normalize-prefix --apply
-atelier normalize-prefix --apply --force
-```
-
-Options:
-
-- `--format=json`: Emit deterministic JSON output.
-- `--apply`: Persist canonical metadata/mapping updates.
-- `--force`: Override active-agent safety gate when used with `--apply`.
 
 ### `atelier list`
 
