@@ -75,6 +75,23 @@ def test_choose_branch_source_prefers_checked_out_worktree_branch() -> None:
     assert source == "feat/live-checkout"
 
 
+def test_resolve_existing_worktree_fails_closed_for_ambiguous_candidates(tmp_path: Path) -> None:
+    project_data_dir = tmp_path / "data"
+    project_data_dir.mkdir(parents=True)
+    first = project_data_dir / "worktrees" / "ts-epic.1"
+    second = project_data_dir / "worktrees" / "at-legacy.1"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    (first / ".git").write_text("gitdir: /tmp/first\n", encoding="utf-8")
+    (second / ".git").write_text("gitdir: /tmp/second\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="ambiguous existing changeset worktree candidates"):
+        prefix_migration_drift._resolve_existing_worktree(
+            project_data_dir=project_data_dir,
+            relpaths=("worktrees/at-legacy.1", "worktrees/ts-epic.1"),
+        )
+
+
 def test_converge_changeset_artifacts_fails_closed_for_non_git_canonical_path(
     tmp_path: Path,
 ) -> None:

@@ -241,11 +241,20 @@ def _resolve_existing_worktree(
     project_data_dir: Path,
     relpaths: tuple[str, ...],
 ) -> tuple[str | None, Path | None]:
+    matches: list[tuple[str, Path]] = []
     for relpath in relpaths:
         candidate = project_data_dir / relpath
         if candidate.exists() and (candidate / ".git").exists():
-            return relpath, candidate
-    return None, None
+            matches.append((relpath, candidate))
+    if not matches:
+        return None, None
+    if len(matches) > 1:
+        candidates = ", ".join(f"{relpath!r}" for relpath, _ in matches)
+        raise RuntimeError(
+            "ambiguous existing changeset worktree candidates; "
+            f"multiple paths exist and cannot be selected safely: {candidates}"
+        )
+    return matches[0]
 
 
 def _choose_branch_source(
