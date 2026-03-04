@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import ANY, Mock, patch
+from unittest.mock import ANY, Mock, call, patch
 
 import pytest
 
@@ -371,6 +371,30 @@ def test_resolve_lineage_repair_prefers_open_pr_head_and_checked_out_path(tmp_pa
     assert decision.worktree_source == "checked-out-worktree"
     assert decision.metadata_changed is True
     assert decision.mapping_changed is True
+
+
+def test_lookup_open_pr_head_does_not_force_refresh_on_failed_lookup() -> None:
+    lookup = Mock(
+        side_effect=[
+            worktree.prs.GithubPrLookup(outcome="error", error="network timeout"),
+            worktree.prs.GithubPrLookup(
+                outcome="found",
+                payload={"state": "OPEN", "headRefName": "feat/new-at-epic.1"},
+            ),
+        ]
+    )
+
+    with patch("atelier.worker.session.worktree.prs.lookup_github_pr_status", lookup):
+        head = worktree._lookup_open_pr_head(
+            repo_slug="acme/repo",
+            branch_candidates=("feat/legacy-at-epic.1", "feat/new-at-epic.1"),
+        )
+
+    assert head == "feat/new-at-epic.1"
+    assert lookup.call_args_list == [
+        call("acme/repo", "feat/legacy-at-epic.1"),
+        call("acme/repo", "feat/new-at-epic.1"),
+    ]
 
 
 def test_prepare_worktrees_aligns_child_workspace_parent_branch_from_epic(tmp_path: Path) -> None:

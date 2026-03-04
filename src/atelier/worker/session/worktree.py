@@ -300,7 +300,7 @@ def _lookup_open_pr_head(
     for candidate in branch_candidates:
         lookup = prs.lookup_github_pr_status(repo_slug, candidate)
         if lookup.failed:
-            lookup = prs.lookup_github_pr_status(repo_slug, candidate, refresh=True)
+            continue
         payload = lookup.payload if lookup.found else None
         if not isinstance(payload, dict):
             continue
