@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -12,12 +13,38 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .. import agent_home, beads, config, prefix_migration_drift, prs
+from .. import (
+    agent_home,
+    beads,
+    changeset_fields,
+    config,
+    lifecycle,
+    prefix_migration_drift,
+    prs,
+    worktrees,
+)
 from ..io import die, say
 from .resolve import resolve_current_project_with_repo_root
 
 _FORMATS = {"table", "json"}
 _ACTIVE_HOOK_STALE_HOURS = 24.0
+_BLOCKED_NOTE_RE = re.compile(r"^blocked_at:\s*(?P<timestamp>\S+)\s+reason:\s*(?P<reason>.*)$")
+_STARTUP_BLOCKER_CODES = frozenset(
+    {
+        "in-progress-epic-unassigned",
+        "in-progress-epic-unhooked",
+        "in-progress-assignee-hook-mismatch",
+        "metadata-missing-root-branch",
+        "metadata-missing-work-branch",
+        "metadata-missing-epic-mapping",
+        "metadata-missing-mapping-work-branch",
+        "metadata-work-branch-conflict",
+        "metadata-worktree-path-conflict",
+        "metadata-root-branch-conflict",
+        "metadata-mapping-root-branch-conflict",
+        "prefix-migration-drift",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -28,8 +55,87 @@ class _ActiveHookBlocker:
     heartbeat_at: str | None
 
 
+@dataclass(frozen=True)
+class _AgentRuntime:
+    agent_id: str
+    hook_bead: str | None
+    session_state: str
+    heartbeat_at: str | None
+
+
+@dataclass(frozen=True)
+class _DoctorFinding:
+    code: str
+    summary: str
+    remediation: str
+    severity: str
+    epic_id: str | None
+    changeset_id: str | None
+    details: dict[str, object]
+
+    @property
+    def startup_blocker(self) -> bool:
+        return self.code in _STARTUP_BLOCKER_CODES
+
+    def as_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "code": self.code,
+            "summary": self.summary,
+            "remediation": self.remediation,
+            "severity": self.severity,
+            "startup_blocker": self.startup_blocker,
+            "details": dict(sorted(self.details.items(), key=lambda item: item[0])),
+        }
+        if self.epic_id:
+            payload["epic_id"] = self.epic_id
+        if self.changeset_id:
+            payload["changeset_id"] = self.changeset_id
+        return payload
+
+
+@dataclass(frozen=True)
+class _DoctorCheckFamily:
+    check_id: str
+    title: str
+    description: str
+    in_scope_changesets: int
+    findings: tuple[_DoctorFinding, ...]
+
+    @property
+    def changesets_with_findings(self) -> int:
+        return len({f.changeset_id for f in self.findings if f.changeset_id})
+
+    @property
+    def startup_blockers(self) -> int:
+        return sum(1 for finding in self.findings if finding.startup_blocker)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "id": self.check_id,
+            "title": self.title,
+            "description": self.description,
+            "counts": {
+                "in_scope_changesets": self.in_scope_changesets,
+                "findings": len(self.findings),
+                "changesets_with_findings": self.changesets_with_findings,
+                "startup_blockers": self.startup_blockers,
+            },
+            "findings": [finding.as_dict() for finding in self.findings],
+        }
+
+
+@dataclass(frozen=True)
+class _DoctorContext:
+    project_data_dir: Path
+    epics_by_id: dict[str, dict[str, object]]
+    changesets: list[dict[str, object]]
+    changeset_to_epic: dict[str, str]
+    fields_by_changeset: dict[str, dict[str, str]]
+    mappings_by_epic: dict[str, worktrees.WorktreeMapping | None]
+
+
 def doctor(args: object) -> None:
-    """Detect and optionally repair prefix-migration drift."""
+    """Run project health diagnostics with optional prefix-drift repair."""
     format_value = str(getattr(args, "format", "table") or "table").lower()
     if format_value not in _FORMATS:
         die(f"unsupported format: {format_value}")
@@ -46,6 +152,7 @@ def doctor(args: object) -> None:
         blockers = _active_agent_hook_blockers(beads_root=beads_root, repo_root=repo_root)
         if blockers:
             die(_active_hook_blockers_message(blockers))
+
     origin = project_config.project.origin or project_config.project.repo_url
     repo_slug = prs.github_repo_slug(origin)
     actions = prefix_migration_drift.repair_prefix_migration_drift(
@@ -56,7 +163,20 @@ def doctor(args: object) -> None:
         repo_slug=repo_slug,
         git_path=git_path,
     )
-    counts = _doctor_counts(actions)
+    context = _collect_doctor_context(
+        project_data_dir=project_data_dir,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+    hook_map, agent_index = _collect_agent_runtime(beads_root=beads_root, repo_root=repo_root)
+    checks = _build_check_families(
+        context=context,
+        actions=actions,
+        hook_map=hook_map,
+        agent_index=agent_index,
+        fix=fix,
+    )
+    counts = _doctor_counts(context=context, checks=checks, actions=actions)
     mode = "fix" if fix else "check"
     project_info = {
         "project_dir": str(project_root),
@@ -65,117 +185,654 @@ def doctor(args: object) -> None:
     }
     payload = {
         "scope": "project",
+        "scope_description": (
+            "project health report across drift, ownership/hooks, blocked reasons, "
+            "and branch/worktree metadata readiness"
+        ),
         "mode": mode,
         "fix": fix,
         "project": project_info,
         "counts": counts,
+        "check_contract": {
+            "check_mode_mutates": False,
+            "fix_mode_mutating_checks": ["prefix_migration_drift"],
+            "read_only_checks": [
+                "in_progress_ownership_hook_consistency",
+                "blocked_state_reason_consistency",
+                "worktree_branch_metadata_readiness",
+            ],
+        },
+        "checks": {check.check_id: check.as_dict() for check in checks},
+        # Backward-compatible key kept for existing consumers.
         "prefix_migration_drift": [action.as_dict() for action in actions],
     }
     if format_value == "json":
         say(json.dumps(payload, indent=2, sort_keys=True))
         return
-    _render_doctor(project_info, counts, actions, fix=fix)
+    _render_doctor(
+        project_info=project_info, counts=counts, checks=checks, actions=actions, fix=fix
+    )
 
 
 def _doctor_counts(
+    *,
+    context: _DoctorContext,
+    checks: tuple[_DoctorCheckFamily, ...],
     actions: list[prefix_migration_drift.PrefixMigrationRepairAction],
 ) -> dict[str, int]:
     changed = sum(1 for action in actions if action.changed)
     applied = sum(1 for action in actions if action.applied and action.changed)
-    return {
+    status_counts: dict[str, int] = {}
+    for issue in context.changesets:
+        normalized = lifecycle.canonical_lifecycle_status(issue.get("status")) or "unknown"
+        status_counts[normalized] = status_counts.get(normalized, 0) + 1
+
+    counts: dict[str, int] = {
+        "changesets_total": len(context.changesets),
+        "changesets_active": sum(
+            count
+            for status, count in status_counts.items()
+            if status in lifecycle.ACTIVE_LIFECYCLE_STATUSES or status == "blocked"
+        ),
+        "changesets_in_progress": status_counts.get("in_progress", 0),
+        "changesets_blocked": status_counts.get("blocked", 0),
         "changesets_drifted": len(actions),
         "changesets_changed": changed,
         "changesets_applied": applied,
+        "check_families": len(checks),
+        "check_families_with_findings": sum(1 for check in checks if check.findings),
+        "findings_total": sum(len(check.findings) for check in checks),
+        "startup_blockers": sum(check.startup_blockers for check in checks),
     }
+    for check in checks:
+        counts[f"{check.check_id}_findings"] = len(check.findings)
+        counts[f"{check.check_id}_changesets"] = check.changesets_with_findings
+    return counts
 
 
-def _render_doctor(
-    project_info: Mapping[str, str],
-    counts: Mapping[str, int],
+def _build_check_families(
+    *,
+    context: _DoctorContext,
     actions: list[prefix_migration_drift.PrefixMigrationRepairAction],
+    hook_map: Mapping[str, tuple[str, ...]],
+    agent_index: Mapping[str, _AgentRuntime],
+    fix: bool,
+) -> tuple[_DoctorCheckFamily, ...]:
+    return (
+        _build_prefix_migration_check(context=context, actions=actions, fix=fix),
+        _build_in_progress_hook_check(context=context, hook_map=hook_map, agent_index=agent_index),
+        _build_blocked_reason_check(context=context),
+        _build_metadata_readiness_check(context=context),
+    )
+
+
+def _build_prefix_migration_check(
+    *,
+    context: _DoctorContext,
+    actions: list[prefix_migration_drift.PrefixMigrationRepairAction],
+    fix: bool,
+) -> _DoctorCheckFamily:
+    findings: list[_DoctorFinding] = []
+    for action in sorted(actions, key=lambda item: (item.changeset_id, item.epic_id)):
+        drift_summary = ", ".join(action.drift_classes) or "drift detected"
+        findings.append(
+            _DoctorFinding(
+                code="prefix-migration-drift",
+                summary=f"{action.changeset_id}: {drift_summary}",
+                remediation=_prefix_drift_remediation(action, fix=fix),
+                severity="error" if action.changed else "warning",
+                epic_id=action.epic_id,
+                changeset_id=action.changeset_id,
+                details=action.as_dict(),
+            )
+        )
+    return _DoctorCheckFamily(
+        check_id="prefix_migration_drift",
+        title="Prefix Migration Drift",
+        description=(
+            "Detects branch/worktree lineage drift introduced by prefix migration and "
+            "reports canonical repair targets."
+        ),
+        in_scope_changesets=len(context.changesets),
+        findings=tuple(findings),
+    )
+
+
+def _build_in_progress_hook_check(
+    *,
+    context: _DoctorContext,
+    hook_map: Mapping[str, tuple[str, ...]],
+    agent_index: Mapping[str, _AgentRuntime],
+) -> _DoctorCheckFamily:
+    findings: list[_DoctorFinding] = []
+    in_scope = [
+        issue
+        for issue in context.changesets
+        if lifecycle.canonical_lifecycle_status(issue.get("status")) == "in_progress"
+    ]
+    for issue in sorted(in_scope, key=lambda item: str(item.get("id") or "")):
+        changeset_id = _normalize_text(issue.get("id"))
+        if changeset_id is None:
+            continue
+        epic_id = context.changeset_to_epic.get(changeset_id, changeset_id)
+        epic_issue = context.epics_by_id.get(epic_id, {})
+        assignee = _normalize_assignee(epic_issue.get("assignee"))
+        hooked_agents = tuple(sorted(hook_map.get(epic_id, ())))
+
+        if assignee is None:
+            findings.append(
+                _DoctorFinding(
+                    code="in-progress-epic-unassigned",
+                    summary=(f"{changeset_id} is in_progress but epic {epic_id} has no assignee."),
+                    remediation=(
+                        f"Assign epic {epic_id} to the active worker before continuing startup."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={"epic_id": epic_id},
+                )
+            )
+        if not hooked_agents:
+            findings.append(
+                _DoctorFinding(
+                    code="in-progress-epic-unhooked",
+                    summary=f"{changeset_id} is in_progress but epic {epic_id} has no active hook.",
+                    remediation=(
+                        f"Re-run worker startup to restore the agent hook for epic {epic_id}."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={"epic_id": epic_id},
+                )
+            )
+        if assignee and hooked_agents and assignee not in hooked_agents:
+            findings.append(
+                _DoctorFinding(
+                    code="in-progress-assignee-hook-mismatch",
+                    summary=(
+                        f"{changeset_id} is in_progress but epic assignee {assignee} "
+                        f"is not among hooked agents ({', '.join(hooked_agents)})."
+                    ),
+                    remediation=(
+                        "Reconcile epic assignee/hook ownership so the same worker owns both."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={
+                        "epic_assignee": assignee,
+                        "hooked_agents": list(hooked_agents),
+                    },
+                )
+            )
+        if assignee:
+            assignee_runtime = agent_index.get(assignee)
+            if assignee_runtime and assignee_runtime.session_state == "stale":
+                findings.append(
+                    _DoctorFinding(
+                        code="in-progress-assignee-session-stale",
+                        summary=(
+                            f"{changeset_id} is in_progress but assignee {assignee} appears stale."
+                        ),
+                        remediation=(
+                            "Reclaim stale ownership or restart the worker session and hook."
+                        ),
+                        severity="warning",
+                        epic_id=epic_id,
+                        changeset_id=changeset_id,
+                        details={
+                            "epic_assignee": assignee,
+                            "session_state": assignee_runtime.session_state,
+                            "heartbeat_at": assignee_runtime.heartbeat_at,
+                        },
+                    )
+                )
+
+    return _DoctorCheckFamily(
+        check_id="in_progress_ownership_hook_consistency",
+        title="In-Progress Ownership/Hook Consistency",
+        description=(
+            "Checks whether in-progress changesets have aligned epic assignment and live hook state."
+        ),
+        in_scope_changesets=len(in_scope),
+        findings=tuple(
+            sorted(
+                findings,
+                key=lambda item: (
+                    item.changeset_id or "",
+                    item.code,
+                    item.epic_id or "",
+                ),
+            )
+        ),
+    )
+
+
+def _build_blocked_reason_check(*, context: _DoctorContext) -> _DoctorCheckFamily:
+    findings: list[_DoctorFinding] = []
+    in_scope = [
+        issue
+        for issue in context.changesets
+        if lifecycle.canonical_lifecycle_status(issue.get("status")) == "blocked"
+    ]
+    for issue in sorted(in_scope, key=lambda item: str(item.get("id") or "")):
+        changeset_id = _normalize_text(issue.get("id"))
+        if changeset_id is None:
+            continue
+        epic_id = context.changeset_to_epic.get(changeset_id, changeset_id)
+        blocked_line = _latest_blocked_note_line(issue.get("notes"))
+        if blocked_line is None:
+            findings.append(
+                _DoctorFinding(
+                    code="blocked-missing-reason-note",
+                    summary=f"{changeset_id} is blocked but has no blocked_at reason note.",
+                    remediation=(
+                        "Append a blocked note (`blocked_at: <timestamp> reason: <detail>`) "
+                        "or move the changeset out of blocked state."
+                    ),
+                    severity="warning",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={},
+                )
+            )
+            continue
+        timestamp, reason = _parse_blocked_note(blocked_line)
+        if timestamp is None:
+            findings.append(
+                _DoctorFinding(
+                    code="blocked-note-format-invalid",
+                    summary=f"{changeset_id} blocked note has invalid format.",
+                    remediation=(
+                        "Rewrite blocked note as `blocked_at: <rfc3339> reason: <detail>`."
+                    ),
+                    severity="warning",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={"blocked_note": blocked_line},
+                )
+            )
+            continue
+        if _parse_rfc3339(timestamp) is None:
+            findings.append(
+                _DoctorFinding(
+                    code="blocked-note-timestamp-invalid",
+                    summary=f"{changeset_id} blocked note has non-RFC3339 timestamp {timestamp!r}.",
+                    remediation="Store blocked_at timestamp in RFC3339 format.",
+                    severity="warning",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={"blocked_at": timestamp},
+                )
+            )
+        if reason is None:
+            findings.append(
+                _DoctorFinding(
+                    code="blocked-note-reason-empty",
+                    summary=f"{changeset_id} blocked note is missing a reason.",
+                    remediation=(
+                        "Provide actionable detail after `reason:` so workers/planners can unblock."
+                    ),
+                    severity="warning",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={"blocked_at": timestamp},
+                )
+            )
+
+    return _DoctorCheckFamily(
+        check_id="blocked_state_reason_consistency",
+        title="Blocked-State Reason Consistency",
+        description=(
+            "Validates blocked changesets carry parseable blocked reason notes for operator triage."
+        ),
+        in_scope_changesets=len(in_scope),
+        findings=tuple(
+            sorted(
+                findings,
+                key=lambda item: (
+                    item.changeset_id or "",
+                    item.code,
+                    item.epic_id or "",
+                ),
+            )
+        ),
+    )
+
+
+def _build_metadata_readiness_check(*, context: _DoctorContext) -> _DoctorCheckFamily:
+    findings: list[_DoctorFinding] = []
+    in_scope = [
+        issue
+        for issue in context.changesets
+        if (lifecycle.canonical_lifecycle_status(issue.get("status")) or "")
+        in (*lifecycle.ACTIVE_LIFECYCLE_STATUSES, "blocked")
+    ]
+    for issue in sorted(in_scope, key=lambda item: str(item.get("id") or "")):
+        changeset_id = _normalize_text(issue.get("id"))
+        if changeset_id is None:
+            continue
+        lifecycle_status = lifecycle.canonical_lifecycle_status(issue.get("status")) or ""
+        enforce_missing_metadata = lifecycle_status in {"in_progress", "blocked"}
+        epic_id = context.changeset_to_epic.get(changeset_id, changeset_id)
+        fields = context.fields_by_changeset.get(changeset_id, {})
+        metadata_root = _normalize_text(fields.get("changeset.root_branch"))
+        metadata_parent = _normalize_text(fields.get("changeset.parent_branch"))
+        metadata_work = _normalize_text(fields.get("changeset.work_branch"))
+        issue_worktree = _normalize_worktree_path(
+            fields.get("worktree_path"),
+            project_data_dir=context.project_data_dir,
+        )
+
+        epic_issue = context.epics_by_id.get(epic_id, {})
+        epic_root = _normalize_text(beads.extract_workspace_root_branch(epic_issue))
+        mapping = context.mappings_by_epic.get(epic_id)
+        mapping_root = _normalize_text(mapping.root_branch if mapping else None)
+        mapping_work = _normalize_text(mapping.changesets.get(changeset_id) if mapping else None)
+        mapping_worktree = _normalize_worktree_path(
+            mapping.changeset_worktrees.get(changeset_id) if mapping else None,
+            project_data_dir=context.project_data_dir,
+        )
+
+        if enforce_missing_metadata and metadata_root is None:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-missing-root-branch",
+                    summary=f"{changeset_id} is missing changeset.root_branch.",
+                    remediation=(
+                        "Run worker startup to populate lineage metadata or set root branch explicitly."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={},
+                )
+            )
+        if enforce_missing_metadata and metadata_work is None:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-missing-work-branch",
+                    summary=f"{changeset_id} is missing changeset.work_branch.",
+                    remediation=(
+                        "Run worker startup to populate work branch metadata before execution."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={},
+                )
+            )
+        if enforce_missing_metadata and changeset_id != epic_id and metadata_parent is None:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-missing-parent-branch",
+                    summary=f"{changeset_id} is missing changeset.parent_branch.",
+                    remediation=(
+                        "Populate parent lineage metadata to avoid ambiguous review/integration ancestry."
+                    ),
+                    severity="warning",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={},
+                )
+            )
+
+        if mapping is None:
+            if not enforce_missing_metadata:
+                continue
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-missing-epic-mapping",
+                    summary=f"Epic {epic_id} has no worktree mapping metadata.",
+                    remediation=(
+                        "Re-run worker startup for this epic to synthesize mapping metadata."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={"epic_id": epic_id},
+                )
+            )
+            continue
+
+        if enforce_missing_metadata and changeset_id != epic_id and mapping_work is None:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-missing-mapping-work-branch",
+                    summary=f"{changeset_id} has no mapping work-branch entry.",
+                    remediation=(
+                        "Re-run worker startup to reconcile changeset branch mapping entries."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={"epic_id": epic_id},
+                )
+            )
+        if mapping_work and metadata_work and mapping_work != metadata_work:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-work-branch-conflict",
+                    summary=(
+                        f"{changeset_id} metadata work branch {metadata_work!r} conflicts "
+                        f"with mapping {mapping_work!r}."
+                    ),
+                    remediation=(
+                        "Run `atelier doctor --fix` to resolve work-branch override conflicts."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={
+                        "metadata_work_branch": metadata_work,
+                        "mapping_work_branch": mapping_work,
+                    },
+                )
+            )
+        if (
+            enforce_missing_metadata
+            and changeset_id != epic_id
+            and mapping_worktree is None
+            and issue_worktree is None
+        ):
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-missing-worktree-path",
+                    summary=f"{changeset_id} has no changeset worktree path metadata.",
+                    remediation=(
+                        "Run worker startup to register a deterministic changeset worktree path."
+                    ),
+                    severity="warning",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={},
+                )
+            )
+        if mapping_worktree and issue_worktree and mapping_worktree != issue_worktree:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-worktree-path-conflict",
+                    summary=(
+                        f"{changeset_id} metadata worktree path {issue_worktree!r} conflicts "
+                        f"with mapping {mapping_worktree!r}."
+                    ),
+                    remediation=(
+                        "Run `atelier doctor --fix` to reconcile worktree-path conflicts."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={
+                        "metadata_worktree_path": issue_worktree,
+                        "mapping_worktree_path": mapping_worktree,
+                    },
+                )
+            )
+        if epic_root and metadata_root and epic_root != metadata_root:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-root-branch-conflict",
+                    summary=(
+                        f"{changeset_id} metadata root branch {metadata_root!r} conflicts "
+                        f"with epic root {epic_root!r}."
+                    ),
+                    remediation=(
+                        "Run `atelier doctor --fix` or re-run startup to reconcile lineage metadata."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={
+                        "metadata_root_branch": metadata_root,
+                        "epic_root_branch": epic_root,
+                    },
+                )
+            )
+        if mapping_root and metadata_root and mapping_root != metadata_root:
+            findings.append(
+                _DoctorFinding(
+                    code="metadata-mapping-root-branch-conflict",
+                    summary=(
+                        f"{changeset_id} metadata root branch {metadata_root!r} conflicts "
+                        f"with mapping root {mapping_root!r}."
+                    ),
+                    remediation=(
+                        "Run `atelier doctor --fix` to align mapping and lineage root branches."
+                    ),
+                    severity="error",
+                    epic_id=epic_id,
+                    changeset_id=changeset_id,
+                    details={
+                        "metadata_root_branch": metadata_root,
+                        "mapping_root_branch": mapping_root,
+                    },
+                )
+            )
+
+    return _DoctorCheckFamily(
+        check_id="worktree_branch_metadata_readiness",
+        title="Worktree/Branch Metadata Readiness",
+        description=(
+            "Detects startup-blocking lineage and mapping inconsistencies for in-progress/blocked "
+            "changesets; open changesets are evaluated for conflicts only."
+        ),
+        in_scope_changesets=len(in_scope),
+        findings=tuple(
+            sorted(
+                findings,
+                key=lambda item: (
+                    item.changeset_id or "",
+                    item.code,
+                    item.epic_id or "",
+                ),
+            )
+        ),
+    )
+
+
+def _prefix_drift_remediation(
+    action: prefix_migration_drift.PrefixMigrationRepairAction,
     *,
     fix: bool,
-) -> None:
-    console = Console()
-    overview = Table(title="Prefix Migration Doctor", box=box.SIMPLE, show_header=False)
-    overview.add_column("Field", style="bold")
-    overview.add_column("Value", overflow="fold")
-    overview.add_row("Project dir", _display_value(project_info.get("project_dir")))
-    overview.add_row("Repo root", _display_value(project_info.get("repo_root")))
-    overview.add_row("Beads root", _display_value(project_info.get("beads_root")))
-    overview.add_row("Mode", "fix" if fix else "check")
-    overview.add_row(
-        "Drifted changesets",
-        _display_value(counts.get("changesets_drifted")),
-    )
-    overview.add_row(
-        "Changesets needing updates",
-        _display_value(counts.get("changesets_changed")),
-    )
-    overview.add_row(
-        "Changesets updated",
-        _display_value(counts.get("changesets_applied")),
-    )
-    console.print(overview)
-    if not actions:
-        console.print("No prefix-migration drift detected.")
-        return
+) -> str:
+    notes: list[str] = []
+    if action.changed:
+        if fix:
+            notes.append("repair applied in fix mode")
+        else:
+            notes.append("run `atelier doctor --fix` to apply canonical repair")
+    else:
+        notes.append("no persistent update required")
+    if "work-branch-conflict" in action.drift_classes:
+        notes.append("resolves startup work-branch override conflicts")
+    if "worktree-path-conflict" in action.drift_classes:
+        notes.append("aligns changeset worktree path metadata/mapping")
+    return "; ".join(notes)
 
-    table = Table(title="Drift Details", box=box.SIMPLE)
-    table.add_column("Changeset", no_wrap=True)
-    table.add_column("Drift", overflow="fold")
-    table.add_column("Canonical", overflow="fold")
-    table.add_column("Worktree", overflow="fold")
-    table.add_column("Action", overflow="fold")
-    for action in actions:
-        canonical = (
-            f"root={action.canonical_root_branch}, "
-            f"work={action.canonical_work_branch} ({action.work_branch_source})"
+
+def _collect_doctor_context(
+    *,
+    project_data_dir: Path,
+    beads_root: Path,
+    repo_root: Path,
+) -> _DoctorContext:
+    epics = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
+    epics_by_id: dict[str, dict[str, object]] = {}
+    mappings_by_epic: dict[str, worktrees.WorktreeMapping | None] = {}
+    for issue in epics:
+        epic_id = _normalize_text(issue.get("id"))
+        if epic_id is None:
+            continue
+        epics_by_id[epic_id] = issue
+        mappings_by_epic[epic_id] = worktrees.load_mapping(
+            worktrees.mapping_path(project_data_dir, epic_id)
         )
-        worktree = f"{action.canonical_worktree_path} ({action.worktree_path_source})"
-        table.add_row(
-            action.changeset_id,
-            ", ".join(action.drift_classes),
-            canonical,
-            worktree,
-            _action_summary(action),
+
+    changesets: list[dict[str, object]] = []
+    changeset_to_epic: dict[str, str] = {}
+    seen_changesets: set[str] = set()
+
+    for epic_id in sorted(epics_by_id):
+        descendants = beads.list_descendant_changesets(
+            epic_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=True,
         )
-    console.print(table)
-    if not fix:
-        console.print("Run `atelier doctor --fix` to apply the planned updates.")
+        if descendants:
+            for issue in descendants:
+                changeset_id = _normalize_text(issue.get("id"))
+                if changeset_id is None or changeset_id in seen_changesets:
+                    continue
+                seen_changesets.add(changeset_id)
+                changesets.append(issue)
+                changeset_to_epic[changeset_id] = epic_id
+            continue
+        work_children = beads.list_work_children(
+            epic_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=True,
+        )
+        if work_children:
+            continue
+        changeset_id = epic_id
+        if changeset_id in seen_changesets:
+            continue
+        seen_changesets.add(changeset_id)
+        changesets.append(epics_by_id[epic_id])
+        changeset_to_epic[changeset_id] = epic_id
+
+    changesets = sorted(changesets, key=lambda issue: str(issue.get("id") or ""))
+    fields_by_changeset: dict[str, dict[str, str]] = {}
+    for issue in changesets:
+        issue_id = _normalize_text(issue.get("id"))
+        if issue_id is None:
+            continue
+        fields_by_changeset[issue_id] = changeset_fields.issue_fields(issue)
+
+    return _DoctorContext(
+        project_data_dir=project_data_dir,
+        epics_by_id=epics_by_id,
+        changesets=changesets,
+        changeset_to_epic=changeset_to_epic,
+        fields_by_changeset=fields_by_changeset,
+        mappings_by_epic=mappings_by_epic,
+    )
 
 
-def _action_summary(action: prefix_migration_drift.PrefixMigrationRepairAction) -> str:
-    targets: list[str] = []
-    if action.update_workspace_root_branch:
-        targets.append("workspace.root_branch")
-    if action.update_changeset_metadata:
-        targets.append("changeset lineage metadata")
-    if action.update_changeset_worktree_path:
-        targets.append("changeset worktree_path metadata")
-    if action.update_mapping:
-        targets.append("worktree mapping")
-    if not targets:
-        return "no-op"
-    if action.applied:
-        return "updated " + ", ".join(targets)
-    return "would update " + ", ".join(targets)
-
-
-def _display_value(value: object) -> str:
-    if value is None or value == "":
-        return "unknown"
-    return str(value)
-
-
-def _active_agent_hook_blockers(
+def _collect_agent_runtime(
     *,
     beads_root: Path,
     repo_root: Path,
-) -> list[_ActiveHookBlocker]:
+) -> tuple[dict[str, tuple[str, ...]], dict[str, _AgentRuntime]]:
     stale_delta = dt.timedelta(hours=_ACTIVE_HOOK_STALE_HOURS)
     now = dt.datetime.now(tz=dt.timezone.utc)
-    blockers: list[_ActiveHookBlocker] = []
+    hook_map: dict[str, set[str]] = {}
+    agent_index: dict[str, _AgentRuntime] = {}
+
     issues = beads.run_bd_json(
         ["list", "--label", beads.issue_label("agent", beads_root=beads_root)],
         beads_root=beads_root,
@@ -184,20 +841,14 @@ def _active_agent_hook_blockers(
     for issue in issues:
         description = issue.get("description")
         fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-        agent_id = fields.get("agent_id") or issue.get("title") or issue.get("id") or ""
-        if not isinstance(agent_id, str):
-            agent_id = str(agent_id)
-        agent_id = agent_id.strip()
-        if not agent_id:
+        agent_id = _normalize_text(fields.get("agent_id")) or _normalize_text(issue.get("title"))
+        if agent_id is None:
+            agent_id = _normalize_text(issue.get("id"))
+        if agent_id is None:
             continue
-        issue_id = issue.get("id")
-        hook_bead = None
-        if isinstance(issue_id, str) and issue_id:
-            hook_bead = beads.get_agent_hook(issue_id, beads_root=beads_root, cwd=repo_root)
-        if not hook_bead:
-            hook_bead = fields.get("hook_bead")
-        if not isinstance(hook_bead, str) or not hook_bead:
-            continue
+        hook_bead = _agent_hook_for_issue_no_write(
+            issue, beads_root=beads_root, repo_root=repo_root
+        )
         heartbeat_at = (
             fields.get("heartbeat_at") if isinstance(fields.get("heartbeat_at"), str) else None
         )
@@ -207,17 +858,96 @@ def _active_agent_hook_blockers(
             now=now,
             stale_delta=stale_delta,
         )
-        if session_state == "stale":
+        runtime = _AgentRuntime(
+            agent_id=agent_id,
+            hook_bead=hook_bead,
+            session_state=session_state,
+            heartbeat_at=heartbeat_at,
+        )
+        agent_index[agent_id] = runtime
+        if hook_bead:
+            hook_map.setdefault(hook_bead, set()).add(agent_id)
+
+    normalized_hook_map = {
+        hook_bead: tuple(sorted(agent_ids))
+        for hook_bead, agent_ids in sorted(hook_map.items(), key=lambda item: item[0])
+    }
+    return normalized_hook_map, agent_index
+
+
+def _agent_hook_for_issue_no_write(
+    issue: dict[str, object],
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> str | None:
+    issue_id = _normalize_text(issue.get("id"))
+    if issue_id:
+        result = beads.run_bd_command(
+            ["slot", "show", issue_id, "--json"],
+            beads_root=beads_root,
+            cwd=repo_root,
+            allow_failure=True,
+        )
+        if result.returncode == 0:
+            raw = result.stdout.strip() if result.stdout else ""
+            if raw:
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    payload = None
+                hook = _extract_hook_from_slot_payload(payload)
+                if hook:
+                    return hook
+    description = issue.get("description")
+    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
+    return _normalize_text(fields.get("hook_bead"))
+
+
+def _extract_hook_from_slot_payload(payload: object) -> str | None:
+    if isinstance(payload, str):
+        return _normalize_text(payload)
+    if isinstance(payload, list):
+        for item in payload:
+            hook = _extract_hook_from_slot_payload(item)
+            if hook:
+                return hook
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if "hook" in payload:
+        return _extract_hook_from_slot_payload(payload.get("hook"))
+    slots = payload.get("slots")
+    if isinstance(slots, dict):
+        return _extract_hook_from_slot_payload(slots.get("hook"))
+    for key in ("id", "issue_id", "bead_id", "bead"):
+        value = _normalize_text(payload.get(key))
+        if value:
+            return value
+    return None
+
+
+def _active_agent_hook_blockers(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[_ActiveHookBlocker]:
+    blockers: list[_ActiveHookBlocker] = []
+    _hook_map, agent_index = _collect_agent_runtime(beads_root=beads_root, repo_root=repo_root)
+    for agent_id, runtime in sorted(agent_index.items(), key=lambda item: item[0]):
+        if runtime.hook_bead is None:
+            continue
+        if runtime.session_state == "stale":
             continue
         blockers.append(
             _ActiveHookBlocker(
                 agent_id=agent_id,
-                hook_bead=hook_bead,
-                session_state=session_state,
-                heartbeat_at=heartbeat_at,
+                hook_bead=runtime.hook_bead,
+                session_state=runtime.session_state,
+                heartbeat_at=runtime.heartbeat_at,
             )
         )
-    return sorted(blockers, key=lambda blocker: (blocker.hook_bead, blocker.agent_id))
+    return blockers
 
 
 def _agent_hook_session_state(
@@ -253,6 +983,180 @@ def _parse_rfc3339(value: str | None) -> dt.datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=dt.timezone.utc)
     return parsed
+
+
+def _render_doctor(
+    *,
+    project_info: Mapping[str, str],
+    counts: Mapping[str, int],
+    checks: tuple[_DoctorCheckFamily, ...],
+    actions: list[prefix_migration_drift.PrefixMigrationRepairAction],
+    fix: bool,
+) -> None:
+    console = Console()
+    overview = Table(title="Project Doctor", box=box.SIMPLE, show_header=False)
+    overview.add_column("Field", style="bold")
+    overview.add_column("Value", overflow="fold")
+    overview.add_row("Project dir", _display_value(project_info.get("project_dir")))
+    overview.add_row("Repo root", _display_value(project_info.get("repo_root")))
+    overview.add_row("Beads root", _display_value(project_info.get("beads_root")))
+    overview.add_row("Mode", "fix" if fix else "check")
+    overview.add_row("Scope", "project health checks (read-only unless `--fix`)")
+    overview.add_row("Changesets", _display_value(counts.get("changesets_total")))
+    overview.add_row("In-progress changesets", _display_value(counts.get("changesets_in_progress")))
+    overview.add_row("Blocked changesets", _display_value(counts.get("changesets_blocked")))
+    overview.add_row("Findings", _display_value(counts.get("findings_total")))
+    overview.add_row("Startup blockers", _display_value(counts.get("startup_blockers")))
+    console.print(overview)
+
+    summary = Table(title="Health Check Summary", box=box.SIMPLE)
+    summary.add_column("Check", no_wrap=True)
+    summary.add_column("In Scope", justify="right")
+    summary.add_column("Findings", justify="right")
+    summary.add_column("Changesets", justify="right")
+    summary.add_column("Startup Blockers", justify="right")
+    for check in checks:
+        summary.add_row(
+            check.title,
+            str(check.in_scope_changesets),
+            str(len(check.findings)),
+            str(check.changesets_with_findings),
+            str(check.startup_blockers),
+        )
+    console.print(summary)
+
+    if not any(check.findings for check in checks):
+        console.print("No health findings detected.")
+        return
+
+    for check in checks:
+        if not check.findings:
+            continue
+        if check.check_id == "prefix_migration_drift":
+            _render_prefix_drift_findings(console, actions)
+            continue
+        _render_check_findings(console, check)
+
+    if not fix and any(action.changed for action in actions):
+        console.print("Run `atelier doctor --fix` to apply prefix-migration drift repairs.")
+
+
+def _render_prefix_drift_findings(
+    console: Console,
+    actions: list[prefix_migration_drift.PrefixMigrationRepairAction],
+) -> None:
+    table = Table(title="Prefix Migration Drift Findings", box=box.SIMPLE)
+    table.add_column("Changeset", no_wrap=True)
+    table.add_column("Drift", overflow="fold")
+    table.add_column("Canonical", overflow="fold")
+    table.add_column("Worktree", overflow="fold")
+    table.add_column("Action", overflow="fold")
+    for action in sorted(actions, key=lambda item: (item.changeset_id, item.epic_id)):
+        canonical = (
+            f"root={action.canonical_root_branch}, "
+            f"work={action.canonical_work_branch} ({action.work_branch_source})"
+        )
+        worktree = f"{action.canonical_worktree_path} ({action.worktree_path_source})"
+        table.add_row(
+            action.changeset_id,
+            ", ".join(action.drift_classes),
+            canonical,
+            worktree,
+            _action_summary(action),
+        )
+    console.print(table)
+
+
+def _render_check_findings(console: Console, check: _DoctorCheckFamily) -> None:
+    table = Table(title=f"{check.title} Findings", box=box.SIMPLE)
+    table.add_column("Changeset", no_wrap=True)
+    table.add_column("Code", no_wrap=True)
+    table.add_column("Summary", overflow="fold")
+    table.add_column("Remediation", overflow="fold")
+    for finding in check.findings:
+        table.add_row(
+            finding.changeset_id or "-",
+            finding.code,
+            finding.summary,
+            finding.remediation,
+        )
+    console.print(table)
+
+
+def _action_summary(action: prefix_migration_drift.PrefixMigrationRepairAction) -> str:
+    targets: list[str] = []
+    if action.update_workspace_root_branch:
+        targets.append("workspace.root_branch")
+    if action.update_changeset_metadata:
+        targets.append("changeset lineage metadata")
+    if action.update_changeset_worktree_path:
+        targets.append("changeset worktree_path metadata")
+    if action.update_mapping:
+        targets.append("worktree mapping")
+    if not targets:
+        return "no-op"
+    if action.applied:
+        return "updated " + ", ".join(targets)
+    return "would update " + ", ".join(targets)
+
+
+def _normalize_assignee(value: object) -> str | None:
+    if isinstance(value, str):
+        return _normalize_text(value)
+    if isinstance(value, dict):
+        for key in ("id", "name", "login"):
+            normalized = _normalize_text(value.get(key))
+            if normalized:
+                return normalized
+    return None
+
+
+def _normalize_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or cleaned.lower() == "null":
+        return None
+    return cleaned
+
+
+def _normalize_worktree_path(value: object, *, project_data_dir: Path) -> str | None:
+    normalized = _normalize_text(value)
+    if normalized is None:
+        return None
+    candidate = Path(normalized)
+    if candidate.is_absolute():
+        try:
+            candidate = candidate.relative_to(project_data_dir)
+        except ValueError:
+            return candidate.as_posix()
+    return candidate.as_posix().lstrip("./")
+
+
+def _latest_blocked_note_line(notes: object) -> str | None:
+    if not isinstance(notes, str):
+        return None
+    for line in reversed(notes.splitlines()):
+        cleaned = line.strip()
+        if cleaned.startswith("blocked_at:"):
+            return cleaned
+    return None
+
+
+def _parse_blocked_note(line: str) -> tuple[str | None, str | None]:
+    match = _BLOCKED_NOTE_RE.match(line.strip())
+    if not match:
+        return None, None
+    timestamp = _normalize_text(match.group("timestamp"))
+    raw_reason = match.group("reason")
+    reason = raw_reason.strip() if isinstance(raw_reason, str) else ""
+    return timestamp, reason or None
+
+
+def _display_value(value: object) -> str:
+    if value is None or value == "":
+        return "unknown"
+    return str(value)
 
 
 def _active_hook_blockers_message(blockers: list[_ActiveHookBlocker]) -> str:

@@ -184,8 +184,14 @@ Atelier planning state. They are treated as external ticket sources.
 
 - `atelier doctor`
 
-  - Detects prefix-migration branch/worktree drift in read-only mode by default.
-  - Applies canonical metadata/mapping repairs only when `--fix` is provided.
+  - Reports project health across four check families: `prefix_migration_drift`,
+    `in_progress_ownership_hook_consistency`,
+    `blocked_state_reason_consistency`, and
+    `worktree_branch_metadata_readiness`.
+  - Stays read-only in default check mode and does not mutate Beads/worktree
+    state.
+  - Applies canonical prefix-drift metadata/mapping repairs only when `--fix` is
+    provided.
   - Blocks `--fix` when active hooks are detected unless `--force` is provided.
   - Does not trigger `atelier gc`.
 

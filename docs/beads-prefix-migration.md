@@ -42,11 +42,18 @@ atelier doctor
 
 Interpretation:
 
-- `Drifted changesets`: changesets with branch/path conflicts.
-- `Changesets needing updates`: subset where canonicalization would change
-  metadata or mapping state.
-- The details table lists canonical root/work/worktree values and whether the
-  run `would update` each target.
+- `atelier doctor` now reports four deterministic health sections:
+  - `prefix_migration_drift`
+  - `in_progress_ownership_hook_consistency`
+  - `blocked_state_reason_consistency`
+  - `worktree_branch_metadata_readiness`
+- Prefix drift remains a distinct check and still reports canonical
+  root/work/worktree repair targets.
+- Additional read-only checks provide project-wide context (for example
+  in-progress assignee/hook mismatches, blocked items missing reason notes, and
+  startup-blocking work-branch/worktree metadata conflicts).
+- `--fix` remains scoped to prefix-migration drift repair only; all other checks
+  remain observational.
 
 For machine-readable output:
 
