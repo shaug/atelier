@@ -37,6 +37,306 @@ class StartupCommandResult:
     parity_report: beads.EpicDiscoveryParityReport
 
 
+@dataclass(frozen=True)
+class StartupMessageSummary:
+    """Structured inbox message summary for startup triage rendering."""
+
+    issue_id: str
+    title: str
+
+
+@dataclass(frozen=True)
+class StartupQueuedMessageSummary:
+    """Structured queued-message summary for startup triage rendering."""
+
+    issue_id: str
+    queue: str
+    title: str
+    claimed_by: str | None
+
+
+@dataclass(frozen=True)
+class StartupIdentityViolationSummary:
+    """Structured identity guardrail violation metadata."""
+
+    issue_id: str
+    status: str
+    issue_type: str
+    labels: tuple[str, ...]
+    remediation_command: str
+
+
+@dataclass(frozen=True)
+class StartupIssueSummary:
+    """Structured issue summary used in deferred and parity sections."""
+
+    issue_id: str
+    status: str
+    title: str
+
+
+@dataclass(frozen=True)
+class StartupDeferredChangesetGroup:
+    """Deferred changesets grouped under one active epic."""
+
+    epic: StartupIssueSummary
+    changesets: tuple[StartupIssueSummary, ...]
+
+
+@dataclass(frozen=True)
+class StartupTriageDiagnostics:
+    """Structured startup diagnostics for deterministic rendering."""
+
+    beads_root: str
+    total_epics: int
+    active_top_level_work_count: int
+    indexed_active_epic_count: int
+    in_parity: bool
+    identity_violations: tuple[StartupIdentityViolationSummary, ...]
+    missing_from_index: tuple[str, ...]
+    deferred_scan_limit: int
+    deferred_scan_skipped_epics: int
+
+
+@dataclass(frozen=True)
+class StartupTriageModel:
+    """Typed startup triage model consumed by the markdown renderer."""
+
+    inbox_messages: tuple[StartupMessageSummary, ...]
+    queued_messages: tuple[StartupQueuedMessageSummary, ...]
+    deferred_changesets: tuple[StartupDeferredChangesetGroup, ...]
+    diagnostics: StartupTriageDiagnostics
+    epic_list_markdown: str
+
+
+def _issue_sort_key(issue: dict[str, object]) -> tuple[str, str]:
+    issue_id = str(issue.get("id") or "").strip()
+    title = str(issue.get("title") or "").strip()
+    return (issue_id, title)
+
+
+def _issue_status(issue: dict[str, object]) -> str:
+    canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
+    if canonical_status:
+        return canonical_status
+    raw_status = str(issue.get("status") or "").strip()
+    return raw_status or "unknown"
+
+
+def _issue_title(issue: dict[str, object]) -> str:
+    title = str(issue.get("title") or "").strip()
+    return title or "(untitled)"
+
+
+def _issue_id(issue: dict[str, object]) -> str:
+    issue_id = str(issue.get("id") or "").strip()
+    return issue_id or "(unknown)"
+
+
+def build_startup_triage_model(
+    *,
+    beads_root: Path,
+    command_result: StartupCommandResult,
+    deferred_groups: list[tuple[dict[str, object], list[dict[str, object]]]],
+    deferred_scan_limit: int,
+    deferred_scan_skipped_epics: int,
+    epic_list_markdown: str,
+) -> StartupTriageModel:
+    """Build a typed startup triage model from collected command outputs.
+
+    Args:
+        beads_root: Beads root path used by startup triage.
+        command_result: Canonical startup command outputs.
+        deferred_groups: Deferred changesets grouped by active epic.
+        deferred_scan_limit: Active epic scan limit used for deferred discovery.
+        deferred_scan_skipped_epics: Number of active epics skipped due to the
+            configured deferred scan limit.
+        epic_list_markdown: Stable `epic-list` section text.
+
+    Returns:
+        Structured startup triage model consumed by deterministic rendering.
+    """
+
+    inbox_messages = tuple(
+        StartupMessageSummary(
+            issue_id=_issue_id(issue),
+            title=_issue_title(issue),
+        )
+        for issue in sorted(command_result.inbox_messages, key=_issue_sort_key)
+    )
+    queued_messages = tuple(
+        StartupQueuedMessageSummary(
+            issue_id=_issue_id(issue),
+            queue=str(issue.get("queue") or "").strip() or "queue",
+            title=_issue_title(issue),
+            claimed_by=(
+                claimed_by.strip()
+                if isinstance(claimed_by := issue.get("claimed_by"), str) and claimed_by.strip()
+                else None
+            ),
+        )
+        for issue in sorted(command_result.queued_messages, key=_issue_sort_key)
+    )
+
+    normalized_groups: list[StartupDeferredChangesetGroup] = []
+    for epic, changesets in sorted(deferred_groups, key=lambda group: _issue_sort_key(group[0])):
+        normalized_groups.append(
+            StartupDeferredChangesetGroup(
+                epic=StartupIssueSummary(
+                    issue_id=_issue_id(epic),
+                    status=_issue_status(epic),
+                    title=_issue_title(epic),
+                ),
+                changesets=tuple(
+                    StartupIssueSummary(
+                        issue_id=_issue_id(issue),
+                        status=_issue_status(issue),
+                        title=_issue_title(issue),
+                    )
+                    for issue in sorted(changesets, key=_issue_sort_key)
+                ),
+            )
+        )
+    deferred_changesets = tuple(normalized_groups)
+
+    parity = command_result.parity_report
+    sorted_identity_violations = sorted(
+        tuple(getattr(parity, "missing_executable_identity", ())),
+        key=lambda item: str(getattr(item, "issue_id", "") or "").strip(),
+    )
+    identity_violations = tuple(
+        StartupIdentityViolationSummary(
+            issue_id=str(getattr(item, "issue_id", "") or "").strip() or "(unknown)",
+            status=str(getattr(item, "status", "") or "").strip() or "missing",
+            issue_type=str(getattr(item, "issue_type", "") or "").strip() or "missing",
+            labels=tuple(
+                sorted(
+                    str(label).strip()
+                    for label in tuple(getattr(item, "labels", ()))
+                    if str(label).strip()
+                )
+            ),
+            remediation_command=(
+                str(getattr(item, "remediation_command", "") or "").strip()
+                or "(missing remediation command)"
+            ),
+        )
+        for item in sorted_identity_violations
+    )
+
+    missing_from_index = tuple(
+        sorted(
+            str(issue_id).strip()
+            for issue_id in tuple(getattr(parity, "missing_from_index", ()))
+            if str(issue_id).strip()
+        )
+    )
+    diagnostics = StartupTriageDiagnostics(
+        beads_root=str(beads_root),
+        total_epics=len(command_result.epics),
+        active_top_level_work_count=int(getattr(parity, "active_top_level_work_count", 0)),
+        indexed_active_epic_count=int(getattr(parity, "indexed_active_epic_count", 0)),
+        in_parity=bool(getattr(parity, "in_parity", False)),
+        identity_violations=identity_violations,
+        missing_from_index=missing_from_index,
+        deferred_scan_limit=max(0, int(deferred_scan_limit)),
+        deferred_scan_skipped_epics=max(0, int(deferred_scan_skipped_epics)),
+    )
+    return StartupTriageModel(
+        inbox_messages=inbox_messages,
+        queued_messages=queued_messages,
+        deferred_changesets=deferred_changesets,
+        diagnostics=diagnostics,
+        epic_list_markdown=epic_list_markdown,
+    )
+
+
+def render_startup_triage_markdown(model: StartupTriageModel) -> str:
+    """Render deterministic startup markdown from a typed triage model.
+
+    Args:
+        model: Startup triage model.
+
+    Returns:
+        Stable markdown output for planner startup triage.
+    """
+
+    lines: list[str] = [
+        "Planner startup overview",
+        f"- Beads root: {model.diagnostics.beads_root}",
+    ]
+
+    if model.inbox_messages:
+        lines.append("Unread messages:")
+        for message in model.inbox_messages:
+            lines.append(f"- {message.issue_id} {message.title}")
+    else:
+        lines.append("No unread messages.")
+
+    if model.queued_messages:
+        lines.append("Queued messages:")
+        for queued_message in model.queued_messages:
+            claim_state = (
+                f"claimed by {queued_message.claimed_by}"
+                if queued_message.claimed_by
+                else "unclaimed"
+            )
+            lines.append(
+                f"- {queued_message.issue_id} [{queued_message.queue}] {queued_message.title} "
+                f"| claim: {claim_state}"
+            )
+    else:
+        lines.append("No queued messages.")
+
+    diagnostics = model.diagnostics
+    lines.append(f"- Total epics: {diagnostics.total_epics}")
+    lines.append(
+        "- Active top-level work (open/in_progress/blocked): "
+        f"{diagnostics.active_top_level_work_count}"
+    )
+    lines.append(
+        f"- Indexed active epics (at:epic discovery): {diagnostics.indexed_active_epic_count}"
+    )
+    if diagnostics.in_parity:
+        lines.append("Epic discovery parity: ok")
+    if diagnostics.identity_violations:
+        lines.append("Identity guardrail violations (deterministic remediation):")
+        for violation in diagnostics.identity_violations:
+            labels = ", ".join(violation.labels) if violation.labels else "(none)"
+            lines.append(
+                f"- {violation.issue_id} [status={violation.status} "
+                f"type={violation.issue_type}] labels={labels}"
+            )
+            lines.append(f"  remediation: {violation.remediation_command}")
+    if diagnostics.missing_from_index:
+        lines.append("Discovery index mismatch for executable top-level work:")
+        for issue_id in diagnostics.missing_from_index:
+            lines.append(f"- {issue_id}")
+        lines.append(
+            "  remediation: run `bd prime`; if mismatch persists, run "
+            "`bd doctor --fix --yes` and rerun startup."
+        )
+
+    if model.deferred_changesets:
+        lines.append("Deferred changesets under open/in-progress/blocked epics:")
+        for group in model.deferred_changesets:
+            lines.append(f"- {group.epic.issue_id} [{group.epic.status}] {group.epic.title}")
+            for issue in group.changesets:
+                lines.append(f"  - {issue.issue_id} [{issue.status}] {issue.title}")
+    else:
+        lines.append("No deferred changesets under open/in-progress/blocked epics.")
+
+    if diagnostics.deferred_scan_skipped_epics:
+        lines.append(
+            "Deferred changeset scan limited to first "
+            f"{diagnostics.deferred_scan_limit} active epics; skipped "
+            f"{diagnostics.deferred_scan_skipped_epics}."
+        )
+
+    lines.extend(model.epic_list_markdown.splitlines())
+    return "\n".join(lines)
+
+
 _STARTUP_COMMAND_PLAN: tuple[StartupCommandStep, ...] = (
     StartupCommandStep(
         name="list_inbox_unread_messages",

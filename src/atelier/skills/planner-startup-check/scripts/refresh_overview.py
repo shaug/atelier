@@ -13,7 +13,9 @@ from atelier.beads_context import resolve_runtime_repo_dir_hint, resolve_skill_b
 from atelier.planner_startup_check import (
     StartupBeadsInvocationHelper,
     StartupCommandResult,
+    build_startup_triage_model,
     execute_startup_command_plan,
+    render_startup_triage_markdown,
 )
 
 DEFAULT_DEFERRED_EPIC_SCAN_LIMIT = 25
@@ -23,13 +25,6 @@ def _issue_sort_key(issue: dict[str, object]) -> tuple[str, str]:
     issue_id = str(issue.get("id") or "").strip()
     title = str(issue.get("title") or "").strip()
     return (issue_id, title)
-
-
-def _queue_claim_state(issue: dict[str, object]) -> str:
-    claimed_by = issue.get("claimed_by")
-    if isinstance(claimed_by, str) and claimed_by.strip():
-        return f"claimed by {claimed_by.strip()}"
-    return "unclaimed"
 
 
 def _deferred_descendant_changesets(
@@ -80,40 +75,6 @@ def _deferred_epic_scan_limit() -> int:
     return max(0, parsed_limit)
 
 
-def _append_deferred_changeset_summary(
-    lines: list[str],
-    epics: list[dict[str, object]],
-    *,
-    helper: StartupBeadsInvocationHelper,
-) -> None:
-    groups, skipped_epics, scan_limit = _deferred_descendant_changesets(
-        epics,
-        helper=helper,
-    )
-    if not groups:
-        lines.append("No deferred changesets under open/in-progress/blocked epics.")
-    else:
-        lines.append("Deferred changesets under open/in-progress/blocked epics:")
-        for epic, deferred in groups:
-            epic_id = str(epic.get("id") or "").strip() or "(unknown)"
-            epic_status = lifecycle.canonical_lifecycle_status(epic.get("status")) or "unknown"
-            epic_title = str(epic.get("title") or "").strip() or "(untitled)"
-            lines.append(f"- {epic_id} [{epic_status}] {epic_title}")
-            for issue in deferred:
-                issue_id = str(issue.get("id") or "").strip() or "(unknown)"
-                issue_status = (
-                    lifecycle.canonical_lifecycle_status(issue.get("status")) or "unknown"
-                )
-                issue_title = str(issue.get("title") or "").strip() or "(untitled)"
-                lines.append(f"  - {issue_id} [{issue_status}] {issue_title}")
-
-    if skipped_epics:
-        lines.append(
-            "Deferred changeset scan limited to first "
-            f"{scan_limit} active epics; skipped {skipped_epics}."
-        )
-
-
 def _resolve_agent_id(requested_agent_id: str | None) -> str:
     candidate = str(requested_agent_id or "").strip()
     if candidate:
@@ -154,66 +115,24 @@ def _startup_helper(*, beads_root: Path, repo_root: Path) -> StartupBeadsInvocat
 
 
 def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path) -> str:
-    lines: list[str] = ["Planner startup overview", f"- Beads root: {beads_root}"]
     helper = _startup_helper(beads_root=beads_root, repo_root=repo_root)
     command_result: StartupCommandResult = execute_startup_command_plan(
         agent_id,
         helper=helper,
     )
-
-    inbox = command_result.inbox_messages
-    if inbox:
-        lines.append("Unread messages:")
-        for issue in sorted(inbox, key=_issue_sort_key):
-            lines.append(f"- {issue.get('id') or ''} {issue.get('title') or ''}")
-    else:
-        lines.append("No unread messages.")
-
-    queued = command_result.queued_messages
-    if queued:
-        lines.append("Queued messages:")
-        for issue in sorted(queued, key=_issue_sort_key):
-            lines.append(
-                f"- {issue.get('id') or ''} [{issue.get('queue') or 'queue'}] "
-                f"{issue.get('title') or ''} | claim: {_queue_claim_state(issue)}"
-            )
-    else:
-        lines.append("No queued messages.")
-
-    epics = command_result.epics
-    lines.append(f"- Total epics: {len(epics)}")
-    parity = command_result.parity_report
-    lines.append(
-        f"- Active top-level work (open/in_progress/blocked): {parity.active_top_level_work_count}"
-    )
-    lines.append(f"- Indexed active epics (at:epic discovery): {parity.indexed_active_epic_count}")
-    if parity.in_parity:
-        lines.append("Epic discovery parity: ok")
-    if parity.missing_executable_identity:
-        lines.append("Identity guardrail violations (deterministic remediation):")
-        for violation in parity.missing_executable_identity:
-            labels = ", ".join(violation.labels) if violation.labels else "(none)"
-            lines.append(
-                f"- {violation.issue_id} [status={violation.status or 'missing'} "
-                f"type={violation.issue_type or 'missing'}] labels={labels}"
-            )
-            lines.append(f"  remediation: {violation.remediation_command}")
-    if parity.missing_from_index:
-        lines.append("Discovery index mismatch for executable top-level work:")
-        for issue_id in parity.missing_from_index:
-            lines.append(f"- {issue_id}")
-        lines.append(
-            "  remediation: run `bd prime`; if mismatch persists, run "
-            "`bd doctor --fix --yes` and rerun startup."
-        )
-
-    _append_deferred_changeset_summary(
-        lines,
-        epics,
+    deferred_groups, skipped_epics, scan_limit = _deferred_descendant_changesets(
+        command_result.epics,
         helper=helper,
     )
-    lines.extend(planner_overview.render_epics(epics, show_drafts=True).splitlines())
-    return "\n".join(lines)
+    triage_model = build_startup_triage_model(
+        beads_root=beads_root,
+        command_result=command_result,
+        deferred_groups=deferred_groups,
+        deferred_scan_limit=scan_limit,
+        deferred_scan_skipped_epics=skipped_epics,
+        epic_list_markdown=planner_overview.render_epics(command_result.epics, show_drafts=True),
+    )
+    return render_startup_triage_markdown(triage_model)
 
 
 def main() -> None:
