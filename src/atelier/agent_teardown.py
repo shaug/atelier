@@ -115,11 +115,6 @@ def _has_active_epic_ownership(
     for issue in assigned_issues:
         if not isinstance(issue, dict):
             continue
-        # Prefer explicit ownership metadata when present, but fail closed when
-        # list payloads omit assignee/owner fields.
-        owner_claim = _clean_text(issue.get("assignee")) or _clean_text(issue.get("owner"))
-        if owner_claim is not None and owner_claim != agent_id:
-            continue
         if lifecycle.canonical_lifecycle_status(issue.get("status")) == "closed":
             continue
         labels = lifecycle.normalized_labels(issue.get("labels"))
@@ -129,8 +124,17 @@ def _has_active_epic_ownership(
             parent_id=_issue_parent_id(issue),
             has_work_children=False,
         )
-        if role.is_work and role.is_epic:
+        if not (role.is_work and role.is_epic):
+            continue
+        assignee_claim = _clean_text(issue.get("assignee"))
+        owner_claim = _clean_text(issue.get("owner"))
+        # Conflicting ownership metadata is ambiguous; block close fail-closed.
+        if assignee_claim and owner_claim and assignee_claim != owner_claim:
             return True
+        ownership_claims = {claim for claim in (assignee_claim, owner_claim) if claim is not None}
+        if ownership_claims and agent_id not in ownership_claims:
+            continue
+        return True
     return False
 
 
