@@ -402,7 +402,8 @@ def _build_startup_lineage_check(*, context: _DoctorContext) -> _DoctorCheckFami
                         f"with mapping {mapping_work!r}."
                     ),
                     remediation=(
-                        "Run `atelier doctor --fix` to resolve work-branch override conflicts."
+                        "Run `atelier normalize-prefix --apply` to resolve work-branch "
+                        "override conflicts."
                     ),
                     severity="error",
                     epic_id=epic_id,
@@ -423,7 +424,8 @@ def _build_startup_lineage_check(*, context: _DoctorContext) -> _DoctorCheckFami
                         f"with mapping {mapping_worktree!r}."
                     ),
                     remediation=(
-                        "Run `atelier doctor --fix` to reconcile worktree-path conflicts."
+                        "Run `atelier normalize-prefix --apply` to reconcile worktree-path "
+                        "conflicts."
                     ),
                     severity="error",
                     epic_id=epic_id,
@@ -444,7 +446,8 @@ def _build_startup_lineage_check(*, context: _DoctorContext) -> _DoctorCheckFami
                         f"with epic root {epic_root!r}."
                     ),
                     remediation=(
-                        "Run `atelier doctor --fix` or rerun startup to reconcile lineage metadata."
+                        "Run `atelier normalize-prefix --apply` or rerun startup to reconcile "
+                        "lineage metadata."
                     ),
                     severity="error",
                     epic_id=epic_id,
@@ -465,7 +468,8 @@ def _build_startup_lineage_check(*, context: _DoctorContext) -> _DoctorCheckFami
                         f"with mapping root {mapping_root!r}."
                     ),
                     remediation=(
-                        "Run `atelier doctor --fix` to align mapping and lineage root branches."
+                        "Run `atelier normalize-prefix --apply` to align mapping and lineage "
+                        "root branches."
                     ),
                     severity="error",
                     epic_id=epic_id,
@@ -625,7 +629,7 @@ def _prefix_drift_remediation(
         if fix:
             notes.append("repair applied in fix mode")
         else:
-            notes.append("run `atelier doctor --fix` to apply canonical repair")
+            notes.append("run `atelier normalize-prefix --apply` to apply canonical repair")
     else:
         notes.append("no persistent update required")
     if "work-branch-conflict" in action.drift_classes:
@@ -926,7 +930,9 @@ def _render_doctor(
         _render_check_findings(console, check)
 
     if not fix and any(action.changed for action in actions):
-        console.print("Run `atelier doctor --fix` to apply prefix-migration drift repairs.")
+        console.print(
+            "Run `atelier normalize-prefix --apply` to apply prefix-migration drift repairs."
+        )
 
 
 def _render_prefix_drift_findings(

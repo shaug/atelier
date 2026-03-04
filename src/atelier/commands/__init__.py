@@ -5,6 +5,7 @@ from .doctor import doctor
 from .init import InitProjectArgs, init_project
 from .list import list_workspaces
 from .new import new_project
+from .normalize_prefix import normalize_prefix
 from .open import open_worktree
 from .plan import run_planner
 from .policy import edit_policy
@@ -18,6 +19,7 @@ __all__ = [
     "init_project",
     "list_workspaces",
     "new_project",
+    "normalize_prefix",
     "open_worktree",
     "run_planner",
     "show_config",
