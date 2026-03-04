@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -147,6 +148,9 @@ def test_prepare_agent_session_does_not_warn_for_self_scoped_agent_id(monkeypatc
     monkeypatch.setattr(
         session_agent.agents, "get_agent", lambda _name: _FakeAgentSpec(name="codex")
     )
+    for key in list(os.environ):
+        if key.startswith("ATELIER_"):
+            monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/worker/codex/p100")
     agent = agent_home.AgentHome(
         name="codex",
@@ -174,7 +178,7 @@ def test_prepare_agent_session_does_not_warn_for_self_scoped_agent_id(monkeypatc
     )
 
     warning_logs = [msg for msg in control.logs if "Would emit runtime env warning:" in msg]
-    assert all("ATELIER_AGENT_ID" not in msg for msg in warning_logs)
+    assert warning_logs == []
 
 
 def test_prepare_agent_session_warns_for_cross_session_agent_id(monkeypatch) -> None:
