@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import ANY, Mock, patch
+from unittest.mock import ANY, Mock, call, patch
 
 import pytest
 
@@ -322,6 +322,79 @@ def test_prepare_worktrees_review_feedback_resume_logs_lineage_mapping_path_synt
         "(worktrees/at-legacy)" in line
         for line in logs
     )
+
+
+def test_resolve_lineage_repair_prefers_open_pr_head_and_checked_out_path(tmp_path: Path) -> None:
+    legacy_path = tmp_path / "worktrees" / "at-legacy.1"
+    legacy_path.mkdir(parents=True)
+    (legacy_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+    mapping = worktrees.WorktreeMapping(
+        epic_id="ts-new",
+        worktree_path="worktrees/ts-new",
+        root_branch="feat/new",
+        changesets={"ts-new.1": "feat/new-ts-new.1"},
+        changeset_worktrees={"ts-new.1": "worktrees/at-legacy.1"},
+    )
+    issue = {
+        "id": "ts-new.1",
+        "description": (
+            "changeset.root_branch: feat/new\n"
+            "changeset.parent_branch: feat/new\n"
+            "changeset.work_branch: feat/new-ts-new.1\n"
+        ),
+    }
+
+    with (
+        patch(
+            "atelier.worker.session.worktree.git.git_current_branch",
+            return_value="feat/legacy-ts-new.1",
+        ),
+        patch(
+            "atelier.worker.session.worktree._lookup_open_pr_head",
+            return_value="feat/legacy-ts-new.1",
+        ),
+    ):
+        decision = worktree._resolve_lineage_repair(
+            project_data_dir=tmp_path,
+            repo_slug="acme/repo",
+            changeset_id="ts-new.1",
+            root_branch_value="feat/new",
+            parent_branch_value="feat/new",
+            mapping=mapping,
+            issue=issue,
+            git_path="git",
+        )
+
+    assert decision.work_branch == "feat/legacy-ts-new.1"
+    assert decision.work_branch_source == "open-pr-head"
+    assert decision.worktree_relpath == "worktrees/at-legacy.1"
+    assert decision.worktree_source == "checked-out-worktree"
+    assert decision.metadata_changed is True
+    assert decision.mapping_changed is True
+
+
+def test_lookup_open_pr_head_does_not_force_refresh_on_failed_lookup() -> None:
+    lookup = Mock(
+        side_effect=[
+            worktree.prs.GithubPrLookup(outcome="error", error="network timeout"),
+            worktree.prs.GithubPrLookup(
+                outcome="found",
+                payload={"state": "OPEN", "headRefName": "feat/new-at-epic.1"},
+            ),
+        ]
+    )
+
+    with patch("atelier.worker.session.worktree.prs.lookup_github_pr_status", lookup):
+        head = worktree._lookup_open_pr_head(
+            repo_slug="acme/repo",
+            branch_candidates=("feat/legacy-at-epic.1", "feat/new-at-epic.1"),
+        )
+
+    assert head == "feat/new-at-epic.1"
+    assert lookup.call_args_list == [
+        call("acme/repo", "feat/legacy-at-epic.1"),
+        call("acme/repo", "feat/new-at-epic.1"),
+    ]
 
 
 def test_prepare_worktrees_aligns_child_workspace_parent_branch_from_epic(tmp_path: Path) -> None:

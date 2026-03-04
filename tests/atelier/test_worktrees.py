@@ -658,6 +658,50 @@ def test_reconcile_mapping_ownership_repairs_existing_destination_path_from_meta
         assert repaired_mapping.changeset_worktrees == {"ts-new.1": "worktrees/ts-new.1"}
 
 
+def test_reconcile_changeset_lineage_entries_updates_target_only_and_is_idempotent() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        mapping_file = worktrees.mapping_path(project_dir, "at-epic")
+        mapping_file.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_file,
+            worktrees.WorktreeMapping(
+                epic_id="at-epic",
+                worktree_path="worktrees/at-epic",
+                root_branch="feat/root",
+                changesets={
+                    "at-epic.1": "feat/root-at-epic.1",
+                    "at-epic.2": "feat/root-at-epic.2",
+                },
+                changeset_worktrees={
+                    "at-epic.1": "worktrees/at-epic.1",
+                    "at-epic.2": "worktrees/at-epic.2",
+                },
+            ),
+        )
+
+        updated, changed = worktrees.reconcile_changeset_lineage_entries(
+            project_dir,
+            "at-epic",
+            "at-epic.1",
+            work_branch="feat/legacy-at-epic.1",
+            worktree_relpath="worktrees/legacy-at-epic.1",
+        )
+        second, second_changed = worktrees.reconcile_changeset_lineage_entries(
+            project_dir,
+            "at-epic",
+            "at-epic.1",
+            work_branch="feat/legacy-at-epic.1",
+            worktree_relpath="worktrees/legacy-at-epic.1",
+        )
+
+        assert changed is True
+        assert second_changed is False
+        assert updated.changesets["at-epic.1"] == "feat/legacy-at-epic.1"
+        assert updated.changeset_worktrees["at-epic.1"] == "worktrees/legacy-at-epic.1"
+        assert second == updated
+
+
 def test_remove_git_worktree_noop_when_missing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp) / "project"
