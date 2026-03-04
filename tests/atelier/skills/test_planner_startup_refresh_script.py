@@ -4,6 +4,8 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 def _load_script():
     scripts_dir = (
@@ -280,6 +282,37 @@ def test_main_emits_override_warning(monkeypatch, capsys, tmp_path: Path) -> Non
 
     captured = capsys.readouterr()
     assert "warning: override mismatch" in captured.err
+
+
+@pytest.mark.parametrize("repo_dir_value", ["/repo/canonical", "./worktree"])
+def test_resolve_context_passes_runtime_repo_hint_to_beads_context(
+    monkeypatch,
+    repo_dir_value: str,
+) -> None:
+    module = _load_script()
+    captured_repo_hints: list[str | None] = []
+    beads_root = Path("/beads")
+
+    def _fake_context(*, beads_dir: str | None, repo_dir: str | None):
+        _ = beads_dir
+        captured_repo_hints.append(repo_dir)
+        return SimpleNamespace(
+            beads_root=beads_root,
+            repo_root=Path("/resolved-repo"),
+            override_warning=None,
+        )
+
+    monkeypatch.setattr(module, "resolve_skill_beads_context", _fake_context)
+
+    resolved_beads_root, resolved_repo_root, warning = module._resolve_context(
+        beads_dir=None,
+        repo_dir=repo_dir_value,
+    )
+
+    assert captured_repo_hints == [repo_dir_value]
+    assert resolved_beads_root == beads_root
+    assert resolved_repo_root == Path("/resolved-repo")
+    assert warning is None
 
 
 def test_render_startup_overview_reports_identity_guardrail_remediation(monkeypatch) -> None:
