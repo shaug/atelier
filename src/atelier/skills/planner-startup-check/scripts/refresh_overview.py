@@ -13,6 +13,7 @@ from atelier.beads_context import resolve_runtime_repo_dir_hint, resolve_skill_b
 from atelier.planner_startup_check import (
     StartupBeadsInvocationHelper,
     StartupCommandResult,
+    build_startup_triage_failure_model,
     build_startup_triage_model,
     execute_startup_command_plan,
     render_startup_triage_markdown,
@@ -116,23 +117,35 @@ def _startup_helper(*, beads_root: Path, repo_root: Path) -> StartupBeadsInvocat
 
 def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path) -> str:
     helper = _startup_helper(beads_root=beads_root, repo_root=repo_root)
-    command_result: StartupCommandResult = execute_startup_command_plan(
-        agent_id,
-        helper=helper,
-    )
-    deferred_groups, skipped_epics, scan_limit = _deferred_descendant_changesets(
-        command_result.epics,
-        helper=helper,
-    )
-    triage_model = build_startup_triage_model(
-        beads_root=beads_root,
-        command_result=command_result,
-        deferred_groups=deferred_groups,
-        deferred_scan_limit=scan_limit,
-        deferred_scan_skipped_epics=skipped_epics,
-        epic_list_markdown=planner_overview.render_epics(command_result.epics, show_drafts=True),
-    )
-    return render_startup_triage_markdown(triage_model)
+    try:
+        command_result: StartupCommandResult = execute_startup_command_plan(
+            agent_id,
+            helper=helper,
+        )
+        deferred_groups, skipped_epics, scan_limit = _deferred_descendant_changesets(
+            command_result.epics,
+            helper=helper,
+        )
+        triage_model = build_startup_triage_model(
+            beads_root=beads_root,
+            command_result=command_result,
+            deferred_groups=deferred_groups,
+            deferred_scan_limit=scan_limit,
+            deferred_scan_skipped_epics=skipped_epics,
+            epic_list_markdown=planner_overview.render_epics(
+                command_result.epics, show_drafts=True
+            ),
+        )
+        return render_startup_triage_markdown(triage_model)
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:
+        fallback_model = build_startup_triage_failure_model(
+            beads_root=beads_root,
+            phase="render_startup_overview",
+            error=exc,
+        )
+        return render_startup_triage_markdown(fallback_model)
 
 
 def main() -> None:

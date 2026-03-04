@@ -364,3 +364,43 @@ def test_render_startup_overview_passes_agent_id_to_command_plan(monkeypatch) ->
     )
 
     assert captured_agent_ids == ["atelier/planner/example"]
+
+
+def test_render_startup_overview_falls_back_to_deterministic_output(monkeypatch) -> None:
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "execute_startup_command_plan",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("command failed: bd list --label at:message")
+        ),
+    )
+    monkeypatch.setattr(
+        module.planner_overview,
+        "render_epics",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("epic renderer should not run in fallback path")
+        ),
+    )
+
+    rendered = module._render_startup_overview(
+        "atelier/planner/example",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert rendered.splitlines() == [
+        "Planner startup overview",
+        "- Beads root: /beads",
+        "Startup collection fallback (deterministic):",
+        "- phase=render_startup_overview error=RuntimeError detail=command failed: bd list --label "
+        "at:message",
+        "No unread messages.",
+        "No queued messages.",
+        "- Total epics: 0",
+        "- Active top-level work (open/in_progress/blocked): 0",
+        "- Indexed active epics (at:epic discovery): 0",
+        "No deferred changesets under open/in-progress/blocked epics.",
+        "Epics by state:",
+        "- unavailable (startup triage failed before epic rendering)",
+    ]

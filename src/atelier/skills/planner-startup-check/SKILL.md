@@ -79,6 +79,39 @@ reject unsupported invocation forms.
   - active epics in stable `epic-list --show-drafts` format
   - Beads root + total epic count diagnostics for planner/worker parity checks
 
+## Deterministic output contract
+
+- Startup overview is always rendered through the typed startup triage model and
+  deterministic markdown renderer.
+- For identical Beads state and environment inputs, output is byte-stable.
+- Section order is fixed:
+  1. header + Beads root
+  1. optional deterministic fallback diagnostics
+  1. inbox summary
+  1. queue summary
+  1. startup counts/parity diagnostics
+  1. deferred changeset summary
+  1. `epic-list` section (verbatim output)
+- Unsupported startup `bd list` invocation forms are rejected before execution
+  (for example `--beads-dir`, `--db`, unsupported long flags).
+
+## Failure behavior
+
+- Startup collection/rendering failures do not emit free-form fallback text.
+- The refresh script returns deterministic fallback output with:
+  - `Startup collection fallback (deterministic):` section
+  - structured `phase`, `error`, and single-line `detail`
+  - stable empty-state sections for inbox/queue/deferred lists
+  - an explicit fallback `Epics by state` section marker
+
+## Maintenance guardrails
+
+- Extend startup output by changing the typed triage model and renderer together
+  (never stitch raw command text directly).
+- When adding a startup section, update snapshot fixtures and refresh-script
+  tests in the same changeset.
+- Keep startup command execution on the canonical ordered command plan only.
+
 ## Parity and recovery
 
 - Use the one-shot parity check and recovery playbook in

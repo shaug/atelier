@@ -20,6 +20,8 @@ Verify both outputs report:
 
 - the same Beads root path
 - the same total epic count
+- deterministic section ordering (including fallback diagnostics when startup
+  collection fails)
 
 If counts differ, you are likely reading different Beads stores.
 

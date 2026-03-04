@@ -45,6 +45,13 @@ def test_validate_startup_list_invocation_rejects_forbidden_flag() -> None:
         )
 
 
+def test_validate_startup_list_invocation_rejects_forbidden_beads_dir_flag() -> None:
+    with pytest.raises(ValueError, match="forbidden startup bd invocation flag"):
+        planner_startup_check.validate_startup_list_invocation(
+            ["list", "--beads-dir", "/tmp/.beads", "--label", "at:message"]
+        )
+
+
 def test_validate_startup_list_invocation_rejects_unsupported_flag() -> None:
     with pytest.raises(ValueError, match="unsupported startup bd list flag"):
         planner_startup_check.validate_startup_list_invocation(
@@ -227,3 +234,30 @@ def test_render_startup_triage_markdown_snapshot_full_state() -> None:
     rendered = planner_startup_check.render_startup_triage_markdown(model)
     expected = (FIXTURES_DIR / "startup_triage_full.txt").read_text(encoding="utf-8").rstrip("\n")
     assert rendered == expected
+
+
+def test_render_startup_triage_markdown_snapshot_fallback_state() -> None:
+    model = planner_startup_check.build_startup_triage_failure_model(
+        beads_root=Path("/beads"),
+        phase="render_startup_overview",
+        error=RuntimeError("command failed: bd list --label at:epic"),
+    )
+
+    rendered = planner_startup_check.render_startup_triage_markdown(model)
+    expected = (
+        (FIXTURES_DIR / "startup_triage_fallback.txt").read_text(encoding="utf-8").rstrip("\n")
+    )
+    assert rendered == expected
+
+
+def test_render_startup_triage_markdown_byte_stable_for_identical_input() -> None:
+    model = planner_startup_check.build_startup_triage_failure_model(
+        beads_root=Path("/beads"),
+        phase="render_startup_overview",
+        error=RuntimeError("deterministic fallback"),
+    )
+
+    first = planner_startup_check.render_startup_triage_markdown(model)
+    second = planner_startup_check.render_startup_triage_markdown(model)
+
+    assert first == second

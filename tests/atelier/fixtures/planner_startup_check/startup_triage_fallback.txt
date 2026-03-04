@@ -1,0 +1,12 @@
+Planner startup overview
+- Beads root: /beads
+Startup collection fallback (deterministic):
+- phase=render_startup_overview error=RuntimeError detail=command failed: bd list --label at:epic
+No unread messages.
+No queued messages.
+- Total epics: 0
+- Active top-level work (open/in_progress/blocked): 0
+- Indexed active epics (at:epic discovery): 0
+No deferred changesets under open/in-progress/blocked epics.
+Epics by state:
+- unavailable (startup triage failed before epic rendering)
