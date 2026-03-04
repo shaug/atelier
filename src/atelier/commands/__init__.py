@@ -1,6 +1,7 @@
 """Command implementations exposed by the Atelier CLI."""
 
 from .config import show_config
+from .doctor import doctor
 from .init import InitProjectArgs, init_project
 from .list import list_workspaces
 from .new import new_project
@@ -12,6 +13,7 @@ from .work import start_worker
 
 __all__ = [
     "InitProjectArgs",
+    "doctor",
     "edit_policy",
     "init_project",
     "list_workspaces",

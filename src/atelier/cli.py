@@ -25,6 +25,7 @@ except ImportError:  # pragma: no cover - legacy Click fallback
 from . import __version__, bd_invocation, beads, config, git, lifecycle, paths
 from . import log as atelier_log
 from .commands import config as config_cmd
+from .commands import doctor as doctor_cmd
 from .commands import edit as edit_cmd
 from .commands import gc as gc_cmd
 from .commands import hook as hook_cmd
@@ -690,6 +691,37 @@ def status_command(
 ) -> None:
     """Show project status for epics, hooks, and changesets."""
     status_cmd(SimpleNamespace(format=format))
+
+
+@app.command(
+    "doctor",
+    help="Detect prefix-migration drift and optionally repair it.",
+)
+def doctor_command(
+    format: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            help="output format (table|json)",
+        ),
+    ] = "table",
+    fix: Annotated[
+        bool,
+        typer.Option(
+            "--fix",
+            help="apply drift repairs (default is read-only detection)",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="override active-agent safety gate when used with --fix",
+        ),
+    ] = False,
+) -> None:
+    """Run prefix-migration drift diagnostics and optional repair."""
+    doctor_cmd(SimpleNamespace(format=format, fix=fix, force=force))
 
 
 @app.command(
