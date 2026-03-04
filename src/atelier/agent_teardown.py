@@ -72,9 +72,11 @@ def _is_epic_assignment_released(
     issue = issues[0]
     assignee = _clean_text(issue.get("assignee"))
     raw_labels = issue.get("labels")
-    labels = {label for label in raw_labels if isinstance(label, str)} if isinstance(
-        raw_labels, list
-    ) else set()
+    labels = (
+        {label for label in raw_labels if isinstance(label, str)}
+        if isinstance(raw_labels, list)
+        else set()
+    )
     hooked = beads.has_issue_label(labels, "hooked", beads_root=beads_root)
     return assignee is None and not hooked
 
@@ -178,8 +180,18 @@ def teardown_agent_runtime(
     )
     hook_cleared = hook_known_after_cleanup and remaining_hook is None
 
+    epic_release_verified_for_close = epic_release_confirmed
+    if close_agent_bead and hook_cleared and target_epic and epic_release_confirmed:
+        # Re-verify right before close so we do not hide a stale epic claim.
+        epic_release_verified_for_close = _is_epic_assignment_released(
+            epic_id=target_epic,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+        released_epic = epic_release_verified_for_close
+
     agent_closed = False
-    if close_agent_bead and hook_cleared and epic_release_confirmed:
+    if close_agent_bead and hook_cleared and epic_release_verified_for_close:
         close_result = None
         try:
             close_result = beads.close_issue(
