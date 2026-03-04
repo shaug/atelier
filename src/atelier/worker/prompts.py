@@ -92,6 +92,11 @@ def worker_opening_prompt(
                     "Use github-prs skill scripts list_review_threads.py and "
                     "reply_inline_thread.py for deterministic inline handling."
                 ),
+                (
+                    "Do not create local pr-* branches for temporary PR inspection. "
+                    "Use detached commits or refs/atelier/review/* refs and clean "
+                    "them up after use."
+                ),
                 ("Do not mark this changeset complete while review feedback remains unaddressed."),
             ]
         )
