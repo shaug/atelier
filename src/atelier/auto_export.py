@@ -72,8 +72,7 @@ def resolve_auto_export_context(*, repo_hint: Path | None = None) -> AutoExportC
     Args:
         repo_hint: Optional filesystem path used to locate the Git enlistment.
             When omitted, the resolver uses runtime repo hint resolution
-            (`./worktree`, `ATELIER_WORKSPACE_DIR`, legacy
-            `ATELIER_PROJECT`), then the current working directory.
+            (`./worktree`), then the current working directory.
 
     Returns:
         A resolved context containing project config, project data dir,
