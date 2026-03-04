@@ -341,13 +341,19 @@ atelier status
 atelier status --format=json
 ```
 
-Detect prefix-migration drift (read-only by default):
+Detect prefix-migration drift (read-only):
 
 ```sh
 atelier doctor
+atelier doctor --format=json
+```
+
+Apply explicit prefix normalization repairs (operator-invoked):
+
+```sh
 atelier doctor --fix
 atelier doctor --fix --force
-atelier doctor --format=json
+atelier doctor --fix --format=json
 ```
 
 List workspaces:
@@ -585,17 +591,17 @@ Options:
 
 ### `atelier doctor`
 
-Detect prefix-migration branch/worktree drift. Read-only by default; pass
-`--fix` to apply canonical metadata/mapping updates. `--fix` refuses to mutate
-while active agent hooks are present unless `--force` is also provided.
+Detect prefix-migration branch/worktree drift and report multi-check health.
+Read-only by default. Use `atelier doctor --fix` for explicit
+normalization/repair.
 
 Usage:
 
 ```sh
 atelier doctor
+atelier doctor --format=json
 atelier doctor --fix
 atelier doctor --fix --force
-atelier doctor --format=json
 ```
 
 Options:

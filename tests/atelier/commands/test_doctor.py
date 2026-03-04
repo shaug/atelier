@@ -84,6 +84,8 @@ def test_doctor_json_check_mode() -> None:
     assert payload["counts"]["changesets_drifted"] == 1
     assert payload["counts"]["changesets_changed"] == 1
     assert payload["counts"]["changesets_applied"] == 0
+    assert payload["prefix_normalization"]["required"] is True
+    assert payload["prefix_normalization"]["required_changesets"] == 1
     assert payload["counts"]["check_families"] == 3
     assert "startup_blocking_lineage_consistency" in payload["checks"]
     assert "in_progress_integrity_signals" in payload["checks"]
@@ -145,6 +147,11 @@ def test_doctor_json_fix_mode_reports_applied() -> None:
     assert payload["counts"]["changesets_drifted"] == 1
     assert payload["counts"]["changesets_changed"] == 1
     assert payload["counts"]["changesets_applied"] == 1
+    assert payload["prefix_normalization"]["required"] is True
+    assert payload["prefix_normalization"]["required_changesets"] == 1
+    guidance = payload["rollback_guidance"]
+    assert "bd info --json" in guidance["beads_inspect"]
+    assert "bd export" not in "\n".join(guidance.values())
 
 
 def test_doctor_json_includes_multi_check_health_report() -> None:
@@ -276,6 +283,8 @@ def test_doctor_json_includes_multi_check_health_report() -> None:
     assert payload["counts"]["startup_blockers"] >= 1
     assert payload["counts"]["changesets_in_progress"] == 1
     assert payload["counts"]["changesets_blocked"] == 1
+    assert payload["prefix_normalization"]["required"] is True
+    assert payload["prefix_normalization"]["required_changesets"] == 1
     checks = payload["checks"]
     assert "prefix_migration_drift" in checks
     assert "startup_blocking_lineage_consistency" in checks
@@ -381,4 +390,7 @@ def test_doctor_fix_mode_force_bypasses_active_hook_gate() -> None:
     payload = json.loads(buffer.getvalue())
     assert payload["mode"] == "fix"
     assert payload["fix"] is True
+    assert payload["prefix_normalization"]["required"] is False
+    assert payload["prefix_normalization"]["required_changesets"] == 0
+    assert "rollback_guidance" in payload
     repair.assert_called_once()

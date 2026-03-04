@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import atelier.beads as beads
 import atelier.prefix_migration_drift as prefix_migration_drift
 import atelier.worktrees as worktrees
 
@@ -516,4 +517,261 @@ def test_repair_prefix_migration_drift_apply_updates_mapping_and_metadata(tmp_pa
     assert updated_mapping is not None
     assert updated_mapping.root_branch == "feat/new-root"
     assert updated_mapping.changesets["ts-epic.1"] == "feat/pr-head"
+    assert updated_mapping.changeset_worktrees["ts-epic.1"] == "worktrees/ts-epic.1"
+
+
+def test_scan_prefix_migration_drift_reports_mixed_legacy_prefix_states(tmp_path: Path) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    worktrees.write_mapping(
+        worktrees.mapping_path(project_data_dir, "ts-epic"),
+        worktrees.WorktreeMapping(
+            epic_id="ts-epic",
+            worktree_path="worktrees/ts-epic",
+            root_branch="feat/ts-root",
+            changesets={"ts-epic.1": "feat/legacy-ts"},
+            changeset_worktrees={"ts-epic.1": "worktrees/at-legacy-ts.1"},
+        ),
+    )
+    worktrees.write_mapping(
+        worktrees.mapping_path(project_data_dir, "gs-epic"),
+        worktrees.WorktreeMapping(
+            epic_id="gs-epic",
+            worktree_path="worktrees/gs-epic",
+            root_branch="feat/gs-root",
+            changesets={"gs-epic.1": "feat/legacy-gs"},
+            changeset_worktrees={"gs-epic.1": "worktrees/at-legacy-gs.1"},
+        ),
+    )
+
+    epic_issues = [
+        {
+            "id": "ts-epic",
+            "labels": ["at:epic"],
+            "description": "workspace.root_branch: feat/ts-root\n",
+        },
+        {
+            "id": "gs-epic",
+            "labels": ["at:epic"],
+            "description": "workspace.root_branch: feat/gs-root\n",
+        },
+    ]
+    descendants = {
+        "ts-epic": [
+            {
+                "id": "ts-epic.1",
+                "labels": [],
+                "type": "task",
+                "description": (
+                    "changeset.root_branch: feat/ts-root\n"
+                    "changeset.work_branch: feat/ts-head\n"
+                    "worktree_path: worktrees/at-legacy-ts.1\n"
+                ),
+            }
+        ],
+        "gs-epic": [
+            {
+                "id": "gs-epic.1",
+                "labels": [],
+                "type": "task",
+                "description": (
+                    "changeset.root_branch: feat/gs-root\n"
+                    "changeset.work_branch: feat/gs-head\n"
+                    "worktree_path: worktrees/at-legacy-gs.1\n"
+                ),
+            }
+        ],
+    }
+    worktree_output = _git_worktree_output(
+        project_data_dir / "worktrees" / "ts-epic.1", "feat/ts-head"
+    ) + _git_worktree_output(project_data_dir / "worktrees" / "gs-epic.1", "feat/gs-head")
+
+    def fake_descendants(
+        epic_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        include_closed: bool,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd, include_closed
+        return descendants[epic_id]
+
+    with (
+        patch("atelier.prefix_migration_drift.beads.list_epics", return_value=epic_issues),
+        patch(
+            "atelier.prefix_migration_drift.beads.list_descendant_changesets",
+            side_effect=fake_descendants,
+        ),
+        patch("atelier.prefix_migration_drift.beads.list_work_children", return_value=[]),
+        patch(
+            "atelier.prefix_migration_drift.exec_util.try_run_command",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "worktree", "list", "--porcelain"],
+                returncode=0,
+                stdout=worktree_output,
+                stderr="",
+            ),
+        ),
+    ):
+        records = prefix_migration_drift.scan_prefix_migration_drift(
+            project_data_dir=project_data_dir,
+            beads_root=tmp_path / ".beads",
+            repo_root=repo_root,
+            repo_slug=None,
+        )
+
+    assert len(records) == 4
+    assert {record["changeset_id"] for record in records} == {"ts-epic.1", "gs-epic.1"}
+    assert {
+        record["drift_class"] for record in records if record["changeset_id"] == "ts-epic.1"
+    } == {"work-branch-conflict", "worktree-path-conflict"}
+    assert {
+        record["drift_class"] for record in records if record["changeset_id"] == "gs-epic.1"
+    } == {"work-branch-conflict", "worktree-path-conflict"}
+    assert any(
+        record["values"]["mapping.worktree_path"] == "worktrees/at-legacy-ts.1"
+        for record in records
+        if record["drift_class"] == "worktree-path-conflict"
+    )
+    assert any(
+        record["values"]["mapping.worktree_path"] == "worktrees/at-legacy-gs.1"
+        for record in records
+        if record["drift_class"] == "worktree-path-conflict"
+    )
+
+
+def test_repair_prefix_migration_drift_apply_is_idempotent(tmp_path: Path) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    mapping_path = worktrees.mapping_path(project_data_dir, "ts-epic")
+    worktrees.write_mapping(
+        mapping_path,
+        worktrees.WorktreeMapping(
+            epic_id="ts-epic",
+            worktree_path="worktrees/ts-epic",
+            root_branch="feat/ts-root",
+            changesets={"ts-epic.1": "feat/legacy-ts"},
+            changeset_worktrees={"ts-epic.1": "worktrees/at-legacy-ts.1"},
+        ),
+    )
+    epic_issue = {
+        "id": "ts-epic",
+        "labels": ["at:epic"],
+        "description": "workspace.root_branch: feat/ts-root\n",
+    }
+    changeset_issue = {
+        "id": "ts-epic.1",
+        "labels": [],
+        "type": "task",
+        "description": (
+            "changeset.root_branch: feat/ts-root\n"
+            "changeset.work_branch: feat/ts-head\n"
+            "worktree_path: worktrees/at-legacy-ts.1\n"
+        ),
+    }
+
+    def set_description_field(issue: dict[str, object], key: str, value: str) -> None:
+        fields = beads.parse_description_fields(issue.get("description"))
+        fields[key] = value
+        issue["description"] = "".join(
+            f"{field_key}: {field_value}\n" for field_key, field_value in fields.items()
+        )
+
+    def fake_update_metadata(
+        changeset_id: str,
+        *,
+        root_branch: str | None,
+        parent_branch: str | None,
+        work_branch: str | None,
+        beads_root: Path,
+        cwd: Path,
+        allow_override: bool,
+    ) -> None:
+        del changeset_id, parent_branch, beads_root, cwd, allow_override
+        if root_branch is not None:
+            set_description_field(changeset_issue, "changeset.root_branch", root_branch)
+        if work_branch is not None:
+            set_description_field(changeset_issue, "changeset.work_branch", work_branch)
+
+    def fake_update_worktree_path(
+        changeset_id: str,
+        worktree_path: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_override: bool,
+    ) -> None:
+        del changeset_id, beads_root, cwd, allow_override
+        set_description_field(changeset_issue, "worktree_path", worktree_path)
+
+    worktree_output = _git_worktree_output(
+        project_data_dir / "worktrees" / "ts-epic.1",
+        "feat/ts-head",
+    )
+
+    def fake_lookup(repo: str, branch: str) -> SimpleNamespace:
+        assert repo == "org/repo"
+        if branch == "feat/legacy-ts":
+            return SimpleNamespace(
+                found=True,
+                failed=False,
+                payload={"headRefName": "feat/ts-head"},
+            )
+        return SimpleNamespace(found=False, failed=False, payload=None)
+
+    with (
+        patch("atelier.prefix_migration_drift.beads.list_epics", return_value=[epic_issue]),
+        patch(
+            "atelier.prefix_migration_drift.beads.list_descendant_changesets",
+            return_value=[changeset_issue],
+        ),
+        patch("atelier.prefix_migration_drift.beads.list_work_children", return_value=[]),
+        patch(
+            "atelier.prefix_migration_drift.exec_util.try_run_command",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "worktree", "list", "--porcelain"],
+                returncode=0,
+                stdout=worktree_output,
+                stderr="",
+            ),
+        ),
+        patch(
+            "atelier.prefix_migration_drift.beads.update_changeset_branch_metadata",
+            side_effect=fake_update_metadata,
+        ),
+        patch(
+            "atelier.prefix_migration_drift.beads.update_worktree_path",
+            side_effect=fake_update_worktree_path,
+        ),
+        patch("atelier.prefix_migration_drift.beads.update_workspace_root_branch"),
+    ):
+        first = prefix_migration_drift.repair_prefix_migration_drift(
+            project_data_dir=project_data_dir,
+            beads_root=tmp_path / ".beads",
+            repo_root=repo_root,
+            repo_slug="org/repo",
+            apply=True,
+            lookup_pr_status=fake_lookup,
+        )
+        second = prefix_migration_drift.repair_prefix_migration_drift(
+            project_data_dir=project_data_dir,
+            beads_root=tmp_path / ".beads",
+            repo_root=repo_root,
+            repo_slug="org/repo",
+            apply=True,
+            lookup_pr_status=fake_lookup,
+        )
+
+    assert len(first) == 1
+    assert first[0].changed is True
+    assert first[0].applied is True
+    assert second == []
+
+    updated_mapping = worktrees.load_mapping(mapping_path)
+    assert updated_mapping is not None
+    assert updated_mapping.changesets["ts-epic.1"] == "feat/ts-head"
     assert updated_mapping.changeset_worktrees["ts-epic.1"] == "worktrees/ts-epic.1"

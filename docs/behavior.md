@@ -190,9 +190,12 @@ Atelier planning state. They are treated as external ticket sources.
     `worktree_branch_metadata_readiness`.
   - Stays read-only in default check mode and does not mutate Beads/worktree
     state.
-  - Applies canonical prefix-drift metadata/mapping repairs only when `--fix` is
-    provided.
+  - Uses `atelier doctor --fix` as the explicit mutation path.
+  - Read-only output reports whether normalization is required as a
+    deterministic yes/no with count.
   - Blocks `--fix` when active hooks are detected unless `--force` is provided.
+  - Includes rollback guidance based on `bd info --json` plus filesystem backups
+    for Beads and mapping metadata.
   - Does not trigger `atelier gc`.
 
 - `atelier list`
