@@ -326,6 +326,24 @@ class TestAgentSpec:
         assert warnings == []
         assert env["ATELIER_AGENT_ID"] == "planner/test-session"
 
+    def test_agent_environment_warns_for_inherited_keys_in_mixed_self_scoped_agent_id_env(
+        self,
+    ) -> None:
+        warnings: list[str] = []
+        env = agents.agent_environment(
+            "planner/test-session",
+            base_env={
+                "ATELIER_AGENT_ID": "planner/test-session",
+                "ATELIER_PROJECT": "/tmp/other-repo",
+            },
+            warn=warnings.append,
+        )
+
+        assert len(warnings) == 1
+        assert "ATELIER_PROJECT" in warnings[0]
+        assert "ATELIER_AGENT_ID" not in warnings[0]
+        assert env["ATELIER_AGENT_ID"] == "planner/test-session"
+
     def test_agent_environment_warns_for_cross_session_agent_id(self) -> None:
         warnings: list[str] = []
         env = agents.agent_environment(
