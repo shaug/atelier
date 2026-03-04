@@ -48,7 +48,7 @@ description: >-
      relation/direction/sync_mode.
    - Provider labels (e.g., `ext:github`) match attached refs.
 1. For retrying non-fatal auto-export errors from planning scripts, use:
-   - `python skills/tickets/scripts/auto_export_issue.py --issue-id <issue_id>`
+   - `python skills/tickets/scripts/auto_export_issue.py --issue-id <issue_id> [--repo-dir <repo_dir>]`
 1. For Beads issues with `ext:<provider>` labels but missing `external_tickets`,
    run deterministic metadata repair:
    - `python skills/tickets/scripts/repair_external_ticket_metadata.py`

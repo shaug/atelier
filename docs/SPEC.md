@@ -195,3 +195,6 @@ Internal runtime env variables (set by Atelier, not user config):
 - Planner hook sync context: `ATELIER_PLANNER_SYNC_ENABLED`,
   `ATELIER_AGENT_BEAD_ID`, `ATELIER_PLANNER_WORKTREE`, `ATELIER_PLANNER_BRANCH`,
   `ATELIER_DEFAULT_BRANCH`
+
+Detailed owner/consumer inventory and launch sanitization policy lives in:
+`docs/runtime-env-subprocess-inventory.md`.

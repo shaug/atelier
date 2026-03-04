@@ -15,6 +15,8 @@ during startup triage. Do not wait for approval to capture deferred work.
 - agent_id: Planner agent identity.
 - beads_dir: Optional explicit Beads store override. Default is the
   project-scoped Beads root.
+- repo_dir: Optional explicit repo root override. Defaults to `./worktree` then
+  cwd.
 - queue: Optional queue name to check (if queues are enabled).
 
 ## Steps
@@ -70,7 +72,7 @@ reject unsupported invocation forms.
 ## On-demand refresh
 
 - During an active planner session, re-run the same read-only overview with:
-  `python3 skills/planner-startup-check/scripts/refresh_overview.py --agent-id "$ATELIER_AGENT_ID"`
+  `python3 skills/planner-startup-check/scripts/refresh_overview.py --agent-id "$ATELIER_AGENT_ID" --repo-dir ./worktree`
 - This refresh is read-only and includes:
   - unread planner inbox messages
   - queued messages with queue name and claim state
