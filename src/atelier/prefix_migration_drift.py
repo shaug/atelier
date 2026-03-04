@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -272,6 +272,34 @@ def _record(
         "drift_class": drift_class,
         "values": {key: values[key] for key in sorted(values)},
     }
+
+
+def _system_exit_code(exc: SystemExit) -> int:
+    code = exc.code
+    if isinstance(code, int):
+        return code
+    return 1
+
+
+def _metadata_read_failure_record(
+    *,
+    epic_id: str,
+    changeset_id: str,
+    target_kind: str,
+    target_id: str,
+    exit_code: int,
+) -> dict[str, object]:
+    return _record(
+        epic_id=epic_id,
+        changeset_id=changeset_id,
+        drift_class="metadata-read-failure",
+        values={
+            "bd.command": f"show {target_id}",
+            "bd.exit_code": str(exit_code),
+            "lookup.target_kind": target_kind,
+            "lookup.target_id": target_id,
+        },
+    )
 
 
 def _canonical_root_branch(*values: str | None) -> str | None:
@@ -661,6 +689,8 @@ def scan_prefix_migration_drift(
     repo_slug: str | None = None,
     git_path: str | None = None,
     lookup_pr_status: PrLookupStatus = prs.lookup_github_pr_status,
+    target_epic_id: str | None = None,
+    target_changeset_ids: Collection[str] | None = None,
 ) -> list[dict[str, object]]:
     """Scan for changeset drift caused by post-migration metadata split-brain.
 
@@ -671,6 +701,9 @@ def scan_prefix_migration_drift(
         repo_slug: Optional GitHub ``owner/name`` for PR-head evidence.
         git_path: Optional git executable override.
         lookup_pr_status: PR lookup adapter for tests and runtime injection.
+        target_epic_id: Optional epic id to scan. When omitted, scans all epics.
+        target_changeset_ids: Optional changeset ids to scan within
+            ``target_epic_id``. When omitted, scans all changesets for each epic.
 
     Returns:
         Deterministically ordered drift records.
@@ -680,7 +713,36 @@ def scan_prefix_migration_drift(
         project_data_dir=project_data_dir,
         git_path=git_path,
     )
-    epics = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
+    scoped_epic_id = _normalize_text(target_epic_id)
+    scoped_changeset_ids = {
+        normalized
+        for normalized in (
+            _normalize_text(changeset_id) for changeset_id in (target_changeset_ids or ())
+        )
+        if normalized is not None
+    }
+    if scoped_epic_id is None:
+        epics = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
+    else:
+        try:
+            scoped_epics = beads.run_bd_json(
+                ["show", scoped_epic_id],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+        except SystemExit as exc:
+            return [
+                _metadata_read_failure_record(
+                    epic_id=scoped_epic_id,
+                    changeset_id=scoped_epic_id,
+                    target_kind="epic",
+                    target_id=scoped_epic_id,
+                    exit_code=_system_exit_code(exc),
+                )
+            ]
+        epics = [
+            issue for issue in scoped_epics if _normalize_text(issue.get("id")) == scoped_epic_id
+        ]
     records: list[dict[str, object]] = []
     for epic in sorted(epics, key=lambda issue: str(issue.get("id") or "")):
         epic_id = _normalize_text(epic.get("id"))
@@ -689,12 +751,42 @@ def scan_prefix_migration_drift(
         epic_root_branch = _normalize_text(beads.extract_workspace_root_branch(epic))
         mapping = worktrees.load_mapping(worktrees.mapping_path(project_data_dir, epic_id))
         mapping_root_branch = _normalize_text(mapping.root_branch) if mapping else None
-        changesets = _changesets_for_epic(
-            epic_id,
-            epic_issue=epic,
-            beads_root=beads_root,
-            repo_root=repo_root,
-        )
+        if scoped_changeset_ids:
+            changesets = []
+            for changeset_id in sorted(scoped_changeset_ids):
+                if changeset_id != epic_id and not changeset_id.startswith(f"{epic_id}."):
+                    continue
+                try:
+                    scoped_changesets = beads.run_bd_json(
+                        ["show", changeset_id],
+                        beads_root=beads_root,
+                        cwd=repo_root,
+                    )
+                except SystemExit as exc:
+                    records.append(
+                        _metadata_read_failure_record(
+                            epic_id=epic_id,
+                            changeset_id=changeset_id,
+                            target_kind="changeset",
+                            target_id=changeset_id,
+                            exit_code=_system_exit_code(exc),
+                        )
+                    )
+                    continue
+                for issue in scoped_changesets:
+                    issue_id = _normalize_text(issue.get("id"))
+                    if issue_id is None:
+                        continue
+                    if issue_id != epic_id and not issue_id.startswith(f"{epic_id}."):
+                        continue
+                    changesets.append(issue)
+        else:
+            changesets = _changesets_for_epic(
+                epic_id,
+                epic_issue=epic,
+                beads_root=beads_root,
+                repo_root=repo_root,
+            )
         for changeset in sorted(changesets, key=lambda issue: str(issue.get("id") or "")):
             changeset_id = _normalize_text(changeset.get("id"))
             if changeset_id is None:
