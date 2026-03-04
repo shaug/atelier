@@ -131,6 +131,10 @@ def _has_active_epic_ownership(
         # Conflicting ownership metadata is ambiguous; block close fail-closed.
         if assignee_claim and owner_claim and assignee_claim != owner_claim:
             return True
+        # `bd list --assignee` should not return owner-only records for a
+        # different agent. If it does, treat as ambiguous and fail closed.
+        if assignee_claim is None and owner_claim is not None and owner_claim != agent_id:
+            return True
         ownership_claims = {claim for claim in (assignee_claim, owner_claim) if claim is not None}
         if ownership_claims and agent_id not in ownership_claims:
             continue

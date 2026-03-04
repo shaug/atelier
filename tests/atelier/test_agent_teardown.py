@@ -333,6 +333,48 @@ def test_teardown_agent_runtime_does_not_close_when_owner_only_payload_still_own
     assert result.agent_closed is False
 
 
+def test_teardown_agent_runtime_does_not_close_when_owner_only_payload_mismatches_agent() -> None:
+    with (
+        patch(
+            "atelier.agent_teardown.beads.find_agent_bead",
+            return_value={"id": "agent-7-owner-mismatch"},
+        ),
+        patch(
+            "atelier.agent_teardown.beads.get_agent_hook",
+            side_effect=[None, None],
+        ),
+        patch(
+            "atelier.agent_teardown.beads.run_bd_json",
+            return_value=[
+                {
+                    "id": "epic-owner-mismatch",
+                    "owner": "atelier/worker/codex/other",
+                    "issue_type": "epic",
+                    "labels": [],
+                    "status": "open",
+                }
+            ],
+        ) as run_bd_json,
+        patch("atelier.agent_teardown.beads.close_issue") as close_issue,
+    ):
+        result = agent_teardown.teardown_agent_runtime(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            agent_id="atelier/worker/codex/p7",
+            close_agent_bead=True,
+        )
+
+    run_bd_json.assert_called_once_with(
+        ["list", "--assignee", "atelier/worker/codex/p7", "--all", "--limit", "0"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    close_issue.assert_not_called()
+    assert result.released_epic is False
+    assert result.hook_cleared is True
+    assert result.agent_closed is False
+
+
 def test_teardown_agent_runtime_does_not_close_when_ownership_fields_missing() -> None:
     with (
         patch(
