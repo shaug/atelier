@@ -212,6 +212,18 @@ def _distinct_values(*values: str | None) -> tuple[str, ...]:
     return tuple(sorted({value for value in values if value is not None}))
 
 
+def _filesystem_path_for_branch(
+    git_index: _GitWorktreeIndex,
+    branch: str | None,
+) -> str | None:
+    if branch is None:
+        return None
+    paths = git_index.branch_to_paths.get(branch)
+    if not paths:
+        return None
+    return paths[0]
+
+
 def _changesets_for_epic(
     epic_id: str,
     *,
@@ -405,16 +417,11 @@ def _resolve_repair_action(
             lookup_pr_status=lookup_pr_status,
         )
 
-    filesystem_path_for_metadata_branch = None
-    if metadata_work_branch is not None:
-        paths = git_index.branch_to_paths.get(metadata_work_branch)
-        if paths:
-            filesystem_path_for_metadata_branch = paths[0]
     filesystem_path_for_canonical_branch = None
     if changeset_id == epic_id:
-        canonical_branch_paths = git_index.branch_to_paths.get(canonical_root)
-        if canonical_branch_paths:
-            filesystem_path_for_canonical_branch = canonical_branch_paths[0]
+        filesystem_path_for_canonical_branch = _filesystem_path_for_branch(
+            git_index, canonical_root
+        )
 
     if changeset_id == epic_id:
         canonical_work_branch = canonical_root
@@ -448,25 +455,22 @@ def _resolve_repair_action(
             canonical_work_branch = derived_work_branch
             work_branch_source = "derived"
 
-        canonical_branch_paths = git_index.branch_to_paths.get(canonical_work_branch)
-        if canonical_branch_paths:
-            filesystem_path_for_canonical_branch = canonical_branch_paths[0]
+        filesystem_path_for_canonical_branch = _filesystem_path_for_branch(
+            git_index, canonical_work_branch
+        )
 
-        if mapped_branch is not None and mapped_relpath is not None:
-            canonical_worktree = mapped_relpath
-            worktree_source = "checked-out-worktree"
-        elif filesystem_path_for_canonical_branch is not None:
+        if filesystem_path_for_canonical_branch is not None:
             canonical_worktree = filesystem_path_for_canonical_branch
             worktree_source = "filesystem-canonical-branch"
-        elif filesystem_path_for_metadata_branch is not None:
-            canonical_worktree = filesystem_path_for_metadata_branch
-            worktree_source = "filesystem-metadata-branch"
-        elif mapping_worktree_path is not None:
-            canonical_worktree = mapping_worktree_path
-            worktree_source = "mapping"
-        elif metadata_worktree_path is not None:
+        elif mapped_branch == canonical_work_branch and mapped_relpath is not None:
+            canonical_worktree = mapped_relpath
+            worktree_source = "checked-out-worktree"
+        elif metadata_work_branch == canonical_work_branch and metadata_worktree_path is not None:
             canonical_worktree = metadata_worktree_path
             worktree_source = "metadata"
+        elif mapping_work_branch == canonical_work_branch and mapping_worktree_path is not None:
+            canonical_worktree = mapping_worktree_path
+            worktree_source = "mapping"
         else:
             canonical_worktree = worktrees.changeset_worktree_relpath(changeset_id)
             worktree_source = "default"
@@ -544,6 +548,8 @@ def repair_prefix_migration_drift(
     repo_slug: str | None = None,
     git_path: str | None = None,
     lookup_pr_status: PrLookupStatus = prs.lookup_github_pr_status,
+    target_epic_id: str | None = None,
+    target_changeset_ids: Collection[str] | None = None,
 ) -> list[PrefixMigrationRepairAction]:
     """Plan or apply deterministic repairs for prefix-migration drift.
 
@@ -555,6 +561,9 @@ def repair_prefix_migration_drift(
         repo_slug: Optional GitHub ``owner/name`` for PR-head evidence.
         git_path: Optional git executable override.
         lookup_pr_status: PR lookup adapter for tests and runtime injection.
+        target_epic_id: Optional epic id to scope planned/applied actions.
+        target_changeset_ids: Optional changeset ids to scope work within
+            ``target_epic_id``.
 
     Returns:
         Planned or applied actions for drifted changesets, sorted
@@ -567,6 +576,8 @@ def repair_prefix_migration_drift(
         repo_slug=repo_slug,
         git_path=git_path,
         lookup_pr_status=lookup_pr_status,
+        target_epic_id=target_epic_id,
+        target_changeset_ids=target_changeset_ids,
     )
     drift_classes = _drift_classes_by_changeset(drift_records)
     if not drift_classes:

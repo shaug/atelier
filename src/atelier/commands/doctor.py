@@ -74,6 +74,8 @@ class _DoctorFinding:
 
     @property
     def startup_blocker(self) -> bool:
+        if self.code == "prefix-migration-drift" and not bool(self.details.get("changed")):
+            return False
         return self.code in _STARTUP_BLOCKER_CODES
 
     def as_dict(self) -> dict[str, object]:
@@ -631,16 +633,25 @@ def _prefix_drift_remediation(
 ) -> str:
     notes: list[str] = []
     if action.changed:
+        targets: list[str] = []
+        if action.update_changeset_metadata:
+            targets.append("changeset lineage")
+        if action.update_changeset_worktree_path:
+            targets.append("changeset worktree_path")
+        if action.update_mapping:
+            targets.append("mapping branch/worktree")
+        target_summary = ", ".join(targets) if targets else "lineage metadata"
         if fix:
-            notes.append("repair applied in fix mode")
+            notes.append(f"repair applied in fix mode; updated {target_summary}")
+            notes.append("rerun `atelier doctor` to confirm zero prefix drift findings")
         else:
-            notes.append("run `atelier doctor --fix` to apply canonical repair")
+            notes.append(f"run `atelier doctor --fix` to update {target_summary}")
     else:
-        notes.append("no persistent update required")
+        notes.append("drift is non-actionable: canonical branch/worktree already aligned")
     if "work-branch-conflict" in action.drift_classes:
         notes.append("resolves startup work-branch override conflicts")
     if "worktree-path-conflict" in action.drift_classes:
-        notes.append("aligns changeset worktree path metadata/mapping")
+        notes.append("converges worktree path to canonical branch-selected location")
     return "; ".join(notes)
 
 

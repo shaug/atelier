@@ -154,6 +154,64 @@ def test_doctor_json_fix_mode_reports_applied() -> None:
     assert "bd export" not in "\n".join(guidance.values())
 
 
+def test_doctor_json_non_actionable_prefix_drift_not_counted_as_startup_blocker() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        project_root.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        project_config = config.ProjectConfig.model_validate(
+            {"project": {"enlistment": str(repo_root), "origin": "github.com/org/repo"}}
+        )
+        actions = [
+            PrefixMigrationRepairAction(
+                epic_id="epic-1",
+                changeset_id="epic-1.2",
+                drift_classes=("worktree-path-conflict",),
+                canonical_root_branch="feat/root",
+                canonical_work_branch="feat/root-epic-1.2",
+                work_branch_source="open-pr-head",
+                canonical_worktree_path="worktrees/epic-1.2",
+                worktree_path_source="filesystem-canonical-branch",
+                pr_head_ref="feat/root-epic-1.2",
+                pr_lookup_branch="at/legacy-epic-1.2",
+                update_workspace_root_branch=False,
+                update_changeset_metadata=False,
+                update_changeset_worktree_path=False,
+                update_mapping=False,
+                applied=False,
+            )
+        ]
+        with (
+            patch(
+                "atelier.commands.doctor.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, str(repo_root), repo_root),
+            ),
+            patch("atelier.commands.doctor.beads.run_bd_command", return_value=DummyResult()),
+            patch(
+                "atelier.commands.doctor.prefix_migration_drift.repair_prefix_migration_drift",
+                return_value=actions,
+            ),
+            patch(
+                "atelier.commands.doctor._collect_doctor_context",
+                return_value=_empty_context(project_root),
+            ),
+            patch("atelier.commands.doctor._collect_agent_runtime", return_value=({}, {})),
+        ):
+            buffer = io.StringIO()
+            with patch("sys.stdout", buffer):
+                doctor_cmd.doctor(SimpleNamespace(format="json", fix=False))
+
+    payload = json.loads(buffer.getvalue())
+    prefix_findings = payload["checks"]["prefix_migration_drift"]["findings"]
+    assert len(prefix_findings) == 1
+    assert prefix_findings[0]["startup_blocker"] is False
+    assert payload["counts"]["startup_blockers"] == 0
+    assert payload["prefix_normalization"]["required"] is False
+    assert "non-actionable" in prefix_findings[0]["remediation"]
+
+
 def test_doctor_json_includes_multi_check_health_report() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
