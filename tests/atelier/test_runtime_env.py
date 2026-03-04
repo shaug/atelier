@@ -28,6 +28,15 @@ def test_format_ambient_env_warning_returns_none_when_no_keys() -> None:
     assert runtime_env.format_ambient_env_warning(()) is None
 
 
+def test_format_ambient_env_warning_includes_removed_keys_and_removal_date() -> None:
+    warning = runtime_env.format_ambient_env_warning(("ATELIER_PROJECT", "ATELIER_WORKSPACE"))
+
+    assert warning is not None
+    assert "ATELIER_PROJECT" in warning
+    assert "ATELIER_WORKSPACE" in warning
+    assert "2026-07-01" in warning
+
+
 def test_sanitize_subprocess_environment_empty_mapping_does_not_inherit_ambient(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -239,6 +239,26 @@ def available_agent_names() -> tuple[str, ...]:
     return tuple(available_agents().keys())
 
 
+def _warning_removed_routing_keys(
+    *,
+    removed: tuple[str, ...],
+    base_env: Mapping[str, str] | None,
+    agent_id: str,
+) -> tuple[str, ...]:
+    """Return warning-eligible removed runtime routing keys.
+
+    A matching ``ATELIER_AGENT_ID`` from the active session is self-scoped and
+    should not emit inherited-routing compatibility warnings.
+    """
+    if "ATELIER_AGENT_ID" not in removed:
+        return removed
+    source = os.environ if base_env is None else base_env
+    inherited_agent_id = str(source.get("ATELIER_AGENT_ID", "")).strip()
+    if inherited_agent_id and inherited_agent_id == agent_id:
+        return tuple(key for key in removed if key != "ATELIER_AGENT_ID")
+    return removed
+
+
 def agent_environment(
     agent_id: str,
     *,
@@ -257,7 +277,12 @@ def agent_environment(
         Sanitized launch environment with required identity variables injected.
     """
     env, removed = runtime_env.sanitize_subprocess_environment(base_env=base_env)
-    warning = runtime_env.format_ambient_env_warning(removed)
+    warning_keys = _warning_removed_routing_keys(
+        removed=removed,
+        base_env=base_env,
+        agent_id=agent_id,
+    )
+    warning = runtime_env.format_ambient_env_warning(warning_keys)
     if warning and warn is not None:
         warn(warning)
     if agent_id:
