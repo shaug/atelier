@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
+import pytest
+
 from atelier import config
 from atelier.agent_home import AgentHome
 from atelier.worker.context import WorkerRunContext
@@ -1177,6 +1179,274 @@ def test_run_worker_once_dry_run_short_circuits_terminal_finalize_without_mutati
     assert any(
         "Startup preflight would skip worker agent startup and finalize changeset" in message
         for message in dry_run_logs
+    )
+
+
+def test_run_worker_once_startup_finalize_dependency_gate_failure_returns_summary() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p6e",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p6e",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    selected_changeset = {
+        "id": "at-epic.1",
+        "title": "Changeset",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    deps.lifecycle.next_changeset = lambda **_kwargs: selected_changeset
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [selected_changeset] if args[:2] == ["show", "at-epic.1"] else []
+        )
+    )
+    deps.lifecycle.startup_finalize_preflight = Mock(
+        return_value=StartupFinalizePreflightResult(
+            should_finalize_only=True,
+            reason="finalize_only:pr_lifecycle_merged_integration_proven",
+        )
+    )
+    deps.lifecycle.finalize_changeset = Mock(
+        side_effect=SystemExit(
+            "cannot set changeset at-epic.1 to in_progress: blocking dependencies "
+            "not complete (at-epic.0(in_progress)). Close dependencies before retrying."
+        )
+    )
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p6e"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "changeset_finalize_in_progress_dependency_gate_failed"
+    assert summary.epic_id == "at-epic"
+    assert summary.changeset_id == "at-epic.1"
+    deps.lifecycle.finalize_changeset.assert_called_once()
+    deps.infra.worker_session_worktree.prepare_worktrees.assert_not_called()
+    deps.infra.worker_session_agent.prepare_agent_session.assert_not_called()
+    deps.infra.worker_session_agent.start_agent_session.assert_not_called()
+    assert any(
+        "Finalize status recovery hit dependency-gate rejection" in str(call.args[0])
+        for call in deps.control._say.call_args_list
+    )
+
+
+def test_run_worker_once_startup_finalize_non_dependency_gate_failure_reraises() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p6e1",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p6e1",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    selected_changeset = {
+        "id": "at-epic.1",
+        "title": "Changeset",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    deps.lifecycle.next_changeset = lambda **_kwargs: selected_changeset
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [selected_changeset] if args[:2] == ["show", "at-epic.1"] else []
+        )
+    )
+    deps.lifecycle.startup_finalize_preflight = Mock(
+        return_value=StartupFinalizePreflightResult(
+            should_finalize_only=True,
+            reason="finalize_only:pr_lifecycle_merged_integration_proven",
+        )
+    )
+    deps.lifecycle.finalize_changeset = Mock(
+        side_effect=SystemExit("failed to load finalize metadata cursor")
+    )
+
+    with pytest.raises(SystemExit, match="failed to load finalize metadata cursor"):
+        runner.run_worker_once(
+            SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+            run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p6e1"),
+            deps=deps,
+        )
+
+    deps.lifecycle.finalize_changeset.assert_called_once()
+    deps.infra.worker_session_worktree.prepare_worktrees.assert_not_called()
+    deps.infra.worker_session_agent.prepare_agent_session.assert_not_called()
+    deps.infra.worker_session_agent.start_agent_session.assert_not_called()
+    assert not any(
+        "Finalize status recovery hit dependency-gate rejection" in str(call.args[0])
+        for call in deps.control._say.call_args_list
+    )
+
+
+def test_run_worker_once_finalize_dependency_gate_failure_returns_summary() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p6f",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p6f",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    selected_changeset = {
+        "id": "at-epic.1",
+        "title": "Changeset",
+        "status": "open",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    deps.lifecycle.next_changeset = lambda **_kwargs: selected_changeset
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [selected_changeset] if args[:2] == ["show", "at-epic.1"] else []
+        )
+    )
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        return_value=SimpleNamespace(
+            epic_worktree_path=Path("/tmp/epic"),
+            changeset_worktree_path=Path("/tmp/changeset"),
+            branch="feat/root-at-epic.1",
+        )
+    )
+    deps.infra.worker_session_agent.prepare_agent_session = Mock(
+        return_value=SimpleNamespace(
+            agent_spec=SimpleNamespace(name="codex", display_name="Codex"),
+            agent_options=[],
+            project_enlistment=Path("/repo"),
+            workspace_branch="feat/root-at-epic.1",
+            env={},
+        )
+    )
+    deps.infra.worker_session_agent.start_agent_session = Mock(
+        return_value=SimpleNamespace(
+            started_at=dt.datetime.now(dt.timezone.utc),
+            returncode=0,
+        )
+    )
+    deps.lifecycle.finalize_changeset = Mock(
+        side_effect=SystemExit(
+            "cannot set changeset at-epic.1 to in_progress: blocking dependencies "
+            "not complete (at-epic.0(in_progress)). Close dependencies before retrying."
+        )
+    )
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p6f"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "changeset_finalize_in_progress_dependency_gate_failed"
+    assert summary.epic_id == "at-epic"
+    assert summary.changeset_id == "at-epic.1"
+    deps.infra.worker_session_agent.start_agent_session.assert_called_once()
+    deps.lifecycle.finalize_changeset.assert_called_once()
+    assert any(
+        "Finalize status recovery hit dependency-gate rejection" in str(call.args[0])
+        for call in deps.control._say.call_args_list
+    )
+
+
+def test_run_worker_once_finalize_non_dependency_gate_failure_reraises() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p6f1",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p6f1",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    selected_changeset = {
+        "id": "at-epic.1",
+        "title": "Changeset",
+        "status": "open",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    deps.lifecycle.next_changeset = lambda **_kwargs: selected_changeset
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [selected_changeset] if args[:2] == ["show", "at-epic.1"] else []
+        )
+    )
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        return_value=SimpleNamespace(
+            epic_worktree_path=Path("/tmp/epic"),
+            changeset_worktree_path=Path("/tmp/changeset"),
+            branch="feat/root-at-epic.1",
+        )
+    )
+    deps.infra.worker_session_agent.prepare_agent_session = Mock(
+        return_value=SimpleNamespace(
+            agent_spec=SimpleNamespace(name="codex", display_name="Codex"),
+            agent_options=[],
+            project_enlistment=Path("/repo"),
+            workspace_branch="feat/root-at-epic.1",
+            env={},
+        )
+    )
+    deps.infra.worker_session_agent.start_agent_session = Mock(
+        return_value=SimpleNamespace(
+            started_at=dt.datetime.now(dt.timezone.utc),
+            returncode=0,
+        )
+    )
+    deps.lifecycle.finalize_changeset = Mock(
+        side_effect=SystemExit("failed to persist finalize completion metadata")
+    )
+
+    with pytest.raises(SystemExit, match="failed to persist finalize completion metadata"):
+        runner.run_worker_once(
+            SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+            run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p6f1"),
+            deps=deps,
+        )
+
+    deps.infra.worker_session_agent.start_agent_session.assert_called_once()
+    deps.lifecycle.finalize_changeset.assert_called_once()
+    assert not any(
+        "Finalize status recovery hit dependency-gate rejection" in str(call.args[0])
+        for call in deps.control._say.call_args_list
     )
 
 
