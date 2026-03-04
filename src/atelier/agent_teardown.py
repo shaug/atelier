@@ -30,6 +30,24 @@ class AgentTeardownResult:
     agent_closed: bool
 
 
+def _read_agent_hook(
+    *,
+    agent_bead_id: str,
+    beads_root: Path,
+    repo_root: Path,
+) -> tuple[bool, str | None]:
+    """Read the current agent hook, returning whether the read was definitive."""
+    try:
+        hook = beads.get_agent_hook(
+            agent_bead_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+        )
+    except SystemExit:
+        return False, None
+    return True, _clean_text(hook)
+
+
 def teardown_agent_runtime(
     *,
     beads_root: Path,
@@ -81,19 +99,14 @@ def teardown_agent_runtime(
             agent_closed=False,
         )
 
-    current_hook = None
-    try:
-        current_hook = beads.get_agent_hook(
-            resolved_agent_bead_id,
-            beads_root=beads_root,
-            cwd=repo_root,
-        )
-    except SystemExit:
-        current_hook = None
+    _, current_hook = _read_agent_hook(
+        agent_bead_id=resolved_agent_bead_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
     target_epic = expected_hook or _clean_text(current_hook)
 
     released_epic = False
-    hook_cleared = False
     if target_epic:
         if resolved_agent_id:
             try:
@@ -113,12 +126,18 @@ def teardown_agent_runtime(
                 cwd=repo_root,
                 expected_hook=target_epic,
             )
-            hook_cleared = True
         except SystemExit:
-            hook_cleared = False
+            pass
+
+    hook_known_after_cleanup, remaining_hook = _read_agent_hook(
+        agent_bead_id=resolved_agent_bead_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+    hook_cleared = hook_known_after_cleanup and remaining_hook is None
 
     agent_closed = False
-    if close_agent_bead:
+    if close_agent_bead and hook_cleared:
         close_result = None
         try:
             close_result = beads.close_issue(
