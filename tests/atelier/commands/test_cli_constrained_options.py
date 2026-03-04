@@ -1,3 +1,4 @@
+import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -5,39 +6,48 @@ from typer.testing import CliRunner
 
 import atelier.cli as cli
 
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(output: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", output)
+
 
 def test_doctor_help_shows_format_choices() -> None:
     runner = CliRunner()
     result = runner.invoke(cli.app, ["doctor", "--help"], color=False, terminal_width=220)
+    clean_output = _strip_ansi(result.output)
 
     assert result.exit_code == 0
-    assert "--format" in result.output
-    assert "[table|json]" in result.output
-    assert "--format        TEXT" not in result.output
+    assert "--format" in clean_output
+    assert "[table|json]" in clean_output
+    assert "--format        TEXT" not in clean_output
 
 
 def test_work_help_shows_mode_select_and_run_mode_choices() -> None:
     runner = CliRunner()
     result = runner.invoke(cli.app, ["work", "--help"], color=False, terminal_width=220)
+    clean_output = _strip_ansi(result.output)
 
     assert result.exit_code == 0
-    assert "--mode" in result.output
-    assert "[prompt|auto]" in result.output
-    assert "--select" in result.output
-    assert "first-eligible" in result.output
-    assert "oldest-feedback" in result.output
-    assert "--run-mode" in result.output
-    assert "[once|default|watch]" in result.output
+    assert "--mode" in clean_output
+    assert "[prompt|auto]" in clean_output
+    assert "--select" in clean_output
+    assert "first-eligible" in clean_output
+    assert "oldest-feedback" in clean_output
+    assert "--run-mode" in clean_output
+    assert "[once|default|watch]" in clean_output
 
 
 def test_global_help_shows_log_level_choices() -> None:
     runner = CliRunner()
     result = runner.invoke(cli.app, ["--help"], color=False, terminal_width=220)
+    clean_output = _strip_ansi(result.output)
 
     assert result.exit_code == 0
-    assert "--log-level" in result.output
-    assert "[trace|debug|info|" in result.output
-    assert "--log-level                           TEXT" not in result.output
+    assert "--log-level" in clean_output
+    assert "[trace|debug|info|" in clean_output
+    assert "--log-level                           TEXT" not in clean_output
 
 
 def test_choice_flags_accept_case_insensitive_and_underscore_aliases() -> None:
