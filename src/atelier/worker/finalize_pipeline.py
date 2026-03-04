@@ -207,6 +207,101 @@ def _finalize_from_pr_lifecycle(
     return None
 
 
+def _with_stale_signal_recovery_reason(result: FinalizeResult) -> FinalizeResult:
+    """Annotate successful finalize results when stale closed-state signals recover."""
+    if not result.continue_running:
+        return result
+    return FinalizeResult(
+        continue_running=True,
+        reason="changeset_closed_pr_lifecycle_stale_recovered",
+    )
+
+
+def _refresh_closed_active_pr_lifecycle(
+    *,
+    issue: Issue,
+    context: "FinalizePipelineContext",
+    changeset_id: str,
+    work_branch: str,
+    repo_slug: str | None,
+    git_path: str | None,
+    service: "FinalizePipelineService",
+) -> tuple[bool, FinalizeResult | None]:
+    """Refresh closed-state active PR lifecycle before escalation.
+
+    Returns:
+        Tuple of (active lifecycle after refresh, optional finalize result when
+        refresh yields a terminal/error outcome that should short-circuit).
+    """
+    if not (context.branch_pr and repo_slug and work_branch):
+        return True, None
+    pushed = git.git_ref_exists(
+        context.repo_root, f"refs/remotes/origin/{work_branch}", git_path=git_path
+    )
+    refreshed_payload, refresh_error = service.lookup_pr_payload_diagnostic(repo_slug, work_branch)
+    if refresh_error:
+        atelier_log.warning(
+            "changeset="
+            f"{changeset_id} finalize closed-state active lifecycle refresh failed "
+            f"branch={work_branch}: {refresh_error}"
+        )
+        service.mark_changeset_blocked(
+            changeset_id, reason="closed changeset PR lifecycle refresh failed"
+        )
+        service.send_planner_notification(
+            subject=f"NEEDS-DECISION: PR status query failed ({changeset_id})",
+            body=(
+                "Unable to reconcile active PR lifecycle for a closed changeset "
+                "because GitHub PR status refresh failed.\n"
+                f"Branch: `{work_branch}`\n"
+                f"Error: {refresh_error}\n"
+                "Action: resolve GitHub access/query issues and rerun worker finalize."
+            ),
+            agent_id=context.agent_id,
+            thread_id=changeset_id,
+        )
+        return True, FinalizeResult(
+            continue_running=False,
+            reason="changeset_closed_pr_lifecycle_refresh_failed",
+        )
+    refreshed_lifecycle = prs.lifecycle_state(
+        refreshed_payload,
+        pushed=pushed,
+        review_requested=prs.has_review_requests(refreshed_payload),
+    )
+    if refreshed_lifecycle in {"merged", "closed"}:
+        atelier_log.info(
+            "changeset="
+            f"{changeset_id} finalize recovered stale closed-state lifecycle "
+            f"via refresh ({refreshed_lifecycle})"
+        )
+        terminal_result = _finalize_from_pr_lifecycle(
+            lifecycle_state=refreshed_lifecycle,
+            issue=issue,
+            changeset_id=changeset_id,
+            work_branch=work_branch,
+            repo_slug=repo_slug,
+            git_path=git_path,
+            pr_payload=refreshed_payload,
+            pushed=pushed,
+            context=context,
+            agent_id=context.agent_id,
+            service=service,
+        )
+        if terminal_result is not None:
+            return False, _with_stale_signal_recovery_reason(terminal_result)
+        return False, None
+    active_lifecycles = {"pushed", "draft-pr", "pr-open", "in-review", "approved"}
+    if refreshed_lifecycle in active_lifecycles:
+        return True, None
+    atelier_log.warning(
+        "changeset="
+        f"{changeset_id} finalize PR lifecycle refresh was indeterminate "
+        f"(state={refreshed_lifecycle or 'none'}); preserving active lifecycle guard"
+    )
+    return True, None
+
+
 @dataclass(frozen=True)
 class FinalizePipelineContext:
     changeset_id: str
@@ -373,6 +468,7 @@ def run_finalize_pipeline(
     if terminal_state is None and canonical_status == "closed":
         if review_state == "merged":
             terminal_state = "merged"
+    stale_signal_recovered = False
     if canonical_status == "closed" and branch_pr and repo_slug and work_branch:
         closed_pr_lookup_error: str | None = None
         if service.lookup_pr_payload(repo_slug, work_branch) is None:
@@ -404,6 +500,19 @@ def run_finalize_pipeline(
             return FinalizeResult(continue_running=False, reason="changeset_pr_status_query_failed")
     if terminal_state is not None or canonical_status == "closed":
         active_pr_lifecycle = service.changeset_waiting_on_review_or_signals(issue, context=context)
+        if active_pr_lifecycle:
+            active_pr_lifecycle, refreshed_result = _refresh_closed_active_pr_lifecycle(
+                issue=issue,
+                context=context,
+                changeset_id=changeset_id,
+                work_branch=work_branch,
+                repo_slug=repo_slug,
+                git_path=git_path,
+                service=service,
+            )
+            if refreshed_result is not None:
+                return refreshed_result
+            stale_signal_recovered = not active_pr_lifecycle
         if beads.close_transition_has_active_pr_lifecycle(
             issue,
             active_pr_lifecycle=active_pr_lifecycle,
@@ -521,11 +630,14 @@ def run_finalize_pipeline(
                 terminal_state = "merged"
             else:
                 terminal_state = "abandoned"
-        return service.finalize_terminal_changeset(
+        final_result = service.finalize_terminal_changeset(
             context=context,
             terminal_state=terminal_state,
             integrated_sha=None,
         )
+        if stale_signal_recovered:
+            return _with_stale_signal_recovery_reason(final_result)
+        return final_result
     if branch_pr:
         integrity = service.stack_integrity_preflight(issue, context=context)
         if not integrity.ok:
