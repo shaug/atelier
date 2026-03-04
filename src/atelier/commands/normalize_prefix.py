@@ -158,7 +158,8 @@ def _render_normalization_report(
 
     if apply:
         console.print("Rollback guidance:")
-        console.print(f"- Export Beads state: {rollback_guidance['beads_export']}")
+        console.print(f"- Inspect Beads DB path: {rollback_guidance['beads_inspect']}")
+        console.print(f"- Backup Beads state: {rollback_guidance['beads_backup']}")
         console.print(f"- Backup mapping metadata: {rollback_guidance['mapping_backup']}")
         console.print(
             "Configured project prefix remains authoritative; this command does not edit config."
@@ -196,9 +197,10 @@ def _rollback_guidance(*, project_data_dir: Path, beads_root: Path) -> dict[str,
     timestamp = dt.datetime.now(tz=dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     meta_dir = project_data_dir / "worktrees" / ".meta"
     meta_backup = project_data_dir / "worktrees" / f".meta.backup-{timestamp}"
-    beads_backup = f"prefix-normalize-beads-{timestamp}.jsonl"
+    beads_backup = beads_root.parent / f"{beads_root.name}.backup-{timestamp}"
     return {
-        "beads_export": f'BEADS_DIR="{beads_root}" bd export > "{beads_backup}"',
+        "beads_inspect": f'BEADS_DIR="{beads_root}" bd info --json',
+        "beads_backup": f'cp -R "{beads_root}" "{beads_backup}"',
         "mapping_backup": f'cp -R "{meta_dir}" "{meta_backup}"',
     }
 
