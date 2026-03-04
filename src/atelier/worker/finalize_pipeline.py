@@ -94,7 +94,9 @@ def _block_missing_merged_integration(
     root_branch = _normalized_branch(fields.get("changeset.root_branch"))
     workspace_parent = _normalized_branch(fields.get("workspace.parent_branch"))
     default_branch = _normalized_branch(git.git_default_branch(repo_root, git_path=git_path))
-    expected_mainline = workspace_parent or default_branch
+    expected_mainline = (
+        workspace_parent if workspace_parent and workspace_parent != root_branch else default_branch
+    )
     if expected_mainline and expected_mainline == root_branch:
         expected_mainline = None
 

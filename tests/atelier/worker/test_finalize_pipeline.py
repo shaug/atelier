@@ -477,6 +477,62 @@ def test_run_finalize_pipeline_keeps_in_progress_when_merged_pr_lacks_mainline_p
     assert "git rebase --onto main feat/root-at-epic.1 <child-work-branch>" in body
 
 
+def test_run_finalize_pipeline_uses_default_mainline_when_workspace_parent_is_root(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "in_progress",
+        "labels": [],
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "workspace.parent_branch: feat/root\n"
+            "changeset.work_branch: feat/root-at-epic.1\n"
+        ),
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_default_branch",
+        lambda *_args, **_kwargs: "main",
+    )
+
+    service = _FinalizeServiceStub()
+    service.lookup_pr_payload_fn = lambda _repo_slug, _branch: {
+        "number": 88,
+        "state": "MERGED",
+        "mergedAt": "2026-02-28T00:00:00Z",
+        "isDraft": False,
+        "baseRefName": "feat/root",
+    }
+    service.changeset_integration_signal_fn = lambda _issue, *, repo_slug, git_path: (False, None)
+    notifications: list[tuple[str, str]] = []
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        (str(kwargs.get("subject")), str(kwargs.get("body")))
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(repo_slug="org/repo"),
+        service=service,
+    )
+
+    assert result.reason == "changeset_in_progress_missing_integration"
+    assert result.continue_running is False
+    assert notifications
+    _, body = notifications[0]
+    assert "Expected mainline branch: `main`" in body
+    assert "git rebase --onto main feat/root-at-epic.1 <child-work-branch>" in body
+
+
 def test_run_finalize_pipeline_blocks_on_stack_integrity_preflight(monkeypatch) -> None:
     issue = {
         "id": "at-epic.1",
