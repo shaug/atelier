@@ -27,17 +27,40 @@ def _parity_ok() -> SimpleNamespace:
     )
 
 
+def _startup_result(
+    module,
+    *,
+    inbox: list[dict[str, object]],
+    queued: list[dict[str, object]],
+    epics: list[dict[str, object]],
+    parity: object,
+):
+    return module.StartupCommandResult(
+        inbox_messages=inbox,
+        queued_messages=queued,
+        epics=epics,
+        parity_report=parity,
+    )
+
+
 def test_render_startup_overview_reports_empty_sections(monkeypatch) -> None:
     module = _load_script()
-    monkeypatch.setattr(module.beads, "list_inbox_messages", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(module.beads, "list_queue_messages", lambda **_kwargs: [])
-    monkeypatch.setattr(module.beads, "list_descendant_changesets", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
-        module.beads,
-        "epic_discovery_parity_report",
-        lambda **_kwargs: _parity_ok(),
+        module,
+        "execute_startup_command_plan",
+        lambda *_args, **_kwargs: _startup_result(
+            module,
+            inbox=[],
+            queued=[],
+            epics=[],
+            parity=_parity_ok(),
+        ),
     )
-    monkeypatch.setattr(module.planner_overview, "list_epics", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        module.StartupBeadsInvocationHelper,
+        "list_descendant_changesets",
+        lambda *_args, **_kwargs: [],
+    )
     monkeypatch.setattr(
         module.planner_overview,
         "render_epics",
@@ -87,15 +110,8 @@ def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatc
     ]
     calls: dict[str, object] = {}
 
-    def _fake_list_inbox_messages(*_args, **_kwargs):
-        return inbox
-
-    def _fake_list_queue_messages(**kwargs):
-        calls["queue_kwargs"] = kwargs
-        return queued
-
-    def _fake_list_descendant_changesets(parent_id: str, **kwargs):
-        calls.setdefault("descendant_calls", []).append((parent_id, kwargs))
+    def _fake_list_descendant_changesets(_self, parent_id: str, *, include_closed: bool):
+        calls.setdefault("descendant_calls", []).append((parent_id, include_closed))
         if parent_id == "at-1":
             return [
                 {"id": "at-1.2", "title": "Second deferred", "status": "deferred"},
@@ -108,30 +124,31 @@ def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatc
             ]
         return []
 
-    monkeypatch.setattr(module.beads, "list_inbox_messages", _fake_list_inbox_messages)
-    monkeypatch.setattr(module.beads, "list_queue_messages", _fake_list_queue_messages)
     monkeypatch.setattr(
-        module.beads, "list_descendant_changesets", _fake_list_descendant_changesets
+        module.StartupBeadsInvocationHelper,
+        "list_descendant_changesets",
+        _fake_list_descendant_changesets,
     )
     monkeypatch.setattr(
-        module.beads,
-        "epic_discovery_parity_report",
-        lambda **_kwargs: SimpleNamespace(
-            active_top_level_work_count=2,
-            indexed_active_epic_count=2,
-            missing_executable_identity=(),
-            missing_from_index=(),
-            in_parity=True,
+        module,
+        "execute_startup_command_plan",
+        lambda *_args, **_kwargs: _startup_result(
+            module,
+            inbox=inbox,
+            queued=queued,
+            epics=[
+                {"id": "at-1", "title": "Epic one", "status": "open"},
+                {"id": "at-2", "title": "Epic blocked", "status": "blocked"},
+                {"id": "at-3", "title": "Epic closed", "status": "closed"},
+            ],
+            parity=SimpleNamespace(
+                active_top_level_work_count=2,
+                indexed_active_epic_count=2,
+                missing_executable_identity=(),
+                missing_from_index=(),
+                in_parity=True,
+            ),
         ),
-    )
-    monkeypatch.setattr(
-        module.planner_overview,
-        "list_epics",
-        lambda **_kwargs: [
-            {"id": "at-1", "title": "Epic one", "status": "open"},
-            {"id": "at-2", "title": "Epic blocked", "status": "blocked"},
-            {"id": "at-3", "title": "Epic closed", "status": "closed"},
-        ],
     )
     monkeypatch.setattr(
         module.planner_overview,
@@ -168,66 +185,45 @@ def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatc
         "Open epics:",
         "- at-1 [open] Example",
     ]
-    assert calls["queue_kwargs"] == {
-        "beads_root": Path("/beads"),
-        "cwd": Path("/repo"),
-        "unread_only": True,
-        "unclaimed_only": False,
-    }
     assert calls["descendant_calls"] == [
-        (
-            "at-1",
-            {
-                "beads_root": Path("/beads"),
-                "cwd": Path("/repo"),
-                "include_closed": False,
-            },
-        ),
-        (
-            "at-2",
-            {
-                "beads_root": Path("/beads"),
-                "cwd": Path("/repo"),
-                "include_closed": False,
-            },
-        ),
+        ("at-1", False),
+        ("at-2", False),
     ]
 
 
 def test_render_startup_overview_caps_deferred_epic_scan(monkeypatch) -> None:
     module = _load_script()
     monkeypatch.setenv("ATELIER_STARTUP_DEFERRED_EPIC_SCAN_LIMIT", "1")
-    monkeypatch.setattr(module.beads, "list_inbox_messages", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(module.beads, "list_queue_messages", lambda **_kwargs: [])
     monkeypatch.setattr(
-        module.beads,
-        "epic_discovery_parity_report",
-        lambda **_kwargs: SimpleNamespace(
-            active_top_level_work_count=3,
-            indexed_active_epic_count=3,
-            missing_executable_identity=(),
-            missing_from_index=(),
-            in_parity=True,
+        module,
+        "execute_startup_command_plan",
+        lambda *_args, **_kwargs: _startup_result(
+            module,
+            inbox=[],
+            queued=[],
+            epics=[
+                {"id": "at-1", "title": "Epic one", "status": "open"},
+                {"id": "at-2", "title": "Epic two", "status": "in_progress"},
+                {"id": "at-3", "title": "Epic three", "status": "blocked"},
+            ],
+            parity=SimpleNamespace(
+                active_top_level_work_count=3,
+                indexed_active_epic_count=3,
+                missing_executable_identity=(),
+                missing_from_index=(),
+                in_parity=True,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        module.StartupBeadsInvocationHelper,
+        "list_descendant_changesets",
+        lambda _self, parent_id, *, include_closed: (
+            scanned_epics.append(parent_id)
+            or [{"id": f"{parent_id}.1", "title": "Deferred child", "status": "deferred"}]
         ),
     )
     scanned_epics: list[str] = []
-
-    def _fake_list_descendant_changesets(parent_id: str, **_kwargs):
-        scanned_epics.append(parent_id)
-        return [{"id": f"{parent_id}.1", "title": "Deferred child", "status": "deferred"}]
-
-    monkeypatch.setattr(
-        module.beads, "list_descendant_changesets", _fake_list_descendant_changesets
-    )
-    monkeypatch.setattr(
-        module.planner_overview,
-        "list_epics",
-        lambda **_kwargs: [
-            {"id": "at-1", "title": "Epic one", "status": "open"},
-            {"id": "at-2", "title": "Epic two", "status": "in_progress"},
-            {"id": "at-3", "title": "Epic three", "status": "blocked"},
-        ],
-    )
     monkeypatch.setattr(
         module.planner_overview,
         "render_epics",
@@ -288,28 +284,35 @@ def test_main_emits_override_warning(monkeypatch, capsys, tmp_path: Path) -> Non
 
 def test_render_startup_overview_reports_identity_guardrail_remediation(monkeypatch) -> None:
     module = _load_script()
-    monkeypatch.setattr(module.beads, "list_inbox_messages", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(module.beads, "list_queue_messages", lambda **_kwargs: [])
-    monkeypatch.setattr(module.beads, "list_descendant_changesets", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(module.planner_overview, "list_epics", lambda **_kwargs: [])
     monkeypatch.setattr(
-        module.beads,
-        "epic_discovery_parity_report",
-        lambda **_kwargs: SimpleNamespace(
-            active_top_level_work_count=1,
-            indexed_active_epic_count=0,
-            missing_executable_identity=(
-                SimpleNamespace(
-                    issue_id="at-missing",
-                    status="open",
-                    issue_type="epic",
-                    labels=(),
-                    remediation_command="bd update at-missing --type epic --add-label at:epic",
+        module,
+        "execute_startup_command_plan",
+        lambda *_args, **_kwargs: _startup_result(
+            module,
+            inbox=[],
+            queued=[],
+            epics=[],
+            parity=SimpleNamespace(
+                active_top_level_work_count=1,
+                indexed_active_epic_count=0,
+                missing_executable_identity=(
+                    SimpleNamespace(
+                        issue_id="at-missing",
+                        status="open",
+                        issue_type="epic",
+                        labels=(),
+                        remediation_command="bd update at-missing --type epic --add-label at:epic",
+                    ),
                 ),
+                missing_from_index=(),
+                in_parity=False,
             ),
-            missing_from_index=(),
-            in_parity=False,
         ),
+    )
+    monkeypatch.setattr(
+        module.StartupBeadsInvocationHelper,
+        "list_descendant_changesets",
+        lambda *_args, **_kwargs: [],
     )
     monkeypatch.setattr(
         module.planner_overview,
@@ -325,3 +328,38 @@ def test_render_startup_overview_reports_identity_guardrail_remediation(monkeypa
 
     assert "Identity guardrail violations (deterministic remediation):" in rendered
     assert "remediation: bd update at-missing --type epic --add-label at:epic" in rendered
+
+
+def test_render_startup_overview_passes_agent_id_to_command_plan(monkeypatch) -> None:
+    module = _load_script()
+    captured_agent_ids: list[str] = []
+
+    def _fake_execute(agent_id: str, **_kwargs):
+        captured_agent_ids.append(agent_id)
+        return _startup_result(
+            module,
+            inbox=[],
+            queued=[],
+            epics=[],
+            parity=_parity_ok(),
+        )
+
+    monkeypatch.setattr(module, "execute_startup_command_plan", _fake_execute)
+    monkeypatch.setattr(
+        module.StartupBeadsInvocationHelper,
+        "list_descendant_changesets",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        module.planner_overview,
+        "render_epics",
+        lambda issues, *, show_drafts: "Epics by state:\n- (none)",
+    )
+
+    module._render_startup_overview(
+        "atelier/planner/example",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert captured_agent_ids == ["atelier/planner/example"]

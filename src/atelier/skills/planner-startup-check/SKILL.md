@@ -37,6 +37,26 @@ during startup triage. Do not wait for approval to capture deferred work.
      `bd update <id> --type epic --add-label at:epic`
    - `cs:*` lifecycle labels are not execution gates.
 
+## Canonical startup command plan
+
+Planner startup triage uses a fixed ordered command plan with explicit I/O:
+
+1. `list_inbox_unread_messages`
+   - inputs: `agent_id`
+   - output: `inbox_messages`
+1. `list_queue_unread_messages`
+   - inputs: none
+   - output: `queued_messages`
+1. `list_indexed_epics`
+   - inputs: none
+   - output: `epics`
+1. `compute_epic_discovery_parity`
+   - inputs: `epics`
+   - output: `parity_report`
+
+All Beads invocations in this flow run through the shared startup helper and
+reject unsupported invocation forms.
+
 ## Verification
 
 - Inbox and queue are processed before planning work starts.
