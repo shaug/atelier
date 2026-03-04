@@ -1139,6 +1139,19 @@ def run_worker_once(
         )
         finishstep(extra=preflight.reason)
         if preflight.should_finalize_only:
+            if dry_run:
+                control.dry_run_log(
+                    "Startup preflight would skip worker agent startup and finalize changeset "
+                    f"({preflight.reason})."
+                )
+                return finish(
+                    WorkerRunSummary(
+                        started=False,
+                        reason="dry_run",
+                        epic_id=selected_epic,
+                        changeset_id=str(changeset_id) if changeset_id else None,
+                    )
+                )
             control.say(
                 "Skipping worker agent startup; finalizing changeset via startup preflight "
                 f"({preflight.reason})."
