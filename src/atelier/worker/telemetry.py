@@ -74,7 +74,12 @@ def report_worker_summary(
 ) -> None:
     """Render the worker session summary."""
     prefix = "DRY-RUN " if dry_run else ""
-    status = "started worker session" if summary.started else "no worker started"
+    agent_session_started = summary.started
+    if summary.started and summary.reason == "startup_finalize_only":
+        status = "continued without agent session (startup finalize-only)"
+        agent_session_started = False
+    else:
+        status = "started worker session" if summary.started else "no worker started"
     say(f"{prefix}Summary: {status}")
     if summary.reason:
         say(f"- Reason: {summary.reason}")
@@ -85,7 +90,9 @@ def report_worker_summary(
     if log_debug is not None:
         log_debug(
             "summary "
-            f"started={summary.started} reason={summary.reason or 'none'} "
+            f"continuation_started={summary.started} "
+            f"agent_session_started={agent_session_started} "
+            f"reason={summary.reason or 'none'} "
             f"epic={summary.epic_id or 'none'} "
             f"changeset={summary.changeset_id or 'none'} dry_run={dry_run}"
         )
