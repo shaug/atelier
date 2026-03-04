@@ -404,3 +404,23 @@ def test_render_startup_overview_falls_back_to_deterministic_output(monkeypatch)
         "Epics by state:",
         "- unavailable (startup triage failed before epic rendering)",
     ]
+
+
+def test_render_startup_overview_does_not_swallow_system_exit(monkeypatch) -> None:
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "execute_startup_command_plan",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(SystemExit(7)),
+    )
+
+    try:
+        module._render_startup_overview(
+            "atelier/planner/example",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+    except SystemExit as exc:
+        assert exc.code == 7
+    else:
+        raise AssertionError("expected SystemExit to propagate")

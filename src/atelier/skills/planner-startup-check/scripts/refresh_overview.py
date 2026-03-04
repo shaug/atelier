@@ -139,7 +139,7 @@ def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path
         return render_startup_triage_markdown(triage_model)
     except KeyboardInterrupt:
         raise
-    except BaseException as exc:
+    except Exception as exc:
         fallback_model = build_startup_triage_failure_model(
             beads_root=beads_root,
             phase="render_startup_overview",
