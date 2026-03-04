@@ -88,6 +88,20 @@ def _startup_worktree_preflight(
     if not target_changesets:
         return
 
+    planned_actions = prefix_migration_drift.repair_prefix_migration_drift(
+        project_data_dir=project_data_dir,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        apply=False,
+        repo_slug=repo_slug,
+        git_path=git_path,
+        target_epic_id=selected_epic,
+        target_changeset_ids=target_changesets,
+    )
+    planned_action_by_key = {
+        (action.epic_id, action.changeset_id): action for action in planned_actions
+    }
+
     drift_records = prefix_migration_drift.scan_prefix_migration_drift(
         project_data_dir=project_data_dir,
         beads_root=beads_root,
@@ -108,7 +122,26 @@ def _startup_worktree_preflight(
         if record_changeset_id not in target_changesets:
             continue
         record_epic_id = _normalize_drift_value(record.get("epic_id")) or "<unknown>"
-        values_json = _format_drift_values(record.get("values"))
+        action = planned_action_by_key.get((record_epic_id, record_changeset_id))
+        if drift_class == "metadata-read-failure":
+            actionable = True
+        elif action is None:
+            actionable = True
+        else:
+            actionable = action.changed and drift_class in action.drift_classes
+        if not actionable:
+            continue
+
+        raw_values = record.get("values")
+        details = dict(raw_values) if isinstance(raw_values, dict) else {}
+        if action is not None:
+            details["repair.changed"] = action.changed
+            details["repair.canonical_work_branch"] = action.canonical_work_branch
+            details["repair.canonical_worktree_path"] = action.canonical_worktree_path
+            details["repair.update_mapping"] = action.update_mapping
+            details["repair.update_changeset_metadata"] = action.update_changeset_metadata
+            details["repair.update_changeset_worktree_path"] = action.update_changeset_worktree_path
+        values_json = _format_drift_values(details)
         diagnostics.append(
             "check=prefix-migration-preflight "
             f"epic={record_epic_id} "

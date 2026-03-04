@@ -415,7 +415,7 @@ def test_repair_prefix_migration_drift_plans_updates_without_applying(tmp_path: 
     assert action.canonical_work_branch == "feat/pr-head"
     assert action.work_branch_source == "open-pr-head"
     assert action.canonical_worktree_path == "worktrees/ts-epic.1"
-    assert action.worktree_path_source == "filesystem-metadata-branch"
+    assert action.worktree_path_source == "default"
     assert action.update_changeset_metadata is True
     assert action.update_changeset_worktree_path is True
     assert action.update_mapping is True
@@ -518,6 +518,86 @@ def test_repair_prefix_migration_drift_apply_updates_mapping_and_metadata(tmp_pa
     assert updated_mapping.root_branch == "feat/new-root"
     assert updated_mapping.changesets["ts-epic.1"] == "feat/pr-head"
     assert updated_mapping.changeset_worktrees["ts-epic.1"] == "worktrees/ts-epic.1"
+
+
+def test_repair_prefix_migration_drift_converges_duplicate_branch_paths_deterministically(
+    tmp_path: Path,
+) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    mapping_path = worktrees.mapping_path(project_data_dir, "ts-epic")
+    worktrees.write_mapping(
+        mapping_path,
+        worktrees.WorktreeMapping(
+            epic_id="ts-epic",
+            worktree_path="worktrees/ts-epic",
+            root_branch="feat/new-root",
+            changesets={"ts-epic.1": "feat/pr-head"},
+            changeset_worktrees={"ts-epic.1": "worktrees/ts-epic.1"},
+        ),
+    )
+    legacy_path = project_data_dir / "worktrees" / "at-legacy-ts-epic.1"
+    legacy_path.mkdir(parents=True)
+    (legacy_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+    canonical_path = project_data_dir / "worktrees" / "ts-epic.1"
+    canonical_path.mkdir(parents=True)
+    (canonical_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+
+    epic_issue = {
+        "id": "ts-epic",
+        "labels": ["at:epic"],
+        "description": "workspace.root_branch: feat/new-root\n",
+    }
+    changeset_issue = {
+        "id": "ts-epic.1",
+        "labels": [],
+        "type": "task",
+        "description": (
+            "changeset.root_branch: feat/new-root\n"
+            "changeset.work_branch: feat/pr-head\n"
+            "worktree_path: worktrees/ts-epic.1\n"
+        ),
+    }
+    worktree_output = _git_worktree_output(legacy_path, "feat/pr-head") + _git_worktree_output(
+        canonical_path, "feat/pr-head"
+    )
+
+    with (
+        patch("atelier.prefix_migration_drift.beads.list_epics", return_value=[epic_issue]),
+        patch(
+            "atelier.prefix_migration_drift.beads.list_descendant_changesets",
+            return_value=[changeset_issue],
+        ),
+        patch("atelier.prefix_migration_drift.beads.list_work_children", return_value=[]),
+        patch(
+            "atelier.prefix_migration_drift.exec_util.try_run_command",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "worktree", "list", "--porcelain"],
+                returncode=0,
+                stdout=worktree_output,
+                stderr="",
+            ),
+        ),
+        patch("atelier.prefix_migration_drift.git.git_current_branch", return_value="feat/pr-head"),
+    ):
+        actions = prefix_migration_drift.repair_prefix_migration_drift(
+            project_data_dir=project_data_dir,
+            beads_root=tmp_path / ".beads",
+            repo_root=repo_root,
+            apply=False,
+        )
+
+    assert len(actions) == 1
+    action = actions[0]
+    assert action.changed is True
+    assert action.canonical_work_branch == "feat/pr-head"
+    assert action.canonical_worktree_path == "worktrees/at-legacy-ts-epic.1"
+    assert action.worktree_path_source == "filesystem-canonical-branch"
+    assert action.update_changeset_metadata is False
+    assert action.update_changeset_worktree_path is True
+    assert action.update_mapping is True
 
 
 def test_scan_prefix_migration_drift_reports_mixed_legacy_prefix_states(tmp_path: Path) -> None:
