@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import config, git
 from .commands.resolve import resolve_current_project_with_repo_root, resolve_project_for_enlistment
-
-LEGACY_ATELIER_PROJECT_FALLBACK_REMOVAL_DATE = "2026-07-01"
-LEGACY_ATELIER_WORKSPACE_DIR_FALLBACK_REMOVAL_DATE = "2026-07-01"
 
 
 @dataclass(frozen=True)
@@ -46,16 +42,17 @@ def resolve_runtime_repo_dir_hint(
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> tuple[str | None, str | None]:
-    """Resolve runtime repo-dir hint without depending on ambient ATELIER_PROJECT.
+    """Resolve runtime repo-dir hints from explicit input or local worktree link.
 
     Args:
         repo_dir: Optional explicit repo dir argument.
         cwd: Optional working directory override for deterministic testing.
         env: Optional environment override for deterministic testing.
+            Retained for API compatibility.
 
     Returns:
-        Tuple of ``(repo_dir_hint, warning)`` where warning is emitted when the
-        legacy ``ATELIER_PROJECT`` fallback was needed.
+        Tuple of ``(repo_dir_hint, warning)``. ``warning`` is reserved for
+        compatibility and currently always ``None``.
     """
     explicit = str(repo_dir or "").strip()
     if explicit:
@@ -66,26 +63,7 @@ def resolve_runtime_repo_dir_hint(
     if worktree_link.exists():
         return str(worktree_link.resolve()), None
 
-    runtime_env = env if env is not None else os.environ
-    workspace_dir = str(runtime_env.get("ATELIER_WORKSPACE_DIR", "")).strip()
-    if workspace_dir:
-        return (
-            workspace_dir,
-            "warning: deprecated runtime fallback via ATELIER_WORKSPACE_DIR; "
-            "pass --repo-dir or run from an agent home with ./worktree. Legacy "
-            "fallback compatibility is scheduled for removal after "
-            f"{LEGACY_ATELIER_WORKSPACE_DIR_FALLBACK_REMOVAL_DATE}.",
-        )
-
-    project_dir = str(runtime_env.get("ATELIER_PROJECT", "")).strip()
-    if project_dir:
-        return (
-            project_dir,
-            "warning: deprecated runtime fallback via ATELIER_PROJECT; pass "
-            "--repo-dir or run from an agent home with ./worktree. Legacy "
-            "fallback compatibility is scheduled for removal after "
-            f"{LEGACY_ATELIER_PROJECT_FALLBACK_REMOVAL_DATE}.",
-        )
+    _ = env
     return None, None
 
 
