@@ -72,7 +72,7 @@ reject unsupported invocation forms.
 ## On-demand refresh
 
 - During an active planner session, re-run the same read-only overview with:
-  `python3 skills/planner-startup-check/scripts/refresh_overview.py --agent-id "$ATELIER_AGENT_ID" --repo-dir ./worktree`
+  `python3 skills/planner-startup-check/scripts/refresh_overview.py --agent-id "<planner-agent-id>" --repo-dir ./worktree`
 - This refresh is read-only and includes:
   - unread planner inbox messages
   - queued messages with queue name and claim state
