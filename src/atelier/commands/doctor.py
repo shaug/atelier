@@ -149,10 +149,10 @@ def doctor(args: object) -> None:
     git_path = config.resolve_git_path(project_config)
 
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
+    blocked_epics: set[str] = set()
     if fix and not force:
         blockers = _active_agent_hook_blockers(beads_root=beads_root, repo_root=repo_root)
-        if blockers:
-            die(_active_hook_blockers_message(blockers))
+        blocked_epics = {blocker.hook_bead for blocker in blockers if blocker.hook_bead}
 
     origin = project_config.project.origin or project_config.project.repo_url
     repo_slug = prs.github_repo_slug(origin)
@@ -163,6 +163,7 @@ def doctor(args: object) -> None:
         apply=fix,
         repo_slug=repo_slug,
         git_path=git_path,
+        blocked_epics=blocked_epics,
     )
     context = _collect_doctor_context(
         project_data_dir=project_data_dir,
@@ -632,6 +633,11 @@ def _prefix_drift_remediation(
     fix: bool,
 ) -> str:
     notes: list[str] = []
+    if action.deferred_reason:
+        if action.deferred_reason == "active-hook":
+            notes.append("deferred: active hook owns this epic (use --force to override)")
+        else:
+            notes.append(f"deferred: {action.deferred_reason}")
     if action.changed:
         targets: list[str] = []
         if action.update_changeset_metadata:
@@ -641,9 +647,11 @@ def _prefix_drift_remediation(
         if action.update_mapping:
             targets.append("mapping branch/worktree")
         target_summary = ", ".join(targets) if targets else "lineage metadata"
-        if fix:
+        if fix and not action.deferred_reason:
             notes.append(f"repair applied in fix mode; updated {target_summary}")
             notes.append("rerun `atelier doctor` to confirm zero prefix drift findings")
+        elif fix and action.deferred_reason:
+            notes.append(f"repair deferred in fix mode; pending update to {target_summary}")
         else:
             notes.append(f"run `atelier doctor --fix` to update {target_summary}")
     else:
@@ -1021,6 +1029,10 @@ def _action_summary(action: prefix_migration_drift.PrefixMigrationRepairAction) 
         return "no-op"
     if action.applied:
         return "updated " + ", ".join(targets)
+    if action.deferred_reason:
+        if action.deferred_reason == "active-hook":
+            return "deferred (active hook)"
+        return f"deferred ({action.deferred_reason})"
     return "would update " + ", ".join(targets)
 
 

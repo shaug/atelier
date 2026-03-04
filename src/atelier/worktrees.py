@@ -218,6 +218,52 @@ def write_mapping(path: Path, mapping: WorktreeMapping) -> None:
             temp_path.unlink(missing_ok=True)
 
 
+def load_mapping_for_changeset(
+    project_dir: Path,
+    *,
+    epic_id: str,
+    changeset_id: str,
+) -> WorktreeMapping | None:
+    """Load mapping for a changeset using explicit mapping ownership.
+
+    The lookup prefers the canonical epic mapping path but falls back to
+    scanning known mapping files for explicit ``changeset`` or
+    ``changeset_worktrees`` ownership.
+    """
+    direct = load_mapping(mapping_path(project_dir, epic_id))
+    if direct is not None:
+        if changeset_id == epic_id:
+            return direct
+        if changeset_id in direct.changesets or changeset_id in direct.changeset_worktrees:
+            return direct
+
+    meta_dir = worktrees_root(project_dir) / METADATA_DIRNAME
+    if not meta_dir.exists():
+        return direct
+
+    candidates: list[WorktreeMapping] = []
+    for candidate_path in sorted(meta_dir.glob("*.json")):
+        mapping = load_mapping(candidate_path)
+        if mapping is None:
+            continue
+        if changeset_id == epic_id and mapping.epic_id == epic_id:
+            candidates.append(mapping)
+            continue
+        if changeset_id in mapping.changesets or changeset_id in mapping.changeset_worktrees:
+            candidates.append(mapping)
+
+    if not candidates:
+        return direct
+    preferred = [mapping for mapping in candidates if mapping.epic_id == epic_id]
+    if len(preferred) == 1:
+        return preferred[0]
+    if len(preferred) > 1:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
 def reconcile_mapping_ownership(
     project_dir: Path,
     *,

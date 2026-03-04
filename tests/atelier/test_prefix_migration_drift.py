@@ -331,6 +331,78 @@ def test_scan_prefix_migration_drift_reports_missing_mapping_lineage_entries(
     assert records[1]["values"]["mapping.worktree_path"] is None
 
 
+def test_scan_prefix_migration_drift_scopes_explicit_changeset_without_epic_id_prefix(
+    tmp_path: Path,
+) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    epic_issue = {
+        "id": "ts-epic",
+        "labels": ["at:epic"],
+        "description": "workspace.root_branch: feat/new-root\n",
+    }
+    changeset_issue = {
+        "id": "legacy-child",
+        "labels": [],
+        "type": "task",
+        "description": (
+            "changeset.root_branch: feat/new-root\nchangeset.work_branch: feat/new-branch\n"
+        ),
+    }
+    worktree_output = _git_worktree_output(
+        project_data_dir / "worktrees" / "legacy-child",
+        "feat/new-branch",
+    )
+    show_calls: list[list[str]] = []
+
+    def fake_show(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        show_calls.append(args)
+        if args == ["show", "ts-epic"]:
+            return [epic_issue]
+        if args == ["show", "legacy-child"]:
+            return [changeset_issue]
+        raise AssertionError(f"unexpected bd command: {args!r}")
+
+    with (
+        patch("atelier.prefix_migration_drift.beads.run_bd_json", side_effect=fake_show),
+        patch("atelier.prefix_migration_drift.beads.list_epics") as list_epics,
+        patch(
+            "atelier.prefix_migration_drift.beads.list_descendant_changesets"
+        ) as list_descendants,
+        patch("atelier.prefix_migration_drift.beads.list_work_children") as list_work_children,
+        patch(
+            "atelier.prefix_migration_drift.exec_util.try_run_command",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "worktree", "list", "--porcelain"],
+                returncode=0,
+                stdout=worktree_output,
+                stderr="",
+            ),
+        ),
+    ):
+        records = prefix_migration_drift.scan_prefix_migration_drift(
+            project_data_dir=project_data_dir,
+            beads_root=tmp_path / ".beads",
+            repo_root=repo_root,
+            target_epic_id="ts-epic",
+            target_changeset_ids={"legacy-child"},
+        )
+
+    assert records == []
+    assert ["show", "legacy-child"] in show_calls
+    list_epics.assert_not_called()
+    list_descendants.assert_not_called()
+    list_work_children.assert_not_called()
+
+
 def test_scan_prefix_migration_drift_records_targeted_changeset_read_failure(
     tmp_path: Path,
 ) -> None:
@@ -485,7 +557,7 @@ def test_repair_prefix_migration_drift_plans_updates_without_applying(tmp_path: 
     assert action.canonical_work_branch == "feat/pr-head"
     assert action.work_branch_source == "open-pr-head"
     assert action.canonical_worktree_path == "worktrees/ts-epic.1"
-    assert action.worktree_path_source == "default"
+    assert action.worktree_path_source == "filesystem-metadata-branch"
     assert action.update_changeset_metadata is True
     assert action.update_changeset_worktree_path is True
     assert action.update_mapping is True
@@ -662,11 +734,14 @@ def test_repair_prefix_migration_drift_converges_duplicate_branch_paths_determin
     assert len(actions) == 1
     action = actions[0]
     assert action.changed is True
-    assert action.canonical_work_branch == "feat/pr-head"
-    assert action.canonical_worktree_path == "worktrees/at-legacy-ts-epic.1"
-    assert action.worktree_path_source == "filesystem-canonical-branch"
-    assert action.update_changeset_metadata is False
-    assert action.update_changeset_worktree_path is True
+    assert action.canonical_work_branch == worktrees.derive_changeset_branch(
+        "feat/new-root",
+        "ts-epic.1",
+    )
+    assert action.canonical_worktree_path == "worktrees/ts-epic.1"
+    assert action.worktree_path_source == "checked-out-worktree"
+    assert action.update_changeset_metadata is True
+    assert action.update_changeset_worktree_path is False
     assert action.update_mapping is True
 
 
@@ -761,6 +836,83 @@ def test_repair_prefix_migration_drift_apply_backfills_missing_mapping_lineage(
     assert updated_mapping is not None
     assert updated_mapping.changesets["ts-epic.1"] == "feat/new-branch"
     assert updated_mapping.changeset_worktrees["ts-epic.1"] == "worktrees/ts-epic.1"
+
+
+def test_repair_prefix_migration_drift_defers_blocked_epic_updates(tmp_path: Path) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    mapping_path = worktrees.mapping_path(project_data_dir, "ts-epic")
+    worktrees.write_mapping(
+        mapping_path,
+        worktrees.WorktreeMapping(
+            epic_id="ts-epic",
+            worktree_path="worktrees/ts-epic",
+            root_branch="feat/new-root",
+            changesets={"ts-epic.1": "feat/legacy-branch"},
+            changeset_worktrees={"ts-epic.1": "worktrees/at-legacy.1"},
+        ),
+    )
+    epic_issue = {
+        "id": "ts-epic",
+        "labels": ["at:epic"],
+        "description": "workspace.root_branch: feat/new-root\n",
+    }
+    changeset_issue = {
+        "id": "ts-epic.1",
+        "labels": [],
+        "type": "task",
+        "description": (
+            "changeset.root_branch: feat/new-root\n"
+            "changeset.work_branch: feat/new-branch\n"
+            "worktree_path: worktrees/at-legacy.1\n"
+        ),
+    }
+    worktree_output = _git_worktree_output(
+        project_data_dir / "worktrees" / "ts-epic.1",
+        "feat/new-branch",
+    )
+
+    with (
+        patch("atelier.prefix_migration_drift.beads.list_epics", return_value=[epic_issue]),
+        patch(
+            "atelier.prefix_migration_drift.beads.list_descendant_changesets",
+            return_value=[changeset_issue],
+        ),
+        patch("atelier.prefix_migration_drift.beads.list_work_children", return_value=[]),
+        patch(
+            "atelier.prefix_migration_drift.exec_util.try_run_command",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "worktree", "list", "--porcelain"],
+                returncode=0,
+                stdout=worktree_output,
+                stderr="",
+            ),
+        ),
+        patch("atelier.prefix_migration_drift.beads.update_workspace_root_branch") as update_root,
+        patch(
+            "atelier.prefix_migration_drift.beads.update_changeset_branch_metadata"
+        ) as update_metadata,
+        patch("atelier.prefix_migration_drift.beads.update_worktree_path") as update_path,
+    ):
+        actions = prefix_migration_drift.repair_prefix_migration_drift(
+            project_data_dir=project_data_dir,
+            beads_root=tmp_path / ".beads",
+            repo_root=repo_root,
+            repo_slug="org/repo",
+            apply=True,
+            blocked_epics={"ts-epic"},
+        )
+
+    assert len(actions) == 1
+    action = actions[0]
+    assert action.changed is True
+    assert action.applied is False
+    assert action.deferred_reason == "active-hook"
+    update_root.assert_not_called()
+    update_metadata.assert_not_called()
+    update_path.assert_not_called()
 
 
 def test_scan_prefix_migration_drift_reports_mixed_legacy_prefix_states(tmp_path: Path) -> None:

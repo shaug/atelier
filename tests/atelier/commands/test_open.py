@@ -417,6 +417,93 @@ def test_open_resolves_changeset_id_to_changeset_worktree() -> None:
         assert env["ATELIER_WORKSPACE"] == "feat/root-at-1my.1"
 
 
+def test_open_resolves_prefix_migrated_legacy_mapping_by_changeset_ownership() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_root = root / "project"
+        repo_root = root / "repo"
+        project_root.mkdir()
+        repo_root.mkdir()
+        project_data_dir = root / "data"
+        project_data_dir.mkdir(parents=True)
+        legacy_worktree_path = project_data_dir / "worktrees" / "at-legacy.1"
+        legacy_worktree_path.mkdir(parents=True)
+        (legacy_worktree_path / ".git").write_text("gitdir: /tmp\n", encoding="utf-8")
+
+        worktrees.write_mapping(
+            worktrees.mapping_path(project_data_dir, "at-legacy"),
+            worktrees.WorktreeMapping(
+                epic_id="at-legacy",
+                worktree_path="worktrees/at-legacy",
+                root_branch="feat/legacy",
+                changesets={"ts-new.1": "feat/new-ts-new.1"},
+                changeset_worktrees={"ts-new.1": "worktrees/at-legacy.1"},
+            ),
+        )
+
+        project_config = config.ProjectConfig()
+        issue = _make_issue("feat/new", "worktrees/ts-new")
+        issue["id"] = "ts-new"
+        changeset_issue = _make_changeset_issue(
+            "ts-new.1",
+            "Child changeset",
+            work_branch="feat/new-ts-new.1",
+        )
+        captured: dict[str, object] = {}
+
+        def fake_run(request: object, *, runner: object | None = None) -> object:
+            del runner
+            assert isinstance(request, open_cmd.exec.CommandRequest)
+            captured["cwd"] = request.cwd
+            captured["env"] = request.env
+            return open_cmd.exec.CommandResult(
+                argv=request.argv, returncode=0, stdout="", stderr=""
+            )
+
+        with (
+            patch(
+                "atelier.commands.open.resolve_current_project_with_repo_root",
+                return_value=(project_root, project_config, str(repo_root), repo_root),
+            ),
+            patch(
+                "atelier.commands.open.config.resolve_project_data_dir",
+                return_value=project_data_dir,
+            ),
+            patch(
+                "atelier.commands.open.config.resolve_beads_root",
+                return_value=Path("/beads"),
+            ),
+            patch("atelier.commands.open.beads.run_bd_command"),
+            patch("atelier.commands.open.beads.list_epics", return_value=[issue]),
+            patch(
+                "atelier.commands.open.beads.list_work_children",
+                return_value=[changeset_issue],
+            ),
+            patch(
+                "atelier.commands.open.beads.list_descendant_changesets",
+                return_value=[changeset_issue],
+            ),
+            patch("atelier.commands.open.exec.run_with_runner", fake_run),
+        ):
+            with pytest.raises(SystemExit) as raised:
+                open_cmd.open_worktree(
+                    SimpleNamespace(
+                        workspace_name="ts-new.1",
+                        raw=False,
+                        command=["pwd"],
+                        shell=None,
+                        workspace_root=False,
+                        set_title=False,
+                    )
+                )
+
+        assert raised.value.code == 0
+        assert captured["cwd"] == legacy_worktree_path
+        env = captured["env"]
+        assert env
+        assert env["ATELIER_WORKSPACE"] == "feat/new-ts-new.1"
+
+
 def test_open_prompts_for_workspace() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

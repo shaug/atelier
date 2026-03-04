@@ -370,7 +370,7 @@ def test_doctor_json_includes_multi_check_health_report() -> None:
     )
 
 
-def test_doctor_fix_mode_blocks_when_active_hooks_exist() -> None:
+def test_doctor_fix_mode_defers_active_hook_owned_repairs() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         project_root = root / "project"
@@ -396,14 +396,24 @@ def test_doctor_fix_mode_blocks_when_active_hooks_exist() -> None:
             patch("atelier.commands.doctor.beads.run_bd_command", return_value=DummyResult()),
             patch("atelier.commands.doctor._active_agent_hook_blockers", return_value=blockers),
             patch(
-                "atelier.commands.doctor.prefix_migration_drift.repair_prefix_migration_drift"
+                "atelier.commands.doctor.prefix_migration_drift.repair_prefix_migration_drift",
+                return_value=[],
             ) as repair,
+            patch(
+                "atelier.commands.doctor._collect_doctor_context",
+                return_value=_empty_context(project_root),
+            ),
+            patch("atelier.commands.doctor._collect_agent_runtime", return_value=({}, {})),
         ):
-            with pytest.raises(SystemExit) as raised:
+            buffer = io.StringIO()
+            with patch("sys.stdout", buffer):
                 doctor_cmd.doctor(SimpleNamespace(format="json", fix=True, force=False))
 
-    assert "active agent hooks detected" in str(raised.value)
-    repair.assert_not_called()
+    payload = json.loads(buffer.getvalue())
+    assert payload["mode"] == "fix"
+    assert payload["fix"] is True
+    repair.assert_called_once()
+    assert repair.call_args.kwargs["blocked_epics"] == {"at-epic"}
 
 
 def test_doctor_fix_mode_force_bypasses_active_hook_gate() -> None:
@@ -452,3 +462,4 @@ def test_doctor_fix_mode_force_bypasses_active_hook_gate() -> None:
     assert payload["prefix_normalization"]["required_changesets"] == 0
     assert "rollback_guidance" in payload
     repair.assert_called_once()
+    assert repair.call_args.kwargs["blocked_epics"] == set()

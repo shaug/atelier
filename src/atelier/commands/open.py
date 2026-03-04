@@ -106,7 +106,11 @@ def _list_openable_changesets(
         if not epic_id:
             continue
 
-        mapping = worktrees.load_mapping(worktrees.mapping_path(project_dir, epic_id))
+        epic_mapping = worktrees.load_mapping_for_changeset(
+            project_dir,
+            epic_id=epic_id,
+            changeset_id=epic_id,
+        )
         work_children = beads.list_work_children(
             epic_id,
             beads_root=beads_root,
@@ -127,18 +131,29 @@ def _list_openable_changesets(
             changeset_id = _issue_id(changeset_issue)
             if not changeset_id or not _is_openable_changeset(changeset_issue):
                 continue
-            workspace_branch = mapping.changesets.get(changeset_id) if mapping is not None else None
+            resolved_mapping = worktrees.load_mapping_for_changeset(
+                project_dir,
+                epic_id=epic_id,
+                changeset_id=changeset_id,
+            )
+            workspace_branch = (
+                resolved_mapping.changesets.get(changeset_id)
+                if resolved_mapping is not None
+                else None
+            )
             if not workspace_branch and changeset_id == epic_id:
                 workspace_branch = root_branch
             if not workspace_branch:
                 continue
 
             worktree_relpath: str | None = None
-            if mapping is not None:
+            if resolved_mapping is not None:
                 if changeset_id == epic_id:
-                    worktree_relpath = mapping.worktree_path
+                    worktree_relpath = resolved_mapping.worktree_path
                 else:
-                    worktree_relpath = mapping.changeset_worktrees.get(changeset_id)
+                    worktree_relpath = resolved_mapping.changeset_worktrees.get(changeset_id)
+            elif epic_mapping is not None and changeset_id == epic_id:
+                worktree_relpath = epic_mapping.worktree_path
             if not worktree_relpath and changeset_id == epic_id:
                 worktree_relpath = beads.extract_worktree_path(epic_issue)
             if changeset_id != epic_id and not worktree_relpath:
