@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
+import atelier.paths as paths
 from atelier import beads_context
+
+
+def _run_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def _patch_project_resolution(
@@ -140,6 +152,56 @@ def test_resolve_skill_beads_context_raises_without_explicit_override_when_proje
         beads_context.resolve_skill_beads_context(beads_dir=None)
 
 
+@pytest.mark.parametrize("repo_input_kind", ["canonical", "linked-worktree"])
+def test_resolve_skill_beads_context_uses_same_project_for_canonical_and_linked_repo_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    repo_input_kind: str,
+) -> None:
+    project_root_base = tmp_path / "atelier-data" / "projects"
+    monkeypatch.setattr(paths, "projects_root", lambda: project_root_base)
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    _run_git(repo_root, "init")
+    _run_git(repo_root, "config", "user.email", "test@example.com")
+    _run_git(repo_root, "config", "user.name", "Test User")
+    (repo_root / "README.md").write_text("seed\n", encoding="utf-8")
+    _run_git(repo_root, "add", "README.md")
+    _run_git(repo_root, "commit", "-m", "seed")
+
+    linked_worktree = tmp_path / "agent-worktree"
+    _run_git(repo_root, "worktree", "add", "-b", "feature-worktree", str(linked_worktree), "HEAD")
+
+    enlistment_path = str(repo_root.resolve())
+    project_root = paths.project_dir_for_enlistment(enlistment_path, origin=None)
+    project_root.mkdir(parents=True, exist_ok=True)
+    config_payload = {
+        "project": {
+            "enlistment": enlistment_path,
+            "origin": None,
+            "repo_url": None,
+        }
+    }
+    paths.project_config_sys_path(project_root).write_text(
+        json.dumps(config_payload),
+        encoding="utf-8",
+    )
+    expected_beads_root = project_root / ".beads"
+    expected_beads_root.mkdir(parents=True, exist_ok=True)
+
+    repo_dir = repo_root if repo_input_kind == "canonical" else linked_worktree
+    context = beads_context.resolve_skill_beads_context(
+        beads_dir=None,
+        repo_dir=str(repo_dir),
+    )
+
+    assert context.project_beads_root == expected_beads_root
+    assert context.beads_root == expected_beads_root
+    assert context.override_warning is None
+    assert context.repo_root == repo_dir.resolve()
+
+
 def test_resolve_runtime_repo_dir_hint_prefers_agent_home_worktree(
     tmp_path: Path,
 ) -> None:
@@ -156,6 +218,17 @@ def test_resolve_runtime_repo_dir_hint_prefers_agent_home_worktree(
     )
 
     assert hint == str(repo_root.resolve())
+    assert warning is None
+
+
+def test_resolve_runtime_repo_dir_hint_returns_explicit_worktree_repo_dir_without_warning() -> None:
+    hint, warning = beads_context.resolve_runtime_repo_dir_hint(
+        repo_dir="./worktree",
+        cwd=Path("/tmp"),
+        env={},
+    )
+
+    assert hint == "./worktree"
     assert warning is None
 
 

@@ -238,7 +238,31 @@ def resolve_enlistment_path(repo_root: Path) -> str:
         >>> resolve_enlistment_path(Path("."))  # doctest: +SKIP
         '/repo'
     """
-    return str(repo_root.resolve())
+    enlistment_root = repo_root.resolve()
+    result = _run_git_or_die(
+        git_command(
+            [
+                "-C",
+                str(repo_root),
+                "rev-parse",
+                "--git-common-dir",
+            ]
+        )
+    )
+    if result.returncode != 0:
+        return str(enlistment_root)
+
+    common_dir_raw = result.stdout.strip()
+    if not common_dir_raw:
+        return str(enlistment_root)
+    common_dir = Path(common_dir_raw).expanduser()
+    if not common_dir.is_absolute():
+        common_dir = (repo_root / common_dir).resolve()
+    else:
+        common_dir = common_dir.resolve()
+    if common_dir.name == ".git":
+        return str(common_dir.parent.resolve())
+    return str(enlistment_root)
 
 
 def resolve_repo_enlistment(
