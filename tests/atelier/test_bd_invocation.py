@@ -40,6 +40,22 @@ def test_with_bd_mode_does_not_override_explicit_db_flag() -> None:
     assert command == ["bd", "--db", "/custom/beads.db", "show", "at-1", "--json"]
 
 
+def test_with_bd_mode_rejects_unsupported_beads_dir_flag() -> None:
+    with pytest.raises(ValueError, match="unsupported bd flag"):
+        with_bd_mode("show", "at-1", "--beads-dir", "/tmp/other", beads_dir="/tmp/beads", env={})
+
+
+def test_with_bd_mode_rejects_unsupported_beads_dir_equals_flag() -> None:
+    with pytest.raises(ValueError, match="unsupported bd flag"):
+        with_bd_mode(
+            "show",
+            "at-1",
+            "--beads-dir=/tmp/other",
+            beads_dir="/tmp/beads",
+            env={},
+        )
+
+
 def test_ensure_supported_bd_version_accepts_minimum(monkeypatch: pytest.MonkeyPatch) -> None:
     bd_invocation._read_bd_version_for_executable.cache_clear()
     monkeypatch.setattr(
