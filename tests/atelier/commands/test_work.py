@@ -88,7 +88,7 @@ def test_start_worker_non_dry_run_previews_and_cleans_agent_home(
     cleanup_agent_home.assert_called_once_with(session_agent, project_dir=tmp_path)
 
 
-def test_start_worker_fails_early_on_worker_role_identity_mismatch(
+def test_start_worker_ignores_ambient_agent_id_role_mismatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -97,6 +97,13 @@ def test_start_worker_fails_early_on_worker_role_identity_mismatch(
     project_root.mkdir()
     repo_root.mkdir()
     project_cfg = _project_config()
+    session_agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p1",
+        role="worker",
+        path=tmp_path / "agents" / "worker" / "codex" / "p1",
+        session_key="p1",
+    )
     monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/planner/codex/p1")
 
     with (
@@ -108,14 +115,23 @@ def test_start_worker_fails_early_on_worker_role_identity_mismatch(
             "atelier.commands.work.config.resolve_project_data_dir",
             return_value=tmp_path,
         ),
+        patch(
+            "atelier.commands.work.agent_home.preview_agent_home",
+            return_value=session_agent,
+        ),
+        patch(
+            "atelier.commands.work.beads.ensure_agent_bead",
+            return_value={"id": "at-agent"},
+        ),
         patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions,
+        patch("atelier.commands.work.agent_teardown.teardown_agent_runtime"),
+        patch("atelier.commands.work.agent_home.cleanup_agent_home"),
     ):
-        with pytest.raises(SystemExit):
-            work_cmd.start_worker(
-                SimpleNamespace(epic_id=None, mode="auto", run_mode="once", dry_run=False)
-            )
+        work_cmd.start_worker(
+            SimpleNamespace(epic_id=None, mode="auto", run_mode="once", dry_run=False)
+        )
 
-    run_sessions.assert_not_called()
+    run_sessions.assert_called_once()
 
 
 def test_start_worker_applies_env_translated_yes_default(

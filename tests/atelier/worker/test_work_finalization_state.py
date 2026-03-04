@@ -1322,65 +1322,67 @@ def test_changeset_stack_integrity_preflight_resolves_epic_parent_without_metada
     assert metadata_updates == []
 
 
-def test_release_epic_assignment_uses_runtime_agent_guard_when_available(monkeypatch) -> None:
-    monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/worker/codex/p100")
+def test_release_epic_assignment_uses_runtime_identity_precondition(monkeypatch) -> None:
+    state = {"assignee": "atelier/worker/codex/p200", "released": False}
+
     monkeypatch.setattr(
         work_finalization_state.beads,
         "run_bd_json",
-        lambda *_args, **_kwargs: [{"id": "at-epic", "assignee": "atelier/worker/codex/p200"}],
+        lambda *_args, **_kwargs: [{"id": "at-epic", "assignee": state["assignee"]}],
     )
-    release_calls: list[dict[str, object]] = []
+
+    def fake_release_epic_assignment(_epic_id: str, **kwargs: object) -> bool:
+        if kwargs["expected_assignee"] == state["assignee"]:
+            state["released"] = True
+            state["assignee"] = None
+            return True
+        return False
+
     monkeypatch.setattr(
         work_finalization_state.beads,
         "release_epic_assignment",
-        lambda epic_id, **kwargs: release_calls.append({"epic_id": epic_id, **kwargs}),
+        fake_release_epic_assignment,
     )
 
     work_finalization_state.release_epic_assignment(
         "at-epic",
+        agent_id="atelier/worker/codex/p200",
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
     )
 
-    assert release_calls == [
-        {
-            "epic_id": "at-epic",
-            "beads_root": Path("/beads"),
-            "cwd": Path("/repo"),
-            "expected_assignee": "atelier/worker/codex/p100",
-            "expected_hooked": False,
-        }
-    ]
+    assert state["released"] is True
+    assert state["assignee"] is None
 
 
-def test_release_epic_assignment_falls_back_to_issue_assignee_without_runtime_agent(
-    monkeypatch,
-) -> None:
-    monkeypatch.delenv("ATELIER_AGENT_ID", raising=False)
+def test_release_epic_assignment_mismatched_runtime_identity_is_no_op(monkeypatch) -> None:
+    state = {"assignee": "atelier/worker/codex/p300", "released": False}
+
     monkeypatch.setattr(
         work_finalization_state.beads,
         "run_bd_json",
-        lambda *_args, **_kwargs: [{"id": "at-epic", "assignee": "atelier/worker/codex/p300"}],
+        lambda *_args, **_kwargs: [{"id": "at-epic", "assignee": state["assignee"]}],
     )
-    release_calls: list[dict[str, object]] = []
+
+    def fake_release_epic_assignment(_epic_id: str, **kwargs: object) -> bool:
+        if kwargs["expected_assignee"] == state["assignee"]:
+            state["released"] = True
+            state["assignee"] = None
+            return True
+        return False
+
     monkeypatch.setattr(
         work_finalization_state.beads,
         "release_epic_assignment",
-        lambda epic_id, **kwargs: release_calls.append({"epic_id": epic_id, **kwargs}),
+        fake_release_epic_assignment,
     )
 
     work_finalization_state.release_epic_assignment(
         "at-epic",
+        agent_id="atelier/worker/codex/p999",
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
     )
 
-    assert release_calls == [
-        {
-            "epic_id": "at-epic",
-            "beads_root": Path("/beads"),
-            "cwd": Path("/repo"),
-            "expected_assignee": "atelier/worker/codex/p300",
-            "expected_hooked": False,
-        }
-    ]
+    assert state["released"] is False
+    assert state["assignee"] == "atelier/worker/codex/p300"

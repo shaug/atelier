@@ -507,21 +507,17 @@ def resolve_agent_home(
     session_key: str | None = None,
 ) -> AgentHome:
     """Resolve the agent identity and ensure the home directory exists."""
-    env_agent_id = os.environ.get("ATELIER_AGENT_ID")
     config_agent_id = project_config.agent.identity
     resolved_session = _normalize_session_key(session_key or os.environ.get(SESSION_ENV_VAR))
-    if env_agent_id:
-        agent_id = env_agent_id.strip()
+    if config_agent_id:
+        agent_id = config_agent_id.strip()
         if not agent_id:
-            die("ATELIER_AGENT_ID must not be empty")
+            die("agent.identity must not be empty")
         _enforce_role_consistent_agent_id(
             role=role,
             agent_id=agent_id,
-            source="ATELIER_AGENT_ID",
+            source="agent.identity",
         )
-        agent_name = _derive_agent_name(agent_id)
-    elif config_agent_id:
-        agent_id = config_agent_id
         agent_name = _derive_agent_name(agent_id)
     else:
         agent_name = _normalize_agent_name(project_config.agent.default)
@@ -687,21 +683,17 @@ def preview_agent_home(
     session_key: str | None = None,
 ) -> AgentHome:
     """Return agent identity and path without creating files."""
-    env_agent_id = os.environ.get("ATELIER_AGENT_ID")
     config_agent_id = project_config.agent.identity
     resolved_session = _normalize_session_key(session_key or os.environ.get(SESSION_ENV_VAR))
-    if env_agent_id:
-        agent_id = env_agent_id.strip()
+    if config_agent_id:
+        agent_id = config_agent_id.strip()
         if not agent_id:
-            die("ATELIER_AGENT_ID must not be empty")
+            die("agent.identity must not be empty")
         _enforce_role_consistent_agent_id(
             role=role,
             agent_id=agent_id,
-            source="ATELIER_AGENT_ID",
+            source="agent.identity",
         )
-        agent_name = _derive_agent_name(agent_id)
-    elif config_agent_id:
-        agent_id = config_agent_id
         agent_name = _derive_agent_name(agent_id)
     else:
         agent_name = _normalize_agent_name(project_config.agent.default)

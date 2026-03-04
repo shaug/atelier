@@ -393,7 +393,7 @@ class WorkerLifecycleService(Protocol):
     ) -> None: ...
 
     def release_epic_assignment(
-        self, epic_id: str, *, beads_root: Path, repo_root: Path
+        self, epic_id: str, *, agent_id: str, beads_root: Path, repo_root: Path
     ) -> None: ...
 
     def reconcile_blocked_merged_changesets(
