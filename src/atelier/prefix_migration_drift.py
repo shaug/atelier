@@ -272,14 +272,17 @@ def _ensure_canonical_branch(
 ) -> None:
     if _local_branch_exists(repo_root, canonical_branch, git_path=git_path):
         return
-    if source_branch is None:
-        return
-    if _local_branch_exists(repo_root, source_branch, git_path=git_path):
-        source_ref = source_branch
-    elif _remote_branch_exists(repo_root, source_branch, git_path=git_path):
-        source_ref = f"origin/{source_branch}"
+    if _remote_branch_exists(repo_root, canonical_branch, git_path=git_path):
+        source_ref = f"origin/{canonical_branch}"
     else:
-        return
+        if source_branch is None:
+            return
+        if _local_branch_exists(repo_root, source_branch, git_path=git_path):
+            source_ref = source_branch
+        elif _remote_branch_exists(repo_root, source_branch, git_path=git_path):
+            source_ref = f"origin/{source_branch}"
+        else:
+            return
     _run_git_checked(
         repo_root=repo_root,
         args=["branch", canonical_branch, source_ref],

@@ -18,6 +18,50 @@ def _git_worktree_output(path: Path, branch: str) -> str:
     )
 
 
+def test_ensure_canonical_branch_prefers_remote_canonical_over_legacy_source() -> None:
+    repo_root = Path("/tmp/repo")
+    local_branch_checks: list[str] = []
+    remote_branch_checks: list[str] = []
+
+    def fake_local_exists(_repo: Path, branch: str, *, git_path: str | None) -> bool:
+        del _repo, git_path
+        local_branch_checks.append(branch)
+        return branch == "feat/canonical" and len(local_branch_checks) > 1
+
+    def fake_remote_exists(_repo: Path, branch: str, *, git_path: str | None) -> bool:
+        del _repo, git_path
+        remote_branch_checks.append(branch)
+        return branch == "feat/canonical"
+
+    with (
+        patch(
+            "atelier.prefix_migration_drift._local_branch_exists",
+            side_effect=fake_local_exists,
+        ),
+        patch(
+            "atelier.prefix_migration_drift._remote_branch_exists",
+            side_effect=fake_remote_exists,
+        ),
+        patch("atelier.prefix_migration_drift._run_git_checked") as run_git_checked,
+    ):
+        prefix_migration_drift._ensure_canonical_branch(
+            repo_root=repo_root,
+            canonical_branch="feat/canonical",
+            source_branch="feat/legacy",
+            git_path=None,
+        )
+
+    run_git_checked.assert_called_once_with(
+        repo_root=repo_root,
+        args=["branch", "feat/canonical", "origin/feat/canonical"],
+        git_path=None,
+        detail="failed to materialize canonical changeset branch 'feat/canonical' from "
+        "'origin/feat/canonical'",
+    )
+    assert local_branch_checks == ["feat/canonical", "feat/canonical"]
+    assert remote_branch_checks == ["feat/canonical"]
+
+
 def test_scan_prefix_migration_drift_reports_conflicts_deterministically(tmp_path: Path) -> None:
     project_data_dir = tmp_path / "data"
     repo_root = tmp_path / "repo"
