@@ -39,6 +39,13 @@ from .commands import remove as remove_cmd
 from .commands import status as status_cmd
 from .commands import work as work_cmd
 from .exec import try_run_command
+from .models import (
+    BRANCH_HISTORY_VALUES,
+    BRANCH_PR_MODE_VALUES,
+    BRANCH_SQUASH_MESSAGE_VALUES,
+    WORKER_SELECT_VALUES,
+)
+from .pr_strategy import PR_STRATEGY_VALUES
 
 _split_arg_string = cast(Callable[[str], list[str]], split_arg_string)
 
@@ -54,6 +61,30 @@ app = typer.Typer(
 _COMPLETE_ENV = "_ATELIER_COMPLETE"
 _DEFAULT_BRANCH_EXCLUDES = {"main", "master"}
 _LOG_LEVEL_CHOICES = ("trace", "debug", "info", "success", "warning", "error")
+_HOOK_EVENT_CHOICES = ("session-start", "pre-compact", "stop")
+_WORK_MODE_CHOICES = ("prompt", "auto")
+_RUN_MODE_CHOICES = ("once", "default", "watch")
+_FORMAT_CHOICES = ("table", "json")
+_POLICY_ROLE_CHOICES = ("planner", "worker", "both")
+
+
+class _HyphenAliasChoice(click.Choice):
+    """Choice type that accepts underscore aliases for hyphenated values."""
+
+    def convert(
+        self,
+        value: object,
+        param: click.Parameter | None,
+        ctx: click.Context | None,
+    ) -> object:
+        if isinstance(value, str):
+            value = value.strip().lower().replace("_", "-")
+        return super().convert(value, param, ctx)
+
+
+def _choice(values: tuple[str, ...]) -> click.Choice:
+    """Build a case-insensitive choice type with underscore aliases."""
+    return _HyphenAliasChoice(values, case_sensitive=False)
 
 
 def _ensure_completion_env() -> None:
@@ -210,6 +241,7 @@ def app_callback(
         typer.Option(
             "--log-level",
             help="set terminal log level (trace|debug|info|success|warning|error)",
+            click_type=_choice(_LOG_LEVEL_CHOICES),
         ),
     ] = None,
     color: Annotated[
@@ -268,6 +300,7 @@ def init_command(
             "--branch-pr-mode",
             "--branch-pr",
             help="workspace pull request mode (none|draft|ready)",
+            click_type=_choice(BRANCH_PR_MODE_VALUES),
         ),
     ] = None,
     branch_history: Annotated[
@@ -275,6 +308,7 @@ def init_command(
         typer.Option(
             "--branch-history",
             help="branch history policy (manual|squash|merge|rebase)",
+            click_type=_choice(BRANCH_HISTORY_VALUES),
         ),
     ] = None,
     branch_squash_message: Annotated[
@@ -282,6 +316,7 @@ def init_command(
         typer.Option(
             "--branch-squash-message",
             help="squash commit message policy (deterministic|agent)",
+            click_type=_choice(BRANCH_SQUASH_MESSAGE_VALUES),
         ),
     ] = None,
     branch_pr_strategy: Annotated[
@@ -289,6 +324,7 @@ def init_command(
         typer.Option(
             "--branch-pr-strategy",
             help="PR strategy (sequential|on-ready|on-parent-approved|parallel)",
+            click_type=_choice(PR_STRATEGY_VALUES),
         ),
     ] = None,
     agent: Annotated[
@@ -378,6 +414,7 @@ def new_command(
             "--branch-pr-mode",
             "--branch-pr",
             help="workspace pull request mode (none|draft|ready)",
+            click_type=_choice(BRANCH_PR_MODE_VALUES),
         ),
     ] = None,
     branch_history: Annotated[
@@ -385,6 +422,7 @@ def new_command(
         typer.Option(
             "--branch-history",
             help="branch history policy (manual|squash|merge|rebase)",
+            click_type=_choice(BRANCH_HISTORY_VALUES),
         ),
     ] = None,
     branch_squash_message: Annotated[
@@ -392,6 +430,7 @@ def new_command(
         typer.Option(
             "--branch-squash-message",
             help="squash commit message policy (deterministic|agent)",
+            click_type=_choice(BRANCH_SQUASH_MESSAGE_VALUES),
         ),
     ] = None,
     branch_pr_strategy: Annotated[
@@ -399,6 +438,7 @@ def new_command(
         typer.Option(
             "--branch-pr-strategy",
             help="PR strategy (sequential|on-ready|on-parent-approved|parallel)",
+            click_type=_choice(PR_STRATEGY_VALUES),
         ),
     ] = None,
     agent: Annotated[
@@ -563,6 +603,7 @@ def hook_command(
         str | None,
         typer.Argument(
             help="hook event name (session-start|pre-compact|stop)",
+            click_type=_choice(_HOOK_EVENT_CHOICES),
         ),
     ] = None,
 ) -> None:
@@ -586,6 +627,7 @@ def work_command(
         typer.Option(
             "--mode",
             help="worker selection mode: prompt or auto (default: prompt)",
+            click_type=_choice(_WORK_MODE_CHOICES),
         ),
     ] = None,
     select: Annotated[
@@ -596,6 +638,7 @@ def work_command(
                 "startup selector policy: first-eligible or oldest-feedback "
                 "(default: config worker.select, then oldest-feedback)"
             ),
+            click_type=_choice(WORKER_SELECT_VALUES),
         ),
     ] = None,
     run_mode: Annotated[
@@ -603,6 +646,7 @@ def work_command(
         typer.Option(
             "--run-mode",
             help="worker run mode: once, default, watch (default: default)",
+            click_type=_choice(_RUN_MODE_CHOICES),
         ),
     ] = None,
     watch_interval: Annotated[
@@ -686,6 +730,7 @@ def status_command(
         typer.Option(
             "--format",
             help="output format (table|json)",
+            click_type=_choice(_FORMAT_CHOICES),
         ),
     ] = "table",
 ) -> None:
@@ -703,6 +748,7 @@ def doctor_command(
         typer.Option(
             "--format",
             help="output format (table|json)",
+            click_type=_choice(_FORMAT_CHOICES),
         ),
     ] = "table",
     fix: Annotated[
@@ -852,7 +898,11 @@ def config_command(
 def policy_command(
     role: Annotated[
         str | None,
-        typer.Option("--role", help="policy role (planner|worker|both)"),
+        typer.Option(
+            "--role",
+            help="policy role (planner|worker|both)",
+            click_type=_choice(_POLICY_ROLE_CHOICES),
+        ),
     ] = None,
     edit: Annotated[
         bool,

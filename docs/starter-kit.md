@@ -73,6 +73,15 @@ Use this spec verbatim as a foundation for a new, similar CLI.
 - Include a `--version` flag that exits immediately.
 - Ensure `--help` is available on the root and all subcommands.
 
+### Constrained Option Typing
+
+- Model finite-value flags with typed constraints (`Literal`, `Enum`, or
+  `click.Choice`) so help output shows allowed values directly.
+- Do not model enum-like flags as free-form `str` with only descriptive help
+  text.
+- Keep compatibility where possible by accepting case-insensitive input and
+  common aliases while normalizing to canonical stored values.
+
 ### Shell Completion Support
 
 - Enable Click/Typer completion on the root app.

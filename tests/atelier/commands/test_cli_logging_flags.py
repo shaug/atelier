@@ -31,7 +31,7 @@ def test_global_log_level_rejects_unknown_values() -> None:
 
     assert result.exit_code != 0
     assert "--log-level" in clean_output
-    assert "expected one of" in clean_output.lower()
+    assert "not one of" in clean_output.lower()
 
 
 def test_no_color_flag_disables_colorized_output() -> None:
