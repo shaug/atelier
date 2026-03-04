@@ -346,6 +346,7 @@ Detect prefix-migration drift (read-only by default):
 ```sh
 atelier doctor
 atelier doctor --fix
+atelier doctor --fix --force
 atelier doctor --format=json
 ```
 
@@ -585,13 +586,15 @@ Options:
 ### `atelier doctor`
 
 Detect prefix-migration branch/worktree drift. Read-only by default; pass
-`--fix` to apply canonical metadata/mapping updates.
+`--fix` to apply canonical metadata/mapping updates. `--fix` refuses to mutate
+while active agent hooks are present unless `--force` is also provided.
 
 Usage:
 
 ```sh
 atelier doctor
 atelier doctor --fix
+atelier doctor --fix --force
 atelier doctor --format=json
 ```
 
@@ -599,6 +602,7 @@ Options:
 
 - `--format=json`: Emit deterministic JSON output.
 - `--fix`: Apply drift repairs instead of read-only detection.
+- `--force`: Override active-agent safety gate when used with `--fix`.
 
 ### `atelier list`
 

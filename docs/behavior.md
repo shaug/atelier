@@ -186,6 +186,7 @@ Atelier planning state. They are treated as external ticket sources.
 
   - Detects prefix-migration branch/worktree drift in read-only mode by default.
   - Applies canonical metadata/mapping repairs only when `--fix` is provided.
+  - Blocks `--fix` when active hooks are detected unless `--force` is provided.
   - Does not trigger `atelier gc`.
 
 - `atelier list`

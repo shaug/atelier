@@ -62,6 +62,14 @@ Mutation is never implicit. Apply only with `--fix`:
 atelier doctor --fix
 ```
 
+By default, `--fix` refuses to run while active agent hooks are present to avoid
+racing worker startup/finalization writes. Use `--force` only when you have
+confirmed this override is safe:
+
+```bash
+atelier doctor --fix --force
+```
+
 The command updates only affected records (changeset lineage metadata and
 worktree mapping entries). Unaffected changesets are not modified.
 

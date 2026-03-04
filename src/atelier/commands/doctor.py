@@ -2,18 +2,30 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping
 
 from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from .. import beads, config, prefix_migration_drift, prs
+from .. import agent_home, beads, config, prefix_migration_drift, prs
 from ..io import die, say
 from .resolve import resolve_current_project_with_repo_root
 
 _FORMATS = {"table", "json"}
+_ACTIVE_HOOK_STALE_HOURS = 24.0
+
+
+@dataclass(frozen=True)
+class _ActiveHookBlocker:
+    agent_id: str
+    hook_bead: str
+    session_state: str
+    heartbeat_at: str | None
 
 
 def doctor(args: object) -> None:
@@ -23,12 +35,17 @@ def doctor(args: object) -> None:
         die(f"unsupported format: {format_value}")
 
     fix = bool(getattr(args, "fix", False))
+    force = bool(getattr(args, "force", False))
     project_root, project_config, _enlistment, repo_root = resolve_current_project_with_repo_root()
     project_data_dir = config.resolve_project_data_dir(project_root, project_config)
     beads_root = config.resolve_beads_root(project_data_dir, repo_root)
     git_path = config.resolve_git_path(project_config)
 
     beads.run_bd_command(["prime"], beads_root=beads_root, cwd=repo_root)
+    if fix and not force:
+        blockers = _active_agent_hook_blockers(beads_root=beads_root, repo_root=repo_root)
+        if blockers:
+            die(_active_hook_blockers_message(blockers))
     origin = project_config.project.origin or project_config.project.repo_url
     repo_slug = prs.github_repo_slug(origin)
     actions = prefix_migration_drift.repair_prefix_migration_drift(
@@ -149,3 +166,106 @@ def _display_value(value: object) -> str:
     if value is None or value == "":
         return "unknown"
     return str(value)
+
+
+def _active_agent_hook_blockers(
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> list[_ActiveHookBlocker]:
+    stale_delta = dt.timedelta(hours=_ACTIVE_HOOK_STALE_HOURS)
+    now = dt.datetime.now(tz=dt.timezone.utc)
+    blockers: list[_ActiveHookBlocker] = []
+    issues = beads.run_bd_json(
+        ["list", "--label", beads.issue_label("agent", beads_root=beads_root)],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    for issue in issues:
+        description = issue.get("description")
+        fields = beads.parse_description_fields(description if isinstance(description, str) else "")
+        agent_id = fields.get("agent_id") or issue.get("title") or issue.get("id") or ""
+        if not isinstance(agent_id, str):
+            agent_id = str(agent_id)
+        agent_id = agent_id.strip()
+        if not agent_id:
+            continue
+        issue_id = issue.get("id")
+        hook_bead = None
+        if isinstance(issue_id, str) and issue_id:
+            hook_bead = beads.get_agent_hook(issue_id, beads_root=beads_root, cwd=repo_root)
+        if not hook_bead:
+            hook_bead = fields.get("hook_bead")
+        if not isinstance(hook_bead, str) or not hook_bead:
+            continue
+        heartbeat_at = (
+            fields.get("heartbeat_at") if isinstance(fields.get("heartbeat_at"), str) else None
+        )
+        session_state = _agent_hook_session_state(
+            agent_id,
+            heartbeat_at=heartbeat_at,
+            now=now,
+            stale_delta=stale_delta,
+        )
+        if session_state == "stale":
+            continue
+        blockers.append(
+            _ActiveHookBlocker(
+                agent_id=agent_id,
+                hook_bead=hook_bead,
+                session_state=session_state,
+                heartbeat_at=heartbeat_at,
+            )
+        )
+    return sorted(blockers, key=lambda blocker: (blocker.hook_bead, blocker.agent_id))
+
+
+def _agent_hook_session_state(
+    agent_id: str,
+    *,
+    heartbeat_at: str | None,
+    now: dt.datetime,
+    stale_delta: dt.timedelta,
+) -> str:
+    if agent_home.session_pid_from_agent_id(agent_id) is not None:
+        return "live" if agent_home.is_session_agent_active(agent_id) else "stale"
+    heartbeat = _parse_rfc3339(heartbeat_at)
+    if heartbeat is None:
+        return "unknown"
+    age = now - heartbeat
+    if age > stale_delta:
+        return "stale"
+    return "live"
+
+
+def _parse_rfc3339(value: str | None) -> dt.datetime | None:
+    if not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw.replace("Z", "+00:00")
+    try:
+        parsed = dt.datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed
+
+
+def _active_hook_blockers_message(blockers: list[_ActiveHookBlocker]) -> str:
+    lines = [
+        "refusing `atelier doctor --fix`: active agent hooks detected",
+        "running with active workers can race metadata and mapping writes",
+        "re-run after workers stop, or pass `--force` to override this safety gate",
+    ]
+    for blocker in blockers:
+        heartbeat = blocker.heartbeat_at or "missing"
+        lines.append(
+            "- agent="
+            f"{blocker.agent_id} hook={blocker.hook_bead} state={blocker.session_state} "
+            f"heartbeat_at={heartbeat}"
+        )
+    return "\n".join(lines)

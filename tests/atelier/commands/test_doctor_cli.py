@@ -13,11 +13,13 @@ class TestDoctorCommand:
         def fake_doctor(args: SimpleNamespace) -> None:
             captured["format"] = args.format
             captured["fix"] = args.fix
+            captured["force"] = args.force
 
         runner = CliRunner()
         with patch("atelier.cli.doctor_cmd", fake_doctor):
-            result = runner.invoke(cli.app, ["doctor", "--format", "json", "--fix"])
+            result = runner.invoke(cli.app, ["doctor", "--format", "json", "--fix", "--force"])
 
         assert result.exit_code == 0
         assert captured["format"] == "json"
         assert captured["fix"] is True
+        assert captured["force"] is True

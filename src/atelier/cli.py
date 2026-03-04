@@ -712,9 +712,16 @@ def doctor_command(
             help="apply drift repairs (default is read-only detection)",
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="override active-agent safety gate when used with --fix",
+        ),
+    ] = False,
 ) -> None:
     """Run prefix-migration drift diagnostics and optional repair."""
-    doctor_cmd(SimpleNamespace(format=format, fix=fix))
+    doctor_cmd(SimpleNamespace(format=format, fix=fix, force=force))
 
 
 @app.command(
