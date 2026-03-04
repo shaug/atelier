@@ -291,14 +291,15 @@ def _refresh_closed_active_pr_lifecycle(
         if terminal_result is not None:
             return False, _with_stale_signal_recovery_reason(terminal_result)
         return False, None
-    if refreshed_lifecycle in {"pushed", "draft-pr", "pr-open", "in-review", "approved"}:
+    active_lifecycles = {"pushed", "draft-pr", "pr-open", "in-review", "approved"}
+    if refreshed_lifecycle in active_lifecycles:
         return True, None
-    atelier_log.info(
+    atelier_log.warning(
         "changeset="
-        f"{changeset_id} finalize recovered stale active lifecycle via refresh "
-        f"(state={refreshed_lifecycle or 'none'})"
+        f"{changeset_id} finalize PR lifecycle refresh was indeterminate "
+        f"(state={refreshed_lifecycle or 'none'}); preserving active lifecycle guard"
     )
-    return False, None
+    return True, None
 
 
 @dataclass(frozen=True)
