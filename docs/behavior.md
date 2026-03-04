@@ -206,6 +206,8 @@ Atelier planning state. They are treated as external ticket sources.
 - `atelier gc`
 
   - Cleans up stale hooks, claims, orphaned worktrees, and stale queue claims.
+  - Scans the full `at:agent` bead set (`bd list --all --limit 0`) so a single
+    pass can release all stale session agents.
   - Closes channel messages when explicit retention metadata is present.
   - Channel retention metadata can be set via `retention_days` or `expires_at`
     in message frontmatter.

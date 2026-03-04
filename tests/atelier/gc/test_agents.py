@@ -119,3 +119,47 @@ def test_collect_agent_homes_prunes_stale_session_agent_beads_deterministically(
         ("close", "agent-stale-nohook"),
         ("cleanup", stale_no_hook_agent),
     ]
+
+
+def test_collect_agent_homes_scans_all_agent_pages_for_stale_sessions() -> None:
+    project_dir = Path("/project")
+    beads_root = Path("/beads")
+    repo_root = Path("/repo")
+
+    expected_args = ["list", "--label", "at:agent", "--all", "--limit", "0"]
+    total_agents = 75
+    stale_agents = [f"atelier/worker/codex/p{index:04d}-t1" for index in range(total_agents)]
+    agent_issues = [
+        {
+            "id": f"agent-{index}",
+            "title": agent_id,
+            "labels": ["at:agent"],
+            "description": f"agent_id: {agent_id}\nrole_type: worker\n",
+        }
+        for index, agent_id in enumerate(stale_agents)
+    ]
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args == expected_args:
+            return agent_issues
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json) as run_bd_json,
+        patch("atelier.beads.list_epics", return_value=[]),
+        patch("atelier.beads.get_agent_hook", return_value=None),
+        patch("atelier.agent_home.session_pid_from_agent_id", return_value=1234),
+        patch("atelier.agent_home.is_session_agent_active", return_value=False),
+    ):
+        actions = gc_agents.collect_agent_homes(
+            project_dir=project_dir,
+            beads_root=beads_root,
+            repo_root=repo_root,
+        )
+
+    assert len(actions) == total_agents
+    assert actions[0].description == f"Prune stale session agent bead for {stale_agents[0]}"
+    assert actions[-1].description == f"Prune stale session agent bead for {stale_agents[-1]}"
+    run_bd_json.assert_called_once_with(expected_args, beads_root=beads_root, cwd=repo_root)
