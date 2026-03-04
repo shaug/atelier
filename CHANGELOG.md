@@ -2,6 +2,15 @@
 
 ## [0.8.0](https://github.com/shaug/atelier/compare/v0.7.0...v0.8.0) (2026-03-04)
 
+### Overview
+
+This release hardens the planner/worker runtime contract with clearer
+role-scoped execution, stronger lifecycle gating, and faster startup triage. It
+also deepens Beads migration and doctor reliability with fail-closed
+ownership/prefix checks and safer recovery paths, while improving operator UX
+through lower-noise live output and more explicit diagnostics across startup and
+review flows.
+
 ### Features
 
 - **agent:** add role-scoped planner/worker launch options
