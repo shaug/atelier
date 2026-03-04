@@ -247,12 +247,19 @@ def load_mapping_for_changeset(
         return direct
 
     candidates: list[WorktreeMapping] = []
+    direct_mismatch = direct is not None and not direct_matches_epic
     for candidate_path in sorted(meta_dir.glob("*.json")):
         mapping = load_mapping(candidate_path)
         if mapping is None:
             continue
-        if changeset_id == epic_id and mapping.epic_id == epic_id:
-            candidates.append(mapping)
+        if changeset_id == epic_id:
+            if mapping.epic_id == epic_id:
+                candidates.append(mapping)
+                continue
+            if direct_mismatch:
+                continue
+            if changeset_id in mapping.changesets or changeset_id in mapping.changeset_worktrees:
+                candidates.append(mapping)
             continue
         if changeset_id in mapping.changesets or changeset_id in mapping.changeset_worktrees:
             candidates.append(mapping)

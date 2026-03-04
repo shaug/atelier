@@ -722,6 +722,31 @@ def test_load_mapping_for_changeset_epic_lookup_ignores_mismatched_direct_mappin
         assert resolved.root_branch == "feat/new"
 
 
+def test_load_mapping_for_changeset_epic_lookup_fails_closed_without_epic_owner() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        meta_dir = worktrees.worktrees_root(project_dir) / worktrees.METADATA_DIRNAME
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            worktrees.mapping_path(project_dir, "ts-new"),
+            worktrees.WorktreeMapping(
+                epic_id="at-legacy",
+                worktree_path="worktrees/at-legacy",
+                root_branch="feat/legacy",
+                changesets={"ts-new": "feat/legacy-ts-new"},
+                changeset_worktrees={"ts-new": "worktrees/at-legacy-ts-new"},
+            ),
+        )
+
+        resolved = worktrees.load_mapping_for_changeset(
+            project_dir,
+            epic_id="ts-new",
+            changeset_id="ts-new",
+        )
+
+        assert resolved is None
+
+
 def test_load_mapping_for_changeset_fails_closed_on_ambiguous_ownership() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)
