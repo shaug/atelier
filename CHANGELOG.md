@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.8.1](https://github.com/shaug/atelier/compare/v0.8.0...v0.8.1) (2026-03-04)
+
+
+### Bug Fixes
+
+* **agent-teardown:** fail closed on owner-only mismatch payloads ([de412fb](https://github.com/shaug/atelier/commit/de412fbcfa0d0905188d5be8160e8c41755be373))
+* **agent-teardown:** fail closed on owner-only ownership payloads ([43de4ce](https://github.com/shaug/atelier/commit/43de4ce4bbea8a3f0465fbfeba74bc084eed7a74))
+* **agent-teardown:** fail closed on ownership metadata drift ([c51f369](https://github.com/shaug/atelier/commit/c51f369832239f202ff0f5ab7c5874e536194955))
+* **agent-teardown:** require epic release confirmation before closing agent bead ([9a58469](https://github.com/shaug/atelier/commit/9a58469ca5c8648e8937cd9af34b010f0a0d1ac3))
+* **agent:** fail closed teardown close gate without hook target ([0d46a2c](https://github.com/shaug/atelier/commit/0d46a2c813ecdc8d861af361b3c02affb30f8ac6))
+* **agent:** fail closed teardown ownership on index drift ([ef21d45](https://github.com/shaug/atelier/commit/ef21d459e6dc25b91d93d8356f4859fc94e662fe))
+* **agent:** re-verify epic release before closing agent bead ([ea87161](https://github.com/shaug/atelier/commit/ea871617f13adb90d67910130004c48f06c857f6))
+* **beads:** prefer open agent bead over closed duplicates ([fdc80e0](https://github.com/shaug/atelier/commit/fdc80e0bcf17ff2458836aa46624b3036ed4dce5)), closes [#506](https://github.com/shaug/atelier/issues/506)
+* **doctor:** backfill missing mapping lineage in migration repair ([577f671](https://github.com/shaug/atelier/commit/577f671781c8bdd0c679c06dd1de990af5b4e1d6)), closes [#508](https://github.com/shaug/atelier/issues/508)
+* **doctor:** converge prefix drift normalization to canonical branch paths ([1281e18](https://github.com/shaug/atelier/commit/1281e18246a5e04a3dbcec6dd211e12ceba2d0bb)), closes [#509](https://github.com/shaug/atelier/issues/509)
+* **gc:** scan all agent beads during stale cleanup ([85600b1](https://github.com/shaug/atelier/commit/85600b11f1f5b0a0ea8bb277e7bc573a3addb4a9))
+* **git:** forward git_path in enlistment resolution ([bf23369](https://github.com/shaug/atelier/commit/bf2336966f93e7b07f041d40fad4712c69ce2c68))
+* **planner-startup:** resolve project identity from linked worktrees ([17672fb](https://github.com/shaug/atelier/commit/17672fb572cdcf7b22cede161b67200a992fc0a7)), closes [#519](https://github.com/shaug/atelier/issues/519)
+* **prefix-migration:** converge legacy namespace drift deterministically ([700a0a5](https://github.com/shaug/atelier/commit/700a0a5315e688752e41be741b056c6c30cd3fd6)), closes [#510](https://github.com/shaug/atelier/issues/510)
+* **prefix-migration:** enforce scoped changeset ownership ([6469171](https://github.com/shaug/atelier/commit/6469171b0a709e0e98af7745b0ccd38eb7f6bc7c))
+* **prefix-migration:** fail closed on ambiguous worktree candidates ([71e1eda](https://github.com/shaug/atelier/commit/71e1eda17c249f09e0343864d87c6dea72b1e4de))
+* **prefix-migration:** prefer remote canonical branch source ([1dedbf8](https://github.com/shaug/atelier/commit/1dedbf83138aae8312c20c30f5ef35afc8e34500))
+* **prefix-migration:** preflight branch checkout before worktree moves ([c4df26e](https://github.com/shaug/atelier/commit/c4df26e24773ba63000fd8d9fc703e478f51ee81))
+* **prefix-migration:** restore metadata worktree source resolution ([7a1c9e3](https://github.com/shaug/atelier/commit/7a1c9e37097669d9b9bc5f185ccec07c13487359))
+* **runtime:** gate agent-bead closure on verified hook cleanup ([327dc64](https://github.com/shaug/atelier/commit/327dc640987854bf18633279266e0caf3804c023))
+* **runtime:** harden planner teardown bead targeting ([e079574](https://github.com/shaug/atelier/commit/e079574d8225e41ce36314dbefda31db9c30aba0)), closes [#506](https://github.com/shaug/atelier/issues/506)
+* **runtime:** teardown agent beads and hooks on exit ([485695a](https://github.com/shaug/atelier/commit/485695a79eb3ce0120d22af7570afcb6c2510f1a)), closes [#506](https://github.com/shaug/atelier/issues/506)
+* **worker-review:** guard leaked review-branch pruning ([f9f2e4e](https://github.com/shaug/atelier/commit/f9f2e4e714bd07de07388cb5cbbd03e42a7678d8))
+* **worker:** pass concrete agent bead id through teardown ([cdf38d9](https://github.com/shaug/atelier/commit/cdf38d98563f1d0850205ad773a3f6bed019f818)), closes [#506](https://github.com/shaug/atelier/issues/506)
+* **worker:** stop leaking temporary pr-* review branches ([aa5a537](https://github.com/shaug/atelier/commit/aa5a537180d60c2f36ca15ef1edd7f1285fca0dc)), closes [#507](https://github.com/shaug/atelier/issues/507)
+* **worktrees:** fail closed on mismatched epic direct mapping ([d0d08ff](https://github.com/shaug/atelier/commit/d0d08ff56e27ef71bf8eef733197203d78e36f35))
+* **worktrees:** prefer live branch source and fail closed on invalid canonical path ([739cfc1](https://github.com/shaug/atelier/commit/739cfc1d6bda48fbc38a3c41bb598c235b3d0559))
+* **worktrees:** validate direct mapping owner on epic lookup ([d8bdd9f](https://github.com/shaug/atelier/commit/d8bdd9fefe89347f01077faac7fd6c9ac26e5aa2))
+
 ## [0.8.0](https://github.com/shaug/atelier/compare/v0.7.0...v0.8.0) (2026-03-04)
 
 ### Overview
