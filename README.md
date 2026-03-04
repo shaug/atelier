@@ -341,6 +341,14 @@ atelier status
 atelier status --format=json
 ```
 
+Detect prefix-migration drift (read-only by default):
+
+```sh
+atelier doctor
+atelier doctor --fix
+atelier doctor --format=json
+```
+
 List workspaces:
 
 ```sh
@@ -573,6 +581,24 @@ atelier status --format=json
 Options:
 
 - `--format=json`: Emit deterministic JSON output.
+
+### `atelier doctor`
+
+Detect prefix-migration branch/worktree drift. Read-only by default; pass
+`--fix` to apply canonical metadata/mapping updates.
+
+Usage:
+
+```sh
+atelier doctor
+atelier doctor --fix
+atelier doctor --format=json
+```
+
+Options:
+
+- `--format=json`: Emit deterministic JSON output.
+- `--fix`: Apply drift repairs instead of read-only detection.
 
 ### `atelier list`
 

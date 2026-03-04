@@ -182,6 +182,12 @@ Atelier planning state. They are treated as external ticket sources.
 
   - Shows project status for epics, hooks, changesets, and queued messages.
 
+- `atelier doctor`
+
+  - Detects prefix-migration branch/worktree drift in read-only mode by default.
+  - Applies canonical metadata/mapping repairs only when `--fix` is provided.
+  - Does not trigger `atelier gc`.
+
 - `atelier list`
 
   - Lists available workspaces (root branches) for the current project.
