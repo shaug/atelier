@@ -200,6 +200,48 @@ def test_run_worker_sessions_auto_skips_local_epic_failure_and_continues() -> No
     )
 
 
+def test_run_worker_sessions_auto_skips_finalize_dependency_gate_failure_and_continues() -> None:
+    emitted: list[str] = []
+    seen_excluded: list[tuple[str, ...]] = []
+    calls = 0
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del mode, dry_run, session_key
+        nonlocal calls
+        calls += 1
+        seen_excluded.append(tuple(getattr(args, "implicit_excluded_epic_ids", ())))
+        if calls == 1:
+            return WorkerRunSummary(
+                started=False,
+                reason="changeset_finalize_in_progress_dependency_gate_failed",
+                epic_id="at-fail",
+                changeset_id="at-fail.1",
+            )
+        return WorkerRunSummary(started=False, reason="no_eligible_epics")
+
+    runtime.run_worker_sessions(
+        args=type("Args", (), {"queue": False, "epic_id": None})(),
+        mode="auto",
+        run_mode="default",
+        dry_run=False,
+        session_key="sess",
+        run_worker_once=run_once,
+        report_worker_summary=lambda _summary, _dry: None,
+        watch_interval_seconds=lambda: 5,
+        dry_run_log=lambda _message: None,
+        emit=emitted.append,
+    )
+
+    assert seen_excluded == [(), ("at-fail",)]
+    assert emitted[0] == (
+        "Skipping failed epic and continuing implicit selection: "
+        "at-fail (changeset_finalize_in_progress_dependency_gate_failed)"
+    )
+    assert (
+        emitted[-1] == "Terminal outcome: taxonomy=no_work_global, summary_reason=no_eligible_epics"
+    )
+
+
 def test_run_worker_sessions_auto_fails_when_local_failure_repeats_same_epic() -> None:
     emitted: list[str] = []
     seen_excluded: list[tuple[str, ...]] = []

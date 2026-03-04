@@ -39,6 +39,11 @@ _FOLLOWUP_DEPENDENCY_GATE_SOFT_FAILURE_MARKERS = (
     "no issue found matching",
     "no issues found matching the provided ids",
 )
+_FINALIZE_DEPENDENCY_GATE_SOFT_FAILURE_MARKERS = (
+    "cannot set changeset",
+    "to in_progress: blocking dependencies",
+)
+_FINALIZE_DEPENDENCY_GATE_SUMMARY_REASON = "changeset_finalize_in_progress_dependency_gate_failed"
 
 
 def _list_local_branches(*, repo_root: Path, git_path: str | None) -> tuple[str, ...]:
@@ -348,6 +353,39 @@ def _is_followup_dependency_gate_soft_failure(error: BaseException) -> bool:
         return False
     detail = _format_preparation_error_detail(error).lower()
     return any(marker in detail for marker in _FOLLOWUP_DEPENDENCY_GATE_SOFT_FAILURE_MARKERS)
+
+
+def _is_finalize_dependency_gate_soft_failure(error: BaseException) -> bool:
+    if not isinstance(error, SystemExit):
+        return False
+    detail = _format_preparation_error_detail(error).lower()
+    return all(marker in detail for marker in _FINALIZE_DEPENDENCY_GATE_SOFT_FAILURE_MARKERS)
+
+
+def _finalize_dependency_gate_summary(
+    *,
+    control: WorkerControlService,
+    selected_epic: str,
+    changeset_id: str | None,
+    error: BaseException,
+) -> WorkerRunSummary:
+    detail = _format_preparation_error_detail(error)
+    if changeset_id:
+        control.say(
+            "Finalize status recovery hit dependency-gate rejection; "
+            f"returning controlled summary for implicit-loop handling ({changeset_id}): {detail}"
+        )
+    else:
+        control.say(
+            "Finalize status recovery hit dependency-gate rejection; "
+            f"returning controlled summary for implicit-loop handling: {detail}"
+        )
+    return WorkerRunSummary(
+        started=False,
+        reason=_FINALIZE_DEPENDENCY_GATE_SUMMARY_REASON,
+        epic_id=selected_epic,
+        changeset_id=changeset_id,
+    )
 
 
 def _dependency_has_work_children(
@@ -1164,27 +1202,39 @@ def run_worker_once(
                 timings=timings,
                 trace=trace,
             )
-            finalize_result = lifecycle.finalize_changeset(
-                changeset_id=changeset_id,
-                epic_id=selected_epic,
-                agent_id=agent.agent_id,
-                agent_bead_id=agent_bead_id_required,
-                started_at=dt.datetime.now(dt.timezone.utc),
-                repo_slug=repo_slug,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                branch_pr=project_config.branch.pr,
-                branch_pr_mode=project_config.branch.pr_mode,
-                branch_pr_strategy=project_config.branch.pr_strategy,
-                branch_history=project_config.branch.history,
-                branch_squash_message=project_config.branch.squash_message,
-                project_data_dir=project_data_dir,
-                squash_message_agent_spec=None,
-                squash_message_agent_options=[],
-                squash_message_agent_home=agent.path,
-                squash_message_agent_env={},
-                git_path=git_path,
-            )
+            try:
+                finalize_result = lifecycle.finalize_changeset(
+                    changeset_id=changeset_id,
+                    epic_id=selected_epic,
+                    agent_id=agent.agent_id,
+                    agent_bead_id=agent_bead_id_required,
+                    started_at=dt.datetime.now(dt.timezone.utc),
+                    repo_slug=repo_slug,
+                    beads_root=beads_root,
+                    repo_root=repo_root,
+                    branch_pr=project_config.branch.pr,
+                    branch_pr_mode=project_config.branch.pr_mode,
+                    branch_pr_strategy=project_config.branch.pr_strategy,
+                    branch_history=project_config.branch.history,
+                    branch_squash_message=project_config.branch.squash_message,
+                    project_data_dir=project_data_dir,
+                    squash_message_agent_spec=None,
+                    squash_message_agent_options=[],
+                    squash_message_agent_home=agent.path,
+                    squash_message_agent_env={},
+                    git_path=git_path,
+                )
+            except SystemExit as exc:
+                if not _is_finalize_dependency_gate_soft_failure(exc):
+                    raise
+                summary = _finalize_dependency_gate_summary(
+                    control=control,
+                    selected_epic=selected_epic,
+                    changeset_id=str(changeset_id) if changeset_id else None,
+                    error=exc,
+                )
+                finishstep(extra=summary.reason)
+                return finish(summary)
             finishstep(extra=finalize_result.reason)
             if not finalize_result.continue_running:
                 return finish(
@@ -1465,27 +1515,39 @@ def run_worker_once(
         started_at = session_result.started_at
         finishstep(extra=f"exit={session_result.returncode}")
         finishstep = control.step("Finalize changeset", timings=timings, trace=trace)
-        finalize_result = lifecycle.finalize_changeset(
-            changeset_id=changeset_id,
-            epic_id=selected_epic,
-            agent_id=agent.agent_id,
-            agent_bead_id=agent_bead_id_required,
-            started_at=started_at,
-            repo_slug=repo_slug,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            branch_pr=project_config.branch.pr,
-            branch_pr_mode=project_config.branch.pr_mode,
-            branch_pr_strategy=project_config.branch.pr_strategy,
-            branch_history=project_config.branch.history,
-            branch_squash_message=project_config.branch.squash_message,
-            project_data_dir=project_data_dir,
-            squash_message_agent_spec=agent_spec,
-            squash_message_agent_options=agent_options,
-            squash_message_agent_home=agent.path,
-            squash_message_agent_env=env,
-            git_path=git_path,
-        )
+        try:
+            finalize_result = lifecycle.finalize_changeset(
+                changeset_id=changeset_id,
+                epic_id=selected_epic,
+                agent_id=agent.agent_id,
+                agent_bead_id=agent_bead_id_required,
+                started_at=started_at,
+                repo_slug=repo_slug,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                branch_pr=project_config.branch.pr,
+                branch_pr_mode=project_config.branch.pr_mode,
+                branch_pr_strategy=project_config.branch.pr_strategy,
+                branch_history=project_config.branch.history,
+                branch_squash_message=project_config.branch.squash_message,
+                project_data_dir=project_data_dir,
+                squash_message_agent_spec=agent_spec,
+                squash_message_agent_options=agent_options,
+                squash_message_agent_home=agent.path,
+                squash_message_agent_env=env,
+                git_path=git_path,
+            )
+        except SystemExit as exc:
+            if not _is_finalize_dependency_gate_soft_failure(exc):
+                raise
+            summary = _finalize_dependency_gate_summary(
+                control=control,
+                selected_epic=selected_epic,
+                changeset_id=str(changeset_id) if changeset_id else None,
+                error=exc,
+            )
+            finishstep(extra=summary.reason)
+            return finish(summary)
         if review_feedback and finalize_result.continue_running:
             feedback_after = lifecycle.capture_review_feedback_snapshot(
                 issue=changeset,
