@@ -115,7 +115,10 @@ def _has_active_epic_ownership(
     for issue in assigned_issues:
         if not isinstance(issue, dict):
             continue
-        if _clean_text(issue.get("assignee")) != agent_id:
+        # Prefer explicit ownership metadata when present, but fail closed when
+        # list payloads omit assignee/owner fields.
+        owner_claim = _clean_text(issue.get("assignee")) or _clean_text(issue.get("owner"))
+        if owner_claim is not None and owner_claim != agent_id:
             continue
         if lifecycle.canonical_lifecycle_status(issue.get("status")) == "closed":
             continue
