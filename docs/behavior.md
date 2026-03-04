@@ -184,10 +184,9 @@ Atelier planning state. They are treated as external ticket sources.
 
 - `atelier doctor`
 
-  - Reports project health across four check families: `prefix_migration_drift`,
-    `in_progress_ownership_hook_consistency`,
-    `blocked_state_reason_consistency`, and
-    `worktree_branch_metadata_readiness`.
+  - Reports project health across three check families:
+    `prefix_migration_drift`, `startup_blocking_lineage_consistency`, and
+    `in_progress_integrity_signals`.
   - Stays read-only in default check mode and does not mutate Beads/worktree
     state.
   - Uses `atelier doctor --fix` as the explicit mutation path.

@@ -17,7 +17,7 @@ This project supports per-project Beads prefixes via `beads.prefix`.
    - `atelier status`
    - Confirm expected epics/changesets and no missing epic identity warnings.
 
-## Prefix-Migration Drift Doctor
+## Operator Runbook: Prefix-Migration Drift
 
 Use `atelier doctor` after prefix migration when worker startup reports lineage
 or worktree-mapping drift (for example
@@ -42,24 +42,54 @@ atelier doctor
 
 Interpretation:
 
-- `atelier doctor` now reports four deterministic health sections:
+- `atelier doctor` reports three deterministic check families:
   - `prefix_migration_drift`
-  - `in_progress_ownership_hook_consistency`
-  - `blocked_state_reason_consistency`
-  - `worktree_branch_metadata_readiness`
-- Prefix drift remains a distinct check and still reports canonical
+  - `startup_blocking_lineage_consistency`
+  - `in_progress_integrity_signals`
+- Prefix drift remains the only mutating check family and reports canonical
   root/work/worktree repair targets.
-- Additional read-only checks provide project-wide context (for example
-  in-progress assignee/hook mismatches, blocked items missing reason notes, and
-  startup-blocking work-branch/worktree metadata conflicts).
-- `--fix` remains scoped to prefix-migration drift repair only; all other checks
-  remain observational.
+- Startup-blocking lineage findings stay read-only and explicitly mark
+  metadata/mapping conflicts that can block worker startup.
+- In-progress integrity findings stay read-only and surface ownership/hook
+  inconsistencies.
+- `--fix` remains scoped to prefix-migration drift repair only.
 
 For machine-readable output:
 
 ```bash
 atelier doctor --format json
 ```
+
+### Convergence validation harness
+
+Run the deterministic regression harness for representative migrated projects:
+
+```bash
+uv run pytest tests/atelier/test_prefix_migration_convergence.py -v
+```
+
+Coverage matrix:
+
+- `tuber-service`: validates startup block on legacy mapping drift,
+  deterministic doctor findings, and convergence after `--fix`.
+- `gumshoe`: validates the same flow with an independent migrated-project
+  lineage fixture.
+- `eldritchdark`: validates the same flow for a third fixture to guard against
+  single-project assumptions.
+
+### Normalization decision points
+
+Use this decision order for operational triage:
+
+1. Run `atelier doctor` (read-only) and confirm whether
+   `prefix_normalization.required` is `true`.
+1. If `required` is `false`, stop; no migration repair action is needed.
+1. If `required` is `true`, capture backups first (Beads root and
+   `worktrees/.meta`).
+1. Apply `atelier doctor --fix` only when no active hooks are present, or when
+   `--force` is explicitly justified.
+1. Re-run `atelier doctor` and verify `prefix_normalization.required` is
+   `false`.
 
 ### Apply repairs (explicit opt-in)
 
@@ -103,6 +133,22 @@ atelier doctor
 
 `atelier doctor` does not run `atelier gc` and introduces no default GC side
 effects. GC remains a separate explicit operation.
+
+### Legacy-compatible vs fully normalized state
+
+Fully normalized:
+
+- `changeset.root_branch`, `changeset.work_branch`, and `worktree_path` match
+  canonical post-migration values.
+- Worktree mapping entries under `worktrees/.meta` match lineage metadata.
+- `atelier doctor` reports no prefix-drift findings for the project.
+
+Intentionally legacy-compatible:
+
+- Read-only detection accepts legacy artifacts as input evidence for diagnosis.
+- Repair remains explicit (`atelier doctor --fix`), never implicit at startup.
+- Lifecycle/runtime labels remain fixed to `at:*` and do not fall back to
+  generalized custom-prefix label matching.
 
 ## Notes
 
