@@ -260,16 +260,17 @@ def test_teardown_agent_runtime_does_not_close_when_untracked_epic_still_owned()
             side_effect=[None, None],
         ),
         patch(
-            "atelier.agent_teardown.beads.list_epics",
+            "atelier.agent_teardown.beads.run_bd_json",
             return_value=[
                 {
                     "id": "epic-stale",
                     "assignee": "atelier/worker/codex/p7",
-                    "labels": ["at:epic", "at:hooked"],
+                    "issue_type": "epic",
+                    "labels": [],
                     "status": "open",
                 }
             ],
-        ) as list_epics,
+        ) as run_bd_json,
         patch("atelier.agent_teardown.beads.close_issue") as close_issue,
     ):
         result = agent_teardown.teardown_agent_runtime(
@@ -279,10 +280,10 @@ def test_teardown_agent_runtime_does_not_close_when_untracked_epic_still_owned()
             close_agent_bead=True,
         )
 
-    list_epics.assert_called_once_with(
+    run_bd_json.assert_called_once_with(
+        ["list", "--assignee", "atelier/worker/codex/p7", "--all", "--limit", "0"],
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
-        include_closed=False,
     )
     close_issue.assert_not_called()
     assert result.released_epic is False
@@ -301,7 +302,7 @@ def test_teardown_agent_runtime_does_not_close_when_ownership_check_fails() -> N
             side_effect=[None, None],
         ),
         patch(
-            "atelier.agent_teardown.beads.list_epics",
+            "atelier.agent_teardown.beads.run_bd_json",
             side_effect=SystemExit(1),
         ),
         patch("atelier.agent_teardown.beads.close_issue") as close_issue,
@@ -327,11 +328,13 @@ def test_teardown_agent_runtime_verifies_closed_status_when_close_fails() -> Non
             return_value={"id": "agent-2"},
         ),
         patch("atelier.agent_teardown.beads.get_agent_hook", return_value=None),
-        patch("atelier.agent_teardown.beads.list_epics", return_value=[]),
         patch("atelier.agent_teardown.beads.close_issue", return_value=close_result),
         patch(
             "atelier.agent_teardown.beads.run_bd_json",
-            return_value=[{"id": "agent-2", "status": "closed"}],
+            side_effect=[
+                [],
+                [{"id": "agent-2", "status": "closed"}],
+            ],
         ) as run_bd_json,
     ):
         result = agent_teardown.teardown_agent_runtime(
@@ -341,9 +344,18 @@ def test_teardown_agent_runtime_verifies_closed_status_when_close_fails() -> Non
             close_agent_bead=True,
         )
 
-    run_bd_json.assert_called_once_with(
-        ["show", "agent-2"],
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
+    run_bd_json.assert_has_calls(
+        [
+            call(
+                ["list", "--assignee", "atelier/planner/codex/p2", "--all", "--limit", "0"],
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            ),
+            call(
+                ["show", "agent-2"],
+                beads_root=Path("/beads"),
+                cwd=Path("/repo"),
+            ),
+        ]
     )
     assert result.agent_closed is True

@@ -81,41 +81,53 @@ def _is_epic_assignment_released(
     return assignee is None and not hooked
 
 
+def _issue_parent_id(issue: dict[str, object]) -> str | None:
+    """Return normalized parent id from a Beads issue payload."""
+    try:
+        boundary = beads.parse_issue_boundary(issue, source="agent_teardown:issue_parent_id")
+    except ValueError:
+        return None
+    return _clean_text(boundary.parent_id)
+
+
 def _has_active_epic_ownership(
     *,
     agent_id: str,
     beads_root: Path,
     repo_root: Path,
 ) -> bool | None:
-    """Return whether the agent still owns a non-closed epic.
+    """Return whether the agent still owns non-closed top-level work.
 
     Returns:
-        ``True`` when at least one non-closed epic is still assigned to the
-        runtime agent, ``False`` when none are found, and ``None`` when
-        ownership cannot be verified.
+        ``True`` when at least one non-closed top-level work bead is still
+        assigned to the runtime agent, ``False`` when none are found, and
+        ``None`` when ownership cannot be verified.
     """
     try:
-        epics = beads.list_epics(
+        assigned_issues = beads.run_bd_json(
+            ["list", "--assignee", agent_id, "--all", "--limit", "0"],
             beads_root=beads_root,
             cwd=repo_root,
-            include_closed=False,
         )
     except SystemExit:
         return None
 
-    for epic in epics:
-        if _clean_text(epic.get("assignee")) != agent_id:
+    for issue in assigned_issues:
+        if not isinstance(issue, dict):
             continue
-        raw_labels = epic.get("labels")
-        labels = (
-            {label for label in raw_labels if isinstance(label, str)}
-            if isinstance(raw_labels, list)
-            else set()
+        if _clean_text(issue.get("assignee")) != agent_id:
+            continue
+        if lifecycle.canonical_lifecycle_status(issue.get("status")) == "closed":
+            continue
+        labels = lifecycle.normalized_labels(issue.get("labels"))
+        role = lifecycle.infer_work_role(
+            labels=labels,
+            issue_type=lifecycle.issue_payload_type(issue),
+            parent_id=_issue_parent_id(issue),
+            has_work_children=False,
         )
-        if beads.has_issue_label(labels, "hooked", beads_root=beads_root):
+        if role.is_work and role.is_epic:
             return True
-        # Assigned ownership alone is sufficient to block close.
-        return True
     return False
 
 
