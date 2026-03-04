@@ -28,7 +28,7 @@ or worktree-mapping drift (for example
 Capture both planning metadata and worktree mapping files before any mutation:
 
 ```bash
-BEADS_DIR="<project beads root>" bd export > beads-backup.jsonl
+cp -R "<project beads root>" beads-root-backup
 cp -R "<project data dir>/worktrees/.meta" worktrees-meta-backup
 ```
 
@@ -77,9 +77,10 @@ If the repair run should be reverted:
 Example restore flow:
 
 ```bash
+rm -rf "<project beads root>"
+cp -R beads-root-backup "<project beads root>"
+rm -rf "<project data dir>/worktrees/.meta"
 cp -R worktrees-meta-backup "<project data dir>/worktrees/.meta"
-# Re-import or otherwise restore beads-backup.jsonl with your project's
-# standard Beads recovery flow.
 atelier doctor
 ```
 
