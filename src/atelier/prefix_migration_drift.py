@@ -256,7 +256,7 @@ def _choose_branch_source(
     mapped_branch: str | None,
     pr_head_ref: str | None,
 ) -> str | None:
-    for value in (mapping_work_branch, metadata_work_branch, mapped_branch, pr_head_ref):
+    for value in (mapped_branch, mapping_work_branch, metadata_work_branch, pr_head_ref):
         if value is None or value == canonical_branch:
             continue
         return value
@@ -417,7 +417,12 @@ def _converge_changeset_artifacts(
                 "failed to verify changeset worktree rename "
                 f"{source_relpath!r} -> {canonical_relpath!r}"
             )
-    if not canonical_path.exists() or not (canonical_path / ".git").exists():
+    if canonical_path.exists() and not (canonical_path / ".git").exists():
+        raise RuntimeError(
+            "canonical changeset worktree path exists but is not a git worktree: "
+            f"{canonical_relpath!r}"
+        )
+    if not canonical_path.exists():
         return
 
     branch_source = _choose_branch_source(

@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import pytest
+
 import atelier.beads as beads
 import atelier.prefix_migration_drift as prefix_migration_drift
 import atelier.worktrees as worktrees
@@ -60,6 +62,65 @@ def test_ensure_canonical_branch_prefers_remote_canonical_over_legacy_source() -
     )
     assert local_branch_checks == ["feat/canonical", "feat/canonical"]
     assert remote_branch_checks == ["feat/canonical"]
+
+
+def test_choose_branch_source_prefers_checked_out_worktree_branch() -> None:
+    source = prefix_migration_drift._choose_branch_source(
+        canonical_branch="feat/canonical",
+        mapping_work_branch="feat/stale-mapping",
+        metadata_work_branch="feat/stale-metadata",
+        mapped_branch="feat/live-checkout",
+        pr_head_ref="feat/pr-head",
+    )
+    assert source == "feat/live-checkout"
+
+
+def test_converge_changeset_artifacts_fails_closed_for_non_git_canonical_path(
+    tmp_path: Path,
+) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    (project_data_dir / "worktrees" / "ts-epic.1").mkdir(parents=True)
+
+    action = prefix_migration_drift.PrefixMigrationRepairAction(
+        epic_id="ts-epic",
+        changeset_id="ts-epic.1",
+        drift_classes=("worktree-path-conflict",),
+        canonical_root_branch="feat/root",
+        canonical_work_branch="feat/canonical",
+        work_branch_source="mapping-work-branch",
+        canonical_worktree_path="worktrees/ts-epic.1",
+        worktree_path_source="mapping-worktree-path",
+        pr_head_ref=None,
+        pr_lookup_branch=None,
+        update_workspace_root_branch=False,
+        update_changeset_metadata=True,
+        update_changeset_worktree_path=True,
+        update_mapping=True,
+        applied=False,
+    )
+    changeset_issue = {
+        "id": "ts-epic.1",
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.work_branch: feat/stale-metadata\n"
+            "worktree_path: worktrees/at-legacy.1\n"
+        ),
+    }
+    git_index = prefix_migration_drift._GitWorktreeIndex(path_to_branch={}, branch_to_paths={})
+
+    with pytest.raises(RuntimeError, match="exists but is not a git worktree"):
+        prefix_migration_drift._converge_changeset_artifacts(
+            project_data_dir=project_data_dir,
+            repo_root=repo_root,
+            action=action,
+            changeset_issue=changeset_issue,
+            mapping=None,
+            git_index=git_index,
+            git_path=None,
+        )
 
 
 def test_scan_prefix_migration_drift_reports_conflicts_deterministically(tmp_path: Path) -> None:
