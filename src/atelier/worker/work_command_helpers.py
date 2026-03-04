@@ -41,6 +41,7 @@ from .work_startup_runtime import (
     persist_review_feedback_cursor,
     review_feedback_progressed,
     run_startup_contract,
+    startup_finalize_preflight,
     worker_opening_prompt,
 )
 
@@ -76,6 +77,7 @@ __all__ = [
     "run_startup_contract",
     "send_no_ready_changesets",
     "send_planner_notification",
+    "startup_finalize_preflight",
     "step",
     "strip_flag_with_value",
     "trace_enabled",

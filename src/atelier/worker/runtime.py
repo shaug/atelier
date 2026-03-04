@@ -22,6 +22,7 @@ from .models import (
     FinalizeResult,
     ReconcileResult,
     StartupContractResult,
+    StartupFinalizePreflightResult,
     WorkerRunSummary,
 )
 from .ports import (
@@ -196,6 +197,23 @@ class WorkerLifecycleAdapter:
 
     def extract_workspace_parent_branch(self, issue: Issue) -> str | None:
         return worker_work.extract_workspace_parent_branch(issue)
+
+    def startup_finalize_preflight(
+        self,
+        *,
+        issue: Issue,
+        repo_slug: str | None,
+        branch_pr: bool,
+        repo_root: Path,
+        git_path: str | None,
+    ) -> StartupFinalizePreflightResult:
+        return worker_work.startup_finalize_preflight(
+            issue=issue,
+            repo_slug=repo_slug,
+            branch_pr=branch_pr,
+            repo_root=repo_root,
+            git_path=git_path,
+        )
 
     def finalize_changeset(
         self,

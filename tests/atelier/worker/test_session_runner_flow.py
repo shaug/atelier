@@ -10,7 +10,11 @@ from unittest.mock import Mock, call, patch
 from atelier import config
 from atelier.agent_home import AgentHome
 from atelier.worker.context import WorkerRunContext
-from atelier.worker.models import FinalizeResult, StartupContractResult
+from atelier.worker.models import (
+    FinalizeResult,
+    StartupContractResult,
+    StartupFinalizePreflightResult,
+)
 from atelier.worker.ports import (
     WorkerInfrastructurePorts,
     WorkerRuntimeDependencies,
@@ -114,6 +118,10 @@ def _build_runner_deps(
             changeset_work_branch=lambda _issue: None,
             extract_changeset_root_branch=lambda _issue: "feat/root",
             extract_workspace_parent_branch=lambda _issue: "main",
+            startup_finalize_preflight=lambda **_kwargs: StartupFinalizePreflightResult(
+                should_finalize_only=False,
+                reason="normal_path:integration_unproven",
+            ),
             finalize_changeset=lambda **_kwargs: FinalizeResult(
                 continue_running=False,
                 reason="done",
@@ -984,6 +992,155 @@ def test_run_worker_once_reports_worker_template_load_failure_reason_code() -> N
         expected_hook="at-epic",
     )
     assert not deps.control._die.called
+
+
+def test_run_worker_once_short_circuits_terminal_finalize_before_agent_startup() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p6d",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p6d",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    _, project_config, _, _ = deps.infra.resolve_current_project_with_repo_root.return_value
+    project_config.branch.pr_mode = "ready"
+    selected_changeset = {
+        "id": "at-epic.1",
+        "title": "Changeset",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    deps.lifecycle.next_changeset = lambda **_kwargs: selected_changeset
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [selected_changeset] if args[:2] == ["show", "at-epic.1"] else []
+        )
+    )
+    deps.lifecycle.startup_finalize_preflight = Mock(
+        return_value=StartupFinalizePreflightResult(
+            should_finalize_only=True,
+            reason="finalize_only:pr_lifecycle_merged_integration_proven",
+        )
+    )
+    deps.lifecycle.finalize_changeset = Mock(
+        return_value=FinalizeResult(
+            continue_running=True,
+            reason="changeset_complete",
+        )
+    )
+    deps.lifecycle.mark_changeset_in_progress = Mock()
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p6d"),
+        deps=deps,
+    )
+
+    assert summary.started is True
+    assert summary.reason == "startup_finalize_only"
+    assert summary.epic_id == "at-epic"
+    assert summary.changeset_id == "at-epic.1"
+    deps.lifecycle.startup_finalize_preflight.assert_called_once_with(
+        issue=selected_changeset,
+        repo_slug="org/repo",
+        branch_pr=True,
+        repo_root=Path("/repo"),
+        git_path="git",
+    )
+    deps.lifecycle.finalize_changeset.assert_called_once()
+    finalize_kwargs = deps.lifecycle.finalize_changeset.call_args.kwargs
+    assert finalize_kwargs["changeset_id"] == "at-epic.1"
+    assert finalize_kwargs["epic_id"] == "at-epic"
+    assert finalize_kwargs["squash_message_agent_spec"] is None
+    assert finalize_kwargs["squash_message_agent_options"] == []
+    assert finalize_kwargs["squash_message_agent_home"] == Path("/tmp/worker")
+    assert finalize_kwargs["squash_message_agent_env"] == {}
+    deps.infra.worker_session_worktree.prepare_worktrees.assert_not_called()
+    deps.lifecycle.mark_changeset_in_progress.assert_not_called()
+    deps.infra.worker_session_agent.prepare_agent_session.assert_not_called()
+    deps.infra.worker_session_agent.start_agent_session.assert_not_called()
+    assert any(
+        "Skipping worker agent startup; finalizing changeset via startup preflight"
+        in str(call.args[0])
+        for call in deps.control._say.call_args_list
+    )
+
+
+def test_run_worker_once_dry_run_short_circuits_terminal_finalize_without_mutation() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p6dr",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p6dr",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    dry_run_logs: list[str] = []
+    deps.control.dry_run_log = dry_run_logs.append  # type: ignore[method-assign]
+    selected_changeset = {
+        "id": "at-epic.1",
+        "title": "Changeset",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+    }
+    deps.lifecycle.next_changeset = lambda **_kwargs: selected_changeset
+    deps.infra.beads.run_bd_json = Mock(
+        side_effect=lambda args, **_kwargs: (
+            [{"id": "at-epic", "title": "Epic", "description": ""}]
+            if args[:2] == ["show", "at-epic"]
+            else []
+        )
+    )
+    deps.lifecycle.startup_finalize_preflight = Mock(
+        return_value=StartupFinalizePreflightResult(
+            should_finalize_only=True,
+            reason="finalize_only:pr_lifecycle_merged_integration_proven",
+        )
+    )
+    deps.lifecycle.finalize_changeset = Mock(
+        return_value=FinalizeResult(
+            continue_running=True,
+            reason="changeset_complete",
+        )
+    )
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=True, session_key="p6dr"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "dry_run"
+    assert summary.epic_id == "at-epic"
+    assert summary.changeset_id == "at-epic.1"
+    deps.lifecycle.finalize_changeset.assert_not_called()
+    deps.infra.worker_session_worktree.prepare_worktrees.assert_not_called()
+    deps.infra.worker_session_agent.prepare_agent_session.assert_not_called()
+    deps.infra.worker_session_agent.start_agent_session.assert_not_called()
+    assert any(
+        "Startup preflight would skip worker agent startup and finalize changeset" in message
+        for message in dry_run_logs
+    )
 
 
 def test_run_worker_once_continues_after_review_pending_finalize() -> None:

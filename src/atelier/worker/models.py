@@ -16,6 +16,12 @@ class StartupContractResult:
 
 
 @dataclass(frozen=True)
+class StartupFinalizePreflightResult:
+    should_finalize_only: bool
+    reason: str
+
+
+@dataclass(frozen=True)
 class WorkerRunSummary:
     started: bool
     reason: str
