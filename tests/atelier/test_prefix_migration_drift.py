@@ -140,6 +140,78 @@ def test_converge_changeset_artifacts_fails_closed_for_non_git_canonical_path(
         )
 
 
+def test_converge_changeset_artifacts_checks_out_before_worktree_move(
+    tmp_path: Path,
+) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    legacy_path = project_data_dir / "worktrees" / "at-legacy.1"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    legacy_path.mkdir(parents=True)
+    (legacy_path / ".git").write_text("gitdir: /tmp/legacy\n", encoding="utf-8")
+
+    action = prefix_migration_drift.PrefixMigrationRepairAction(
+        epic_id="ts-epic",
+        changeset_id="ts-epic.1",
+        drift_classes=("worktree-path-conflict",),
+        canonical_root_branch="feat/root",
+        canonical_work_branch="feat/canonical",
+        work_branch_source="mapping-work-branch",
+        canonical_worktree_path="worktrees/ts-epic.1",
+        worktree_path_source="metadata-worktree-path",
+        pr_head_ref=None,
+        pr_lookup_branch=None,
+        update_workspace_root_branch=False,
+        update_changeset_metadata=True,
+        update_changeset_worktree_path=True,
+        update_mapping=True,
+        applied=False,
+    )
+    changeset_issue = {
+        "id": "ts-epic.1",
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.work_branch: feat/stale-metadata\n"
+            "worktree_path: worktrees/at-legacy.1\n"
+        ),
+    }
+    git_index = prefix_migration_drift._GitWorktreeIndex(path_to_branch={}, branch_to_paths={})
+
+    with (
+        patch("atelier.prefix_migration_drift._ensure_canonical_branch") as ensure_branch,
+        patch(
+            "atelier.prefix_migration_drift._checkout_canonical_branch",
+            side_effect=RuntimeError("dirty worktree"),
+        ) as checkout_branch,
+        patch("atelier.prefix_migration_drift._run_git_checked") as run_git_checked,
+        patch("atelier.prefix_migration_drift.git.git_current_branch", return_value="feat/source"),
+    ):
+        with pytest.raises(RuntimeError, match="dirty worktree"):
+            prefix_migration_drift._converge_changeset_artifacts(
+                project_data_dir=project_data_dir,
+                repo_root=repo_root,
+                action=action,
+                changeset_issue=changeset_issue,
+                mapping=None,
+                git_index=git_index,
+                git_path=None,
+            )
+
+    ensure_branch.assert_called_once_with(
+        repo_root=repo_root,
+        canonical_branch="feat/canonical",
+        source_branch="feat/source",
+        git_path=None,
+    )
+    checkout_branch.assert_called_once_with(
+        worktree_path=legacy_path,
+        canonical_branch="feat/canonical",
+        git_path=None,
+    )
+    assert not run_git_checked.call_args_list
+
+
 def test_scan_prefix_migration_drift_reports_conflicts_deterministically(tmp_path: Path) -> None:
     project_data_dir = tmp_path / "data"
     repo_root = tmp_path / "repo"

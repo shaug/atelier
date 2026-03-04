@@ -407,12 +407,48 @@ def _converge_changeset_artifacts(
         relpaths=source_relpaths,
     )
 
-    if (
+    if canonical_path.exists() and not (canonical_path / ".git").exists():
+        raise RuntimeError(
+            "canonical changeset worktree path exists but is not a git worktree: "
+            f"{canonical_relpath!r}"
+        )
+    move_worktree = (
         source_path is not None
         and source_relpath is not None
         and source_relpath != canonical_relpath
         and not canonical_path.exists()
-    ):
+    )
+    if move_worktree:
+        assert source_path is not None
+        active_worktree_path = source_path
+    elif canonical_path.exists():
+        active_worktree_path = canonical_path
+    else:
+        return
+
+    branch_source = _choose_branch_source(
+        canonical_branch=action.canonical_work_branch,
+        mapping_work_branch=mapping_work_branch,
+        metadata_work_branch=metadata_work_branch,
+        mapped_branch=_normalize_text(
+            git.git_current_branch(active_worktree_path, git_path=git_path)
+        ),
+        pr_head_ref=action.pr_head_ref,
+    )
+    _ensure_canonical_branch(
+        repo_root=repo_root,
+        canonical_branch=action.canonical_work_branch,
+        source_branch=branch_source,
+        git_path=git_path,
+    )
+    _checkout_canonical_branch(
+        worktree_path=active_worktree_path,
+        canonical_branch=action.canonical_work_branch,
+        git_path=git_path,
+    )
+    if move_worktree:
+        assert source_path is not None
+        assert source_relpath is not None
         _run_git_checked(
             repo_root=repo_root,
             args=["worktree", "move", str(source_path), str(canonical_path)],
@@ -426,32 +462,6 @@ def _converge_changeset_artifacts(
                 "failed to verify changeset worktree rename "
                 f"{source_relpath!r} -> {canonical_relpath!r}"
             )
-    if canonical_path.exists() and not (canonical_path / ".git").exists():
-        raise RuntimeError(
-            "canonical changeset worktree path exists but is not a git worktree: "
-            f"{canonical_relpath!r}"
-        )
-    if not canonical_path.exists():
-        return
-
-    branch_source = _choose_branch_source(
-        canonical_branch=action.canonical_work_branch,
-        mapping_work_branch=mapping_work_branch,
-        metadata_work_branch=metadata_work_branch,
-        mapped_branch=_normalize_text(git.git_current_branch(canonical_path, git_path=git_path)),
-        pr_head_ref=action.pr_head_ref,
-    )
-    _ensure_canonical_branch(
-        repo_root=repo_root,
-        canonical_branch=action.canonical_work_branch,
-        source_branch=branch_source,
-        git_path=git_path,
-    )
-    _checkout_canonical_branch(
-        worktree_path=canonical_path,
-        canonical_branch=action.canonical_work_branch,
-        git_path=git_path,
-    )
 
 
 def _mapped_worktree_lineage(
