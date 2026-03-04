@@ -93,6 +93,8 @@ def _startup_worktree_preflight(
         repo_root=repo_root,
         repo_slug=repo_slug,
         git_path=git_path,
+        target_epic_id=selected_epic,
+        target_changeset_ids=target_changesets,
     )
     diagnostics: list[str] = []
     for record in drift_records:

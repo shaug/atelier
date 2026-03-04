@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import atelier.prefix_migration_drift as prefix_migration_drift
 import atelier.worktrees as worktrees
@@ -178,6 +178,86 @@ def test_scan_prefix_migration_drift_returns_empty_when_metadata_mapping_and_wor
 
     assert records == []
     assert lookup_calls == []
+
+
+def test_scan_prefix_migration_drift_scopes_to_selected_epic_and_changesets(
+    tmp_path: Path,
+) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    worktrees.write_mapping(
+        worktrees.mapping_path(project_data_dir, "ts-epic"),
+        worktrees.WorktreeMapping(
+            epic_id="ts-epic",
+            worktree_path="worktrees/ts-epic",
+            root_branch="feat/new-root",
+            changesets={"ts-epic.1": "feat/new-branch"},
+            changeset_worktrees={"ts-epic.1": "worktrees/ts-epic.1"},
+        ),
+    )
+    epic_issue = {
+        "id": "ts-epic",
+        "labels": ["at:epic"],
+        "description": "workspace.root_branch: feat/new-root\n",
+    }
+    changeset_issue = {
+        "id": "ts-epic.1",
+        "labels": [],
+        "type": "task",
+        "description": (
+            "changeset.root_branch: feat/new-root\nchangeset.work_branch: feat/new-branch\n"
+        ),
+    }
+    worktree_output = _git_worktree_output(
+        project_data_dir / "worktrees" / "ts-epic.1",
+        "feat/new-branch",
+    )
+    list_epics = Mock()
+    list_descendants = Mock()
+    list_work_children = Mock()
+
+    def fake_show(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args == ["show", "ts-epic"]:
+            return [epic_issue]
+        if args == ["show", "ts-epic.1"]:
+            return [changeset_issue]
+        raise AssertionError(f"unexpected bd command: {args!r}")
+
+    with (
+        patch("atelier.prefix_migration_drift.beads.run_bd_json", side_effect=fake_show),
+        patch("atelier.prefix_migration_drift.beads.list_epics", list_epics),
+        patch("atelier.prefix_migration_drift.beads.list_descendant_changesets", list_descendants),
+        patch("atelier.prefix_migration_drift.beads.list_work_children", list_work_children),
+        patch(
+            "atelier.prefix_migration_drift.exec_util.try_run_command",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "worktree", "list", "--porcelain"],
+                returncode=0,
+                stdout=worktree_output,
+                stderr="",
+            ),
+        ),
+    ):
+        records = prefix_migration_drift.scan_prefix_migration_drift(
+            project_data_dir=project_data_dir,
+            beads_root=tmp_path / ".beads",
+            repo_root=repo_root,
+            target_epic_id="ts-epic",
+            target_changeset_ids={"ts-epic.1"},
+        )
+
+    assert records == []
+    list_epics.assert_not_called()
+    list_descendants.assert_not_called()
+    list_work_children.assert_not_called()
 
 
 def test_repair_prefix_migration_drift_plans_updates_without_applying(tmp_path: Path) -> None:

@@ -78,21 +78,24 @@ def test_prepare_worktrees_blocks_before_mutations_on_prefix_drift_for_selected_
     reconcile_mapping = Mock()
     ensure_epic_worktree = Mock()
     ensure_changeset_branch = Mock()
+    scan_drift = Mock(
+        return_value=[
+            {
+                "epic_id": "at-epic",
+                "changeset_id": "at-epic.1",
+                "drift_class": "work-branch-conflict",
+                "values": {
+                    "metadata.changeset.work_branch": "feat/new-at-epic.1",
+                    "mapping.work_branch": "at/legacy-at-epic.1",
+                },
+            }
+        ]
+    )
 
     with (
         patch(
             "atelier.worker.session.worktree.prefix_migration_drift.scan_prefix_migration_drift",
-            return_value=[
-                {
-                    "epic_id": "at-epic",
-                    "changeset_id": "at-epic.1",
-                    "drift_class": "work-branch-conflict",
-                    "values": {
-                        "metadata.changeset.work_branch": "feat/new-at-epic.1",
-                        "mapping.work_branch": "at/legacy-at-epic.1",
-                    },
-                }
-            ],
+            scan_drift,
         ),
         patch("atelier.worker.session.worktree.git.git_origin_url", return_value=None),
         patch("atelier.worker.session.worktree.prs.github_repo_slug", return_value=None),
@@ -126,6 +129,15 @@ def test_prepare_worktrees_blocks_before_mutations_on_prefix_drift_for_selected_
                 control=_TestControl(logs),
             )
 
+    scan_drift.assert_called_once_with(
+        project_data_dir=Path("/project"),
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        repo_slug=None,
+        git_path="git",
+        target_epic_id="at-epic",
+        target_changeset_ids={"at-epic", "at-epic.1"},
+    )
     reconcile_mapping.assert_not_called()
     ensure_epic_worktree.assert_not_called()
     ensure_changeset_branch.assert_not_called()
