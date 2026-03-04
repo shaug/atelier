@@ -171,9 +171,11 @@ Changeset description fields include:
 - `atelier open`: run a shell or command inside the worktree.
 - `atelier config`: view or update project config.
 - `atelier status`: show hooks, claims, and changeset status.
-- `atelier doctor`: detect prefix-migration drift; apply repairs only with
-  `--fix`; refuse mutation while active hooks are present unless `--force` is
-  provided.
+- `atelier doctor`: project health report with deterministic sections for prefix
+  drift, in-progress ownership/hook consistency, blocked-state reason
+  consistency, and worktree/branch metadata readiness. Apply repairs only with
+  `--fix`; mutation remains scoped to prefix-drift repair and is refused while
+  active hooks are present unless `--force` is provided.
 - `atelier list`: list available workspaces (root branches).
 - `atelier gc`: clean up stale hooks and orphaned worktrees.
 
