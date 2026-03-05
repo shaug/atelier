@@ -222,7 +222,7 @@ class TestConfigCommand:
             os.chdir(root)
             try:
                 responses = iter(
-                    ["prefs/", "at", "draft", "merge", "", "codex", "code -w", "code", ""]
+                    ["prefs/", "at", "draft", "merge", "codex", "code -w", "code", ""]
                 )
                 with (
                     patch("builtins.input", lambda _: next(responses)),
