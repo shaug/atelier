@@ -34,9 +34,10 @@ def test_branch_config_maps_legacy_pr_bool_to_pr_mode() -> None:
     assert disabled.pr_mode == "none"
 
 
-def test_branch_config_enforces_sequential_strategy_when_pr_mode_enabled() -> None:
+def test_branch_config_ignores_legacy_pr_strategy_field() -> None:
     parsed = BranchConfig.model_validate({"pr_mode": "ready", "pr_strategy": "parallel"})
     assert parsed.pr_mode == "ready"
+    assert "pr_strategy" not in parsed.model_dump()
     assert parsed.pr_strategy == "sequential"
 
 

@@ -237,10 +237,11 @@ def test_build_project_config_skips_pr_strategy_prompt_when_pr_mode_none() -> No
             )
 
     assert payload.branch.pr_mode == "none"
-    assert payload.branch.pr_strategy == "on-ready"
+    assert payload.branch.pr_strategy == "sequential"
+    assert "pr_strategy" not in payload.branch.model_dump()
 
 
-def test_parse_project_config_migrates_non_sequential_strategy_for_pr_mode() -> None:
+def test_parse_project_config_accepts_legacy_pr_strategy_value() -> None:
     payload = config.parse_project_config(
         {
             "branch": {
@@ -251,10 +252,11 @@ def test_parse_project_config_migrates_non_sequential_strategy_for_pr_mode() -> 
     )
     assert payload.branch.pr_mode == "draft"
     assert payload.branch.pr_strategy == "sequential"
+    assert "pr_strategy" not in payload.branch.model_dump()
 
 
 @pytest.mark.parametrize("pr_mode", ("draft", "ready"))
-def test_build_project_config_forces_sequential_strategy_when_pr_mode_enabled(
+def test_build_project_config_ignores_pr_strategy_override_when_pr_mode_enabled(
     pr_mode: str,
 ) -> None:
     args = SimpleNamespace(
@@ -289,6 +291,7 @@ def test_build_project_config_forces_sequential_strategy_when_pr_mode_enabled(
 
     assert payload.branch.pr_mode == pr_mode
     assert payload.branch.pr_strategy == "sequential"
+    assert "pr_strategy" not in payload.branch.model_dump()
 
 
 def test_derive_beads_prefix_seed_for_tuber_service() -> None:

@@ -103,7 +103,6 @@ def new_project(args: object) -> None:
                 ),
                 branch_history=getattr(args, "branch_history", None),
                 branch_squash_message=getattr(args, "branch_squash_message", None),
-                branch_pr_strategy=getattr(args, "branch_pr_strategy", None),
                 agent=getattr(args, "agent", None),
                 editor_edit=getattr(args, "editor_edit", None),
                 editor_work=getattr(args, "editor_work", None),
