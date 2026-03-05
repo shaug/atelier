@@ -1074,12 +1074,17 @@ def build_project_config(
 
     suggested_seed = derive_beads_prefix_seed(enlistment_path, origin)
     suggested_prefix = suggest_available_beads_prefix(suggested_seed, taken_beads_prefixes)
+    beads_prompt_default = suggested_prefix if prompt_missing_only else existing_beads_prefix
 
     beads_prefix_arg = read_arg(args, "beads_prefix")
     if beads_prefix_arg is not None:
         beads_prefix = validate_unique_beads_prefix(beads_prefix_arg, source="--beads-prefix")
     elif should_prompt("beads", "prefix"):
-        beads_prefix_input = prompt("Beads issue prefix", suggested_prefix, required=True)
+        beads_prefix_input = prompt(
+            "Beads issue prefix",
+            beads_prompt_default,
+            required=True,
+        )
         beads_prefix = validate_unique_beads_prefix(beads_prefix_input, source="beads.prefix")
     else:
         beads_prefix = validate_unique_beads_prefix(suggested_prefix, source="beads.prefix")
