@@ -21,7 +21,6 @@ def test_changeset_pr_creation_decision_on_ready_blocks_when_parent_only_pushed(
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="on-ready",
         lookup_pr_payload=lambda *_args, **_kwargs: None,
     )
 
@@ -53,7 +52,6 @@ def test_changeset_pr_creation_decision_legacy_parallel_is_coerced_to_sequential
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="parallel",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: None,
     )
@@ -75,7 +73,6 @@ def test_changeset_pr_creation_decision_allows_when_parent_pr_merged(monkeypatch
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         lookup_pr_payload=lambda _repo_slug, branch: (
             {"state": "CLOSED", "mergedAt": "2026-03-01T00:00:00Z"}
             if branch == "feature-parent"
@@ -100,7 +97,6 @@ def test_changeset_pr_creation_decision_blocks_when_parent_pr_closed(monkeypatch
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="on-parent-approved",
         lookup_pr_payload=lambda _repo_slug, branch: (
             {"state": "CLOSED", "closedAt": "2026-03-01T00:00:00Z"}
             if branch == "feature-parent"
@@ -129,7 +125,6 @@ def test_changeset_pr_creation_decision_blocks_when_dependency_parent_unresolved
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: None,
     )
@@ -157,7 +152,6 @@ def test_handle_pushed_without_pr_returns_review_pending_when_strategy_blocks(
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         beads_root=Path("/beads"),
-        branch_pr_strategy="on-ready",
         git_path="git",
         create_as_draft=True,
         changeset_base_branch=lambda *_args, **_kwargs: "main",
@@ -211,7 +205,6 @@ def test_handle_pushed_without_pr_reports_failure_when_pr_create_fails(
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         beads_root=Path("/beads"),
-        branch_pr_strategy="parallel",
         git_path="git",
         create_as_draft=True,
         changeset_base_branch=lambda *_args, **_kwargs: "main",
@@ -270,7 +263,6 @@ def test_handle_pushed_without_pr_keeps_deeper_dependency_gated(monkeypatch) -> 
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         beads_root=Path("/beads"),
-        branch_pr_strategy="sequential",
         git_path="git",
         create_as_draft=True,
         changeset_base_branch=lambda *_args, **_kwargs: "main",
@@ -321,7 +313,6 @@ def test_changeset_pr_creation_decision_resolves_collapsed_dependency_parent(mon
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: {"state": "OPEN", "isDraft": False},
     )
@@ -368,7 +359,6 @@ def test_changeset_pr_creation_decision_collapses_transitive_duplicate_dependenc
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=_lookup,
     )
@@ -401,7 +391,6 @@ def test_changeset_pr_creation_decision_blocks_on_ambiguous_dependency_lineage(
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: None,
     )
@@ -448,7 +437,6 @@ def test_changeset_pr_creation_decision_blocks_when_non_parent_dependency_not_in
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=_lookup,
     )
@@ -481,7 +469,6 @@ def test_changeset_pr_creation_decision_allows_ambiguous_join_when_all_dependenc
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: {
             "state": "MERGED",
@@ -519,7 +506,6 @@ def test_changeset_pr_creation_decision_blocks_dependency_lineage_when_parent_st
         repo_slug=None,
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: None,
     )
@@ -546,7 +532,6 @@ def test_changeset_pr_creation_decision_ignores_parent_child_dependency_variants
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: None,
     )
@@ -590,7 +575,6 @@ def test_sequential_stack_integrity_preflight_ignores_heritage_epic_dependency_w
         repo_slug=None,
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: None,
     )
@@ -630,7 +614,6 @@ def test_changeset_pr_creation_decision_uses_dependency_frontier_parent_state(mo
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=_lookup,
     )
@@ -665,7 +648,6 @@ def test_changeset_pr_creation_decision_blocks_when_dependency_parent_pr_closed(
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: {
             "state": "CLOSED",
@@ -712,7 +694,6 @@ def test_changeset_pr_creation_decision_blocks_when_dependency_parent_pr_missing
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: None,
     )
@@ -756,7 +737,6 @@ def test_changeset_pr_creation_decision_blocks_when_dependency_parent_only_pushe
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: None,
     )
@@ -793,7 +773,6 @@ def test_sequential_stack_integrity_preflight_reconciles_stale_parent_review_met
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         lookup_pr_payload=lambda *_args, **_kwargs: {"state": "OPEN", "isDraft": False},
         reconcile_parent_review_state=lambda **kwargs: reconciled.append(
@@ -832,7 +811,6 @@ def test_changeset_pr_creation_decision_treats_integration_parent_as_top_level(
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         lookup_pr_payload=lambda *_args, **_kwargs: None,
     )
 
@@ -937,7 +915,6 @@ def test_attempt_create_pr_does_not_pass_strategy_to_base_resolver(monkeypatch) 
         issue={"title": "Example"},
         work_branch="feature/work",
         is_draft=True,
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
         git_path="git",
@@ -974,7 +951,6 @@ def test_handle_pushed_without_pr_ready_mode_sets_pr_open_fallback(monkeypatch) 
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         beads_root=Path("/beads"),
-        branch_pr_strategy="parallel",
         git_path="git",
         create_as_draft=False,
         changeset_base_branch=lambda *_args, **_kwargs: "main",
@@ -1020,7 +996,6 @@ def test_handle_pushed_without_pr_uses_diagnostic_payload_after_create(monkeypat
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         beads_root=Path("/beads"),
-        branch_pr_strategy="parallel",
         git_path="git",
         create_as_draft=True,
         changeset_base_branch=lambda *_args, **_kwargs: "main",

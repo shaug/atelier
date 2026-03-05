@@ -339,7 +339,6 @@ def _build_changeset_details(
             repo_slug=repo_slug,
             repo_root=repo_root,
             git_path=None,
-            branch_pr_strategy=strategy,
             beads_root=beads_root,
             lookup_pr_payload=lookup_pr_payload,
             lookup_pr_payload_diagnostic=lookup_pr_payload_diagnostic,

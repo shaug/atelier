@@ -26,10 +26,9 @@ class _NextChangesetMatrixService(startup.NextChangesetService):
         *,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: object,
         git_path: str | None,
     ) -> bool:
-        del issue, repo_slug, branch_pr, branch_pr_strategy, git_path
+        del issue, repo_slug, branch_pr, git_path
         return False
 
     def is_changeset_recovery_candidate(
@@ -278,7 +277,6 @@ def test_lifecycle_matrix_claim_selection_startup_and_overview(
         epic_id="at-epic",
         repo_slug=None,
         branch_pr=False,
-        branch_pr_strategy="on-ready",
         git_path=None,
     )
     selected = startup.next_changeset_service(
@@ -320,7 +318,6 @@ def test_lifecycle_matrix_finalize_ignores_terminal_labels_when_status_active(mo
             repo_root=Path("/repo"),
             branch_pr=False,
             branch_pr_mode="draft",
-            branch_pr_strategy="on-ready",
             branch_history="manual",
             branch_squash_message="deterministic",
             project_data_dir=Path("/project"),

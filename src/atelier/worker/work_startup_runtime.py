@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import agent_home, beads, changeset_fields, pr_strategy, prs, work_feedback
+from .. import agent_home, beads, changeset_fields, prs, work_feedback
 from ..io import die, prompt, say, select
 from ..work_feedback import ReviewFeedbackSnapshot
 from ..worker import prompts as worker_prompts
@@ -131,7 +131,6 @@ class _NextChangesetService(worker_startup.NextChangesetService):
         *,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: object,
         git_path: str | None,
     ) -> bool:
         return changeset_waiting_on_review_or_signals(
@@ -139,7 +138,6 @@ class _NextChangesetService(worker_startup.NextChangesetService):
             repo_slug=repo_slug,
             repo_root=self._repo_root,
             branch_pr=branch_pr,
-            branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
             beads_root=self._beads_root,
         )
@@ -284,7 +282,6 @@ def next_changeset(
     repo_root: Path,
     repo_slug: str | None = None,
     branch_pr: bool = True,
-    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     git_path: str | None = None,
     resume_review: bool = False,
 ) -> dict[str, object] | None:
@@ -296,7 +293,6 @@ def next_changeset(
         repo_root: Value for `repo_root`.
         repo_slug: Value for `repo_slug`.
         branch_pr: Value for `branch_pr`.
-        branch_pr_strategy: Value for `branch_pr_strategy`.
         git_path: Value for `git_path`.
         resume_review: Value for `resume_review`.
 
@@ -307,7 +303,6 @@ def next_changeset(
         epic_id=epic_id,
         repo_slug=repo_slug,
         branch_pr=branch_pr,
-        branch_pr_strategy=branch_pr_strategy,
         git_path=git_path,
         resume_review=resume_review,
     )
@@ -694,7 +689,6 @@ class _StartupContractService(worker_startup.StartupContractService):
         epic_id: str,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: object,
         git_path: str | None,
         resume_review: bool,
     ) -> dict[str, object] | None:
@@ -704,7 +698,6 @@ class _StartupContractService(worker_startup.StartupContractService):
             repo_root=self._repo_root,
             repo_slug=repo_slug,
             branch_pr=branch_pr,
-            branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
             resume_review=resume_review,
         )
@@ -755,7 +748,6 @@ class _StartupContractService(worker_startup.StartupContractService):
         *,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: object,
         git_path: str | None,
     ) -> bool:
         return changeset_waiting_on_review_or_signals(
@@ -763,7 +755,6 @@ class _StartupContractService(worker_startup.StartupContractService):
             repo_slug=repo_slug,
             repo_root=self._repo_root,
             branch_pr=branch_pr,
-            branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
             beads_root=self._beads_root,
         )

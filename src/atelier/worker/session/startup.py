@@ -24,7 +24,6 @@ class NextChangesetContext:
     epic_id: str
     repo_slug: str | None
     branch_pr: bool
-    branch_pr_strategy: object
     git_path: str | None
     resume_review: bool = False
 
@@ -40,7 +39,6 @@ class NextChangesetService(Protocol):
         *,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: object,
         git_path: str | None,
     ) -> bool: ...
 
@@ -218,7 +216,6 @@ def next_changeset_service(
             issue,
             repo_slug=context.repo_slug,
             branch_pr=context.branch_pr,
-            branch_pr_strategy=context.branch_pr_strategy,
             git_path=context.git_path,
         )
 
@@ -358,7 +355,6 @@ class StartupContractContext:
     assume_yes: bool
     repo_slug: str | None
     branch_pr: bool
-    branch_pr_strategy: object
     git_path: str | None
     worker_queue_name: str
     select: str = "oldest-feedback"
@@ -389,7 +385,6 @@ class StartupContractService(Protocol):
         epic_id: str,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: object,
         git_path: str | None,
         resume_review: bool,
     ) -> dict[str, object] | None: ...
@@ -422,7 +417,6 @@ class StartupContractService(Protocol):
         *,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: object,
         git_path: str | None,
     ) -> bool: ...
 
@@ -503,7 +497,6 @@ def run_startup_contract_service(
     assume_yes = context.assume_yes
     repo_slug = context.repo_slug
     branch_pr = context.branch_pr
-    branch_pr_strategy = context.branch_pr_strategy
     git_path = context.git_path
     worker_queue_name = context.worker_queue_name
     select_mode = str(context.select or "oldest-feedback").strip().lower().replace("_", "-")
@@ -645,7 +638,6 @@ def run_startup_contract_service(
                 epic_id=selected_epic,
                 repo_slug=repo_slug,
                 branch_pr=branch_pr,
-                branch_pr_strategy=branch_pr_strategy,
                 git_path=git_path,
                 resume_review=resume_review,
             ),
@@ -709,7 +701,6 @@ def run_startup_contract_service(
                     epic_id=epic_id,
                     repo_slug=repo_slug,
                     branch_pr=branch_pr,
-                    branch_pr_strategy=branch_pr_strategy,
                     git_path=git_path,
                     resume_review=resume_review and explicit_epic_id is not None,
                 )

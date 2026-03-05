@@ -1,73 +1,64 @@
-"""PR strategy normalization and gating decisions."""
+"""Sequential PR policy normalization and gating decisions."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
 from . import lifecycle
 
-PR_STRATEGY_VALUES = ("sequential",)
-_LEGACY_PR_STRATEGY_VALUES = (
+_SEQUENTIAL_POLICY_VALUES = ("sequential",)
+_LEGACY_POLICY_ALIASES = (
     "on-ready",
     "on-parent-approved",
     "parallel",
 )
-PrStrategy = Literal["sequential"]
-
-PR_STRATEGY_DEFAULT: PrStrategy = "sequential"
 
 
-def normalize_pr_strategy(value: object) -> PrStrategy:
+def normalize_pr_strategy(value: object) -> str:
     """Normalize PR strategy values to the sequential-only policy.
 
     Legacy strategy values are accepted and coerced to ``"sequential"`` to
     keep existing project metadata deterministic after policy migration.
     """
     if value is None:
-        return PR_STRATEGY_DEFAULT
+        return "sequential"
     if isinstance(value, str):
         normalized = value.strip().lower().replace("_", "-")
         if not normalized:
-            return PR_STRATEGY_DEFAULT
-        if normalized in PR_STRATEGY_VALUES or normalized in _LEGACY_PR_STRATEGY_VALUES:
-            return PR_STRATEGY_DEFAULT
-    raise ValueError("pr_strategy must be one of: " + ", ".join(PR_STRATEGY_VALUES))
+            return "sequential"
+        if normalized in _SEQUENTIAL_POLICY_VALUES or normalized in _LEGACY_POLICY_ALIASES:
+            return "sequential"
+    raise ValueError("pr_strategy must be one of: " + ", ".join(_SEQUENTIAL_POLICY_VALUES))
 
 
 @dataclass(frozen=True)
-class PrStrategyDecision:
-    """Decision for whether a PR may be created under a strategy."""
+class PrCreationDecision:
+    """Decision for whether a PR may be created under sequential policy."""
 
-    strategy: PrStrategy
     parent_state: str | None
     allow_pr: bool
     reason: str
 
 
-def pr_strategy_decision(strategy: object, *, parent_state: str | None) -> PrStrategyDecision:
+def pr_creation_decision(*, parent_state: str | None) -> PrCreationDecision:
     """Return the PR creation decision for the sequential-only policy."""
-    normalized = normalize_pr_strategy(strategy)
     parent_state_normalized = None
     if isinstance(parent_state, str):
         parent_state_normalized = parent_state.strip().lower() or None
 
     if parent_state_normalized is None:
-        return PrStrategyDecision(
-            strategy=normalized,
+        return PrCreationDecision(
             parent_state=None,
             allow_pr=True,
             reason="no-parent",
         )
     if lifecycle.is_integrated_review_state(parent_state_normalized):
-        return PrStrategyDecision(
-            strategy=normalized,
+        return PrCreationDecision(
             parent_state=parent_state_normalized,
             allow_pr=True,
             reason=f"parent:{parent_state_normalized}",
         )
-    return PrStrategyDecision(
-        strategy=normalized,
+    return PrCreationDecision(
         parent_state=parent_state_normalized,
         allow_pr=False,
         reason=f"blocked:{parent_state_normalized}",

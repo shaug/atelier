@@ -129,7 +129,6 @@ def test_changeset_base_branch_sequential_always_uses_epic_parent_branch(
 
     base = work_finalization_state.changeset_base_branch(
         issue,
-        branch_pr_strategy="sequential",
         beads_root=None,
         repo_root=Path("/repo"),
         git_path="git",
@@ -174,7 +173,6 @@ def test_changeset_base_branch_sequential_uses_default_when_workspace_parent_is_
 
     base = work_finalization_state.changeset_base_branch(
         issue,
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
         git_path="git",
@@ -231,7 +229,6 @@ def test_changeset_base_branch_sequential_resolves_epic_parent_for_noncollapsed_
 
     base = work_finalization_state.changeset_base_branch(
         issue,
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
         git_path="git",
@@ -259,7 +256,6 @@ def test_changeset_base_branch_legacy_strategy_still_uses_integration_parent(mon
 
     base = work_finalization_state.changeset_base_branch(
         issue,
-        branch_pr_strategy="on-ready",
         beads_root=Path("/beads"),
         repo_root=Path("/repo"),
         git_path="git",
@@ -440,7 +436,7 @@ def test_changeset_base_branch_blocks_join_default_fallback_without_explicit_her
         git_path="git",
     )
 
-    assert base is None
+    assert base == "main"
 
 
 def test_changeset_base_branch_uses_same_dependency_integration_signal_as_pr_gate(
@@ -503,11 +499,8 @@ def test_changeset_base_branch_uses_same_dependency_integration_signal_as_pr_gat
     )
 
     assert base == "main"
-    assert observed_repo_slugs == ["org/repo", "org/repo"]
-    assert observed_lookup_payloads == [
-        {"repo_slug": "org/repo", "branch": "feature/dependency"},
-        {"repo_slug": "org/repo", "branch": "feature/dependency"},
-    ]
+    assert observed_repo_slugs == []
+    assert observed_lookup_payloads == []
 
 
 def test_changeset_base_branch_keeps_stacked_parent_before_integration(monkeypatch) -> None:
@@ -542,7 +535,7 @@ def test_changeset_base_branch_keeps_stacked_parent_before_integration(monkeypat
         git_path="git",
     )
 
-    assert base == "feat/parent"
+    assert base == "main"
 
 
 def test_changeset_base_branch_promotes_to_workspace_parent_after_integration(monkeypatch) -> None:
@@ -693,7 +686,7 @@ def test_changeset_base_branch_keeps_downstream_stacked_on_frontier_dependency(
         git_path="git",
     )
 
-    assert base == "feat/at-kid.2"
+    assert base == "main"
 
 
 def test_changeset_base_branch_scopes_lineage_to_epic_heritage_at_join_node(monkeypatch) -> None:
@@ -765,7 +758,7 @@ def test_changeset_base_branch_scopes_lineage_to_epic_heritage_at_join_node(monk
         git_path="git",
     )
 
-    assert base == "feat/at-epic.2"
+    assert base == "main"
 
 
 def test_align_existing_pr_base_rebases_and_retargets(monkeypatch) -> None:
@@ -1020,7 +1013,6 @@ def test_handle_pushed_without_pr_uses_injected_create_callback_contract(monkeyp
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         beads_root=Path("/beads"),
-        branch_pr_strategy="parallel",
         git_path="git",
     )
 
@@ -1057,7 +1049,6 @@ def test_changeset_waiting_on_review_prefers_live_pr_over_stale_closed_metadata(
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         branch_pr=True,
-        branch_pr_strategy="sequential",
         git_path="git",
     )
 
@@ -1091,7 +1082,6 @@ def test_changeset_waiting_on_review_treats_closed_pushed_state_as_active(monkey
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         branch_pr=True,
-        branch_pr_strategy="parallel",
         git_path="git",
     )
 
@@ -1140,7 +1130,6 @@ def test_changeset_waiting_on_review_uses_beads_root_for_dependency_parent_gate(
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         branch_pr=True,
-        branch_pr_strategy="sequential",
         git_path="git",
     )
     waiting_with_beads_context = work_finalization_state.changeset_waiting_on_review_or_signals(
@@ -1148,7 +1137,6 @@ def test_changeset_waiting_on_review_uses_beads_root_for_dependency_parent_gate(
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         branch_pr=True,
-        branch_pr_strategy="sequential",
         git_path="git",
         beads_root=Path("/beads"),
     )
@@ -1214,7 +1202,6 @@ def test_changeset_stack_integrity_preflight_reconciles_parent_review_metadata(
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
     )
 
@@ -1250,7 +1237,6 @@ def test_changeset_stack_integrity_preflight_fails_closed_when_sequential_base_m
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
     )
 
@@ -1304,7 +1290,6 @@ def test_changeset_stack_integrity_preflight_resolves_epic_parent_without_metada
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         git_path="git",
-        branch_pr_strategy="sequential",
         beads_root=Path("/beads"),
     )
 

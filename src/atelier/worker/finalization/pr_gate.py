@@ -150,7 +150,6 @@ def sequential_stack_integrity_preflight(
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
-    branch_pr_strategy: object | None = None,
     beads_root: Path | None = None,
     lookup_pr_payload: Callable[..., dict[str, object] | None],
     lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]]
@@ -159,8 +158,6 @@ def sequential_stack_integrity_preflight(
     reconcile_parent_review_state: Callable[..., None] | None = None,
 ) -> StackIntegrityPreflightResult:
     """Validate sequential parent-child PR integrity for dependency stacks."""
-    del branch_pr_strategy
-
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     issue_cache: dict[str, dict[str, object] | None] = {}
@@ -438,15 +435,12 @@ def changeset_pr_creation_decision(
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
-    branch_pr_strategy: object,
     beads_root: Path | None = None,
     lookup_pr_payload: Callable[..., dict[str, object] | None],
     lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]]
     | None = None,
     lookup_dependency_issue: Callable[[str], dict[str, object] | None] | None = None,
-) -> pr_strategy.PrStrategyDecision:
-    del branch_pr_strategy
-    normalized_strategy = pr_strategy.PR_STRATEGY_DEFAULT
+) -> pr_strategy.PrCreationDecision:
     preflight = sequential_stack_integrity_preflight(
         issue,
         repo_slug=repo_slug,
@@ -459,8 +453,7 @@ def changeset_pr_creation_decision(
     )
     if not preflight.ok:
         reason_suffix = preflight.reason or "dependency-parent-unresolved"
-        return pr_strategy.PrStrategyDecision(
-            strategy=normalized_strategy,
+        return pr_strategy.PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason=f"blocked:{reason_suffix}",
@@ -490,13 +483,12 @@ def changeset_pr_creation_decision(
     if preflight.dependencies_integrated and (
         lineage.blocked or not lineage.dependency_parent_branch
     ):
-        return pr_strategy.pr_strategy_decision(normalized_strategy, parent_state=None)
+        return pr_strategy.pr_creation_decision(parent_state=None)
     if lineage.blocked:
         reason_suffix = lineage.blocker_reason or "dependency-parent-unresolved"
         if lineage.diagnostics:
             reason_suffix = f"{reason_suffix} ({lineage.diagnostics[0]})"
-        return pr_strategy.PrStrategyDecision(
-            strategy=normalized_strategy,
+        return pr_strategy.PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason=f"blocked:{reason_suffix}",
@@ -505,8 +497,7 @@ def changeset_pr_creation_decision(
         reason_suffix = "dependency-parent-state-unavailable"
         if lineage.diagnostics:
             reason_suffix = f"{reason_suffix} ({lineage.diagnostics[0]})"
-        return pr_strategy.PrStrategyDecision(
-            strategy=normalized_strategy,
+        return pr_strategy.PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason=f"blocked:{reason_suffix}",
@@ -522,13 +513,12 @@ def changeset_pr_creation_decision(
         lookup_dependency_issue=lookup_dependency_issue,
     )
     if lineage.dependency_ids and parent_state is None:
-        return pr_strategy.PrStrategyDecision(
-            strategy=normalized_strategy,
+        return pr_strategy.PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason="blocked:dependency-parent-state-unavailable",
         )
-    return pr_strategy.pr_strategy_decision(normalized_strategy, parent_state=parent_state)
+    return pr_strategy.pr_creation_decision(parent_state=parent_state)
 
 
 def set_changeset_review_pending_state(
@@ -567,14 +557,12 @@ def attempt_create_pr(
     issue: dict[str, object],
     work_branch: str,
     is_draft: bool,
-    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
     changeset_base_branch: Callable[..., str | None],
     render_changeset_pr_body: Callable[[dict[str, object]], str],
 ) -> tuple[bool, str]:
-    del branch_pr_strategy
     base_branch = changeset_base_branch(
         issue,
         repo_slug=repo_slug,
@@ -621,7 +609,6 @@ def attempt_create_draft_pr(
     repo_slug: str,
     issue: dict[str, object],
     work_branch: str,
-    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
@@ -634,7 +621,6 @@ def attempt_create_draft_pr(
         issue=issue,
         work_branch=work_branch,
         is_draft=True,
-        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         repo_root=repo_root,
         git_path=git_path,
@@ -662,7 +648,6 @@ def handle_pushed_without_pr(
     repo_slug: str | None,
     repo_root: Path,
     beads_root: Path,
-    branch_pr_strategy: object,
     git_path: str | None,
     create_as_draft: bool,
     create_detail_prefix: str | None = None,
@@ -682,7 +667,6 @@ def handle_pushed_without_pr(
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
-        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
     )
@@ -722,7 +706,6 @@ def handle_pushed_without_pr(
                 issue=issue,
                 work_branch=work_branch,
                 is_draft=create_as_draft,
-                branch_pr_strategy=branch_pr_strategy,
                 beads_root=beads_root,
                 repo_root=repo_root,
                 git_path=git_path,
@@ -825,7 +808,7 @@ def handle_pushed_without_pr(
     )
     body = (
         "Changeset branch is pushed but no PR exists where policy allows PR "
-        f"creation (strategy={decision.strategy}, reason={decision.reason})."
+        f"creation (reason={decision.reason})."
     )
     if create_detail:
         body = f"{body}\nPR creation attempt failed: {create_detail}"
@@ -849,7 +832,7 @@ def handle_pushed_without_pr(
     atelier_log.warning(
         "changeset="
         f"{changeset_id} finalize stopped reason={failure_reason} "
-        f"strategy={decision.strategy} detail={create_detail or 'n/a'}"
+        f"detail={create_detail or 'n/a'}"
     )
     return PrGateResult(
         finalize_result=FinalizeResult(continue_running=False, reason=failure_reason),

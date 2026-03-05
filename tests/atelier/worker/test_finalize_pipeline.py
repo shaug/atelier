@@ -256,7 +256,6 @@ def _pipeline_context(**overrides: Any) -> finalize_pipeline.FinalizePipelineCon
         "repo_root": Path("/repo"),
         "branch_pr": True,
         "branch_pr_mode": "draft",
-        "branch_pr_strategy": "on-ready",
         "branch_history": "manual",
         "branch_squash_message": "deterministic",
         "project_data_dir": Path("/project"),

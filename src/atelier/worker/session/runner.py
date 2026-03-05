@@ -9,10 +9,9 @@ from pathlib import Path
 from typing import Protocol
 
 from ... import beads as beads_runtime
-from ... import changeset_fields, git, lifecycle, pr_strategy
+from ... import changeset_fields, git, lifecycle
 from ... import exec as exec_util
 from ... import root_branch as root_branch_runtime
-from ...pr_strategy import PrStrategy
 from ..context import ChangesetSelectionContext, WorkerRunContext
 from ..models import StartupContractResult, WorkerRunSummary
 from ..models_boundary import parse_issue_boundary
@@ -419,14 +418,12 @@ def _dependency_has_work_children(
 def _dependency_gate_ready_for_transition(
     *,
     dependency_ids: tuple[str, ...],
-    branch_pr_strategy: PrStrategy,
     beads: BeadsService,
     beads_root: Path,
     repo_root: Path,
 ) -> bool:
     if not dependency_ids:
         return True
-    del branch_pr_strategy
     require_integrated = True
     for dependency_id in dependency_ids:
         dependency_issues = beads.run_bd_json(
@@ -468,7 +465,6 @@ def _startup_transition_decision(
     issue: dict[str, object],
     dependency_ids: tuple[str, ...],
     startup_reason: str,
-    branch_pr_strategy: PrStrategy,
     beads: BeadsService,
     beads_root: Path,
     repo_root: Path,
@@ -486,7 +482,6 @@ def _startup_transition_decision(
     try:
         dependency_ready = _dependency_gate_ready_for_transition(
             dependency_ids=dependency_ids,
-            branch_pr_strategy=branch_pr_strategy,
             beads=beads,
             beads_root=beads_root,
             repo_root=repo_root,
@@ -554,7 +549,6 @@ class _BoundChangesetSelectionService:
     repo_root: Path
     repo_slug: str | None
     branch_pr: bool
-    branch_pr_strategy: PrStrategy
     git_path: str | None
 
     def show_issue(self, issue_id: str) -> dict[str, object] | None:
@@ -579,7 +573,6 @@ class _BoundChangesetSelectionService:
             repo_root=self.repo_root,
             repo_slug=self.repo_slug,
             branch_pr=self.branch_pr,
-            branch_pr_strategy=self.branch_pr_strategy,
             git_path=self.git_path,
             resume_review=resume_review,
         )
@@ -750,7 +743,6 @@ def run_worker_once(
                     assume_yes=assume_yes,
                     repo_slug=repo_slug,
                     branch_pr=project_config.branch.pr,
-                    branch_pr_strategy=pr_strategy.PR_STRATEGY_DEFAULT,
                     git_path=git_path,
                     worker_queue_name=_WORKER_QUEUE_NAME,
                     select=startup_select,
@@ -1061,7 +1053,6 @@ def run_worker_once(
                     repo_root=repo_root,
                     repo_slug=repo_slug,
                     branch_pr=project_config.branch.pr,
-                    branch_pr_strategy=pr_strategy.PR_STRATEGY_DEFAULT,
                     git_path=git_path,
                 ),
             )
@@ -1222,7 +1213,6 @@ def run_worker_once(
                     repo_root=repo_root,
                     branch_pr=project_config.branch.pr,
                     branch_pr_mode=project_config.branch.pr_mode,
-                    branch_pr_strategy=pr_strategy.PR_STRATEGY_DEFAULT,
                     branch_history=project_config.branch.history,
                     branch_squash_message=project_config.branch.squash_message,
                     project_data_dir=project_data_dir,
@@ -1348,7 +1338,6 @@ def run_worker_once(
                     issue=changeset,
                     dependency_ids=changeset_boundary.dependency_ids,
                     startup_reason=startup_result.reason,
-                    branch_pr_strategy=pr_strategy.PR_STRATEGY_DEFAULT,
                     beads=infra.beads,
                     beads_root=beads_root,
                     repo_root=repo_root,
@@ -1535,7 +1524,6 @@ def run_worker_once(
                 repo_root=repo_root,
                 branch_pr=project_config.branch.pr,
                 branch_pr_mode=project_config.branch.pr_mode,
-                branch_pr_strategy=pr_strategy.PR_STRATEGY_DEFAULT,
                 branch_history=project_config.branch.history,
                 branch_squash_message=project_config.branch.squash_message,
                 project_data_dir=project_data_dir,

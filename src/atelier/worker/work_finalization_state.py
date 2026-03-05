@@ -499,7 +499,6 @@ def _dependencies_integrated(
 def changeset_base_branch(
     issue: dict[str, object],
     *,
-    branch_pr_strategy: object | None = None,
     repo_slug: str | None = None,
     beads_root: Path | None = None,
     repo_root: Path,
@@ -518,7 +517,7 @@ def changeset_base_branch(
     Returns:
         Function result.
     """
-    del branch_pr_strategy, repo_slug, lookup_pr_payload_fn
+    del repo_slug, lookup_pr_payload_fn
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     root_branch = _normalize_branch(changeset_root_branch(issue))
@@ -592,7 +591,6 @@ def align_existing_pr_base(
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
-    branch_pr_strategy: object | None = None,
 ) -> tuple[bool, str | None]:
     """Align an existing PR base to the expected changeset parent lineage.
 
@@ -635,7 +633,6 @@ def align_existing_pr_base(
 
     expected_base = changeset_base_branch(
         issue,
-        branch_pr_strategy=branch_pr_strategy,
         repo_slug=repo_slug,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -784,7 +781,6 @@ def attempt_create_pr(
     issue: dict[str, object],
     work_branch: str,
     is_draft: bool,
-    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
@@ -800,7 +796,6 @@ def attempt_create_pr(
         issue: Value for `issue`.
         work_branch: Value for `work_branch`.
         is_draft: Whether to create a draft PR.
-        branch_pr_strategy: PR strategy used to resolve PR base policy.
         beads_root: Value for `beads_root`.
         repo_root: Value for `repo_root`.
         git_path: Value for `git_path`.
@@ -817,7 +812,6 @@ def attempt_create_pr(
         issue=issue,
         work_branch=work_branch,
         is_draft=is_draft,
-        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         repo_root=repo_root,
         git_path=git_path,
@@ -837,7 +831,6 @@ def attempt_create_draft_pr(
     repo_slug: str,
     issue: dict[str, object],
     work_branch: str,
-    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
@@ -852,7 +845,6 @@ def attempt_create_draft_pr(
         repo_slug: Repository owner/name slug.
         issue: Changeset issue payload.
         work_branch: Work branch to open the PR from.
-        branch_pr_strategy: PR strategy used to resolve PR base policy.
         beads_root: Beads root path.
         repo_root: Repository root path.
         git_path: Optional git executable path override.
@@ -869,7 +861,6 @@ def attempt_create_draft_pr(
         issue=issue,
         work_branch=work_branch,
         is_draft=True,
-        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         repo_root=repo_root,
         git_path=git_path,
@@ -959,7 +950,6 @@ def handle_pushed_without_pr(
     repo_slug: str | None,
     repo_root: Path,
     beads_root: Path,
-    branch_pr_strategy: object,
     git_path: str | None,
     create_as_draft: bool = True,
     create_detail_prefix: str | None = None,
@@ -973,7 +963,6 @@ def handle_pushed_without_pr(
         repo_slug: Value for `repo_slug`.
         repo_root: Value for `repo_root`.
         beads_root: Value for `beads_root`.
-        branch_pr_strategy: Value for `branch_pr_strategy`.
         git_path: Value for `git_path`.
         create_as_draft: Whether PR creation should use draft mode.
         create_detail_prefix: Value for `create_detail_prefix`.
@@ -988,7 +977,6 @@ def handle_pushed_without_pr(
         repo_slug=repo_slug,
         repo_root=repo_root,
         beads_root=beads_root,
-        branch_pr_strategy=branch_pr_strategy,
         git_path=git_path,
         create_as_draft=create_as_draft,
         create_detail_prefix=create_detail_prefix,
@@ -1048,7 +1036,6 @@ def changeset_stack_integrity_preflight(
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
-    branch_pr_strategy: object,
     beads_root: Path | None = None,
 ) -> worker_pr_gate.StackIntegrityPreflightResult:
     """Run sequential stack-integrity preflight for a changeset issue.
@@ -1058,13 +1045,11 @@ def changeset_stack_integrity_preflight(
         repo_slug: Optional GitHub owner/repo slug.
         repo_root: Repository checkout path.
         git_path: Optional git executable override.
-        branch_pr_strategy: Configured PR strategy value.
         beads_root: Optional Beads root for dependency issue lookups.
 
     Returns:
         Preflight result describing whether stack integrity passed.
     """
-    del branch_pr_strategy
     preflight = worker_pr_gate.sequential_stack_integrity_preflight(
         issue,
         repo_slug=repo_slug,
@@ -1180,9 +1165,8 @@ def changeset_pr_creation_decision(
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
-    branch_pr_strategy: object,
     beads_root: Path | None = None,
-) -> pr_strategy.PrStrategyDecision:
+) -> pr_strategy.PrCreationDecision:
     """Changeset pr creation decision.
 
     Args:
@@ -1190,7 +1174,6 @@ def changeset_pr_creation_decision(
         repo_slug: Value for `repo_slug`.
         repo_root: Value for `repo_root`.
         git_path: Value for `git_path`.
-        branch_pr_strategy: Value for `branch_pr_strategy`.
         beads_root: Optional Beads root for dependency lookups.
 
     Returns:
@@ -1201,7 +1184,6 @@ def changeset_pr_creation_decision(
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
-        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
     )
@@ -1218,7 +1200,6 @@ def recover_premature_merged_changeset(
     branch_pr_mode: BranchPrMode,
     branch_history: str,
     branch_squash_message: str,
-    branch_pr_strategy: pr_strategy.PrStrategy,
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
@@ -1241,7 +1222,6 @@ def recover_premature_merged_changeset(
         branch_pr_mode: Value for `branch_pr_mode`.
         branch_history: Value for `branch_history`.
         branch_squash_message: Value for `branch_squash_message`.
-        branch_pr_strategy: Value for `branch_pr_strategy`.
         repo_slug: Value for `repo_slug`.
         beads_root: Value for `beads_root`.
         repo_root: Value for `repo_root`.
@@ -1267,7 +1247,6 @@ def recover_premature_merged_changeset(
         branch_pr_mode=branch_pr_mode,
         branch_history=branch_history,
         branch_squash_message=branch_squash_message,
-        branch_pr_strategy=branch_pr_strategy,
         repo_slug=repo_slug,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -1294,7 +1273,6 @@ def changeset_waiting_on_review_or_signals(
     repo_slug: str | None,
     repo_root: Path,
     branch_pr: bool,
-    branch_pr_strategy: object,
     git_path: str | None,
     beads_root: Path | None = None,
 ) -> bool:
@@ -1305,7 +1283,6 @@ def changeset_waiting_on_review_or_signals(
         repo_slug: Value for `repo_slug`.
         repo_root: Value for `repo_root`.
         branch_pr: Value for `branch_pr`.
-        branch_pr_strategy: Value for `branch_pr_strategy`.
         git_path: Value for `git_path`.
         beads_root: Optional Beads root for dependency lookups.
 
@@ -1336,7 +1313,6 @@ def changeset_waiting_on_review_or_signals(
                 repo_slug=repo_slug,
                 repo_root=repo_root,
                 git_path=git_path,
-                branch_pr_strategy=branch_pr_strategy,
                 beads_root=beads_root,
             )
             return not decision.allow_pr
@@ -1352,7 +1328,6 @@ def changeset_waiting_on_review_or_signals(
                 repo_slug=repo_slug,
                 repo_root=repo_root,
                 git_path=git_path,
-                branch_pr_strategy=branch_pr_strategy,
                 beads_root=beads_root,
             )
             return not decision.allow_pr
