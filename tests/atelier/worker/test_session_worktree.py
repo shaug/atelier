@@ -591,6 +591,111 @@ def test_prepare_worktrees_review_feedback_resume_logs_lineage_mapping_path_synt
     )
 
 
+def test_prepare_worktrees_allows_epic_worktree_path_override_after_drift_repair(
+    tmp_path: Path,
+) -> None:
+    logs: list[str] = []
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    epic_worktree_path = tmp_path / "worktrees" / "ts-new"
+    epic_worktree_path.mkdir(parents=True)
+    (epic_worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+    changeset_worktree_path = tmp_path / "worktrees" / "ts-new.1"
+    changeset_worktree_path.mkdir(parents=True)
+    (changeset_worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
+
+    mapping = worktrees.WorktreeMapping(
+        epic_id="ts-new",
+        worktree_path="worktrees/ts-new",
+        root_branch="feat/new",
+        changesets={"ts-new.1": "feat/new-ts-new.1"},
+        changeset_worktrees={"ts-new.1": "worktrees/ts-new.1"},
+    )
+
+    update_call: dict[str, object] = {}
+
+    def fake_update_worktree_path(
+        epic_id: str,
+        worktree_path: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        allow_override: bool = False,
+    ) -> dict[str, object]:
+        update_call["epic_id"] = epic_id
+        update_call["worktree_path"] = worktree_path
+        update_call["beads_root"] = beads_root
+        update_call["cwd"] = cwd
+        update_call["allow_override"] = allow_override
+        if not allow_override:
+            raise RuntimeError("worktree path already set; override not permitted")
+        return {}
+
+    with (
+        patch("atelier.worker.session.worktree._startup_worktree_preflight"),
+        patch(
+            "atelier.worker.session.worktree._mapping_ownership_from_beads",
+            return_value=(
+                {"ts-new.1": "ts-new"},
+                {"ts-new": "feat/new"},
+                {"ts-new": "worktrees/at-legacy"},
+            ),
+        ),
+        patch(
+            "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership", return_value=()
+        ),
+        patch("atelier.worker.session.worktree.git.git_origin_url", return_value=None),
+        patch("atelier.worker.session.worktree.prs.github_repo_slug", return_value=None),
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_git_worktree",
+            return_value=epic_worktree_path,
+        ),
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_changeset_branch",
+            return_value=("feat/new-ts-new.1", mapping),
+        ),
+        patch(
+            "atelier.worker.session.worktree._repair_non_epic_changeset_lineage",
+            return_value=("feat/new-ts-new.1", mapping),
+        ),
+        patch(
+            "atelier.worker.session.worktree.beads.update_worktree_path",
+            side_effect=fake_update_worktree_path,
+        ),
+        patch(
+            "atelier.worker.session.worktree.worktrees.ensure_changeset_worktree",
+            return_value=changeset_worktree_path,
+        ),
+        patch("atelier.worker.session.worktree.worktrees.ensure_changeset_checkout"),
+        patch("atelier.worker.session.worktree._sync_child_workspace_parent_branch"),
+        patch("atelier.worker.session.worktree.git.git_rev_parse", return_value="abc1234"),
+        patch("atelier.worker.session.worktree.beads.update_changeset_branch_metadata"),
+    ):
+        worktree.prepare_worktrees(
+            context=worktree.WorktreePreparationContext(
+                dry_run=False,
+                project_data_dir=tmp_path,
+                repo_root=repo_root,
+                beads_root=tmp_path / ".beads",
+                selected_epic="ts-new",
+                changeset_id="ts-new.1",
+                root_branch_value="feat/new",
+                changeset_parent_branch="feat/new",
+                allow_parent_branch_override=False,
+                git_path="git",
+            ),
+            control=_TestControl(logs),
+        )
+
+    assert update_call == {
+        "epic_id": "ts-new",
+        "worktree_path": "worktrees/ts-new",
+        "beads_root": tmp_path / ".beads",
+        "cwd": repo_root,
+        "allow_override": True,
+    }
+
+
 def test_resolve_lineage_repair_prefers_open_pr_head_and_checked_out_path(tmp_path: Path) -> None:
     legacy_path = tmp_path / "worktrees" / "at-legacy.1"
     legacy_path.mkdir(parents=True)
