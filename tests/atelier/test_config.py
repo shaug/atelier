@@ -353,6 +353,44 @@ def test_build_project_config_non_interactive_uses_available_suggested_beads_pre
     assert payload.beads.prefix == "ts"
 
 
+def test_build_project_config_prompt_defaults_to_existing_beads_prefix() -> None:
+    args = SimpleNamespace(
+        branch_prefix="",
+        beads_prefix=None,
+        branch_pr_mode="draft",
+        branch_history="merge",
+        branch_pr_strategy="sequential",
+        agent="codex",
+        editor_edit="cat",
+        editor_work="cat",
+    )
+    existing = ProjectConfig.model_validate(
+        {
+            "project": {"origin": "github.com/org/repo"},
+            "beads": {"prefix": "gs"},
+        }
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = Path(tmp) / "data"
+        with (
+            patch("atelier.paths.atelier_data_dir", return_value=data_dir),
+            patch("atelier.agents.available_agent_names", return_value=("codex",)),
+            patch("atelier.config.discover_local_project_prefixes", return_value={"at"}),
+            patch("atelier.config.prompt", return_value="gs") as prompt_mock,
+        ):
+            payload = config.build_project_config(
+                existing,
+                "/tmp/gumshoe",
+                "github.com/org/repo",
+                "https://github.com/org/repo",
+                args,
+                allow_editor_empty=True,
+            )
+
+    prompt_mock.assert_called_once_with("Beads issue prefix", "gs", required=True)
+    assert payload.beads.prefix == "gs"
+
+
 def test_build_project_config_preserves_agent_launch_options() -> None:
     args = SimpleNamespace(
         branch_prefix="",
