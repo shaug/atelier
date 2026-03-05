@@ -1133,11 +1133,8 @@ def build_project_config(
         branch_squash_message = branch_squash_message_default
 
     branch_pr_strategy_default = branch_config.pr_strategy
-    branch_pr_strategy_arg = read_arg(args, "branch_pr_strategy")
     if branch_pr_mode != "none":
         branch_pr_strategy = pr_strategy.PR_STRATEGY_DEFAULT
-    elif branch_pr_strategy_arg is not None:
-        branch_pr_strategy = normalize_pr_strategy(branch_pr_strategy_arg, "--branch-pr-strategy")
     else:
         branch_pr_strategy = branch_pr_strategy_default
 

@@ -142,9 +142,6 @@ Epic description fields include:
 - `workspace.parent_branch` (integration target, optional)
 - `workspace.primary_head` (last known root SHA, optional)
 - `workspace.worktree_path` (set after worktree creation)
-- `workspace.pr_strategy` (optional; PR-enabled projects enforce `sequential`,
-  and legacy non-sequential values are migrated to `sequential` to prevent
-  out-of-order stack merges)
 - `external_tickets` (JSON list of linked external tickets, optional)
 
 Changeset description fields include:
