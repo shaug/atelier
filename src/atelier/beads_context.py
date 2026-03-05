@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import config, git
 from .commands.resolve import resolve_current_project_with_repo_root, resolve_project_for_enlistment
+
+_RUNTIME_REPO_HINT_ENV_KEYS: tuple[str, ...] = ("ATELIER_PLANNER_WORKTREE",)
 
 
 @dataclass(frozen=True)
@@ -42,13 +45,12 @@ def resolve_runtime_repo_dir_hint(
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> tuple[str | None, str | None]:
-    """Resolve runtime repo-dir hints from explicit input or local worktree link.
+    """Resolve runtime repo-dir hints from deterministic runtime context.
 
     Args:
         repo_dir: Optional explicit repo dir argument.
         cwd: Optional working directory override for deterministic testing.
         env: Optional environment override for deterministic testing.
-            Retained for API compatibility.
 
     Returns:
         Tuple of ``(repo_dir_hint, warning)``. ``warning`` is reserved for
@@ -63,7 +65,12 @@ def resolve_runtime_repo_dir_hint(
     if worktree_link.exists():
         return str(worktree_link.resolve()), None
 
-    _ = env
+    runtime_env = env if env is not None else os.environ
+    for env_key in _RUNTIME_REPO_HINT_ENV_KEYS:
+        value = str(runtime_env.get(env_key, "")).strip()
+        if value:
+            return value, None
+
     return None, None
 
 
