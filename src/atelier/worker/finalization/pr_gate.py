@@ -114,6 +114,59 @@ def _normalize_issue_id(value: object) -> str | None:
     return cleaned or None
 
 
+def _is_epic_issue(*, issue: dict[str, object], beads_root: Path) -> bool:
+    labels = lifecycle.normalized_labels(issue.get("labels"))
+    if beads.has_issue_label(labels, "epic", beads_root=beads_root):
+        return True
+    issue_type = lifecycle.issue_payload_type(issue)
+    return isinstance(issue_type, str) and issue_type.strip().lower() == "epic"
+
+
+def _resolve_epic_scope_id(
+    issue: dict[str, object],
+    *,
+    repo_root: Path,
+    beads_root: Path | None,
+) -> str | None:
+    if beads_root is None:
+        return None
+    current_issue = issue
+    current_id = _normalize_issue_id(current_issue.get("id"))
+    if not current_id:
+        return None
+    visited: set[str] = set()
+    while True:
+        if current_id in visited:
+            return None
+        visited.add(current_id)
+        if _is_epic_issue(issue=current_issue, beads_root=beads_root):
+            return current_id
+        try:
+            boundary = beads.parse_issue_boundary(
+                current_issue, source="pr_gate:resolve_epic_scope"
+            )
+        except ValueError:
+            return None
+        parent_id = _normalize_issue_id(boundary.parent_id)
+        if not parent_id:
+            return current_id
+        try:
+            parent_issues = beads.run_bd_json(
+                ["show", parent_id],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+        except Exception as exc:  # pragma: no cover - defensive boundary
+            atelier_log.warning(
+                f"changeset={current_id} failed to resolve epic scope via {parent_id}: {exc}"
+            )
+            return parent_id
+        if not parent_issues:
+            return parent_id
+        current_issue = parent_issues[0]
+        current_id = parent_id
+
+
 def _sequential_pr_creation_decision(*, parent_state: str | None) -> PrCreationDecision:
     parent_state_normalized = None
     if isinstance(parent_state, str):
@@ -176,24 +229,22 @@ def _active_epic_sibling_state(
 ) -> tuple[str, str] | None:
     if beads_root is None:
         return None
-    try:
-        boundary = beads.parse_issue_boundary(issue, source="pr_gate:epic_sibling_gate")
-    except ValueError:
+    current_id = _normalize_issue_id(issue.get("id"))
+    if not current_id:
         return None
-    current_id = _normalize_issue_id(boundary.id)
-    parent_id = _normalize_issue_id(boundary.parent_id)
-    if not current_id or not parent_id:
+    epic_id = _resolve_epic_scope_id(issue, repo_root=repo_root, beads_root=beads_root)
+    if not epic_id:
         return None
     try:
         siblings = beads.list_descendant_changesets(
-            parent_id,
+            epic_id,
             beads_root=beads_root,
             cwd=repo_root,
             include_closed=True,
         )
     except Exception as exc:  # pragma: no cover - defensive boundary
         atelier_log.warning(
-            f"changeset={current_id} failed to evaluate sibling PR gate under {parent_id}: {exc}"
+            f"changeset={current_id} failed to evaluate sibling PR gate under {epic_id}: {exc}"
         )
         return None
     for sibling in siblings:

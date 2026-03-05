@@ -562,6 +562,15 @@ def test_changeset_pr_creation_decision_blocks_no_parent_when_sibling_pr_active(
         "list_descendant_changesets",
         lambda *_args, **_kwargs: [sibling, issue],
     )
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"id": "at-epic", "labels": ["at:epic"], "issue_type": "epic"}]
+            if args == ["show", "at-epic"]
+            else []
+        ),
+    )
     monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
 
     decision = pr_gate.changeset_pr_creation_decision(
@@ -601,6 +610,15 @@ def test_changeset_pr_creation_decision_allows_no_parent_when_sibling_integrated
         "list_descendant_changesets",
         lambda *_args, **_kwargs: [sibling, issue],
     )
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"id": "at-epic", "labels": ["at:epic"], "issue_type": "epic"}]
+            if args == ["show", "at-epic"]
+            else []
+        ),
+    )
     monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
 
     decision = pr_gate.changeset_pr_creation_decision(
@@ -618,6 +636,61 @@ def test_changeset_pr_creation_decision_allows_no_parent_when_sibling_integrated
 
     assert decision.allow_pr is True
     assert decision.reason == "no-parent"
+
+
+def test_changeset_pr_creation_decision_blocks_no_parent_when_nested_epic_descendant_pr_active(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.a.2",
+        "parent": "at-epic.a",
+        "description": (
+            "changeset.parent_branch: feature-root\n"
+            "changeset.root_branch: feature-root\n"
+            "changeset.work_branch: feature-a-2\n"
+        ),
+    }
+    active_descendant = {
+        "id": "at-epic.b.1",
+        "description": "changeset.work_branch: feature-b-1\n",
+    }
+    listed_under: list[str] = []
+
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "run_bd_json",
+        lambda args, **_kwargs: (
+            [{"id": "at-epic.a", "parent": "at-epic"}]
+            if args == ["show", "at-epic.a"]
+            else [{"id": "at-epic", "labels": ["at:epic"], "issue_type": "epic"}]
+            if args == ["show", "at-epic"]
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "list_descendant_changesets",
+        lambda parent_id, **_kwargs: (
+            listed_under.append(parent_id),
+            [active_descendant, issue],
+        )[1],
+    )
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda _repo_slug, branch: (
+            {"state": "OPEN", "isDraft": False} if branch == "feature-b-1" else None
+        ),
+    )
+
+    assert listed_under == ["at-epic"]
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:epic-pr-in-flight"
 
 
 def test_sequential_stack_integrity_preflight_ignores_heritage_epic_dependency_without_work_branch(
