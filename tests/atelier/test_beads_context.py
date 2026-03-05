@@ -225,10 +225,21 @@ def test_resolve_runtime_repo_dir_hint_returns_explicit_worktree_repo_dir_withou
     hint, warning = beads_context.resolve_runtime_repo_dir_hint(
         repo_dir="./worktree",
         cwd=Path("/tmp"),
-        env={},
+        env={"ATELIER_PLANNER_WORKTREE": "/repo/from-planner-worktree"},
     )
 
     assert hint == "./worktree"
+    assert warning is None
+
+
+def test_resolve_runtime_repo_dir_hint_uses_planner_worktree_env_fallback() -> None:
+    hint, warning = beads_context.resolve_runtime_repo_dir_hint(
+        repo_dir=None,
+        cwd=Path("/tmp"),
+        env={"ATELIER_PLANNER_WORKTREE": "/repo/from-planner-worktree"},
+    )
+
+    assert hint == "/repo/from-planner-worktree"
     assert warning is None
 
 
