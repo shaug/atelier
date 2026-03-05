@@ -891,8 +891,8 @@ def test_attempt_create_pr_passes_repo_slug_to_base_resolver(monkeypatch) -> Non
     assert observed_repo_slug == ["org/repo"]
 
 
-def test_attempt_create_pr_does_not_pass_strategy_to_base_resolver(monkeypatch) -> None:
-    observed_strategy = False
+def test_attempt_create_pr_does_not_pass_unrelated_kwarg_to_base_resolver(monkeypatch) -> None:
+    observed_marker = False
 
     monkeypatch.setattr(
         pr_gate.exec,
@@ -903,11 +903,11 @@ def test_attempt_create_pr_does_not_pass_strategy_to_base_resolver(monkeypatch) 
     def resolve_base(
         _issue,
         *,
-        branch_pr_strategy: object | None = None,
+        marker: object | None = None,
         **_kwargs,
     ) -> str | None:
-        nonlocal observed_strategy
-        observed_strategy = branch_pr_strategy is not None
+        nonlocal observed_marker
+        observed_marker = marker is not None
         return "main"
 
     created, detail = pr_gate.attempt_create_pr(
@@ -924,7 +924,7 @@ def test_attempt_create_pr_does_not_pass_strategy_to_base_resolver(monkeypatch) 
 
     assert created is True
     assert detail == "created"
-    assert observed_strategy is False
+    assert observed_marker is False
 
 
 def test_handle_pushed_without_pr_ready_mode_sets_pr_open_fallback(monkeypatch) -> None:
