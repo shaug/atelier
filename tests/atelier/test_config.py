@@ -256,16 +256,13 @@ def test_parse_project_config_accepts_legacy_pr_strategy_value() -> None:
 
 
 @pytest.mark.parametrize("pr_mode", ("draft", "ready"))
-def test_build_project_config_ignores_pr_strategy_override_when_pr_mode_enabled(
-    pr_mode: str,
-) -> None:
+def test_build_project_config_omits_pr_strategy_for_pr_enabled_modes(pr_mode: str) -> None:
     args = SimpleNamespace(
         branch_prefix="",
         beads_prefix="at",
         branch_pr_mode=pr_mode,
         branch_history="merge",
         branch_squash_message="deterministic",
-        branch_pr_strategy="parallel",
         agent="codex",
         editor_edit="cat",
         editor_work="cat",
