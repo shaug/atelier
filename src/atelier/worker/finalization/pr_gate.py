@@ -9,7 +9,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Iterator
 
-from ... import beads, changesets, dependency_lineage, exec, git, pr_strategy, prs
+from ... import beads, changesets, dependency_lineage, exec, git, lifecycle, prs
 from ... import log as atelier_log
 from .. import integration as worker_integration
 from ..models import FinalizeResult
@@ -21,6 +21,15 @@ class PrGateResult:
 
     finalize_result: FinalizeResult
     detail: str | None = None
+
+
+@dataclass(frozen=True)
+class PrCreationDecision:
+    """Decision for whether a PR may be created under sequential policy."""
+
+    parent_state: str | None
+    allow_pr: bool
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -93,6 +102,30 @@ def _normalize_branch(value: object) -> str | None:
     if not cleaned or cleaned.lower() == "null":
         return None
     return cleaned
+
+
+def _sequential_pr_creation_decision(*, parent_state: str | None) -> PrCreationDecision:
+    parent_state_normalized = None
+    if isinstance(parent_state, str):
+        parent_state_normalized = parent_state.strip().lower() or None
+
+    if parent_state_normalized is None:
+        return PrCreationDecision(
+            parent_state=None,
+            allow_pr=True,
+            reason="no-parent",
+        )
+    if lifecycle.is_integrated_review_state(parent_state_normalized):
+        return PrCreationDecision(
+            parent_state=parent_state_normalized,
+            allow_pr=True,
+            reason=f"parent:{parent_state_normalized}",
+        )
+    return PrCreationDecision(
+        parent_state=parent_state_normalized,
+        allow_pr=False,
+        reason=f"blocked:{parent_state_normalized}",
+    )
 
 
 def _dependency_integrated(
@@ -440,7 +473,7 @@ def changeset_pr_creation_decision(
     lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]]
     | None = None,
     lookup_dependency_issue: Callable[[str], dict[str, object] | None] | None = None,
-) -> pr_strategy.PrCreationDecision:
+) -> PrCreationDecision:
     preflight = sequential_stack_integrity_preflight(
         issue,
         repo_slug=repo_slug,
@@ -453,7 +486,7 @@ def changeset_pr_creation_decision(
     )
     if not preflight.ok:
         reason_suffix = preflight.reason or "dependency-parent-unresolved"
-        return pr_strategy.PrCreationDecision(
+        return PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason=f"blocked:{reason_suffix}",
@@ -483,12 +516,12 @@ def changeset_pr_creation_decision(
     if preflight.dependencies_integrated and (
         lineage.blocked or not lineage.dependency_parent_branch
     ):
-        return pr_strategy.pr_creation_decision(parent_state=None)
+        return _sequential_pr_creation_decision(parent_state=None)
     if lineage.blocked:
         reason_suffix = lineage.blocker_reason or "dependency-parent-unresolved"
         if lineage.diagnostics:
             reason_suffix = f"{reason_suffix} ({lineage.diagnostics[0]})"
-        return pr_strategy.PrCreationDecision(
+        return PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason=f"blocked:{reason_suffix}",
@@ -497,7 +530,7 @@ def changeset_pr_creation_decision(
         reason_suffix = "dependency-parent-state-unavailable"
         if lineage.diagnostics:
             reason_suffix = f"{reason_suffix} ({lineage.diagnostics[0]})"
-        return pr_strategy.PrCreationDecision(
+        return PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason=f"blocked:{reason_suffix}",
@@ -513,12 +546,12 @@ def changeset_pr_creation_decision(
         lookup_dependency_issue=lookup_dependency_issue,
     )
     if lineage.dependency_ids and parent_state is None:
-        return pr_strategy.PrCreationDecision(
+        return PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason="blocked:dependency-parent-state-unavailable",
         )
-    return pr_strategy.pr_creation_decision(parent_state=parent_state)
+    return _sequential_pr_creation_decision(parent_state=parent_state)
 
 
 def set_changeset_review_pending_state(

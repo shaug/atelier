@@ -15,7 +15,6 @@ from .. import (
     exec,
     git,
     lifecycle,
-    pr_strategy,
     prs,
 )
 from ..io import say
@@ -1166,7 +1165,7 @@ def changeset_pr_creation_decision(
     repo_root: Path,
     git_path: str | None,
     beads_root: Path | None = None,
-) -> pr_strategy.PrCreationDecision:
+) -> worker_pr_gate.PrCreationDecision:
     """Changeset pr creation decision.
 
     Args:
