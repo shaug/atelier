@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.2](https://github.com/shaug/atelier/compare/v0.8.1...v0.8.2) (2026-03-05)
+
+
+### Bug Fixes
+
+* **agent-home:** drop ambient ATELIER_AGENT_ID overrides ([3d18a7d](https://github.com/shaug/atelier/commit/3d18a7d6516efe6934c1737412d63a1ce00862c6))
+* **beads-context:** remove ambient repo-hint env fallbacks ([ca53088](https://github.com/shaug/atelier/commit/ca53088892659916bd560a9f824a3f11d634924d)), closes [#524](https://github.com/shaug/atelier/issues/524)
+* **config:** default beads prefix prompt to existing value ([1ca42f8](https://github.com/shaug/atelier/commit/1ca42f841e0867126bf1553351e6f4655fe51b05))
+* **planner-startup:** use planner worktree env for repo hints ([63c8474](https://github.com/shaug/atelier/commit/63c84749812fec10d42618a3802d6db985f2354c))
+* **runtime-env:** align ambient warning text with explicit routing ([7cc6538](https://github.com/shaug/atelier/commit/7cc6538ff8cf38c95088940f83bfd9fda7f0f121)), closes [#526](https://github.com/shaug/atelier/issues/526)
+* **runtime:** suppress self-scoped agent env warnings ([68afa88](https://github.com/shaug/atelier/commit/68afa884a73cd2ea2652ad6c0d4613d409926ab7)), closes [#523](https://github.com/shaug/atelier/issues/523)
+* **worker:** allow startup worktree-path metadata override ([284c657](https://github.com/shaug/atelier/commit/284c657cbd920da221a97a4d44469720c4e8889f)), closes [#534](https://github.com/shaug/atelier/issues/534)
+* **worker:** guard epic release with explicit runtime identity ([3c4aac5](https://github.com/shaug/atelier/commit/3c4aac5533dc5c8903321b8d7f2853ff3be28fea))
+* **worker:** handle finalize dependency-gate soft failures ([c4bf366](https://github.com/shaug/atelier/commit/c4bf3668dabd6a30422a59519c0e8a203bebab92)), closes [#528](https://github.com/shaug/atelier/issues/528)
+
 ## [0.8.1](https://github.com/shaug/atelier/compare/v0.8.0...v0.8.1) (2026-03-04)
 
 
