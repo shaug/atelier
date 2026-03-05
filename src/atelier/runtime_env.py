@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable, Mapping
 
-LEGACY_AMBIENT_ENV_REMOVAL_DATE = "2026-07-01"
 _WARNING_SAMPLE_LIMIT = 6
 
 USER_DEFAULT_ENV_KEYS: frozenset[str] = frozenset(
@@ -58,7 +57,7 @@ def sanitize_subprocess_environment(
 
 
 def format_ambient_env_warning(removed_keys: Iterable[str]) -> str | None:
-    """Build a compatibility warning for dropped inherited runtime env keys.
+    """Build a warning for dropped inherited runtime env keys.
 
     Args:
         removed_keys: Iterable of removed ``ATELIER_*`` key names.
@@ -76,7 +75,6 @@ def format_ambient_env_warning(removed_keys: Iterable[str]) -> str | None:
     return (
         "Warning: ignored inherited runtime routing env keys "
         f"({sample}{suffix}). "
-        "Use launch-time project context instead of ambient ATELIER_* routing "
-        "state; legacy fallback compatibility is scheduled for removal after "
-        f"{LEGACY_AMBIENT_ENV_REMOVAL_DATE}."
+        "Use explicit launch context (for example --repo-dir or the local "
+        "./worktree link) instead of ambient ATELIER_* routing state."
     )

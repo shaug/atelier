@@ -313,7 +313,7 @@ class TestAgentSpec:
         )
         assert len(warnings) == 1
         assert "ATELIER_PROJECT" in warnings[0]
-        assert "2026-07-01" in warnings[0]
+        assert "--repo-dir" in warnings[0]
 
     def test_agent_environment_does_not_warn_for_self_scoped_agent_id(self) -> None:
         warnings: list[str] = []

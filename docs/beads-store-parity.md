@@ -9,12 +9,14 @@ the default planning store.
 
 ## One-shot parity check
 
-Run these commands from a project worktree to verify planner/worker parity:
+Run these commands with explicit launch context to verify planner/worker parity:
 
 ```bash
-python3 src/atelier/skills/planner-startup-check/scripts/refresh_overview.py --agent-id "$ATELIER_AGENT_ID"
+python3 src/atelier/skills/planner-startup-check/scripts/refresh_overview.py --agent-id "<planner-agent-id>" --repo-dir "<repo-root-or-./worktree>"
 atelier work --mode auto --dry-run
 ```
+
+If you run from an agent home, use `--repo-dir ./worktree`.
 
 Verify both outputs report:
 

@@ -8,8 +8,18 @@ when launching planner/worker/editor/shell subprocesses.
 - Subprocess launch env is sanitized by
   `src/atelier/runtime_env.py::sanitize_subprocess_environment`.
 - Inherited routing keys from ambient parent env are ignored.
-- Legacy ambient fallback compatibility is scheduled for removal after
-  `2026-07-01`.
+- Internal launch flows no longer use ambient fallback routing via
+  `ATELIER_PROJECT`, `ATELIER_WORKSPACE_DIR`, or cross-session
+  `ATELIER_AGENT_ID`.
+
+## Operator migration notes
+
+- Scripts that need repository resolution must pass `--repo-dir` explicitly or
+  run from an agent home that has a local `./worktree` link.
+- Planner startup refresh commands should pass `--agent-id` explicitly instead
+  of relying on inherited shell state.
+- Runtime warnings about removed inherited keys are now immediate guidance for
+  explicit launch context, not future deprecation notices.
 
 ## Variable inventory
 
@@ -27,16 +37,14 @@ when launching planner/worker/editor/shell subprocesses.
   - Class: workspace context
 - `ATELIER_PROJECT`
   - Owner (set path): `src/atelier/workspace.py::workspace_environment`
-  - Primary consumers:
-    `src/atelier/beads_context.py::resolve_runtime_repo_dir_hint` (legacy
-    fallback), `src/atelier/auto_export.py::resolve_auto_export_context`
-    (indirect via beads context helper)
-  - Class: project routing
+  - Primary consumers: downstream shell/editor commands and user scripts that
+    run inside workspace-aware subprocesses.
+  - Class: workspace context
 - `ATELIER_WORKSPACE_DIR`
   - Owner (set path): `src/atelier/workspace.py::workspace_environment`
-  - Primary consumers:
-    `src/atelier/beads_context.py::resolve_runtime_repo_dir_hint`
-  - Class: project routing
+  - Primary consumers: downstream shell/editor commands and user scripts that
+    run inside workspace-aware subprocesses.
+  - Class: workspace context
 - `ATELIER_HOOKS_PATH`
   - Owner (set path): `src/atelier/hooks.py::ensure_hooks_path`
   - Primary consumers: hook-capable runtimes (Claude/Gemini/OpenCode/Copilot)
