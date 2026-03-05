@@ -150,7 +150,7 @@ def sequential_stack_integrity_preflight(
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
-    branch_pr_strategy: object,
+    branch_pr_strategy: object | None = None,
     beads_root: Path | None = None,
     lookup_pr_payload: Callable[..., dict[str, object] | None],
     lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]]
@@ -159,9 +159,7 @@ def sequential_stack_integrity_preflight(
     reconcile_parent_review_state: Callable[..., None] | None = None,
 ) -> StackIntegrityPreflightResult:
     """Validate sequential parent-child PR integrity for dependency stacks."""
-    normalized_strategy = pr_strategy.normalize_pr_strategy(branch_pr_strategy)
-    if normalized_strategy != "sequential":
-        return StackIntegrityPreflightResult(ok=True)
+    del branch_pr_strategy
 
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
@@ -447,13 +445,13 @@ def changeset_pr_creation_decision(
     | None = None,
     lookup_dependency_issue: Callable[[str], dict[str, object] | None] | None = None,
 ) -> pr_strategy.PrStrategyDecision:
-    normalized_strategy = pr_strategy.normalize_pr_strategy(branch_pr_strategy)
+    del branch_pr_strategy
+    normalized_strategy = pr_strategy.PR_STRATEGY_DEFAULT
     preflight = sequential_stack_integrity_preflight(
         issue,
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
-        branch_pr_strategy=normalized_strategy,
         beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
         lookup_pr_payload_diagnostic=lookup_pr_payload_diagnostic,
@@ -489,13 +487,11 @@ def changeset_pr_creation_decision(
         root_branch=fields.get("changeset.root_branch"),
         lookup_issue=lookup_dependency_issue_local,
     )
-    if (
-        normalized_strategy == "sequential"
-        and preflight.dependencies_integrated
-        and (lineage.blocked or not lineage.dependency_parent_branch)
+    if preflight.dependencies_integrated and (
+        lineage.blocked or not lineage.dependency_parent_branch
     ):
         return pr_strategy.pr_strategy_decision(normalized_strategy, parent_state=None)
-    if normalized_strategy == "sequential" and lineage.blocked:
+    if lineage.blocked:
         reason_suffix = lineage.blocker_reason or "dependency-parent-unresolved"
         if lineage.diagnostics:
             reason_suffix = f"{reason_suffix} ({lineage.diagnostics[0]})"
@@ -505,11 +501,7 @@ def changeset_pr_creation_decision(
             allow_pr=False,
             reason=f"blocked:{reason_suffix}",
         )
-    if (
-        normalized_strategy == "sequential"
-        and lineage.dependency_ids
-        and not lineage.dependency_parent_branch
-    ):
+    if lineage.dependency_ids and not lineage.dependency_parent_branch:
         reason_suffix = "dependency-parent-state-unavailable"
         if lineage.diagnostics:
             reason_suffix = f"{reason_suffix} ({lineage.diagnostics[0]})"
@@ -529,7 +521,7 @@ def changeset_pr_creation_decision(
         lookup_pr_payload=lookup_pr_payload,
         lookup_dependency_issue=lookup_dependency_issue,
     )
-    if normalized_strategy == "sequential" and lineage.dependency_ids and parent_state is None:
+    if lineage.dependency_ids and parent_state is None:
         return pr_strategy.PrStrategyDecision(
             strategy=normalized_strategy,
             parent_state=None,
@@ -582,25 +574,14 @@ def attempt_create_pr(
     changeset_base_branch: Callable[..., str | None],
     render_changeset_pr_body: Callable[[dict[str, object]], str],
 ) -> tuple[bool, str]:
-    try:
-        base_branch = changeset_base_branch(
-            issue,
-            branch_pr_strategy=branch_pr_strategy,
-            repo_slug=repo_slug,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            git_path=git_path,
-        )
-    except TypeError as exc:
-        if "branch_pr_strategy" not in str(exc):
-            raise
-        base_branch = changeset_base_branch(
-            issue,
-            repo_slug=repo_slug,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            git_path=git_path,
-        )
+    del branch_pr_strategy
+    base_branch = changeset_base_branch(
+        issue,
+        repo_slug=repo_slug,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        git_path=git_path,
+    )
     if not base_branch:
         return False, "missing PR base branch metadata"
     title = str(issue.get("title") or "").strip() or work_branch

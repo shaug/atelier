@@ -38,7 +38,6 @@ def test_branch_config_ignores_legacy_pr_strategy_field() -> None:
     parsed = BranchConfig.model_validate({"pr_mode": "ready", "pr_strategy": "parallel"})
     assert parsed.pr_mode == "ready"
     assert "pr_strategy" not in parsed.model_dump()
-    assert parsed.pr_strategy == "sequential"
 
 
 def test_beads_section_normalizes_server_runtime_aliases() -> None:

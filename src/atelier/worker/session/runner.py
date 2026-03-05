@@ -426,10 +426,8 @@ def _dependency_gate_ready_for_transition(
 ) -> bool:
     if not dependency_ids:
         return True
-    try:
-        require_integrated = pr_strategy.normalize_pr_strategy(branch_pr_strategy) == "sequential"
-    except ValueError:
-        require_integrated = True
+    del branch_pr_strategy
+    require_integrated = True
     for dependency_id in dependency_ids:
         dependency_issues = beads.run_bd_json(
             ["show", dependency_id],
@@ -752,7 +750,7 @@ def run_worker_once(
                     assume_yes=assume_yes,
                     repo_slug=repo_slug,
                     branch_pr=project_config.branch.pr,
-                    branch_pr_strategy=project_config.branch.pr_strategy,
+                    branch_pr_strategy=pr_strategy.PR_STRATEGY_DEFAULT,
                     git_path=git_path,
                     worker_queue_name=_WORKER_QUEUE_NAME,
                     select=startup_select,
@@ -1063,7 +1061,7 @@ def run_worker_once(
                     repo_root=repo_root,
                     repo_slug=repo_slug,
                     branch_pr=project_config.branch.pr,
-                    branch_pr_strategy=project_config.branch.pr_strategy,
+                    branch_pr_strategy=pr_strategy.PR_STRATEGY_DEFAULT,
                     git_path=git_path,
                 ),
             )
@@ -1224,7 +1222,7 @@ def run_worker_once(
                     repo_root=repo_root,
                     branch_pr=project_config.branch.pr,
                     branch_pr_mode=project_config.branch.pr_mode,
-                    branch_pr_strategy=project_config.branch.pr_strategy,
+                    branch_pr_strategy=pr_strategy.PR_STRATEGY_DEFAULT,
                     branch_history=project_config.branch.history,
                     branch_squash_message=project_config.branch.squash_message,
                     project_data_dir=project_data_dir,
@@ -1350,7 +1348,7 @@ def run_worker_once(
                     issue=changeset,
                     dependency_ids=changeset_boundary.dependency_ids,
                     startup_reason=startup_result.reason,
-                    branch_pr_strategy=project_config.branch.pr_strategy,
+                    branch_pr_strategy=pr_strategy.PR_STRATEGY_DEFAULT,
                     beads=infra.beads,
                     beads_root=beads_root,
                     repo_root=repo_root,
@@ -1537,7 +1535,7 @@ def run_worker_once(
                 repo_root=repo_root,
                 branch_pr=project_config.branch.pr,
                 branch_pr_mode=project_config.branch.pr_mode,
-                branch_pr_strategy=project_config.branch.pr_strategy,
+                branch_pr_strategy=pr_strategy.PR_STRATEGY_DEFAULT,
                 branch_history=project_config.branch.history,
                 branch_squash_message=project_config.branch.squash_message,
                 project_data_dir=project_data_dir,

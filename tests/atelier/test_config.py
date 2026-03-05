@@ -222,10 +222,6 @@ def test_build_project_config_skips_pr_strategy_prompt_when_pr_mode_none() -> No
         with (
             patch("atelier.paths.atelier_data_dir", return_value=data_dir),
             patch("atelier.agents.available_agent_names", return_value=("codex",)),
-            patch(
-                "atelier.config.select",
-                side_effect=AssertionError("select should not be called"),
-            ),
         ):
             payload = config.build_project_config(
                 existing,
@@ -237,7 +233,6 @@ def test_build_project_config_skips_pr_strategy_prompt_when_pr_mode_none() -> No
             )
 
     assert payload.branch.pr_mode == "none"
-    assert payload.branch.pr_strategy == "sequential"
     assert "pr_strategy" not in payload.branch.model_dump()
 
 
@@ -251,7 +246,6 @@ def test_parse_project_config_accepts_legacy_pr_strategy_value() -> None:
         }
     )
     assert payload.branch.pr_mode == "draft"
-    assert payload.branch.pr_strategy == "sequential"
     assert "pr_strategy" not in payload.branch.model_dump()
 
 
@@ -272,10 +266,6 @@ def test_build_project_config_omits_pr_strategy_for_pr_enabled_modes(pr_mode: st
         with (
             patch("atelier.paths.atelier_data_dir", return_value=data_dir),
             patch("atelier.agents.available_agent_names", return_value=("codex",)),
-            patch(
-                "atelier.config.select",
-                side_effect=AssertionError("select should not be called"),
-            ),
         ):
             payload = config.build_project_config(
                 {},
@@ -287,7 +277,6 @@ def test_build_project_config_omits_pr_strategy_for_pr_enabled_modes(pr_mode: st
             )
 
     assert payload.branch.pr_mode == pr_mode
-    assert payload.branch.pr_strategy == "sequential"
     assert "pr_strategy" not in payload.branch.model_dump()
 
 

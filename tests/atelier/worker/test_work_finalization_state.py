@@ -243,7 +243,7 @@ def test_changeset_base_branch_sequential_resolves_epic_parent_for_noncollapsed_
     assert updates[-1]["parent_base"] == "release/2026.03-sha"
 
 
-def test_changeset_base_branch_non_sequential_keeps_stacked_parent(monkeypatch) -> None:
+def test_changeset_base_branch_legacy_strategy_still_uses_integration_parent(monkeypatch) -> None:
     issue = {
         "description": (
             "changeset.root_branch: feat/root\n"
@@ -252,19 +252,9 @@ def test_changeset_base_branch_non_sequential_keeps_stacked_parent(monkeypatch) 
         )
     }
     monkeypatch.setattr(
-        work_finalization_state,
-        "branch_ref_for_lookup",
-        lambda _repo_root, branch, **_kwargs: branch,
-    )
-    monkeypatch.setattr(
         work_finalization_state.git,
-        "git_is_ancestor",
-        lambda *_args, **_kwargs: False,
-    )
-    monkeypatch.setattr(
-        work_finalization_state.git,
-        "git_branch_fully_applied",
-        lambda *_args, **_kwargs: False,
+        "git_default_branch",
+        lambda *_args, **_kwargs: "main",
     )
 
     base = work_finalization_state.changeset_base_branch(
@@ -275,7 +265,7 @@ def test_changeset_base_branch_non_sequential_keeps_stacked_parent(monkeypatch) 
         git_path="git",
     )
 
-    assert base == "feat/parent"
+    assert base == "main"
 
 
 def test_changeset_base_branch_rejects_root_base_without_non_root_fallback(monkeypatch) -> None:

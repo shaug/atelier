@@ -121,11 +121,6 @@ class BranchConfig(BaseModel):
         """Return whether pull requests are enabled for this branch policy."""
         return self.pr_mode != "none"
 
-    @property
-    def pr_strategy(self) -> Literal["sequential"]:
-        """Return the only supported PR strategy for compatibility callers."""
-        return "sequential"
-
 
 class WorkerConfig(BaseModel):
     """Worker startup selection policy configuration.

@@ -29,7 +29,7 @@ def test_changeset_pr_creation_decision_on_ready_blocks_when_parent_only_pushed(
     assert decision.reason == "blocked:pushed"
 
 
-def test_changeset_pr_creation_decision_parallel_ignores_sequential_dependency_gates(
+def test_changeset_pr_creation_decision_legacy_parallel_is_coerced_to_sequential(
     monkeypatch,
 ) -> None:
     issue = {
@@ -58,8 +58,8 @@ def test_changeset_pr_creation_decision_parallel_ignores_sequential_dependency_g
         lookup_pr_payload=lambda *_args, **_kwargs: None,
     )
 
-    assert decision.allow_pr is True
-    assert decision.reason == "strategy:parallel"
+    assert decision.allow_pr is False
+    assert decision.reason.startswith("blocked:dependency-lineage-ambiguous")
 
 
 def test_changeset_pr_creation_decision_allows_when_parent_pr_merged(monkeypatch) -> None:
@@ -87,7 +87,7 @@ def test_changeset_pr_creation_decision_allows_when_parent_pr_merged(monkeypatch
     assert decision.reason == "parent:merged"
 
 
-def test_changeset_pr_creation_decision_allows_when_parent_pr_closed(monkeypatch) -> None:
+def test_changeset_pr_creation_decision_blocks_when_parent_pr_closed(monkeypatch) -> None:
     issue = {
         "description": (
             "changeset.parent_branch: feature-parent\nchangeset.root_branch: feature-root\n"
@@ -108,8 +108,8 @@ def test_changeset_pr_creation_decision_allows_when_parent_pr_closed(monkeypatch
         ),
     )
 
-    assert decision.allow_pr is True
-    assert decision.reason == "parent:closed"
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:closed"
 
 
 def test_changeset_pr_creation_decision_blocks_when_dependency_parent_unresolved(
@@ -913,8 +913,8 @@ def test_attempt_create_pr_passes_repo_slug_to_base_resolver(monkeypatch) -> Non
     assert observed_repo_slug == ["org/repo"]
 
 
-def test_attempt_create_pr_passes_strategy_to_base_resolver(monkeypatch) -> None:
-    observed_strategies: list[str] = []
+def test_attempt_create_pr_does_not_pass_strategy_to_base_resolver(monkeypatch) -> None:
+    observed_strategy = False
 
     monkeypatch.setattr(
         pr_gate.exec,
@@ -928,8 +928,8 @@ def test_attempt_create_pr_passes_strategy_to_base_resolver(monkeypatch) -> None
         branch_pr_strategy: object | None = None,
         **_kwargs,
     ) -> str | None:
-        if isinstance(branch_pr_strategy, str):
-            observed_strategies.append(branch_pr_strategy)
+        nonlocal observed_strategy
+        observed_strategy = branch_pr_strategy is not None
         return "main"
 
     created, detail = pr_gate.attempt_create_pr(
@@ -947,7 +947,7 @@ def test_attempt_create_pr_passes_strategy_to_base_resolver(monkeypatch) -> None
 
     assert created is True
     assert detail == "created"
-    assert observed_strategies == ["sequential"]
+    assert observed_strategy is False
 
 
 def test_handle_pushed_without_pr_ready_mode_sets_pr_open_fallback(monkeypatch) -> None:

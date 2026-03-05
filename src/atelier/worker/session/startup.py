@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, TypeVar
 
-from ... import changeset_fields, lifecycle, pr_strategy
+from ... import changeset_fields, lifecycle
 from ... import log as atelier_log
 from .. import selection as worker_selection
 from ..models import StartupContractResult
@@ -142,14 +142,7 @@ def _dependencies_satisfied(
     context: NextChangesetContext,
     service: NextChangesetService,
 ) -> bool:
-    require_integrated = False
-    try:
-        require_integrated = pr_strategy.normalize_pr_strategy(context.branch_pr_strategy) == (
-            "sequential"
-        )
-    except ValueError:
-        # Fail closed for unknown strategy values.
-        require_integrated = True
+    require_integrated = True
     dependency_ids = _dependency_ids(issue)
     if dependency_ids is None:
         return False

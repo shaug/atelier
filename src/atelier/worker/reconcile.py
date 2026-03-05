@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import beads, config, git, lifecycle, prs
+from .. import beads, config, git, lifecycle, pr_strategy, prs
 from .models import FinalizeResult, ReconcileResult
 
 
@@ -599,7 +599,7 @@ def reconcile_blocked_merged_changesets(
                 beads_root=beads_root,
                 repo_root=repo_root,
                 branch_pr=project_config.branch.pr,
-                branch_pr_strategy=project_config.branch.pr_strategy,
+                branch_pr_strategy=pr_strategy.PR_STRATEGY_DEFAULT,
                 branch_history=project_config.branch.history,
                 branch_squash_message=project_config.branch.squash_message,
                 project_data_dir=project_data_dir,
