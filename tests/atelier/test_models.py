@@ -34,6 +34,12 @@ def test_branch_config_maps_legacy_pr_bool_to_pr_mode() -> None:
     assert disabled.pr_mode == "none"
 
 
+def test_branch_config_enforces_sequential_strategy_when_pr_mode_enabled() -> None:
+    parsed = BranchConfig.model_validate({"pr_mode": "ready", "pr_strategy": "parallel"})
+    assert parsed.pr_mode == "ready"
+    assert parsed.pr_strategy == "sequential"
+
+
 def test_beads_section_normalizes_server_runtime_aliases() -> None:
     parsed = BeadsSection.model_validate({"runtime_mode": "server"})
     assert parsed.runtime_mode == "dolt-server"

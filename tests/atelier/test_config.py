@@ -240,15 +240,30 @@ def test_build_project_config_skips_pr_strategy_prompt_when_pr_mode_none() -> No
     assert payload.branch.pr_strategy == "on-ready"
 
 
+def test_parse_project_config_migrates_non_sequential_strategy_for_pr_mode() -> None:
+    payload = config.parse_project_config(
+        {
+            "branch": {
+                "pr_mode": "draft",
+                "pr_strategy": "on-ready",
+            }
+        }
+    )
+    assert payload.branch.pr_mode == "draft"
+    assert payload.branch.pr_strategy == "sequential"
+
+
 @pytest.mark.parametrize("pr_mode", ("draft", "ready"))
-def test_build_project_config_prompts_pr_strategy_when_pr_mode_enabled(pr_mode: str) -> None:
+def test_build_project_config_forces_sequential_strategy_when_pr_mode_enabled(
+    pr_mode: str,
+) -> None:
     args = SimpleNamespace(
         branch_prefix="",
         beads_prefix="at",
         branch_pr_mode=pr_mode,
         branch_history="merge",
         branch_squash_message="deterministic",
-        branch_pr_strategy=None,
+        branch_pr_strategy="parallel",
         agent="codex",
         editor_edit="cat",
         editor_work="cat",
@@ -258,7 +273,10 @@ def test_build_project_config_prompts_pr_strategy_when_pr_mode_enabled(pr_mode: 
         with (
             patch("atelier.paths.atelier_data_dir", return_value=data_dir),
             patch("atelier.agents.available_agent_names", return_value=("codex",)),
-            patch("atelier.config.select", return_value="parallel") as select_mock,
+            patch(
+                "atelier.config.select",
+                side_effect=AssertionError("select should not be called"),
+            ),
         ):
             payload = config.build_project_config(
                 {},
@@ -269,13 +287,8 @@ def test_build_project_config_prompts_pr_strategy_when_pr_mode_enabled(pr_mode: 
                 allow_editor_empty=True,
             )
 
-    select_mock.assert_called_once_with(
-        "PR strategy",
-        config.pr_strategy.PR_STRATEGY_VALUES,
-        "sequential",
-    )
     assert payload.branch.pr_mode == pr_mode
-    assert payload.branch.pr_strategy == "parallel"
+    assert payload.branch.pr_strategy == "sequential"
 
 
 def test_derive_beads_prefix_seed_for_tuber_service() -> None:

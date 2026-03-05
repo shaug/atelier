@@ -37,8 +37,8 @@ class BranchConfig(BaseModel):
         pr_mode: Pull request mode (none|draft|ready).
         history: History policy (manual|squash|merge|rebase).
         squash_message: Squash commit message policy (deterministic|agent).
-        pr_strategy: PR creation strategy
-            (sequential|on-ready|on-parent-approved|parallel).
+        pr_strategy: PR creation strategy. When ``pr_mode`` is ``draft`` or
+            ``ready``, this is normalized to ``sequential``.
 
     Example:
         >>> BranchConfig(prefix="scott/", pr_mode="none", history="rebase")
@@ -131,6 +131,13 @@ class BranchConfig(BaseModel):
         raise ValueError(
             "squash_message must be one of: " + ", ".join(BRANCH_SQUASH_MESSAGE_VALUES)
         )
+
+    @model_validator(mode="after")
+    def enforce_sequential_pr_strategy_when_pr_enabled(self) -> BranchConfig:
+        """Normalize PR-enabled projects to sequential PR strategy."""
+        if self.pr_mode == "none" or self.pr_strategy == PR_STRATEGY_DEFAULT:
+            return self
+        return self.model_copy(update={"pr_strategy": PR_STRATEGY_DEFAULT})
 
     @property
     def pr(self) -> bool:
