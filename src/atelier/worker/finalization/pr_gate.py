@@ -9,7 +9,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Iterator
 
-from ... import beads, changesets, dependency_lineage, exec, git, pr_strategy, prs
+from ... import beads, changesets, dependency_lineage, exec, git, lifecycle, prs
 from ... import log as atelier_log
 from .. import integration as worker_integration
 from ..models import FinalizeResult
@@ -21,6 +21,15 @@ class PrGateResult:
 
     finalize_result: FinalizeResult
     detail: str | None = None
+
+
+@dataclass(frozen=True)
+class PrCreationDecision:
+    """Decision for whether a PR may be created under sequential policy."""
+
+    parent_state: str | None
+    allow_pr: bool
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -64,6 +73,9 @@ _STACK_INTEGRITY_REMEDIATIONS: dict[str, str] = {
         "Wait until every declared dependency shows integrated evidence, then rerun finalize."
     ),
 }
+_ACTIVE_EPIC_PR_LIFECYCLE_STATES = frozenset(
+    {"pushed", "draft-pr", "pr-open", "in-review", "approved"}
+)
 
 
 def _remediation_for_stack_reason(reason: str) -> str:
@@ -93,6 +105,162 @@ def _normalize_branch(value: object) -> str | None:
     if not cleaned or cleaned.lower() == "null":
         return None
     return cleaned
+
+
+def _normalize_issue_id(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _is_epic_issue(*, issue: dict[str, object], beads_root: Path) -> bool:
+    labels = lifecycle.normalized_labels(issue.get("labels"))
+    if beads.has_issue_label(labels, "epic", beads_root=beads_root):
+        return True
+    issue_type = lifecycle.issue_payload_type(issue)
+    return isinstance(issue_type, str) and issue_type.strip().lower() == "epic"
+
+
+def _resolve_epic_scope_id(
+    issue: dict[str, object],
+    *,
+    repo_root: Path,
+    beads_root: Path | None,
+) -> str | None:
+    if beads_root is None:
+        return None
+    current_issue = issue
+    current_id = _normalize_issue_id(current_issue.get("id"))
+    if not current_id:
+        return None
+    visited: set[str] = set()
+    while True:
+        if current_id in visited:
+            return None
+        visited.add(current_id)
+        if _is_epic_issue(issue=current_issue, beads_root=beads_root):
+            return current_id
+        try:
+            boundary = beads.parse_issue_boundary(
+                current_issue, source="pr_gate:resolve_epic_scope"
+            )
+        except ValueError:
+            return None
+        parent_id = _normalize_issue_id(boundary.parent_id)
+        if not parent_id:
+            return current_id
+        try:
+            parent_issues = beads.run_bd_json(
+                ["show", parent_id],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+        except Exception as exc:  # pragma: no cover - defensive boundary
+            atelier_log.warning(
+                f"changeset={current_id} failed to resolve epic scope via {parent_id}: {exc}"
+            )
+            return parent_id
+        if not parent_issues:
+            return parent_id
+        current_issue = parent_issues[0]
+        current_id = parent_id
+
+
+def _sequential_pr_creation_decision(*, parent_state: str | None) -> PrCreationDecision:
+    parent_state_normalized = None
+    if isinstance(parent_state, str):
+        parent_state_normalized = parent_state.strip().lower() or None
+
+    if parent_state_normalized is None:
+        return PrCreationDecision(
+            parent_state=None,
+            allow_pr=True,
+            reason="no-parent",
+        )
+    if lifecycle.is_integrated_review_state(parent_state_normalized):
+        return PrCreationDecision(
+            parent_state=parent_state_normalized,
+            allow_pr=True,
+            reason=f"parent:{parent_state_normalized}",
+        )
+    return PrCreationDecision(
+        parent_state=parent_state_normalized,
+        allow_pr=False,
+        reason=f"blocked:{parent_state_normalized}",
+    )
+
+
+def _changeset_lifecycle_state(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+    lookup_pr_payload: Callable[..., dict[str, object] | None],
+) -> str | None:
+    description = issue.get("description")
+    description_text = description if isinstance(description, str) else ""
+    fields = beads.parse_description_fields(description_text)
+    work_branch = _normalize_branch(fields.get("changeset.work_branch"))
+    if repo_slug and work_branch:
+        pushed = git.git_ref_exists(
+            repo_root,
+            f"refs/remotes/origin/{work_branch}",
+            git_path=git_path,
+        )
+        payload = lookup_pr_payload(repo_slug, work_branch)
+        review_requested = prs.has_review_requests(payload)
+        state = prs.lifecycle_state(payload, pushed=pushed, review_requested=review_requested)
+        if state:
+            return state
+    review = changesets.parse_review_metadata(description_text)
+    return lifecycle.normalize_review_state(review.pr_state)
+
+
+def _active_epic_sibling_state(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+    beads_root: Path | None,
+    lookup_pr_payload: Callable[..., dict[str, object] | None],
+) -> tuple[str, str] | None:
+    if beads_root is None:
+        return None
+    current_id = _normalize_issue_id(issue.get("id"))
+    if not current_id:
+        return None
+    epic_id = _resolve_epic_scope_id(issue, repo_root=repo_root, beads_root=beads_root)
+    if not epic_id:
+        return None
+    try:
+        siblings = beads.list_descendant_changesets(
+            epic_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensive boundary
+        atelier_log.warning(
+            f"changeset={current_id} failed to evaluate sibling PR gate under {epic_id}: {exc}"
+        )
+        return None
+    for sibling in siblings:
+        sibling_id = _normalize_issue_id(sibling.get("id"))
+        if not sibling_id or sibling_id == current_id:
+            continue
+        sibling_state = _changeset_lifecycle_state(
+            sibling,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            lookup_pr_payload=lookup_pr_payload,
+        )
+        if sibling_state in _ACTIVE_EPIC_PR_LIFECYCLE_STATES:
+            return sibling_id, sibling_state
+    return None
 
 
 def _dependency_integrated(
@@ -150,7 +318,6 @@ def sequential_stack_integrity_preflight(
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
-    branch_pr_strategy: object,
     beads_root: Path | None = None,
     lookup_pr_payload: Callable[..., dict[str, object] | None],
     lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]]
@@ -159,10 +326,6 @@ def sequential_stack_integrity_preflight(
     reconcile_parent_review_state: Callable[..., None] | None = None,
 ) -> StackIntegrityPreflightResult:
     """Validate sequential parent-child PR integrity for dependency stacks."""
-    normalized_strategy = pr_strategy.normalize_pr_strategy(branch_pr_strategy)
-    if normalized_strategy != "sequential":
-        return StackIntegrityPreflightResult(ok=True)
-
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     issue_cache: dict[str, dict[str, object] | None] = {}
@@ -440,20 +603,17 @@ def changeset_pr_creation_decision(
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
-    branch_pr_strategy: object,
     beads_root: Path | None = None,
     lookup_pr_payload: Callable[..., dict[str, object] | None],
     lookup_pr_payload_diagnostic: Callable[..., tuple[dict[str, object] | None, str | None]]
     | None = None,
     lookup_dependency_issue: Callable[[str], dict[str, object] | None] | None = None,
-) -> pr_strategy.PrStrategyDecision:
-    normalized_strategy = pr_strategy.normalize_pr_strategy(branch_pr_strategy)
+) -> PrCreationDecision:
     preflight = sequential_stack_integrity_preflight(
         issue,
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
-        branch_pr_strategy=normalized_strategy,
         beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
         lookup_pr_payload_diagnostic=lookup_pr_payload_diagnostic,
@@ -461,8 +621,7 @@ def changeset_pr_creation_decision(
     )
     if not preflight.ok:
         reason_suffix = preflight.reason or "dependency-parent-unresolved"
-        return pr_strategy.PrStrategyDecision(
-            strategy=normalized_strategy,
+        return PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason=f"blocked:{reason_suffix}",
@@ -489,32 +648,24 @@ def changeset_pr_creation_decision(
         root_branch=fields.get("changeset.root_branch"),
         lookup_issue=lookup_dependency_issue_local,
     )
-    if (
-        normalized_strategy == "sequential"
-        and preflight.dependencies_integrated
-        and (lineage.blocked or not lineage.dependency_parent_branch)
+    if preflight.dependencies_integrated and (
+        lineage.blocked or not lineage.dependency_parent_branch
     ):
-        return pr_strategy.pr_strategy_decision(normalized_strategy, parent_state=None)
-    if normalized_strategy == "sequential" and lineage.blocked:
+        return _sequential_pr_creation_decision(parent_state=None)
+    if lineage.blocked:
         reason_suffix = lineage.blocker_reason or "dependency-parent-unresolved"
         if lineage.diagnostics:
             reason_suffix = f"{reason_suffix} ({lineage.diagnostics[0]})"
-        return pr_strategy.PrStrategyDecision(
-            strategy=normalized_strategy,
+        return PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason=f"blocked:{reason_suffix}",
         )
-    if (
-        normalized_strategy == "sequential"
-        and lineage.dependency_ids
-        and not lineage.dependency_parent_branch
-    ):
+    if lineage.dependency_ids and not lineage.dependency_parent_branch:
         reason_suffix = "dependency-parent-state-unavailable"
         if lineage.diagnostics:
             reason_suffix = f"{reason_suffix} ({lineage.diagnostics[0]})"
-        return pr_strategy.PrStrategyDecision(
-            strategy=normalized_strategy,
+        return PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason=f"blocked:{reason_suffix}",
@@ -529,14 +680,36 @@ def changeset_pr_creation_decision(
         lookup_pr_payload=lookup_pr_payload,
         lookup_dependency_issue=lookup_dependency_issue,
     )
-    if normalized_strategy == "sequential" and lineage.dependency_ids and parent_state is None:
-        return pr_strategy.PrStrategyDecision(
-            strategy=normalized_strategy,
+    if lineage.dependency_ids and parent_state is None:
+        return PrCreationDecision(
             parent_state=None,
             allow_pr=False,
             reason="blocked:dependency-parent-state-unavailable",
         )
-    return pr_strategy.pr_strategy_decision(normalized_strategy, parent_state=parent_state)
+    decision = _sequential_pr_creation_decision(parent_state=parent_state)
+    if decision.allow_pr and decision.reason == "no-parent":
+        active_sibling = _active_epic_sibling_state(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            beads_root=beads_root,
+            lookup_pr_payload=lookup_pr_payload,
+        )
+        if active_sibling is not None:
+            sibling_id, sibling_state = active_sibling
+            issue_id = _normalize_issue_id(issue.get("id")) or "unknown-changeset"
+            atelier_log.info(
+                "changeset="
+                f"{issue_id} blocked by active sibling PR lifecycle "
+                f"{sibling_id}:{sibling_state}"
+            )
+            return PrCreationDecision(
+                parent_state=None,
+                allow_pr=False,
+                reason="blocked:epic-pr-in-flight",
+            )
+    return decision
 
 
 def set_changeset_review_pending_state(
@@ -575,32 +748,19 @@ def attempt_create_pr(
     issue: dict[str, object],
     work_branch: str,
     is_draft: bool,
-    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
     changeset_base_branch: Callable[..., str | None],
     render_changeset_pr_body: Callable[[dict[str, object]], str],
 ) -> tuple[bool, str]:
-    try:
-        base_branch = changeset_base_branch(
-            issue,
-            branch_pr_strategy=branch_pr_strategy,
-            repo_slug=repo_slug,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            git_path=git_path,
-        )
-    except TypeError as exc:
-        if "branch_pr_strategy" not in str(exc):
-            raise
-        base_branch = changeset_base_branch(
-            issue,
-            repo_slug=repo_slug,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            git_path=git_path,
-        )
+    base_branch = changeset_base_branch(
+        issue,
+        repo_slug=repo_slug,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        git_path=git_path,
+    )
     if not base_branch:
         return False, "missing PR base branch metadata"
     title = str(issue.get("title") or "").strip() or work_branch
@@ -640,7 +800,6 @@ def attempt_create_draft_pr(
     repo_slug: str,
     issue: dict[str, object],
     work_branch: str,
-    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
@@ -653,7 +812,6 @@ def attempt_create_draft_pr(
         issue=issue,
         work_branch=work_branch,
         is_draft=True,
-        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         repo_root=repo_root,
         git_path=git_path,
@@ -681,7 +839,6 @@ def handle_pushed_without_pr(
     repo_slug: str | None,
     repo_root: Path,
     beads_root: Path,
-    branch_pr_strategy: object,
     git_path: str | None,
     create_as_draft: bool,
     create_detail_prefix: str | None = None,
@@ -701,7 +858,6 @@ def handle_pushed_without_pr(
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
-        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
     )
@@ -741,7 +897,6 @@ def handle_pushed_without_pr(
                 issue=issue,
                 work_branch=work_branch,
                 is_draft=create_as_draft,
-                branch_pr_strategy=branch_pr_strategy,
                 beads_root=beads_root,
                 repo_root=repo_root,
                 git_path=git_path,
@@ -844,7 +999,7 @@ def handle_pushed_without_pr(
     )
     body = (
         "Changeset branch is pushed but no PR exists where policy allows PR "
-        f"creation (strategy={decision.strategy}, reason={decision.reason})."
+        f"creation (reason={decision.reason})."
     )
     if create_detail:
         body = f"{body}\nPR creation attempt failed: {create_detail}"
@@ -868,7 +1023,7 @@ def handle_pushed_without_pr(
     atelier_log.warning(
         "changeset="
         f"{changeset_id} finalize stopped reason={failure_reason} "
-        f"strategy={decision.strategy} detail={create_detail or 'n/a'}"
+        f"detail={create_detail or 'n/a'}"
     )
     return PrGateResult(
         finalize_result=FinalizeResult(continue_running=False, reason=failure_reason),

@@ -15,7 +15,6 @@ from .. import (
     exec,
     git,
     lifecycle,
-    pr_strategy,
     prs,
 )
 from ..io import say
@@ -499,7 +498,6 @@ def _dependencies_integrated(
 def changeset_base_branch(
     issue: dict[str, object],
     *,
-    branch_pr_strategy: object | None = None,
     repo_slug: str | None = None,
     beads_root: Path | None = None,
     repo_root: Path,
@@ -518,6 +516,7 @@ def changeset_base_branch(
     Returns:
         Function result.
     """
+    del repo_slug, lookup_pr_payload_fn
     description = issue.get("description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     root_branch = _normalize_branch(changeset_root_branch(issue))
@@ -528,7 +527,6 @@ def changeset_base_branch(
         repo_root=repo_root,
     )
     parent_branch = _normalize_branch(lineage.effective_parent_branch)
-    raw_parent_branch = parent_branch
     workspace_parent_branch = _resolve_workspace_parent_branch(
         issue,
         root_branch=root_branch,
@@ -539,217 +537,48 @@ def changeset_base_branch(
     )
     if workspace_parent_branch and root_branch and workspace_parent_branch == root_branch:
         workspace_parent_branch = ""
-    default_parent_branch = ""
-    if (
-        not lineage.blocked
-        and not workspace_parent_branch
-        and (not parent_branch or (root_branch and parent_branch == root_branch))
-    ):
-        default_parent_branch = _resolve_non_root_default_branch(
+
+    integration_parent_branch = workspace_parent_branch
+    if not integration_parent_branch:
+        integration_parent_branch = _resolve_non_root_default_branch(
             root_branch=root_branch,
             repo_root=repo_root,
             git_path=git_path,
         )
-    integration_parent_branch = workspace_parent_branch or default_parent_branch
-    normalized_strategy = (
-        pr_strategy.normalize_pr_strategy(branch_pr_strategy)
-        if branch_pr_strategy is not None
-        else None
-    )
-    if normalized_strategy == "sequential":
-        if not integration_parent_branch:
-            integration_parent_branch = _resolve_non_root_default_branch(
-                root_branch=root_branch,
-                repo_root=repo_root,
-                git_path=git_path,
-            )
-        if integration_parent_branch:
-            changeset_id = issue.get("id")
-            if (
-                update_metadata
-                and beads_root is not None
-                and isinstance(changeset_id, str)
-                and changeset_id
-            ):
-                root_base = (
-                    git.git_rev_parse(repo_root, root_branch, git_path=git_path)
-                    if root_branch
-                    else None
-                )
-                parent_base = git.git_rev_parse(
-                    repo_root,
-                    integration_parent_branch,
-                    git_path=git_path,
-                )
-                beads.update_changeset_branch_metadata(
-                    changeset_id,
-                    root_branch=root_branch,
-                    parent_branch=integration_parent_branch,
-                    work_branch=changeset_work_branch(issue),
-                    root_base=root_base,
-                    parent_base=parent_base,
-                    beads_root=beads_root,
-                    cwd=repo_root,
-                    allow_override=True,
-                )
-            return integration_parent_branch
+    if not integration_parent_branch:
         if root_branch:
             return None
         return _resolve_non_root_default_branch(
             root_branch="", repo_root=repo_root, git_path=git_path
         )
-    if lineage.blocked:
-        if not (
-            lineage.dependency_ids
-            and integration_parent_branch
-            and _dependencies_integrated(
-                lineage.dependency_ids,
-                repo_slug=repo_slug,
-                beads_root=beads_root,
-                repo_root=repo_root,
-                git_path=git_path,
-                lookup_pr_payload_fn=lookup_pr_payload_fn,
-            )
-        ):
-            return None
-        changeset_id = issue.get("id")
-        if (
-            update_metadata
-            and beads_root is not None
-            and isinstance(changeset_id, str)
-            and changeset_id
-        ):
-            root_base = (
-                git.git_rev_parse(repo_root, root_branch, git_path=git_path)
-                if root_branch
-                else None
-            )
-            parent_base = git.git_rev_parse(
-                repo_root,
-                integration_parent_branch,
-                git_path=git_path,
-            )
-            beads.update_changeset_branch_metadata(
-                changeset_id,
-                root_branch=root_branch,
-                parent_branch=integration_parent_branch,
-                work_branch=changeset_work_branch(issue),
-                root_base=root_base,
-                parent_base=parent_base,
-                beads_root=beads_root,
-                cwd=repo_root,
-                allow_override=True,
-            )
-        return integration_parent_branch
+
+    changeset_id = issue.get("id")
     if (
         update_metadata
         and beads_root is not None
-        and lineage.used_dependency_parent
-        and lineage.dependency_parent_branch
+        and isinstance(changeset_id, str)
+        and changeset_id
     ):
-        changeset_id = issue.get("id")
-        if isinstance(changeset_id, str) and changeset_id:
-            root_base = (
-                git.git_rev_parse(repo_root, root_branch, git_path=git_path)
-                if root_branch
-                else None
-            )
-            parent_base = git.git_rev_parse(
-                repo_root, lineage.dependency_parent_branch, git_path=git_path
-            )
-            beads.update_changeset_branch_metadata(
-                changeset_id,
-                root_branch=root_branch,
-                parent_branch=lineage.dependency_parent_branch,
-                work_branch=changeset_work_branch(issue),
-                root_base=root_base,
-                parent_base=parent_base,
-                beads_root=beads_root,
-                cwd=repo_root,
-                allow_override=True,
-            )
-    collapsed_parent_normalized = bool(
-        raw_parent_branch
-        and root_branch
-        and raw_parent_branch == root_branch
-        and integration_parent_branch
-    )
-    if collapsed_parent_normalized and integration_parent_branch:
-        parent_branch = integration_parent_branch
-        changeset_id = issue.get("id")
-        if (
-            update_metadata
-            and beads_root is not None
-            and isinstance(changeset_id, str)
-            and changeset_id
-        ):
-            root_base = (
-                git.git_rev_parse(repo_root, root_branch, git_path=git_path)
-                if root_branch
-                else None
-            )
-            parent_base = git.git_rev_parse(
-                repo_root,
-                integration_parent_branch,
-                git_path=git_path,
-            )
-            beads.update_changeset_branch_metadata(
-                changeset_id,
-                root_branch=root_branch,
-                parent_branch=integration_parent_branch,
-                work_branch=changeset_work_branch(issue),
-                root_base=root_base,
-                parent_base=parent_base,
-                beads_root=beads_root,
-                cwd=repo_root,
-                allow_override=True,
-            )
-
-    if parent_branch and integration_parent_branch and parent_branch != integration_parent_branch:
-        if _branch_integrated_into(
-            parent_branch,
+        root_base = (
+            git.git_rev_parse(repo_root, root_branch, git_path=git_path) if root_branch else None
+        )
+        parent_base = git.git_rev_parse(
+            repo_root,
             integration_parent_branch,
-            repo_root=repo_root,
             git_path=git_path,
-        ):
-            changeset_id = issue.get("id")
-            if (
-                update_metadata
-                and beads_root is not None
-                and isinstance(changeset_id, str)
-                and changeset_id
-            ):
-                root_base = (
-                    git.git_rev_parse(repo_root, root_branch, git_path=git_path)
-                    if root_branch
-                    else None
-                )
-                parent_base = git.git_rev_parse(
-                    repo_root,
-                    integration_parent_branch,
-                    git_path=git_path,
-                )
-                beads.update_changeset_branch_metadata(
-                    changeset_id,
-                    root_branch=root_branch,
-                    parent_branch=integration_parent_branch,
-                    work_branch=changeset_work_branch(issue),
-                    root_base=root_base,
-                    parent_base=parent_base,
-                    beads_root=beads_root,
-                    cwd=repo_root,
-                    allow_override=True,
-                )
-            return integration_parent_branch
-    if parent_branch:
-        if root_branch and parent_branch == root_branch:
-            return None
-        return parent_branch
-    if integration_parent_branch:
-        return integration_parent_branch
-    if root_branch:
-        return None
-    return _resolve_non_root_default_branch(root_branch="", repo_root=repo_root, git_path=git_path)
+        )
+        beads.update_changeset_branch_metadata(
+            changeset_id,
+            root_branch=root_branch,
+            parent_branch=integration_parent_branch,
+            work_branch=changeset_work_branch(issue),
+            root_base=root_base,
+            parent_base=parent_base,
+            beads_root=beads_root,
+            cwd=repo_root,
+            allow_override=True,
+        )
+    return integration_parent_branch
 
 
 def align_existing_pr_base(
@@ -761,7 +590,6 @@ def align_existing_pr_base(
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
-    branch_pr_strategy: object | None = None,
 ) -> tuple[bool, str | None]:
     """Align an existing PR base to the expected changeset parent lineage.
 
@@ -804,7 +632,6 @@ def align_existing_pr_base(
 
     expected_base = changeset_base_branch(
         issue,
-        branch_pr_strategy=branch_pr_strategy,
         repo_slug=repo_slug,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -953,7 +780,6 @@ def attempt_create_pr(
     issue: dict[str, object],
     work_branch: str,
     is_draft: bool,
-    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
@@ -969,7 +795,6 @@ def attempt_create_pr(
         issue: Value for `issue`.
         work_branch: Value for `work_branch`.
         is_draft: Whether to create a draft PR.
-        branch_pr_strategy: PR strategy used to resolve PR base policy.
         beads_root: Value for `beads_root`.
         repo_root: Value for `repo_root`.
         git_path: Value for `git_path`.
@@ -986,7 +811,6 @@ def attempt_create_pr(
         issue=issue,
         work_branch=work_branch,
         is_draft=is_draft,
-        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         repo_root=repo_root,
         git_path=git_path,
@@ -1006,7 +830,6 @@ def attempt_create_draft_pr(
     repo_slug: str,
     issue: dict[str, object],
     work_branch: str,
-    branch_pr_strategy: object = pr_strategy.PR_STRATEGY_DEFAULT,
     beads_root: Path,
     repo_root: Path,
     git_path: str | None,
@@ -1021,7 +844,6 @@ def attempt_create_draft_pr(
         repo_slug: Repository owner/name slug.
         issue: Changeset issue payload.
         work_branch: Work branch to open the PR from.
-        branch_pr_strategy: PR strategy used to resolve PR base policy.
         beads_root: Beads root path.
         repo_root: Repository root path.
         git_path: Optional git executable path override.
@@ -1038,7 +860,6 @@ def attempt_create_draft_pr(
         issue=issue,
         work_branch=work_branch,
         is_draft=True,
-        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         repo_root=repo_root,
         git_path=git_path,
@@ -1128,7 +949,6 @@ def handle_pushed_without_pr(
     repo_slug: str | None,
     repo_root: Path,
     beads_root: Path,
-    branch_pr_strategy: object,
     git_path: str | None,
     create_as_draft: bool = True,
     create_detail_prefix: str | None = None,
@@ -1142,7 +962,6 @@ def handle_pushed_without_pr(
         repo_slug: Value for `repo_slug`.
         repo_root: Value for `repo_root`.
         beads_root: Value for `beads_root`.
-        branch_pr_strategy: Value for `branch_pr_strategy`.
         git_path: Value for `git_path`.
         create_as_draft: Whether PR creation should use draft mode.
         create_detail_prefix: Value for `create_detail_prefix`.
@@ -1157,7 +976,6 @@ def handle_pushed_without_pr(
         repo_slug=repo_slug,
         repo_root=repo_root,
         beads_root=beads_root,
-        branch_pr_strategy=branch_pr_strategy,
         git_path=git_path,
         create_as_draft=create_as_draft,
         create_detail_prefix=create_detail_prefix,
@@ -1217,7 +1035,6 @@ def changeset_stack_integrity_preflight(
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
-    branch_pr_strategy: object,
     beads_root: Path | None = None,
 ) -> worker_pr_gate.StackIntegrityPreflightResult:
     """Run sequential stack-integrity preflight for a changeset issue.
@@ -1227,7 +1044,6 @@ def changeset_stack_integrity_preflight(
         repo_slug: Optional GitHub owner/repo slug.
         repo_root: Repository checkout path.
         git_path: Optional git executable override.
-        branch_pr_strategy: Configured PR strategy value.
         beads_root: Optional Beads root for dependency issue lookups.
 
     Returns:
@@ -1238,7 +1054,6 @@ def changeset_stack_integrity_preflight(
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
-        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
         lookup_pr_payload_diagnostic=lookup_pr_payload_diagnostic,
@@ -1254,8 +1069,7 @@ def changeset_stack_integrity_preflight(
             else None
         ),
     )
-    normalized_strategy = pr_strategy.normalize_pr_strategy(branch_pr_strategy)
-    if normalized_strategy != "sequential" or not preflight.ok:
+    if not preflight.ok:
         return preflight
 
     description = issue.get("description")
@@ -1290,7 +1104,6 @@ def changeset_stack_integrity_preflight(
     resolved_base_branch = _normalize_branch(
         changeset_base_branch(
             issue,
-            branch_pr_strategy=normalized_strategy,
             repo_slug=repo_slug,
             beads_root=beads_root,
             repo_root=repo_root,
@@ -1351,9 +1164,8 @@ def changeset_pr_creation_decision(
     repo_slug: str | None,
     repo_root: Path,
     git_path: str | None,
-    branch_pr_strategy: object,
     beads_root: Path | None = None,
-) -> pr_strategy.PrStrategyDecision:
+) -> worker_pr_gate.PrCreationDecision:
     """Changeset pr creation decision.
 
     Args:
@@ -1361,7 +1173,6 @@ def changeset_pr_creation_decision(
         repo_slug: Value for `repo_slug`.
         repo_root: Value for `repo_root`.
         git_path: Value for `git_path`.
-        branch_pr_strategy: Value for `branch_pr_strategy`.
         beads_root: Optional Beads root for dependency lookups.
 
     Returns:
@@ -1372,7 +1183,6 @@ def changeset_pr_creation_decision(
         repo_slug=repo_slug,
         repo_root=repo_root,
         git_path=git_path,
-        branch_pr_strategy=branch_pr_strategy,
         beads_root=beads_root,
         lookup_pr_payload=lookup_pr_payload,
     )
@@ -1389,7 +1199,6 @@ def recover_premature_merged_changeset(
     branch_pr_mode: BranchPrMode,
     branch_history: str,
     branch_squash_message: str,
-    branch_pr_strategy: pr_strategy.PrStrategy,
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
@@ -1412,7 +1221,6 @@ def recover_premature_merged_changeset(
         branch_pr_mode: Value for `branch_pr_mode`.
         branch_history: Value for `branch_history`.
         branch_squash_message: Value for `branch_squash_message`.
-        branch_pr_strategy: Value for `branch_pr_strategy`.
         repo_slug: Value for `repo_slug`.
         beads_root: Value for `beads_root`.
         repo_root: Value for `repo_root`.
@@ -1438,7 +1246,6 @@ def recover_premature_merged_changeset(
         branch_pr_mode=branch_pr_mode,
         branch_history=branch_history,
         branch_squash_message=branch_squash_message,
-        branch_pr_strategy=branch_pr_strategy,
         repo_slug=repo_slug,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -1465,7 +1272,6 @@ def changeset_waiting_on_review_or_signals(
     repo_slug: str | None,
     repo_root: Path,
     branch_pr: bool,
-    branch_pr_strategy: object,
     git_path: str | None,
     beads_root: Path | None = None,
 ) -> bool:
@@ -1476,7 +1282,6 @@ def changeset_waiting_on_review_or_signals(
         repo_slug: Value for `repo_slug`.
         repo_root: Value for `repo_root`.
         branch_pr: Value for `branch_pr`.
-        branch_pr_strategy: Value for `branch_pr_strategy`.
         git_path: Value for `git_path`.
         beads_root: Optional Beads root for dependency lookups.
 
@@ -1507,7 +1312,6 @@ def changeset_waiting_on_review_or_signals(
                 repo_slug=repo_slug,
                 repo_root=repo_root,
                 git_path=git_path,
-                branch_pr_strategy=branch_pr_strategy,
                 beads_root=beads_root,
             )
             return not decision.allow_pr
@@ -1523,7 +1327,6 @@ def changeset_waiting_on_review_or_signals(
                 repo_slug=repo_slug,
                 repo_root=repo_root,
                 git_path=git_path,
-                branch_pr_strategy=branch_pr_strategy,
                 beads_root=beads_root,
             )
             return not decision.allow_pr

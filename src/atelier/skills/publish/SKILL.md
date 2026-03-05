@@ -19,7 +19,6 @@ description: >-
 - root_branch: epic root branch (from bead metadata).
 - parent_branch: parent branch for the changeset (from bead metadata).
 - work_branch: changeset work branch (from bead metadata).
-- pr_strategy: project PR strategy (e.g., sequential).
 - required_checks: explicit commands from `repo/AGENTS.md`.
 - allow_check_failures: only if the user explicitly asks to ignore failures.
 
@@ -30,16 +29,11 @@ description: >-
    semantics, invariants, and recovery rules.
 1. Resolve publish settings from project config:
    - Use `branch.pr_mode`, `branch.history`, and the project default branch.
-1. Resolve changeset metadata (root/parent/work branches and PR strategy) from
-   bead descriptions or environment.
-1. Determine whether PR creation is allowed by the PR strategy:
-   - `sequential`: allow only when the parent PR state is `merged` or `closed`
-     (or when there is no parent PR).
-   - `on-ready`: allow when parent is not merely `pushed` (no parent,
-     draft/open/review/approved/merged/closed are allowed).
-   - `on-parent-approved`: allow only when parent is `approved`, `merged`, or
-     `closed` (or when there is no parent PR).
-   - `parallel`: allow immediately.
+1. Resolve changeset metadata (root/parent/work branches) from bead descriptions
+   or environment.
+1. Determine whether PR creation is allowed by the sequential policy:
+   - allow only when the parent PR state is `merged` or `closed` (or when there
+     is no parent PR).
    - If PR creation is blocked, record the reason and skip PR creation.
 1. Ensure a clean working tree before changes:
    - Run `scripts/ensure_clean_tree.sh <repo_path>`.
@@ -74,8 +68,8 @@ description: >-
      `deferred|open|in_progress|blocked|closed`.
    - `cs:*` lifecycle labels are not execution gates.
    - For PR projects:
-     - `pushed` without PR is only acceptable when PR strategy gates PR
-       creation.
+     - `pushed` without PR is only acceptable when the sequential PR gate blocks
+       PR creation.
      - Otherwise, the run is incomplete and must be reported as blocked/pending.
 1. Verify results using read-only commands and git:
    - `atelier status --format=json`
@@ -85,7 +79,7 @@ description: >-
 
 - Required checks succeeded (or explicit user override recorded).
 - Working tree is clean before and after mutations.
-- Branch/PR state matches the project config-derived plan and PR strategy.
+- Branch/PR state matches the project config-derived plan and sequential policy.
 - `changeset.integrated_sha` is present when integration/merge occurred.
 - Repo is clean after publish/persist.
 

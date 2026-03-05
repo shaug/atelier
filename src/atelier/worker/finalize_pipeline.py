@@ -11,7 +11,6 @@ from .. import beads, git, lifecycle, prs
 from .. import log as atelier_log
 from ..agents import AgentSpec
 from ..models import BranchPrMode
-from ..pr_strategy import PrStrategy
 from .models import FinalizeResult, PublishSignalDiagnostics
 
 Issue = dict[str, object]
@@ -314,7 +313,6 @@ class FinalizePipelineContext:
     repo_root: Path
     branch_pr: bool
     branch_pr_mode: BranchPrMode
-    branch_pr_strategy: PrStrategy
     branch_history: str
     branch_squash_message: str
     project_data_dir: Path | None

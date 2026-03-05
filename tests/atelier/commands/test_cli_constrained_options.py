@@ -50,6 +50,15 @@ def test_global_help_shows_log_level_choices() -> None:
     assert "--log-level                           TEXT" not in clean_output
 
 
+def test_init_help_hides_pr_strategy_flag() -> None:
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["init", "--help"], color=False, terminal_width=220)
+    clean_output = _strip_ansi(result.output)
+
+    assert result.exit_code == 0
+    assert "--branch-pr-strategy" not in clean_output
+
+
 def test_choice_flags_accept_case_insensitive_and_underscore_aliases() -> None:
     doctor_capture: dict[str, object] = {}
     work_capture: dict[str, object] = {}
@@ -100,7 +109,6 @@ def test_init_policy_choice_flags_normalize_to_canonical_values() -> None:
         captured["branch_pr_mode"] = getattr(args, "branch_pr_mode")
         captured["branch_history"] = getattr(args, "branch_history")
         captured["branch_squash_message"] = getattr(args, "branch_squash_message")
-        captured["branch_pr_strategy"] = getattr(args, "branch_pr_strategy")
 
     runner = CliRunner()
     with patch("atelier.cli.init_cmd.init_project", fake_init_project):
@@ -114,8 +122,6 @@ def test_init_policy_choice_flags_normalize_to_canonical_values() -> None:
                 "MERGE",
                 "--branch-squash-message",
                 "deterministic",
-                "--branch-pr-strategy",
-                "on_parent_approved",
                 "--yes",
             ],
             color=False,
@@ -126,5 +132,4 @@ def test_init_policy_choice_flags_normalize_to_canonical_values() -> None:
         "branch_pr_mode": "draft",
         "branch_history": "merge",
         "branch_squash_message": "deterministic",
-        "branch_pr_strategy": "on-parent-approved",
     }

@@ -20,7 +20,7 @@ from typing import cast
 
 from pydantic import BaseModel, ValidationError
 
-from . import __version__, agents, paths, pr_strategy
+from . import __version__, agents, paths
 from . import command as command_util
 from .editor import system_editor_default
 from .io import die, prompt, select
@@ -401,14 +401,6 @@ def normalize_branch_history(value: object, source: str) -> str:
     return normalized
 
 
-def normalize_pr_strategy(value: object, source: str) -> str:
-    """Normalize a PR strategy string or fail with a helpful error."""
-    try:
-        return pr_strategy.normalize_pr_strategy(value)
-    except ValueError:
-        die(f"{source} must be one of: " + ", ".join(pr_strategy.PR_STRATEGY_VALUES))
-
-
 def normalize_pr_mode(value: object, source: str) -> str:
     """Normalize a PR mode string or fail with a helpful error."""
     if isinstance(value, bool):
@@ -753,7 +745,6 @@ def user_config_missing_fields(payload: dict | None) -> list[str]:
         ("branch", "pr_mode"),
         ("branch", "history"),
         ("branch", "squash_message"),
-        ("branch", "pr_strategy"),
         ("agent", "default"),
         ("editor", "edit"),
         ("editor", "work"),
@@ -946,9 +937,6 @@ def load_installed_defaults(path: Path | None = None) -> ProjectConfig:
         branch = branch.model_copy(update={"history": default_config.branch.history})
     if not _path_has_value(payload, "branch", "squash_message"):
         branch = branch.model_copy(update={"squash_message": default_config.branch.squash_message})
-    if not _path_has_value(payload, "branch", "pr_strategy"):
-        branch = branch.model_copy(update={"pr_strategy": default_config.branch.pr_strategy})
-
     agent = parsed.agent
     if not _path_has_value(payload, "agent", "default"):
         agent = agent.model_copy(update={"default": default_config.agent.default})
@@ -1132,21 +1120,6 @@ def build_project_config(
     else:
         branch_squash_message = branch_squash_message_default
 
-    branch_pr_strategy_default = branch_config.pr_strategy
-    branch_pr_strategy_arg = read_arg(args, "branch_pr_strategy")
-    prompt_pr_strategy = branch_pr_mode != "none"
-    if branch_pr_strategy_arg is not None:
-        branch_pr_strategy = normalize_pr_strategy(branch_pr_strategy_arg, "--branch-pr-strategy")
-    elif prompt_pr_strategy and should_prompt("branch", "pr_strategy"):
-        branch_pr_strategy_input = select(
-            "PR strategy",
-            pr_strategy.PR_STRATEGY_VALUES,
-            branch_pr_strategy_default,
-        )
-        branch_pr_strategy = normalize_pr_strategy(branch_pr_strategy_input, "branch.pr_strategy")
-    else:
-        branch_pr_strategy = branch_pr_strategy_default
-
     available_agents = agents.available_agent_names()
     if not available_agents:
         die("no supported agent CLIs found on PATH; install at least one agent to use Atelier")
@@ -1253,7 +1226,6 @@ def build_project_config(
             "pr_mode": branch_pr_mode,
             "history": branch_history,
             "squash_message": branch_squash_message,
-            "pr_strategy": branch_pr_strategy,
         }
     )
     upgrade_policy = cast(UpgradePolicy, resolve_upgrade_policy(atelier_upgrade))

@@ -156,7 +156,6 @@ def test_status_json_summary() -> None:
         epic_payloads = {item["id"]: item for item in payload["epics"]}
         epic = epic_payloads["epic-1"]
         assert epic["root_branch"] == "alpha"
-        assert epic["pr_strategy"] == "sequential"
         assert epic["hooked_by"] == ["agent-1"]
         assert epic["changesets"]["total"] == 3
         assert epic["changesets"]["ready"] == 1
@@ -460,7 +459,6 @@ def test_build_changeset_details_scopes_pr_payload_cache_by_repo_slug() -> None:
                 beads_root=root / ".beads",
                 repo_root=root,
                 repo_slug="org/repo",
-                pr_strategy_value="sequential",
             )
 
     assert len(details) == 1

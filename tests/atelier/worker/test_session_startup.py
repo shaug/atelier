@@ -29,7 +29,7 @@ class FakeStartupService:
         )
         self._changeset_waiting_on_review_or_signals = overrides.pop(
             "changeset_waiting_on_review_or_signals",
-            lambda _issue, repo_slug, branch_pr, branch_pr_strategy, git_path: False,
+            lambda _issue, repo_slug, branch_pr, git_path: False,
         )
         self._mark_changeset_merged = overrides.pop(
             "mark_changeset_merged", lambda _changeset_id: None
@@ -100,7 +100,6 @@ class FakeStartupService:
         epic_id: str,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: object,
         git_path: str | None,
         resume_review: bool,
     ) -> dict[str, object] | None:
@@ -108,7 +107,6 @@ class FakeStartupService:
             epic_id=epic_id,
             repo_slug=repo_slug,
             branch_pr=branch_pr,
-            branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
             resume_review=resume_review,
         )
@@ -144,14 +142,12 @@ class FakeStartupService:
         *,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: object,
         git_path: str | None,
     ) -> bool:
         return self._changeset_waiting_on_review_or_signals(
             issue,
             repo_slug=repo_slug,
             branch_pr=branch_pr,
-            branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
         )
 
@@ -269,7 +265,6 @@ def _startup_context_service(
         "assume_yes": False,
         "repo_slug": None,
         "branch_pr": False,
-        "branch_pr_strategy": "on-ready",
         "git_path": "git",
         "worker_queue_name": "worker",
         "select": "oldest-feedback",

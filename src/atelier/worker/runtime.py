@@ -15,7 +15,6 @@ from .. import log as atelier_log
 from .. import root_branch as root_branch_module
 from ..config import ProjectConfig
 from ..models import BranchHistory, BranchPrMode, BranchSquashMessage
-from ..pr_strategy import PrStrategy
 from ..work_feedback import ReviewFeedbackSnapshot
 from . import work_command_helpers as worker_work
 from .models import (
@@ -228,7 +227,6 @@ class WorkerLifecycleAdapter:
         repo_root: Path,
         branch_pr: bool,
         branch_pr_mode: BranchPrMode,
-        branch_pr_strategy: PrStrategy,
         branch_history: BranchHistory,
         branch_squash_message: BranchSquashMessage,
         project_data_dir: Path | None,
@@ -249,7 +247,6 @@ class WorkerLifecycleAdapter:
             repo_root=repo_root,
             branch_pr=branch_pr,
             branch_pr_mode=branch_pr_mode,
-            branch_pr_strategy=branch_pr_strategy,
             branch_history=branch_history,
             branch_squash_message=branch_squash_message,
             project_data_dir=project_data_dir,
@@ -285,7 +282,6 @@ class WorkerLifecycleAdapter:
         repo_root: Path,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: PrStrategy,
         git_path: str | None,
         resume_review: bool,
     ) -> Issue | None:
@@ -295,7 +291,6 @@ class WorkerLifecycleAdapter:
             repo_root=repo_root,
             repo_slug=repo_slug,
             branch_pr=branch_pr,
-            branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
             resume_review=resume_review,
         )

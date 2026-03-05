@@ -49,10 +49,9 @@ class FakeNextChangesetService:
         *,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: object,
         git_path: str | None,
     ) -> bool:
-        del repo_slug, branch_pr, branch_pr_strategy, git_path
+        del repo_slug, branch_pr, git_path
         issue_id = issue.get("id")
         if not isinstance(issue_id, str):
             return False
@@ -153,12 +152,11 @@ def _changeset(
     return payload
 
 
-def _context(*, strategy: str = "sequential") -> startup.NextChangesetContext:
+def _context() -> startup.NextChangesetContext:
     return startup.NextChangesetContext(
         epic_id="at-epic",
         repo_slug="org/repo",
         branch_pr=True,
-        branch_pr_strategy=strategy,
         git_path="git",
     )
 
@@ -308,7 +306,6 @@ def test_next_changeset_service_resume_review_selects_waiting_handoff() -> None:
         epic_id="at-epic",
         repo_slug="org/repo",
         branch_pr=True,
-        branch_pr_strategy="sequential",
         git_path="git",
         resume_review=True,
     )
@@ -332,7 +329,6 @@ def test_next_changeset_service_resume_review_requires_handoff_signal() -> None:
         epic_id="at-epic",
         repo_slug="org/repo",
         branch_pr=True,
-        branch_pr_strategy="sequential",
         git_path="git",
         resume_review=True,
     )
@@ -513,9 +509,7 @@ def test_next_changeset_service_sequential_blocks_closed_dependency_without_merg
         descendants=[blocker, downstream],
     )
 
-    selected = startup.next_changeset_service(
-        context=_context(strategy="sequential"), service=service
-    )
+    selected = startup.next_changeset_service(context=_context(), service=service)
 
     assert selected is None
 
@@ -535,9 +529,7 @@ def test_next_changeset_service_sequential_accepts_closed_dependency_with_merged
         descendants=[blocker, downstream],
     )
 
-    selected = startup.next_changeset_service(
-        context=_context(strategy="sequential"), service=service
-    )
+    selected = startup.next_changeset_service(context=_context(), service=service)
 
     assert selected is not None
     assert selected["id"] == "at-epic.2"
@@ -562,9 +554,7 @@ def test_next_changeset_service_sequential_accepts_closed_dependency_with_merged
         descendants=[blocker, downstream],
     )
 
-    selected = startup.next_changeset_service(
-        context=_context(strategy="sequential"), service=service
-    )
+    selected = startup.next_changeset_service(context=_context(), service=service)
 
     assert selected is not None
     assert selected["id"] == "at-epic.2"
@@ -585,15 +575,13 @@ def test_next_changeset_service_sequential_allows_closed_non_leaf_dependency() -
         work_children_by_id={"at-epic.1": [_changeset("at-epic.1.1", status="closed")]},
     )
 
-    selected = startup.next_changeset_service(
-        context=_context(strategy="sequential"), service=service
-    )
+    selected = startup.next_changeset_service(context=_context(), service=service)
 
     assert selected is not None
     assert selected["id"] == "at-epic.2"
 
 
-def test_next_changeset_service_non_sequential_keeps_closed_dependency_terminal() -> None:
+def test_next_changeset_service_sequential_blocks_closed_dependency_without_integration() -> None:
     blocker = _changeset("at-epic.1", status="closed", work_branch="feat/at-epic.1")
     downstream = _changeset(
         "at-epic.2",
@@ -607,12 +595,9 @@ def test_next_changeset_service_non_sequential_keeps_closed_dependency_terminal(
         descendants=[blocker, downstream],
     )
 
-    selected = startup.next_changeset_service(
-        context=_context(strategy="on-ready"), service=service
-    )
+    selected = startup.next_changeset_service(context=_context(), service=service)
 
-    assert selected is not None
-    assert selected["id"] == "at-epic.2"
+    assert selected is None
 
 
 def test_next_changeset_service_rehydrates_sparse_ready_candidates() -> None:

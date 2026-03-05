@@ -8,7 +8,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import agents
-from .pr_strategy import PR_STRATEGY_DEFAULT, PR_STRATEGY_VALUES, PrStrategy
 
 BRANCH_HISTORY_VALUES = ("manual", "squash", "merge", "rebase")
 BranchHistory = Literal["manual", "squash", "merge", "rebase"]
@@ -37,8 +36,6 @@ class BranchConfig(BaseModel):
         pr_mode: Pull request mode (none|draft|ready).
         history: History policy (manual|squash|merge|rebase).
         squash_message: Squash commit message policy (deterministic|agent).
-        pr_strategy: PR creation strategy
-            (sequential|on-ready|on-parent-approved|parallel).
 
     Example:
         >>> BranchConfig(prefix="scott/", pr_mode="none", history="rebase")
@@ -51,7 +48,6 @@ class BranchConfig(BaseModel):
     pr_mode: BranchPrMode = "none"
     history: BranchHistory = "manual"
     squash_message: BranchSquashMessage = "deterministic"
-    pr_strategy: PrStrategy = PR_STRATEGY_DEFAULT
 
     @model_validator(mode="before")
     @classmethod
@@ -59,6 +55,7 @@ class BranchConfig(BaseModel):
         if not isinstance(value, dict):
             return value
         payload = dict(value)
+        payload.pop("pr_strategy", None)
         legacy_pr = payload.pop("pr", None)
         if "pr_mode" in payload and payload.get("pr_mode") is not None:
             return payload
@@ -103,19 +100,6 @@ class BranchConfig(BaseModel):
             if normalized in BRANCH_PR_MODE_VALUES:
                 return normalized
         raise ValueError("pr_mode must be one of: " + ", ".join(BRANCH_PR_MODE_VALUES))
-
-    @field_validator("pr_strategy", mode="before")
-    @classmethod
-    def normalize_pr_strategy(cls, value: object) -> object:
-        if value is None:
-            return PR_STRATEGY_DEFAULT
-        if isinstance(value, str):
-            normalized = value.strip().lower().replace("_", "-")
-            if not normalized:
-                return PR_STRATEGY_DEFAULT
-            if normalized in PR_STRATEGY_VALUES:
-                return normalized
-        raise ValueError("pr_strategy must be one of: " + ", ".join(PR_STRATEGY_VALUES))
 
     @field_validator("squash_message", mode="before")
     @classmethod

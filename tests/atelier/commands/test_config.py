@@ -221,9 +221,7 @@ class TestConfigCommand:
             original_cwd = Path.cwd()
             os.chdir(root)
             try:
-                responses = iter(
-                    ["prefs/", "at", "draft", "merge", "", "codex", "code -w", "code", ""]
-                )
+                responses = iter(["prefs/", "at", "draft", "merge", "codex", "code -w", "code", ""])
                 with (
                     patch("builtins.input", lambda _: next(responses)),
                     patch("atelier.paths.atelier_data_dir", return_value=data_dir),

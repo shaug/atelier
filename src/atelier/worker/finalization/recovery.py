@@ -9,7 +9,6 @@ from ... import git, prs
 from ... import log as atelier_log
 from ...agents import AgentSpec
 from ...models import BranchPrMode
-from ...pr_strategy import PrStrategy
 from ..models import FinalizeResult
 
 
@@ -24,7 +23,6 @@ def recover_premature_merged_changeset(
     branch_pr_mode: BranchPrMode,
     branch_history: str,
     branch_squash_message: str,
-    branch_pr_strategy: PrStrategy,
     repo_slug: str | None,
     beads_root: Path,
     repo_root: Path,
@@ -147,7 +145,6 @@ def recover_premature_merged_changeset(
             repo_slug=repo_slug,
             repo_root=repo_root,
             beads_root=beads_root,
-            branch_pr_strategy=branch_pr_strategy,
             git_path=git_path,
             create_as_draft=branch_pr_mode == "draft",
         )

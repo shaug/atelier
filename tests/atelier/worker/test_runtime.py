@@ -674,7 +674,6 @@ def test_next_changeset_service_passes_beads_root_to_review_waiting_gate() -> No
             issue,
             repo_slug="org/repo",
             branch_pr=True,
-            branch_pr_strategy="sequential",
             git_path="git",
         )
 
@@ -684,7 +683,6 @@ def test_next_changeset_service_passes_beads_root_to_review_waiting_gate() -> No
         repo_slug="org/repo",
         repo_root=Path("/repo"),
         branch_pr=True,
-        branch_pr_strategy="sequential",
         git_path="git",
         beads_root=Path("/beads"),
     )

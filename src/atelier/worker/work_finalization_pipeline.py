@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
-from .. import agents, pr_strategy
+from .. import agents
 from ..models import BranchPrMode
 from ..worker import finalize_pipeline as worker_finalize_pipeline
 from ..worker.models import FinalizeResult, PublishSignalDiagnostics
@@ -99,7 +99,6 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
             branch_pr_mode=context.branch_pr_mode,
             branch_history=context.branch_history,
             branch_squash_message=context.branch_squash_message,
-            branch_pr_strategy=context.branch_pr_strategy,
             repo_slug=context.repo_slug,
             beads_root=self._beads_root,
             repo_root=self._repo_root,
@@ -171,7 +170,6 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
             repo_slug=context.repo_slug,
             repo_root=self._repo_root,
             git_path=context.git_path,
-            branch_pr_strategy=context.branch_pr_strategy,
             beads_root=self._beads_root,
         )
         return worker_finalize_pipeline.StackIntegrityCheck(
@@ -193,7 +191,6 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
             repo_slug=context.repo_slug,
             repo_root=self._repo_root,
             branch_pr=context.branch_pr,
-            branch_pr_strategy=context.branch_pr_strategy,
             git_path=context.git_path,
             beads_root=self._beads_root,
         )
@@ -223,7 +220,6 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
             beads_root=self._beads_root,
             repo_root=self._repo_root,
             git_path=context.git_path,
-            branch_pr_strategy=context.branch_pr_strategy,
         )
 
     def update_changeset_review_from_pr(
@@ -283,7 +279,6 @@ class _FinalizePipelineService(worker_finalize_pipeline.FinalizePipelineService)
             repo_slug=context.repo_slug,
             repo_root=self._repo_root,
             beads_root=self._beads_root,
-            branch_pr_strategy=context.branch_pr_strategy,
             git_path=context.git_path,
             create_as_draft=create_as_draft,
             create_detail_prefix=create_detail_prefix,
@@ -344,7 +339,6 @@ def finalize_changeset(
     repo_root: Path,
     branch_pr: bool = True,
     branch_pr_mode: BranchPrMode = "draft",
-    branch_pr_strategy: pr_strategy.PrStrategy = pr_strategy.PR_STRATEGY_DEFAULT,
     branch_history: str = "manual",
     branch_squash_message: str = "deterministic",
     project_data_dir: Path | None = None,
@@ -367,7 +361,6 @@ def finalize_changeset(
         repo_root: Value for `repo_root`.
         branch_pr: Value for `branch_pr`.
         branch_pr_mode: Value for `branch_pr_mode`.
-        branch_pr_strategy: Value for `branch_pr_strategy`.
         branch_history: Value for `branch_history`.
         branch_squash_message: Value for `branch_squash_message`.
         project_data_dir: Value for `project_data_dir`.
@@ -391,7 +384,6 @@ def finalize_changeset(
         repo_root=repo_root,
         branch_pr=branch_pr,
         branch_pr_mode=branch_pr_mode,
-        branch_pr_strategy=branch_pr_strategy,
         branch_history=branch_history,
         branch_squash_message=branch_squash_message,
         project_data_dir=project_data_dir,

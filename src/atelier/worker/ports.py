@@ -14,7 +14,6 @@ from ..agent_home import AgentHome
 from ..agents import AgentSpec
 from ..config import ProjectConfig
 from ..models import BranchHistory, BranchPrMode, BranchSquashMessage
-from ..pr_strategy import PrStrategy
 from ..work_feedback import ReviewFeedbackSnapshot
 from .models import (
     FinalizeResult,
@@ -348,7 +347,6 @@ class WorkerLifecycleService(Protocol):
         repo_root: Path,
         branch_pr: bool,
         branch_pr_mode: BranchPrMode,
-        branch_pr_strategy: PrStrategy,
         branch_history: BranchHistory,
         branch_squash_message: BranchSquashMessage,
         project_data_dir: Path | None,
@@ -377,7 +375,6 @@ class WorkerLifecycleService(Protocol):
         repo_root: Path,
         repo_slug: str | None,
         branch_pr: bool,
-        branch_pr_strategy: PrStrategy,
         git_path: str | None,
         resume_review: bool,
     ) -> Issue | None: ...

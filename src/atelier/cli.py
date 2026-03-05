@@ -45,7 +45,6 @@ from .models import (
     BRANCH_SQUASH_MESSAGE_VALUES,
     WORKER_SELECT_VALUES,
 )
-from .pr_strategy import PR_STRATEGY_VALUES
 
 _split_arg_string = cast(Callable[[str], list[str]], split_arg_string)
 
@@ -319,14 +318,6 @@ def init_command(
             click_type=_choice(BRANCH_SQUASH_MESSAGE_VALUES),
         ),
     ] = None,
-    branch_pr_strategy: Annotated[
-        str | None,
-        typer.Option(
-            "--branch-pr-strategy",
-            help="PR strategy (sequential|on-ready|on-parent-approved|parallel)",
-            click_type=_choice(PR_STRATEGY_VALUES),
-        ),
-    ] = None,
     agent: Annotated[
         str | None,
         typer.Option(
@@ -360,8 +351,6 @@ def init_command(
         branch_history: History policy (manual|squash|merge|rebase).
         branch_squash_message: Squash commit subject policy
             (deterministic|agent).
-        branch_pr_strategy: PR strategy
-            (sequential|on-ready|on-parent-approved|parallel).
         agent: Agent name.
         editor_edit: Editor command used for blocking edits (policy docs).
         editor_work: Editor command used for opening the workspace repo.
@@ -379,7 +368,6 @@ def init_command(
             branch_pr_mode=branch_pr_mode,
             branch_history=branch_history,
             branch_squash_message=branch_squash_message,
-            branch_pr_strategy=branch_pr_strategy,
             agent=agent,
             editor_edit=editor_edit,
             editor_work=editor_work,
@@ -433,14 +421,6 @@ def new_command(
             click_type=_choice(BRANCH_SQUASH_MESSAGE_VALUES),
         ),
     ] = None,
-    branch_pr_strategy: Annotated[
-        str | None,
-        typer.Option(
-            "--branch-pr-strategy",
-            help="PR strategy (sequential|on-ready|on-parent-approved|parallel)",
-            click_type=_choice(PR_STRATEGY_VALUES),
-        ),
-    ] = None,
     agent: Annotated[
         str | None,
         typer.Option(
@@ -467,8 +447,6 @@ def new_command(
         branch_history: History policy (manual|squash|merge|rebase).
         branch_squash_message: Squash commit subject policy
             (deterministic|agent).
-        branch_pr_strategy: PR strategy
-            (sequential|on-ready|on-parent-approved|parallel).
         agent: Agent name.
         editor_edit: Editor command used for blocking edits (policy docs).
         editor_work: Editor command used for opening the workspace repo.
@@ -487,7 +465,6 @@ def new_command(
             branch_pr_mode=branch_pr_mode,
             branch_history=branch_history,
             branch_squash_message=branch_squash_message,
-            branch_pr_strategy=branch_pr_strategy,
             agent=agent,
             editor_edit=editor_edit,
             editor_work=editor_work,

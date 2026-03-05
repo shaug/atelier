@@ -17,7 +17,6 @@ from .. import (
     git,
     lifecycle,
     messages,
-    pr_strategy,
     prefix_migration_drift,
     prs,
     worktrees,
@@ -207,7 +206,6 @@ def _build_epic_payloads(
             beads_root=beads_root,
             repo_root=repo_root,
             repo_slug=repo_slug,
-            pr_strategy_value=fields.get("workspace.pr_strategy"),
         )
         ready_changesets = _list_ready_changesets(
             epic_id, beads_root=beads_root, repo_root=repo_root
@@ -234,7 +232,6 @@ def _build_epic_payloads(
                 "reclaimable": reclaimable,
                 "labels": labels,
                 "root_branch": root_branch,
-                "pr_strategy": fields.get("workspace.pr_strategy") or None,
                 "workspace_label": (beads.workspace_label(root_branch) if root_branch else None),
                 "worktree_path": worktree_path,
                 "worktree_relpath": worktree_relpath,
@@ -258,10 +255,8 @@ def _build_changeset_details(
     beads_root: Path,
     repo_root: Path,
     repo_slug: str | None,
-    pr_strategy_value: object,
 ) -> list[dict[str, object]]:
     details: list[dict[str, object]] = []
-    strategy = pr_strategy.normalize_pr_strategy(pr_strategy_value)
     changesets_by_id: dict[str, dict[str, object]] = {}
     payload_by_repo_branch: dict[tuple[str, str], dict[str, object] | None] = {}
     payload_errors_by_repo_branch: dict[tuple[str, str], str | None] = {}
@@ -339,7 +334,6 @@ def _build_changeset_details(
             repo_slug=repo_slug,
             repo_root=repo_root,
             git_path=None,
-            branch_pr_strategy=strategy,
             beads_root=beads_root,
             lookup_pr_payload=lookup_pr_payload,
             lookup_pr_payload_diagnostic=lookup_pr_payload_diagnostic,
@@ -592,7 +586,6 @@ def _render_status(
         table.add_column("Session", no_wrap=True)
         table.add_column("Reclaim", no_wrap=True)
         table.add_column("Root", no_wrap=True)
-        table.add_column("PR Strategy", no_wrap=True)
         table.add_column("Hooked by", no_wrap=True)
         table.add_column("Policy", no_wrap=True)
         table.add_column("Changesets", justify="right")
@@ -615,7 +608,6 @@ def _render_status(
                 _display_value(epic.get("assignee_session_state")),
                 _display_value(epic.get("reclaimable")),
                 _display_value(epic.get("root_branch")),
-                _display_value(epic.get("pr_strategy")),
                 hooked_by_display or "-",
                 _display_value(epic.get("ownership_policy_reason") or "ok"),
                 ready_display,
