@@ -784,6 +784,7 @@ def prepare_worktrees(
         mapping.worktree_path,
         beads_root=beads_root,
         cwd=repo_root,
+        allow_override=True,
     )
     if epic_is_changeset:
         _reconcile_epic_changeset_lineage(
