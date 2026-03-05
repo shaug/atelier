@@ -73,6 +73,9 @@ _STACK_INTEGRITY_REMEDIATIONS: dict[str, str] = {
         "Wait until every declared dependency shows integrated evidence, then rerun finalize."
     ),
 }
+_ACTIVE_EPIC_PR_LIFECYCLE_STATES = frozenset(
+    {"pushed", "draft-pr", "pr-open", "in-review", "approved"}
+)
 
 
 def _remediation_for_stack_reason(reason: str) -> str:
@@ -104,6 +107,13 @@ def _normalize_branch(value: object) -> str | None:
     return cleaned
 
 
+def _normalize_issue_id(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def _sequential_pr_creation_decision(*, parent_state: str | None) -> PrCreationDecision:
     parent_state_normalized = None
     if isinstance(parent_state, str):
@@ -126,6 +136,80 @@ def _sequential_pr_creation_decision(*, parent_state: str | None) -> PrCreationD
         allow_pr=False,
         reason=f"blocked:{parent_state_normalized}",
     )
+
+
+def _changeset_lifecycle_state(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+    lookup_pr_payload: Callable[..., dict[str, object] | None],
+) -> str | None:
+    description = issue.get("description")
+    description_text = description if isinstance(description, str) else ""
+    fields = beads.parse_description_fields(description_text)
+    work_branch = _normalize_branch(fields.get("changeset.work_branch"))
+    if repo_slug and work_branch:
+        pushed = git.git_ref_exists(
+            repo_root,
+            f"refs/remotes/origin/{work_branch}",
+            git_path=git_path,
+        )
+        payload = lookup_pr_payload(repo_slug, work_branch)
+        review_requested = prs.has_review_requests(payload)
+        state = prs.lifecycle_state(payload, pushed=pushed, review_requested=review_requested)
+        if state:
+            return state
+    review = changesets.parse_review_metadata(description_text)
+    return lifecycle.normalize_review_state(review.pr_state)
+
+
+def _active_epic_sibling_state(
+    issue: dict[str, object],
+    *,
+    repo_slug: str | None,
+    repo_root: Path,
+    git_path: str | None,
+    beads_root: Path | None,
+    lookup_pr_payload: Callable[..., dict[str, object] | None],
+) -> tuple[str, str] | None:
+    if beads_root is None:
+        return None
+    try:
+        boundary = beads.parse_issue_boundary(issue, source="pr_gate:epic_sibling_gate")
+    except ValueError:
+        return None
+    current_id = _normalize_issue_id(boundary.id)
+    parent_id = _normalize_issue_id(boundary.parent_id)
+    if not current_id or not parent_id:
+        return None
+    try:
+        siblings = beads.list_descendant_changesets(
+            parent_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            include_closed=True,
+        )
+    except Exception as exc:  # pragma: no cover - defensive boundary
+        atelier_log.warning(
+            f"changeset={current_id} failed to evaluate sibling PR gate under {parent_id}: {exc}"
+        )
+        return None
+    for sibling in siblings:
+        sibling_id = _normalize_issue_id(sibling.get("id"))
+        if not sibling_id or sibling_id == current_id:
+            continue
+        sibling_state = _changeset_lifecycle_state(
+            sibling,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            lookup_pr_payload=lookup_pr_payload,
+        )
+        if sibling_state in _ACTIVE_EPIC_PR_LIFECYCLE_STATES:
+            return sibling_id, sibling_state
+    return None
 
 
 def _dependency_integrated(
@@ -551,7 +635,30 @@ def changeset_pr_creation_decision(
             allow_pr=False,
             reason="blocked:dependency-parent-state-unavailable",
         )
-    return _sequential_pr_creation_decision(parent_state=parent_state)
+    decision = _sequential_pr_creation_decision(parent_state=parent_state)
+    if decision.allow_pr and decision.reason == "no-parent":
+        active_sibling = _active_epic_sibling_state(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            beads_root=beads_root,
+            lookup_pr_payload=lookup_pr_payload,
+        )
+        if active_sibling is not None:
+            sibling_id, sibling_state = active_sibling
+            issue_id = _normalize_issue_id(issue.get("id")) or "unknown-changeset"
+            atelier_log.info(
+                "changeset="
+                f"{issue_id} blocked by active sibling PR lifecycle "
+                f"{sibling_id}:{sibling_state}"
+            )
+            return PrCreationDecision(
+                parent_state=None,
+                allow_pr=False,
+                reason="blocked:epic-pr-in-flight",
+            )
+    return decision
 
 
 def set_changeset_review_pending_state(

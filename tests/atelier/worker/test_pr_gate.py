@@ -540,6 +540,86 @@ def test_changeset_pr_creation_decision_ignores_parent_child_dependency_variants
     assert decision.reason == "no-parent"
 
 
+def test_changeset_pr_creation_decision_blocks_no_parent_when_sibling_pr_active(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.2",
+        "parent": "at-epic",
+        "description": (
+            "changeset.parent_branch: feature-root\n"
+            "changeset.root_branch: feature-root\n"
+            "changeset.work_branch: feature-kid-2\n"
+        ),
+    }
+    sibling = {
+        "id": "at-epic.1",
+        "description": "changeset.work_branch: feature-kid-1\n",
+    }
+
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "list_descendant_changesets",
+        lambda *_args, **_kwargs: [sibling, issue],
+    )
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda _repo_slug, branch: (
+            {"state": "OPEN", "isDraft": False} if branch == "feature-kid-1" else None
+        ),
+    )
+
+    assert decision.allow_pr is False
+    assert decision.reason == "blocked:epic-pr-in-flight"
+
+
+def test_changeset_pr_creation_decision_allows_no_parent_when_sibling_integrated(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.2",
+        "parent": "at-epic",
+        "description": (
+            "changeset.parent_branch: feature-root\n"
+            "changeset.root_branch: feature-root\n"
+            "changeset.work_branch: feature-kid-2\n"
+        ),
+    }
+    sibling = {
+        "id": "at-epic.1",
+        "description": "changeset.work_branch: feature-kid-1\n",
+    }
+
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "list_descendant_changesets",
+        lambda *_args, **_kwargs: [sibling, issue],
+    )
+    monkeypatch.setattr(pr_gate.git, "git_ref_exists", lambda *_args, **_kwargs: True)
+
+    decision = pr_gate.changeset_pr_creation_decision(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        beads_root=Path("/beads"),
+        lookup_pr_payload=lambda _repo_slug, branch: (
+            {"state": "CLOSED", "mergedAt": "2026-03-05T00:00:00Z"}
+            if branch == "feature-kid-1"
+            else None
+        ),
+    )
+
+    assert decision.allow_pr is True
+    assert decision.reason == "no-parent"
+
+
 def test_sequential_stack_integrity_preflight_ignores_heritage_epic_dependency_without_work_branch(
     monkeypatch,
 ) -> None:
