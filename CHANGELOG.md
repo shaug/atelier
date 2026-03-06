@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.3](https://github.com/shaug/atelier/compare/v0.8.2...v0.8.3) (2026-03-06)
+
+
+### Bug Fixes
+
+* **config:** enforce sequential strategy for PR mode ([d3c8acd](https://github.com/shaug/atelier/commit/d3c8acdbf8175675e5da5dec8bfb8036c9bfa727))
+* **config:** remove residual pr_strategy argument handling ([06fad3a](https://github.com/shaug/atelier/commit/06fad3aa36cf3393fec71caa5f19853acd006666))
+* **config:** stop tracking branch pr strategy ([53e254a](https://github.com/shaug/atelier/commit/53e254ab02b77a3e949203150066c58b88d2bddd))
+* **doctor:** classify authoritative and stale duplicate paths ([3adfd81](https://github.com/shaug/atelier/commit/3adfd81c5e5675c0fa75658c11a931006e1f3834))
+* **prefix-migration:** auto-heal split worktree path drift ([eda298c](https://github.com/shaug/atelier/commit/eda298cf2c5d145d5a304489121c9235143b5a05)), closes [#540](https://github.com/shaug/atelier/issues/540)
+* **worker:** block no-parent PR creation when sibling PR is active ([1493fee](https://github.com/shaug/atelier/commit/1493fee20f0692754788300688f5701e7d04fc53))
+* **worker:** gate PR creation across full epic subtree ([f938782](https://github.com/shaug/atelier/commit/f9387826ca511b43c1f5a3f7981a433ca7464546))
+* **worker:** remove legacy PR strategy runtime branches ([9b38b1d](https://github.com/shaug/atelier/commit/9b38b1d1c15ddf320f8b87766481fe94d8551c3d))
+
 ## [0.8.2](https://github.com/shaug/atelier/compare/v0.8.1...v0.8.2) (2026-03-05)
 
 
