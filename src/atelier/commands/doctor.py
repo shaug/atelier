@@ -633,6 +633,7 @@ def _prefix_drift_remediation(
     fix: bool,
 ) -> str:
     notes: list[str] = []
+    notes.append(f"path roles: {_path_role_summary(action)}")
     if action.deferred_reason:
         if action.deferred_reason == "active-hook":
             notes.append("deferred: active hook owns this epic (use --force to override)")
@@ -659,12 +660,37 @@ def _prefix_drift_remediation(
     if "work-branch-conflict" in action.drift_classes:
         notes.append("resolves startup work-branch override conflicts")
     if "worktree-path-conflict" in action.drift_classes:
-        notes.append("converges worktree path to canonical branch-selected location")
+        if action.planned_path_operations:
+            operations = "; ".join(action.planned_path_operations)
+            if fix and action.applied and not action.deferred_reason:
+                notes.append(f"applied path operations: {operations}")
+            elif fix and action.deferred_reason:
+                notes.append(f"pending path operations: {operations}")
+            else:
+                notes.append(f"`--fix` path operations: {operations}")
+        else:
+            notes.append("converges worktree path to canonical branch-selected location")
     if "metadata-missing-mapping-work-branch" in action.drift_classes:
         notes.append("backfills missing mapping work-branch lineage")
     if "metadata-missing-mapping-worktree-path" in action.drift_classes:
         notes.append("backfills missing mapping worktree-path lineage")
     return "; ".join(notes)
+
+
+def _path_role_summary(action: prefix_migration_drift.PrefixMigrationRepairAction) -> str:
+    authoritative = [
+        entry.path
+        for entry in action.path_classification
+        if entry.classification == "authoritative"
+    ]
+    stale = [
+        entry.path
+        for entry in action.path_classification
+        if entry.classification == "stale_duplicate"
+    ]
+    authoritative_path = authoritative[0] if authoritative else action.canonical_worktree_path
+    stale_summary = ", ".join(sorted(stale)) if stale else "(none)"
+    return f"authoritative={authoritative_path}; stale_duplicate={stale_summary}"
 
 
 def _collect_doctor_context(
@@ -988,13 +1014,19 @@ def _render_prefix_drift_findings(
             f"root={action.canonical_root_branch}, "
             f"work={action.canonical_work_branch} ({action.work_branch_source})"
         )
-        worktree = f"{action.canonical_worktree_path} ({action.worktree_path_source})"
+        worktree = f"{_path_role_summary(action)}; canonical_source={action.worktree_path_source}"
+        action_summary = _action_summary(action)
+        if action.planned_path_operations:
+            operation_prefix = "applied path ops" if action.applied else "planned path ops"
+            action_summary = (
+                f"{action_summary}; {operation_prefix}: {'; '.join(action.planned_path_operations)}"
+            )
         table.add_row(
             action.changeset_id,
             ", ".join(action.drift_classes),
             canonical,
             worktree,
-            _action_summary(action),
+            action_summary,
         )
     console.print(table)
 

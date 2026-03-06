@@ -1304,6 +1304,16 @@ def test_repair_prefix_migration_drift_converges_duplicate_branch_paths_determin
     assert action.update_changeset_metadata is True
     assert action.update_changeset_worktree_path is False
     assert action.update_mapping is True
+    assert [entry.classification for entry in action.path_classification] == [
+        "authoritative",
+        "stale_duplicate",
+    ]
+    assert action.path_classification[0].path == "worktrees/ts-epic.1"
+    assert action.path_classification[1].path == "worktrees/at-legacy-ts-epic.1"
+    assert any(
+        operation.startswith("rewrite metadata/mapping worktree paths")
+        for operation in action.planned_path_operations
+    )
 
 
 def test_repair_prefix_migration_drift_apply_backfills_missing_mapping_lineage(

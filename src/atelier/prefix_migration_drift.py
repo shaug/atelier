@@ -38,6 +38,23 @@ class _GitWorktreeIndex:
 
 
 @dataclass(frozen=True)
+class WorktreePathClassification:
+    """Classification detail for one candidate worktree path."""
+
+    path: str
+    classification: str
+    reason: str
+
+    def as_dict(self) -> dict[str, str]:
+        """Serialize classification details for status/doctor JSON payloads."""
+        return {
+            "path": self.path,
+            "classification": self.classification,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
 class PrefixMigrationRepairAction:
     """Plan or applied repair details for one drifted changeset."""
 
@@ -57,6 +74,8 @@ class PrefixMigrationRepairAction:
     update_mapping: bool
     applied: bool
     deferred_reason: str | None = None
+    path_classification: tuple[WorktreePathClassification, ...] = ()
+    planned_path_operations: tuple[str, ...] = ()
 
     @property
     def changed(self) -> bool:
@@ -88,6 +107,8 @@ class PrefixMigrationRepairAction:
             "update_mapping": self.update_mapping,
             "applied": self.applied,
             "deferred_reason": self.deferred_reason,
+            "path_classification": [entry.as_dict() for entry in self.path_classification],
+            "planned_path_operations": list(self.planned_path_operations),
         }
 
 
@@ -234,6 +255,148 @@ def _candidate_worktree_relpaths(
             continue
         deduped.append(normalized)
     return tuple(deduped)
+
+
+def _worktree_path_kind(
+    *,
+    project_data_dir: Path,
+    relpath: str,
+    git_index: _GitWorktreeIndex,
+) -> str:
+    attached_branch = _normalize_text(git_index.path_to_branch.get(relpath))
+    if attached_branch is not None:
+        return f"branch_attached:{attached_branch}"
+    candidate = project_data_dir / relpath
+    if candidate.exists() and (candidate / ".git").exists():
+        return "detached_placeholder"
+    if candidate.exists():
+        return "non_worktree_path"
+    return "metadata_only"
+
+
+def _classify_worktree_paths(
+    *,
+    project_data_dir: Path,
+    git_index: _GitWorktreeIndex,
+    canonical_worktree_path: str,
+    canonical_branch_attached_path: str | None,
+    candidate_paths: tuple[str, ...],
+) -> tuple[WorktreePathClassification, ...]:
+    canonical_relpath = _normalize_worktree_path(
+        canonical_worktree_path,
+        project_data_dir=project_data_dir,
+    )
+    if canonical_relpath is None:
+        return ()
+
+    branch_attached_relpath = _normalize_worktree_path(
+        canonical_branch_attached_path,
+        project_data_dir=project_data_dir,
+    )
+    normalized_candidates = {
+        normalized
+        for normalized in (
+            _normalize_worktree_path(path, project_data_dir=project_data_dir)
+            for path in candidate_paths
+        )
+        if normalized is not None
+    }
+    normalized_candidates.add(canonical_relpath)
+    if branch_attached_relpath is not None:
+        normalized_candidates.add(branch_attached_relpath)
+
+    classifications: list[WorktreePathClassification] = [
+        WorktreePathClassification(
+            path=canonical_relpath,
+            classification="authoritative",
+            reason=("matches canonical branch/worktree lineage selected for deterministic repair"),
+        )
+    ]
+    for relpath in sorted(normalized_candidates):
+        if relpath == canonical_relpath:
+            continue
+        if relpath == branch_attached_relpath:
+            reason = (
+                "canonical branch is currently attached here; --fix moves it to the "
+                "authoritative path"
+            )
+        else:
+            kind = _worktree_path_kind(
+                project_data_dir=project_data_dir,
+                relpath=relpath,
+                git_index=git_index,
+            )
+            if kind == "detached_placeholder":
+                reason = (
+                    "detached placeholder duplicate; --fix removes it before authoritative "
+                    "branch convergence"
+                )
+            else:
+                reason = "candidate path does not match canonical branch/worktree lineage"
+        classifications.append(
+            WorktreePathClassification(
+                path=relpath,
+                classification="stale_duplicate",
+                reason=reason,
+            )
+        )
+    return tuple(classifications)
+
+
+def _plan_worktree_path_operations(
+    *,
+    project_data_dir: Path,
+    git_index: _GitWorktreeIndex,
+    canonical_worktree_path: str,
+    canonical_branch_attached_path: str | None,
+    stale_duplicate_paths: tuple[str, ...],
+    update_changeset_worktree_path: bool,
+    update_mapping: bool,
+) -> tuple[str, ...]:
+    canonical_relpath = _normalize_worktree_path(
+        canonical_worktree_path,
+        project_data_dir=project_data_dir,
+    )
+    if canonical_relpath is None:
+        return ()
+
+    operations: list[str] = []
+    branch_attached_relpath = _normalize_worktree_path(
+        canonical_branch_attached_path,
+        project_data_dir=project_data_dir,
+    )
+    canonical_path = project_data_dir / canonical_relpath
+    canonical_exists_git = canonical_path.exists() and (canonical_path / ".git").exists()
+    canonical_attached_branch = _normalize_text(git_index.path_to_branch.get(canonical_relpath))
+
+    if branch_attached_relpath is not None and branch_attached_relpath != canonical_relpath:
+        if canonical_exists_git and canonical_attached_branch is not None:
+            operations.append(
+                "skip move: authoritative path "
+                f"{canonical_relpath} is already branch-attached ({canonical_attached_branch})"
+            )
+        else:
+            if canonical_exists_git and canonical_attached_branch is None:
+                operations.append(
+                    "remove stale_duplicate detached placeholder "
+                    f"{canonical_relpath} before moving the canonical branch attachment"
+                )
+            operations.append(
+                "move branch_attached stale_duplicate "
+                f"{branch_attached_relpath} -> authoritative {canonical_relpath}"
+            )
+
+    if update_changeset_worktree_path or update_mapping:
+        operations.append(
+            f"rewrite metadata/mapping worktree paths to authoritative {canonical_relpath}"
+        )
+
+    if not operations and stale_duplicate_paths:
+        operations.append(
+            "retain stale_duplicate paths with no filesystem mutation; "
+            "only canonical lineage metadata changes are required"
+        )
+    return tuple(operations)
 
 
 def _existing_worktree_candidates(
@@ -825,6 +988,11 @@ def _resolve_repair_action(
         filesystem_path_for_metadata_branch = _filesystem_path_for_branch(
             git_index, metadata_work_branch
         )
+    filesystem_path_for_mapping_branch = None
+    if mapping_work_branch is not None:
+        filesystem_path_for_mapping_branch = _filesystem_path_for_branch(
+            git_index, mapping_work_branch
+        )
     filesystem_path_for_canonical_branch = None
     if changeset_id == epic_id:
         filesystem_path_for_canonical_branch = _filesystem_path_for_branch(
@@ -893,6 +1061,40 @@ def _resolve_repair_action(
         or mapping_work_branch != canonical_work_branch
         or mapping_worktree_path != canonical_worktree
     )
+    path_classification = _classify_worktree_paths(
+        project_data_dir=project_data_dir,
+        git_index=git_index,
+        canonical_worktree_path=canonical_worktree,
+        canonical_branch_attached_path=filesystem_path_for_canonical_branch,
+        candidate_paths=tuple(
+            sorted(
+                {
+                    value
+                    for value in (
+                        metadata_worktree_path,
+                        mapping_worktree_path,
+                        filesystem_path_for_metadata_branch,
+                        filesystem_path_for_mapping_branch,
+                        filesystem_path_for_canonical_branch,
+                        canonical_worktree,
+                    )
+                    if value is not None
+                }
+            )
+        ),
+    )
+    stale_duplicate_paths = tuple(
+        entry.path for entry in path_classification if entry.classification == "stale_duplicate"
+    )
+    planned_path_operations = _plan_worktree_path_operations(
+        project_data_dir=project_data_dir,
+        git_index=git_index,
+        canonical_worktree_path=canonical_worktree,
+        canonical_branch_attached_path=filesystem_path_for_canonical_branch,
+        stale_duplicate_paths=stale_duplicate_paths,
+        update_changeset_worktree_path=update_changeset_worktree_path,
+        update_mapping=update_mapping,
+    )
     return PrefixMigrationRepairAction(
         epic_id=epic_id,
         changeset_id=changeset_id,
@@ -909,6 +1111,8 @@ def _resolve_repair_action(
         update_changeset_worktree_path=update_changeset_worktree_path,
         update_mapping=update_mapping,
         applied=False,
+        path_classification=path_classification,
+        planned_path_operations=planned_path_operations,
     )
 
 
@@ -1156,6 +1360,8 @@ def repair_prefix_migration_drift(
                     update_mapping=action.update_mapping,
                     applied=applied,
                     deferred_reason=deferred_reason,
+                    path_classification=action.path_classification,
+                    planned_path_operations=action.planned_path_operations,
                 )
             )
     return sorted(
