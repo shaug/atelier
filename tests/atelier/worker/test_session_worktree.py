@@ -92,24 +92,46 @@ def test_prepare_worktrees_blocks_before_mutations_on_prefix_drift_for_selected_
         ]
     )
     plan_repairs = Mock(
-        return_value=[
-            worktree.prefix_migration_drift.PrefixMigrationRepairAction(
-                epic_id="at-epic",
-                changeset_id="at-epic.1",
-                drift_classes=("work-branch-conflict",),
-                canonical_root_branch="feat/new",
-                canonical_work_branch="feat/new-at-epic.1",
-                work_branch_source="derived",
-                canonical_worktree_path="worktrees/at-epic.1",
-                worktree_path_source="default",
-                pr_head_ref=None,
-                pr_lookup_branch=None,
-                update_workspace_root_branch=False,
-                update_changeset_metadata=True,
-                update_changeset_worktree_path=True,
-                update_mapping=True,
-                applied=False,
-            )
+        side_effect=[
+            [
+                worktree.prefix_migration_drift.PrefixMigrationRepairAction(
+                    epic_id="at-epic",
+                    changeset_id="at-epic.1",
+                    drift_classes=("work-branch-conflict",),
+                    canonical_root_branch="feat/new",
+                    canonical_work_branch="feat/new-at-epic.1",
+                    work_branch_source="derived",
+                    canonical_worktree_path="worktrees/at-epic.1",
+                    worktree_path_source="default",
+                    pr_head_ref=None,
+                    pr_lookup_branch=None,
+                    update_workspace_root_branch=False,
+                    update_changeset_metadata=True,
+                    update_changeset_worktree_path=True,
+                    update_mapping=True,
+                    applied=False,
+                    deferred_reason="dirty worktree",
+                )
+            ],
+            [
+                worktree.prefix_migration_drift.PrefixMigrationRepairAction(
+                    epic_id="at-epic",
+                    changeset_id="at-epic.1",
+                    drift_classes=("work-branch-conflict",),
+                    canonical_root_branch="feat/new",
+                    canonical_work_branch="feat/new-at-epic.1",
+                    work_branch_source="derived",
+                    canonical_worktree_path="worktrees/at-epic.1",
+                    worktree_path_source="default",
+                    pr_head_ref=None,
+                    pr_lookup_branch=None,
+                    update_workspace_root_branch=False,
+                    update_changeset_metadata=True,
+                    update_changeset_worktree_path=True,
+                    update_mapping=True,
+                    applied=False,
+                )
+            ],
         ]
     )
 
@@ -163,16 +185,28 @@ def test_prepare_worktrees_blocks_before_mutations_on_prefix_drift_for_selected_
         target_epic_id="at-epic",
         target_changeset_ids={"at-epic", "at-epic.1"},
     )
-    plan_repairs.assert_called_once_with(
-        project_data_dir=Path("/project"),
-        beads_root=Path("/beads"),
-        repo_root=Path("/repo"),
-        apply=False,
-        repo_slug=None,
-        git_path="git",
-        target_epic_id="at-epic",
-        target_changeset_ids={"at-epic", "at-epic.1"},
-    )
+    assert plan_repairs.call_args_list == [
+        call(
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            apply=True,
+            repo_slug=None,
+            git_path="git",
+            target_epic_id="at-epic",
+            target_changeset_ids={"at-epic", "at-epic.1"},
+        ),
+        call(
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            apply=False,
+            repo_slug=None,
+            git_path="git",
+            target_epic_id="at-epic",
+            target_changeset_ids={"at-epic", "at-epic.1"},
+        ),
+    ]
     reconcile_mapping.assert_not_called()
     ensure_epic_worktree.assert_not_called()
     ensure_changeset_branch.assert_not_called()
@@ -199,7 +233,7 @@ def test_prepare_worktrees_blocks_before_mutations_on_targeted_metadata_read_fai
             }
         ]
     )
-    plan_repairs = Mock(return_value=[])
+    plan_repairs = Mock(side_effect=[[], []])
 
     with (
         patch(
@@ -251,16 +285,28 @@ def test_prepare_worktrees_blocks_before_mutations_on_targeted_metadata_read_fai
         target_epic_id="at-epic",
         target_changeset_ids={"at-epic", "at-epic.1"},
     )
-    plan_repairs.assert_called_once_with(
-        project_data_dir=Path("/project"),
-        beads_root=Path("/beads"),
-        repo_root=Path("/repo"),
-        apply=False,
-        repo_slug=None,
-        git_path="git",
-        target_epic_id="at-epic",
-        target_changeset_ids={"at-epic", "at-epic.1"},
-    )
+    assert plan_repairs.call_args_list == [
+        call(
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            apply=True,
+            repo_slug=None,
+            git_path="git",
+            target_epic_id="at-epic",
+            target_changeset_ids={"at-epic", "at-epic.1"},
+        ),
+        call(
+            project_data_dir=Path("/project"),
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            apply=False,
+            repo_slug=None,
+            git_path="git",
+            target_epic_id="at-epic",
+            target_changeset_ids={"at-epic", "at-epic.1"},
+        ),
+    ]
     reconcile_mapping.assert_not_called()
     ensure_epic_worktree.assert_not_called()
     ensure_changeset_branch.assert_not_called()
@@ -283,24 +329,27 @@ def test_startup_worktree_preflight_ignores_non_actionable_prefix_drift() -> Non
         ]
     )
     plan_repairs = Mock(
-        return_value=[
-            worktree.prefix_migration_drift.PrefixMigrationRepairAction(
-                epic_id="at-epic",
-                changeset_id="at-epic.1",
-                drift_classes=("worktree-path-conflict",),
-                canonical_root_branch="feat/new",
-                canonical_work_branch="feat/new-at-epic.1",
-                work_branch_source="derived",
-                canonical_worktree_path="worktrees/ts-epic.1",
-                worktree_path_source="mapping",
-                pr_head_ref=None,
-                pr_lookup_branch=None,
-                update_workspace_root_branch=False,
-                update_changeset_metadata=False,
-                update_changeset_worktree_path=False,
-                update_mapping=False,
-                applied=False,
-            )
+        side_effect=[
+            [
+                worktree.prefix_migration_drift.PrefixMigrationRepairAction(
+                    epic_id="at-epic",
+                    changeset_id="at-epic.1",
+                    drift_classes=("worktree-path-conflict",),
+                    canonical_root_branch="feat/new",
+                    canonical_work_branch="feat/new-at-epic.1",
+                    work_branch_source="derived",
+                    canonical_worktree_path="worktrees/ts-epic.1",
+                    worktree_path_source="mapping",
+                    pr_head_ref=None,
+                    pr_lookup_branch=None,
+                    update_workspace_root_branch=False,
+                    update_changeset_metadata=True,
+                    update_changeset_worktree_path=True,
+                    update_mapping=True,
+                    applied=True,
+                )
+            ],
+            [],
         ]
     )
     mapping = worktrees.WorktreeMapping(
@@ -337,7 +386,7 @@ def test_startup_worktree_preflight_ignores_non_actionable_prefix_drift() -> Non
         )
 
     scan_drift.assert_called_once()
-    plan_repairs.assert_called_once()
+    assert plan_repairs.call_count == 2
 
 
 def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: Path) -> None:
@@ -1141,7 +1190,15 @@ def test_prepare_worktrees_fail_closed_when_epic_changeset_lineage_drift_is_dete
                 control=_TestControl(logs),
             )
 
-    assert update_metadata.call_count == 0
+    update_metadata.assert_called_once_with(
+        "at-epic",
+        root_branch="feat/root",
+        parent_branch=None,
+        work_branch="feat/root",
+        beads_root=Path("/beads"),
+        cwd=repo_root,
+        allow_override=True,
+    )
     ensure_epic.assert_not_called()
     ensure_branch.assert_not_called()
     assert not logs
@@ -1222,5 +1279,13 @@ def test_prepare_worktrees_blocks_ambiguous_epic_changeset_lineage_drift() -> No
                 control=_TestControl([]),
             )
 
-    update.assert_not_called()
+    update.assert_called_once_with(
+        "at-epic",
+        root_branch="feat/root",
+        parent_branch=None,
+        work_branch="feat/root",
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_override=True,
+    )
     checkout.assert_not_called()

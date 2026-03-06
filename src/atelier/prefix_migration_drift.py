@@ -236,16 +236,25 @@ def _candidate_worktree_relpaths(
     return tuple(deduped)
 
 
-def _resolve_existing_worktree(
+def _existing_worktree_candidates(
     *,
     project_data_dir: Path,
     relpaths: tuple[str, ...],
-) -> tuple[str | None, Path | None]:
+) -> list[tuple[str, Path]]:
     matches: list[tuple[str, Path]] = []
     for relpath in relpaths:
         candidate = project_data_dir / relpath
         if candidate.exists() and (candidate / ".git").exists():
             matches.append((relpath, candidate))
+    return matches
+
+
+def _resolve_existing_worktree(
+    *,
+    project_data_dir: Path,
+    relpaths: tuple[str, ...],
+) -> tuple[str | None, Path | None]:
+    matches = _existing_worktree_candidates(project_data_dir=project_data_dir, relpaths=relpaths)
     if not matches:
         return None, None
     if len(matches) > 1:
@@ -255,6 +264,35 @@ def _resolve_existing_worktree(
             f"multiple paths exist and cannot be selected safely: {candidates}"
         )
     return matches[0]
+
+
+def _resolve_authoritative_worktree(
+    *,
+    project_data_dir: Path,
+    relpaths: tuple[str, ...],
+    git_index: _GitWorktreeIndex,
+    canonical_branch: str,
+) -> tuple[str | None, Path | None]:
+    matches = _existing_worktree_candidates(project_data_dir=project_data_dir, relpaths=relpaths)
+    if not matches:
+        return None, None
+
+    by_relpath = {relpath: path for relpath, path in matches}
+    canonical_branch_paths = tuple(
+        relpath
+        for relpath in git_index.branch_to_paths.get(canonical_branch, ())
+        if relpath in by_relpath
+    )
+    if len(canonical_branch_paths) > 1:
+        candidates = ", ".join(f"{relpath!r}" for relpath in canonical_branch_paths)
+        raise RuntimeError(
+            "ambiguous existing changeset worktree candidates; canonical branch is attached "
+            f"to multiple paths and cannot be selected safely: {candidates}"
+        )
+    if len(canonical_branch_paths) == 1:
+        selected_relpath = canonical_branch_paths[0]
+        return selected_relpath, by_relpath[selected_relpath]
+    return _resolve_existing_worktree(project_data_dir=project_data_dir, relpaths=relpaths)
 
 
 def _choose_branch_source(
@@ -343,6 +381,57 @@ def _checkout_canonical_branch(
     )
 
 
+def _checked_status_porcelain(
+    *,
+    worktree_path: Path,
+    git_path: str | None,
+    detail: str,
+) -> list[str]:
+    result = exec_util.try_run_command(
+        git.git_command(["-C", str(worktree_path), "status", "--porcelain"], git_path=git_path)
+    )
+    if result is None:
+        raise RuntimeError(f"{detail}: missing required command: git")
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        reason = stderr or stdout or "git status failed"
+        raise RuntimeError(f"{detail}: {reason}")
+    return [line for line in (result.stdout or "").splitlines() if line.strip()]
+
+
+def _remove_detached_placeholder_worktree(
+    *,
+    repo_root: Path,
+    placeholder_relpath: str,
+    placeholder_path: Path,
+    git_path: str | None,
+) -> None:
+    status_lines = _checked_status_porcelain(
+        worktree_path=placeholder_path,
+        git_path=git_path,
+        detail=(
+            "failed to inspect detached placeholder worktree before removal "
+            f"({placeholder_relpath!r})"
+        ),
+    )
+    if status_lines:
+        raise RuntimeError(
+            "detached placeholder worktree has local changes and cannot be removed safely: "
+            f"{placeholder_relpath!r}"
+        )
+    _run_git_checked(
+        repo_root=repo_root,
+        args=["worktree", "remove", str(placeholder_path)],
+        git_path=git_path,
+        detail=f"failed to remove detached placeholder worktree {placeholder_relpath!r}",
+    )
+    if placeholder_path.exists():
+        raise RuntimeError(
+            f"failed to verify detached placeholder worktree removal for {placeholder_relpath!r}"
+        )
+
+
 def _converge_changeset_artifacts(
     *,
     project_data_dir: Path,
@@ -402,9 +491,11 @@ def _converge_changeset_artifacts(
         filesystem_path_for_metadata_branch=filesystem_path_for_metadata_branch,
         filesystem_path_for_mapping_branch=filesystem_path_for_mapping_branch,
     )
-    source_relpath, source_path = _resolve_existing_worktree(
+    source_relpath, source_path = _resolve_authoritative_worktree(
         project_data_dir=project_data_dir,
         relpaths=source_relpaths,
+        git_index=git_index,
+        canonical_branch=action.canonical_work_branch,
     )
 
     if canonical_path.exists() and not (canonical_path / ".git").exists():
@@ -412,11 +503,33 @@ def _converge_changeset_artifacts(
             "canonical changeset worktree path exists but is not a git worktree: "
             f"{canonical_relpath!r}"
         )
+    remove_detached_placeholder = False
+    if (
+        source_path is not None
+        and source_relpath is not None
+        and source_relpath != canonical_relpath
+        and canonical_path.exists()
+    ):
+        canonical_branch = _normalize_text(git_index.path_to_branch.get(canonical_relpath))
+        if canonical_branch is not None:
+            raise RuntimeError(
+                "canonical changeset worktree path is already branch-attached and cannot be "
+                f"replaced safely: {canonical_relpath!r} ({canonical_branch})"
+            )
+        canonical_head = _normalize_branch_ref(
+            git.git_current_branch(canonical_path, git_path=git_path)
+        )
+        if canonical_head not in {None, "HEAD"}:
+            raise RuntimeError(
+                "canonical changeset worktree path is not detached and cannot be replaced safely: "
+                f"{canonical_relpath!r} ({canonical_head})"
+            )
+        remove_detached_placeholder = True
     move_worktree = (
         source_path is not None
         and source_relpath is not None
         and source_relpath != canonical_relpath
-        and not canonical_path.exists()
+        and (remove_detached_placeholder or not canonical_path.exists())
     )
     if move_worktree:
         assert source_path is not None
@@ -449,6 +562,13 @@ def _converge_changeset_artifacts(
     if move_worktree:
         assert source_path is not None
         assert source_relpath is not None
+        if remove_detached_placeholder:
+            _remove_detached_placeholder_worktree(
+                repo_root=repo_root,
+                placeholder_relpath=canonical_relpath,
+                placeholder_path=canonical_path,
+                git_path=git_path,
+            )
         _run_git_checked(
             repo_root=repo_root,
             args=["worktree", "move", str(source_path), str(canonical_path)],
