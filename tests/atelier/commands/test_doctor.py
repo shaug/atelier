@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 import atelier.config as config
-from atelier.prefix_migration_drift import PrefixMigrationRepairAction
+from atelier.prefix_migration_drift import PrefixMigrationRepairAction, WorktreePathClassification
 from atelier.worktrees import WorktreeMapping
 from tests.atelier.helpers import DummyResult
 
@@ -43,7 +43,7 @@ def test_doctor_json_check_mode() -> None:
             PrefixMigrationRepairAction(
                 epic_id="epic-1",
                 changeset_id="epic-1.2",
-                drift_classes=("work-branch-conflict",),
+                drift_classes=("work-branch-conflict", "worktree-path-conflict"),
                 canonical_root_branch="feat/root",
                 canonical_work_branch="feat/new",
                 work_branch_source="open-pr-head",
@@ -56,6 +56,23 @@ def test_doctor_json_check_mode() -> None:
                 update_changeset_worktree_path=False,
                 update_mapping=True,
                 applied=False,
+                path_classification=(
+                    WorktreePathClassification(
+                        path="worktrees/epic-1.2",
+                        classification="authoritative",
+                        reason="canonical path selected",
+                    ),
+                    WorktreePathClassification(
+                        path="worktrees/at-legacy-epic-1.2",
+                        classification="stale_duplicate",
+                        reason="legacy duplicate",
+                    ),
+                ),
+                planned_path_operations=(
+                    "move branch_attached stale_duplicate worktrees/at-legacy-epic-1.2 -> "
+                    "authoritative worktrees/epic-1.2",
+                    "rewrite metadata/mapping worktree paths to authoritative worktrees/epic-1.2",
+                ),
             )
         ]
         with (
@@ -89,6 +106,14 @@ def test_doctor_json_check_mode() -> None:
     assert payload["counts"]["check_families"] == 3
     assert "startup_blocking_lineage_consistency" in payload["checks"]
     assert "in_progress_integrity_signals" in payload["checks"]
+    finding = payload["checks"]["prefix_migration_drift"]["findings"][0]
+    details = finding["details"]
+    assert details["path_classification"][0]["classification"] == "authoritative"
+    assert details["path_classification"][1]["classification"] == "stale_duplicate"
+    assert "move branch_attached stale_duplicate" in details["planned_path_operations"][0]
+    assert "authoritative=worktrees/epic-1.2" in finding["remediation"]
+    assert "stale_duplicate=worktrees/at-legacy-epic-1.2" in finding["remediation"]
+    assert "`--fix` path operations" in finding["remediation"]
 
 
 def test_doctor_json_fix_mode_reports_applied() -> None:
@@ -210,6 +235,50 @@ def test_doctor_json_non_actionable_prefix_drift_not_counted_as_startup_blocker(
     assert payload["counts"]["startup_blockers"] == 0
     assert payload["prefix_normalization"]["required"] is False
     assert "non-actionable" in prefix_findings[0]["remediation"]
+
+
+def test_prefix_drift_remediation_reports_applied_path_operations_in_fix_mode() -> None:
+    action = PrefixMigrationRepairAction(
+        epic_id="epic-1",
+        changeset_id="epic-1.2",
+        drift_classes=("worktree-path-conflict",),
+        canonical_root_branch="feat/root",
+        canonical_work_branch="feat/root-epic-1.2",
+        work_branch_source="open-pr-head",
+        canonical_worktree_path="worktrees/epic-1.2",
+        worktree_path_source="derived-canonical",
+        pr_head_ref="feat/root-epic-1.2",
+        pr_lookup_branch="at/legacy-epic-1.2",
+        update_workspace_root_branch=False,
+        update_changeset_metadata=True,
+        update_changeset_worktree_path=True,
+        update_mapping=True,
+        applied=True,
+        path_classification=(
+            WorktreePathClassification(
+                path="worktrees/epic-1.2",
+                classification="authoritative",
+                reason="canonical path selected",
+            ),
+            WorktreePathClassification(
+                path="worktrees/at-legacy-epic-1.2",
+                classification="stale_duplicate",
+                reason="legacy duplicate",
+            ),
+        ),
+        planned_path_operations=(
+            "remove stale_duplicate detached placeholder worktrees/epic-1.2 before moving the "
+            "canonical branch attachment",
+            "move branch_attached stale_duplicate worktrees/at-legacy-epic-1.2 -> "
+            "authoritative worktrees/epic-1.2",
+        ),
+    )
+
+    remediation = doctor_cmd._prefix_drift_remediation(action, fix=True)
+    assert "authoritative=worktrees/epic-1.2" in remediation
+    assert "stale_duplicate=worktrees/at-legacy-epic-1.2" in remediation
+    assert "applied path operations:" in remediation
+    assert "move branch_attached stale_duplicate" in remediation
 
 
 def test_doctor_json_includes_multi_check_health_report() -> None:

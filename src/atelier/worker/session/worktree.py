@@ -81,14 +81,27 @@ def _startup_worktree_preflight(
     allow_parent_branch_override: bool,
     git_path: str | None,
 ) -> None:
-    """Fail closed when startup detects blocking prefix-migration drift."""
+    """Auto-heal recoverable drift and fail closed on unresolved startup blockers."""
     repo_slug = prs.github_repo_slug(git.git_origin_url(repo_root))
     target_changesets = {selected_epic.strip(), changeset_id.strip()}
     target_changesets.discard("")
     if not target_changesets:
         return
 
-    planned_actions = prefix_migration_drift.repair_prefix_migration_drift(
+    auto_heal_actions = prefix_migration_drift.repair_prefix_migration_drift(
+        project_data_dir=project_data_dir,
+        beads_root=beads_root,
+        repo_root=repo_root,
+        apply=True,
+        repo_slug=repo_slug,
+        git_path=git_path,
+        target_epic_id=selected_epic,
+        target_changeset_ids=target_changesets,
+    )
+    auto_heal_action_by_key = {
+        (action.epic_id, action.changeset_id): action for action in auto_heal_actions
+    }
+    remaining_actions = prefix_migration_drift.repair_prefix_migration_drift(
         project_data_dir=project_data_dir,
         beads_root=beads_root,
         repo_root=repo_root,
@@ -98,8 +111,8 @@ def _startup_worktree_preflight(
         target_epic_id=selected_epic,
         target_changeset_ids=target_changesets,
     )
-    planned_action_by_key = {
-        (action.epic_id, action.changeset_id): action for action in planned_actions
+    remaining_action_by_key = {
+        (action.epic_id, action.changeset_id): action for action in remaining_actions
     }
 
     drift_records = prefix_migration_drift.scan_prefix_migration_drift(
@@ -122,11 +135,16 @@ def _startup_worktree_preflight(
         if record_changeset_id not in target_changesets:
             continue
         record_epic_id = _normalize_drift_value(record.get("epic_id")) or "<unknown>"
-        action = planned_action_by_key.get((record_epic_id, record_changeset_id))
+        action = remaining_action_by_key.get((record_epic_id, record_changeset_id))
+        auto_heal_action = auto_heal_action_by_key.get((record_epic_id, record_changeset_id))
         if drift_class == "metadata-read-failure":
             actionable = True
         elif action is None:
-            actionable = True
+            actionable = not (
+                auto_heal_action is not None
+                and auto_heal_action.applied
+                and drift_class in auto_heal_action.drift_classes
+            )
         else:
             actionable = action.changed and drift_class in action.drift_classes
         if not actionable:
@@ -134,6 +152,10 @@ def _startup_worktree_preflight(
 
         raw_values = record.get("values")
         details = dict(raw_values) if isinstance(raw_values, dict) else {}
+        if auto_heal_action is not None:
+            details["auto_heal.applied"] = auto_heal_action.applied
+            details["auto_heal.deferred_reason"] = auto_heal_action.deferred_reason
+            details["auto_heal.changed"] = auto_heal_action.changed
         if action is not None:
             details["repair.changed"] = action.changed
             details["repair.canonical_work_branch"] = action.canonical_work_branch

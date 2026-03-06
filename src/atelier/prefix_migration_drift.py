@@ -38,6 +38,23 @@ class _GitWorktreeIndex:
 
 
 @dataclass(frozen=True)
+class WorktreePathClassification:
+    """Classification detail for one candidate worktree path."""
+
+    path: str
+    classification: str
+    reason: str
+
+    def as_dict(self) -> dict[str, str]:
+        """Serialize classification details for status/doctor JSON payloads."""
+        return {
+            "path": self.path,
+            "classification": self.classification,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
 class PrefixMigrationRepairAction:
     """Plan or applied repair details for one drifted changeset."""
 
@@ -57,6 +74,8 @@ class PrefixMigrationRepairAction:
     update_mapping: bool
     applied: bool
     deferred_reason: str | None = None
+    path_classification: tuple[WorktreePathClassification, ...] = ()
+    planned_path_operations: tuple[str, ...] = ()
 
     @property
     def changed(self) -> bool:
@@ -88,6 +107,8 @@ class PrefixMigrationRepairAction:
             "update_mapping": self.update_mapping,
             "applied": self.applied,
             "deferred_reason": self.deferred_reason,
+            "path_classification": [entry.as_dict() for entry in self.path_classification],
+            "planned_path_operations": list(self.planned_path_operations),
         }
 
 
@@ -236,16 +257,167 @@ def _candidate_worktree_relpaths(
     return tuple(deduped)
 
 
-def _resolve_existing_worktree(
+def _worktree_path_kind(
+    *,
+    project_data_dir: Path,
+    relpath: str,
+    git_index: _GitWorktreeIndex,
+) -> str:
+    attached_branch = _normalize_text(git_index.path_to_branch.get(relpath))
+    if attached_branch is not None:
+        return f"branch_attached:{attached_branch}"
+    candidate = project_data_dir / relpath
+    if candidate.exists() and (candidate / ".git").exists():
+        return "detached_placeholder"
+    if candidate.exists():
+        return "non_worktree_path"
+    return "metadata_only"
+
+
+def _classify_worktree_paths(
+    *,
+    project_data_dir: Path,
+    git_index: _GitWorktreeIndex,
+    canonical_worktree_path: str,
+    canonical_branch_attached_path: str | None,
+    candidate_paths: tuple[str, ...],
+) -> tuple[WorktreePathClassification, ...]:
+    canonical_relpath = _normalize_worktree_path(
+        canonical_worktree_path,
+        project_data_dir=project_data_dir,
+    )
+    if canonical_relpath is None:
+        return ()
+
+    branch_attached_relpath = _normalize_worktree_path(
+        canonical_branch_attached_path,
+        project_data_dir=project_data_dir,
+    )
+    normalized_candidates = {
+        normalized
+        for normalized in (
+            _normalize_worktree_path(path, project_data_dir=project_data_dir)
+            for path in candidate_paths
+        )
+        if normalized is not None
+    }
+    normalized_candidates.add(canonical_relpath)
+    if branch_attached_relpath is not None:
+        normalized_candidates.add(branch_attached_relpath)
+
+    classifications: list[WorktreePathClassification] = [
+        WorktreePathClassification(
+            path=canonical_relpath,
+            classification="authoritative",
+            reason=("matches canonical branch/worktree lineage selected for deterministic repair"),
+        )
+    ]
+    for relpath in sorted(normalized_candidates):
+        if relpath == canonical_relpath:
+            continue
+        if relpath == branch_attached_relpath:
+            reason = (
+                "canonical branch is currently attached here; --fix moves it to the "
+                "authoritative path"
+            )
+        else:
+            kind = _worktree_path_kind(
+                project_data_dir=project_data_dir,
+                relpath=relpath,
+                git_index=git_index,
+            )
+            if kind == "detached_placeholder":
+                reason = (
+                    "detached placeholder duplicate; --fix removes it before authoritative "
+                    "branch convergence"
+                )
+            else:
+                reason = "candidate path does not match canonical branch/worktree lineage"
+        classifications.append(
+            WorktreePathClassification(
+                path=relpath,
+                classification="stale_duplicate",
+                reason=reason,
+            )
+        )
+    return tuple(classifications)
+
+
+def _plan_worktree_path_operations(
+    *,
+    project_data_dir: Path,
+    git_index: _GitWorktreeIndex,
+    canonical_worktree_path: str,
+    canonical_branch_attached_path: str | None,
+    stale_duplicate_paths: tuple[str, ...],
+    update_changeset_worktree_path: bool,
+    update_mapping: bool,
+) -> tuple[str, ...]:
+    canonical_relpath = _normalize_worktree_path(
+        canonical_worktree_path,
+        project_data_dir=project_data_dir,
+    )
+    if canonical_relpath is None:
+        return ()
+
+    operations: list[str] = []
+    branch_attached_relpath = _normalize_worktree_path(
+        canonical_branch_attached_path,
+        project_data_dir=project_data_dir,
+    )
+    canonical_path = project_data_dir / canonical_relpath
+    canonical_exists_git = canonical_path.exists() and (canonical_path / ".git").exists()
+    canonical_attached_branch = _normalize_text(git_index.path_to_branch.get(canonical_relpath))
+
+    if branch_attached_relpath is not None and branch_attached_relpath != canonical_relpath:
+        if canonical_exists_git and canonical_attached_branch is not None:
+            operations.append(
+                "skip move: authoritative path "
+                f"{canonical_relpath} is already branch-attached ({canonical_attached_branch})"
+            )
+        else:
+            if canonical_exists_git and canonical_attached_branch is None:
+                operations.append(
+                    "remove stale_duplicate detached placeholder "
+                    f"{canonical_relpath} before moving the canonical branch attachment"
+                )
+            operations.append(
+                "move branch_attached stale_duplicate "
+                f"{branch_attached_relpath} -> authoritative {canonical_relpath}"
+            )
+
+    if update_changeset_worktree_path or update_mapping:
+        operations.append(
+            f"rewrite metadata/mapping worktree paths to authoritative {canonical_relpath}"
+        )
+
+    if not operations and stale_duplicate_paths:
+        operations.append(
+            "retain stale_duplicate paths with no filesystem mutation; "
+            "only canonical lineage metadata changes are required"
+        )
+    return tuple(operations)
+
+
+def _existing_worktree_candidates(
     *,
     project_data_dir: Path,
     relpaths: tuple[str, ...],
-) -> tuple[str | None, Path | None]:
+) -> list[tuple[str, Path]]:
     matches: list[tuple[str, Path]] = []
     for relpath in relpaths:
         candidate = project_data_dir / relpath
         if candidate.exists() and (candidate / ".git").exists():
             matches.append((relpath, candidate))
+    return matches
+
+
+def _resolve_existing_worktree(
+    *,
+    project_data_dir: Path,
+    relpaths: tuple[str, ...],
+) -> tuple[str | None, Path | None]:
+    matches = _existing_worktree_candidates(project_data_dir=project_data_dir, relpaths=relpaths)
     if not matches:
         return None, None
     if len(matches) > 1:
@@ -255,6 +427,35 @@ def _resolve_existing_worktree(
             f"multiple paths exist and cannot be selected safely: {candidates}"
         )
     return matches[0]
+
+
+def _resolve_authoritative_worktree(
+    *,
+    project_data_dir: Path,
+    relpaths: tuple[str, ...],
+    git_index: _GitWorktreeIndex,
+    canonical_branch: str,
+) -> tuple[str | None, Path | None]:
+    matches = _existing_worktree_candidates(project_data_dir=project_data_dir, relpaths=relpaths)
+    if not matches:
+        return None, None
+
+    by_relpath = {relpath: path for relpath, path in matches}
+    canonical_branch_paths = tuple(
+        relpath
+        for relpath in git_index.branch_to_paths.get(canonical_branch, ())
+        if relpath in by_relpath
+    )
+    if len(canonical_branch_paths) > 1:
+        candidates = ", ".join(f"{relpath!r}" for relpath in canonical_branch_paths)
+        raise RuntimeError(
+            "ambiguous existing changeset worktree candidates; canonical branch is attached "
+            f"to multiple paths and cannot be selected safely: {candidates}"
+        )
+    if len(canonical_branch_paths) == 1:
+        selected_relpath = canonical_branch_paths[0]
+        return selected_relpath, by_relpath[selected_relpath]
+    return _resolve_existing_worktree(project_data_dir=project_data_dir, relpaths=relpaths)
 
 
 def _choose_branch_source(
@@ -343,6 +544,57 @@ def _checkout_canonical_branch(
     )
 
 
+def _checked_status_porcelain(
+    *,
+    worktree_path: Path,
+    git_path: str | None,
+    detail: str,
+) -> list[str]:
+    result = exec_util.try_run_command(
+        git.git_command(["-C", str(worktree_path), "status", "--porcelain"], git_path=git_path)
+    )
+    if result is None:
+        raise RuntimeError(f"{detail}: missing required command: git")
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        reason = stderr or stdout or "git status failed"
+        raise RuntimeError(f"{detail}: {reason}")
+    return [line for line in (result.stdout or "").splitlines() if line.strip()]
+
+
+def _remove_detached_placeholder_worktree(
+    *,
+    repo_root: Path,
+    placeholder_relpath: str,
+    placeholder_path: Path,
+    git_path: str | None,
+) -> None:
+    status_lines = _checked_status_porcelain(
+        worktree_path=placeholder_path,
+        git_path=git_path,
+        detail=(
+            "failed to inspect detached placeholder worktree before removal "
+            f"({placeholder_relpath!r})"
+        ),
+    )
+    if status_lines:
+        raise RuntimeError(
+            "detached placeholder worktree has local changes and cannot be removed safely: "
+            f"{placeholder_relpath!r}"
+        )
+    _run_git_checked(
+        repo_root=repo_root,
+        args=["worktree", "remove", str(placeholder_path)],
+        git_path=git_path,
+        detail=f"failed to remove detached placeholder worktree {placeholder_relpath!r}",
+    )
+    if placeholder_path.exists():
+        raise RuntimeError(
+            f"failed to verify detached placeholder worktree removal for {placeholder_relpath!r}"
+        )
+
+
 def _converge_changeset_artifacts(
     *,
     project_data_dir: Path,
@@ -402,9 +654,11 @@ def _converge_changeset_artifacts(
         filesystem_path_for_metadata_branch=filesystem_path_for_metadata_branch,
         filesystem_path_for_mapping_branch=filesystem_path_for_mapping_branch,
     )
-    source_relpath, source_path = _resolve_existing_worktree(
+    source_relpath, source_path = _resolve_authoritative_worktree(
         project_data_dir=project_data_dir,
         relpaths=source_relpaths,
+        git_index=git_index,
+        canonical_branch=action.canonical_work_branch,
     )
 
     if canonical_path.exists() and not (canonical_path / ".git").exists():
@@ -412,11 +666,33 @@ def _converge_changeset_artifacts(
             "canonical changeset worktree path exists but is not a git worktree: "
             f"{canonical_relpath!r}"
         )
+    remove_detached_placeholder = False
+    if (
+        source_path is not None
+        and source_relpath is not None
+        and source_relpath != canonical_relpath
+        and canonical_path.exists()
+    ):
+        canonical_branch = _normalize_text(git_index.path_to_branch.get(canonical_relpath))
+        if canonical_branch is not None:
+            raise RuntimeError(
+                "canonical changeset worktree path is already branch-attached and cannot be "
+                f"replaced safely: {canonical_relpath!r} ({canonical_branch})"
+            )
+        canonical_head = _normalize_branch_ref(
+            git.git_current_branch(canonical_path, git_path=git_path)
+        )
+        if canonical_head not in {None, "HEAD"}:
+            raise RuntimeError(
+                "canonical changeset worktree path is not detached and cannot be replaced safely: "
+                f"{canonical_relpath!r} ({canonical_head})"
+            )
+        remove_detached_placeholder = True
     move_worktree = (
         source_path is not None
         and source_relpath is not None
         and source_relpath != canonical_relpath
-        and not canonical_path.exists()
+        and (remove_detached_placeholder or not canonical_path.exists())
     )
     if move_worktree:
         assert source_path is not None
@@ -449,6 +725,13 @@ def _converge_changeset_artifacts(
     if move_worktree:
         assert source_path is not None
         assert source_relpath is not None
+        if remove_detached_placeholder:
+            _remove_detached_placeholder_worktree(
+                repo_root=repo_root,
+                placeholder_relpath=canonical_relpath,
+                placeholder_path=canonical_path,
+                git_path=git_path,
+            )
         _run_git_checked(
             repo_root=repo_root,
             args=["worktree", "move", str(source_path), str(canonical_path)],
@@ -705,6 +988,11 @@ def _resolve_repair_action(
         filesystem_path_for_metadata_branch = _filesystem_path_for_branch(
             git_index, metadata_work_branch
         )
+    filesystem_path_for_mapping_branch = None
+    if mapping_work_branch is not None:
+        filesystem_path_for_mapping_branch = _filesystem_path_for_branch(
+            git_index, mapping_work_branch
+        )
     filesystem_path_for_canonical_branch = None
     if changeset_id == epic_id:
         filesystem_path_for_canonical_branch = _filesystem_path_for_branch(
@@ -773,6 +1061,40 @@ def _resolve_repair_action(
         or mapping_work_branch != canonical_work_branch
         or mapping_worktree_path != canonical_worktree
     )
+    path_classification = _classify_worktree_paths(
+        project_data_dir=project_data_dir,
+        git_index=git_index,
+        canonical_worktree_path=canonical_worktree,
+        canonical_branch_attached_path=filesystem_path_for_canonical_branch,
+        candidate_paths=tuple(
+            sorted(
+                {
+                    value
+                    for value in (
+                        metadata_worktree_path,
+                        mapping_worktree_path,
+                        filesystem_path_for_metadata_branch,
+                        filesystem_path_for_mapping_branch,
+                        filesystem_path_for_canonical_branch,
+                        canonical_worktree,
+                    )
+                    if value is not None
+                }
+            )
+        ),
+    )
+    stale_duplicate_paths = tuple(
+        entry.path for entry in path_classification if entry.classification == "stale_duplicate"
+    )
+    planned_path_operations = _plan_worktree_path_operations(
+        project_data_dir=project_data_dir,
+        git_index=git_index,
+        canonical_worktree_path=canonical_worktree,
+        canonical_branch_attached_path=filesystem_path_for_canonical_branch,
+        stale_duplicate_paths=stale_duplicate_paths,
+        update_changeset_worktree_path=update_changeset_worktree_path,
+        update_mapping=update_mapping,
+    )
     return PrefixMigrationRepairAction(
         epic_id=epic_id,
         changeset_id=changeset_id,
@@ -789,6 +1111,8 @@ def _resolve_repair_action(
         update_changeset_worktree_path=update_changeset_worktree_path,
         update_mapping=update_mapping,
         applied=False,
+        path_classification=path_classification,
+        planned_path_operations=planned_path_operations,
     )
 
 
@@ -1036,6 +1360,8 @@ def repair_prefix_migration_drift(
                     update_mapping=action.update_mapping,
                     applied=applied,
                     deferred_reason=deferred_reason,
+                    path_classification=action.path_classification,
+                    planned_path_operations=action.planned_path_operations,
                 )
             )
     return sorted(

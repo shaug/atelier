@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -210,6 +211,185 @@ def test_converge_changeset_artifacts_checks_out_before_worktree_move(
         git_path=None,
     )
     assert not run_git_checked.call_args_list
+
+
+def test_converge_changeset_artifacts_removes_detached_placeholder_before_move(
+    tmp_path: Path,
+) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    legacy_path = project_data_dir / "worktrees" / "at-legacy.1"
+    canonical_path = project_data_dir / "worktrees" / "ts-epic.1"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    legacy_path.mkdir(parents=True)
+    canonical_path.mkdir(parents=True)
+    (legacy_path / ".git").write_text("gitdir: /tmp/legacy\n", encoding="utf-8")
+    (canonical_path / ".git").write_text("gitdir: /tmp/canonical\n", encoding="utf-8")
+
+    action = prefix_migration_drift.PrefixMigrationRepairAction(
+        epic_id="ts-epic",
+        changeset_id="ts-epic.1",
+        drift_classes=("worktree-path-conflict",),
+        canonical_root_branch="feat/root",
+        canonical_work_branch="feat/canonical",
+        work_branch_source="mapping-work-branch",
+        canonical_worktree_path="worktrees/ts-epic.1",
+        worktree_path_source="derived-canonical",
+        pr_head_ref=None,
+        pr_lookup_branch=None,
+        update_workspace_root_branch=False,
+        update_changeset_metadata=True,
+        update_changeset_worktree_path=True,
+        update_mapping=True,
+        applied=False,
+    )
+    changeset_issue = {
+        "id": "ts-epic.1",
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.work_branch: feat/canonical\n"
+            "worktree_path: worktrees/at-legacy.1\n"
+        ),
+    }
+    git_index = prefix_migration_drift._GitWorktreeIndex(
+        path_to_branch={"worktrees/at-legacy.1": "feat/canonical"},
+        branch_to_paths={"feat/canonical": ("worktrees/at-legacy.1",)},
+    )
+
+    operations: list[str] = []
+
+    def fake_run_git_checked(
+        *,
+        repo_root: Path,
+        args: list[str],
+        git_path: str | None,
+        detail: str,
+    ) -> None:
+        del repo_root, git_path, detail
+        if args[:2] == ["worktree", "remove"]:
+            operations.append("remove")
+            shutil.rmtree(Path(args[2]))
+            return
+        if args[:2] == ["worktree", "move"]:
+            operations.append("move")
+            Path(args[2]).rename(Path(args[3]))
+            return
+        raise AssertionError(f"unexpected git invocation: {args!r}")
+
+    def fake_try_run_command(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        if cmd[-2:] == ["status", "--porcelain"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected command: {cmd!r}")
+
+    with (
+        patch("atelier.prefix_migration_drift._ensure_canonical_branch"),
+        patch("atelier.prefix_migration_drift._checkout_canonical_branch"),
+        patch("atelier.prefix_migration_drift._run_git_checked", side_effect=fake_run_git_checked),
+        patch(
+            "atelier.prefix_migration_drift.exec_util.try_run_command",
+            side_effect=fake_try_run_command,
+        ),
+        patch(
+            "atelier.prefix_migration_drift.git.git_current_branch",
+            side_effect=lambda path, *, git_path=None: (
+                "HEAD" if path == canonical_path else "feat/source"
+            ),
+        ),
+    ):
+        prefix_migration_drift._converge_changeset_artifacts(
+            project_data_dir=project_data_dir,
+            repo_root=repo_root,
+            action=action,
+            changeset_issue=changeset_issue,
+            mapping=None,
+            git_index=git_index,
+            git_path=None,
+        )
+
+    assert operations == ["remove", "move"]
+    assert canonical_path.exists()
+    assert (canonical_path / ".git").exists()
+    assert not legacy_path.exists()
+
+
+def test_converge_changeset_artifacts_blocks_dirty_detached_placeholder(tmp_path: Path) -> None:
+    project_data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    legacy_path = project_data_dir / "worktrees" / "at-legacy.1"
+    canonical_path = project_data_dir / "worktrees" / "ts-epic.1"
+    project_data_dir.mkdir(parents=True)
+    repo_root.mkdir(parents=True)
+    legacy_path.mkdir(parents=True)
+    canonical_path.mkdir(parents=True)
+    (legacy_path / ".git").write_text("gitdir: /tmp/legacy\n", encoding="utf-8")
+    (canonical_path / ".git").write_text("gitdir: /tmp/canonical\n", encoding="utf-8")
+    (canonical_path / "scratch.txt").write_text("dirty\n", encoding="utf-8")
+
+    action = prefix_migration_drift.PrefixMigrationRepairAction(
+        epic_id="ts-epic",
+        changeset_id="ts-epic.1",
+        drift_classes=("worktree-path-conflict",),
+        canonical_root_branch="feat/root",
+        canonical_work_branch="feat/canonical",
+        work_branch_source="mapping-work-branch",
+        canonical_worktree_path="worktrees/ts-epic.1",
+        worktree_path_source="derived-canonical",
+        pr_head_ref=None,
+        pr_lookup_branch=None,
+        update_workspace_root_branch=False,
+        update_changeset_metadata=True,
+        update_changeset_worktree_path=True,
+        update_mapping=True,
+        applied=False,
+    )
+    changeset_issue = {
+        "id": "ts-epic.1",
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.work_branch: feat/canonical\n"
+            "worktree_path: worktrees/at-legacy.1\n"
+        ),
+    }
+    git_index = prefix_migration_drift._GitWorktreeIndex(
+        path_to_branch={"worktrees/at-legacy.1": "feat/canonical"},
+        branch_to_paths={"feat/canonical": ("worktrees/at-legacy.1",)},
+    )
+
+    with (
+        patch("atelier.prefix_migration_drift._ensure_canonical_branch"),
+        patch("atelier.prefix_migration_drift._checkout_canonical_branch"),
+        patch(
+            "atelier.prefix_migration_drift.exec_util.try_run_command",
+            return_value=subprocess.CompletedProcess(
+                args=["git", "status", "--porcelain"],
+                returncode=0,
+                stdout="?? scratch.txt\n",
+                stderr="",
+            ),
+        ),
+        patch("atelier.prefix_migration_drift._run_git_checked") as run_git_checked,
+        patch(
+            "atelier.prefix_migration_drift.git.git_current_branch",
+            side_effect=lambda path, *, git_path=None: (
+                "HEAD" if path == canonical_path else "feat/source"
+            ),
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="detached placeholder worktree has local changes"):
+            prefix_migration_drift._converge_changeset_artifacts(
+                project_data_dir=project_data_dir,
+                repo_root=repo_root,
+                action=action,
+                changeset_issue=changeset_issue,
+                mapping=None,
+                git_index=git_index,
+                git_path=None,
+            )
+
+    run_git_checked.assert_not_called()
+    assert canonical_path.exists()
+    assert legacy_path.exists()
 
 
 def test_scan_prefix_migration_drift_reports_conflicts_deterministically(tmp_path: Path) -> None:
@@ -1124,6 +1304,16 @@ def test_repair_prefix_migration_drift_converges_duplicate_branch_paths_determin
     assert action.update_changeset_metadata is True
     assert action.update_changeset_worktree_path is False
     assert action.update_mapping is True
+    assert [entry.classification for entry in action.path_classification] == [
+        "authoritative",
+        "stale_duplicate",
+    ]
+    assert action.path_classification[0].path == "worktrees/ts-epic.1"
+    assert action.path_classification[1].path == "worktrees/at-legacy-ts-epic.1"
+    assert any(
+        operation.startswith("rewrite metadata/mapping worktree paths")
+        for operation in action.planned_path_operations
+    )
 
 
 def test_repair_prefix_migration_drift_apply_backfills_missing_mapping_lineage(

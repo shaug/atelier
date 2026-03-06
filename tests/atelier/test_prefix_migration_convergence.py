@@ -212,23 +212,6 @@ def test_migrated_project_convergence_harness(case: _ConvergenceCase, tmp_path: 
             "worktree-path-conflict",
         }
 
-        with (
-            patch("atelier.worker.session.worktree.git.git_origin_url", return_value=None),
-            patch("atelier.worker.session.worktree.prs.github_repo_slug", return_value=None),
-        ):
-            with pytest.raises(RuntimeError, match="startup preflight blocked"):
-                session_worktree._startup_worktree_preflight(
-                    project_data_dir=state.project_data_dir,
-                    beads_root=state.beads_root,
-                    repo_root=state.repo_root,
-                    selected_epic=case.epic_id,
-                    changeset_id=case.changeset_id,
-                    root_branch_value=case.root_branch,
-                    changeset_parent_branch=case.root_branch,
-                    allow_parent_branch_override=False,
-                    git_path=None,
-                )
-
         planned_actions = prefix_migration_drift.repair_prefix_migration_drift(
             project_data_dir=state.project_data_dir,
             beads_root=state.beads_root,
@@ -301,31 +284,6 @@ def test_migrated_project_convergence_harness(case: _ConvergenceCase, tmp_path: 
                 "atelier.prefix_migration_drift.beads.update_worktree_path",
                 side_effect=fake_update_worktree_path,
             ),
-        ):
-            applied_actions = prefix_migration_drift.repair_prefix_migration_drift(
-                project_data_dir=state.project_data_dir,
-                beads_root=state.beads_root,
-                repo_root=state.repo_root,
-                apply=True,
-                repo_slug="org/repo",
-                lookup_pr_status=fake_lookup,
-            )
-
-        assert len(applied_actions) == 1
-        assert applied_actions[0].applied is True
-        assert applied_actions[0].changed is True
-        update_root.assert_not_called()
-
-        assert (
-            prefix_migration_drift.scan_prefix_migration_drift(
-                project_data_dir=state.project_data_dir,
-                beads_root=state.beads_root,
-                repo_root=state.repo_root,
-            )
-            == []
-        )
-
-        with (
             patch("atelier.worker.session.worktree.git.git_origin_url", return_value=None),
             patch("atelier.worker.session.worktree.prs.github_repo_slug", return_value=None),
         ):
@@ -340,6 +298,16 @@ def test_migrated_project_convergence_harness(case: _ConvergenceCase, tmp_path: 
                 allow_parent_branch_override=False,
                 git_path=None,
             )
+        update_root.assert_not_called()
+
+        assert (
+            prefix_migration_drift.scan_prefix_migration_drift(
+                project_data_dir=state.project_data_dir,
+                beads_root=state.beads_root,
+                repo_root=state.repo_root,
+            )
+            == []
+        )
 
         post_actions = prefix_migration_drift.repair_prefix_migration_drift(
             project_data_dir=state.project_data_dir,
