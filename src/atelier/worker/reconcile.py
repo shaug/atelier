@@ -206,6 +206,14 @@ def _converge_stale_terminal_metadata(
     return tuple(updates)
 
 
+def _converged_integrated_sha(updates: tuple[str, ...]) -> str | None:
+    prefix = "changeset.integrated_sha="
+    for update in updates:
+        if update.startswith(prefix):
+            return update.removeprefix(prefix)
+    return None
+
+
 def _agent_issue_identity(issue: dict[str, object]) -> str | None:
     fields = _description_fields(issue)
     description_identity = _normalized_text(fields.get("agent_id"))
@@ -1029,9 +1037,11 @@ def reconcile_blocked_merged_changesets(
                         f"(finalize reason={finalize_result.reason})"
                     )
                 continue
-            if candidate.require_terminal_status:
+            refreshed_issue: dict[str, object] | None = None
+            if candidate.require_terminal_status or candidate.integrated_sha:
                 issue_cache.pop(changeset_id, None)
                 refreshed_issue = load_issue(changeset_id)
+            if candidate.require_terminal_status:
                 refreshed_status = (
                     _canonical_changeset_status(refreshed_issue) if refreshed_issue else None
                 )
@@ -1056,7 +1066,11 @@ def reconcile_blocked_merged_changesets(
                             )
                         )
                     continue
-            if candidate.integrated_sha:
+            if (
+                candidate.integrated_sha
+                and _converged_integrated_sha(converged_updates) is None
+                and _recorded_integrated_sha(refreshed_issue or {}) is None
+            ):
                 beads.update_changeset_integrated_sha(
                     changeset_id,
                     candidate.integrated_sha,
