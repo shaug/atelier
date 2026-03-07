@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .. import beads, worktrees
+from .. import beads, config, prs, worktrees
+from ..worker import stale_pr_lifecycle
 from .common import issue_integrated_sha, normalize_branch, try_show_issue
 
 
@@ -15,8 +16,15 @@ def reconcile_preview_lines(
     project_dir: Path | None,
     beads_root: Path,
     repo_root: Path,
+    project_config: config.ProjectConfig | None = None,
+    git_path: str | None = None,
 ) -> tuple[str, ...]:
     lines: list[str] = []
+    repo_slug: str | None = None
+    if project_config is not None:
+        repo_slug = prs.github_repo_slug(
+            project_config.project.origin or project_config.project.repo_url
+        )
     if project_dir is not None:
         mapping = worktrees.load_mapping(worktrees.mapping_path(project_dir, epic_id))
         if mapping is not None:
@@ -60,4 +68,16 @@ def reconcile_preview_lines(
         status = str(issue.get("status") or "unknown")
         integrated_sha = issue_integrated_sha(issue) or "missing"
         lines.append(f"{changeset_id}: status={status} integrated_sha={integrated_sha}")
+        if project_config is not None and project_config.branch.pr:
+            classification = stale_pr_lifecycle.classify_stale_terminal_pr_lifecycle(
+                issue,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                branch_pr=True,
+                git_path=git_path,
+            )
+            if classification.is_candidate or classification.is_anomaly:
+                lines.append(
+                    f"{changeset_id}: {stale_pr_lifecycle.format_operator_triage(classification)}"
+                )
     return tuple(lines)

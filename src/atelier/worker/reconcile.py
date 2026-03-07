@@ -22,6 +22,7 @@ class ReconcileCandidate:
     dependency_ids: tuple[str, ...]
     terminal_pr_state: str | None = None
     require_terminal_status: bool = False
+    triage_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -714,34 +715,18 @@ def reconcile_blocked_merged_changesets(
                     log(
                         "reconcile anomaly: "
                         f"{changeset_id} -> epic={epic_id} "
-                        + (
-                            "in_progress+stale-terminal-pr-anomaly("
-                            f"reason={stale_terminal.reason},"
-                            f"detail={_format_lookup_error(stale_terminal.detail)}) "
-                            if stale_terminal.detail
-                            else (
-                                "in_progress+stale-terminal-pr-anomaly("
-                                f"reason={stale_terminal.reason}) "
-                            )
-                        )
-                        + "decision-required"
+                        f"status={status} "
+                        f"{stale_pr_lifecycle.format_operator_triage(stale_terminal)}"
                     )
                 continue
             if not stale_terminal.is_candidate:
                 if log:
-                    if stale_terminal.reason.startswith("active_pr_lifecycle_"):
-                        log(
-                            f"reconcile skip: {changeset_id} "
-                            "(in_progress pr lifecycle still active: "
-                            f"{stale_terminal.live_pr_state or 'none'})"
-                        )
-                    else:
-                        stored_state = _stored_review_state(issue) or "none"
-                        log(
-                            f"reconcile skip: {changeset_id} "
-                            "(in_progress terminal PR evidence unavailable; "
-                            f"stored={stored_state}, live={stale_terminal.live_pr_state or 'none'})"
-                        )
+                    log(
+                        "reconcile skip: "
+                        f"{changeset_id} -> epic={epic_id} "
+                        f"status={status} "
+                        f"{stale_pr_lifecycle.format_operator_triage(stale_terminal)}"
+                    )
                 continue
             integration_proven, integrated_sha = changeset_integration_signal(
                 issue,
@@ -761,6 +746,7 @@ def reconcile_blocked_merged_changesets(
                 dependency_ids=issue_dependency_ids(issue),
                 terminal_pr_state=stale_terminal.live_pr_state,
                 require_terminal_status=True,
+                triage_summary=stale_pr_lifecycle.format_operator_triage(stale_terminal),
             )
             continue
         if project_config.branch.pr and status in {"open", "blocked"}:
@@ -778,17 +764,8 @@ def reconcile_blocked_merged_changesets(
                     log(
                         "reconcile anomaly: "
                         f"{changeset_id} -> epic={epic_id} "
-                        + (
-                            f"{status}+stale-terminal-pr-anomaly("
-                            f"reason={stale_terminal.reason},"
-                            f"detail={_format_lookup_error(stale_terminal.detail)}) "
-                            if stale_terminal.detail
-                            else (
-                                f"{status}+stale-terminal-pr-anomaly("
-                                f"reason={stale_terminal.reason}) "
-                            )
-                        )
-                        + "decision-required"
+                        f"status={status} "
+                        f"{stale_pr_lifecycle.format_operator_triage(stale_terminal)}"
                     )
                 continue
             if stale_terminal.is_candidate:
@@ -810,8 +787,17 @@ def reconcile_blocked_merged_changesets(
                     dependency_ids=issue_dependency_ids(issue),
                     terminal_pr_state=stale_terminal.live_pr_state,
                     require_terminal_status=True,
+                    triage_summary=stale_pr_lifecycle.format_operator_triage(stale_terminal),
                 )
                 continue
+            if log:
+                log(
+                    "reconcile skip: "
+                    f"{changeset_id} -> epic={epic_id} "
+                    f"status={status} "
+                    f"{stale_pr_lifecycle.format_operator_triage(stale_terminal)}"
+                )
+            continue
         integration_proven, integrated_sha = changeset_integration_signal(
             issue,
             repo_slug=repo_slug,
@@ -959,6 +945,7 @@ def reconcile_blocked_merged_changesets(
                 if log:
                     log(
                         f"reconcile dry-run: {changeset_id} -> epic={candidate.epic_id}"
+                        + (f" {candidate.triage_summary}" if candidate.triage_summary else "")
                         + (
                             f" integrated_sha={candidate.integrated_sha}"
                             if candidate.integrated_sha
@@ -1081,6 +1068,7 @@ def reconcile_blocked_merged_changesets(
                 log(
                     f"reconcile ok: {changeset_id} -> epic={candidate.epic_id} "
                     f"(finalize reason={finalize_result.reason})"
+                    + (f" {candidate.triage_summary}" if candidate.triage_summary else "")
                     + (f" metadata={','.join(converged_updates)}" if converged_updates else "")
                 )
             reconciled += 1

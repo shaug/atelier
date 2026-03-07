@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from atelier import prs
 from atelier.worker import stale_pr_lifecycle
 
@@ -140,3 +142,50 @@ def test_classify_stale_terminal_pr_lifecycle_marks_lookup_failure_as_anomaly() 
     assert result.kind == "anomaly"
     assert result.reason == "pr_lifecycle_lookup_failed"
     assert result.detail == "gh timeout"
+
+
+@pytest.mark.parametrize(
+    ("classification", "expected"),
+    [
+        (
+            stale_pr_lifecycle.StaleTerminalPrLifecycleClassification(
+                kind="candidate",
+                reason="terminal_pr_merged",
+                canonical_status="blocked",
+                stored_pr_state="draft-pr",
+                live_pr_state="merged",
+                stale_fields=("status", "pr_state"),
+            ),
+            "triage=metadata-stale reason=terminal_pr_merged "
+            "live_pr=merged stored_pr=draft-pr stale_fields=status,pr_state "
+            "action=reconcile-stale-metadata",
+        ),
+        (
+            stale_pr_lifecycle.StaleTerminalPrLifecycleClassification(
+                kind="none",
+                reason="active_pr_lifecycle_pr-open",
+                canonical_status="blocked",
+                stored_pr_state="merged",
+                live_pr_state="pr-open",
+            ),
+            "triage=not-merged reason=active_pr_lifecycle_pr-open "
+            "live_pr=pr-open stored_pr=merged action=leave-state-as-is",
+        ),
+        (
+            stale_pr_lifecycle.StaleTerminalPrLifecycleClassification(
+                kind="anomaly",
+                reason="pr_lifecycle_lookup_failed",
+                canonical_status="blocked",
+                stored_pr_state="draft-pr",
+                detail="gh timeout",
+            ),
+            "triage=decision-required reason=pr_lifecycle_lookup_failed "
+            "stored_pr=draft-pr detail=gh timeout action=manual-decision-required",
+        ),
+    ],
+)
+def test_format_operator_triage_matrix(
+    classification: stale_pr_lifecycle.StaleTerminalPrLifecycleClassification,
+    expected: str,
+) -> None:
+    assert stale_pr_lifecycle.format_operator_triage(classification) == expected

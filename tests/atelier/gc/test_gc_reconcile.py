@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import atelier.gc.reconcile as gc_reconcile
+from atelier import config, prs
 
 
 def test_reconcile_preview_lines_includes_epic_and_changeset_info() -> None:
@@ -70,3 +71,45 @@ def test_reconcile_preview_lines_includes_mapping_when_project_dir_given() -> No
 
     assert any("mapped branches" in line for line in lines)
     assert any("mapped worktrees" in line for line in lines)
+
+
+def test_reconcile_preview_lines_reports_operator_triage_for_stale_metadata() -> None:
+    project_config = config.ProjectConfig(
+        project=config.ProjectSection(origin="https://github.com/org/repo"),
+        branch=config.BranchConfig(pr=True),
+    )
+    issue = {
+        "id": "at-epic.1",
+        "status": "blocked",
+        "description": "changeset.work_branch: feat/root-at-epic.1\npr_state: draft-pr\n",
+    }
+
+    with (
+        patch("atelier.gc.reconcile.try_show_issue", return_value=issue),
+        patch("atelier.gc.reconcile.stale_pr_lifecycle.git.git_ref_exists", return_value=True),
+        patch(
+            "atelier.gc.reconcile.stale_pr_lifecycle.prs.lookup_github_pr_status",
+            return_value=prs.GithubPrLookup(
+                outcome="found",
+                payload={
+                    "number": 17,
+                    "state": "CLOSED",
+                    "isDraft": False,
+                    "reviewDecision": None,
+                    "mergedAt": "2026-03-01T00:00:00Z",
+                    "closedAt": "2026-03-01T00:00:00Z",
+                },
+            ),
+        ),
+    ):
+        lines = gc_reconcile.reconcile_preview_lines(
+            "at-epic",
+            ["at-epic.1"],
+            project_dir=None,
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            project_config=project_config,
+            git_path="git",
+        )
+
+    assert any("triage=metadata-stale" in line for line in lines)

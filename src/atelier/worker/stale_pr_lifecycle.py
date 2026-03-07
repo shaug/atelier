@@ -35,6 +35,15 @@ class StaleTerminalPrLifecycleClassification:
         """Return whether the classification represents ambiguous evidence."""
         return self.kind == "anomaly"
 
+    @property
+    def triage_bucket(self) -> str:
+        """Return the operator-facing triage bucket for this classification."""
+        if self.is_candidate:
+            return "metadata-stale"
+        if self.is_anomaly:
+            return "decision-required"
+        return "not-merged"
+
 
 def _classification(
     *,
@@ -161,7 +170,42 @@ def classify_stale_terminal_pr_lifecycle(
     )
 
 
+def format_operator_triage(
+    classification: StaleTerminalPrLifecycleClassification,
+) -> str:
+    """Render a stable operator-facing triage summary.
+
+    Args:
+        classification: Stale terminal lifecycle classification result.
+
+    Returns:
+        Stable summary string suitable for reconcile logs and diagnostics.
+    """
+    parts = [
+        f"triage={classification.triage_bucket}",
+        f"reason={classification.reason}",
+    ]
+    if classification.live_pr_state:
+        parts.append(f"live_pr={classification.live_pr_state}")
+    if classification.stored_pr_state:
+        parts.append(f"stored_pr={classification.stored_pr_state}")
+    if classification.stale_fields:
+        parts.append(f"stale_fields={','.join(classification.stale_fields)}")
+    if classification.detail:
+        detail = " ".join(classification.detail.split()) or "unknown"
+        parts.append(f"detail={detail}")
+
+    if classification.is_candidate:
+        parts.append("action=reconcile-stale-metadata")
+    elif classification.is_anomaly:
+        parts.append("action=manual-decision-required")
+    else:
+        parts.append("action=leave-state-as-is")
+    return " ".join(parts)
+
+
 __all__ = [
     "StaleTerminalPrLifecycleClassification",
     "classify_stale_terminal_pr_lifecycle",
+    "format_operator_triage",
 ]
