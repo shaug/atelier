@@ -13,6 +13,7 @@ from ..worker import prompts as worker_prompts
 from ..worker import queueing as worker_queueing
 from ..worker import review as worker_review
 from ..worker import selection as worker_selection
+from ..worker import stale_pr_lifecycle
 from ..worker.models import StartupContractResult, StartupFinalizePreflightResult
 from ..worker.session import startup as worker_startup
 from .work_finalization_runtime import (
@@ -61,6 +62,63 @@ def startup_finalize_preflight(
     Returns:
         Startup preflight decision with deterministic reason code.
     """
+    if not branch_pr:
+        integration_proven, _integrated_sha = changeset_integration_signal(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            require_target_branch_proof=True,
+        )
+        if not integration_proven:
+            return StartupFinalizePreflightResult(
+                should_finalize_only=False,
+                reason="normal_path:integration_unproven",
+            )
+        return StartupFinalizePreflightResult(
+            should_finalize_only=True,
+            reason="finalize_only:non_pr_integration_proven",
+        )
+
+    stale_terminal = stale_pr_lifecycle.classify_stale_terminal_pr_lifecycle(
+        issue,
+        repo_slug=repo_slug,
+        repo_root=repo_root,
+        branch_pr=branch_pr,
+        git_path=git_path,
+    )
+    if stale_terminal.is_anomaly:
+        return StartupFinalizePreflightResult(
+            should_finalize_only=False,
+            reason=f"normal_path:stale_terminal_pr_anomaly_{stale_terminal.reason}",
+        )
+    if stale_terminal.reason.startswith("active_pr_lifecycle_"):
+        lifecycle_label = stale_terminal.live_pr_state or "none"
+        return StartupFinalizePreflightResult(
+            should_finalize_only=False,
+            reason=f"normal_path:pr_lifecycle_{lifecycle_label}",
+        )
+    if stale_terminal.is_candidate:
+        integration_proven, _integrated_sha = changeset_integration_signal(
+            issue,
+            repo_slug=repo_slug,
+            repo_root=repo_root,
+            git_path=git_path,
+            require_target_branch_proof=True,
+        )
+        if not integration_proven:
+            return StartupFinalizePreflightResult(
+                should_finalize_only=False,
+                reason=(
+                    "normal_path:stale_terminal_pr_lifecycle_"
+                    f"{stale_terminal.live_pr_state or 'none'}"
+                ),
+            )
+        return StartupFinalizePreflightResult(
+            should_finalize_only=True,
+            reason=f"finalize_only:pr_lifecycle_{stale_terminal.live_pr_state}_integration_proven",
+        )
+
     integration_proven, _integrated_sha = changeset_integration_signal(
         issue,
         repo_slug=repo_slug,
@@ -72,11 +130,6 @@ def startup_finalize_preflight(
         return StartupFinalizePreflightResult(
             should_finalize_only=False,
             reason="normal_path:integration_unproven",
-        )
-    if not branch_pr:
-        return StartupFinalizePreflightResult(
-            should_finalize_only=True,
-            reason="finalize_only:non_pr_integration_proven",
         )
 
     work_branch = changeset_fields.work_branch(issue)

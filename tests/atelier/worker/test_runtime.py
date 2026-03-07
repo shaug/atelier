@@ -689,18 +689,33 @@ def test_next_changeset_service_passes_beads_root_to_review_waiting_gate() -> No
 
 
 def test_startup_finalize_preflight_short_circuits_terminal_pr_with_integration() -> None:
-    issue = {"description": "changeset.work_branch: feat/root-at-epic.1\n"}
+    issue = {
+        "status": "blocked",
+        "description": "changeset.work_branch: feat/root-at-epic.1\npr_state: draft-pr\n",
+    }
     with (
         patch(
             "atelier.worker.work_startup_runtime.changeset_integration_signal",
             return_value=(True, "abc1234"),
         ) as integration_signal,
         patch(
-            "atelier.worker.work_startup_runtime.lookup_pr_payload",
-            return_value={"number": 42},
-        ) as lookup_pr,
-        patch("atelier.worker.work_startup_runtime.prs.has_review_requests", return_value=False),
-        patch("atelier.worker.work_startup_runtime.prs.lifecycle_state", return_value="merged"),
+            "atelier.worker.work_startup_runtime.stale_pr_lifecycle.git.git_ref_exists",
+            return_value=True,
+        ),
+        patch(
+            "atelier.worker.work_startup_runtime.stale_pr_lifecycle.prs.lookup_github_pr_status",
+            return_value=work_startup_runtime.prs.GithubPrLookup(
+                outcome="found",
+                payload={
+                    "number": 42,
+                    "state": "CLOSED",
+                    "isDraft": False,
+                    "reviewDecision": None,
+                    "mergedAt": "2026-03-01T00:00:00Z",
+                    "closedAt": "2026-03-01T00:00:00Z",
+                },
+            ),
+        ),
     ):
         result = work_startup_runtime.startup_finalize_preflight(
             issue=issue,
@@ -719,22 +734,34 @@ def test_startup_finalize_preflight_short_circuits_terminal_pr_with_integration(
         git_path="git",
         require_target_branch_proof=True,
     )
-    lookup_pr.assert_called_once_with("org/repo", "feat/root-at-epic.1")
 
 
 def test_startup_finalize_preflight_fails_closed_when_pr_not_terminal() -> None:
-    issue = {"description": "changeset.work_branch: feat/root-at-epic.1\n"}
+    issue = {
+        "status": "in_progress",
+        "description": "changeset.work_branch: feat/root-at-epic.1\npr_state: closed\n",
+    }
     with (
         patch(
             "atelier.worker.work_startup_runtime.changeset_integration_signal",
-            return_value=(True, "abc1234"),
+            side_effect=AssertionError("integration should not be checked for active PR states"),
+        ) as integration_signal,
+        patch(
+            "atelier.worker.work_startup_runtime.stale_pr_lifecycle.git.git_ref_exists",
+            return_value=True,
         ),
         patch(
-            "atelier.worker.work_startup_runtime.lookup_pr_payload",
-            return_value={"number": 42},
+            "atelier.worker.work_startup_runtime.stale_pr_lifecycle.prs.lookup_github_pr_status",
+            return_value=work_startup_runtime.prs.GithubPrLookup(
+                outcome="found",
+                payload={
+                    "number": 42,
+                    "state": "OPEN",
+                    "isDraft": False,
+                    "reviewDecision": None,
+                },
+            ),
         ),
-        patch("atelier.worker.work_startup_runtime.prs.has_review_requests", return_value=False),
-        patch("atelier.worker.work_startup_runtime.prs.lifecycle_state", return_value="pr-open"),
     ):
         result = work_startup_runtime.startup_finalize_preflight(
             issue=issue,
@@ -746,6 +773,56 @@ def test_startup_finalize_preflight_fails_closed_when_pr_not_terminal() -> None:
 
     assert result.should_finalize_only is False
     assert result.reason == "normal_path:pr_lifecycle_pr-open"
+    integration_signal.assert_not_called()
+
+
+def test_startup_finalize_preflight_flags_stale_terminal_pr_without_integration() -> None:
+    issue = {
+        "status": "blocked",
+        "description": "changeset.work_branch: feat/root-at-epic.2\npr_state: draft-pr\n",
+    }
+
+    with (
+        patch(
+            "atelier.worker.work_startup_runtime.stale_pr_lifecycle.git.git_ref_exists",
+            return_value=True,
+        ),
+        patch(
+            "atelier.worker.work_startup_runtime.stale_pr_lifecycle.prs.lookup_github_pr_status",
+            return_value=work_startup_runtime.prs.GithubPrLookup(
+                outcome="found",
+                payload={
+                    "number": 43,
+                    "state": "CLOSED",
+                    "isDraft": False,
+                    "reviewDecision": None,
+                    "mergedAt": "2026-03-02T00:00:00Z",
+                    "closedAt": "2026-03-02T00:00:00Z",
+                },
+            ),
+        ),
+        patch(
+            "atelier.worker.work_startup_runtime.changeset_integration_signal",
+            return_value=(False, None),
+        ) as integration_signal,
+    ):
+        result = work_startup_runtime.startup_finalize_preflight(
+            issue=issue,
+            repo_slug="org/repo",
+            branch_pr=True,
+            repo_root=Path("/repo"),
+            git_path="git",
+        )
+
+    assert result.should_finalize_only is False
+    assert result.reason == "normal_path:stale_terminal_pr_lifecycle_merged"
+    integration_signal.assert_called_once_with(
+        issue,
+        repo_slug="org/repo",
+        repo_root=Path("/repo"),
+        git_path="git",
+        require_target_branch_proof=True,
+    )
 
 
 def test_startup_service_reports_planner_owned_executable_violations() -> None:
