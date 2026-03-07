@@ -60,6 +60,22 @@ For executable work, the worker-facing path should cover intent, rationale,
 non-goals, constraints, edge cases, related context, and a done definition using
 description, notes, design, and acceptance fields together.
 
+Write concrete fields, not placeholders. Useful patterns:
+
+- Motivation capture:
+  `rationale: Split the promotion renderer from the planner template update so review stays scoped and operator-facing guidance can ship independently.`
+- Negative scope:
+  `non_goals: Do not change worker finalization or publish sequencing in this changeset.`
+- Related-bead linking:
+  `related_context: at-surch (worker north-star review contract), at-ohj2 (formal review mode design), GH-555 (operator-facing planning request).`
+- Acceptance criterion wording:
+  `Done when the promotion preview shows description, notes, acceptance criteria, dependencies, and related-context references for the epic and every child changeset.`
+- Clarification-loop wording:
+  `edge_cases: Confirm with the operator whether deferred children stay out of scope, which ambiguity must be resolved before promotion, and which failure paths need explicit notes.`
+
+If a field is intentionally empty, say so explicitly rather than using a
+placeholder. For example: `related_context: none identified.`
+
 Agent hook storage:
 
 - Store the active hook in the agent bead slot

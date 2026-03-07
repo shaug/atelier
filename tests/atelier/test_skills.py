@@ -285,6 +285,10 @@ def test_plan_promote_epic_skill_requires_one_child_rationale() -> None:
     assert "description, notes, acceptance criteria, dependencies," in text
     assert "related-context references" in text
     assert "Missing detail sections:" in text
+    assert "clarification loop with the operator" in text
+    assert 'explicit non-goals ("what not to do")' in text
+    assert "Do not ask for confirmation while the executable path still reads as" in text
+    assert "Example clarification prompt" in text
 
 
 def test_plan_create_epic_skill_captures_drafts_without_approval() -> None:
@@ -294,6 +298,27 @@ def test_plan_create_epic_skill_captures_drafts_without_approval() -> None:
     assert "not request approval to create or edit deferred beads." in text
     assert "edge_cases" in text
     assert "done_definition" in text
+
+
+def test_beads_conventions_reference_includes_concrete_authoring_examples() -> None:
+    reference_path = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "atelier"
+        / "skills"
+        / "beads"
+        / "references"
+        / "beads-conventions.md"
+    )
+    text = reference_path.read_text(encoding="utf-8")
+
+    assert "Write concrete fields, not placeholders." in text
+    assert "Motivation capture:" in text
+    assert "Negative scope:" in text
+    assert "Related-bead linking:" in text
+    assert "Acceptance criterion wording:" in text
+    assert "Clarification-loop wording:" in text
+    assert "related_context: none identified." in text
 
 
 def test_planner_startup_check_skill_captures_drafts_without_approval() -> None:
