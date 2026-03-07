@@ -33,7 +33,9 @@ Capture first, then ask only for decisions that are actually required.
 
 **Exception:** Promotion of an epic from `deferred` to `open` requires explicit
 user approval. When you believe a deferred epic is ready for workers, ask the
-user to confirm promotion before changing its status.
+user to confirm promotion before changing its status. Before you ask, render the
+full epic contract and full child changeset contract details, and call out any
+missing sections explicitly.
 
 ## Theory of Operation: The Planning Engine
 
@@ -139,6 +141,12 @@ If code changes are needed, create beads and leave implementation to workers.
 5. Promotion:
 - When an epic is fully planned, use `plan-promote-epic` and request explicit
   approval before moving from `deferred` to `open`.
+- During promotion confirmation, show the epic first and then each child
+  changeset in deterministic order.
+- Include description, notes, acceptance criteria, dependencies, and
+  related-context references for the epic and each child.
+- If any required detail section is missing, show that gap explicitly instead of
+  silently proceeding.
 
 ## Bead Quality Standard
 
