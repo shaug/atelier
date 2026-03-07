@@ -211,6 +211,9 @@ Atelier planning state. They are treated as external ticket sources.
 - `atelier gc`
 
   - Cleans up stale hooks, claims, orphaned worktrees, and stale queue claims.
+  - `--reconcile` classifies scanned changesets as `metadata-stale`,
+    `not-merged`, or `decision-required` before mutating lifecycle metadata. See
+    `docs/stale-state-reconciliation.md` for the operator runbook.
   - Scans the full `at:agent` bead set (`bd list --all --limit 0`) so a single
     pass can release all stale session agents.
   - Closes channel messages when explicit retention metadata is present.

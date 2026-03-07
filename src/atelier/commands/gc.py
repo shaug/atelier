@@ -70,6 +70,8 @@ def gc(args: object) -> None:
                     project_dir=project_data_dir,
                     beads_root=beads_root,
                     repo_root=repo_root,
+                    project_config=project_config,
+                    git_path=git_path,
                 ):
                     say(f"- {detail}")
             reconcile_result = work_cmd.reconcile_blocked_merged_changesets(
@@ -116,6 +118,8 @@ def gc(args: object) -> None:
                     project_dir=project_data_dir,
                     beads_root=beads_root,
                     repo_root=repo_root,
+                    project_config=project_config,
+                    git_path=git_path,
                 ):
                     say(f"- {detail}")
                 if not confirm(prompt_text, default=False):
