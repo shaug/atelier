@@ -19,6 +19,9 @@ description: >-
 - Each changeset should include a LOC estimate in notes.
 - If a changeset exceeds the approval threshold (default 800 LOC), notes should
   include an explicit approval record.
+- Each executable path should include explicit planner context: `intent`,
+  `rationale`, `non_goals`, `constraints`, `edge_cases`, `related_context`, and
+  a done definition.
 - Guardrails should be recorded in notes or description when exceptions apply.
 - Detect anti-pattern: an epic with exactly one child changeset and no
   decomposition rationale.
@@ -43,6 +46,8 @@ description: >-
    - If `changeset_ids` is provided, validate those.
    - Else list leaf work beads (changesets) under `epic_id`.
 1. For each changeset, inspect description/notes:
+   - Validate the planner authoring contract across the changeset plus inherited
+     epic context.
    - Look for a LOC estimate (e.g., `loc`, `LOC`, `estimate`).
    - If a large estimate is found (>800), ensure approval is recorded.
    - When lifecycle/contract invariant terms are present, verify the invariant
@@ -56,6 +61,8 @@ description: >-
 ## Verification
 
 - Violations are reported with bead ids and missing guardrail details.
+- Missing planner authoring contract sections are reported with actionable field
+  names.
 - One-child anti-pattern warnings are reported when rationale is missing.
 - Cross-cutting invariant violations identify missing impact map coverage,
   decomposition expectations, and re-split handling requirements.

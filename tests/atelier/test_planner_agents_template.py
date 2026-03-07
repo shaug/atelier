@@ -28,6 +28,11 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "Do not claim or keep assignee ownership" in content
     assert "Planner owns operator decision handling" in content
     assert "Do not dispatch cleanup-only beads as worker executable work." in content
+    assert "intent, rationale, non-goals, constraints, edge" in content
+    assert "related-context links" in content
+    assert "done definition" in content
+    assert "`related_context:`" in content
+    assert "`done_definition:`" in content
     assert "concrete issue, create or update a deferred bead immediately" in content
     assert "Create or update deferred beads immediately" in content
     assert "Capture first, then ask only for decisions" in content

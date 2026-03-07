@@ -24,12 +24,25 @@ def _load_script_module():
     return module
 
 
+def _planner_contract_text() -> str:
+    return (
+        "intent: Prevent planner beads from losing execution context.\n"
+        "rationale: Workers need stable scope and rationale before implementation.\n"
+        "non_goals: Do not change publish or worker runtime behavior.\n"
+        "constraints: Keep changesets reviewable and deterministic.\n"
+        "edge_cases: Imported tickets may omit key worker-facing context.\n"
+        "related_context: at-surch, at-ohj2."
+    )
+
+
 def test_evaluate_guardrails_accepts_single_unit_epic_path() -> None:
     module = _load_script_module()
     epic = {
         "id": "at-epic",
         "labels": ["at:epic"],
-        "description": "LOC estimate: 320",
+        "description": _planner_contract_text(),
+        "notes": "LOC estimate: 320",
+        "acceptance_criteria": "Done when planner beads expose executable worker context.",
     }
 
     report = module._evaluate_guardrails(
@@ -44,7 +57,12 @@ def test_evaluate_guardrails_accepts_single_unit_epic_path() -> None:
 
 def test_evaluate_guardrails_flags_one_child_without_rationale() -> None:
     module = _load_script_module()
-    epic = {"id": "at-epic", "labels": ["at:epic"], "description": "Intent: ship parser update"}
+    epic = {
+        "id": "at-epic",
+        "labels": ["at:epic"],
+        "description": _planner_contract_text(),
+        "acceptance_criteria": "Done when the executable path is actionable.",
+    }
     child = {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 210"}
 
     report = module._evaluate_guardrails(
@@ -61,7 +79,9 @@ def test_evaluate_guardrails_allows_one_child_with_rationale() -> None:
     epic = {
         "id": "at-epic",
         "labels": ["at:epic"],
+        "description": _planner_contract_text(),
         "notes": "Decomposition rationale: split due to dependency sequencing.",
+        "acceptance_criteria": "Done when the executable path is actionable.",
     }
     child = {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 260"}
 
@@ -80,7 +100,8 @@ def test_evaluate_guardrails_flags_large_changeset_without_approval() -> None:
     child = {
         "id": "at-epic.1",
         "labels": [],
-        "description": "LOC estimate: 920\nGuardrails: data migration",
+        "description": _planner_contract_text() + "\nLOC estimate: 920\nGuardrails: data migration",
+        "acceptance_criteria": "Done when the large migration scope is fully documented.",
     }
 
     report = module._evaluate_guardrails(
@@ -94,7 +115,12 @@ def test_evaluate_guardrails_flags_large_changeset_without_approval() -> None:
 
 def test_evaluate_guardrails_reports_multi_unit_decomposition() -> None:
     module = _load_script_module()
-    epic = {"id": "at-epic", "labels": ["at:epic"]}
+    epic = {
+        "id": "at-epic",
+        "labels": ["at:epic"],
+        "description": _planner_contract_text(),
+        "acceptance_criteria": "Done when each child changeset is actionable.",
+    }
     children = [
         {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 220"},
         {"id": "at-epic.2", "labels": [], "description": "LOC estimate: 240"},
@@ -110,13 +136,61 @@ def test_evaluate_guardrails_reports_multi_unit_decomposition() -> None:
     assert report.violations == []
 
 
+def test_evaluate_guardrails_flags_missing_authoring_contract_fields() -> None:
+    module = _load_script_module()
+    epic = {
+        "id": "at-epic",
+        "labels": ["at:epic"],
+        "description": (
+            "intent: Raise planner bead quality.\n"
+            "rationale: Workers need better context.\n"
+            "non_goals: Do not change promotion UX.\n"
+            "constraints: Keep the change reviewable."
+        ),
+        "acceptance_criteria": "Done when missing context is caught before promotion.",
+    }
+    child = {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 180"}
+
+    report = module._evaluate_guardrails(
+        epic_issue=epic,
+        child_changesets=[child],
+        target_changesets=[child],
+    )
+
+    assert any(
+        "missing planner authoring contract fields (edge_cases, related_context)" in item
+        for item in report.violations
+    )
+
+
+def test_evaluate_guardrails_flags_missing_done_definition() -> None:
+    module = _load_script_module()
+    child = {
+        "id": "at-epic.1",
+        "labels": [],
+        "description": _planner_contract_text() + "\nLOC estimate: 180",
+    }
+
+    report = module._evaluate_guardrails(
+        epic_issue=None,
+        child_changesets=[],
+        target_changesets=[child],
+    )
+
+    assert any("missing explicit done definition" in item for item in report.violations)
+
+
 def test_evaluate_guardrails_flags_cross_cutting_guardrail_gaps() -> None:
     module = _load_script_module()
     epic = {
         "id": "at-epic",
         "labels": ["at:epic"],
         "title": "Fix lifecycle invariant regression",
-        "description": ("Concern domains: lifecycle state machine and external provider sync."),
+        "description": (
+            _planner_contract_text()
+            + "\nConcern domains: lifecycle state machine and external provider sync."
+        ),
+        "acceptance_criteria": "Done when lifecycle fixes are fully reviewable.",
     }
     children = [
         {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 230"},
@@ -144,6 +218,7 @@ def test_evaluate_guardrails_flags_cross_cutting_single_changeset_decomposition_
         "labels": ["at:epic"],
         "title": "Fix lifecycle invariant regression",
         "notes": (
+            _planner_contract_text() + "\n"
             "Decomposition rationale: split due to dependency sequencing.\n"
             "Invariant impact map:\n"
             "- mutation entry points\n"
@@ -154,6 +229,7 @@ def test_evaluate_guardrails_flags_cross_cutting_single_changeset_decomposition_
             "Review feedback: scope expansion during review is captured immediately."
         ),
         "description": ("Concern domains: lifecycle state machine and external provider sync."),
+        "acceptance_criteria": "Done when lifecycle fixes are fully reviewable.",
     }
     child = {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 300"}
 
@@ -173,6 +249,7 @@ def test_evaluate_guardrails_accepts_cross_cutting_guardrails_when_complete() ->
         "labels": ["at:epic"],
         "title": "Fix lifecycle invariant regression",
         "notes": (
+            _planner_contract_text() + "\n"
             "Invariant impact map:\n"
             "- mutation entry points\n"
             "- recovery paths\n"
@@ -183,6 +260,7 @@ def test_evaluate_guardrails_accepts_cross_cutting_guardrails_when_complete() ->
             "Planner action: create deferred follow-on changeset or stack extension.\n"
             "Review feedback: scope expansion during review is captured immediately."
         ),
+        "acceptance_criteria": "Done when lifecycle fixes are fully reviewable.",
     }
     children = [
         {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 230"},
@@ -205,6 +283,7 @@ def test_evaluate_guardrails_detects_numeric_threshold_trigger_without_phrase() 
         "labels": ["at:epic"],
         "title": "Fix lifecycle invariant regression",
         "notes": (
+            _planner_contract_text() + "\n"
             "Invariant impact map:\n"
             "- mutation entry points\n"
             "- recovery paths\n"
@@ -214,6 +293,7 @@ def test_evaluate_guardrails_detects_numeric_threshold_trigger_without_phrase() 
             "Planner action: create deferred follow-on changeset or stack extension.\n"
             "Review feedback: scope expansion during review is captured immediately."
         ),
+        "acceptance_criteria": "Done when lifecycle fixes are fully reviewable.",
     }
     children = [
         {"id": "at-epic.1", "labels": [], "description": "LOC estimate: 230"},

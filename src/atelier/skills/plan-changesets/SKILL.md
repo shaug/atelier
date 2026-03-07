@@ -28,6 +28,11 @@ create/edit deferred work.
 - Separate renames from behavioral changes.
 - Prefer additive-first changesets.
 - Keep changesets reviewable (~200–400 LOC; split when >800 LOC).
+- Ensure the executable path for each changeset (the child plus inherited epic
+  context) explicitly records `intent`, `rationale`, `non_goals`, `constraints`,
+  `edge_cases`, `related_context`, and a done definition.
+- Shared context can live on the epic; child changesets should add only the
+  delta needed for worker execution.
 - For lifecycle/contract invariant bugs, record an upfront invariant impact map
   that calls out:
   - mutation entry points
@@ -63,6 +68,8 @@ create/edit deferred work.
      creating the child.
 1. Default new changesets to `status=deferred`; promote to `status=open` only
    via the explicit promotion flow.
+1. After creation, fill in any missing authoring-contract fields on the epic or
+   child bead before promotion.
 1. Capture an estimated LOC range and record it in notes.
 1. If a changeset violates guardrails (especially >800 LOC), pause and request
    explicit approval; record the approval decision in notes.
@@ -98,5 +105,7 @@ Scenario: `Prevent premature close of active-PR changesets`.
 - Decomposition happened only when needed for scope/dependency/reviewability.
 - Any one-child decomposition has explicit rationale recorded in notes or
   description.
+- Every executable path includes explicit worker-facing context fields plus
+  acceptance criteria or `done_definition`.
 - When auto-export is enabled and not opted out, each changeset gets its own
   exported external ticket link.

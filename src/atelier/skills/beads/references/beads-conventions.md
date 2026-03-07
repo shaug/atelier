@@ -43,11 +43,22 @@ Use key: value lines in descriptions for structured fields (human-readable and
 machine-parsable). Example:
 
 ```
+intent: <why this work exists>
+rationale: <why this unit is shaped this way>
 scope: <short scope>
+non_goals: <what not to change>
+constraints: <hard limits or invariants>
+edge_cases: <important edge cases or "none identified.">
+related_context: <other bead ids/links or "none identified.">
+done_definition: <explicit success definition if not fully captured in acceptance>
 changeset_strategy: <rules>
 worktree_path: <path>
 external_tickets: <json list>
 ```
+
+For executable work, the worker-facing path should cover intent, rationale,
+non-goals, constraints, edge cases, related context, and a done definition using
+description, notes, design, and acceptance fields together.
 
 Agent hook storage:
 
