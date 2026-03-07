@@ -282,6 +282,7 @@ atelier work --select first-eligible
 atelier work --run-mode once
 atelier work --run-mode watch
 atelier work --run-mode watch --watch-interval 30
+atelier work --reconcile
 ```
 
 `atelier work` will:
@@ -524,6 +525,9 @@ Options:
   Defaults to `worker.select` in config, then `oldest-feedback`.
 - `--run-mode`: Worker loop mode (`once`, `default`, or `watch`).
 - `--yes`: Accept defaults for interactive choices (`ATELIER_WORK_YES`).
+- `--reconcile`: Run a fail-closed reconcile sweep before startup selection.
+  This auto-finalizes orphaned `in_progress` changesets only when PR lifecycle
+  is terminal (`merged`/`closed`) and no live worker hook owns the epic.
 - Watch polling defaults to `ATELIER_WATCH_INTERVAL` (seconds) in watch mode.
 
 ### `atelier plan`
