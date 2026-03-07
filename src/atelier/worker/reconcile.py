@@ -7,7 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import agent_home, beads, config, git, lifecycle, prs
+from .. import agent_home, beads, changesets, config, git, lifecycle, prs
+from . import stale_pr_lifecycle
 from .models import FinalizeResult, ReconcileResult
 
 
@@ -19,6 +20,8 @@ class ReconcileCandidate:
     epic_id: str
     integrated_sha: str | None
     dependency_ids: tuple[str, ...]
+    terminal_pr_state: str | None = None
+    require_terminal_status: bool = False
 
 
 @dataclass(frozen=True)
@@ -149,6 +152,58 @@ def _normalized_text(value: object) -> str | None:
     if not normalized:
         return None
     return normalized
+
+
+def _normalized_sha(value: object) -> str | None:
+    normalized = _normalized_text(value)
+    if normalized is None or normalized.lower() == "null":
+        return None
+    return normalized
+
+
+def _recorded_integrated_sha(issue: dict[str, object]) -> str | None:
+    return _normalized_sha(_description_fields(issue).get("changeset.integrated_sha"))
+
+
+def _converge_stale_terminal_metadata(
+    candidate: ReconcileCandidate,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> tuple[str, ...]:
+    issue = candidate.issue
+    changeset_id = candidate.issue_id
+    updates: list[str] = []
+    if candidate.terminal_pr_state:
+        description = issue.get("description")
+        metadata = changesets.parse_review_metadata(
+            description if isinstance(description, str) else ""
+        )
+        stored_state = lifecycle.normalize_review_state(metadata.pr_state)
+        if stored_state != candidate.terminal_pr_state:
+            beads.update_changeset_review(
+                changeset_id,
+                changesets.ReviewMetadata(
+                    pr_url=metadata.pr_url,
+                    pr_number=metadata.pr_number,
+                    pr_state=candidate.terminal_pr_state,
+                    review_owner=metadata.review_owner,
+                ),
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+            updates.append(f"pr_state={candidate.terminal_pr_state}")
+    if candidate.integrated_sha:
+        recorded_sha = _recorded_integrated_sha(issue)
+        if recorded_sha != candidate.integrated_sha:
+            beads.update_changeset_integrated_sha(
+                changeset_id,
+                candidate.integrated_sha,
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+            updates.append(f"changeset.integrated_sha={candidate.integrated_sha}")
+    return tuple(updates)
 
 
 def _agent_issue_identity(issue: dict[str, object]) -> str | None:
@@ -610,6 +665,7 @@ def reconcile_blocked_merged_changesets(
                 log(f"reconcile error: {changeset_id} (unable to resolve epic)")
             continue
         scanned += 1
+        stale_terminal: stale_pr_lifecycle.StaleTerminalPrLifecycleClassification | None = None
         if status == "in_progress":
             hook_state = _epic_hook_state(
                 epic_id,
@@ -636,37 +692,47 @@ def reconcile_blocked_merged_changesets(
                         f"(in_progress with live hook: {hook_state.detail})"
                     )
                 continue
-            live_state, lookup_error = _live_review_state(
+            stale_terminal = stale_pr_lifecycle.classify_stale_terminal_pr_lifecycle(
                 issue,
                 repo_slug=repo_slug,
                 repo_root=repo_root,
+                branch_pr=project_config.branch.pr,
                 git_path=git_path,
             )
-            if lookup_error is not None:
+            if stale_terminal.is_anomaly:
                 actionable += 1
                 failed += 1
                 if log:
                     log(
                         "reconcile anomaly: "
                         f"{changeset_id} -> epic={epic_id} "
-                        "in_progress+pr-lifecycle-lookup-error"
-                        f"(error={_format_lookup_error(lookup_error)}) "
-                        "decision-required"
+                        + (
+                            "in_progress+stale-terminal-pr-anomaly("
+                            f"reason={stale_terminal.reason},"
+                            f"detail={_format_lookup_error(stale_terminal.detail)}) "
+                            if stale_terminal.detail
+                            else (
+                                "in_progress+stale-terminal-pr-anomaly("
+                                f"reason={stale_terminal.reason}) "
+                            )
+                        )
+                        + "decision-required"
                     )
                 continue
-            if live_state not in {"merged", "closed"}:
+            if not stale_terminal.is_candidate:
                 if log:
-                    if live_state in lifecycle.ACTIVE_REVIEW_STATES:
+                    if stale_terminal.reason.startswith("active_pr_lifecycle_"):
                         log(
                             f"reconcile skip: {changeset_id} "
-                            f"(in_progress pr lifecycle still active: {live_state})"
+                            "(in_progress pr lifecycle still active: "
+                            f"{stale_terminal.live_pr_state or 'none'})"
                         )
                     else:
                         stored_state = _stored_review_state(issue) or "none"
                         log(
                             f"reconcile skip: {changeset_id} "
                             "(in_progress terminal PR evidence unavailable; "
-                            f"stored={stored_state}, live={live_state or 'none'})"
+                            f"stored={stored_state}, live={stale_terminal.live_pr_state or 'none'})"
                         )
                 continue
             integration_proven, integrated_sha = changeset_integration_signal(
@@ -674,7 +740,7 @@ def reconcile_blocked_merged_changesets(
                 repo_slug=repo_slug,
                 repo_root=repo_root,
                 git_path=git_path,
-                require_target_branch_proof=live_state == "merged",
+                require_target_branch_proof=stale_terminal.live_pr_state == "merged",
             )
             candidates[changeset_id] = ReconcileCandidate(
                 issue_id=changeset_id,
@@ -685,8 +751,59 @@ def reconcile_blocked_merged_changesets(
                 if integration_proven and integrated_sha
                 else None,
                 dependency_ids=issue_dependency_ids(issue),
+                terminal_pr_state=stale_terminal.live_pr_state,
+                require_terminal_status=True,
             )
             continue
+        if project_config.branch.pr and status in {"open", "blocked"}:
+            stale_terminal = stale_pr_lifecycle.classify_stale_terminal_pr_lifecycle(
+                issue,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                branch_pr=True,
+                git_path=git_path,
+            )
+            if stale_terminal.is_anomaly:
+                actionable += 1
+                failed += 1
+                if log:
+                    log(
+                        "reconcile anomaly: "
+                        f"{changeset_id} -> epic={epic_id} "
+                        + (
+                            f"{status}+stale-terminal-pr-anomaly("
+                            f"reason={stale_terminal.reason},"
+                            f"detail={_format_lookup_error(stale_terminal.detail)}) "
+                            if stale_terminal.detail
+                            else (
+                                f"{status}+stale-terminal-pr-anomaly("
+                                f"reason={stale_terminal.reason}) "
+                            )
+                        )
+                        + "decision-required"
+                    )
+                continue
+            if stale_terminal.is_candidate:
+                integration_proven, integrated_sha = changeset_integration_signal(
+                    issue,
+                    repo_slug=repo_slug,
+                    repo_root=repo_root,
+                    git_path=git_path,
+                    require_target_branch_proof=stale_terminal.live_pr_state == "merged",
+                )
+                candidates[changeset_id] = ReconcileCandidate(
+                    issue_id=changeset_id,
+                    issue=issue,
+                    status=status,
+                    epic_id=epic_id,
+                    integrated_sha=integrated_sha.strip()
+                    if integration_proven and integrated_sha
+                    else None,
+                    dependency_ids=issue_dependency_ids(issue),
+                    terminal_pr_state=stale_terminal.live_pr_state,
+                    require_terminal_status=True,
+                )
+                continue
         integration_proven, integrated_sha = changeset_integration_signal(
             issue,
             repo_slug=repo_slug,
@@ -841,6 +958,25 @@ def reconcile_blocked_merged_changesets(
                         )
                     )
                 continue
+            converged_updates: tuple[str, ...] = ()
+            if candidate.terminal_pr_state is not None:
+                try:
+                    converged_updates = _converge_stale_terminal_metadata(
+                        candidate,
+                        beads_root=beads_root,
+                        repo_root=repo_root,
+                    )
+                except (SystemExit, ValueError) as exc:
+                    failed += 1
+                    failed_ids.add(changeset_id)
+                    if log:
+                        log(
+                            "reconcile anomaly: "
+                            f"{changeset_id} -> epic={candidate.epic_id} "
+                            "stale-terminal-metadata-convergence-failed"
+                            f"(error={_format_lookup_error(str(exc))}) decision-required"
+                        )
+                    continue
             if candidate.status in {"closed", "done"}:
                 beads.reconcile_closed_issue_exported_github_tickets(
                     changeset_id,
@@ -893,7 +1029,7 @@ def reconcile_blocked_merged_changesets(
                         f"(finalize reason={finalize_result.reason})"
                     )
                 continue
-            if candidate.status == "in_progress":
+            if candidate.require_terminal_status:
                 issue_cache.pop(changeset_id, None)
                 refreshed_issue = load_issue(changeset_id)
                 refreshed_status = (
@@ -904,10 +1040,20 @@ def reconcile_blocked_merged_changesets(
                     failed_ids.add(changeset_id)
                     if log:
                         log(
-                            "reconcile error: "
-                            f"{changeset_id} (finalize remained non-terminal: "
-                            f"status={refreshed_status or 'unknown'}, "
-                            f"reason={finalize_result.reason})"
+                            "reconcile anomaly: "
+                            f"{changeset_id} -> epic={candidate.epic_id} "
+                            + (
+                                "stale-terminal-finalize-remained-non-terminal("
+                                f"expected_pr_state={candidate.terminal_pr_state or 'none'}, "
+                                f"status={refreshed_status or 'unknown'}, "
+                                f"reason={finalize_result.reason}"
+                                + (
+                                    f",metadata={','.join(converged_updates)}"
+                                    if converged_updates
+                                    else ""
+                                )
+                                + ") decision-required"
+                            )
                         )
                     continue
             if candidate.integrated_sha:
@@ -921,6 +1067,7 @@ def reconcile_blocked_merged_changesets(
                 log(
                     f"reconcile ok: {changeset_id} -> epic={candidate.epic_id} "
                     f"(finalize reason={finalize_result.reason})"
+                    + (f" metadata={','.join(converged_updates)}" if converged_updates else "")
                 )
             reconciled += 1
             reconciled_ids.add(changeset_id)
