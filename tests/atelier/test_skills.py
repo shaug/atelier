@@ -262,6 +262,8 @@ def test_plan_changesets_skill_requires_rationale_for_one_child_split() -> None:
     assert "one child changeset" in text
     assert "decomposition rationale" in text
     assert "Default new changesets to `status=deferred`" in text
+    assert "edge_cases" in text
+    assert "related_context" in text
 
 
 def test_plan_changeset_guardrails_skill_mentions_checker_script() -> None:
@@ -270,6 +272,8 @@ def test_plan_changeset_guardrails_skill_mentions_checker_script() -> None:
     assert "scripts/check_guardrails.py" in text
     assert "one child changeset" in text
     assert "decomposition rationale" in text
+    assert "done definition" in text
+    assert "related_context" in text
 
 
 def test_plan_promote_epic_skill_requires_one_child_rationale() -> None:
@@ -284,6 +288,8 @@ def test_plan_create_epic_skill_captures_drafts_without_approval() -> None:
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "capture it as a deferred epic immediately" in text
     assert "not request approval to create or edit deferred beads." in text
+    assert "edge_cases" in text
+    assert "done_definition" in text
 
 
 def test_planner_startup_check_skill_captures_drafts_without_approval() -> None:

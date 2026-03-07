@@ -27,6 +27,13 @@ Do not request approval to create or edit deferred beads.
    - `python skills/plan-create-epic/scripts/create_epic.py --title "<title>" --scope "<scope>" --acceptance "<acceptance>" [--changeset-strategy "<changeset_strategy>"] [--design "<design>"] [--beads-dir "<beads_dir>"] [--repo-dir "<repo_dir>"] [--no-export]`
    - This is the canonical top-level executable-work creation path; it sets both
      `issue_type=epic` and the required `at:epic` discovery label.
+1. Refine the epic into the executable-path authoring contract immediately:
+   - Record explicit `intent`, `rationale`, `non_goals`, `constraints`,
+     `edge_cases`, and `related_context` fields in description/notes/design.
+   - Use acceptance criteria as the done definition, or add
+     `done_definition: ...` when completion needs sharper wording.
+   - If there is no broader bead context, write
+     `related_context: none identified.`
 1. The script creates the bead, applies auto-export when enabled by project
    config, sets status to `deferred`, and prints non-fatal retry instructions if
    export fails.
@@ -41,6 +48,8 @@ Do not request approval to create or edit deferred beads.
 - Epic is created with `issue_type=epic`.
 - Epic status is `deferred` until explicit promotion.
 - Acceptance criteria stored in the acceptance field.
+- Epic description/notes/design capture the required planner authoring contract
+  before promotion.
 - When auto-export is enabled and not opted out, `external_tickets` is updated
   with `direction=exported` and `sync_mode=export`.
 - If startup diagnostics report identity drift, remediation is deterministic:

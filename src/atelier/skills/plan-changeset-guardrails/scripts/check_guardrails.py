@@ -14,12 +14,14 @@ from pathlib import Path
 
 from atelier import beads
 from atelier.bd_invocation import with_bd_mode
+from atelier.planner_contract import validate_authoring_contract
 
 _LOC_TRIGGER = re.compile(r"\b(?:loc|estimate)\b", re.IGNORECASE)
 _NUMBER = re.compile(r"\b\d{2,5}\b")
 _APPROVAL = re.compile(r"\b(?:approve|approved|approval|sign[- ]?off|ok(?:ay)?)\b", re.IGNORECASE)
 _RATIONALE = re.compile(
-    r"\b(?:rationale|split because|split due to|reviewability|dependency|sequencing)\b",
+    r"\b(?:decomposition rationale|split because|split due to|reviewability|"
+    r"dependency sequencing|sequencing constraint)\b",
     re.IGNORECASE,
 )
 _CROSS_CUTTING_INVARIANT = re.compile(
@@ -226,6 +228,28 @@ def _evaluate_guardrails(
 
     for issue in target_changesets:
         issue_id = _issue_id(issue) or "(unknown)"
+        inherited_context = (
+            [epic_issue] if epic_issue is not None and epic_issue is not issue else []
+        )
+        missing_contract_fields = validate_authoring_contract(
+            issue,
+            inherited_context=inherited_context,
+        )
+        if missing_contract_fields:
+            missing_sections = tuple(
+                field for field in missing_contract_fields if field != "done_definition"
+            )
+            if missing_sections:
+                violations.append(
+                    f"{issue_id}: missing planner authoring contract fields "
+                    f"({', '.join(missing_sections)}); add explicit key/value context to the "
+                    "epic or changeset description/notes/design."
+                )
+            if "done_definition" in missing_contract_fields:
+                violations.append(
+                    f"{issue_id}: missing explicit done definition; add acceptance criteria or "
+                    "`done_definition:` to the executable path."
+                )
         text = _text_blob(issue)
         estimate = _extract_loc_estimate(text)
         if estimate is None:

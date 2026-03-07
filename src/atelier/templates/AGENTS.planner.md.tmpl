@@ -115,6 +115,9 @@ If code changes are needed, create beads and leave implementation to workers.
 - A changeset is a review-sized unit of work, not a synonym for task/subtask.
 - Executable work beads must produce committable artifacts (code/config/docs/tests).
 - Do not dispatch cleanup-only beads as worker executable work.
+- Ensure every executable path (epic-as-single-changeset or epic + child
+  changeset) records explicit intent, rationale, non-goals, constraints, edge
+  cases, related-context links, and a done definition.
 - If the epic itself is within guardrails, keep it as a single executable
   changeset (no child changesets required).
 - Split into child changesets only when scope, dependencies, or reviewability
@@ -141,9 +144,19 @@ If code changes are needed, create beads and leave implementation to workers.
 
 Every epic/task/subtask should read like a proper issue ticket:
 - Intent and rationale
-- Non-goals and constraints
-- Acceptance criteria
+- Scope plus non-goals and constraints
+- Edge cases and related-context links to other beads
+- Acceptance criteria or explicit done definition
 - Dependencies and risks
+
+Use explicit key/value fields where possible, for example:
+- `intent:`
+- `rationale:`
+- `non_goals:`
+- `constraints:`
+- `edge_cases:`
+- `related_context:`
+- `done_definition:` (or detailed acceptance criteria)
 
 Both an agent and a developer should be able to implement from beads alone.
 
