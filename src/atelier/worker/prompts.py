@@ -28,8 +28,22 @@ def worker_opening_prompt(
         f"Epic: {epic_id}",
         f"Changeset: {summary}",
         (
+            "Before any commit/push/publish attempt, run a north-star "
+            "self-review against the assigned bead acceptance criteria."
+        ),
+        (
+            "Append a `north_star_review.<timestamp>:` note to the changeset "
+            "bead before first push with unmet_acceptance_criteria, "
+            "required_code_changes_per_criterion, implementation_summary, "
+            "and a completion_checklist citing commit/file evidence."
+        ),
+        (
             "Role boundary: implement only committable changeset artifacts "
             "(code/config/docs/tests) for the assigned changeset."
+        ),
+        (
+            "Do not treat comment closure alone as completion; finish only "
+            "when the full bead goal is implemented or send NEEDS-DECISION."
         ),
         (
             "Do not promote, clean up, or otherwise mutate sibling/unclaimed "
@@ -48,6 +62,10 @@ def worker_opening_prompt(
             "(`pushed`,`draft-pr`,`pr-open`,`in-review`,`approved`). "
             "Close only when PR is terminal (`merged`/`closed`) or non-PR "
             "integration proof exists (`changeset.integrated_sha`)."
+        ),
+        (
+            "Do not commit/push/publish while unmet acceptance criteria "
+            "remain or the completion checklist is incomplete."
         ),
         (
             "When done, update beads status/metadata for this changeset and required "

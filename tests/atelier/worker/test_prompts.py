@@ -15,9 +15,13 @@ def test_worker_opening_prompt_uses_status_metadata_wording() -> None:
     assert "update beads status/metadata for this changeset" in prompt
     assert "update beads state/labels for this changeset" not in prompt
     assert "implement only committable changeset artifacts" in prompt
+    assert "run a north-star self-review" in prompt
+    assert "north_star_review.<timestamp>" in prompt
+    assert "Do not treat comment closure alone as completion" in prompt
     assert "planner owns non-commit orchestration" in prompt
     assert "Do not set status=closed while PR lifecycle is active" in prompt
     assert "Close only when PR is terminal (`merged`/`closed`)" in prompt
+    assert "Do not commit/push/publish while unmet acceptance criteria remain" in prompt
 
 
 def test_worker_opening_prompt_review_feedback_avoids_label_reset_guidance() -> None:
