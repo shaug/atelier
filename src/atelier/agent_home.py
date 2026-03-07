@@ -40,6 +40,14 @@ _WORKER_SAFE_PRIME_ADDENDUM = "\n".join(
         "## Worker Runtime Context",
         "",
         "- The assigned epic/changeset bead is the only execution scope.",
+        "- Before any commit/push/publish attempt, run a north-star self-review "
+        "against the assigned bead acceptance criteria.",
+        "- Append a `north_star_review.<timestamp>:` note to the changeset bead "
+        "before first push with `unmet_acceptance_criteria`, "
+        "`required_code_changes_per_criterion`, `implementation_summary`, and "
+        "`completion_checklist` commit/file evidence.",
+        "- Do not treat comment closure alone as completion; finish only when "
+        "the full bead goal is implemented or send `NEEDS-DECISION`.",
         "- Keep `pr_state` accurate: `pushed`, `draft-pr`, `pr-open`, "
         "`in-review`, `approved`, `merged`, `closed`.",
         "- Do not set `status=closed` while PR lifecycle is active "
@@ -47,6 +55,8 @@ _WORKER_SAFE_PRIME_ADDENDUM = "\n".join(
         "- Set `status=closed` only when terminal proof exists:",
         "  - PR lifecycle is terminal (`pr_state=merged` or `pr_state=closed`), or",
         "  - non-PR integration proof exists (`changeset.integrated_sha`).",
+        "- Do not commit/push/publish while unmet acceptance criteria remain or "
+        "the completion checklist is incomplete.",
         "- Do not run backlog/planning workflows from worker sessions "
         "(`bd ready`, `bd create`, `bd dep add`, `bd close` for unrelated work).",
     )

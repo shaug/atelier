@@ -429,6 +429,9 @@ def test_apply_beads_prime_addendum_worker_role_replaces_generic_prime_guidance(
     assert "bd close at-123" not in updated
     assert "SESSION CLOSE PROTOCOL" not in updated
     assert "assigned epic/changeset bead is the only execution scope" in updated
+    assert "run a north-star self-review" in updated
+    assert "north_star_review.<timestamp>" in updated
+    assert "Do not treat comment closure alone as completion" in updated
 
 
 def test_apply_beads_prime_addendum_planner_role_keeps_addendum_body() -> None:

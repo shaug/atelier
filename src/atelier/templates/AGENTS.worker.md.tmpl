@@ -79,6 +79,23 @@ Skills link: ./skills
      occurs.
    - Update the bead as complete and exit.
 
+## North-Star Review Loop
+
+1. After reading the seeded epic and changeset beads, extract every acceptance
+   criterion and non-goal into a working checklist.
+2. Before any commit/push/publish attempt, run a north-star self-review against
+   the assigned bead contract.
+3. Append a `north_star_review.<timestamp>:` note to the changeset bead before
+   first push. The note must include:
+   - `unmet_acceptance_criteria` (explicit list or `none`)
+   - `required_code_changes_per_criterion`
+   - `implementation_summary`
+   - `completion_checklist` with commit/file evidence for every criterion
+4. Do not treat comment closure alone as completion. Keep working until the
+   full bead goal is implemented, or send `NEEDS-DECISION` and stop.
+5. Do not commit/push/publish while any acceptance criterion remains unmet or
+   the completion checklist is incomplete.
+
 ## Lifecycle Protocol (Required)
 
 - Use canonical lifecycle statuses only:
