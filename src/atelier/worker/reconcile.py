@@ -151,6 +151,66 @@ def _normalized_text(value: object) -> str | None:
     return normalized
 
 
+def _agent_issue_identity(issue: dict[str, object]) -> str | None:
+    fields = _description_fields(issue)
+    description_identity = _normalized_text(fields.get("agent_id"))
+    if description_identity is not None:
+        return description_identity
+    return _normalized_text(issue.get("title"))
+
+
+def _active_hook_scan_for_epic(
+    epic_id: str,
+    *,
+    beads_root: Path,
+    repo_root: Path,
+) -> EpicHookStateEvidence:
+    issues_by_id: dict[str, dict[str, object]] = {}
+    list_errors: list[str] = []
+    for label in beads.issue_label_candidates(
+        "agent",
+        beads_root=beads_root,
+        include_configured_prefix=True,
+    ):
+        try:
+            agent_issues = beads.run_bd_json(
+                ["list", "--label", label, "--all", "--limit", "0"],
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
+        except SystemExit:
+            list_errors.append(f"agent_list_failed({label})")
+            continue
+        for issue in agent_issues:
+            issue_id = _normalized_text(issue.get("id"))
+            if issue_id is None:
+                continue
+            issues_by_id.setdefault(issue_id, issue)
+
+    active_hook_agents: set[str] = set()
+    scan_unknown_details: list[str] = []
+    for issue_id in sorted(issues_by_id):
+        issue = issues_by_id[issue_id]
+        agent_id = _agent_issue_identity(issue)
+        if agent_id is None or not agent_home.is_session_agent_active(agent_id):
+            continue
+        try:
+            hook = beads.get_agent_hook(issue_id, beads_root=beads_root, cwd=repo_root)
+        except SystemExit:
+            scan_unknown_details.append(f"hook_lookup_failed({agent_id})")
+            continue
+        if hook == epic_id:
+            active_hook_agents.add(agent_id)
+
+    if active_hook_agents:
+        agents = ",".join(sorted(active_hook_agents))
+        return EpicHookStateEvidence(has_live_hook=True, detail=f"active_hook({agents})")
+    if scan_unknown_details or list_errors:
+        details = ";".join([*scan_unknown_details, *list_errors])
+        return EpicHookStateEvidence(has_live_hook=None, detail=details)
+    return EpicHookStateEvidence(has_live_hook=False, detail="no_active_hook_match")
+
+
 def _epic_hook_state(
     epic_id: str,
     *,
@@ -168,54 +228,75 @@ def _epic_hook_state(
         cache[epic_id] = evidence
         return evidence
 
-    assignee = _normalized_text(epic.get("assignee"))
-    if assignee is None:
-        evidence = EpicHookStateEvidence(has_live_hook=False, detail="unassigned")
-        cache[epic_id] = evidence
-        return evidence
+    fallback_hook_evidence = _active_hook_scan_for_epic(
+        epic_id,
+        beads_root=beads_root,
+        repo_root=repo_root,
+    )
+    if fallback_hook_evidence.has_live_hook:
+        cache[epic_id] = fallback_hook_evidence
+        return fallback_hook_evidence
 
-    if not agent_home.is_session_agent_active(assignee):
-        evidence = EpicHookStateEvidence(
+    assignee = _normalized_text(epic.get("assignee"))
+    assignee_evidence: EpicHookStateEvidence
+    if assignee is None:
+        assignee_evidence = EpicHookStateEvidence(has_live_hook=False, detail="unassigned")
+    elif not agent_home.is_session_agent_active(assignee):
+        assignee_evidence = EpicHookStateEvidence(
             has_live_hook=False, detail=f"assignee_inactive({assignee})"
         )
+    else:
+        assignee_bead = beads.find_agent_bead(assignee, beads_root=beads_root, cwd=repo_root)
+        if not assignee_bead:
+            assignee_evidence = EpicHookStateEvidence(
+                has_live_hook=None, detail=f"agent_bead_missing({assignee})"
+            )
+        else:
+            assignee_bead_id = _normalized_text(assignee_bead.get("id"))
+            if assignee_bead_id is None:
+                assignee_evidence = EpicHookStateEvidence(
+                    has_live_hook=None, detail=f"agent_bead_id_missing({assignee})"
+                )
+            else:
+                try:
+                    hook = beads.get_agent_hook(
+                        assignee_bead_id,
+                        beads_root=beads_root,
+                        cwd=repo_root,
+                    )
+                except SystemExit:
+                    assignee_evidence = EpicHookStateEvidence(
+                        has_live_hook=None, detail=f"hook_lookup_failed({assignee})"
+                    )
+                else:
+                    if hook == epic_id:
+                        assignee_evidence = EpicHookStateEvidence(
+                            has_live_hook=True,
+                            detail=f"active_hook({assignee})",
+                        )
+                    elif hook:
+                        assignee_evidence = EpicHookStateEvidence(
+                            has_live_hook=False,
+                            detail=f"hooked_elsewhere({assignee}->{hook})",
+                        )
+                    else:
+                        assignee_evidence = EpicHookStateEvidence(
+                            has_live_hook=False,
+                            detail=f"assignee_unhooked({assignee})",
+                        )
+
+    if assignee_evidence.has_live_hook:
+        cache[epic_id] = assignee_evidence
+        return assignee_evidence
+
+    if fallback_hook_evidence.has_live_hook is None or assignee_evidence.has_live_hook is None:
+        detail = ";".join((assignee_evidence.detail, fallback_hook_evidence.detail))
+        evidence = EpicHookStateEvidence(has_live_hook=None, detail=detail)
         cache[epic_id] = evidence
         return evidence
 
-    assignee_bead = beads.find_agent_bead(assignee, beads_root=beads_root, cwd=repo_root)
-    if not assignee_bead:
-        evidence = EpicHookStateEvidence(
-            has_live_hook=None, detail=f"agent_bead_missing({assignee})"
-        )
-        cache[epic_id] = evidence
-        return evidence
-    assignee_bead_id = _normalized_text(assignee_bead.get("id"))
-    if assignee_bead_id is None:
-        evidence = EpicHookStateEvidence(
-            has_live_hook=None, detail=f"agent_bead_id_missing({assignee})"
-        )
-        cache[epic_id] = evidence
-        return evidence
-    try:
-        hook = beads.get_agent_hook(assignee_bead_id, beads_root=beads_root, cwd=repo_root)
-    except SystemExit:
-        evidence = EpicHookStateEvidence(
-            has_live_hook=None, detail=f"hook_lookup_failed({assignee})"
-        )
-        cache[epic_id] = evidence
-        return evidence
-    if hook == epic_id:
-        evidence = EpicHookStateEvidence(has_live_hook=True, detail=f"active_hook({assignee})")
-        cache[epic_id] = evidence
-        return evidence
-    if hook:
-        evidence = EpicHookStateEvidence(
-            has_live_hook=False,
-            detail=f"hooked_elsewhere({assignee}->{hook})",
-        )
-        cache[epic_id] = evidence
-        return evidence
-
-    evidence = EpicHookStateEvidence(has_live_hook=False, detail=f"assignee_unhooked({assignee})")
+    detail = ";".join((assignee_evidence.detail, fallback_hook_evidence.detail))
+    evidence = EpicHookStateEvidence(has_live_hook=False, detail=detail)
     cache[epic_id] = evidence
     return evidence
 
