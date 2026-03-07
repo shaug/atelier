@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import beads, config, git, lifecycle, prs
+from .. import agent_home, beads, config, git, lifecycle, prs
 from .models import FinalizeResult, ReconcileResult
 
 
@@ -27,6 +27,12 @@ class ReopenLifecycleEvidence:
     source: str
     stored_state: str | None
     live_state: str | None
+
+
+@dataclass(frozen=True)
+class EpicHookStateEvidence:
+    has_live_hook: bool | None
+    detail: str
 
 
 def _normalized_labels(issue: dict[str, object]) -> set[str]:
@@ -136,6 +142,84 @@ def _format_lookup_error(error: str | None) -> str:
     return normalized
 
 
+def _normalized_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized
+
+
+def _epic_hook_state(
+    epic_id: str,
+    *,
+    load_epic: Callable[[str], dict[str, object] | None],
+    beads_root: Path,
+    repo_root: Path,
+    cache: dict[str, EpicHookStateEvidence],
+) -> EpicHookStateEvidence:
+    cached = cache.get(epic_id)
+    if cached is not None:
+        return cached
+    epic = load_epic(epic_id)
+    if not epic:
+        evidence = EpicHookStateEvidence(has_live_hook=None, detail="epic_unavailable")
+        cache[epic_id] = evidence
+        return evidence
+
+    assignee = _normalized_text(epic.get("assignee"))
+    if assignee is None:
+        evidence = EpicHookStateEvidence(has_live_hook=False, detail="unassigned")
+        cache[epic_id] = evidence
+        return evidence
+
+    if not agent_home.is_session_agent_active(assignee):
+        evidence = EpicHookStateEvidence(
+            has_live_hook=False, detail=f"assignee_inactive({assignee})"
+        )
+        cache[epic_id] = evidence
+        return evidence
+
+    assignee_bead = beads.find_agent_bead(assignee, beads_root=beads_root, cwd=repo_root)
+    if not assignee_bead:
+        evidence = EpicHookStateEvidence(
+            has_live_hook=None, detail=f"agent_bead_missing({assignee})"
+        )
+        cache[epic_id] = evidence
+        return evidence
+    assignee_bead_id = _normalized_text(assignee_bead.get("id"))
+    if assignee_bead_id is None:
+        evidence = EpicHookStateEvidence(
+            has_live_hook=None, detail=f"agent_bead_id_missing({assignee})"
+        )
+        cache[epic_id] = evidence
+        return evidence
+    try:
+        hook = beads.get_agent_hook(assignee_bead_id, beads_root=beads_root, cwd=repo_root)
+    except SystemExit:
+        evidence = EpicHookStateEvidence(
+            has_live_hook=None, detail=f"hook_lookup_failed({assignee})"
+        )
+        cache[epic_id] = evidence
+        return evidence
+    if hook == epic_id:
+        evidence = EpicHookStateEvidence(has_live_hook=True, detail=f"active_hook({assignee})")
+        cache[epic_id] = evidence
+        return evidence
+    if hook:
+        evidence = EpicHookStateEvidence(
+            has_live_hook=False,
+            detail=f"hooked_elsewhere({assignee}->{hook})",
+        )
+        cache[epic_id] = evidence
+        return evidence
+
+    evidence = EpicHookStateEvidence(has_live_hook=False, detail=f"assignee_unhooked({assignee})")
+    cache[epic_id] = evidence
+    return evidence
+
+
 def list_reconcile_epic_candidates(
     *,
     project_config: config.ProjectConfig,
@@ -165,12 +249,41 @@ def list_reconcile_epic_candidates(
         epic_cache[epic_id] = loaded[0] if loaded else None
         return epic_cache[epic_id]
 
+    hook_state_cache: dict[str, EpicHookStateEvidence] = {}
     candidates: dict[str, list[str]] = {}
     for issue in all_changesets:
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id.strip():
             continue
         changeset_id = issue_id.strip()
+        status = _canonical_changeset_status(issue)
+        if status == "in_progress":
+            epic_id = resolve_epic_id_for_changeset(
+                issue, beads_root=beads_root, repo_root=repo_root
+            )
+            if not epic_id:
+                continue
+            hook_state = _epic_hook_state(
+                epic_id,
+                load_epic=load_epic,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                cache=hook_state_cache,
+            )
+            if hook_state.has_live_hook is not False:
+                continue
+            live_state, lookup_error = _live_review_state(
+                issue,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                git_path=git_path,
+            )
+            if lookup_error is not None:
+                candidates.setdefault(epic_id, []).append(changeset_id)
+                continue
+            if live_state in {"merged", "closed"}:
+                candidates.setdefault(epic_id, []).append(changeset_id)
+            continue
         drift_evidence, drift_lookup_error = _review_drift_evidence(
             issue,
             repo_slug=repo_slug,
@@ -186,8 +299,7 @@ def list_reconcile_epic_candidates(
             candidates.setdefault(epic_id, []).append(changeset_id)
             continue
         if drift_evidence is None:
-            status = _canonical_changeset_status(issue)
-            if status not in {"open", "in_progress", "blocked", "closed"}:
+            if status not in {"open", "blocked", "closed"}:
                 continue
             integration_proven, integrated_sha = changeset_integration_signal(
                 issue,
@@ -292,6 +404,16 @@ def reconcile_blocked_merged_changesets(
     repo_slug = prs.github_repo_slug(
         project_config.project.origin or project_config.project.repo_url
     )
+    epic_cache: dict[str, dict[str, object] | None] = {}
+
+    def load_epic(epic_id: str) -> dict[str, object] | None:
+        if epic_id in epic_cache:
+            return epic_cache[epic_id]
+        loaded = beads.run_bd_json(["show", epic_id], beads_root=beads_root, cwd=repo_root)
+        epic_cache[epic_id] = loaded[0] if loaded else None
+        return epic_cache[epic_id]
+
+    hook_state_cache: dict[str, EpicHookStateEvidence] = {}
     drift_anomaly_ids: set[str] = set()
     drift_lookup_error_ids: set[str] = set()
     for issue in all_changesets:
@@ -407,6 +529,83 @@ def reconcile_blocked_merged_changesets(
                 log(f"reconcile error: {changeset_id} (unable to resolve epic)")
             continue
         scanned += 1
+        if status == "in_progress":
+            hook_state = _epic_hook_state(
+                epic_id,
+                load_epic=load_epic,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                cache=hook_state_cache,
+            )
+            if hook_state.has_live_hook is None:
+                actionable += 1
+                failed += 1
+                if log:
+                    log(
+                        "reconcile anomaly: "
+                        f"{changeset_id} -> epic={epic_id} "
+                        f"in_progress+hook-state-unknown({hook_state.detail}) "
+                        "decision-required"
+                    )
+                continue
+            if hook_state.has_live_hook:
+                if log:
+                    log(
+                        f"reconcile skip: {changeset_id} "
+                        f"(in_progress with live hook: {hook_state.detail})"
+                    )
+                continue
+            live_state, lookup_error = _live_review_state(
+                issue,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                git_path=git_path,
+            )
+            if lookup_error is not None:
+                actionable += 1
+                failed += 1
+                if log:
+                    log(
+                        "reconcile anomaly: "
+                        f"{changeset_id} -> epic={epic_id} "
+                        "in_progress+pr-lifecycle-lookup-error"
+                        f"(error={_format_lookup_error(lookup_error)}) "
+                        "decision-required"
+                    )
+                continue
+            if live_state not in {"merged", "closed"}:
+                if log:
+                    if live_state in lifecycle.ACTIVE_REVIEW_STATES:
+                        log(
+                            f"reconcile skip: {changeset_id} "
+                            f"(in_progress pr lifecycle still active: {live_state})"
+                        )
+                    else:
+                        stored_state = _stored_review_state(issue) or "none"
+                        log(
+                            f"reconcile skip: {changeset_id} "
+                            "(in_progress terminal PR evidence unavailable; "
+                            f"stored={stored_state}, live={live_state or 'none'})"
+                        )
+                continue
+            integration_proven, integrated_sha = changeset_integration_signal(
+                issue,
+                repo_slug=repo_slug,
+                repo_root=repo_root,
+                git_path=git_path,
+                require_target_branch_proof=live_state == "merged",
+            )
+            candidates[changeset_id] = ReconcileCandidate(
+                issue_id=changeset_id,
+                issue=issue,
+                status=status,
+                epic_id=epic_id,
+                integrated_sha=integrated_sha.strip()
+                if integration_proven and integrated_sha
+                else None,
+                dependency_ids=issue_dependency_ids(issue),
+            )
+            continue
         integration_proven, integrated_sha = changeset_integration_signal(
             issue,
             repo_slug=repo_slug,
@@ -604,7 +803,7 @@ def reconcile_blocked_merged_changesets(
                 project_data_dir=project_data_dir,
                 git_path=git_path,
             )
-            if "_blocked_" in finalize_result.reason:
+            if not finalize_result.continue_running or "_blocked_" in finalize_result.reason:
                 failed += 1
                 failed_ids.add(changeset_id)
                 if log:
@@ -613,6 +812,23 @@ def reconcile_blocked_merged_changesets(
                         f"(finalize reason={finalize_result.reason})"
                     )
                 continue
+            if candidate.status == "in_progress":
+                issue_cache.pop(changeset_id, None)
+                refreshed_issue = load_issue(changeset_id)
+                refreshed_status = (
+                    _canonical_changeset_status(refreshed_issue) if refreshed_issue else None
+                )
+                if refreshed_status != "closed":
+                    failed += 1
+                    failed_ids.add(changeset_id)
+                    if log:
+                        log(
+                            "reconcile error: "
+                            f"{changeset_id} (finalize remained non-terminal: "
+                            f"status={refreshed_status or 'unknown'}, "
+                            f"reason={finalize_result.reason})"
+                        )
+                    continue
             if candidate.integrated_sha:
                 beads.update_changeset_integrated_sha(
                     changeset_id,
