@@ -281,6 +281,10 @@ def test_plan_promote_epic_skill_requires_one_child_rationale() -> None:
     text = skill.files["SKILL.md"].decode("utf-8")
     assert "exactly one child changeset" in text
     assert "decomposition rationale" in text
+    assert "deterministic order" in text
+    assert "description, notes, acceptance criteria, dependencies," in text
+    assert "related-context references" in text
+    assert "Missing detail sections:" in text
 
 
 def test_plan_create_epic_skill_captures_drafts_without_approval() -> None:
