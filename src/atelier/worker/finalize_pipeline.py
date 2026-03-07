@@ -11,6 +11,7 @@ from .. import beads, git, lifecycle, prs
 from .. import log as atelier_log
 from ..agents import AgentSpec
 from ..models import BranchPrMode
+from .finalize_publish_gate import validate_north_star_review_gate
 from .models import FinalizeResult, PublishSignalDiagnostics
 
 Issue = dict[str, object]
@@ -138,6 +139,57 @@ def _block_missing_merged_integration(
     return FinalizeResult(
         continue_running=False,
         reason="changeset_in_progress_missing_integration",
+    )
+
+
+def _block_incomplete_north_star_review(
+    *,
+    issue: Issue,
+    changeset_id: str,
+    agent_id: str,
+    beads_root: Path,
+    repo_root: Path,
+    service: "FinalizePipelineService",
+) -> FinalizeResult | None:
+    gate = validate_north_star_review_gate(issue)
+    if gate.ok:
+        return None
+
+    service.mark_changeset_blocked(
+        changeset_id,
+        reason="north-star review checklist incomplete",
+    )
+    note = f"publish_blocked: north-star review gate failed; {gate.summary}"
+    beads.run_bd_command(
+        ["update", changeset_id, "--append-notes", note],
+        beads_root=beads_root,
+        cwd=repo_root,
+        allow_failure=True,
+    )
+    body_lines = [
+        "Worker publish gate blocked outbound push/PR because the bead's "
+        "north-star review artifact is incomplete.",
+        *gate.diagnostics,
+        (
+            "Action: append or repair an authoritative "
+            "`north_star_review.<timestamp>:` note that marks "
+            "`unmet_acceptance_criteria: none`, maps required code changes "
+            "for every acceptance criterion, and records criterion-by-criterion "
+            "completion evidence before rerunning finalize."
+        ),
+    ]
+    service.send_planner_notification(
+        subject=f"NEEDS-DECISION: North-star review incomplete ({changeset_id})",
+        body="\n".join(body_lines),
+        agent_id=agent_id,
+        thread_id=changeset_id,
+    )
+    atelier_log.warning(
+        f"changeset={changeset_id} finalize blocked by north-star review gate: {gate.summary}"
+    )
+    return FinalizeResult(
+        continue_running=False,
+        reason="changeset_blocked_north_star_review",
     )
 
 
@@ -735,6 +787,16 @@ def run_finalize_pipeline(
     if terminal_result is not None:
         return terminal_result
     if branch_pr and pushed and not pr_payload:
+        blocked = _block_incomplete_north_star_review(
+            issue=issue,
+            changeset_id=changeset_id,
+            agent_id=agent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            service=service,
+        )
+        if blocked is not None:
+            return blocked
         integration_ok, integrated_sha = service.changeset_integration_signal(
             issue,
             repo_slug=repo_slug,
@@ -756,6 +818,16 @@ def run_finalize_pipeline(
     if not pushed and not pr_payload:
         push_detail: str | None = None
         if branch_pr:
+            blocked = _block_incomplete_north_star_review(
+                issue=issue,
+                changeset_id=changeset_id,
+                agent_id=agent_id,
+                beads_root=beads_root,
+                repo_root=repo_root,
+                service=service,
+            )
+            if blocked is not None:
+                return blocked
             pushed, push_detail = service.attempt_push_work_branch(work_branch)
             if pushed:
                 if repo_slug:
