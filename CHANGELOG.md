@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.0](https://github.com/shaug/atelier/compare/v0.8.3...v0.9.0) (2026-03-07)
+
+
+### Features
+
+* **planner:** enforce richer bead authoring contract ([#559](https://github.com/shaug/atelier/issues/559)) ([f209363](https://github.com/shaug/atelier/commit/f2093637c023926edb3ab9b092ca8b45925e48c0)), closes [#556](https://github.com/shaug/atelier/issues/556)
+* **planner:** require full promotion previews ([#562](https://github.com/shaug/atelier/issues/562)) ([f643765](https://github.com/shaug/atelier/commit/f6437658393cc25aaca1766f5c4622e25a5093f5)), closes [#557](https://github.com/shaug/atelier/issues/557)
+* **worker:** add north-star self-review contract ([#561](https://github.com/shaug/atelier/issues/561)) ([c9b616c](https://github.com/shaug/atelier/commit/c9b616ccbffee81cbc5b50049ad5602dc62168cf))
+
 ## [0.8.3](https://github.com/shaug/atelier/compare/v0.8.2...v0.8.3) (2026-03-06)
 
 ### Bug Fixes
