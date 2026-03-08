@@ -24,7 +24,7 @@ def _repo_dir_from_argv(argv: list[str]) -> Path | None:
     return None
 
 
-def _bootstrap_source_import() -> None:
+def _bootstrap_source_import() -> Path | None:
     candidate_roots: list[Path] = []
     argv_repo_dir = _repo_dir_from_argv(sys.argv[1:])
     if argv_repo_dir is not None:
@@ -50,14 +50,26 @@ def _bootstrap_source_import() -> None:
         src_dir_entry = str(src_dir)
         sys.path[:] = [entry for entry in sys.path if entry != src_dir_entry]
         sys.path.insert(0, src_dir_entry)
-        return
+        return resolved
+    return None
 
 
-_bootstrap_source_import()
+_BOOTSTRAP_REPO_ROOT = _bootstrap_source_import()
 
-from atelier import lifecycle, planner_overview
-from atelier.beads_context import resolve_runtime_repo_dir_hint, resolve_skill_beads_context
-from atelier.planner_startup_check import (
+from atelier.runtime_env import maybe_reexec_projected_repo_runtime  # noqa: E402
+
+if __name__ == "__main__":
+    maybe_reexec_projected_repo_runtime(
+        repo_root=_BOOTSTRAP_REPO_ROOT,
+        script_path=Path(__file__).resolve(),
+    )
+
+from atelier import lifecycle, planner_overview  # noqa: E402
+from atelier.beads_context import (  # noqa: E402
+    resolve_runtime_repo_dir_hint,
+    resolve_skill_beads_context,
+)
+from atelier.planner_startup_check import (  # noqa: E402
     StartupBeadsInvocationHelper,
     StartupCommandResult,
     StartupRuntimePreflight,
