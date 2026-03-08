@@ -961,6 +961,68 @@ def test_attempt_create_pr_accepts_pr_gate_keyword_contract(monkeypatch) -> None
     assert calls[0]["render_changeset_pr_body"]({"title": "Example"}) == "summary"
 
 
+def test_attempt_create_pr_normalizes_sequential_base_to_epic_parent(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.2",
+        "title": "Example",
+        "description": (
+            "changeset.root_branch: feat/root\n"
+            "changeset.parent_branch: feat/parent\n"
+            "changeset.work_branch: feat/work\n"
+            "workspace.parent_branch: main\n"
+        ),
+    }
+    commands: list[list[str]] = []
+    metadata_updates: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        work_finalization_state.worker_pr_gate.exec,
+        "try_run_command",
+        lambda cmd, **_kwargs: (
+            commands.append(list(cmd)) or SimpleNamespace(returncode=0, stdout="created", stderr="")
+        ),
+    )
+    monkeypatch.setattr(
+        work_finalization_state.git,
+        "git_rev_parse",
+        lambda _repo_root, ref, **_kwargs: f"{ref}-sha",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_branch_metadata",
+        lambda *_args, **kwargs: metadata_updates.append(kwargs),
+    )
+
+    created, detail = work_finalization_state.attempt_create_pr(
+        repo_slug="org/repo",
+        issue=issue,
+        work_branch="feat/work",
+        is_draft=True,
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        git_path="git",
+        render_changeset_pr_body=lambda _issue: "summary",
+    )
+
+    assert created is True
+    assert detail == "created"
+    assert commands
+    assert commands[0][:8] == [
+        "gh",
+        "pr",
+        "create",
+        "--repo",
+        "org/repo",
+        "--base",
+        "main",
+        "--head",
+    ]
+    assert commands[0][8] == "feat/work"
+    assert metadata_updates
+    assert metadata_updates[-1]["parent_branch"] == "main"
+    assert metadata_updates[-1]["parent_base"] == "main-sha"
+
+
 def test_handle_pushed_without_pr_uses_injected_create_callback_contract(monkeypatch) -> None:
     issue = {
         "title": "Example",
