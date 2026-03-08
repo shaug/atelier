@@ -679,8 +679,12 @@ Install `just` with `brew install just` or `cargo install just`.
 `just test-integration` runs publish-skill evals and requires the `codex` CLI to
 be installed and authenticated.
 
+Local quality gates intentionally pin `uv` to Python 3.11 to match the current
+CI baseline. Ambient Python 3.14 interpreters and pre-existing 3.14 `.venv`
+directories are not part of the supported publish/test matrix yet.
+
 ```sh
-uv venv
+bash scripts/supported-python.sh venv
 uv pip install -e .[dev]
 ```
 
@@ -693,8 +697,8 @@ uv run atelier --help
 Run tests:
 
 ```sh
-uv run python -m atelier.skill_frontmatter_validation
-pytest
+bash scripts/supported-python.sh run python -m atelier.skill_frontmatter_validation
+bash scripts/supported-python.sh run pytest
 bash tests/shell/run.sh
 ```
 

@@ -20,14 +20,15 @@ install-editable:
 
 # Editable install in a local venv
 install-dev:
-  uv venv
-  uv pip install -e .[dev]
+  bash scripts/supported-python.sh venv
+  env -u VIRTUAL_ENV uv pip install -e .[dev]
 
 # Run the test suite
 test:
-  uv pip install -e .[dev]
-  uv run python -m atelier.skill_frontmatter_validation
-  uv run pytest
+  bash scripts/supported-python.sh venv
+  env -u VIRTUAL_ENV uv pip install -e .[dev]
+  bash scripts/supported-python.sh run python -m atelier.skill_frontmatter_validation
+  bash scripts/supported-python.sh run pytest
   bash tests/shell/run.sh
 
 # Run integration evals (requires codex CLI on PATH)
@@ -40,10 +41,10 @@ lint:
 
 # Run static type checks
 typecheck:
-  uv run --extra dev pyright
+  bash scripts/supported-python.sh run --extra dev pyright
 
 # Auto-format code
 format:
-  uv run ruff check --select I,RUF022 --fix .
-  uv run ruff format .
-  uv run --extra dev mdformat --wrap 80 .
+  bash scripts/supported-python.sh run ruff check --select I,RUF022 --fix .
+  bash scripts/supported-python.sh run ruff format .
+  bash scripts/supported-python.sh run --extra dev mdformat --wrap 80 .

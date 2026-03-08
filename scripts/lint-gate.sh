@@ -3,6 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
+supported_python_cmd=(bash "${repo_root}/scripts/supported-python.sh")
 
 resolve_ruff_cmd() {
   if [[ -n "${ATELIER_RUFF_BIN:-}" ]]; then
@@ -10,7 +11,7 @@ resolve_ruff_cmd() {
     return 0
   fi
   if command -v uv >/dev/null 2>&1; then
-    RUFF_CMD=(uv run ruff)
+    RUFF_CMD=("${supported_python_cmd[@]}" run ruff)
     return 0
   fi
   if command -v ruff >/dev/null 2>&1; then
@@ -27,7 +28,7 @@ resolve_pyright_cmd() {
     return 0
   fi
   if command -v uv >/dev/null 2>&1; then
-    PYRIGHT_CMD=(uv run --extra dev pyright)
+    PYRIGHT_CMD=("${supported_python_cmd[@]}" run --extra dev pyright)
     return 0
   fi
   if command -v pyright >/dev/null 2>&1; then
@@ -40,7 +41,7 @@ resolve_pyright_cmd() {
 
 resolve_shellcheck_cmd() {
   if command -v uv >/dev/null 2>&1; then
-    SHELLCHECK_CMD=(uv run --extra dev shellcheck)
+    SHELLCHECK_CMD=("${supported_python_cmd[@]}" run --extra dev shellcheck)
     return 0
   fi
   if command -v shellcheck >/dev/null 2>&1; then

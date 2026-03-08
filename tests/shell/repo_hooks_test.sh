@@ -22,16 +22,25 @@ create_temp_repo() {
   cp "${ROOT_DIR}/.githooks/post-checkout" "${repo}/.githooks/post-checkout"
   mkdir -p "${repo}/scripts"
   cp "${ROOT_DIR}/scripts/lint-gate.sh" "${repo}/scripts/lint-gate.sh"
+  cp "${ROOT_DIR}/scripts/supported-python.sh" "${repo}/scripts/supported-python.sh"
   chmod +x "${repo}/.githooks/worktree-bootstrap.sh" \
     "${repo}/.githooks/pre-commit" \
     "${repo}/.githooks/pre-push" \
     "${repo}/.githooks/commit-msg" \
     "${repo}/.githooks/post-checkout" \
     "${repo}/scripts/lint-gate.sh"
-  git -C "$repo" add commitlint.config.cjs .githooks scripts/lint-gate.sh
+  git -C "$repo" add commitlint.config.cjs .githooks scripts/lint-gate.sh \
+    scripts/supported-python.sh
   git -C "$repo" commit -m "chore(repo): add hooks" -q
 
   echo "$repo"
+}
+
+canonical_path() {
+  (
+    cd "$1"
+    pwd -P
+  )
 }
 
 teardown() {
@@ -102,9 +111,12 @@ SCRIPT
   echo "not python" > "${TMP_REPO}/notes.txt"
   git -C "${TMP_REPO}" add hook_target.py notes.txt
 
-  ATELIER_RUFF_BIN="${fake_ruff}" \
-    ATELIER_TEST_ARGS_FILE="${args_file}" \
-    "${TMP_REPO}/.githooks/pre-commit" >/dev/null 2>&1
+  (
+    cd "${TMP_REPO}" && \
+      ATELIER_RUFF_BIN="${fake_ruff}" \
+      ATELIER_TEST_ARGS_FILE="${args_file}" \
+      "${TMP_REPO}/.githooks/pre-commit"
+  ) >/dev/null 2>&1
   assert_equals 0 "$?"
 
   expected_first="check --select I,RUF022 hook_target.py"
@@ -155,9 +167,12 @@ printf '%s' "$*" > "${ATELIER_TEST_ARGS_FILE}"
 SCRIPT
   chmod +x "${fake_just}"
 
-  ATELIER_JUST_BIN="${fake_just}" \
-    ATELIER_TEST_ARGS_FILE="${args_file}" \
-    "${TMP_REPO}/.githooks/pre-push" origin git@example.com/repo.git >/dev/null 2>&1
+  (
+    cd "${TMP_REPO}" && \
+      ATELIER_JUST_BIN="${fake_just}" \
+      ATELIER_TEST_ARGS_FILE="${args_file}" \
+      "${TMP_REPO}/.githooks/pre-push" origin git@example.com/repo.git
+  ) >/dev/null 2>&1
   assert_equals 0 "$?"
 
   expected="test"
@@ -179,9 +194,11 @@ exit 3
 SCRIPT
   chmod +x "${fake_just}"
 
-  ATELIER_JUST_BIN="${fake_just}" \
-    "${TMP_REPO}/.githooks/pre-push" origin git@example.com/repo.git \
-    > /dev/null 2> "${stderr_file}"
+  (
+    cd "${TMP_REPO}" && \
+      ATELIER_JUST_BIN="${fake_just}" \
+      "${TMP_REPO}/.githooks/pre-push" origin git@example.com/repo.git
+  ) > /dev/null 2> "${stderr_file}"
   assert_equals 1 "$?"
 
   local guidance_present
@@ -212,11 +229,83 @@ fi
 SCRIPT
   chmod +x "${fake_just}"
 
-  GIT_DIR="${git_dir}" \
-    GIT_WORK_TREE="${git_work_tree}" \
-    ATELIER_JUST_BIN="${fake_just}" \
-    "${TMP_REPO}/.githooks/pre-push" origin git@example.com/repo.git >/dev/null 2>&1
+  (
+    cd "${TMP_REPO}" && \
+      GIT_DIR="${git_dir}" \
+      GIT_WORK_TREE="${git_work_tree}" \
+      ATELIER_JUST_BIN="${fake_just}" \
+      "${TMP_REPO}/.githooks/pre-push" origin git@example.com/repo.git
+  ) >/dev/null 2>&1
   assert_equals 0 "$?"
+}
+
+test_pre_commit_uses_active_worktree_root() {
+  TMP_REPO="$(create_temp_repo)"
+  "${TMP_REPO}/.githooks/worktree-bootstrap.sh" >/dev/null 2>&1
+
+  TMP_WORKTREE="${TMP_REPO}-wt"
+  git -C "${TMP_REPO}" worktree add -q -b test/pre-commit-worktree "${TMP_WORKTREE}" HEAD
+  local physical_worktree
+  physical_worktree="$(canonical_path "${TMP_WORKTREE}")"
+
+  local fake_ruff args_file actual_first
+  fake_ruff="${TMP_REPO}/fake-ruff.sh"
+  args_file="${TMP_REPO}/ruff-args.txt"
+
+  cat > "${fake_ruff}" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s|%s\n' "$PWD" "$*" >> "${ATELIER_TEST_ARGS_FILE}"
+SCRIPT
+  chmod +x "${fake_ruff}"
+
+  echo 'print("hi")' > "${TMP_WORKTREE}/worktree_hook_target.py"
+  git -C "${TMP_WORKTREE}" add worktree_hook_target.py
+
+  (
+    cd "${TMP_WORKTREE}" && \
+      ATELIER_RUFF_BIN="${fake_ruff}" \
+      ATELIER_TEST_ARGS_FILE="${args_file}" \
+      "${TMP_REPO}/.githooks/pre-commit"
+  ) >/dev/null 2>&1
+  assert_equals 0 "$?"
+
+  actual_first="$(sed -n '1p' "${args_file}")"
+  assert_equals \
+    "${physical_worktree}|check --select I,RUF022 worktree_hook_target.py" \
+    "${actual_first}"
+}
+
+test_pre_push_uses_active_worktree_root() {
+  TMP_REPO="$(create_temp_repo)"
+  "${TMP_REPO}/.githooks/worktree-bootstrap.sh" >/dev/null 2>&1
+
+  TMP_WORKTREE="${TMP_REPO}-wt"
+  git -C "${TMP_REPO}" worktree add -q -b test/pre-push-worktree "${TMP_WORKTREE}" HEAD
+  local physical_worktree
+  physical_worktree="$(canonical_path "${TMP_WORKTREE}")"
+
+  local fake_just args_file actual
+  fake_just="${TMP_REPO}/fake-just.sh"
+  args_file="${TMP_REPO}/just-args.txt"
+
+  cat > "${fake_just}" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s|%s' "$PWD" "$*" > "${ATELIER_TEST_ARGS_FILE}"
+SCRIPT
+  chmod +x "${fake_just}"
+
+  (
+    cd "${TMP_WORKTREE}" && \
+      ATELIER_JUST_BIN="${fake_just}" \
+      ATELIER_TEST_ARGS_FILE="${args_file}" \
+      "${TMP_REPO}/.githooks/pre-push" origin git@example.com/repo.git
+  ) >/dev/null 2>&1
+  assert_equals 0 "$?"
+
+  actual="$(cat "${args_file}")"
+  assert_equals "${physical_worktree}|test" "${actual}"
 }
 
 test_post_checkout_repairs_hookspath_from_worktree() {

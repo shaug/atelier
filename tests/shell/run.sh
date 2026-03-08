@@ -7,4 +7,5 @@ BASHUNIT="${SCRIPT_DIR}/vendor/bashunit"
 
 cd "${ROOT_DIR}"
 "${BASHUNIT}" test "tests/shell/publish_scripts_test.sh"
+"${BASHUNIT}" test "tests/shell/python_policy_test.sh"
 "${BASHUNIT}" test "tests/shell/repo_hooks_test.sh"
