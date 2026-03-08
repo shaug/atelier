@@ -44,13 +44,17 @@ part of the published contract only for the routes listed below.
 The harness recognizes the following route families. Later changesets add real
 semantics behind these routes without changing the public dispatcher boundary.
 
-| Family id | Tier | Routes | `--json` routes |
-| --- | --- | --- | --- |
-| `core-issues` | Tier 0 | `show`, `list`, `ready`, `create`, `update`, `close` | all documented routes |
-| `dependency-edges` | Tier 0 | `dep add`, `dep remove` | all documented routes |
-| `ownership-slots` | Tier 1 | `slot show`, `slot set`, `slot clear` | `slot show` |
-| `startup-config` | Tier 2 | `prime`, `init`, `config get`, `config set`, `types`, `rename-prefix` | `config get`, `types` |
-| `runtime-admin` | Tier 3 | `stats`, `doctor`, `migrate`, `dolt show`, `dolt set database`, `dolt commit`, `vc status` | `dolt show`, `vc status` |
+- `core-issues` (Tier 0): routes `show`, `list`, `ready`, `create`, `update`,
+  `close`; `--json` routes: all documented routes
+- `dependency-edges` (Tier 0): routes `dep add`, `dep remove`; `--json` routes:
+  all documented routes
+- `ownership-slots` (Tier 1): routes `slot show`, `slot set`, `slot clear`;
+  `--json` routes: `slot show`
+- `startup-config` (Tier 2): routes `prime`, `init`, `config get`, `config set`,
+  `types`, `rename-prefix`; `--json` routes: `config get`, `types`
+- `runtime-admin` (Tier 3): routes `stats`, `doctor`, `migrate`, `dolt show`,
+  `dolt set database`, `dolt commit`, `vc status`; `--json` routes: `dolt show`,
+  `vc status`
 
 Notes:
 
