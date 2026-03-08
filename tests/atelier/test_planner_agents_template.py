@@ -30,6 +30,9 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "dependencies, and" in content
     assert "related-context references" in content
     assert "show that gap explicitly" in content
+    assert "operator clarification" in content
+    assert 'non-goals ("what' in content
+    assert "Do not ask for promotion while ambiguity remains." in content
     assert "Do not claim or keep assignee ownership" in content
     assert "Planner owns operator decision handling" in content
     assert "Do not dispatch cleanup-only beads as worker executable work." in content
@@ -38,6 +41,8 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert "done definition" in content
     assert "`related_context:`" in content
     assert "`done_definition:`" in content
+    assert "Use concrete wording instead of placeholders." in content
+    assert "Acceptance criterion example:" in content
     assert "concrete issue, create or update a deferred bead immediately" in content
     assert "Create or update deferred beads immediately" in content
     assert "Capture first, then ask only for decisions" in content

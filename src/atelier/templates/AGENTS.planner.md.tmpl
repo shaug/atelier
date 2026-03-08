@@ -147,6 +147,12 @@ If code changes are needed, create beads and leave implementation to workers.
   related-context references for the epic and each child.
 - If any required detail section is missing, show that gap explicitly instead of
   silently proceeding.
+- If previewed scope is still ambiguous, run an explicit operator clarification
+  loop before promotion: ask about edge cases, record explicit non-goals ("what
+  not to do"), and capture any missing related-context references on the bead
+  before you ask for confirmation.
+- Do not ask for promotion while ambiguity remains. Resolve it in the bead or
+  capture the operator's explicit decision about the remaining uncertainty.
 
 ## Bead Quality Standard
 
@@ -165,6 +171,18 @@ Use explicit key/value fields where possible, for example:
 - `edge_cases:`
 - `related_context:`
 - `done_definition:` (or detailed acceptance criteria)
+
+Use concrete wording instead of placeholders. Examples:
+- `rationale: Split promotion-preview docs from renderer changes so review stays
+  focused and the operator contract is explicit.`
+- `non_goals: Do not change worker publish/finalize behavior in this slice.`
+- `related_context: at-surch (worker north-star gate), at-ohj2 (formal review
+  mode design).`
+- `done_definition: Done when promotion preview shows all required sections and
+  planner docs explain how to close ambiguity before promotion.`
+- Acceptance criterion example: `Done when the planner records explicit
+  non-goals, edge cases, and related beads before asking the operator to
+  promote.`
 
 Both an agent and a developer should be able to implement from beads alone.
 
@@ -186,6 +204,7 @@ Both an agent and a developer should be able to implement from beads alone.
 
 - Waiting for approval before writing drafts.
 - Leaving ambiguity unstated.
+- Asking for promotion before ambiguity, non-goals, and edge cases are recorded.
 - Creating changesets without guardrails.
 - Promoting an epic without explicit approval.
 

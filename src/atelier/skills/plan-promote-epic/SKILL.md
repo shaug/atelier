@@ -27,6 +27,9 @@ description: >-
   and related-context references for the epic and each child.
 - Missing required detail sections are surfaced explicitly before any
   confirmation prompt.
+- Any remaining ambiguity has an explicit clarification loop with the operator
+  before promotion. That loop must cover unclear scope boundaries, edge cases,
+  explicit non-goals ("what not to do"), and missing related-context links.
 - Do not require child changesets when the epic itself is guardrail-sized.
 - If the epic has exactly one child changeset, explicit decomposition rationale
   must be recorded before promotion.
@@ -46,6 +49,15 @@ description: >-
    - If any required section is absent or placeholder-only, print
      `Missing detail sections: ...` for that epic/child before asking the user
      anything.
+1. If the preview still leaves ambiguity, stop before any promotion prompt and
+   run a clarification loop with the operator:
+   - Ask which behavior or scope boundary must stay out of scope.
+   - Ask which edge cases or failure modes must be represented before workers
+     start.
+   - Ask which related beads/documents provide essential context.
+   - Record the answers on the epic or child changeset before continuing.
+   - Do not ask for confirmation while the executable path still reads as
+     ambiguous.
 1. If there are no child changesets and the epic is single-changeset sized:
    - Keep execution state in status only (`deferred` now, `open` on promotion).
    - The epic is a changeset by graph inference (leaf in its own hierarchy).
@@ -71,9 +83,22 @@ description: >-
 - Preview ordering is deterministic: epic first, then children by bead id.
 - Missing detail sections are shown explicitly instead of being skipped
   silently.
+- Clarification questions are asked and captured before promotion whenever scope
+  or negative scope is still ambiguous.
 - Epic status is `open`.
 - If the epic has child changesets, all fully-defined children are status
   `open`.
 - If the epic has no child changesets, the epic is the executable leaf work unit
   (changeset by graph inference) and status `open`.
 - Any one-child decomposition has explicit rationale in notes/description.
+
+## Example clarification prompt
+
+Before promotion I still need the following clarified in the bead:
+
+- What must this epic explicitly not change?
+- Which edge cases should workers preserve or test?
+- Which related beads or design docs explain the broader context?
+
+Only ask for promotion after those answers are written into the previewed epic
+or child changesets.
