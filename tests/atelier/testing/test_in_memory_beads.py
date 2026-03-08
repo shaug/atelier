@@ -15,6 +15,7 @@ from atelier.lib.beads import (
     ListIssuesRequest,
     ReadyIssuesRequest,
     ShowIssueRequest,
+    SubprocessBeadsClient,
     SupportedOperation,
     SyncBeadsClient,
     UpdateIssueRequest,
@@ -30,6 +31,7 @@ from atelier.testing.beads import (
     CommandEnvelope,
     InMemoryBeadsCommandBackend,
     InMemoryBeadsDispatcher,
+    InMemoryBeadsTransport,
     IssueFixtureBuilder,
     build_in_memory_beads_client,
     build_in_memory_dispatcher,
@@ -55,6 +57,7 @@ def test_contract_docs_publish_route_inventory() -> None:
     assert "`--json` routes: `dolt show`," in content
     assert "`vc status`" in content
     assert "build_in_memory_beads_client()" in content
+    assert "one source of truth" in content
     assert "Intentional Tier 0 Deltas" in content
     assert "dep add" in content
     assert "dep remove" in content
@@ -312,6 +315,38 @@ def test_in_memory_client_supports_representative_planner_flow() -> None:
     assert [issue.id for issue in ready_after] == []
     assert [issue.id for issue in ready_after_merge] == ["at-3"]
     assert [issue.id for issue in listed_all] == ["at-2", "at-3", "at-4"]
+
+
+def test_typed_client_and_dispatcher_share_one_store_contract() -> None:
+    builder = IssueFixtureBuilder()
+    store = build_in_memory_issue_store(
+        issues=(
+            builder.issue(
+                1,
+                title="Epic",
+                issue_type="epic",
+                status="open",
+                labels=("at:epic",),
+            ),
+        )
+    )
+    dispatcher = build_in_memory_dispatcher(issue_store=store)
+    client = SubprocessBeadsClient(
+        transport=InMemoryBeadsTransport(dispatcher),
+        compatibility_policy=IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY,
+    )
+    sync = SyncBeadsClient(client)
+
+    created = sync.create(CreateIssueRequest(title="Shared slice", type="task", parent_id="at-1"))
+    shown = IssueRecord.model_validate(
+        json.loads(dispatcher.run(["bd", "show", created.id, "--json"]).stdout)[0]
+    )
+    dispatcher.run(["bd", "close", created.id, "--reason", "done", "--json"])
+    closed = sync.show(ShowIssueRequest(issue_id=created.id))
+
+    assert shown.id == created.id
+    assert shown.parent and shown.parent.id == "at-1"
+    assert closed.status == "closed"
 
 
 def test_ready_requires_integrated_evidence_for_closed_changeset_dependencies() -> None:

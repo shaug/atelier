@@ -1,4 +1,11 @@
-"""Typed client adapters for the in-memory Beads dispatcher."""
+"""Typed client adapters for the in-memory Beads dispatcher.
+
+The dispatcher remains the command-contract seam defined in `at-s1vc.1`. The
+typed client adapter intentionally wraps that same dispatcher so argv-level
+parity tests and `atelier.lib.beads.Beads` protocol tests share one mutable
+store and one set of command semantics rather than drifting into separate
+implementations.
+"""
 
 from __future__ import annotations
 
@@ -73,7 +80,16 @@ def build_in_memory_dispatcher(
     *,
     issue_store: InMemoryIssueStore | None = None,
 ) -> InMemoryBeadsDispatcher:
-    """Build a dispatcher with the Tier 0 core issue handler installed."""
+    """Build a dispatcher with the Tier 0 core issue handler installed.
+
+    Args:
+        issue_store: Optional shared issue store. Callers can pass the same
+            store to both dispatcher and typed-client helpers when they need to
+            assert parity across both entry points.
+
+    Returns:
+        Dispatcher backed by the provided or newly created issue store.
+    """
 
     store = issue_store or InMemoryIssueStore()
     return InMemoryBeadsDispatcher(
@@ -97,7 +113,22 @@ def build_in_memory_beads_client(
     prefix: str = "at",
     compatibility_policy: CompatibilityPolicy = IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY,
 ) -> tuple[Beads, InMemoryIssueStore]:
-    """Build a typed Beads client backed by the in-memory dispatcher."""
+    """Build a typed Beads client backed by the in-memory dispatcher.
+
+    The typed client is intentionally an adapter over the dispatcher rather than
+    a separate backend implementation. That keeps the documented argv contract
+    from `at-s1vc.1` and the `atelier.lib.beads.Beads` protocol on top of the
+    same store/mutation surface.
+
+    Args:
+        issues: Initial issue payloads to seed into the shared store.
+        prefix: Prefix used for generated numeric ids.
+        compatibility_policy: Supported-operation policy for the typed client.
+
+    Returns:
+        Tuple of the typed Beads client and the shared in-memory issue store it
+        uses underneath the dispatcher transport.
+    """
 
     store = build_in_memory_issue_store(issues=issues, prefix=prefix)
     client = SubprocessBeadsClient(

@@ -91,6 +91,10 @@ family and exposes them through a typed in-memory client adapter in
 
 - `build_in_memory_beads_client()` returns the shared `atelier.lib.beads.Beads`
   protocol backed by the in-memory dispatcher.
+- The dispatcher is not a second semantic backend. It is the stable
+  command-contract seam from `at-s1vc.1`, and the typed client intentionally
+  wraps that same dispatcher/store so argv-level parity tests and direct
+  protocol tests exercise one source of truth.
 - The default in-memory compatibility policy currently validates only the
   implemented Tier 0 operations: `show`, `list`, `ready`, `create`, `update`,
   and `close`, even though `inspect_environment()` still reports help-probed
