@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -37,6 +38,36 @@ MergeConflictSelection = worker_review.MergeConflictSelection
 GlobalStartupSelections = worker_review.GlobalStartupSelections
 
 _WORKER_QUEUE_NAME = "worker"
+
+
+def _normalized_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _extract_hook_from_slot_payload(payload: object) -> str | None:
+    if isinstance(payload, str):
+        return _normalized_text(payload)
+    if isinstance(payload, list):
+        for item in payload:
+            hook = _extract_hook_from_slot_payload(item)
+            if hook:
+                return hook
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if "hook" in payload:
+        return _extract_hook_from_slot_payload(payload.get("hook"))
+    slots = payload.get("slots")
+    if isinstance(slots, dict):
+        return _extract_hook_from_slot_payload(slots.get("hook"))
+    for key in ("id", "issue_id", "bead_id", "bead"):
+        value = _normalized_text(payload.get(key))
+        if value:
+            return value
+    return None
 
 
 def startup_finalize_preflight(
@@ -863,18 +894,42 @@ class _StartupContractService(worker_startup.StartupContractService):
                 cwd=self._repo_root,
             )
 
-        def get_agent_hook(agent_issue: dict[str, object]) -> str | None:
-            agent_bead_id = str(agent_issue.get("id") or "").strip()
-            if not agent_bead_id:
-                return None
+        def get_agent_hook(
+            agent_issue: dict[str, object],
+        ) -> worker_selection.AgentHookObservation:
+            agent_bead_id = _normalized_text(agent_issue.get("id"))
+            if agent_bead_id is None:
+                return worker_selection.AgentHookObservation.unknown("agent_bead_id_missing")
+
+            result = beads.run_bd_command(
+                ["slot", "show", agent_bead_id, "--json"],
+                beads_root=self._beads_root,
+                cwd=self._repo_root,
+                allow_failure=True,
+            )
+            if result.returncode != 0:
+                return worker_selection.AgentHookObservation.unknown("hook_lookup_failed")
+
+            raw = result.stdout.strip() if result.stdout else ""
+            if not raw:
+                return worker_selection.AgentHookObservation.unknown("hook_payload_missing")
             try:
-                return beads.get_agent_hook(
-                    agent_bead_id,
-                    beads_root=self._beads_root,
-                    cwd=self._repo_root,
-                )
-            except SystemExit:
-                return None
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                return worker_selection.AgentHookObservation.unknown("hook_payload_invalid")
+
+            hook = _extract_hook_from_slot_payload(payload)
+            if hook is not None:
+                return worker_selection.AgentHookObservation.present(hook)
+
+            description = agent_issue.get("description")
+            fields = beads.parse_description_fields(
+                description if isinstance(description, str) else ""
+            )
+            fallback_hook = _normalized_text(fields.get("hook_bead"))
+            if fallback_hook is not None:
+                return worker_selection.AgentHookObservation.present(fallback_hook)
+            return worker_selection.AgentHookObservation.absent()
 
         return worker_selection.stale_family_assigned_epics(
             issues,

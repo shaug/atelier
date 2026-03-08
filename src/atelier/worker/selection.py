@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
 from .. import agent_home, beads, lifecycle
 from .models_boundary import parse_issue_boundary
@@ -25,6 +26,36 @@ class EpicAssigneeReclaimEvaluation:
     assignee: str | None
     reclaimable: bool
     detail: str
+
+
+@dataclass(frozen=True)
+class AgentHookObservation:
+    """Describe whether an assignee hook lookup succeeded.
+
+    Args:
+        hook: Hooked epic id when explicitly known.
+        state: Whether the lookup found a hook, confirmed no hook, or failed.
+        detail: Stable diagnostic detail for unknown/error states.
+    """
+
+    hook: str | None
+    state: Literal["present", "absent", "unknown"]
+    detail: str | None = None
+
+    @classmethod
+    def present(cls, hook: str) -> AgentHookObservation:
+        """Return an observation for a confirmed hook value."""
+        return cls(hook=hook, state="present")
+
+    @classmethod
+    def absent(cls) -> AgentHookObservation:
+        """Return an observation for a confirmed missing hook."""
+        return cls(hook=None, state="absent")
+
+    @classmethod
+    def unknown(cls, detail: str) -> AgentHookObservation:
+        """Return an observation for an indeterminate hook lookup."""
+        return cls(hook=None, state="unknown", detail=detail)
 
 
 def _normalized_text(value: object) -> str | None:
@@ -61,12 +92,23 @@ def _agent_heartbeat_at(agent_issue: dict[str, object] | None) -> str | None:
     return heartbeat_at if isinstance(heartbeat_at, str) else None
 
 
+def _hook_observation(
+    value: AgentHookObservation | str | None,
+) -> AgentHookObservation:
+    if isinstance(value, AgentHookObservation):
+        return value
+    hook = _normalized_text(value)
+    if hook is not None:
+        return AgentHookObservation.present(hook)
+    return AgentHookObservation.absent()
+
+
 def evaluate_epic_assignee_reclaimability(
     issue: dict[str, object],
     *,
     is_session_active: Callable[[str], bool],
     find_agent_issue: Callable[[str], dict[str, object] | None] | None = None,
-    get_agent_hook: Callable[[dict[str, object]], str | None] | None = None,
+    get_agent_hook: Callable[[dict[str, object]], AgentHookObservation | str | None] | None = None,
     now: dt.datetime | None = None,
     stale_heartbeat_delta: dt.timedelta | None = None,
 ) -> EpicAssigneeReclaimEvaluation:
@@ -81,8 +123,8 @@ def evaluate_epic_assignee_reclaimability(
         issue: Epic payload being evaluated.
         is_session_active: Callback that validates PID-backed session liveness.
         find_agent_issue: Optional callback returning the assignee agent bead.
-        get_agent_hook: Optional callback returning the hooked epic id for an
-            assignee agent bead.
+        get_agent_hook: Optional callback returning either the hooked epic id or
+            an explicit hook lookup observation for an assignee agent bead.
         now: Optional timestamp override for deterministic tests.
         stale_heartbeat_delta: Optional heartbeat staleness window.
 
@@ -141,18 +183,25 @@ def evaluate_epic_assignee_reclaimability(
             detail=f"{session_detail}({assignee})",
         )
 
-    hook = _normalized_text(get_agent_hook(agent_issue))
-    if epic_id is not None and hook == epic_id:
+    hook_observation = _hook_observation(get_agent_hook(agent_issue))
+    if hook_observation.state == "unknown":
+        return EpicAssigneeReclaimEvaluation(
+            assignee=assignee,
+            reclaimable=False,
+            detail=hook_observation.detail or f"hook_lookup_failed({assignee})",
+        )
+
+    if epic_id is not None and hook_observation.hook == epic_id:
         return EpicAssigneeReclaimEvaluation(
             assignee=assignee,
             reclaimable=False,
             detail=f"active_hook({assignee})",
         )
-    if hook is not None:
+    if hook_observation.hook is not None:
         return EpicAssigneeReclaimEvaluation(
             assignee=assignee,
             reclaimable=True,
-            detail=f"hooked_elsewhere({assignee}->{hook})",
+            detail=f"hooked_elsewhere({assignee}->{hook_observation.hook})",
         )
     return EpicAssigneeReclaimEvaluation(
         assignee=assignee,
@@ -311,7 +360,7 @@ def stale_family_assigned_epics(
     agent_id: str,
     is_session_active: Callable[[str], bool],
     find_agent_issue: Callable[[str], dict[str, object] | None] | None = None,
-    get_agent_hook: Callable[[dict[str, object]], str | None] | None = None,
+    get_agent_hook: Callable[[dict[str, object]], AgentHookObservation | str | None] | None = None,
     now: dt.datetime | None = None,
     stale_heartbeat_delta: dt.timedelta | None = None,
 ) -> list[dict[str, object]]:

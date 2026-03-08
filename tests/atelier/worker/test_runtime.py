@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -853,3 +854,42 @@ def test_startup_service_reports_planner_owned_executable_violations() -> None:
     assert any(
         "Ownership-policy blockers may prevent review-feedback pickup." in line for line in emitted
     )
+
+
+def test_startup_service_preserves_live_worker_when_hook_lookup_fails() -> None:
+    issue = {
+        "id": "at-hook-error",
+        "status": "in_progress",
+        "labels": ["at:epic"],
+        "assignee": "atelier/worker/codex/p222",
+    }
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    with (
+        patch(
+            "atelier.worker.work_startup_runtime.agent_home.is_session_agent_active",
+            return_value=True,
+        ),
+        patch(
+            "atelier.worker.work_startup_runtime.beads.find_agent_bead",
+            return_value={"id": "at-agent-live"},
+        ),
+        patch(
+            "atelier.worker.work_startup_runtime.beads.run_bd_command",
+            return_value=subprocess.CompletedProcess(
+                args=["slot", "show", "at-agent-live", "--json"],
+                returncode=1,
+                stdout="",
+                stderr="slot read failed",
+            ),
+        ),
+    ):
+        stale = service.stale_family_assigned_epics(
+            [issue],
+            agent_id="atelier/worker/codex/p999",
+        )
+
+    assert stale == []

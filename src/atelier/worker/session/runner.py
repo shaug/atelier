@@ -129,31 +129,36 @@ def _agent_hook_for_issue(
     agent_issue: dict[str, object],
     beads_root: Path,
     repo_root: Path,
-) -> str | None:
+) -> worker_selection.AgentHookObservation:
     agent_bead_id = _normalized_text(agent_issue.get("id"))
     if agent_bead_id is None:
-        return None
+        return worker_selection.AgentHookObservation.unknown("agent_bead_id_missing")
     result = beads.run_bd_command(
         ["slot", "show", agent_bead_id, "--json"],
         beads_root=beads_root,
         cwd=repo_root,
         allow_failure=True,
     )
-    if result.returncode == 0:
-        raw = result.stdout.strip() if result.stdout else ""
-        if raw:
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                payload = None
-            hook = _extract_hook_from_slot_payload(payload)
-            if hook:
-                return hook
+    if result.returncode != 0:
+        return worker_selection.AgentHookObservation.unknown("hook_lookup_failed")
+    raw = result.stdout.strip() if result.stdout else ""
+    if not raw:
+        return worker_selection.AgentHookObservation.unknown("hook_payload_missing")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return worker_selection.AgentHookObservation.unknown("hook_payload_invalid")
+    hook = _extract_hook_from_slot_payload(payload)
+    if hook:
+        return worker_selection.AgentHookObservation.present(hook)
     description = agent_issue.get("description")
     fields = beads_runtime.parse_description_fields(
         description if isinstance(description, str) else ""
     )
-    return _normalized_text(fields.get("hook_bead"))
+    fallback_hook = _normalized_text(fields.get("hook_bead"))
+    if fallback_hook is not None:
+        return worker_selection.AgentHookObservation.present(fallback_hook)
+    return worker_selection.AgentHookObservation.absent()
 
 
 def _classify_claim_failure(

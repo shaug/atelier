@@ -278,6 +278,28 @@ def test_stale_family_assigned_epics_reclaims_live_worker_when_hook_missing() ->
     assert [item["id"] for item in stale] == ["at-unhooked"]
 
 
+def test_stale_family_assigned_epics_preserves_live_worker_when_hook_lookup_fails() -> None:
+    issue = {
+        "id": "at-hook-error",
+        "status": "in_progress",
+        "labels": ["at:epic"],
+        "assignee": "atelier/worker/codex/p222",
+        "created_at": "2026-02-20T00:00:00+00:00",
+    }
+
+    stale = selection.stale_family_assigned_epics(
+        [issue],
+        agent_id="atelier/worker/codex/p999",
+        is_session_active=lambda _assignee: True,
+        find_agent_issue=lambda _assignee: {"id": "at-agent-live"},
+        get_agent_hook=lambda _agent_issue: selection.AgentHookObservation.unknown(
+            "hook_lookup_failed"
+        ),
+    )
+
+    assert stale == []
+
+
 def test_stale_family_assigned_epics_preserves_live_worker_with_matching_hook() -> None:
     issue = {
         "id": "at-active-hook",

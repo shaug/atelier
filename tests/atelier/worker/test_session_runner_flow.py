@@ -731,6 +731,39 @@ def test_run_worker_once_retries_claim_as_stale_reclaim_after_claim_time_conflic
     )
 
 
+def test_classify_claim_failure_fails_closed_when_hook_lookup_fails() -> None:
+    stale_assignee = "atelier/worker/codex/p777"
+    beads = SimpleNamespace(
+        run_bd_json=Mock(return_value=[{"id": "at-conflict", "assignee": stale_assignee}]),
+        find_agent_bead=Mock(return_value={"id": "at-stale-agent"}),
+        run_bd_command=Mock(
+            return_value=subprocess.CompletedProcess(
+                args=["slot", "show", "at-stale-agent", "--json"],
+                returncode=1,
+                stdout="",
+                stderr="slot read failed",
+            )
+        ),
+    )
+
+    with patch(
+        "atelier.worker.session.runner.agent_home.is_session_agent_active",
+        return_value=True,
+    ):
+        failure = runner._classify_claim_failure(  # pyright: ignore[reportPrivateUsage]
+            beads=beads,
+            epic_id="at-conflict",
+            agent_id="atelier/worker/codex/p3c",
+            allow_takeover_from=None,
+            beads_root=Path("/project/.atelier/.beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert failure.kind == "assignee_conflict"
+    assert failure.assignee == stale_assignee
+    assert failure.detail == "hook_lookup_failed"
+
+
 def test_run_worker_once_reclaims_stale_explicit_assignment_and_clears_old_hook() -> None:
     agent = AgentHome(
         name="worker",
