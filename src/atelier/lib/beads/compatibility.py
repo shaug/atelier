@@ -113,7 +113,11 @@ class CompatibilityPolicy(BeadsModel):
 DEFAULT_MINIMUM_BD_VERSION = SemanticVersion(major=0, minor=56, patch=1)
 _READ_CAPS = (BeadsCapability.VERSION_REPORTING, BeadsCapability.ISSUE_JSON)
 _WRITE_CAPS = (BeadsCapability.VERSION_REPORTING, BeadsCapability.ISSUE_MUTATION)
-_DEP_CAPS = (BeadsCapability.VERSION_REPORTING, BeadsCapability.DEPENDENCY_MUTATION)
+_DEP_CAPS = (
+    BeadsCapability.VERSION_REPORTING,
+    BeadsCapability.ISSUE_JSON,
+    BeadsCapability.DEPENDENCY_MUTATION,
+)
 
 DEFAULT_COMPATIBILITY_POLICY = CompatibilityPolicy(
     minimum_version=DEFAULT_MINIMUM_BD_VERSION,
@@ -142,27 +146,27 @@ DEFAULT_COMPATIBILITY_POLICY = CompatibilityPolicy(
         ),
         OperationContract(
             operation=SupportedOperation.CREATE,
-            output_mode=OperationOutputMode.TEXT_NORMALIZED,
+            output_mode=OperationOutputMode.JSON_REQUIRED,
             required_capabilities=_WRITE_CAPS,
         ),
         OperationContract(
             operation=SupportedOperation.UPDATE,
-            output_mode=OperationOutputMode.TEXT_NORMALIZED,
+            output_mode=OperationOutputMode.JSON_REQUIRED,
             required_capabilities=_WRITE_CAPS,
         ),
         OperationContract(
             operation=SupportedOperation.CLOSE,
-            output_mode=OperationOutputMode.TEXT_NORMALIZED,
+            output_mode=OperationOutputMode.JSON_REQUIRED,
             required_capabilities=_WRITE_CAPS,
         ),
         OperationContract(
             operation=SupportedOperation.DEPENDENCY_ADD,
-            output_mode=OperationOutputMode.TEXT_NORMALIZED,
+            output_mode=OperationOutputMode.JSON_REQUIRED,
             required_capabilities=_DEP_CAPS,
         ),
         OperationContract(
             operation=SupportedOperation.DEPENDENCY_REMOVE,
-            output_mode=OperationOutputMode.TEXT_NORMALIZED,
+            output_mode=OperationOutputMode.JSON_REQUIRED,
             required_capabilities=_DEP_CAPS,
         ),
     ),
