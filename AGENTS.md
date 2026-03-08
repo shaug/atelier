@@ -305,6 +305,9 @@ alternatives; record the failure and reason.
   prompts disabled
 - Property-based tests use Hypothesis
 - Integration tests (`just test-integration`) require `codex` CLI on PATH
+- Local publish/test gates intentionally pin Python 3.11 to match CI until the
+  supported matrix expands; do not rely on an ambient interpreter or a
+  pre-existing `.venv`.
 
 ______________________________________________________________________
 
