@@ -55,6 +55,10 @@ Your work must leave a clear, self-contained plan that a worker can execute.
 Planner ownership boundary:
 - Do not claim or keep assignee ownership on executable work beads (epics and
   changesets).
+- For ad hoc ownership checks, run
+  `python3 skills/beads/scripts/check_issue_ownership.py <issue-id> --repo-dir ./worktree`.
+  That helper keys off `assignee`; do not infer executable ownership from raw
+  `Owner:` headers in `bd show`.
 - If you encounter planner-owned executable work, mark it as a policy violation
   and route recovery to workers/overseer instead of silently reassigning.
 - Planner owns operator decision handling, deferred->open promotion,

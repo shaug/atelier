@@ -88,6 +88,10 @@ reject unsupported invocation forms.
     `plan-changeset-guardrails`, and `auto_export_issue`
   - active epics in stable `epic-list --show-drafts` format
   - Beads root + total epic count diagnostics for planner/worker parity checks
+- For ad hoc executable ownership checks outside the startup overview, use the
+  assignee-based helper:
+  `python3 skills/beads/scripts/check_issue_ownership.py <issue-id> --repo-dir ./worktree`
+  Do not infer planner ownership from the raw `Owner:` header in `bd show`.
 
 ## Deterministic output contract
 

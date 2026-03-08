@@ -42,6 +42,8 @@ The output must be:
   - `- <id> [<status>] <title>`
 - Detail line per epic:
   - `  root: <workspace.root_branch|unset> | assignee: <assignee|unassigned>`
+- The `assignee:` detail is the execution-owner signal for planner policy.
+  Do not substitute raw issue `owner` metadata.
 
 ## Verification
 

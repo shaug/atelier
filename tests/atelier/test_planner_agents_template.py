@@ -34,6 +34,8 @@ def test_planner_agents_template_contains_core_sections() -> None:
     assert 'non-goals ("what' in content
     assert "Do not ask for promotion while ambiguity remains." in content
     assert "Do not claim or keep assignee ownership" in content
+    assert "check_issue_ownership.py" in content
+    assert "do not infer executable ownership from raw" in content
     assert "Planner owns operator decision handling" in content
     assert "Do not dispatch cleanup-only beads as worker executable work." in content
     assert "intent, rationale, non-goals, constraints, edge" in content
