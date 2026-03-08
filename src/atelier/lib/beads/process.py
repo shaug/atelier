@@ -26,7 +26,6 @@ from .models import (
     BeadsCommandRequest,
     BeadsCommandResult,
     BeadsEnvironment,
-    BeadsModel,
     CloseIssueRequest,
     CreateIssueRequest,
     DependencyMutationRequest,
@@ -40,6 +39,7 @@ from .models import (
 )
 
 _SEMVER_SEARCH: Pattern[str] = compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
+_JSON_FLAG = "--json"
 _CAPABILITY_PROBES = (
     (BeadsCapability.ISSUE_JSON, (("show", "--help"), ("list", "--help"))),
     (
@@ -90,13 +90,6 @@ async def _spawn_process(
     )
 
 
-class _DependencyMutationResult(BeadsModel):
-    issue_id: str
-    depends_on_id: str
-    status: str
-    type: str | None = None
-
-
 class SubprocessBeadsTransport(BeadsTransport):
     def __init__(self, *, spawn: _ProcessSpawner = _spawn_process) -> None:
         self._spawn = spawn
@@ -134,14 +127,10 @@ class SubprocessBeadsTransport(BeadsTransport):
         return BeadsCommandResult(
             argv=request.argv,
             returncode=process.returncode or 0,
-            stdout=_decode_output(stdout_bytes),
-            stderr=_decode_output(stderr_bytes),
+            stdout=stdout_bytes.decode("utf-8", errors="replace"),
+            stderr=stderr_bytes.decode("utf-8", errors="replace"),
             timed_out=False,
         )
-
-
-def _decode_output(value: bytes) -> str:
-    return value.decode("utf-8", errors="replace")
 
 
 def _extend_optional_args(argv: list[str], *items: tuple[str, object | None]) -> None:
@@ -177,23 +166,25 @@ class SubprocessBeadsClient(Beads):
         if self._environment_cache is not None:
             return self._environment_cache
 
-        version_result = await self._execute(
-            SupportedOperation.INSPECT_ENVIRONMENT,
-            "--version",
+        version = _parse_version(
+            await self._execute(SupportedOperation.INSPECT_ENVIRONMENT, "--version")
         )
-        version = _parse_version(version_result)
-
         probes = await asyncio.gather(
             *(
                 self._probe_capability(capability, commands)
                 for capability, commands in _CAPABILITY_PROBES
             )
         )
-
-        capabilities = [BeadsCapability.VERSION_REPORTING]
-        capabilities.extend(capability for capability in probes if capability is not None)
-        environment = BeadsEnvironment(version=version, capabilities=tuple(capabilities))
+        environment = BeadsEnvironment(
+            version=version,
+            capabilities=(
+                BeadsCapability.VERSION_REPORTING,
+                *(capability for capability in probes if capability is not None),
+            ),
+        )
         self.compatibility_policy.assert_environment_supports(environment)
+        for operation in (contract.operation for contract in self.compatibility_policy.operations):
+            self.compatibility_policy.assert_environment_supports(environment, operation=operation)
         self._environment_cache = environment
         return environment
 
@@ -326,14 +317,15 @@ class SubprocessBeadsClient(Beads):
             "--json",
         )
         payload = _load_payload(result, operation=operation)
-        try:
-            _DependencyMutationResult.model_validate(payload)
-        except ValidationError as exc:
+        if not isinstance(payload, dict) or any(
+            not isinstance(payload.get(field), str)
+            for field in ("issue_id", "depends_on_id", "status")
+        ):
             raise _parse_error(
-                f"failed to decode dependency mutation output: {exc}",
+                "failed to decode dependency mutation output",
                 result,
                 operation=operation,
-            ) from exc
+            )
         return await self.show(ShowIssueRequest(issue_id=request.issue_id))
 
     async def _probe_capability(
@@ -345,12 +337,14 @@ class SubprocessBeadsClient(Beads):
             result = await self._execute_raw(command)
             if result.returncode != 0:
                 return None
+            help_text = "\n".join(part for part in (result.stdout, result.stderr) if part)
+            if _JSON_FLAG not in help_text:
+                return None
         return capability
 
     async def _ensure_environment_supports(self, operation: SupportedOperation) -> None:
-        environment = await self.inspect_environment()
         self.compatibility_policy.assert_environment_supports(
-            environment,
+            await self.inspect_environment(),
             operation=operation,
         )
 
@@ -423,29 +417,21 @@ def _parse_issue_list(
     operation: SupportedOperation,
 ) -> tuple[IssueRecord, ...]:
     payload = _load_payload(result, operation=operation)
-    items: list[object]
-    if isinstance(payload, list):
-        items = list(payload)
-    elif isinstance(payload, dict):
-        items = [payload]
-    else:
+    if not isinstance(payload, (list, dict)):
         raise _parse_error(
             f"expected JSON object or array from {operation.value}",
             result,
             operation=operation,
         )
-
-    issues: list[IssueRecord] = []
-    for index, item in enumerate(items):
-        try:
-            issues.append(IssueRecord.model_validate(item))
-        except ValidationError as exc:
-            raise _parse_error(
-                f"failed to decode issue payload at index {index}: {exc}",
-                result,
-                operation=operation,
-            ) from exc
-    return tuple(issues)
+    items = payload if isinstance(payload, list) else [payload]
+    try:
+        return tuple(IssueRecord.model_validate(item) for item in items)
+    except ValidationError as exc:
+        raise _parse_error(
+            f"failed to decode issue payload: {exc}",
+            result,
+            operation=operation,
+        ) from exc
 
 
 def _load_payload(

@@ -127,18 +127,43 @@ class _FakeClient:
     compatibility_policy = DEFAULT_COMPATIBILITY_POLICY
 
     async def inspect_environment(self) -> BeadsEnvironment:
+        capabilities = [rule.capability for rule in DEFAULT_COMPATIBILITY_POLICY.capability_rules]
         return BeadsEnvironment(
             version=SemanticVersion(major=0, minor=56, patch=1),
-            capabilities=[
-                rule.capability for rule in DEFAULT_COMPATIBILITY_POLICY.capability_rules
-            ],
+            capabilities=capabilities,
         )
 
     async def show(self, request: object) -> IssueRecord:
         del request
         return IssueRecord(id="at-1")
 
-    list = ready = create = update = close = add_dependency = remove_dependency = show
+    async def list(self, request: object) -> tuple[IssueRecord, ...]:
+        del request
+        return (IssueRecord(id="at-1"),)
+
+    async def ready(self, request: object) -> tuple[IssueRecord, ...]:
+        del request
+        return ()
+
+    async def create(self, request: object) -> IssueRecord:
+        del request
+        return IssueRecord(id="at-1")
+
+    async def update(self, request: object) -> IssueRecord:
+        del request
+        return IssueRecord(id="at-1")
+
+    async def close(self, request: object) -> IssueRecord:
+        del request
+        return IssueRecord(id="at-1")
+
+    async def add_dependency(self, request: object) -> IssueRecord:
+        del request
+        return IssueRecord(id="at-1")
+
+    async def remove_dependency(self, request: object) -> IssueRecord:
+        del request
+        return IssueRecord(id="at-1")
 
 
 def test_protocols_are_runtime_checkable() -> None:
@@ -186,6 +211,18 @@ class _FakeProcess:
 
 
 _run = asyncio.run
+_HELP_OUTPUT = "Flags:\n  -h, --help   help for command\n      --json  Output in JSON format"
+_HELP_OUTPUT_NO_JSON = "Flags:\n  -h, --help   help for command"
+_HELP_COMMANDS = (
+    ("bd", "show", "--help"),
+    ("bd", "list", "--help"),
+    ("bd", "create", "--help"),
+    ("bd", "update", "--help"),
+    ("bd", "close", "--help"),
+    ("bd", "dep", "add", "--help"),
+    ("bd", "dep", "remove", "--help"),
+    ("bd", "ready", "--help"),
+)
 
 
 def _result(
@@ -207,19 +244,18 @@ def _result(
 
 
 def _probe_responses() -> dict[tuple[str, ...], BeadsCommandResult]:
-    return dict(
-        [
-            _result(("bd", "--version"), stdout="bd version 0.56.1 (dev)"),
-            _result(("bd", "show", "--help"), stdout="help"),
-            _result(("bd", "list", "--help"), stdout="help"),
-            _result(("bd", "create", "--help"), stdout="help"),
-            _result(("bd", "update", "--help"), stdout="help"),
-            _result(("bd", "close", "--help"), stdout="help"),
-            _result(("bd", "dep", "add", "--help"), stdout="help"),
-            _result(("bd", "dep", "remove", "--help"), stdout="help"),
-            _result(("bd", "ready", "--help"), stdout="help"),
-        ]
-    )
+    return {
+        ("bd", "--version"): BeadsCommandResult(
+            argv=("bd", "--version"),
+            returncode=0,
+            stdout="bd version 0.56.1 (dev)",
+            stderr="",
+        ),
+        **{
+            argv: BeadsCommandResult(argv=argv, returncode=0, stdout=_HELP_OUTPUT, stderr="")
+            for argv in _HELP_COMMANDS
+        },
+    }
 
 
 def test_subprocess_transport_raises_typed_timeout() -> None:
@@ -308,7 +344,7 @@ def test_subprocess_client_decodes_core_json_commands() -> None:
                     stdout='[{"id":"at-2","issue_type":"task","dependencies":["at-1"]}]',
                 ),
             ]
-        )
+        ),
     )
     transport = _StubTransport(responses)
     client = SubprocessBeadsClient(transport=transport, env={"BEADS_DIR": "/repo/.beads"})
@@ -396,3 +432,20 @@ def test_subprocess_client_parse_and_capability_failures(
             _run(client.show(client_request))
         else:
             _run(client.ready(client_request))
+
+
+def test_inspect_environment_fails_closed_when_json_flag_is_missing() -> None:
+    responses = _probe_responses()
+    responses[("bd", "show", "--help")] = BeadsCommandResult(
+        argv=("bd", "show", "--help"),
+        returncode=0,
+        stdout=_HELP_OUTPUT_NO_JSON,
+        stderr="",
+    )
+    transport = _StubTransport(responses)
+    client = SubprocessBeadsClient(transport=transport)
+
+    with pytest.raises(CapabilityMismatchError, match="show: issue-json"):
+        _run(client.inspect_environment())
+
+    assert ("bd", "show", "at-1", "--json") not in [request.argv for request in transport.requests]
