@@ -1,4 +1,4 @@
-"""Async-first Beads client and transport protocols."""
+"""Public Beads client and transport protocols."""
 
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ class BeadsTransport(Protocol):
 
 
 @runtime_checkable
-class AsyncBeadsClient(Protocol):
-    """Async-first contract for the supported Beads operations."""
+class Beads(Protocol):
+    """Public async-first contract for the supported Beads operations."""
 
     @property
     def compatibility_policy(self) -> CompatibilityPolicy: ...
@@ -51,3 +51,6 @@ class AsyncBeadsClient(Protocol):
     async def add_dependency(self, request: DependencyMutationRequest) -> IssueRecord: ...
 
     async def remove_dependency(self, request: DependencyMutationRequest) -> IssueRecord: ...
+
+
+AsyncBeadsClient = Beads

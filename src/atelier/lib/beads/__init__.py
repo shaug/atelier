@@ -1,6 +1,6 @@
 """Public contract for the reusable Beads library surface."""
 
-from .client import AsyncBeadsClient, BeadsTransport
+from .client import AsyncBeadsClient, Beads, BeadsTransport
 from .compatibility import (
     DEFAULT_COMPATIBILITY_POLICY,
     DEFAULT_MINIMUM_BD_VERSION,
@@ -42,6 +42,7 @@ __all__ = [
     "DEFAULT_MINIMUM_BD_VERSION",
     "AsyncBeadsClient",
     "BeadError",
+    "Beads",
     "BeadsCapability",
     "BeadsCommandError",
     "BeadsCommandRequest",

@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from atelier.lib.beads import (
     DEFAULT_COMPATIBILITY_POLICY,
     AsyncBeadsClient,
+    Beads,
     BeadsCapability,
     BeadsCommandRequest,
     BeadsCommandResult,
@@ -152,4 +153,5 @@ class _FakeClient:
 
 def test_protocols_are_runtime_checkable() -> None:
     assert isinstance(_FakeTransport(), BeadsTransport)
+    assert isinstance(_FakeClient(), Beads)
     assert isinstance(_FakeClient(), AsyncBeadsClient)
