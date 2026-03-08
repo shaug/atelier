@@ -6,7 +6,7 @@ import datetime as dt
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import beads
+from .. import beads, messages
 
 EmitFn = Callable[[str], None]
 PromptFn = Callable[[str], str]
@@ -78,11 +78,18 @@ def send_planner_notification(
         "queue": "planner",
         "msg_type": "notification",
         "kind": "needs-decision" if subject.startswith("NEEDS-DECISION:") else "notification",
-        "blocking": subject.startswith("NEEDS-DECISION:"),
         "audience": ["planner"],
+        "audiences": ["planner"],
     }
     if thread_id:
         metadata["thread"] = thread_id
+        thread_target = messages.infer_thread_target(thread_id)
+        if thread_target is not None:
+            metadata["thread_kind"] = thread_target
+            metadata["thread_target"] = thread_target
+    if subject.startswith("NEEDS-DECISION:"):
+        metadata["blocking"] = True
+        metadata["blocking_roles"] = ["planner"]
     beads.create_message_bead(
         subject=subject,
         body=body,

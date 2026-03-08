@@ -91,8 +91,8 @@ class WorkThreadRouting:
         thread_target: Explicit thread target, usually ``epic`` or
             ``changeset``.
         kind: Normalized message kind such as ``needs-decision``.
-        audiences: Runtime roles explicitly or compatibly targeted by the
-            message.
+        audiences: Runtime roles explicitly targeted by the message or inferred
+            from compatibility-only legacy routing metadata.
         blocking_roles: Runtime roles that the message should block until the
             message is processed.
     """
@@ -395,6 +395,13 @@ def _coerce_roles(value: object) -> tuple[str, ...]:
     return _ordered_unique_roles(roles)
 
 
+def _metadata_value(payload: MessagePayload, *keys: str) -> tuple[object, bool]:
+    for key in keys:
+        if key in payload.metadata:
+            return payload.metadata[key], True
+    return None, False
+
+
 def _normalize_audience(
     value: object,
     *,
@@ -434,6 +441,23 @@ def _normalize_thread_kind(
     if _EPIC_THREAD_PATTERN.fullmatch(thread_id):
         return "epic"
     return "work"
+
+
+def infer_thread_target(thread_id: str) -> str | None:
+    """Infer the work-thread target type from a bead id.
+
+    Args:
+        thread_id: Epic or changeset bead id attached to the message.
+
+    Returns:
+        ``changeset`` for dotted bead ids, ``epic`` for top-level bead ids, or
+        ``None`` when the thread id is blank.
+    """
+
+    normalized = thread_id.strip()
+    if not normalized:
+        return None
+    return _normalize_thread_kind(None, thread_id=normalized)
 
 
 def _normalize_delivery(
@@ -498,9 +522,7 @@ def _issue_id(issue: dict[str, object]) -> str | None:
 
 
 def _message_thread_target(contract: MessageContract) -> str | None:
-    if contract.thread_kind is not None:
-        return contract.thread_kind
-    return _clean_optional_string(contract.metadata.get("thread_target"))
+    return contract.thread_kind
 
 
 def _message_kind_from_contract(
@@ -517,26 +539,31 @@ def _message_kind_from_contract(
 
 def _message_blocking_roles(
     issue: dict[str, object],
+    payload: MessagePayload,
     contract: MessageContract,
     *,
     title: str,
     audiences: tuple[str, ...],
 ) -> tuple[str, ...]:
-    explicit_roles = _coerce_roles(
-        contract.metadata.get("blocking_roles", contract.metadata.get("blocking_for"))
+    explicit_blocking_value, has_explicit_blocking = _metadata_value(
+        payload,
+        "blocking_roles",
+        "blocking_for",
     )
-    if explicit_roles:
-        return explicit_roles
-    blocking_value = contract.metadata.get("blocking")
-    if isinstance(blocking_value, bool):
-        return audiences if blocking_value else ()
-    blocking_roles = _coerce_roles(blocking_value)
-    if blocking_roles:
-        return blocking_roles
-    if title.startswith(_NEEDS_DECISION_SUBJECT_PREFIX):
+    if has_explicit_blocking:
+        return _coerce_roles(explicit_blocking_value)
+    blocking_value, has_blocking_flag = _metadata_value(payload, "blocking")
+    if has_blocking_flag:
+        if isinstance(blocking_value, bool):
+            return audiences if blocking_value else ()
+        return _coerce_roles(blocking_value)
+    if title.startswith(_NEEDS_DECISION_SUBJECT_PREFIX) and audiences:
         return audiences
     assignee_role = _normalize_runtime_role(issue.get("assignee"))
     if contract.thread_id and assignee_role == "worker":
+        _, has_explicit_audience = _metadata_value(payload, "audiences", "audience")
+        if has_explicit_audience:
+            return ()
         return ("worker",)
     return ()
 
@@ -553,8 +580,10 @@ def work_thread_routing(issue: dict[str, object]) -> WorkThreadRouting:
     """
 
     title = _issue_title(issue)
-    contract = parse_message_contract(
-        _issue_description(issue),
+    payload = parse_message(_issue_description(issue))
+    contract = build_message_contract(
+        payload.metadata,
+        body=payload.body,
         assignee=_clean_optional_string(issue.get("assignee")),
     )
     audiences = contract.audience
@@ -568,6 +597,7 @@ def work_thread_routing(issue: dict[str, object]) -> WorkThreadRouting:
         audiences=audiences,
         blocking_roles=_message_blocking_roles(
             issue,
+            payload,
             contract,
             title=title,
             audiences=audiences,

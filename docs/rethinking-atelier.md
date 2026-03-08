@@ -697,8 +697,8 @@ Messaging skills:
 
 ## Messaging Policy (When to Send Mail)
 
-Messages are for coordination and exceptions. The hook is the assignment
-channel.
+Messages are for coordination and exceptions. Durable coordination belongs on
+the epic or changeset thread; the hook remains the assignment channel.
 
 ### Send a message when:
 
@@ -709,6 +709,14 @@ channel.
 - **Scope changes**: epic needs splitting/merging, or new epics are required.
 - **Handoff**: a session is ending mid-work; summarize state and next steps.
 - **Status exceptions**: repeated failures or no eligible epics available.
+
+Default durable pattern:
+
+- Attach the message to the relevant epic or changeset with `thread`.
+- Add explicit routing metadata (`thread_target`, `audiences`, `kind`, and
+  `blocking_roles` when execution should stop).
+- Use assignee or queue only as compatibility routing on top of the threaded
+  message.
 
 ### Do NOT message when:
 
@@ -723,6 +731,9 @@ Overseer and planner may message workers for meta-coordination:
 - Size guardrails tightened
 - Work paused or resumed
 - Epic split/merge instructions
+
+See `docs/work-threaded-message-migration.md` for the migration policy and the
+remaining compatibility-only cases.
 
 ### Subject Conventions (Optional)
 
