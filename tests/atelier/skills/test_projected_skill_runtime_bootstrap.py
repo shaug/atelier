@@ -662,3 +662,85 @@ def test_projected_refresh_overview_fails_closed_when_repo_runtime_is_dependency
     assert "runtime: ambient" in completed.stderr
     assert "dependency: pydantic_core._pydantic_core" in completed.stderr
     assert "repair the selected repo runtime or rerun explicitly via" in completed.stderr
+
+
+def test_projected_check_issue_ownership_fails_closed_when_repo_runtime_is_dependency_unhealthy(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _copy_script(
+        tmp_path,
+        skill_name="beads",
+        script_name="check_issue_ownership.py",
+    )
+    repo_root = _fake_repo(
+        tmp_path,
+        sentinel_import="planner_issue_ownership",
+        extra_modules={
+            "beads_context.py": (
+                "def resolve_runtime_repo_dir_hint(*, repo_dir=None, cwd=None, env=None):\n"
+                "    return (repo_dir, None)\n"
+                "\n"
+                "class _Context:\n"
+                "    def __init__(self, repo_dir):\n"
+                "        self.beads_root = repo_dir\n"
+                "        self.repo_root = repo_dir\n"
+                "        self.override_warning = None\n"
+                "\n"
+                "def resolve_skill_beads_context(*, beads_dir=None, repo_dir=None):\n"
+                "    return _Context(repo_dir)\n"
+            ),
+        },
+    )
+    _write_repo_python_without_site_packages(repo_root)
+    installed_root = _fake_installed_package(
+        tmp_path,
+        modules={
+            "planner_issue_ownership.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['OWNERSHIP_SENTINEL']).write_text('installed', encoding='utf-8')\n"
+            ),
+            "beads.py": "",
+            "beads_context.py": (
+                "def resolve_runtime_repo_dir_hint(*, repo_dir=None, cwd=None, env=None):\n"
+                "    return (repo_dir, None)\n"
+                "\n"
+                "class _Context:\n"
+                "    def __init__(self, repo_dir):\n"
+                "        self.beads_root = repo_dir\n"
+                "        self.repo_root = repo_dir\n"
+                "        self.override_warning = None\n"
+                "\n"
+                "def resolve_skill_beads_context(*, beads_dir=None, repo_dir=None):\n"
+                "    return _Context(repo_dir)\n"
+            ),
+        },
+    )
+    ambient_python = _ambient_python_executable()
+    sentinel_path = tmp_path / "ownership-runtime.txt"
+
+    completed = subprocess.run(
+        [
+            ambient_python,
+            str(projected_script),
+            "at-123",
+            "--repo-dir",
+            str(repo_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "OWNERSHIP_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": os.pathsep.join([str(installed_root), str(repo_root / "src")]),
+        },
+    )
+
+    assert completed.returncode == 1
+    assert not sentinel_path.exists()
+    assert "planner helper runtime is unhealthy" in completed.stderr
+    assert "runtime: ambient" in completed.stderr
+    assert "dependency: pydantic_core._pydantic_core" in completed.stderr
+    assert "repair the selected repo runtime or rerun explicitly via" in completed.stderr
