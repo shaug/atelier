@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from atelier.worker import restart_runtime
 
 
@@ -76,3 +78,42 @@ def test_capture_worker_startup_runtime_detects_package_tree_updates(
     os.utime(module_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
 
     assert startup.runtime_changed(version="1.2.3", package_root=package_root) is True
+
+
+def test_relaunch_worker_process_uses_preserved_contract(tmp_path: Path) -> None:
+    startup = restart_runtime.capture_worker_startup_runtime(
+        argv=("atelier", "work", "--restart-on-update"),
+        orig_argv=("/venv/bin/python", "-m", "atelier.cli", "work", "--restart-on-update"),
+        env={"PATH": "/venv/bin:/usr/bin", "ATELIER_AGENT_ID": "atelier/worker/codex/p1"},
+        cwd=tmp_path,
+        executable="/venv/bin/python",
+        version="1.2.3",
+        package_root=tmp_path,
+    )
+    captured: dict[str, object] = {}
+
+    def fake_chdir(path: Path) -> None:
+        captured["cwd"] = path
+
+    def fake_execvpe(target: str, argv: list[str], env: dict[str, str]) -> None:
+        captured["target"] = target
+        captured["argv"] = argv
+        captured["env"] = env
+        raise RuntimeError("reexec")
+
+    with pytest.raises(RuntimeError, match="reexec"):
+        restart_runtime.relaunch_worker_process(
+            startup,
+            chdir_fn=fake_chdir,
+            execvpe_fn=fake_execvpe,
+        )
+
+    assert captured == {
+        "cwd": tmp_path,
+        "target": "/venv/bin/python",
+        "argv": ["/venv/bin/python", "-m", "atelier.cli", "work", "--restart-on-update"],
+        "env": {
+            "ATELIER_AGENT_ID": "atelier/worker/codex/p1",
+            "PATH": "/venv/bin:/usr/bin",
+        },
+    }

@@ -37,6 +37,8 @@ def test_work_help_shows_mode_select_and_run_mode_choices() -> None:
     assert "oldest-feedback" in clean_output
     assert "--run-mode" in clean_output
     assert "[once|default|watch]" in clean_output
+    assert "--restart-on-update" in clean_output
+    assert "--no-restart-on-update" in clean_output
 
 
 def test_global_help_shows_log_level_choices() -> None:
@@ -70,6 +72,7 @@ def test_choice_flags_accept_case_insensitive_and_underscore_aliases() -> None:
         work_capture["mode"] = args.mode
         work_capture["select"] = args.select
         work_capture["run_mode"] = args.run_mode
+        work_capture["restart_on_update"] = args.restart_on_update
 
     runner = CliRunner()
     with (
@@ -87,6 +90,7 @@ def test_choice_flags_accept_case_insensitive_and_underscore_aliases() -> None:
                 "oldest_feedback",
                 "--run-mode",
                 "ONCE",
+                "--restart-on-update",
             ],
             color=False,
         )
@@ -99,6 +103,7 @@ def test_choice_flags_accept_case_insensitive_and_underscore_aliases() -> None:
         "mode": "auto",
         "select": "oldest-feedback",
         "run_mode": "once",
+        "restart_on_update": True,
     }
 
 

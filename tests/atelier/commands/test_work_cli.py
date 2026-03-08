@@ -14,6 +14,7 @@ def test_work_passes_yolo_flag_to_command() -> None:
         captured["mode"] = args.mode
         captured["select"] = args.select
         captured["run_mode"] = args.run_mode
+        captured["restart_on_update"] = args.restart_on_update
         captured["yes"] = args.yes
         captured["reconcile"] = args.reconcile
         captured["yolo"] = args.yolo
@@ -31,6 +32,7 @@ def test_work_passes_yolo_flag_to_command() -> None:
                 "first-eligible",
                 "--run-mode",
                 "once",
+                "--restart-on-update",
                 "--yes",
                 "--reconcile",
                 "--yolo",
@@ -43,6 +45,7 @@ def test_work_passes_yolo_flag_to_command() -> None:
         "mode": "auto",
         "select": "first-eligible",
         "run_mode": "once",
+        "restart_on_update": True,
         "yes": True,
         "reconcile": True,
         "yolo": True,

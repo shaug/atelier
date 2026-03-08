@@ -62,6 +62,13 @@ def start_worker(args: object) -> None:
     setattr(args, "startup_runtime", worker_restart_runtime.capture_worker_startup_runtime())
     mode = normalize_mode(getattr(args, "mode", None))
     run_mode = normalize_run_mode(getattr(args, "run_mode", None))
+    explicit_restart_on_update = getattr(args, "restart_on_update", None)
+    restart_on_update = (
+        bool(explicit_restart_on_update)
+        if explicit_restart_on_update is not None
+        else run_mode == "watch"
+    )
+    setattr(args, "restart_on_update", restart_on_update)
     watch_interval = watch_interval_seconds(getattr(args, "watch_interval", None))
     dry_run = bool(getattr(args, "dry_run", False))
     session_key = agent_home.generate_session_key()
