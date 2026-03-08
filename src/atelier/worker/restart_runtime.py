@@ -82,6 +82,16 @@ class WorkerRuntimeFingerprint:
     code_marker: str
     package_root: Path
 
+    def restart_scope(self) -> str:
+        """Return a stable identifier for restart-loop scoping.
+
+        Returns:
+            Serialized composite fingerprint used to bound retries per update.
+        """
+        return (
+            f"version={self.version};marker_kind={self.code_marker_kind};marker={self.code_marker}"
+        )
+
     def changed_from(self, previous: WorkerRuntimeFingerprint) -> bool:
         """Return whether this runtime fingerprint differs from ``previous``.
 
@@ -143,6 +153,23 @@ class WorkerRestartLoopState:
             return WorkerRestartLoopState()
         return self
 
+    def scoped_to(self, *, fingerprint: WorkerRuntimeFingerprint) -> WorkerRestartLoopState:
+        """Reset retry state when a distinct runtime update is detected.
+
+        Args:
+            fingerprint: Runtime fingerprint detected at the idle boundary.
+
+        Returns:
+            Existing state when it applies to this fingerprint,
+            otherwise a reset state.
+        """
+        if self.last_fingerprint is None:
+            return self
+        restart_scope = fingerprint.restart_scope()
+        if self.last_fingerprint in {restart_scope, fingerprint.code_marker}:
+            return self
+        return WorkerRestartLoopState()
+
     def remaining_cooldown(self, *, now: int) -> int:
         """Return remaining cooldown seconds before the next restart attempt.
 
@@ -181,7 +208,7 @@ class WorkerRestartLoopState:
             attempt_count=attempt_count,
             window_started_at=active_window_start,
             retry_not_before=now + backoff,
-            last_fingerprint=fingerprint.code_marker,
+            last_fingerprint=fingerprint.restart_scope(),
         )
 
     def export_env(self) -> tuple[tuple[str, str], ...]:
@@ -275,7 +302,9 @@ class WorkerStartupRuntime:
         if not current_fingerprint.changed_from(self.startup_fingerprint):
             return None
         current_time = now if now is not None else current_restart_timestamp()
-        loop_state = self.restart_loop_state.normalized(now=current_time)
+        loop_state = self.restart_loop_state.normalized(now=current_time).scoped_to(
+            fingerprint=current_fingerprint
+        )
         wait_seconds = loop_state.remaining_cooldown(now=current_time)
         if wait_seconds:
             return WorkerRestartDecision(

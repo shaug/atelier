@@ -178,12 +178,14 @@ def test_capture_worker_startup_runtime_restores_restart_loop_state(tmp_path: Pa
 
 
 def test_plan_restart_blocks_during_cooldown(tmp_path: Path) -> None:
-    startup = _make_updated_startup_runtime(tmp_path).with_restart_loop_state(
+    startup = _make_updated_startup_runtime(tmp_path)
+    current_fingerprint = startup.capture_current_fingerprint()
+    startup = startup.with_restart_loop_state(
         restart_runtime.WorkerRestartLoopState(
             attempt_count=1,
             window_started_at=100,
             retry_not_before=115,
-            last_fingerprint="digest-1",
+            last_fingerprint=current_fingerprint.restart_scope(),
         )
     )
 
@@ -199,12 +201,14 @@ def test_plan_restart_blocks_during_cooldown(tmp_path: Path) -> None:
 
 
 def test_plan_restart_blocks_after_bounded_attempt_limit(tmp_path: Path) -> None:
-    startup = _make_updated_startup_runtime(tmp_path).with_restart_loop_state(
+    startup = _make_updated_startup_runtime(tmp_path)
+    current_fingerprint = startup.capture_current_fingerprint()
+    startup = startup.with_restart_loop_state(
         restart_runtime.WorkerRestartLoopState(
             attempt_count=3,
             window_started_at=100,
             retry_not_before=100,
-            last_fingerprint="digest-3",
+            last_fingerprint=current_fingerprint.restart_scope(),
         )
     )
 
@@ -216,4 +220,29 @@ def test_plan_restart_blocks_after_bounded_attempt_limit(tmp_path: Path) -> None
     assert decision.message == (
         "Runtime update detected but auto-restart is paused after 3/3 attempts "
         "in 300s; continuing with the current runtime."
+    )
+
+
+def test_plan_restart_resets_loop_state_for_distinct_runtime_update(tmp_path: Path) -> None:
+    startup = _make_updated_startup_runtime(tmp_path).with_restart_loop_state(
+        restart_runtime.WorkerRestartLoopState(
+            attempt_count=3,
+            window_started_at=100,
+            retry_not_before=200,
+            last_fingerprint="version=1.2.3;marker_kind=package-tree-stat-digest;marker=old-update",
+        )
+    )
+
+    decision = startup.plan_restart(now=110)
+
+    assert decision is not None
+    assert decision.should_restart is True
+    assert decision.reason == "restart"
+    assert decision.message == (
+        "Runtime update detected; restarting worker before the next idle check (attempt 1/3)."
+    )
+    assert decision.startup_runtime.restart_loop_state.attempt_count == 1
+    assert (
+        decision.startup_runtime.restart_loop_state.last_fingerprint
+        == decision.current_fingerprint.restart_scope()
     )

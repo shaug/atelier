@@ -540,8 +540,8 @@ Options:
 Auto-restart controls:
 
 - `atelier work --run-mode watch` enables restart-on-update by default.
-- `atelier work --run-mode watch --no-restart-on-update` keeps watch polling
-  but disables self-reexec.
+- `atelier work --run-mode watch --no-restart-on-update` keeps watch polling but
+  disables self-reexec.
 - `atelier work --run-mode default --restart-on-update` opts long-lived
   non-watch workers into the same idle-boundary restart behavior.
 - Restart checks happen only between worker sessions, never during an active
