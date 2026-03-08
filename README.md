@@ -360,6 +360,7 @@ atelier doctor --fix --format=json
 Operator triage + rollback runbook and convergence harness:
 
 - [docs/beads-prefix-migration.md](docs/beads-prefix-migration.md)
+- [docs/north-star-review-gate.md](docs/north-star-review-gate.md)
 
 List workspaces:
 

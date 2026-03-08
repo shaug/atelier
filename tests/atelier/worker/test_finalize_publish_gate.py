@@ -75,3 +75,28 @@ def test_validate_north_star_review_gate_rejects_unmet_and_incomplete_checklist(
     assert any("unmet_acceptance_criteria" in line for line in result.diagnostics)
     assert any("required_code_changes_per_criterion" in line for line in result.diagnostics)
     assert any("completion_checklist" in line and "AC2" in line for line in result.diagnostics)
+
+
+def test_validate_north_star_review_gate_rejects_missing_checklist_evidence() -> None:
+    issue = {
+        "acceptance_criteria": "1) First criterion.\n2) Second criterion.\n",
+        "notes": (
+            "north_star_review.2026-03-07T13:00:00Z:\n"
+            "1) unmet_acceptance_criteria: none\n"
+            "2) required_code_changes_per_criterion:\n"
+            "- AC1: add publish gating before outbound push.\n"
+            "- AC2: surface explicit operator diagnostics.\n"
+            "3) implementation_summary:\n"
+            "- Added the publish gate and warning path.\n"
+            "4) completion_checklist:\n"
+            "- AC1 satisfied by commit abc1234; "
+            "files: src/atelier/worker/finalize_publish_gate.py.\n"
+            "- AC2 satisfied after planner audit.\n"
+        ),
+    }
+
+    result = validate_north_star_review_gate(issue)
+
+    assert result.ok is False
+    assert result.artifact_name == "north_star_review.2026-03-07T13:00:00Z"
+    assert any("missing evidence tokens for AC2" in line for line in result.diagnostics)
