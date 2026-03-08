@@ -76,6 +76,8 @@ reject unsupported invocation forms.
 - This refresh is read-only and includes:
   - unread planner inbox messages
   - queued messages with queue name and claim state
+  - planner skill runtime preflight for `plan-create-epic` and
+    `auto_export_issue`
   - active epics in stable `epic-list --show-drafts` format
   - Beads root + total epic count diagnostics for planner/worker parity checks
 
@@ -87,6 +89,7 @@ reject unsupported invocation forms.
 - Section order is fixed:
   1. header + Beads root
   1. optional deterministic fallback diagnostics
+  1. optional planner runtime preflight diagnostics
   1. inbox summary
   1. queue summary
   1. startup counts/parity diagnostics

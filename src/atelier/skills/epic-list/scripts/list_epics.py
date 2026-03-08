@@ -4,8 +4,54 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+
+def _repo_dir_from_argv(argv: list[str]) -> Path | None:
+    for index, token in enumerate(argv):
+        if token == "--repo-dir" and index + 1 < len(argv):
+            value = argv[index + 1].strip()
+            if value:
+                return Path(value).expanduser()
+        if token.startswith("--repo-dir="):
+            value = token.split("=", 1)[1].strip()
+            if value:
+                return Path(value).expanduser()
+    return None
+
+
+def _bootstrap_source_import() -> None:
+    candidate_roots: list[Path] = []
+    argv_repo_dir = _repo_dir_from_argv(sys.argv[1:])
+    if argv_repo_dir is not None:
+        candidate_roots.append(argv_repo_dir)
+
+    current_dir = Path.cwd()
+    candidate_roots.append(current_dir / "worktree")
+    env_repo_dir = os.environ.get("ATELIER_PLANNER_WORKTREE", "").strip()
+    if env_repo_dir:
+        candidate_roots.append(Path(env_repo_dir).expanduser())
+    candidate_roots.append(current_dir)
+    candidate_roots.extend(Path(__file__).resolve().parents)
+
+    seen: set[Path] = set()
+    for root in candidate_roots:
+        resolved = root.expanduser().resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        src_dir = resolved / "src"
+        if not (src_dir / "atelier" / "__init__.py").is_file():
+            continue
+        src_dir_entry = str(src_dir)
+        sys.path[:] = [entry for entry in sys.path if entry != src_dir_entry]
+        sys.path.insert(0, src_dir_entry)
+        return
+
+
+_bootstrap_source_import()
 
 from atelier import planner_overview
 from atelier.beads_context import resolve_runtime_repo_dir_hint, resolve_skill_beads_context

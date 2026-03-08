@@ -85,6 +85,15 @@ class StartupCollectionFailure:
 
 
 @dataclass(frozen=True)
+class StartupRuntimePreflight:
+    """Structured runtime preflight result for planner skill checks."""
+
+    name: str
+    status: str
+    detail: str
+
+
+@dataclass(frozen=True)
 class StartupDeferredChangesetGroup:
     """Deferred changesets grouped under one active epic."""
 
@@ -105,6 +114,7 @@ class StartupTriageDiagnostics:
     missing_from_index: tuple[str, ...]
     deferred_scan_limit: int
     deferred_scan_skipped_epics: int
+    runtime_preflight: tuple[StartupRuntimePreflight, ...] = ()
     startup_failures: tuple[StartupCollectionFailure, ...] = ()
 
 
@@ -150,6 +160,7 @@ def build_startup_triage_model(
     deferred_groups: list[tuple[dict[str, object], list[dict[str, object]]]],
     deferred_scan_limit: int,
     deferred_scan_skipped_epics: int,
+    runtime_preflight: tuple[StartupRuntimePreflight, ...] = (),
     epic_list_markdown: str,
 ) -> StartupTriageModel:
     """Build a typed startup triage model from collected command outputs.
@@ -251,6 +262,7 @@ def build_startup_triage_model(
         missing_from_index=missing_from_index,
         deferred_scan_limit=max(0, int(deferred_scan_limit)),
         deferred_scan_skipped_epics=max(0, int(deferred_scan_skipped_epics)),
+        runtime_preflight=tuple(runtime_preflight),
     )
     return StartupTriageModel(
         inbox_messages=inbox_messages,
@@ -282,6 +294,7 @@ def build_startup_triage_failure_model(
     beads_root: Path,
     phase: str,
     error: BaseException,
+    runtime_preflight: tuple[StartupRuntimePreflight, ...] = (),
     epic_list_markdown: str | None = None,
 ) -> StartupTriageModel:
     """Build a deterministic startup triage model for fallback/error paths.
@@ -312,6 +325,7 @@ def build_startup_triage_failure_model(
         missing_from_index=(),
         deferred_scan_limit=0,
         deferred_scan_skipped_epics=0,
+        runtime_preflight=tuple(runtime_preflight),
         startup_failures=(failure,),
     )
     return StartupTriageModel(
@@ -345,6 +359,11 @@ def render_startup_triage_markdown(model: StartupTriageModel) -> str:
             lines.append(
                 f"- phase={failure.phase} error={failure.error_type} detail={failure.detail}"
             )
+
+    if diagnostics.runtime_preflight:
+        lines.append("Planner skill runtime preflight:")
+        for result in diagnostics.runtime_preflight:
+            lines.append(f"- {result.name}: {result.status} ({result.detail})")
 
     if model.inbox_messages:
         lines.append("Unread messages:")
