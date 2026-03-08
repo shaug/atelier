@@ -19,11 +19,16 @@ def _project_config() -> config.ProjectConfig:
 
 
 def test_start_worker_delegates_loop_to_runtime() -> None:
+    startup_runtime = object()
     with (
         patch(
             "atelier.commands.work.agent_home.generate_session_key",
             return_value="sess-1",
         ),
+        patch(
+            "atelier.commands.work.worker_restart_runtime.capture_worker_startup_runtime",
+            return_value=startup_runtime,
+        ) as capture_startup_runtime,
         patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions,
     ):
         work_cmd.start_worker(
@@ -31,11 +36,13 @@ def test_start_worker_delegates_loop_to_runtime() -> None:
         )
 
     kwargs = run_sessions.call_args.kwargs
+    capture_startup_runtime.assert_called_once()
     assert kwargs["mode"] == "auto"
     assert kwargs["run_mode"] == "once"
     assert kwargs["dry_run"] is True
     assert kwargs["session_key"] == "sess-1"
     assert kwargs["run_worker_once"] is work_cmd._run_worker_once
+    assert kwargs["args"].startup_runtime is startup_runtime
 
 
 def test_start_worker_cleans_up_agent_home_after_runtime_failure(

@@ -8,6 +8,7 @@ from pathlib import Path
 from .. import agent_home, agent_teardown, beads, cli_defaults, config
 from ..io import confirm, die, say
 from ..worker import models as worker_models
+from ..worker import restart_runtime as worker_restart_runtime
 from ..worker import runtime as worker_runtime
 from ..worker.context import WorkerRunContext
 from ..worker.session import runner as worker_session_runner
@@ -58,6 +59,7 @@ def start_worker(args: object) -> None:
     yes_default = cli_defaults.resolve_work_yes_default(bool(getattr(args, "yes", False)))
     report_translated_cli_default(yes_default)
     setattr(args, "yes", yes_default.value)
+    setattr(args, "startup_runtime", worker_restart_runtime.capture_worker_startup_runtime())
     mode = normalize_mode(getattr(args, "mode", None))
     run_mode = normalize_run_mode(getattr(args, "run_mode", None))
     watch_interval = watch_interval_seconds(getattr(args, "watch_interval", None))
