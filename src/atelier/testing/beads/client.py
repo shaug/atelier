@@ -1,11 +1,4 @@
-"""Typed client adapters for the in-memory Beads dispatcher.
-
-The dispatcher remains the command-contract seam defined in `at-s1vc.1`. The
-typed client adapter intentionally wraps that same dispatcher so argv-level
-parity tests and `atelier.lib.beads.Beads` protocol tests share one mutable
-store and one set of command semantics rather than drifting into separate
-implementations.
-"""
+"""Store-backed typed Beads client for the Tier 0 in-memory backend."""
 
 from __future__ import annotations
 
@@ -15,17 +8,25 @@ from atelier.lib.beads import (
     DEFAULT_COMPATIBILITY_POLICY,
     Beads,
     BeadsCapability,
-    BeadsCommandRequest,
-    BeadsCommandResult,
-    BeadsTransport,
+    BeadsEnvironment,
+    CloseIssueRequest,
     CompatibilityPolicy,
+    CreateIssueRequest,
+    DependencyMutationRequest,
+    IssueRecord,
+    ListIssuesRequest,
     OperationContract,
-    SubprocessBeadsClient,
+    ReadyIssuesRequest,
+    SemanticVersion,
+    ShowIssueRequest,
     SupportedOperation,
+    UnsupportedOperationError,
+    UpdateIssueRequest,
 )
 
+from .contract import IN_MEMORY_BEADS_VERSION
 from .core_issues import InMemoryCoreIssuesHandler
-from .dispatcher import InMemoryBeadsCommandBackend, InMemoryBeadsDispatcher
+from .dispatcher import InMemoryBeadsDispatcher
 from .store import InMemoryIssueStore
 
 _TIER_ZERO_OPERATIONS = (
@@ -58,21 +59,132 @@ IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY = CompatibilityPolicy(
     ),
 )
 
+_TIER_ZERO_CAPABILITIES = (
+    BeadsCapability.VERSION_REPORTING,
+    BeadsCapability.ISSUE_JSON,
+    BeadsCapability.ISSUE_MUTATION,
+    BeadsCapability.READY_DISCOVERY,
+)
 
-class InMemoryBeadsTransport(BeadsTransport):
-    """Async transport adapter over the in-memory command backend."""
 
-    def __init__(self, backend: InMemoryBeadsCommandBackend) -> None:
-        self._backend = backend
+class InMemoryBeadsClient(Beads):
+    """Typed Beads client backed directly by the in-memory issue store."""
 
-    async def execute(self, request: BeadsCommandRequest) -> BeadsCommandResult:
-        result = self._backend.run(request.argv, cwd=request.cwd, env=request.env)
-        return BeadsCommandResult(
-            argv=tuple(str(token) for token in result.args),
-            returncode=result.returncode,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            timed_out=False,
+    def __init__(
+        self,
+        *,
+        issue_store: InMemoryIssueStore,
+        compatibility_policy: CompatibilityPolicy = IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY,
+    ) -> None:
+        self._issue_store = issue_store
+        self._compatibility_policy = compatibility_policy
+        self._environment = BeadsEnvironment(
+            version=SemanticVersion.model_validate(IN_MEMORY_BEADS_VERSION),
+            capabilities=_TIER_ZERO_CAPABILITIES,
+        )
+
+    @property
+    def compatibility_policy(self) -> CompatibilityPolicy:
+        return self._compatibility_policy
+
+    async def inspect_environment(self) -> BeadsEnvironment:
+        self._compatibility_policy.assert_environment_supports(self._environment)
+        for contract in self._compatibility_policy.operations:
+            self._compatibility_policy.assert_environment_supports(
+                self._environment,
+                operation=contract.operation,
+            )
+        return self._environment
+
+    async def show(self, request: ShowIssueRequest) -> IssueRecord:
+        await self._ensure_operation_supported(SupportedOperation.SHOW)
+        return IssueRecord.model_validate(self._issue_store.show(request.issue_id))
+
+    async def list(self, request: ListIssuesRequest) -> tuple[IssueRecord, ...]:
+        await self._ensure_operation_supported(SupportedOperation.LIST)
+        return tuple(
+            IssueRecord.model_validate(payload)
+            for payload in self._issue_store.list(
+                parent_id=request.parent_id,
+                status=request.status,
+                assignee=request.assignee,
+                title_query=request.title_query,
+                labels=request.labels,
+                include_closed=request.include_closed,
+                limit=request.limit,
+            )
+        )
+
+    async def ready(self, request: ReadyIssuesRequest) -> tuple[IssueRecord, ...]:
+        await self._ensure_operation_supported(SupportedOperation.READY)
+        return tuple(
+            IssueRecord.model_validate(payload)
+            for payload in self._issue_store.ready(parent_id=request.parent_id)
+        )
+
+    async def create(self, request: CreateIssueRequest) -> IssueRecord:
+        await self._ensure_operation_supported(SupportedOperation.CREATE)
+        if request.status is not None:
+            raise UnsupportedOperationError(
+                "in-memory Tier 0 create does not support setting status during creation"
+            )
+        return IssueRecord.model_validate(
+            self._issue_store.create(
+                title=request.title,
+                issue_type=request.issue_type,
+                description=request.description,
+                design=request.design,
+                acceptance_criteria=request.acceptance_criteria,
+                assignee=request.assignee,
+                parent_id=request.parent_id,
+                priority=request.priority,
+                estimate=request.estimate,
+                labels=request.labels,
+            )
+        )
+
+    async def update(self, request: UpdateIssueRequest) -> IssueRecord:
+        await self._ensure_operation_supported(SupportedOperation.UPDATE)
+        if request.labels == ():
+            raise UnsupportedOperationError(
+                "in-memory Tier 0 update does not support clearing labels"
+            )
+        return IssueRecord.model_validate(
+            self._issue_store.update(
+                request.issue_id,
+                title=request.title,
+                description=request.description,
+                design=request.design,
+                acceptance_criteria=request.acceptance_criteria,
+                status=request.status,
+                assignee=request.assignee,
+                priority=request.priority,
+                estimate=request.estimate,
+                labels=request.labels,
+            )
+        )
+
+    async def close(self, request: CloseIssueRequest) -> IssueRecord:
+        await self._ensure_operation_supported(SupportedOperation.CLOSE)
+        return IssueRecord.model_validate(
+            self._issue_store.close(request.issue_id, reason=request.reason)
+        )
+
+    async def add_dependency(self, request: DependencyMutationRequest) -> IssueRecord:
+        del request
+        await self._ensure_operation_supported(SupportedOperation.DEPENDENCY_ADD)
+        raise UnsupportedOperationError("dependency mutation is outside Tier 0 scope")
+
+    async def remove_dependency(self, request: DependencyMutationRequest) -> IssueRecord:
+        del request
+        await self._ensure_operation_supported(SupportedOperation.DEPENDENCY_REMOVE)
+        raise UnsupportedOperationError("dependency mutation is outside Tier 0 scope")
+
+    async def _ensure_operation_supported(self, operation: SupportedOperation) -> None:
+        environment = await self.inspect_environment()
+        self._compatibility_policy.assert_environment_supports(
+            environment,
+            operation=operation,
         )
 
 
@@ -80,15 +192,14 @@ def build_in_memory_dispatcher(
     *,
     issue_store: InMemoryIssueStore | None = None,
 ) -> InMemoryBeadsDispatcher:
-    """Build a dispatcher with the Tier 0 core issue handler installed.
+    """Build the optional Tier 0 command harness for route-level tests.
 
     Args:
-        issue_store: Optional shared issue store. Callers can pass the same
-            store to both dispatcher and typed-client helpers when they need to
-            assert parity across both entry points.
+        issue_store: Optional shared issue store for command-harness tests.
 
     Returns:
-        Dispatcher backed by the provided or newly created issue store.
+        Dispatcher backed by the provided or newly created issue store. The
+        typed in-memory Beads client does not depend on this helper.
     """
 
     store = issue_store or InMemoryIssueStore()
@@ -113,12 +224,7 @@ def build_in_memory_beads_client(
     prefix: str = "at",
     compatibility_policy: CompatibilityPolicy = IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY,
 ) -> tuple[Beads, InMemoryIssueStore]:
-    """Build a typed Beads client backed by the in-memory dispatcher.
-
-    The typed client is intentionally an adapter over the dispatcher rather than
-    a separate backend implementation. That keeps the documented argv contract
-    from `at-s1vc.1` and the `atelier.lib.beads.Beads` protocol on top of the
-    same store/mutation surface.
+    """Build a typed Beads client backed directly by the in-memory store.
 
     Args:
         issues: Initial issue payloads to seed into the shared store.
@@ -127,12 +233,12 @@ def build_in_memory_beads_client(
 
     Returns:
         Tuple of the typed Beads client and the shared in-memory issue store it
-        uses underneath the dispatcher transport.
+        mutates directly.
     """
 
     store = build_in_memory_issue_store(issues=issues, prefix=prefix)
-    client = SubprocessBeadsClient(
-        transport=InMemoryBeadsTransport(build_in_memory_dispatcher(issue_store=store)),
+    client = InMemoryBeadsClient(
+        issue_store=store,
         compatibility_policy=compatibility_policy,
     )
     return client, store
@@ -140,7 +246,7 @@ def build_in_memory_beads_client(
 
 __all__ = [
     "IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY",
-    "InMemoryBeadsTransport",
+    "InMemoryBeadsClient",
     "build_in_memory_beads_client",
     "build_in_memory_dispatcher",
     "build_in_memory_issue_store",

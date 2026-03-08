@@ -2,9 +2,8 @@
 
 from .client import (
     IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY,
-    InMemoryBeadsTransport,
+    InMemoryBeadsClient,
     build_in_memory_beads_client,
-    build_in_memory_dispatcher,
     build_in_memory_issue_store,
 )
 from .contract import (
@@ -40,15 +39,14 @@ __all__ = [
     "CommandEnvelope",
     "CommandFamilyHandler",
     "CommandInvocation",
+    "InMemoryBeadsClient",
     "InMemoryBeadsCommandBackend",
     "InMemoryBeadsCommandRoute",
     "InMemoryBeadsDispatcher",
-    "InMemoryBeadsTransport",
     "InMemoryIssueStore",
     "IssueFixtureBuilder",
     "StoredIssue",
     "build_in_memory_beads_client",
-    "build_in_memory_dispatcher",
     "build_in_memory_issue_store",
     "build_issue_payload",
     "build_issue_reference",

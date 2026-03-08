@@ -15,7 +15,6 @@ from atelier.lib.beads import (
     ListIssuesRequest,
     ReadyIssuesRequest,
     ShowIssueRequest,
-    SubprocessBeadsClient,
     SupportedOperation,
     SyncBeadsClient,
     UpdateIssueRequest,
@@ -29,15 +28,15 @@ from atelier.testing.beads import (
     IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY,
     SUPPORTED_GLOBAL_FLAGS,
     CommandEnvelope,
+    InMemoryBeadsClient,
     InMemoryBeadsCommandBackend,
     InMemoryBeadsDispatcher,
-    InMemoryBeadsTransport,
     IssueFixtureBuilder,
     build_in_memory_beads_client,
-    build_in_memory_dispatcher,
     build_in_memory_issue_store,
     normalize_invocation,
 )
+from atelier.testing.beads.core_issues import InMemoryCoreIssuesHandler
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTRACT_DOC_PATH = REPO_ROOT / "docs" / "in-memory-beads-command-contract.md"
@@ -57,7 +56,7 @@ def test_contract_docs_publish_route_inventory() -> None:
     assert "`--json` routes: `dolt show`," in content
     assert "`vc status`" in content
     assert "build_in_memory_beads_client()" in content
-    assert "one source of truth" in content
+    assert "backed directly by the in-memory store" in content
     assert "Intentional Tier 0 Deltas" in content
     assert "dep add" in content
     assert "dep remove" in content
@@ -189,7 +188,9 @@ def test_dispatcher_implements_tier_zero_core_issue_commands() -> None:
             builder.issue(4, title="Closed slice", parent=1, status="closed"),
         )
     )
-    dispatcher = build_in_memory_dispatcher(issue_store=store)
+    dispatcher = InMemoryBeadsDispatcher(
+        family_handlers={"core-issues": InMemoryCoreIssuesHandler(store)}
+    )
 
     listed = dispatcher.run(["bd", "list", "--parent", "at-1", "--limit", "2", "--json"])
     ready_before = dispatcher.run(["bd", "ready", "--parent", "at-1", "--json"])
@@ -317,9 +318,9 @@ def test_in_memory_client_supports_representative_planner_flow() -> None:
     assert [issue.id for issue in listed_all] == ["at-2", "at-3", "at-4"]
 
 
-def test_typed_client_and_dispatcher_share_one_store_contract() -> None:
+def test_typed_client_mutates_the_store_directly() -> None:
     builder = IssueFixtureBuilder()
-    store = build_in_memory_issue_store(
+    client, store = build_in_memory_beads_client(
         issues=(
             builder.issue(
                 1,
@@ -330,18 +331,13 @@ def test_typed_client_and_dispatcher_share_one_store_contract() -> None:
             ),
         )
     )
-    dispatcher = build_in_memory_dispatcher(issue_store=store)
-    client = SubprocessBeadsClient(
-        transport=InMemoryBeadsTransport(dispatcher),
-        compatibility_policy=IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY,
-    )
     sync = SyncBeadsClient(client)
 
+    assert isinstance(client, InMemoryBeadsClient)
+
     created = sync.create(CreateIssueRequest(title="Shared slice", type="task", parent_id="at-1"))
-    shown = IssueRecord.model_validate(
-        json.loads(dispatcher.run(["bd", "show", created.id, "--json"]).stdout)[0]
-    )
-    dispatcher.run(["bd", "close", created.id, "--reason", "done", "--json"])
+    shown = IssueRecord.model_validate(store.show(created.id))
+    store.close(created.id, reason="done")
     closed = sync.show(ShowIssueRequest(issue_id=created.id))
 
     assert shown.id == created.id

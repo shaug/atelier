@@ -86,15 +86,15 @@ persistence or command semantics by themselves.
 ## Tier 0 Semantic Notes
 
 This changeset wires real Tier 0 stateful semantics behind the `core-issues`
-family and exposes them through a typed in-memory client adapter in
+family and exposes them through a typed in-memory client in
 `atelier.testing.beads`.
 
 - `build_in_memory_beads_client()` returns the shared `atelier.lib.beads.Beads`
-  protocol backed by the in-memory dispatcher.
-- The dispatcher is not a second semantic backend. It is the stable
-  command-contract seam from `at-s1vc.1`, and the typed client intentionally
-  wraps that same dispatcher/store so argv-level parity tests and direct
-  protocol tests exercise one source of truth.
+  protocol backed directly by the in-memory store.
+- The Tier 0 backend semantics now live directly in `InMemoryBeadsClient` and
+  `InMemoryIssueStore`. The dispatcher remains an optional command-harness seam
+  from `at-s1vc.1` for explicit route-level tests; it is not part of the typed
+  backend path.
 - The default in-memory compatibility policy currently validates only the
   implemented Tier 0 operations: `show`, `list`, `ready`, `create`, `update`,
   and `close`, even though `inspect_environment()` still reports help-probed
