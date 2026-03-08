@@ -98,8 +98,15 @@ def worker_opening_prompt(
                 "",
                 "Priority mode: review-feedback",
                 (
-                    "This run is for PR feedback resolution. First fetch open PR "
-                    "feedback comments and address them directly."
+                    "This run is for PR feedback resolution. Before fetching or "
+                    "addressing PR comments, re-read the seeded epic and "
+                    "changeset beads and confirm scope, non-goals, acceptance "
+                    "criteria, and done definition."
+                ),
+                (
+                    "After that bead-first review, fetch open PR feedback "
+                    "comments and address them directly without narrowing the "
+                    "goal to comment closure alone."
                 ),
                 (
                     "For inline review comments, reply inline to each comment and "
