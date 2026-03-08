@@ -5,14 +5,61 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+
+def _repo_dir_from_argv(argv: list[str]) -> Path | None:
+    for index, token in enumerate(argv):
+        if token == "--repo-dir" and index + 1 < len(argv):
+            value = argv[index + 1].strip()
+            if value:
+                return Path(value).expanduser()
+        if token.startswith("--repo-dir="):
+            value = token.split("=", 1)[1].strip()
+            if value:
+                return Path(value).expanduser()
+    return None
+
+
+def _bootstrap_source_import() -> None:
+    candidate_roots: list[Path] = []
+    argv_repo_dir = _repo_dir_from_argv(sys.argv[1:])
+    if argv_repo_dir is not None:
+        candidate_roots.append(argv_repo_dir)
+
+    current_dir = Path.cwd()
+    candidate_roots.append(current_dir / "worktree")
+    env_repo_dir = os.environ.get("ATELIER_PLANNER_WORKTREE", "").strip()
+    if env_repo_dir:
+        candidate_roots.append(Path(env_repo_dir).expanduser())
+    candidate_roots.append(current_dir)
+    candidate_roots.extend(Path(__file__).resolve().parents)
+
+    seen: set[Path] = set()
+    for root in candidate_roots:
+        resolved = root.expanduser().resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        src_dir = resolved / "src"
+        if not (src_dir / "atelier" / "__init__.py").is_file():
+            continue
+        if str(src_dir) not in sys.path:
+            sys.path.insert(0, str(src_dir))
+        return
+
+
+_bootstrap_source_import()
 
 from atelier import lifecycle, planner_overview
 from atelier.beads_context import resolve_runtime_repo_dir_hint, resolve_skill_beads_context
 from atelier.planner_startup_check import (
     StartupBeadsInvocationHelper,
     StartupCommandResult,
+    StartupRuntimePreflight,
     build_startup_triage_failure_model,
     build_startup_triage_model,
     execute_startup_command_plan,
@@ -20,6 +67,25 @@ from atelier.planner_startup_check import (
 )
 
 DEFAULT_DEFERRED_EPIC_SCAN_LIMIT = 25
+_RUNTIME_CHECK_TIMEOUT_SECONDS = 10
+
+
+@dataclass(frozen=True)
+class _RuntimePreflightSpec:
+    name: str
+    script_relpath: Path
+
+
+_RUNTIME_PREFLIGHT_SPECS: tuple[_RuntimePreflightSpec, ...] = (
+    _RuntimePreflightSpec(
+        name="plan-create-epic",
+        script_relpath=Path("plan-create-epic/scripts/create_epic.py"),
+    ),
+    _RuntimePreflightSpec(
+        name="auto_export_issue",
+        script_relpath=Path("tickets/scripts/auto_export_issue.py"),
+    ),
+)
 
 
 def _issue_sort_key(issue: dict[str, object]) -> tuple[str, str]:
@@ -93,6 +159,61 @@ def _merge_warnings(*messages: str | None) -> str | None:
     return "\n".join(lines)
 
 
+def _normalize_preflight_detail(*chunks: str | None) -> str:
+    for chunk in chunks:
+        text = " ".join(str(chunk or "").split())
+        if text:
+            return text
+    return "no output"
+
+
+def _planner_runtime_preflight(*, repo_root: Path) -> tuple[StartupRuntimePreflight, ...]:
+    skills_root = Path(__file__).resolve().parents[2]
+    results: list[StartupRuntimePreflight] = []
+    for spec in _RUNTIME_PREFLIGHT_SPECS:
+        script_path = skills_root / spec.script_relpath
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(script_path), "--help"],
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=repo_root,
+                timeout=_RUNTIME_CHECK_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            results.append(
+                StartupRuntimePreflight(
+                    name=spec.name,
+                    status="failed",
+                    detail=f"{type(exc).__name__}: {exc}",
+                )
+            )
+            continue
+
+        if completed.returncode == 0:
+            detail = _normalize_preflight_detail(
+                f"{spec.script_relpath} --help ok via {Path(sys.executable).name}",
+            )
+            results.append(
+                StartupRuntimePreflight(
+                    name=spec.name,
+                    status="ok",
+                    detail=detail,
+                )
+            )
+            continue
+
+        results.append(
+            StartupRuntimePreflight(
+                name=spec.name,
+                status="failed",
+                detail=_normalize_preflight_detail(completed.stderr, completed.stdout),
+            )
+        )
+    return tuple(results)
+
+
 def _resolve_context(
     *, beads_dir: str | None, repo_dir: str | None
 ) -> tuple[Path, Path, str | None]:
@@ -117,6 +238,7 @@ def _startup_helper(*, beads_root: Path, repo_root: Path) -> StartupBeadsInvocat
 
 def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path) -> str:
     helper = _startup_helper(beads_root=beads_root, repo_root=repo_root)
+    runtime_preflight = _planner_runtime_preflight(repo_root=repo_root)
     try:
         command_result: StartupCommandResult = execute_startup_command_plan(
             agent_id,
@@ -132,6 +254,7 @@ def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path
             deferred_groups=deferred_groups,
             deferred_scan_limit=scan_limit,
             deferred_scan_skipped_epics=skipped_epics,
+            runtime_preflight=runtime_preflight,
             epic_list_markdown=planner_overview.render_epics(
                 command_result.epics, show_drafts=True
             ),
@@ -144,6 +267,7 @@ def _render_startup_overview(agent_id: str, *, beads_root: Path, repo_root: Path
             beads_root=beads_root,
             phase="render_startup_overview",
             error=exc,
+            runtime_preflight=runtime_preflight,
         )
         return render_startup_triage_markdown(fallback_model)
 

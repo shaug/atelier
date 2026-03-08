@@ -47,6 +47,7 @@ def _startup_result(
 
 def test_render_startup_overview_reports_empty_sections(monkeypatch) -> None:
     module = _load_script()
+    monkeypatch.setattr(module, "_planner_runtime_preflight", lambda **_kwargs: ())
     monkeypatch.setattr(
         module,
         "execute_startup_command_plan",
@@ -92,6 +93,7 @@ def test_render_startup_overview_reports_empty_sections(monkeypatch) -> None:
 
 def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatch) -> None:
     module = _load_script()
+    monkeypatch.setattr(module, "_planner_runtime_preflight", lambda **_kwargs: ())
     inbox = [
         {"id": "at-msg-2", "title": "Beta"},
         {"id": "at-msg-1", "title": "Alpha"},
@@ -195,6 +197,7 @@ def test_render_startup_overview_lists_claim_state_and_sorts_messages(monkeypatc
 
 def test_render_startup_overview_caps_deferred_epic_scan(monkeypatch) -> None:
     module = _load_script()
+    monkeypatch.setattr(module, "_planner_runtime_preflight", lambda **_kwargs: ())
     monkeypatch.setenv("ATELIER_STARTUP_DEFERRED_EPIC_SCAN_LIMIT", "1")
     monkeypatch.setattr(
         module,
@@ -317,6 +320,7 @@ def test_resolve_context_passes_runtime_repo_hint_to_beads_context(
 
 def test_render_startup_overview_reports_identity_guardrail_remediation(monkeypatch) -> None:
     module = _load_script()
+    monkeypatch.setattr(module, "_planner_runtime_preflight", lambda **_kwargs: ())
     monkeypatch.setattr(
         module,
         "execute_startup_command_plan",
@@ -366,6 +370,7 @@ def test_render_startup_overview_reports_identity_guardrail_remediation(monkeypa
 
 def test_render_startup_overview_passes_agent_id_to_command_plan(monkeypatch) -> None:
     module = _load_script()
+    monkeypatch.setattr(module, "_planner_runtime_preflight", lambda **_kwargs: ())
     captured_agent_ids: list[str] = []
 
     def _fake_execute(agent_id: str, **_kwargs):
@@ -401,6 +406,7 @@ def test_render_startup_overview_passes_agent_id_to_command_plan(monkeypatch) ->
 
 def test_render_startup_overview_falls_back_to_deterministic_output(monkeypatch) -> None:
     module = _load_script()
+    monkeypatch.setattr(module, "_planner_runtime_preflight", lambda **_kwargs: ())
     monkeypatch.setattr(
         module,
         "execute_startup_command_plan",
@@ -441,6 +447,7 @@ def test_render_startup_overview_falls_back_to_deterministic_output(monkeypatch)
 
 def test_render_startup_overview_does_not_swallow_system_exit(monkeypatch) -> None:
     module = _load_script()
+    monkeypatch.setattr(module, "_planner_runtime_preflight", lambda **_kwargs: ())
     monkeypatch.setattr(
         module,
         "execute_startup_command_plan",
@@ -457,3 +464,67 @@ def test_render_startup_overview_does_not_swallow_system_exit(monkeypatch) -> No
         assert exc.code == 7
     else:
         raise AssertionError("expected SystemExit to propagate")
+
+
+def test_render_startup_overview_includes_runtime_preflight(monkeypatch) -> None:
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "_planner_runtime_preflight",
+        lambda **_kwargs: (
+            module.StartupRuntimePreflight(
+                name="plan-create-epic",
+                status="ok",
+                detail="skills/plan-create-epic/scripts/create_epic.py --help ok",
+            ),
+            module.StartupRuntimePreflight(
+                name="auto_export_issue",
+                status="failed",
+                detail="ModuleNotFoundError: pydantic_core._pydantic_core",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "execute_startup_command_plan",
+        lambda *_args, **_kwargs: _startup_result(
+            module,
+            inbox=[],
+            queued=[],
+            epics=[],
+            parity=_parity_ok(),
+        ),
+    )
+    monkeypatch.setattr(
+        module.StartupBeadsInvocationHelper,
+        "list_descendant_changesets",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        module.planner_overview,
+        "render_epics",
+        lambda issues, *, show_drafts: "Epics by state:\n- (none)",
+    )
+
+    rendered = module._render_startup_overview(
+        "atelier/planner/example",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert rendered.splitlines() == [
+        "Planner startup overview",
+        "- Beads root: /beads",
+        "Planner skill runtime preflight:",
+        "- plan-create-epic: ok (skills/plan-create-epic/scripts/create_epic.py --help ok)",
+        "- auto_export_issue: failed (ModuleNotFoundError: pydantic_core._pydantic_core)",
+        "No unread messages.",
+        "No queued messages.",
+        "- Total epics: 0",
+        "- Active top-level work (open/in_progress/blocked): 0",
+        "- Indexed active epics (at:epic discovery): 0",
+        "Epic discovery parity: ok",
+        "No deferred changesets under open/in-progress/blocked epics.",
+        "Epics by state:",
+        "- (none)",
+    ]

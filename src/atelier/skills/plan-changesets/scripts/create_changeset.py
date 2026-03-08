@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -11,10 +12,45 @@ from dataclasses import replace
 from pathlib import Path
 
 
+def _repo_dir_from_argv(argv: list[str]) -> Path | None:
+    for index, token in enumerate(argv):
+        if token == "--repo-dir" and index + 1 < len(argv):
+            value = argv[index + 1].strip()
+            if value:
+                return Path(value).expanduser()
+        if token.startswith("--repo-dir="):
+            value = token.split("=", 1)[1].strip()
+            if value:
+                return Path(value).expanduser()
+    return None
+
+
 def _bootstrap_source_import() -> None:
-    src_dir = Path(__file__).resolve().parents[4]
-    if src_dir.is_dir() and str(src_dir) not in sys.path:
-        sys.path.insert(0, str(src_dir))
+    candidate_roots: list[Path] = []
+    argv_repo_dir = _repo_dir_from_argv(sys.argv[1:])
+    if argv_repo_dir is not None:
+        candidate_roots.append(argv_repo_dir)
+
+    current_dir = Path.cwd()
+    candidate_roots.append(current_dir / "worktree")
+    env_repo_dir = os.environ.get("ATELIER_PLANNER_WORKTREE", "").strip()
+    if env_repo_dir:
+        candidate_roots.append(Path(env_repo_dir).expanduser())
+    candidate_roots.append(current_dir)
+    candidate_roots.extend(Path(__file__).resolve().parents)
+
+    seen: set[Path] = set()
+    for root in candidate_roots:
+        resolved = root.expanduser().resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        src_dir = resolved / "src"
+        if not (src_dir / "atelier" / "__init__.py").is_file():
+            continue
+        if str(src_dir) not in sys.path:
+            sys.path.insert(0, str(src_dir))
+        return
 
 
 _bootstrap_source_import()
