@@ -80,6 +80,20 @@ def _ticket_has_state_tracking(ticket: ExternalTicketRef) -> bool:
     )
 
 
+def _is_primary_exported_github_ticket(ticket: ExternalTicketRef) -> bool:
+    """Return whether ticket metadata represents the exported GitHub work item.
+
+    A primary exported GitHub issue is created for the changeset itself, so the
+    PR body must keep a closing clause even when cached state metadata has gone
+    stale. That keeps merge-driven GitHub issue closure deterministic.
+    """
+    return (
+        ticket.provider == "github"
+        and ticket.relation == "primary"
+        and ticket.direction == "exported"
+    )
+
+
 def _ticket_allows_closing_clause(
     ticket: ExternalTicketRef,
     *,
@@ -93,6 +107,9 @@ def _ticket_allows_closing_clause(
         return False
     if ticket.state == "unknown":
         return False
+
+    if _is_primary_exported_github_ticket(ticket):
+        return True
 
     if not _ticket_has_state_tracking(ticket):
         # Backwards-compatibility for legacy metadata without state tracking.
@@ -116,6 +133,10 @@ def _ticket_forbids_closing_clause(
         return True
     if ticket.state == "unknown":
         return True
+
+    if _is_primary_exported_github_ticket(ticket):
+        return False
+
     if not _ticket_has_state_tracking(ticket):
         return False
 

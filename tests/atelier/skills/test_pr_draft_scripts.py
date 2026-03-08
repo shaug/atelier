@@ -102,6 +102,25 @@ def test_render_tickets_section_avoids_closing_clause_for_closed_ticket() -> Non
     assert "- Fixes #371" not in section
 
 
+def test_render_tickets_section_keeps_closing_clause_for_exported_primary_github_issue() -> None:
+    module = _load_script_module()
+    issue = {
+        "description": (
+            "scope: test\n"
+            "external_tickets: "
+            '[{"provider":"github","id":"607","relation":"primary","direction":"exported",'
+            '"sync_mode":"export","state":"open",'
+            '"state_updated_at":"2026-03-01T15:22:33Z","last_synced_at":"2026-03-01T15:22:33Z"}]\n'
+        )
+    }
+
+    section = module.render_ticket_section(issue)
+
+    assert "## Tickets" in section
+    assert "- Fixes #607" in section
+    assert "- Addresses #607" not in section
+
+
 def test_load_issue_defaults_to_direct_mode(monkeypatch, tmp_path: Path) -> None:
     module = _load_script_module()
     captured: dict[str, list[str]] = {}
