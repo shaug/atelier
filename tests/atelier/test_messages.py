@@ -86,6 +86,20 @@ def test_build_message_contract_preserves_explicit_epic_thread_kind() -> None:
     assert contract.thread_kind == "epic"
 
 
+def test_build_message_contract_infers_epic_thread_kind_from_top_level_thread_id() -> None:
+    contract = messages.build_message_contract(
+        {
+            "from": "atelier/planner/codex/p1",
+            "thread": "at-ue6aj",
+        },
+        assignee="atelier/worker/codex/p2",
+    )
+
+    assert contract.delivery == "work-threaded"
+    assert contract.thread_id == "at-ue6aj"
+    assert contract.thread_kind == "epic"
+
+
 def test_message_blocks_worker_for_threaded_worker_assignment() -> None:
     issue = {
         "id": "at-msg-1",

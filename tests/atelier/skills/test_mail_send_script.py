@@ -53,10 +53,34 @@ def test_dispatch_message_delivers_to_active_worker() -> None:
     assert call["metadata"]["from"] == "atelier/planner/codex/p202-t2"
     assert call["metadata"]["delivery"] == "work-threaded"
     assert call["metadata"]["thread"] == "at-thread-1"
-    assert call["metadata"]["thread_kind"] == "work"
+    assert call["metadata"]["thread_kind"] == "epic"
     assert call["metadata"]["audience"] == ["worker"]
     assert call["metadata"]["kind"] == "reply"
     assert call["metadata"]["reply_to"] == "at-msg-0"
+
+
+def test_dispatch_message_infers_epic_thread_kind_for_top_level_work_thread() -> None:
+    module = _load_script_module()
+    with (
+        patch.object(module.agent_home, "is_session_agent_active", return_value=True),
+        patch.object(
+            module.beads, "create_message_bead", return_value={"id": "at-msg-1"}
+        ) as create,
+    ):
+        result = module.dispatch_message(
+            subject="Need follow-up",
+            body="Please investigate.",
+            to="atelier/worker/codex/p101-t1",
+            from_agent="atelier/planner/codex/p202-t2",
+            thread="at-ue6aj",
+            reply_to=None,
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result.decision == "delivered"
+    assert result.issue_id == "at-msg-1"
+    assert create.call_args.kwargs["metadata"]["thread_kind"] == "epic"
 
 
 def test_dispatch_message_reroutes_when_worker_inactive() -> None:

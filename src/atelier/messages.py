@@ -9,6 +9,7 @@ from typing import Final, Literal
 
 FRONTMATTER_DELIMITER = "---"
 _CHANGESET_THREAD_PATTERN = re.compile(r".+\.\d+$")
+_EPIC_THREAD_PATTERN = re.compile(r"[^.]+$")
 _MESSAGE_KEY_ORDER = (
     "from",
     "delivery",
@@ -430,6 +431,8 @@ def _normalize_thread_kind(
         return None
     if _CHANGESET_THREAD_PATTERN.fullmatch(thread_id):
         return "changeset"
+    if _EPIC_THREAD_PATTERN.fullmatch(thread_id):
+        return "epic"
     return "work"
 
 
