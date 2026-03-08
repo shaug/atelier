@@ -148,7 +148,7 @@ def _run_bd_json(
     args: list[str],
     *,
     beads_dir: str | None,
-    cwd: Path,
+    cwd: Path | None = None,
 ) -> list[dict[str, object]]:
     env = dict(os.environ)
     command = with_bd_mode(*args, beads_dir=beads_dir, env=env)
