@@ -135,9 +135,10 @@ def has_blocking_messages(
         created_at = parse_issue_time(issue.get("created_at"))
         if created_at is not None and created_at < started_at:
             continue
-        description = issue.get("description")
-        payload = messages.parse_message(description if isinstance(description, str) else "")
-        thread = payload.metadata.get("thread")
-        if isinstance(thread, str) and thread in thread_ids:
+        if messages.message_blocks_runtime(
+            issue,
+            runtime_role="worker",
+            thread_ids=thread_ids,
+        ):
             return True
     return False
