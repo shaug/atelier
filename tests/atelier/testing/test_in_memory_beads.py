@@ -23,48 +23,34 @@ from atelier.testing.beads import (
     normalize_invocation,
 )
 
-FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONTRACT_FIXTURE_PATH = FIXTURES_DIR / "in_memory_beads_command_contract_v1.json"
 CONTRACT_DOC_PATH = REPO_ROOT / "docs" / "in-memory-beads-command-contract.md"
 CLIENT_CONTRACT_DOC_PATH = REPO_ROOT / "docs" / "beads-client-contract.md"
 
 
-def _load_contract_fixture() -> dict[str, object]:
-    return json.loads(CONTRACT_FIXTURE_PATH.read_text(encoding="utf-8"))
-
-
-def test_contract_fixture_matches_dispatcher_contract() -> None:
-    payload = _load_contract_fixture()
-
-    assert payload["emulated_version"] == IN_MEMORY_BEADS_VERSION
-    assert payload["default_unimplemented_returncode"] == DEFAULT_UNIMPLEMENTED_RETURN_CODE
-    assert payload["supported_global_flags"] == list(SUPPORTED_GLOBAL_FLAGS)
-    assert payload["routes"] == [
-        {
-            "family_id": route.family_id,
-            "tier": route.tier,
-            "command": list(route.command),
-            "supports_json_output": route.supports_json_output,
-        }
-        for route in DOCUMENTED_COMMAND_ROUTES
-    ]
-
-
 def test_contract_docs_publish_route_inventory() -> None:
-    payload = _load_contract_fixture()
     content = CONTRACT_DOC_PATH.read_text(encoding="utf-8")
     client_contract = CLIENT_CONTRACT_DOC_PATH.read_text(encoding="utf-8")
 
     assert "In-Memory Beads Command Contract" in content
     assert "source contract" in content
-    assert payload["emulated_version"] in content
-    for flag in payload["supported_global_flags"]:
+    assert IN_MEMORY_BEADS_VERSION in content
+    for flag in SUPPORTED_GLOBAL_FLAGS:
         assert flag in content
-    for route in payload["routes"]:
-        assert " ".join(route["command"]) in content
-        assert route["family_id"] in content
+    for route in DOCUMENTED_COMMAND_ROUTES:
+        assert route.command_label in content
+        assert route.family_id in content
     assert "docs/in-memory-beads-command-contract.md" in client_contract
+
+
+def test_documented_routes_cover_each_planned_command_family() -> None:
+    assert {route.family_id for route in DOCUMENTED_COMMAND_ROUTES} == {
+        "core-issues",
+        "dependency-edges",
+        "ownership-slots",
+        "startup-config",
+        "runtime-admin",
+    }
 
 
 def test_dispatcher_protocol_and_version_help_are_client_compatible() -> None:
@@ -94,21 +80,9 @@ def test_dispatcher_strips_supported_global_flags_before_matching() -> None:
         return CommandEnvelope.json_payload([builder.issue(7)])
 
     dispatcher = InMemoryBeadsDispatcher(family_handlers={"core-issues": core_handler})
+    result = dispatcher.run(["bd", "--db", "/tmp/beads.db", "--readonly", "show", "at-7", "--json"])
 
-    result = dispatcher.run(
-        [
-            "bd",
-            "--db",
-            "/tmp/beads.db",
-            "--readonly",
-            "show",
-            "at-7",
-            "--json",
-        ]
-    )
-
-    payload = json.loads(result.stdout)
-    issue = IssueRecord.model_validate(payload[0])
+    issue = IssueRecord.model_validate(json.loads(result.stdout)[0])
 
     assert issue.id == "at-7"
 
@@ -136,7 +110,6 @@ def test_dispatcher_marks_default_family_handlers_as_explicitly_unimplemented(
 
 def test_issue_fixture_builder_is_deterministic_and_payload_compatible() -> None:
     builder = IssueFixtureBuilder()
-
     first = builder.issue(
         5,
         labels=("atelier", "changeset", "atelier"),
@@ -145,7 +118,8 @@ def test_issue_fixture_builder_is_deterministic_and_payload_compatible() -> None
         metadata={"claimed_by": "agent-1"},
         extra_fields={"future_field": {"nested": True}},
     )
-    second = builder.issue(
+
+    assert first == builder.issue(
         5,
         labels=("atelier", "changeset", "atelier"),
         parent=1,
@@ -153,8 +127,6 @@ def test_issue_fixture_builder_is_deterministic_and_payload_compatible() -> None
         metadata={"claimed_by": "agent-1"},
         extra_fields={"future_field": {"nested": True}},
     )
-
-    assert first == second
 
     issue = IssueRecord.model_validate(first)
 

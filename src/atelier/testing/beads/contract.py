@@ -1,10 +1,4 @@
-"""Published contract for the in-memory Beads command harness.
-
-The dispatcher added for ``at-s1vc`` emulates the small slice of command-shape
-behavior that Atelier's runtime relies on today: argv-based dispatch,
-parseable ``--version`` / ``--help`` responses, and explicit unimplemented
-markers for command families whose semantics are added in later changesets.
-"""
+"""Published contract for the in-memory Beads command harness."""
 
 from __future__ import annotations
 
@@ -25,26 +19,11 @@ SUPPORTED_GLOBAL_FLAGS = (
     "--sandbox",
     "--verbose",
 )
-_VALUE_GLOBAL_FLAGS = ("--actor", "--db", "--dolt-auto-commit")
-BOOLEAN_GLOBAL_FLAGS = tuple(
-    flag for flag in SUPPORTED_GLOBAL_FLAGS if flag not in _VALUE_GLOBAL_FLAGS
-)
 
 
 @dataclass(frozen=True)
 class InMemoryBeadsCommandRoute:
-    """One documented in-memory ``bd`` route.
-
-    Args:
-        family_id: Stable command-family identifier used for dispatcher
-            handler registration.
-        tier: Implementation tier planned for the route family.
-        command: Canonical command tokens after the optional ``bd`` executable
-            and any leading global flags are stripped.
-        summary: Short user-facing purpose text rendered in help output.
-        supports_json_output: Whether ``--json`` is part of the command's
-            published contract.
-    """
+    """One documented in-memory ``bd`` route."""
 
     family_id: str
     tier: str
@@ -59,164 +38,60 @@ class InMemoryBeadsCommandRoute:
         return " ".join(self.command)
 
 
-DOCUMENTED_COMMAND_ROUTES = (
-    InMemoryBeadsCommandRoute(
-        family_id="core-issues",
-        tier="tier-0",
-        command=("show",),
-        summary="Show one issue.",
-        supports_json_output=True,
+_ROUTE_ROWS = (
+    ("core-issues", "tier-0", ("show",), "Show one issue.", True),
+    ("core-issues", "tier-0", ("list",), "List issues.", True),
+    ("core-issues", "tier-0", ("ready",), "List ready issues.", True),
+    ("core-issues", "tier-0", ("create",), "Create an issue.", True),
+    ("core-issues", "tier-0", ("update",), "Update an issue.", True),
+    ("core-issues", "tier-0", ("close",), "Close an issue.", True),
+    ("dependency-edges", "tier-0", ("dep", "add"), "Add an issue dependency edge.", True),
+    (
+        "dependency-edges",
+        "tier-0",
+        ("dep", "remove"),
+        "Remove an issue dependency edge.",
+        True,
     ),
-    InMemoryBeadsCommandRoute(
-        family_id="core-issues",
-        tier="tier-0",
-        command=("list",),
-        summary="List issues.",
-        supports_json_output=True,
+    ("ownership-slots", "tier-1", ("slot", "show"), "Show slot values for an issue.", True),
+    ("ownership-slots", "tier-1", ("slot", "set"), "Set a slot value for an issue.", False),
+    (
+        "ownership-slots",
+        "tier-1",
+        ("slot", "clear"),
+        "Clear a slot value for an issue.",
+        False,
     ),
-    InMemoryBeadsCommandRoute(
-        family_id="core-issues",
-        tier="tier-0",
-        command=("ready",),
-        summary="List ready issues.",
-        supports_json_output=True,
+    ("startup-config", "tier-2", ("prime",), "Prime the Beads store.", False),
+    ("startup-config", "tier-2", ("init",), "Initialize a Beads store.", False),
+    ("startup-config", "tier-2", ("config", "get"), "Read configuration values.", True),
+    ("startup-config", "tier-2", ("config", "set"), "Write configuration values.", False),
+    ("startup-config", "tier-2", ("types",), "List configured issue types.", True),
+    ("startup-config", "tier-2", ("rename-prefix",), "Rename issue id prefixes.", False),
+    ("runtime-admin", "tier-3", ("stats",), "Show runtime store statistics.", False),
+    ("runtime-admin", "tier-3", ("doctor",), "Run store diagnostics.", False),
+    ("runtime-admin", "tier-3", ("migrate",), "Migrate legacy store state.", False),
+    ("runtime-admin", "tier-3", ("dolt", "show"), "Show Dolt backend metadata.", True),
+    (
+        "runtime-admin",
+        "tier-3",
+        ("dolt", "set", "database"),
+        "Select the active Dolt database.",
+        False,
     ),
+    ("runtime-admin", "tier-3", ("dolt", "commit"), "Persist pending Dolt changes.", False),
+    ("runtime-admin", "tier-3", ("vc", "status"), "Show Dolt working-set status.", True),
+)
+
+DOCUMENTED_COMMAND_ROUTES = tuple(
     InMemoryBeadsCommandRoute(
-        family_id="core-issues",
-        tier="tier-0",
-        command=("create",),
-        summary="Create an issue.",
-        supports_json_output=True,
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="core-issues",
-        tier="tier-0",
-        command=("update",),
-        summary="Update an issue.",
-        supports_json_output=True,
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="core-issues",
-        tier="tier-0",
-        command=("close",),
-        summary="Close an issue.",
-        supports_json_output=True,
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="dependency-edges",
-        tier="tier-0",
-        command=("dep", "add"),
-        summary="Add an issue dependency edge.",
-        supports_json_output=True,
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="dependency-edges",
-        tier="tier-0",
-        command=("dep", "remove"),
-        summary="Remove an issue dependency edge.",
-        supports_json_output=True,
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="ownership-slots",
-        tier="tier-1",
-        command=("slot", "show"),
-        summary="Show slot values for an issue.",
-        supports_json_output=True,
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="ownership-slots",
-        tier="tier-1",
-        command=("slot", "set"),
-        summary="Set a slot value for an issue.",
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="ownership-slots",
-        tier="tier-1",
-        command=("slot", "clear"),
-        summary="Clear a slot value for an issue.",
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="startup-config",
-        tier="tier-2",
-        command=("prime",),
-        summary="Prime the Beads store.",
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="startup-config",
-        tier="tier-2",
-        command=("init",),
-        summary="Initialize a Beads store.",
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="startup-config",
-        tier="tier-2",
-        command=("config", "get"),
-        summary="Read configuration values.",
-        supports_json_output=True,
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="startup-config",
-        tier="tier-2",
-        command=("config", "set"),
-        summary="Write configuration values.",
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="startup-config",
-        tier="tier-2",
-        command=("types",),
-        summary="List configured issue types.",
-        supports_json_output=True,
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="startup-config",
-        tier="tier-2",
-        command=("rename-prefix",),
-        summary="Rename issue id prefixes.",
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="runtime-admin",
-        tier="tier-3",
-        command=("stats",),
-        summary="Show runtime store statistics.",
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="runtime-admin",
-        tier="tier-3",
-        command=("doctor",),
-        summary="Run store diagnostics.",
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="runtime-admin",
-        tier="tier-3",
-        command=("migrate",),
-        summary="Migrate legacy store state.",
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="runtime-admin",
-        tier="tier-3",
-        command=("dolt", "show"),
-        summary="Show Dolt backend metadata.",
-        supports_json_output=True,
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="runtime-admin",
-        tier="tier-3",
-        command=("dolt", "set", "database"),
-        summary="Select the active Dolt database.",
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="runtime-admin",
-        tier="tier-3",
-        command=("dolt", "commit"),
-        summary="Persist pending Dolt changes.",
-    ),
-    InMemoryBeadsCommandRoute(
-        family_id="runtime-admin",
-        tier="tier-3",
-        command=("vc", "status"),
-        summary="Show Dolt working-set status.",
-        supports_json_output=True,
-    ),
+        family_id=family_id,
+        tier=tier,
+        command=command,
+        summary=summary,
+        supports_json_output=supports_json_output,
+    )
+    for family_id, tier, command, summary, supports_json_output in _ROUTE_ROWS
 )
 
 
@@ -227,7 +102,6 @@ def documented_route_index() -> dict[tuple[str, ...], InMemoryBeadsCommandRoute]
 
 
 __all__ = [
-    "BOOLEAN_GLOBAL_FLAGS",
     "DEFAULT_UNIMPLEMENTED_RETURN_CODE",
     "DOCUMENTED_COMMAND_ROUTES",
     "IN_MEMORY_BEADS_VERSION",

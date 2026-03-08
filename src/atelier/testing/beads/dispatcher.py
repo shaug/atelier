@@ -9,15 +9,18 @@ from pathlib import Path
 from typing import Mapping, Protocol, Sequence, runtime_checkable
 
 from .contract import (
-    BOOLEAN_GLOBAL_FLAGS,
     DEFAULT_UNIMPLEMENTED_RETURN_CODE,
     DOCUMENTED_COMMAND_ROUTES,
     IN_MEMORY_BEADS_VERSION,
+    SUPPORTED_GLOBAL_FLAGS,
     InMemoryBeadsCommandRoute,
     documented_route_index,
 )
 
 _VALUE_GLOBAL_FLAGS = ("--actor", "--db", "--dolt-auto-commit")
+_BOOLEAN_GLOBAL_FLAGS = tuple(
+    flag for flag in SUPPORTED_GLOBAL_FLAGS if flag not in _VALUE_GLOBAL_FLAGS
+)
 _ROUTE_INDEX = documented_route_index()
 _SORTED_ROUTES = tuple(
     sorted(DOCUMENTED_COMMAND_ROUTES, key=lambda route: len(route.command), reverse=True)
@@ -222,7 +225,7 @@ def _consume_leading_global_tokens(
     index = 0
     while index < len(tokens):
         token = tokens[index]
-        if token in BOOLEAN_GLOBAL_FLAGS:
+        if token in _BOOLEAN_GLOBAL_FLAGS:
             consumed.append(token)
             index += 1
             continue

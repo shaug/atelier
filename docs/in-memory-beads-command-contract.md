@@ -93,5 +93,4 @@ persistence or command semantics by themselves.
 - `src/atelier/testing/beads/contract.py`
 - `src/atelier/testing/beads/dispatcher.py`
 - `src/atelier/testing/beads/fixtures.py`
-- `tests/atelier/testing/fixtures/in_memory_beads_command_contract_v1.json`
 - `tests/atelier/testing/test_in_memory_beads.py`
