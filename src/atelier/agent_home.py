@@ -48,6 +48,12 @@ _WORKER_SAFE_PRIME_ADDENDUM = "\n".join(
         "`completion_checklist` commit/file evidence.",
         "- Do not treat comment closure alone as completion; finish only when "
         "the full bead goal is implemented or send `NEEDS-DECISION`.",
+        "- For PR feedback runs, re-read the seeded epic and changeset beads "
+        "first. Confirm scope, non-goals, acceptance criteria, and done "
+        "definition before fetching or addressing PR comments.",
+        "- After that bead-first review, handle inline review comments in "
+        "their existing threads and resolve the same thread; do not replace "
+        "inline replies with new top-level PR comments.",
         "- Keep `pr_state` accurate: `pushed`, `draft-pr`, `pr-open`, "
         "`in-review`, `approved`, `merged`, `closed`.",
         "- Do not set `status=closed` while PR lifecycle is active "

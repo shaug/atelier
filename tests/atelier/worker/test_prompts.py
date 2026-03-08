@@ -37,6 +37,18 @@ def test_worker_opening_prompt_review_feedback_avoids_label_reset_guidance() -> 
     assert (
         "Do not mark this changeset complete while review feedback remains unaddressed." in prompt
     )
+    bead_review = (
+        "Before fetching or addressing PR comments, re-read the seeded epic and "
+        "changeset beads and confirm scope, non-goals, acceptance criteria, and "
+        "done definition."
+    )
+    fetch_feedback = (
+        "After that bead-first review, fetch open PR feedback comments and address "
+        "them directly without narrowing the goal to comment closure alone."
+    )
+    assert bead_review in prompt
+    assert fetch_feedback in prompt
+    assert prompt.index(bead_review) < prompt.index(fetch_feedback)
     assert "Do not create local pr-* branches for temporary PR inspection." in prompt
     assert "refs/atelier/review/* refs and clean them up after use." in prompt
     assert (

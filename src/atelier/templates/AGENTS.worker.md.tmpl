@@ -96,6 +96,18 @@ Skills link: ./skills
 5. Do not commit/push/publish while any acceptance criterion remains unmet or
    the completion checklist is incomplete.
 
+## PR Feedback Runs
+
+1. In review-feedback mode, re-read the seeded epic and changeset beads first.
+   Confirm scope, non-goals, acceptance criteria, and done definition before
+   fetching or addressing PR comments.
+2. After the bead-first review, fetch open PR feedback and address it without
+   narrowing the goal to comment closure alone.
+3. For inline review comments, reply inline and resolve the same thread; do not
+   post a new top-level PR comment in place of an inline reply.
+4. Use the `github-prs` skill scripts (`list_review_threads.py`,
+   `reply_inline_thread.py`) for deterministic inline handling.
+
 ## Lifecycle Protocol (Required)
 
 - Use canonical lifecycle statuses only:
@@ -109,10 +121,6 @@ Skills link: ./skills
 - Set `status=closed` only when terminal proof exists:
   - PR lifecycle is terminal (`pr_state=merged` or `pr_state=closed`), OR
   - non-PR integration is proven (`changeset.integrated_sha` recorded).
-- For PR feedback runs, inline review comments must be answered inline and then
-  resolved; do not post a new top-level PR comment in place of an inline reply.
-  Use the `github-prs` skill scripts (`list_review_threads.py`,
-  `reply_inline_thread.py`) for deterministic thread handling.
 
 ## Messaging Rules
 

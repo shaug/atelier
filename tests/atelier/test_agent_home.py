@@ -432,6 +432,14 @@ def test_apply_beads_prime_addendum_worker_role_replaces_generic_prime_guidance(
     assert "run a north-star self-review" in updated
     assert "north_star_review.<timestamp>" in updated
     assert "Do not treat comment closure alone as completion" in updated
+    bead_review = "For PR feedback runs, re-read the seeded epic and changeset beads first."
+    fetch_feedback = (
+        "After that bead-first review, handle inline review comments in their existing "
+        "threads and resolve the same thread"
+    )
+    assert bead_review in updated
+    assert fetch_feedback in updated
+    assert updated.index(bead_review) < updated.index(fetch_feedback)
 
 
 def test_apply_beads_prime_addendum_planner_role_keeps_addendum_body() -> None:

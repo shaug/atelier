@@ -15,6 +15,7 @@ def test_worker_agents_template_contains_core_sections() -> None:
     assert "Single-Bead Contract" in content
     assert "Execution Workflow" in content
     assert "North-Star Review Loop" in content
+    assert "PR Feedback Runs" in content
     assert "Messaging Rules" in content
     assert "Finish" in content
     assert "Do not look for more" in content
@@ -23,6 +24,11 @@ def test_worker_agents_template_contains_core_sections() -> None:
     assert "Do not mutate sibling/unclaimed work-bead lifecycle state." in content
     assert "north_star_review.<timestamp>" in content
     assert "Do not treat comment closure alone as completion." in content
+    bead_review = "In review-feedback mode, re-read the seeded epic and changeset beads first."
+    fetch_feedback = "After the bead-first review, fetch open PR feedback and address it"
+    assert bead_review in content
+    assert fetch_feedback in content
+    assert content.index(bead_review) < content.index(fetch_feedback)
     assert "Update changeset metadata and labels." not in content
     assert "do not set `status=closed`" in content
     assert "Set `status=closed` only when terminal proof exists" in content
