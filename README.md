@@ -529,11 +529,34 @@ Options:
 - `--run-mode`: Worker loop mode (`once`, `default`, or `watch`).
 - `--restart-on-update`: Self-reexec at idle boundaries after runtime changes.
   Defaults to on in `watch` mode and off in other run modes.
+- `--no-restart-on-update`: Disable idle-boundary self-reexec even in `watch`
+  mode.
 - `--yes`: Accept defaults for interactive choices (`ATELIER_WORK_YES`).
 - `--reconcile`: Run a fail-closed reconcile sweep before startup selection.
   This auto-finalizes orphaned `in_progress` changesets only when PR lifecycle
   is terminal (`merged`/`closed`) and no live worker hook owns the epic.
 - Watch polling defaults to `ATELIER_WATCH_INTERVAL` (seconds) in watch mode.
+
+Auto-restart controls:
+
+- `atelier work --run-mode watch` enables restart-on-update by default.
+- `atelier work --run-mode watch --no-restart-on-update` keeps watch polling but
+  disables self-reexec.
+- `atelier work --run-mode default --restart-on-update` opts long-lived
+  non-watch workers into the same idle-boundary restart behavior.
+- Restart checks happen only between worker sessions, never during an active
+  changeset execution.
+- If restart attempts fail or retrigger too quickly, Atelier logs bounded
+  cooldown diagnostics and keeps running the current process instead of looping
+  indefinitely.
+
+Debugging restart behavior:
+
+- Confirm the effective mode/flags in the launch command you used.
+- Watch for `Runtime update detected`, `auto-restart is cooling down`, and
+  `restart failed` log lines in the worker output.
+- Use `--no-restart-on-update` to keep a long-lived worker stable while you
+  investigate repeated runtime changes or install failures.
 
 ### `atelier plan`
 
