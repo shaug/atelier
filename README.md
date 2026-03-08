@@ -75,7 +75,12 @@ Command-specific details live in module docstrings under `src/atelier/commands`.
 ## Requirements
 
 - Git (for worktrees and branch operations)
-- `bd` `>= 0.51.0` on your PATH (Atelier's local planning store)
+- `bd` `>= 0.56.1` on your PATH (Atelier's local planning store)
+
+The reusable Beads client published under `atelier.lib.beads` supports a bounded
+v1 `bd` surface. See
+[docs/beads-client-contract.md](docs/beads-client-contract.md) for the supported
+command inventory, version/capability policy, and downstream adoption rules.
 
 ## Repo-Local Commit Hooks
 
@@ -591,10 +596,9 @@ Options:
 - `--new-session`: Always start a fresh planner session (skip resume lookup).
 - In an active planner session, run
   `python3 skills/planner-startup-check/scripts/refresh_overview.py` to refresh
-  the same read-only startup overview on demand.
-  This command now hardens the previously uncovered mode where projected
-  planner scripts were launched by an ambient interpreter that did not match
-  the repo dependency runtime.
+  the same read-only startup overview on demand. This command now hardens the
+  previously uncovered mode where projected planner scripts were launched by an
+  ambient interpreter that did not match the repo dependency runtime.
 
 ### `atelier open [workspace-branch] [--] [command ...]`
 
