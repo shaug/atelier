@@ -591,10 +591,9 @@ Options:
 - `--new-session`: Always start a fresh planner session (skip resume lookup).
 - In an active planner session, run
   `python3 skills/planner-startup-check/scripts/refresh_overview.py` to refresh
-  the same read-only startup overview on demand.
-  This command now hardens the previously uncovered mode where projected
-  planner scripts were launched by an ambient interpreter that did not match
-  the repo dependency runtime.
+  the same read-only startup overview on demand. This command now hardens the
+  previously uncovered mode where projected planner scripts were launched by an
+  ambient interpreter that did not match the repo dependency runtime.
 
 ### `atelier open [workspace-branch] [--] [command ...]`
 
