@@ -295,6 +295,11 @@ Frontmatter fields (recommended):
 
 - from: <identity>
 - thread: <thread-id>
+- thread_kind: epic|changeset|work
+- audience: [worker|planner|operator, ...]
+- kind: instruction|notification|needs-decision|reply
+- blocking: true|false
+- delivery: work-threaded|agent-addressed
 - reply_to: <msg-id>
 - msg_type: task|scavenge|notification|reply
 - cc: \[<identity>, ...\]
@@ -316,7 +321,9 @@ Message beads should be shaped as:
 
 Message beads are first-class; do not rely on generic comments plus inbox
 queries as a substitute. For bead-specific discussion, use a message bead with
-`thread: <bead-id>` in frontmatter.
+`thread: <bead-id>` in frontmatter. Work-threaded metadata is the durable
+coordination path; direct assignee routing exists only as a compatibility
+fallback while migration is in progress.
 
 ### Work Bead Hierarchy
 

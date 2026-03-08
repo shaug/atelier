@@ -49,6 +49,10 @@ def test_send_no_ready_changesets_uses_summary_counts() -> None:
     kwargs = create_message.call_args.kwargs
     assert kwargs["subject"] == "NEEDS-DECISION: No ready changesets for at-1"
     assert "Ready changesets: 0" in kwargs["body"]
+    assert kwargs["metadata"]["queue"] == "planner"
+    assert kwargs["metadata"]["audience"] == ["planner"]
+    assert kwargs["metadata"]["kind"] == "needs-decision"
+    assert kwargs["metadata"]["blocking"] is True
 
 
 def test_prompt_queue_claim_assume_yes_claims_first_message() -> None:

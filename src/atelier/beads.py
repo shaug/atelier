@@ -5560,7 +5560,8 @@ def create_message_bead(
     cwd: Path,
 ) -> dict[str, object]:
     """Create a message bead and return its data."""
-    description = messages.render_message(metadata, body)
+    normalized_metadata = messages.normalize_message_metadata(metadata, assignee=assignee)
+    description = messages.render_message(normalized_metadata, body)
     args = [
         "create",
         "--type",

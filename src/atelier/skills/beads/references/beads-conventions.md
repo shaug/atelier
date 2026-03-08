@@ -84,9 +84,19 @@ Agent hook storage:
 
 ## Messages
 
-Message beads are first-class. Use YAML frontmatter in the description and
-include `thread: <bead-id>` when the message belongs to a specific epic or
-changeset.
+Message beads are first-class. Use YAML frontmatter in the description and make
+work-threaded coordination explicit by default:
+
+- `thread: <bead-id>` for the durable work target
+- `thread_kind: epic|changeset|work` for the thread scope
+- `audience: [worker|planner|operator, ...]` for role-aware consumption
+- `kind: <semantic-kind>` such as `instruction`, `notification`,
+  `needs-decision`, or `reply`
+- `blocking: true|false` when the message should gate progress
+
+Direct assignee delivery is compatibility routing only. Durable instructions,
+handoffs, and decisions should be attached to the relevant epic/changeset thread
+whenever possible.
 
 Queue/channel frontmatter fields (optional):
 
