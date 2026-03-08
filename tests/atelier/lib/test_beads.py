@@ -11,6 +11,7 @@ from atelier.lib.beads import (
     Beads,
     BeadsCapability,
     BeadsCommandError,
+    BeadsCommandHelp,
     BeadsCommandRequest,
     BeadsCommandResult,
     BeadsEnvironment,
@@ -28,13 +29,18 @@ from atelier.lib.beads import (
     OperationContract,
     OperationOutputMode,
     ReadyIssuesRequest,
+    RecordingBeadsTransport,
+    ScriptedBeadsTransport,
     SemanticVersion,
     ShowIssueRequest,
     SubprocessBeadsClient,
     SubprocessBeadsTransport,
     SupportedOperation,
+    SyncBeadsClient,
     UnsupportedVersionError,
     UpdateIssueRequest,
+    decode_help_output,
+    decode_version_output,
 )
 
 
@@ -170,16 +176,6 @@ def test_protocols_are_runtime_checkable() -> None:
     assert isinstance(_FakeTransport(), BeadsTransport)
     assert isinstance(_FakeClient(), Beads)
     assert isinstance(_FakeClient(), AsyncBeadsClient)
-
-
-class _StubTransport:
-    def __init__(self, responses: dict[tuple[str, ...], BeadsCommandResult]) -> None:
-        self._responses = responses
-        self.requests: list[BeadsCommandRequest] = []
-
-    async def execute(self, request: BeadsCommandRequest) -> BeadsCommandResult:
-        self.requests.append(request)
-        return self._responses[request.argv]
 
 
 class _FakeProcess:
@@ -339,14 +335,22 @@ def test_subprocess_client_decodes_core_json_commands() -> None:
                     ("bd", "dep", "remove", "at-2", "at-1", "--json"),
                     stdout='{"issue_id":"at-2","depends_on_id":"at-1","status":"removed"}',
                 ),
-                _result(
-                    ("bd", "show", "at-2", "--json"),
-                    stdout='[{"id":"at-2","issue_type":"task","dependencies":["at-1"]}]',
-                ),
             ]
         ),
     )
-    transport = _StubTransport(responses)
+    responses[("bd", "show", "at-2", "--json")] = [
+        BeadsCommandResult(
+            argv=("bd", "show", "at-2", "--json"),
+            returncode=0,
+            stdout='[{"id":"at-2","issue_type":"task","dependencies":["at-1"]}]',
+        ),
+        BeadsCommandResult(
+            argv=("bd", "show", "at-2", "--json"),
+            returncode=0,
+            stdout='[{"id":"at-2","issue_type":"task"}]',
+        ),
+    ]
+    transport = ScriptedBeadsTransport(responses)
     client = SubprocessBeadsClient(transport=transport, env={"BEADS_DIR": "/repo/.beads"})
 
     shown = _run(client.show(ShowIssueRequest(issue_id="at-1")))
@@ -425,7 +429,7 @@ def test_subprocess_client_parse_and_capability_failures(
 ) -> None:
     responses = _probe_responses()
     responses.update([_result(argv, stdout=stdout, returncode=returncode, stderr=stderr)])
-    client = SubprocessBeadsClient(transport=_StubTransport(responses))
+    client = SubprocessBeadsClient(transport=ScriptedBeadsTransport(responses))
 
     with pytest.raises(error_type, match=match):
         if isinstance(client_request, ShowIssueRequest):
@@ -442,10 +446,90 @@ def test_inspect_environment_fails_closed_when_json_flag_is_missing() -> None:
         stdout=_HELP_OUTPUT_NO_JSON,
         stderr="",
     )
-    transport = _StubTransport(responses)
+    transport = ScriptedBeadsTransport(responses)
     client = SubprocessBeadsClient(transport=transport)
 
     with pytest.raises(CapabilityMismatchError, match="show: issue-json"):
         _run(client.inspect_environment())
 
     assert ("bd", "show", "at-1", "--json") not in [request.argv for request in transport.requests]
+
+
+def test_decode_version_output_returns_semantic_version() -> None:
+    result = BeadsCommandResult(
+        argv=("bd", "--version"),
+        returncode=0,
+        stdout="bd version 0.56.7 (dev)",
+    )
+
+    assert decode_version_output(result) == SemanticVersion(major=0, minor=56, patch=7)
+
+
+def test_decode_help_output_normalizes_flags() -> None:
+    result = BeadsCommandResult(
+        argv=("bd", "show", "--help"),
+        returncode=0,
+        stdout="Flags:\n  -h, --help\n      --json  output\n      --json  output",
+    )
+
+    assert decode_help_output(result) == BeadsCommandHelp(
+        argv=("bd", "show", "--help"),
+        flags=("--help", "--json"),
+        supports_json_output=True,
+    )
+
+
+def test_recording_transport_records_requests() -> None:
+    transport = RecordingBeadsTransport()
+    request = BeadsCommandRequest(
+        operation=SupportedOperation.SHOW,
+        argv=("bd", "show", "at-1", "--json"),
+    )
+
+    result = _run(transport.execute(request))
+
+    assert result.argv == request.argv
+    assert transport.requests == [request]
+
+
+def test_scripted_transport_replays_sequential_outcomes() -> None:
+    responses = _probe_responses()
+    responses[("bd", "show", "at-1", "--json")] = [
+        BeadsCommandResult(
+            argv=("bd", "show", "at-1", "--json"),
+            returncode=0,
+            stdout='[{"id":"at-1","issue_type":"task"}]',
+        ),
+        BeadsCommandResult(
+            argv=("bd", "show", "at-1", "--json"),
+            returncode=0,
+            stdout='[{"id":"at-1","status":"closed","issue_type":"task"}]',
+        ),
+    ]
+    transport = ScriptedBeadsTransport(responses)
+    client = SubprocessBeadsClient(transport=transport)
+
+    first = _run(client.show(ShowIssueRequest(issue_id="at-1")))
+    second = _run(client.show(ShowIssueRequest(issue_id="at-1")))
+
+    assert (first.status, second.status) == (None, "closed")
+    assert [request.argv for request in transport.requests].count(
+        ("bd", "show", "at-1", "--json")
+    ) == 2
+
+
+def test_sync_beads_client_wraps_async_client() -> None:
+    responses = _probe_responses()
+    responses[("bd", "show", "at-1", "--json")] = BeadsCommandResult(
+        argv=("bd", "show", "at-1", "--json"),
+        returncode=0,
+        stdout='[{"id":"at-1","issue_type":"task"}]',
+    )
+    async_client = SubprocessBeadsClient(transport=ScriptedBeadsTransport(responses))
+    sync_client = SyncBeadsClient(async_client)
+
+    environment = sync_client.inspect_environment()
+    issue = sync_client.show(ShowIssueRequest(issue_id="at-1"))
+
+    assert environment.version == SemanticVersion(major=0, minor=56, patch=1)
+    assert issue.id == "at-1"

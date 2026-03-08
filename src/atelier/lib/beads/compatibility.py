@@ -130,6 +130,10 @@ DEFAULT_COMPATIBILITY_POLICY = CompatibilityPolicy(
     ),
     operations=(
         OperationContract(
+            operation=SupportedOperation.INSPECT_ENVIRONMENT,
+            output_mode=OperationOutputMode.TEXT_NORMALIZED,
+        ),
+        OperationContract(
             operation=SupportedOperation.SHOW,
             output_mode=OperationOutputMode.JSON_REQUIRED,
             required_capabilities=_READ_CAPS,
