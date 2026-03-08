@@ -257,6 +257,88 @@ def test_projected_auto_export_prefers_explicit_repo_dir_source(tmp_path: Path) 
     )
 
 
+def test_projected_check_guardrails_reorders_repo_src_ahead_of_installed_package(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _copy_script(
+        tmp_path,
+        skill_name="plan-changeset-guardrails",
+        script_name="check_guardrails.py",
+    )
+    repo_root = _fake_repo(
+        tmp_path,
+        sentinel_import="beads",
+        extra_modules={
+            "bd_invocation.py": (
+                "def with_bd_mode(*args, beads_dir=None, env=None):\n    return ['bd', *args]\n"
+            ),
+            "beads_context.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(__file__, encoding='utf-8')\n"
+                "\n"
+                "def resolve_runtime_repo_dir_hint(*, repo_dir=None, cwd=None, env=None):\n"
+                "    return (repo_dir, None)\n"
+            ),
+            "planner_contract.py": (
+                "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
+            ),
+        },
+    )
+    installed_root = _fake_installed_package(
+        tmp_path,
+        modules={
+            "beads.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(__file__, encoding='utf-8')\n"
+            ),
+            "bd_invocation.py": (
+                "def with_bd_mode(*args, beads_dir=None, env=None):\n"
+                "    return ['installed', *args]\n"
+            ),
+            "beads_context.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(__file__, encoding='utf-8')\n"
+                "\n"
+                "def resolve_runtime_repo_dir_hint(*, repo_dir=None, cwd=None, env=None):\n"
+                "    return (repo_dir, None)\n"
+            ),
+            "planner_contract.py": (
+                "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
+            ),
+        },
+    )
+    sentinel_path = tmp_path / "check-guardrails-sentinel.txt"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "BOOTSTRAP_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": os.pathsep.join([str(installed_root), str(repo_root / "src")]),
+        },
+    )
+
+    assert completed.returncode == 0
+    assert sentinel_path.read_text(encoding="utf-8") == str(
+        repo_root / "src" / "atelier" / "beads_context.py"
+    )
+
+
 def test_projected_refresh_overview_reorders_repo_src_ahead_of_installed_package(
     tmp_path: Path,
 ) -> None:

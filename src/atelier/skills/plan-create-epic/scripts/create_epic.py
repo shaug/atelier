@@ -56,10 +56,17 @@ def _bootstrap_source_import() -> Path | None:
 
 _BOOTSTRAP_REPO_ROOT = _bootstrap_source_import()
 
-from atelier.runtime_env import maybe_reexec_projected_repo_runtime  # noqa: E402
+from atelier.runtime_env import (  # noqa: E402
+    ensure_projected_runtime_dependency,
+    maybe_reexec_projected_repo_runtime,
+)
 
 if __name__ == "__main__":
     maybe_reexec_projected_repo_runtime(
+        repo_root=_BOOTSTRAP_REPO_ROOT,
+        script_path=Path(__file__).resolve(),
+    )
+    ensure_projected_runtime_dependency(
         repo_root=_BOOTSTRAP_REPO_ROOT,
         script_path=Path(__file__).resolve(),
     )

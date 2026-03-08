@@ -12,9 +12,71 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from atelier import beads
-from atelier.bd_invocation import with_bd_mode
-from atelier.planner_contract import validate_authoring_contract
+
+def _repo_dir_from_argv(argv: list[str]) -> Path | None:
+    for index, token in enumerate(argv):
+        if token == "--repo-dir" and index + 1 < len(argv):
+            value = argv[index + 1].strip()
+            if value:
+                return Path(value).expanduser()
+        if token.startswith("--repo-dir="):
+            value = token.split("=", 1)[1].strip()
+            if value:
+                return Path(value).expanduser()
+    return None
+
+
+def _bootstrap_source_import() -> Path | None:
+    candidate_roots: list[Path] = []
+    argv_repo_dir = _repo_dir_from_argv(sys.argv[1:])
+    if argv_repo_dir is not None:
+        candidate_roots.append(argv_repo_dir)
+
+    current_dir = Path.cwd()
+    candidate_roots.append(current_dir / "worktree")
+    env_repo_dir = os.environ.get("ATELIER_PLANNER_WORKTREE", "").strip()
+    if env_repo_dir:
+        candidate_roots.append(Path(env_repo_dir).expanduser())
+    candidate_roots.append(current_dir)
+    candidate_roots.extend(Path(__file__).resolve().parents)
+
+    seen: set[Path] = set()
+    for root in candidate_roots:
+        resolved = root.expanduser().resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        src_dir = resolved / "src"
+        if not (src_dir / "atelier" / "__init__.py").is_file():
+            continue
+        src_dir_entry = str(src_dir)
+        sys.path[:] = [entry for entry in sys.path if entry != src_dir_entry]
+        sys.path.insert(0, src_dir_entry)
+        return resolved
+    return None
+
+
+_BOOTSTRAP_REPO_ROOT = _bootstrap_source_import()
+
+from atelier.runtime_env import (  # noqa: E402
+    ensure_projected_runtime_dependency,
+    maybe_reexec_projected_repo_runtime,
+)
+
+if __name__ == "__main__":
+    maybe_reexec_projected_repo_runtime(
+        repo_root=_BOOTSTRAP_REPO_ROOT,
+        script_path=Path(__file__).resolve(),
+    )
+    ensure_projected_runtime_dependency(
+        repo_root=_BOOTSTRAP_REPO_ROOT,
+        script_path=Path(__file__).resolve(),
+    )
+
+from atelier import beads  # noqa: E402
+from atelier.bd_invocation import with_bd_mode  # noqa: E402
+from atelier.beads_context import resolve_runtime_repo_dir_hint  # noqa: E402
+from atelier.planner_contract import validate_authoring_contract  # noqa: E402
 
 _LOC_TRIGGER = re.compile(r"\b(?:loc|estimate)\b", re.IGNORECASE)
 _NUMBER = re.compile(r"\b\d{2,5}\b")
@@ -82,7 +144,12 @@ class _GuardrailReport:
     checked_ids: list[str]
 
 
-def _run_bd_json(args: list[str], *, beads_dir: str | None) -> list[dict[str, object]]:
+def _run_bd_json(
+    args: list[str],
+    *,
+    beads_dir: str | None,
+    cwd: Path,
+) -> list[dict[str, object]]:
     env = dict(os.environ)
     command = with_bd_mode(*args, beads_dir=beads_dir, env=env)
     if beads_dir:
@@ -94,6 +161,7 @@ def _run_bd_json(args: list[str], *, beads_dir: str | None) -> list[dict[str, ob
             capture_output=True,
             text=True,
             env=env,
+            cwd=cwd,
         )
     except FileNotFoundError:
         print("error: missing required command: bd", file=sys.stderr)
@@ -199,16 +267,25 @@ def _has_resplit_threshold_trigger(text: str) -> bool:
     return bool(_RESPLIT_THRESHOLD_TRIGGER.search(text) or _RESPLIT_THRESHOLD_NUMERIC.search(text))
 
 
-def _load_issue(issue_id: str, *, beads_dir: str | None) -> dict[str, object] | None:
-    issues = _run_bd_json(["show", issue_id, "--json"], beads_dir=beads_dir)
+def _load_issue(
+    issue_id: str,
+    *,
+    beads_dir: str | None,
+    cwd: Path,
+) -> dict[str, object] | None:
+    issues = _run_bd_json(["show", issue_id, "--json"], beads_dir=beads_dir, cwd=cwd)
     if not issues:
         return None
     return issues[0]
 
 
-def _list_child_changesets(epic_id: str, *, beads_dir: str | None) -> list[dict[str, object]]:
+def _list_child_changesets(
+    epic_id: str,
+    *,
+    beads_dir: str | None,
+    cwd: Path,
+) -> list[dict[str, object]]:
     beads_root = Path(beads_dir).resolve() if beads_dir else Path.cwd() / ".beads"
-    cwd = Path.cwd()
     return beads.list_child_changesets(
         epic_id,
         beads_root=beads_root,
@@ -371,24 +448,37 @@ def main() -> None:
         default=os.environ.get("BEADS_DIR", ""),
         help="Beads directory path (defaults to BEADS_DIR env var)",
     )
+    parser.add_argument(
+        "--repo-dir",
+        default="",
+        help="Repo root override (defaults to ./worktree, then cwd)",
+    )
     args = parser.parse_args()
 
     epic_id = str(args.epic_id or "").strip()
     changeset_ids = [str(value).strip() for value in args.changeset_ids if str(value).strip()]
     beads_dir = str(args.beads_dir or "").strip() or None
+    repo_dir, runtime_warning = resolve_runtime_repo_dir_hint(
+        repo_dir=str(args.repo_dir).strip() or None
+    )
+    if runtime_warning:
+        print(runtime_warning, file=sys.stderr)
+    cwd = Path(repo_dir).resolve() if repo_dir else Path.cwd().resolve()
     if beads_dir and not Path(beads_dir).exists():
         print(f"error: beads dir not found: {beads_dir}", file=sys.stderr)
         raise SystemExit(1)
     if not epic_id and not changeset_ids:
         parser.error("provide --epic-id or at least one --changeset-id")
 
-    epic_issue = _load_issue(epic_id, beads_dir=beads_dir) if epic_id else None
-    child_changesets = _list_child_changesets(epic_id, beads_dir=beads_dir) if epic_id else []
+    epic_issue = _load_issue(epic_id, beads_dir=beads_dir, cwd=cwd) if epic_id else None
+    child_changesets = (
+        _list_child_changesets(epic_id, beads_dir=beads_dir, cwd=cwd) if epic_id else []
+    )
 
     target_changesets: list[dict[str, object]] = []
     if changeset_ids:
         for changeset_id in changeset_ids:
-            issue = _load_issue(changeset_id, beads_dir=beads_dir)
+            issue = _load_issue(changeset_id, beads_dir=beads_dir, cwd=cwd)
             if issue is not None:
                 target_changesets.append(issue)
     elif child_changesets:

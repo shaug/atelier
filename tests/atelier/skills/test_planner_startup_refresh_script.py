@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -478,6 +479,11 @@ def test_render_startup_overview_includes_runtime_preflight(monkeypatch) -> None
                 detail="skills/plan-create-epic/scripts/create_epic.py --help ok",
             ),
             module.StartupRuntimePreflight(
+                name="plan-changeset-guardrails",
+                status="ok",
+                detail="skills/plan-changeset-guardrails/scripts/check_guardrails.py --help ok",
+            ),
+            module.StartupRuntimePreflight(
                 name="auto_export_issue",
                 status="failed",
                 detail="ModuleNotFoundError: pydantic_core._pydantic_core",
@@ -517,6 +523,7 @@ def test_render_startup_overview_includes_runtime_preflight(monkeypatch) -> None
         "- Beads root: /beads",
         "Planner skill runtime preflight:",
         "- plan-create-epic: ok (skills/plan-create-epic/scripts/create_epic.py --help ok)",
+        "- plan-changeset-guardrails: ok (skills/plan-changeset-guardrails/scripts/check_guardrails.py --help ok)",
         "- auto_export_issue: failed (ModuleNotFoundError: pydantic_core._pydantic_core)",
         "No unread messages.",
         "No queued messages.",
@@ -528,3 +535,27 @@ def test_render_startup_overview_includes_runtime_preflight(monkeypatch) -> None
         "Epics by state:",
         "- (none)",
     ]
+
+
+def test_planner_runtime_preflight_checks_guardrails_helper(monkeypatch) -> None:
+    module = _load_script()
+    captured_commands: list[list[str]] = []
+
+    def _fake_run(command: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
+        captured_commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", _fake_run)
+
+    results = module._planner_runtime_preflight(repo_root=Path("/repo"))
+
+    assert [result.name for result in results] == [
+        "plan-create-epic",
+        "plan-changeset-guardrails",
+        "auto_export_issue",
+    ]
+    assert all("--repo-dir" in command for command in captured_commands)
+    assert any(
+        "plan-changeset-guardrails/scripts/check_guardrails.py" in command[1]
+        for command in captured_commands
+    )

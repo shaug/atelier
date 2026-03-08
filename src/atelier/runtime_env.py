@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import shutil
 import sys
@@ -11,6 +12,12 @@ from typing import Sequence
 
 _WARNING_SAMPLE_LIMIT = 6
 _PROJECTED_RUNTIME_SELECTED_ENV = "ATELIER_PROJECTED_RUNTIME_SELECTED"
+_PROJECTED_RUNTIME_DEPENDENCY = "pydantic_core._pydantic_core"
+_INSTALLED_TOOL_RUNTIME_MARKERS: tuple[str, ...] = (
+    "/.local/share/uv/tools/atelier/",
+    "/Library/Application Support/uv/tools/atelier/",
+    "/site-packages/atelier/",
+)
 
 USER_DEFAULT_ENV_KEYS: frozenset[str] = frozenset(
     {
@@ -174,6 +181,86 @@ def maybe_reexec_projected_repo_runtime(
     )
 
 
+def ensure_projected_runtime_dependency(
+    *,
+    repo_root: Path | None,
+    script_path: Path,
+    dependency: str = _PROJECTED_RUNTIME_DEPENDENCY,
+    base_env: Mapping[str, str] | None = None,
+    current_executable: str | None = None,
+) -> None:
+    """Fail closed when a projected helper runtime lacks compiled dependencies.
+
+    Projected planner helpers are expected to either re-exec into the repo
+    runtime or stop with deterministic guidance before importing heavier
+    ``atelier`` modules. This catches the remaining failure mode where the
+    selected interpreter cannot import compiled dependencies such as
+    ``pydantic_core._pydantic_core``.
+
+    Args:
+        repo_root: Resolved repository root, if any.
+        script_path: Concrete helper script path for diagnostics.
+        dependency: Import path used as the runtime-health probe.
+        base_env: Optional environment mapping used for runtime resolution.
+        current_executable: Optional interpreter path override for testing.
+
+    Raises:
+        SystemExit: If the dependency cannot be imported in the selected
+            interpreter.
+    """
+    try:
+        importlib.import_module(dependency)
+        return
+    except Exception as exc:
+        dependency_error = exc
+
+    env = dict(os.environ if base_env is None else base_env)
+    current = str(current_executable or sys.executable or "").strip()
+    command = (
+        projected_repo_python_command(
+            repo_root=repo_root,
+            base_env=env,
+            current_executable=current,
+        )
+        if repo_root is not None
+        else None
+    )
+    runtime_label = _projected_runtime_label(
+        current_executable=current,
+        script_path=script_path,
+    )
+    repo_display = str(repo_root) if repo_root is not None else "(unresolved)"
+    print(
+        "error: planner helper runtime is unhealthy before importing atelier modules.",
+        file=sys.stderr,
+    )
+    print(
+        "boundary: repo-source bootstrap is separate; this is an interpreter "
+        "dependency failure, not another src-path-ordering regression.",
+        file=sys.stderr,
+    )
+    print(f"script: {script_path}", file=sys.stderr)
+    print(f"interpreter: {current or '(unknown)'}", file=sys.stderr)
+    print(f"runtime: {runtime_label}", file=sys.stderr)
+    print(f"repo_root: {repo_display}", file=sys.stderr)
+    print(f"dependency: {dependency}", file=sys.stderr)
+    print(
+        f"detail: {type(dependency_error).__name__}: {dependency_error}",
+        file=sys.stderr,
+    )
+    print(
+        "action: "
+        + _projected_runtime_recovery_guidance(
+            repo_root=repo_root,
+            script_path=script_path,
+            runtime_label=runtime_label,
+            command=command,
+        ),
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
 def _repo_python_candidate(repo_root: Path) -> Path | None:
     for relative_path in (
         Path(".venv/bin/python3"),
@@ -194,3 +281,40 @@ def _same_executable_path(current_executable: str, candidate: Path) -> bool:
         return Path(current).resolve() == candidate.resolve()
     except OSError:
         return False
+
+
+def _projected_runtime_label(*, current_executable: str, script_path: Path) -> str:
+    candidates = (current_executable, str(script_path))
+    for candidate in candidates:
+        if any(marker in candidate for marker in _INSTALLED_TOOL_RUNTIME_MARKERS):
+            return "installed-tool"
+    return "ambient"
+
+
+def _projected_runtime_recovery_guidance(
+    *,
+    repo_root: Path | None,
+    script_path: Path,
+    runtime_label: str,
+    command: tuple[str, ...] | None,
+) -> str:
+    if repo_root is None:
+        return (
+            "provide --repo-dir <repo-root> or run from an agent home with a "
+            "./worktree link so the helper can select the repo runtime."
+        )
+    if command is not None:
+        return (
+            "repair the selected repo runtime or rerun explicitly via "
+            f"`{' '.join((*command, str(script_path)))}'."
+        )
+    if runtime_label == "installed-tool":
+        return (
+            "repair or reinstall the uv tool environment, or rerun the helper "
+            f"from the repo runtime (for example `uv run --project {repo_root} "
+            f"python {script_path}`)."
+        )
+    return (
+        "repair the selected Python runtime so it can import compiled "
+        "dependencies, then rerun the helper."
+    )
