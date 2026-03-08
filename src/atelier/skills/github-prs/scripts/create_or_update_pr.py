@@ -203,6 +203,8 @@ def main(argv: Iterable[str]) -> int:
                         args.title,
                         "--body-file",
                         body_file,
+                        "--base",
+                        args.base,
                     ]
                 )
         edit_labels(args.repo, number, labels)

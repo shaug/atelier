@@ -201,6 +201,8 @@ def test_create_or_update_pr_edit_uses_body_file(capsys) -> None:
     def fake_run(cmd: list[str]) -> str:
         if cmd[:3] != ["gh", "pr", "edit"]:
             raise AssertionError(f"unexpected command: {cmd}")
+        base_index = cmd.index("--base")
+        observed["base"] = cmd[base_index + 1]
         body_index = cmd.index("--body-file")
         body_path = Path(cmd[body_index + 1])
         observed["body"] = body_path.read_text(encoding="utf-8")
@@ -234,6 +236,7 @@ def test_create_or_update_pr_edit_uses_body_file(capsys) -> None:
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["number"] == 41
+    assert observed["base"] == "main"
     assert observed["body_exists_during_call"] is True
     assert observed["body"] == "Body with `code` and $(echo safe)"
     body_path = observed["body_path"]
