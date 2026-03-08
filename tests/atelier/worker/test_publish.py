@@ -193,6 +193,49 @@ def test_render_pr_ticket_lines_allows_fixes_for_fresh_state_metadata() -> None:
     assert lines == ["- Fixes #387"]
 
 
+def test_render_pr_ticket_lines_keeps_fixes_for_stale_primary_exported_github_ticket() -> None:
+    issue = {
+        "description": (
+            "external_tickets: "
+            '[{"provider":"github","id":"607","relation":"primary","direction":"exported",'
+            '"sync_mode":"export","state":"open",'
+            '"state_updated_at":"2026-03-01T15:22:33Z","last_synced_at":"2026-03-01T15:22:33Z"}]'
+        )
+    }
+
+    lines = publish.render_pr_ticket_lines(
+        issue, now=dt.datetime(2026, 3, 1, 16, 55, tzinfo=dt.UTC)
+    )
+
+    assert lines == ["- Fixes #607"]
+
+
+def test_render_pr_ticket_lines_only_auto_closes_primary_exported_github_ticket() -> None:
+    issue = {
+        "description": (
+            "external_tickets: "
+            '[{"provider":"github","id":"607","relation":"primary","direction":"exported",'
+            '"sync_mode":"export","state":"open",'
+            '"state_updated_at":"2026-03-01T15:22:33Z","last_synced_at":"2026-03-01T15:22:33Z"},'
+            '{"provider":"github","id":"608","relation":"secondary","direction":"exported",'
+            '"sync_mode":"export","state":"open",'
+            '"state_updated_at":"2026-03-01T15:22:33Z","last_synced_at":"2026-03-01T15:22:33Z"},'
+            '{"provider":"linear","id":"ABC-19","relation":"context","direction":"exported",'
+            '"sync_mode":"export","state":"open"}]'
+        )
+    }
+
+    lines = publish.render_pr_ticket_lines(
+        issue, now=dt.datetime(2026, 3, 1, 16, 55, tzinfo=dt.UTC)
+    )
+
+    assert lines == [
+        "- Fixes #607",
+        "- Addresses #608",
+        "- Addresses ABC-19",
+    ]
+
+
 def test_render_pr_ticket_lines_does_not_upgrade_closed_ticket_from_explicit_clause() -> None:
     issue = {
         "description": (
