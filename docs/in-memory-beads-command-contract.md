@@ -100,7 +100,9 @@ family and exposes them through a typed in-memory client adapter in
   `--all`, and `--limit`.
 - `ready` uses Atelier's shared lifecycle helpers: runnable results must be leaf
   work beads, have active lifecycle status, and have all dependencies in a
-  terminal satisfied state.
+  satisfied terminal state. Closed changeset dependencies still require stored
+  integration evidence such as `pr_state: merged` or the `cs:merged` label,
+  matching worker startup's default dependency gate.
 - `create`, `update`, and `close` preserve parent/child and dependency
   relationships so higher-level planner/worker assertions can observe stable
   graph behavior across mutations.
@@ -114,10 +116,10 @@ family and exposes them through a typed in-memory client adapter in
   typed client plus the documented Tier 0 filters above. Non-contract flags such
   as `--silent`, `--body-file`, `--add-label`, and `--remove-label` fail closed
   instead of approximating subprocess-specific behavior.
-- Dependency readiness currently requires terminal lifecycle closure, not PR
-  integration metadata. This keeps Tier 0 tests aligned with the planner/worker
-  state transitions that depend on basic blocker closure while leaving
-  sequential publish semantics to later slices.
+- Dependency readiness does not emulate live integration probes. Tier 0 only
+  honors stored integration evidence already present on the dependency issue,
+  such as `pr_state: merged` or `cs:merged`; it does not synthesize merge proof
+  from git state or verify `changeset.integrated_sha`.
 
 ## Non-Goals
 

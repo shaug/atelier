@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from re import Pattern, compile
 
-from atelier import lifecycle
+from atelier import changeset_fields, lifecycle
 from atelier.lib.beads import IssueRecord
 
 _NUMERIC_ID_PATTERN: Pattern[str] = compile(r"^(?P<prefix>[a-z][a-z0-9_-]*)-(?P<value>\d+)$")
@@ -317,12 +317,16 @@ class InMemoryIssueStore:
             if not lifecycle.dependency_issue_satisfied(
                 status=dependency.status,
                 labels=set(dependency.labels),
-                require_integrated=False,
+                require_integrated=True,
+                review_state=self._dependency_review_state(dependency.id),
                 issue_type=dependency.issue_type,
                 has_work_children=self._has_work_children(dependency.id),
             ):
                 return False
         return True
+
+    def _dependency_review_state(self, issue_id: str) -> str | None:
+        return changeset_fields.review_state(self._export_issue(issue_id))
 
     def _export_issue(self, issue_id: str) -> dict[str, object]:
         issue = self._issues[issue_id]

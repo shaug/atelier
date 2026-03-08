@@ -221,6 +221,16 @@ def test_dispatcher_implements_tier_zero_core_issue_commands() -> None:
             "--json",
         ]
     )
+    merged = dispatcher.run(
+        [
+            "bd",
+            "update",
+            "at-2",
+            "--set-labels",
+            "cs:merged",
+            "--json",
+        ]
+    )
     shown = dispatcher.run(["bd", "show", created_issue.id, "--json"])
     closed = dispatcher.run(["bd", "close", "at-2", "--reason", "done", "--json"])
     ready_after = dispatcher.run(["bd", "ready", "--parent", "at-1", "--json"])
@@ -228,6 +238,7 @@ def test_dispatcher_implements_tier_zero_core_issue_commands() -> None:
     listed_ids = [item["id"] for item in json.loads(listed.stdout)]
     ready_before_ids = [item["id"] for item in json.loads(ready_before.stdout)]
     updated_issue = IssueRecord.model_validate(json.loads(updated.stdout)[0])
+    merged_issue = IssueRecord.model_validate(json.loads(merged.stdout)[0])
     shown_issue = IssueRecord.model_validate(json.loads(shown.stdout)[0])
     closed_issue = IssueRecord.model_validate(json.loads(closed.stdout)[0])
     ready_after_ids = [item["id"] for item in json.loads(ready_after.stdout)]
@@ -238,6 +249,7 @@ def test_dispatcher_implements_tier_zero_core_issue_commands() -> None:
     assert created_issue.labels == ("tier0", "worker")
     assert updated_issue.status == "in_progress"
     assert updated_issue.labels == ("worker", "in-flight")
+    assert merged_issue.labels == ("cs:merged",)
     assert shown_issue.id == created_issue.id
     assert closed_issue.status == "closed"
     assert ready_after_ids == ["at-3", created_issue.id]
@@ -278,6 +290,13 @@ def test_in_memory_client_supports_representative_planner_flow() -> None:
     ready_before = sync.ready(ReadyIssuesRequest(parent_id="at-1"))
     sync.close(CloseIssueRequest(issue_id="at-2"))
     ready_after = sync.ready(ReadyIssuesRequest(parent_id="at-1"))
+    sync.update(
+        UpdateIssueRequest(
+            issue_id="at-2",
+            labels=("cs:merged",),
+        )
+    )
+    ready_after_merge = sync.ready(ReadyIssuesRequest(parent_id="at-1"))
     listed_all = sync.list(ListIssuesRequest(parent_id="at-1", include_closed=True))
 
     assert str(environment.version) == IN_MEMORY_BEADS_VERSION
@@ -290,8 +309,39 @@ def test_in_memory_client_supports_representative_planner_flow() -> None:
     assert [issue.id for issue in listed] == ["at-2", "at-3"]
     assert [issue.id for issue in filtered] == ["at-3"]
     assert [issue.id for issue in ready_before] == ["at-2"]
-    assert [issue.id for issue in ready_after] == ["at-3"]
+    assert [issue.id for issue in ready_after] == []
+    assert [issue.id for issue in ready_after_merge] == ["at-3"]
     assert [issue.id for issue in listed_all] == ["at-2", "at-3", "at-4"]
+
+
+def test_ready_requires_integrated_evidence_for_closed_changeset_dependencies() -> None:
+    builder = IssueFixtureBuilder()
+    client, _store = build_in_memory_beads_client(
+        issues=(
+            builder.issue(
+                1,
+                title="Epic",
+                issue_type="epic",
+                status="open",
+                labels=("at:epic",),
+            ),
+            builder.issue(2, title="Base slice", parent=1, status="closed"),
+            builder.issue(3, title="Follow-up slice", parent=1, status="open", dependencies=(2,)),
+            builder.issue(
+                4,
+                title="Merged slice",
+                parent=1,
+                status="closed",
+                description="pr_state: merged",
+            ),
+            builder.issue(5, title="Merged follow-up", parent=1, status="open", dependencies=(4,)),
+        )
+    )
+    sync = SyncBeadsClient(client)
+
+    ready = sync.ready(ReadyIssuesRequest(parent_id="at-1"))
+
+    assert [issue.id for issue in ready] == ["at-5"]
 
 
 def test_in_memory_client_supports_representative_worker_flow() -> None:
