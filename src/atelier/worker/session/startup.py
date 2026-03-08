@@ -745,6 +745,15 @@ def run_startup_contract_service(
         if isinstance(issue.get("id"), str) and issue.get("id")
     }
 
+    def is_stale_noncanonical_hooked_issue(issue: dict[str, object]) -> bool:
+        issue_id = _issue_id(issue)
+        if hooked_epic is None or issue_id is None or issue_id == hooked_epic:
+            return False
+        assignee = issue.get("assignee")
+        if not isinstance(assignee, str) or assignee.strip() != agent_id:
+            return False
+        return lifecycle.has_namespaced_label(worker_selection.issue_labels(issue), "hooked")
+
     def load_claimable_issue(epic_id: str, *, stage: str) -> dict[str, object] | None:
         issue = issues_by_id.get(epic_id)
         if issue is None:
@@ -766,6 +775,16 @@ def run_startup_contract_service(
                 return None
             issues_by_id[epic_id] = issue
         return issue
+
+    def is_stale_noncanonical_hooked_epic(epic_id: str, *, stage: str) -> bool:
+        issue = load_claimable_issue(epic_id, stage=stage)
+        if issue is None or not is_stale_noncanonical_hooked_issue(issue):
+            return False
+        atelier_log.debug(
+            "startup demoting stale noncanonical hook "
+            f"stage={stage} epic={epic_id} hooked_epic={hooked_epic}"
+        )
+        return True
 
     def is_excluded(epic_id: str, *, stage: str) -> bool:
         if epic_id in excluded_epics:
@@ -830,6 +849,8 @@ def run_startup_contract_service(
             if epic_id in seen_epics:
                 continue
             seen_epics.add(epic_id)
+            if is_stale_noncanonical_hooked_epic(epic_id, stage="merge-conflict"):
+                continue
             if is_excluded(epic_id, stage="merge-conflict"):
                 continue
             selection = stage_call(
@@ -881,6 +902,8 @@ def run_startup_contract_service(
             if epic_id in seen_epics:
                 continue
             seen_epics.add(epic_id)
+            if is_stale_noncanonical_hooked_epic(epic_id, stage="review-feedback"):
+                continue
             if is_excluded(epic_id, stage="review-feedback"):
                 continue
             if not is_claimable(epic_id, stage="review-feedback"):
@@ -986,10 +1009,11 @@ def run_startup_contract_service(
             "scan.global-merge-conflict",
             lambda: service.select_global_conflicted_changeset(repo_slug=repo_slug),
         )
-        if global_conflict is not None and is_excluded(
-            global_conflict.epic_id, stage="global-merge-conflict"
-        ):
-            global_conflict = None
+        if global_conflict is not None:
+            if is_stale_noncanonical_hooked_epic(
+                global_conflict.epic_id, stage="global-merge-conflict"
+            ) or is_excluded(global_conflict.epic_id, stage="global-merge-conflict"):
+                global_conflict = None
         if global_conflict is not None:
             return resume_conflict(global_conflict)
         feedback = select_feedback_candidate(unhooked_epics)
@@ -999,10 +1023,12 @@ def run_startup_contract_service(
             "scan.global-review-feedback",
             lambda: service.select_global_review_feedback_changeset(repo_slug=repo_slug),
         )
-        if global_feedback is not None and not is_excluded(
-            global_feedback.epic_id, stage="global-review-feedback"
-        ):
-            if not is_claimable(global_feedback.epic_id, stage="global-review-feedback"):
+        if global_feedback is not None:
+            if is_stale_noncanonical_hooked_epic(
+                global_feedback.epic_id, stage="global-review-feedback"
+            ) or is_excluded(global_feedback.epic_id, stage="global-review-feedback"):
+                global_feedback = None
+            elif not is_claimable(global_feedback.epic_id, stage="global-review-feedback"):
                 global_feedback = None
         if global_feedback is not None:
             return resume_feedback(global_feedback)
@@ -1011,6 +1037,7 @@ def run_startup_contract_service(
         candidate = issue.get("id")
         if (
             candidate
+            and not is_stale_noncanonical_hooked_issue(issue)
             and not is_excluded(str(candidate), stage="assigned")
             and epic_has_actionable_changeset(str(candidate))
         ):
@@ -1068,11 +1095,16 @@ def run_startup_contract_service(
             epic_id=None, changeset_id=None, should_exit=True, reason="queue_blocked"
         )
 
+    selection_issues = [
+        (dict(issue, assignee=None) if is_stale_noncanonical_hooked_issue(issue) else issue)
+        for issue in issues
+    ]
+
     if mode == "auto":
         selected_epic = worker_selection.select_epic_auto(
             [
                 issue
-                for issue in issues
+                for issue in selection_issues
                 if not is_excluded(str(issue.get("id") or ""), stage="auto")
             ],
             agent_id=agent_id,
@@ -1082,7 +1114,7 @@ def run_startup_contract_service(
         selected_epic = service.select_epic_prompt(
             [
                 issue
-                for issue in issues
+                for issue in selection_issues
                 if not is_excluded(str(issue.get("id") or ""), stage="prompt")
             ],
             agent_id=agent_id,
@@ -1091,7 +1123,7 @@ def run_startup_contract_service(
         )
     if selected_epic is None:
         selected_epic = worker_selection.select_epic_from_ready_changesets(
-            issues=issues,
+            issues=selection_issues,
             ready_changesets=service.ready_changesets_global(),
             is_actionable=epic_has_actionable_changeset,
         )

@@ -776,6 +776,88 @@ def test_run_startup_contract_prioritizes_review_feedback() -> None:
     assert next_changeset_calls == 0
 
 
+def test_run_startup_contract_skips_review_feedback_on_stale_noncanonical_hook() -> None:
+    feedback_calls: list[str] = []
+
+    def select_review_feedback_changeset(
+        *, epic_id: str, repo_slug: str | None
+    ) -> ReviewFeedbackSelection | None:
+        _ = repo_slug
+        feedback_calls.append(epic_id)
+        if epic_id == "at-stale":
+            return ReviewFeedbackSelection(
+                epic_id=epic_id,
+                changeset_id=f"{epic_id}.1",
+                feedback_at="2026-02-20T00:00:00Z",
+            )
+        return None
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        resolve_hooked_epic=lambda *_args: "at-hooked",
+        list_epics=lambda: [
+            {
+                "id": "at-hooked",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": "atelier/worker/codex/p100",
+                "created_at": "2026-02-20T00:00:00Z",
+            },
+            {
+                "id": "at-stale",
+                "status": "open",
+                "labels": ["at:epic", "at:hooked"],
+                "assignee": "atelier/worker/codex/p100",
+                "created_at": "2026-02-21T00:00:00Z",
+            },
+            {
+                "id": "at-ready",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": None,
+                "created_at": "2026-02-22T00:00:00Z",
+            },
+        ],
+        next_changeset=lambda **kwargs: (
+            {"id": "at-ready.1"} if kwargs["epic_id"] == "at-ready" else None
+        ),
+        select_review_feedback_changeset=select_review_feedback_changeset,
+    )
+
+    assert result.reason == "selected_auto"
+    assert result.epic_id == "at-ready"
+    assert feedback_calls == ["at-hooked", "at-ready"]
+
+
+def test_run_startup_contract_demotes_stale_noncanonical_hook_to_available_work() -> None:
+    result = _run_startup(
+        resolve_hooked_epic=lambda *_args: "at-hooked",
+        list_epics=lambda: [
+            {
+                "id": "at-hooked",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": "atelier/worker/codex/p100",
+                "created_at": "2026-02-20T00:00:00Z",
+            },
+            {
+                "id": "at-stale",
+                "status": "open",
+                "labels": ["at:epic", "at:hooked"],
+                "assignee": "atelier/worker/codex/p100",
+                "created_at": "2026-02-21T00:00:00Z",
+            },
+        ],
+        next_changeset=lambda **kwargs: (
+            {"id": "at-stale.1"} if kwargs["epic_id"] == "at-stale" else None
+        ),
+    )
+
+    assert result.reason == "selected_auto"
+    assert result.epic_id == "at-stale"
+
+
 def test_run_startup_contract_first_eligible_short_circuits_review_feedback() -> None:
     select_calls: list[str] = []
 
