@@ -36,6 +36,7 @@ from .models import (
     SupportedOperation,
     UpdateIssueRequest,
 )
+from .process import SubprocessBeadsClient, SubprocessBeadsTransport
 
 __all__ = [
     "DEFAULT_COMPATIBILITY_POLICY",
@@ -66,6 +67,8 @@ __all__ = [
     "ReadyIssuesRequest",
     "SemanticVersion",
     "ShowIssueRequest",
+    "SubprocessBeadsClient",
+    "SubprocessBeadsTransport",
     "SupportedOperation",
     "UnsupportedOperationError",
     "UnsupportedVersionError",

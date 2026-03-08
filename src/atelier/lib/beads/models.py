@@ -102,6 +102,7 @@ class BeadsCapability(str, Enum):
 class SupportedOperation(str, Enum):
     """Supported Beads operations."""
 
+    INSPECT_ENVIRONMENT = "inspect-environment"
     CREATE = "create"
     UPDATE = "update"
     SHOW = "show"
@@ -140,7 +141,10 @@ class IssueRecord(BeadsModel):
     design: NonBlankStr | None = None
     acceptance_criteria: NonBlankStr | None = None
     status: NonBlankStr | None = None
-    type: NonBlankStr | None = None
+    type: NonBlankStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("type", "issue_type", "issueType"),
+    )
     assignee: NonBlankStr | None = None
     owner: NonBlankStr | None = None
     priority: StrictInt | None = None
