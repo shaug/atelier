@@ -18,6 +18,11 @@ when launching planner/worker/editor/shell subprocesses.
   run from an agent home that has a local `./worktree` link.
 - Planner startup refresh commands should pass `--agent-id` explicitly instead
   of relying on inherited shell state.
+- The `refresh_overview.py` failure after `at-g5a19` was an uncovered
+  interpreter-selection mode, not another source-path-ordering regression:
+  projected planner scripts could still start under an incompatible ambient
+  `python3` / installed-tool runtime and then import repo source against those
+  installed dependencies.
 - Runtime warnings about removed inherited keys are now immediate guidance for
   explicit launch context, not future deprecation notices.
 

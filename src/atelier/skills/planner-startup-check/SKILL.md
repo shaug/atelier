@@ -71,6 +71,11 @@ reject unsupported invocation forms.
 
 ## On-demand refresh
 
+- Runtime note: the post-`at-g5a19` failure shape was not another repo-source
+  path-ordering regression. The uncovered mode was launching projected planner
+  scripts with an incompatible ambient `python3` / installed-tool interpreter,
+  then importing repo source against that dependency set. Projected planner
+  scripts now switch into the repo runtime before importing `atelier` modules.
 - During an active planner session, re-run the same read-only overview with:
   `python3 skills/planner-startup-check/scripts/refresh_overview.py --agent-id "<planner-agent-id>" --repo-dir ./worktree`
 - This refresh is read-only and includes:

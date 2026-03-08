@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from atelier import runtime_env
@@ -49,3 +51,35 @@ def test_sanitize_subprocess_environment_empty_mapping_does_not_inherit_ambient(
 
     assert env == {}
     assert removed == ()
+
+
+def test_projected_repo_python_command_prefers_repo_venv_python(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    python_path = repo_root / ".venv" / "bin" / "python3"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python_path.chmod(python_path.stat().st_mode | 0o111)
+
+    command = runtime_env.projected_repo_python_command(
+        repo_root=repo_root,
+        current_executable="/usr/bin/python3",
+    )
+
+    assert command == (str(python_path.resolve()),)
+
+
+def test_projected_repo_python_command_returns_none_when_current_matches_repo_venv(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    python_path = repo_root / ".venv" / "bin" / "python3"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python_path.chmod(python_path.stat().st_mode | 0o111)
+
+    command = runtime_env.projected_repo_python_command(
+        repo_root=repo_root,
+        current_executable=str(python_path.resolve()),
+    )
+
+    assert command is None
