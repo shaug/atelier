@@ -56,10 +56,17 @@ def _bootstrap_source_import() -> Path | None:
 
 _BOOTSTRAP_REPO_ROOT = _bootstrap_source_import()
 
-from atelier.runtime_env import maybe_reexec_projected_repo_runtime  # noqa: E402
+from atelier.runtime_env import (  # noqa: E402
+    ensure_projected_runtime_dependency,
+    maybe_reexec_projected_repo_runtime,
+)
 
 if __name__ == "__main__":
     maybe_reexec_projected_repo_runtime(
+        repo_root=_BOOTSTRAP_REPO_ROOT,
+        script_path=Path(__file__).resolve(),
+    )
+    ensure_projected_runtime_dependency(
         repo_root=_BOOTSTRAP_REPO_ROOT,
         script_path=Path(__file__).resolve(),
     )
@@ -93,6 +100,10 @@ _RUNTIME_PREFLIGHT_SPECS: tuple[_RuntimePreflightSpec, ...] = (
     _RuntimePreflightSpec(
         name="plan-create-epic",
         script_relpath=Path("plan-create-epic/scripts/create_epic.py"),
+    ),
+    _RuntimePreflightSpec(
+        name="plan-changeset-guardrails",
+        script_relpath=Path("plan-changeset-guardrails/scripts/check_guardrails.py"),
     ),
     _RuntimePreflightSpec(
         name="auto_export_issue",
@@ -187,7 +198,7 @@ def _planner_runtime_preflight(*, repo_root: Path) -> tuple[StartupRuntimePrefli
         script_path = skills_root / spec.script_relpath
         try:
             completed = subprocess.run(
-                [sys.executable, str(script_path), "--help"],
+                [sys.executable, str(script_path), "--repo-dir", str(repo_root), "--help"],
                 check=False,
                 capture_output=True,
                 text=True,

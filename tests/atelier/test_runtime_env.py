@@ -83,3 +83,52 @@ def test_projected_repo_python_command_returns_none_when_current_matches_repo_ve
     )
 
     assert command is None
+
+
+def test_ensure_projected_runtime_dependency_returns_when_import_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    imported: list[str] = []
+
+    def _fake_import_module(name: str):
+        imported.append(name)
+        return object()
+
+    monkeypatch.setattr(runtime_env.importlib, "import_module", _fake_import_module)
+
+    runtime_env.ensure_projected_runtime_dependency(
+        repo_root=Path("/repo"),
+        script_path=Path("/repo/skills/example.py"),
+    )
+
+    assert imported == ["pydantic_core._pydantic_core"]
+
+
+def test_ensure_projected_runtime_dependency_fails_closed_for_installed_tool_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _fake_import_module(_name: str):
+        raise ModuleNotFoundError("No module named 'pydantic_core._pydantic_core'")
+
+    monkeypatch.setattr(runtime_env.importlib, "import_module", _fake_import_module)
+    monkeypatch.setattr(runtime_env, "projected_repo_python_command", lambda **_kwargs: None)
+
+    with pytest.raises(SystemExit) as exc_info:
+        runtime_env.ensure_projected_runtime_dependency(
+            repo_root=Path("/repo"),
+            script_path=Path(
+                "/Users/scott/.local/share/uv/tools/atelier/lib/python3.11/"
+                "site-packages/atelier/skills/planner-startup-check/scripts/"
+                "refresh_overview.py"
+            ),
+            current_executable="/Users/scott/.local/share/uv/tools/atelier/bin/python",
+        )
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "planner helper runtime is unhealthy" in captured.err
+    assert "runtime: installed-tool" in captured.err
+    assert "dependency: pydantic_core._pydantic_core" in captured.err
+    assert "not another src-path-ordering regression" in captured.err
+    assert "repair or reinstall the uv tool environment" in captured.err

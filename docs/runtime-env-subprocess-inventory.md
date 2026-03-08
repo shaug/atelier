@@ -23,6 +23,10 @@ when launching planner/worker/editor/shell subprocesses.
   projected planner scripts could still start under an incompatible ambient
   `python3` / installed-tool runtime and then import repo source against those
   installed dependencies.
+- That boundary is now explicit in planner helper diagnostics: repo-source
+  bootstrap bugs and installed-tool dependency-health failures are treated as
+  separate classes. Helpers fail closed before import-time crashes when the
+  selected interpreter cannot import `pydantic_core._pydantic_core`.
 - Runtime warnings about removed inherited keys are now immediate guidance for
   explicit launch context, not future deprecation notices.
 

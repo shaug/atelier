@@ -110,6 +110,22 @@ def _link_repo_python(repo_root: Path) -> None:
     repo_python.symlink_to(Path(sys.executable).resolve())
 
 
+def _write_repo_python_without_site_packages(repo_root: Path) -> None:
+    repo_python = repo_root / ".venv" / "bin" / "python3"
+    repo_python.parent.mkdir(parents=True, exist_ok=True)
+    repo_python.write_text(
+        "\n".join(
+            [
+                "#!/bin/sh",
+                f'exec {Path(sys.executable).resolve()} -S "$@"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    repo_python.chmod(repo_python.stat().st_mode | 0o111)
+
+
 def _ambient_python_executable() -> str:
     current = Path(sys.executable).resolve()
     candidates = (
@@ -257,6 +273,88 @@ def test_projected_auto_export_prefers_explicit_repo_dir_source(tmp_path: Path) 
     )
 
 
+def test_projected_check_guardrails_reorders_repo_src_ahead_of_installed_package(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _copy_script(
+        tmp_path,
+        skill_name="plan-changeset-guardrails",
+        script_name="check_guardrails.py",
+    )
+    repo_root = _fake_repo(
+        tmp_path,
+        sentinel_import="beads",
+        extra_modules={
+            "bd_invocation.py": (
+                "def with_bd_mode(*args, beads_dir=None, env=None):\n    return ['bd', *args]\n"
+            ),
+            "beads_context.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(__file__, encoding='utf-8')\n"
+                "\n"
+                "def resolve_runtime_repo_dir_hint(*, repo_dir=None, cwd=None, env=None):\n"
+                "    return (repo_dir, None)\n"
+            ),
+            "planner_contract.py": (
+                "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
+            ),
+        },
+    )
+    installed_root = _fake_installed_package(
+        tmp_path,
+        modules={
+            "beads.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(__file__, encoding='utf-8')\n"
+            ),
+            "bd_invocation.py": (
+                "def with_bd_mode(*args, beads_dir=None, env=None):\n"
+                "    return ['installed', *args]\n"
+            ),
+            "beads_context.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(__file__, encoding='utf-8')\n"
+                "\n"
+                "def resolve_runtime_repo_dir_hint(*, repo_dir=None, cwd=None, env=None):\n"
+                "    return (repo_dir, None)\n"
+            ),
+            "planner_contract.py": (
+                "def validate_authoring_contract(*_args, **_kwargs):\n    return []\n"
+            ),
+        },
+    )
+    sentinel_path = tmp_path / "check-guardrails-sentinel.txt"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(projected_script),
+            "--repo-dir",
+            str(repo_root),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "BOOTSTRAP_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": os.pathsep.join([str(installed_root), str(repo_root / "src")]),
+        },
+    )
+
+    assert completed.returncode == 0
+    assert sentinel_path.read_text(encoding="utf-8") == str(
+        repo_root / "src" / "atelier" / "beads_context.py"
+    )
+
+
 def test_projected_refresh_overview_reorders_repo_src_ahead_of_installed_package(
     tmp_path: Path,
 ) -> None:
@@ -395,7 +493,7 @@ def test_projected_refresh_overview_reorders_repo_src_ahead_of_installed_package
     )
 
 
-def test_projected_refresh_overview_reexecs_into_repo_runtime_for_preflight(
+def test_projected_refresh_overview_fails_closed_when_repo_runtime_is_dependency_unhealthy(
     tmp_path: Path,
 ) -> None:
     agent_home, projected_script = _copy_script(
@@ -497,7 +595,7 @@ def test_projected_refresh_overview_reexecs_into_repo_runtime_for_preflight(
             ),
         },
     )
-    _link_repo_python(repo_root)
+    _write_repo_python_without_site_packages(repo_root)
     installed_root = _fake_installed_package(
         tmp_path,
         modules={
@@ -558,5 +656,9 @@ def test_projected_refresh_overview_reexecs_into_repo_runtime_for_preflight(
         },
     )
 
-    assert completed.returncode == 0
-    assert sentinel_path.read_text(encoding="utf-8") == str(Path(sys.executable).resolve())
+    assert completed.returncode == 1
+    assert not sentinel_path.exists()
+    assert "planner helper runtime is unhealthy" in completed.stderr
+    assert "runtime: ambient" in completed.stderr
+    assert "dependency: pydantic_core._pydantic_core" in completed.stderr
+    assert "repair the selected repo runtime or rerun explicitly via" in completed.stderr
