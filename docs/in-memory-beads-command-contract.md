@@ -9,9 +9,10 @@ the test-only command harness that later `at-s1vc.*` changesets plug semantic
 behavior into so existing Atelier runtime flows can be exercised without
 shelling out to a real `bd` process.
 
-This file is the source contract for the `atelier.testing.beads` dispatcher and
-fixture harness. Subsequent in-memory implementation changesets must update this
-document first when they add, remove, or reinterpret command families.
+This file is the source contract for the `atelier.testing.beads` dispatcher,
+shared in-memory store, optional command backend, and fixture harness.
+Subsequent in-memory implementation changesets must update this document first
+when they add, remove, or reinterpret command families.
 
 ## Execution Contract
 
@@ -68,6 +69,30 @@ Notes:
 - The dispatcher publishes parseable help output for each documented route even
   before that route has real stateful behavior.
 
+## Implemented Stateful Semantics
+
+The Tier 1 ownership/message slice now extends the shared in-memory issue store
+used by the typed Tier 0 client and by the optional command backend:
+
+- `show`: returns deterministic issue payloads for seeded issues
+- `list`: supports `--label`, `--assignee`, `--parent`, `--status`, `--title`,
+  `--limit`, and `--all`
+- `update`: supports `--claim`, `--status`, `--assignee`, `--add-label`,
+  `--remove-label`, `--description`, `--body-file`, `--append-notes`, and
+  `--title`
+- `close`: marks a seeded issue closed
+- `slot show`, `slot set`, `slot clear`: persist per-issue slot values such as
+  `hook`
+
+`InMemoryBeadsBackend` is now a thin command-harness adapter that composes
+`InMemoryIssueStore`, `InMemoryCoreIssuesHandler`, and Tier 1 slot handlers.
+It does not maintain a second issue state model. Tests provide the issue graph
+they need up front, then route `atelier.beads` command execution through the
+shared store with `patch_in_memory_beads(...)`.
+
+Commands outside this implemented subset continue to fail explicitly with the
+published `not implemented yet` marker.
+
 ## Fixture Contract
 
 `atelier.testing.beads.IssueFixtureBuilder` provides deterministic payload
@@ -93,8 +118,8 @@ family and exposes them through a typed in-memory client in
   protocol backed directly by the in-memory store.
 - The Tier 0 backend semantics now live directly in `InMemoryBeadsClient` and
   `InMemoryIssueStore`. The dispatcher remains an optional command-harness seam
-  from `at-s1vc.1` for explicit route-level tests; it is not part of the typed
-  backend path.
+  from `at-s1vc.1`, and Tier 1 extends that same store rather than forking a
+  second in-memory state model.
 - The default in-memory compatibility policy currently validates only the
   implemented Tier 0 operations: `show`, `list`, `ready`, `create`, `update`,
   and `close`, even though `inspect_environment()` still reports help-probed
@@ -140,5 +165,7 @@ family and exposes them through a typed in-memory client in
 - `src/atelier/testing/beads/core_issues.py`
 - `src/atelier/testing/beads/dispatcher.py`
 - `src/atelier/testing/beads/fixtures.py`
+- `src/atelier/testing/beads/backend.py`
 - `src/atelier/testing/beads/store.py`
+- `src/atelier/testing/beads/patch.py`
 - `tests/atelier/testing/test_in_memory_beads.py`

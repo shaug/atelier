@@ -1,9 +1,15 @@
 """Public test-support surface for the in-memory Beads backend."""
 
+from .backend import (
+    InMemoryBeadsBackend,
+    InMemoryBeadsCommandRunner,
+    InMemoryOwnershipSlotsHandler,
+)
 from .client import (
     IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY,
     InMemoryBeadsClient,
     build_in_memory_beads_client,
+    build_in_memory_dispatcher,
     build_in_memory_issue_store,
 )
 from .contract import (
@@ -27,7 +33,8 @@ from .fixtures import (
     build_issue_payload,
     build_issue_reference,
 )
-from .store import InMemoryIssueStore, StoredIssue
+from .patch import patch_in_memory_beads
+from .store import InMemoryIssueStore, StoredIssue, UNSET_UPDATE_FIELD
 
 __all__ = [
     "DEFAULT_FIXTURE_TIMESTAMP",
@@ -39,16 +46,22 @@ __all__ = [
     "CommandEnvelope",
     "CommandFamilyHandler",
     "CommandInvocation",
+    "InMemoryBeadsBackend",
     "InMemoryBeadsClient",
     "InMemoryBeadsCommandBackend",
     "InMemoryBeadsCommandRoute",
+    "InMemoryBeadsCommandRunner",
     "InMemoryBeadsDispatcher",
     "InMemoryIssueStore",
+    "InMemoryOwnershipSlotsHandler",
     "IssueFixtureBuilder",
     "StoredIssue",
+    "UNSET_UPDATE_FIELD",
     "build_in_memory_beads_client",
+    "build_in_memory_dispatcher",
     "build_in_memory_issue_store",
     "build_issue_payload",
     "build_issue_reference",
     "normalize_invocation",
+    "patch_in_memory_beads",
 ]

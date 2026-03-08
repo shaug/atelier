@@ -1,15 +1,17 @@
-"""In-memory Tier 0 issue state and mutation semantics for Beads tests."""
+"""In-memory issue state and mutation semantics for Beads tests."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from re import Pattern, compile
+import threading
 
 from atelier import changeset_fields, lifecycle
 from atelier.lib.beads import IssueRecord
 
 _NUMERIC_ID_PATTERN: Pattern[str] = compile(r"^(?P<prefix>[a-z][a-z0-9_-]*)-(?P<value>\d+)$")
+UNSET_UPDATE_FIELD = object()
 
 
 def _dedupe_strings(values: Iterable[str]) -> tuple[str, ...]:
@@ -93,11 +95,12 @@ class StoredIssue:
 
 
 class InMemoryIssueStore:
-    """Stateful in-memory issue store for Tier 0 Beads command semantics.
+    """Stateful in-memory issue store for Beads command semantics.
 
     Args:
         issues: Initial issue payloads to seed into the store.
         prefix: Prefix used for generated numeric ids.
+        slots: Optional per-issue slot state keyed by issue id.
     """
 
     def __init__(
@@ -105,12 +108,18 @@ class InMemoryIssueStore:
         *,
         issues: Iterable[Mapping[str, object]] = (),
         prefix: str = "at",
+        slots: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         self._prefix = prefix.strip() or "at"
         self._issues: dict[str, StoredIssue] = {}
         self._order: list[str] = []
+        self._slots: dict[str, dict[str, str]] = {
+            issue_id: _clean_slot_map(slot_map)
+            for issue_id, slot_map in (slots or {}).items()
+        }
         self._next_numeric_id = 1
         self._event_counter = 0
+        self._lock = threading.RLock()
         for payload in issues:
             self._seed_issue(payload)
         self._repair_parent_child_links()
@@ -118,7 +127,8 @@ class InMemoryIssueStore:
     def show(self, issue_id: str) -> dict[str, object]:
         """Return one issue payload or raise ``KeyError`` when missing."""
 
-        return self._export_issue(self._require_issue(issue_id).id)
+        with self._lock:
+            return self._export_issue(self._require_issue(issue_id).id)
 
     def list(
         self,
@@ -127,55 +137,60 @@ class InMemoryIssueStore:
         status: str | None = None,
         assignee: str | None = None,
         title_query: str | None = None,
+        title: str | None = None,
         labels: tuple[str, ...] = (),
         include_closed: bool = False,
         limit: int | None = None,
     ) -> list[dict[str, object]]:
-        """Return issues filtered with the Tier 0 list semantics."""
+        """Return issues filtered with the current in-memory list semantics."""
 
-        title_filter = title_query.lower() if title_query else None
-        status_filter = lifecycle.canonical_lifecycle_status(status)
-        requested_labels = _dedupe_strings(labels)
-        items: list[dict[str, object]] = []
-        for issue_id in self._order:
-            issue = self._issues[issue_id]
-            issue_status = lifecycle.canonical_lifecycle_status(issue.status)
-            if parent_id is not None and issue.parent_id != parent_id:
-                continue
-            if status_filter is not None and issue_status != status_filter:
-                continue
-            if status_filter is None and not include_closed and issue_status == "closed":
-                continue
-            if assignee is not None and (issue.assignee or "") != assignee:
-                continue
-            if title_filter is not None and title_filter not in issue.title.lower():
-                continue
-            if requested_labels and not set(requested_labels).issubset(issue.labels):
-                continue
-            items.append(self._export_issue(issue_id))
-        if limit is None or limit == 0:
-            return items
-        return items[: max(0, limit)]
+        with self._lock:
+            title_filter = title_query.lower() if title_query else None
+            status_filter = lifecycle.canonical_lifecycle_status(status)
+            requested_labels = _dedupe_strings(labels)
+            items: list[dict[str, object]] = []
+            for issue_id in self._order:
+                issue = self._issues[issue_id]
+                issue_status = lifecycle.canonical_lifecycle_status(issue.status)
+                if parent_id is not None and issue.parent_id != parent_id:
+                    continue
+                if status_filter is not None and issue_status != status_filter:
+                    continue
+                if status_filter is None and not include_closed and issue_status == "closed":
+                    continue
+                if assignee is not None and (issue.assignee or "") != assignee:
+                    continue
+                if title is not None and issue.title != title:
+                    continue
+                if title_filter is not None and title_filter not in issue.title.lower():
+                    continue
+                if requested_labels and not set(requested_labels).issubset(issue.labels):
+                    continue
+                items.append(self._export_issue(issue_id))
+            if limit is None or limit == 0:
+                return items
+            return items[: max(0, limit)]
 
     def ready(self, *, parent_id: str | None = None) -> list[dict[str, object]]:
         """Return runnable leaf work beads with satisfied dependencies."""
 
-        ready_items: list[dict[str, object]] = []
-        for issue_id in self._order:
-            issue = self._issues[issue_id]
-            if parent_id is not None and issue.parent_id != parent_id:
-                continue
-            evaluation = lifecycle.evaluate_runnable_leaf(
-                status=issue.status,
-                labels=set(issue.labels),
-                issue_type=issue.issue_type,
-                parent_id=issue.parent_id,
-                has_work_children=self._has_work_children(issue_id),
-                dependencies_satisfied=self._dependencies_satisfied(issue),
-            )
-            if evaluation.runnable:
-                ready_items.append(self._export_issue(issue_id))
-        return ready_items
+        with self._lock:
+            ready_items: list[dict[str, object]] = []
+            for issue_id in self._order:
+                issue = self._issues[issue_id]
+                if parent_id is not None and issue.parent_id != parent_id:
+                    continue
+                evaluation = lifecycle.evaluate_runnable_leaf(
+                    status=issue.status,
+                    labels=set(issue.labels),
+                    issue_type=issue.issue_type,
+                    parent_id=issue.parent_id,
+                    has_work_children=self._has_work_children(issue_id),
+                    dependencies_satisfied=self._dependencies_satisfied(issue),
+                )
+                if evaluation.runnable:
+                    ready_items.append(self._export_issue(issue_id))
+            return ready_items
 
     def create(
         self,
@@ -193,30 +208,31 @@ class InMemoryIssueStore:
     ) -> dict[str, object]:
         """Create and return a new open issue."""
 
-        if parent_id is not None:
-            self._require_issue(parent_id)
-        issue_id = self._allocate_issue_id()
-        timestamp = self._next_timestamp()
-        stored = StoredIssue(
-            id=issue_id,
-            title=title,
-            issue_type=issue_type,
-            status="open",
-            labels=_dedupe_strings(labels),
-            parent_id=parent_id,
-            description=description,
-            design=design,
-            acceptance_criteria=acceptance_criteria,
-            assignee=assignee,
-            priority=priority,
-            estimate=estimate,
-            extra_fields={"created_at": timestamp, "updated_at": timestamp, "metadata": {}},
-        )
-        self._issues[issue_id] = stored
-        self._order.append(issue_id)
-        if parent_id is not None:
-            self._append_child(parent_id, issue_id)
-        return self._export_issue(issue_id)
+        with self._lock:
+            if parent_id is not None:
+                self._require_issue(parent_id)
+            issue_id = self._allocate_issue_id()
+            timestamp = self._next_timestamp()
+            stored = StoredIssue(
+                id=issue_id,
+                title=title,
+                issue_type=issue_type,
+                status="open",
+                labels=_dedupe_strings(labels),
+                parent_id=parent_id,
+                description=description,
+                design=design,
+                acceptance_criteria=acceptance_criteria,
+                assignee=assignee,
+                priority=priority,
+                estimate=estimate,
+                extra_fields={"created_at": timestamp, "updated_at": timestamp, "metadata": {}},
+            )
+            self._issues[issue_id] = stored
+            self._order.append(issue_id)
+            if parent_id is not None:
+                self._append_child(parent_id, issue_id)
+            return self._export_issue(issue_id)
 
     def update(
         self,
@@ -227,44 +243,94 @@ class InMemoryIssueStore:
         design: str | None = None,
         acceptance_criteria: str | None = None,
         status: str | None = None,
-        assignee: str | None = None,
+        assignee: str | object = UNSET_UPDATE_FIELD,
         priority: int | None = None,
         estimate: int | None = None,
         labels: tuple[str, ...] | None = None,
+        add_labels: tuple[str, ...] = (),
+        remove_labels: tuple[str, ...] = (),
+        append_notes: tuple[str, ...] = (),
     ) -> dict[str, object]:
-        """Update a Tier 0 issue and return the new payload."""
+        """Update an issue and return the new payload."""
 
-        issue = self._require_issue(issue_id)
-        if title is not None:
-            issue.title = title
-        if description is not None:
-            issue.description = description
-        if design is not None:
-            issue.design = design
-        if acceptance_criteria is not None:
-            issue.acceptance_criteria = acceptance_criteria
-        if status is not None:
-            issue.status = status
-        if assignee is not None:
-            issue.assignee = assignee or None
-        if priority is not None:
-            issue.priority = priority
-        if estimate is not None:
-            issue.estimate = estimate
-        if labels is not None:
-            issue.labels = _dedupe_strings(labels)
-        issue.extra_fields["updated_at"] = self._next_timestamp()
-        return self._export_issue(issue_id)
+        with self._lock:
+            issue = self._require_issue(issue_id)
+            if title is not None:
+                issue.title = title
+            if description is not None:
+                issue.description = description
+            if design is not None:
+                issue.design = design
+            if acceptance_criteria is not None:
+                issue.acceptance_criteria = acceptance_criteria
+            if status is not None:
+                issue.status = status
+            if assignee is not UNSET_UPDATE_FIELD:
+                issue.assignee = _clean_optional_string(assignee)
+            if priority is not None:
+                issue.priority = priority
+            if estimate is not None:
+                issue.estimate = estimate
+            if labels is not None:
+                issue.labels = _dedupe_strings(labels)
+            if add_labels:
+                issue.labels = _dedupe_strings((*issue.labels, *add_labels))
+            if remove_labels:
+                removed = set(_dedupe_strings(remove_labels))
+                issue.labels = tuple(label for label in issue.labels if label not in removed)
+            if append_notes:
+                issue.description = _append_issue_notes(issue.description, append_notes)
+            issue.extra_fields["updated_at"] = self._next_timestamp()
+            return self._export_issue(issue_id)
+
+    def claim(self, issue_id: str, *, actor: str) -> dict[str, object]:
+        """Claim an issue for one actor while preserving single-owner semantics."""
+
+        normalized_actor = actor.strip()
+        if not normalized_actor:
+            raise ValueError("claim requires an actor")
+        with self._lock:
+            issue = self._require_issue(issue_id)
+            if issue.assignee not in {None, normalized_actor}:
+                raise ValueError(f"issue {issue_id} already has an assignee")
+            issue.assignee = normalized_actor
+            issue.extra_fields["updated_at"] = self._next_timestamp()
+            return self._export_issue(issue_id)
 
     def close(self, issue_id: str, *, reason: str | None = None) -> dict[str, object]:
         """Close an issue while preserving existing graph relationships."""
 
-        issue = self._require_issue(issue_id)
-        issue.status = "closed"
-        issue.extra_fields["updated_at"] = self._next_timestamp()
-        if reason is not None:
-            issue.extra_fields["close_reason"] = reason
-        return self._export_issue(issue_id)
+        with self._lock:
+            issue = self._require_issue(issue_id)
+            issue.status = "closed"
+            issue.extra_fields["updated_at"] = self._next_timestamp()
+            if reason is not None:
+                issue.extra_fields["close_reason"] = reason
+            return self._export_issue(issue_id)
+
+    def show_slots(self, issue_id: str) -> dict[str, str]:
+        """Return the slot mapping for one issue."""
+
+        with self._lock:
+            return dict(self._slots.get(issue_id, {}))
+
+    def set_slot(self, issue_id: str, slot_name: str, slot_value: str) -> None:
+        """Persist one slot value for one issue."""
+
+        with self._lock:
+            issue_slots = self._slots.setdefault(issue_id, {})
+            issue_slots[slot_name] = slot_value
+
+    def clear_slot(self, issue_id: str, slot_name: str) -> None:
+        """Clear one slot value for one issue."""
+
+        with self._lock:
+            issue_slots = self._slots.get(issue_id)
+            if issue_slots is None:
+                return
+            issue_slots.pop(slot_name, None)
+            if not issue_slots:
+                self._slots.pop(issue_id, None)
 
     def _seed_issue(self, payload: Mapping[str, object]) -> None:
         issue = StoredIssue.from_payload(payload)
@@ -367,4 +433,35 @@ class InMemoryIssueStore:
         return payload
 
 
-__all__ = ["InMemoryIssueStore", "StoredIssue"]
+def _clean_optional_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _append_issue_notes(
+    description: str | None,
+    append_notes: tuple[str, ...],
+) -> str:
+    base = description.rstrip("\n") if description else ""
+    joined = "\n".join(note for note in append_notes if note)
+    if not joined:
+        return description or ""
+    if not base:
+        return f"{joined}\n"
+    return f"{base}\n{joined}\n"
+
+
+def _clean_slot_map(slot_map: Mapping[str, str]) -> dict[str, str]:
+    cleaned: dict[str, str] = {}
+    for name, value in slot_map.items():
+        normalized_name = name.strip()
+        normalized_value = value.strip()
+        if not normalized_name or not normalized_value:
+            continue
+        cleaned[normalized_name] = normalized_value
+    return cleaned
+
+
+__all__ = ["InMemoryIssueStore", "StoredIssue", "UNSET_UPDATE_FIELD"]

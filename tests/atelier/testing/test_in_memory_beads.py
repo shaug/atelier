@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,7 @@ from atelier.testing.beads import (
     IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY,
     SUPPORTED_GLOBAL_FLAGS,
     CommandEnvelope,
+    InMemoryBeadsBackend,
     InMemoryBeadsClient,
     InMemoryBeadsCommandBackend,
     InMemoryBeadsDispatcher,
@@ -170,7 +172,6 @@ def test_normalize_invocation_preserves_command_and_global_tokens() -> None:
     assert invocation.global_tokens == ("--db=/tmp/beads.db", "--sandbox")
     assert invocation.command_tokens == ("vc", "status", "--json")
     assert invocation.requests_json is True
-
 
 def test_dispatcher_implements_tier_zero_core_issue_commands() -> None:
     builder = IssueFixtureBuilder()
@@ -432,3 +433,71 @@ def test_in_memory_tier_zero_policy_tracks_only_implemented_operations() -> None
         SupportedOperation.UPDATE,
         SupportedOperation.CLOSE,
     }
+
+
+def test_stateful_backend_round_trips_hook_slots() -> None:
+    builder = IssueFixtureBuilder()
+    backend = InMemoryBeadsBackend(
+        seeded_issues=(builder.issue("at-agent", issue_type="agent", labels=("at:agent",)),)
+    )
+
+    backend.run(["bd", "slot", "set", "at-agent", "hook", "at-epic"])
+    show_result = backend.run(["bd", "slot", "show", "at-agent", "--json"])
+
+    assert json.loads(show_result.stdout) == {"slots": {"hook": "at-epic"}}
+
+    backend.run(["bd", "slot", "clear", "at-agent", "hook"])
+    cleared_result = backend.run(["bd", "slot", "show", "at-agent", "--json"])
+
+    assert json.loads(cleared_result.stdout) == {"slots": {}}
+
+
+def test_stateful_backend_fails_closed_when_claim_owner_differs() -> None:
+    builder = IssueFixtureBuilder()
+    backend = InMemoryBeadsBackend(
+        seeded_issues=(
+            builder.issue(
+                "at-epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                assignee="agent-a",
+            ),
+        )
+    )
+
+    result = backend.run(["bd", "--actor", "agent-b", "update", "at-epic", "--claim", "--json"])
+
+    assert result.returncode == 1
+    assert "already has an assignee" in result.stderr
+    assert backend.state.show("at-epic")["assignee"] == "agent-a"
+
+
+def test_stateful_backend_allows_only_one_concurrent_claim_winner() -> None:
+    builder = IssueFixtureBuilder()
+    backend = InMemoryBeadsBackend(
+        seeded_issues=(builder.issue("at-epic", issue_type="epic", labels=("at:epic",)),)
+    )
+    barrier = threading.Barrier(2)
+    winners: list[str] = []
+    failures: list[str] = []
+
+    def claim(actor: str) -> None:
+        barrier.wait(timeout=1.0)
+        result = backend.run(["bd", "--actor", actor, "update", "at-epic", "--claim", "--json"])
+        if result.returncode == 0:
+            winners.append(json.loads(result.stdout)[0]["assignee"])
+        else:
+            failures.append(result.stderr)
+
+    first = threading.Thread(target=claim, args=("agent-a",))
+    second = threading.Thread(target=claim, args=("agent-b",))
+    first.start()
+    second.start()
+    first.join(timeout=1.0)
+    second.join(timeout=1.0)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert len(winners) == 1
+    assert len(failures) == 1
+    assert backend.state.show("at-epic")["assignee"] == winners[0]
