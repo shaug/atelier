@@ -856,10 +856,32 @@ class _StartupContractService(worker_startup.StartupContractService):
     def stale_family_assigned_epics(
         self, issues: list[dict[str, object]], *, agent_id: str
     ) -> list[dict[str, object]]:
+        def find_agent_issue(assignee: str) -> dict[str, object] | None:
+            return beads.find_agent_bead(
+                assignee,
+                beads_root=self._beads_root,
+                cwd=self._repo_root,
+            )
+
+        def get_agent_hook(agent_issue: dict[str, object]) -> str | None:
+            agent_bead_id = str(agent_issue.get("id") or "").strip()
+            if not agent_bead_id:
+                return None
+            try:
+                return beads.get_agent_hook(
+                    agent_bead_id,
+                    beads_root=self._beads_root,
+                    cwd=self._repo_root,
+                )
+            except SystemExit:
+                return None
+
         return worker_selection.stale_family_assigned_epics(
             issues,
             agent_id=agent_id,
             is_session_active=agent_home.is_session_agent_active,
+            find_agent_issue=find_agent_issue,
+            get_agent_hook=get_agent_hook,
         )
 
     def select_conflicted_changeset(
