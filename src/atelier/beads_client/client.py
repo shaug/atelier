@@ -1,4 +1,4 @@
-"""Async-first public client interfaces for Beads operations."""
+"""Async-first Beads client and transport protocols."""
 
 from __future__ import annotations
 
@@ -22,65 +22,32 @@ from .models import (
 
 @runtime_checkable
 class BeadsTransport(Protocol):
-    """Low-level async transport used by process-backed or in-memory clients."""
+    """Low-level async transport for process-backed or in-memory clients."""
 
-    async def execute(self, request: BeadsCommandRequest) -> BeadsCommandResult:
-        """Execute a low-level Beads command request."""
-
-        ...
+    async def execute(self, request: BeadsCommandRequest) -> BeadsCommandResult: ...
 
 
 @runtime_checkable
 class AsyncBeadsClient(Protocol):
-    """Async-first client contract for supported ``bd`` operations."""
+    """Async-first contract for the supported Beads operations."""
 
     @property
-    def compatibility_policy(self) -> CompatibilityPolicy:
-        """Return the bounded compatibility policy for this client."""
+    def compatibility_policy(self) -> CompatibilityPolicy: ...
 
-        ...
+    async def inspect_environment(self) -> BeadsEnvironment: ...
 
-    async def inspect_environment(self) -> BeadsEnvironment:
-        """Return the active ``bd`` environment and detected capabilities."""
+    async def show(self, request: ShowIssueRequest) -> IssueRecord: ...
 
-        ...
+    async def list(self, request: ListIssuesRequest) -> tuple[IssueRecord, ...]: ...
 
-    async def show(self, request: ShowIssueRequest) -> IssueRecord:
-        """Load a single issue by id."""
+    async def ready(self, request: ReadyIssuesRequest) -> tuple[IssueRecord, ...]: ...
 
-        ...
+    async def create(self, request: CreateIssueRequest) -> IssueRecord: ...
 
-    async def list(self, request: ListIssuesRequest) -> tuple[IssueRecord, ...]:
-        """List issues matching the provided filters."""
+    async def update(self, request: UpdateIssueRequest) -> IssueRecord: ...
 
-        ...
+    async def close(self, request: CloseIssueRequest) -> IssueRecord: ...
 
-    async def ready(self, request: ReadyIssuesRequest) -> tuple[IssueRecord, ...]:
-        """Return issues that are ready to execute or review."""
+    async def add_dependency(self, request: DependencyMutationRequest) -> IssueRecord: ...
 
-        ...
-
-    async def create(self, request: CreateIssueRequest) -> IssueRecord:
-        """Create an issue and return its normalized record."""
-
-        ...
-
-    async def update(self, request: UpdateIssueRequest) -> IssueRecord:
-        """Mutate an issue and return its normalized record."""
-
-        ...
-
-    async def close(self, request: CloseIssueRequest) -> IssueRecord:
-        """Close an issue and return its normalized record."""
-
-        ...
-
-    async def add_dependency(self, request: DependencyMutationRequest) -> IssueRecord:
-        """Add a dependency edge and return the refreshed issue."""
-
-        ...
-
-    async def remove_dependency(self, request: DependencyMutationRequest) -> IssueRecord:
-        """Remove a dependency edge and return the refreshed issue."""
-
-        ...
+    async def remove_dependency(self, request: DependencyMutationRequest) -> IssueRecord: ...

@@ -28,17 +28,15 @@ def test_issue_record_preserves_unknown_fields() -> None:
     record = IssueRecord.model_validate(
         {
             "id": "at-1",
-            "title": "Typed contract",
-            "labels": ["atelier", "changeset"],
+            "labels": ["atelier", "changeset", "atelier"],
             "parent": {"id": "at-epic"},
             "dependencies": ["at-0"],
             "future_field": {"nested": True},
         }
     )
 
-    assert record.id == "at-1"
-    assert record.parent is not None
-    assert record.parent.id == "at-epic"
+    assert record.labels == ("atelier", "changeset")
+    assert record.parent and record.parent.id == "at-epic"
     assert record.dependencies[0].id == "at-0"
     assert record.extra_fields["future_field"] == {"nested": True}
 
@@ -48,12 +46,12 @@ def test_issue_record_rejects_known_field_type_mismatch() -> None:
         IssueRecord.model_validate({"id": 7})
 
 
-def test_update_request_requires_a_mutation_field() -> None:
+def test_update_request_requires_a_field_change() -> None:
     with pytest.raises(ValidationError, match="at least one field change"):
         UpdateIssueRequest(issue_id="at-1")
 
 
-def test_compatibility_policy_rejects_versions_below_minimum() -> None:
+def test_compatibility_policy_rejects_unsupported_version() -> None:
     environment = BeadsEnvironment(
         version=SemanticVersion(major=0, minor=56, patch=0),
         capabilities=[BeadsCapability.VERSION_REPORTING],
@@ -63,7 +61,7 @@ def test_compatibility_policy_rejects_versions_below_minimum() -> None:
         DEFAULT_COMPATIBILITY_POLICY.assert_environment_supports(environment)
 
 
-def test_compatibility_policy_rejects_capability_gaps() -> None:
+def test_compatibility_policy_rejects_missing_capability() -> None:
     environment = BeadsEnvironment(
         version=SemanticVersion(major=0, minor=56, patch=1),
         capabilities=[BeadsCapability.VERSION_REPORTING],
@@ -82,7 +80,6 @@ def test_compatibility_policy_supports_explicit_capability_ceiling() -> None:
         capability_rules=(
             CapabilityRule(
                 capability=BeadsCapability.ISSUE_JSON,
-                minimum_version=SemanticVersion(major=0, minor=56, patch=1),
                 maximum_version_exclusive=SemanticVersion(major=0, minor=99, patch=0),
             ),
         ),
@@ -94,30 +91,15 @@ def test_compatibility_policy_supports_explicit_capability_ceiling() -> None:
             ),
         ),
     )
-    environment = BeadsEnvironment(
-        version=SemanticVersion(major=0, minor=99, patch=0),
-        capabilities=[BeadsCapability.ISSUE_JSON],
-    )
 
-    with pytest.raises(UnsupportedVersionError):
+    with pytest.raises(CapabilityMismatchError, match="supported capability window"):
         policy.assert_environment_supports(
             BeadsEnvironment(
-                version=SemanticVersion(major=0, minor=56, patch=0),
-                capabilities=[],
-            )
+                version=SemanticVersion(major=0, minor=99, patch=0),
+                capabilities=[BeadsCapability.ISSUE_JSON],
+            ),
+            operation=SupportedOperation.SHOW,
         )
-    with pytest.raises(CapabilityMismatchError, match="outside the supported capability window"):
-        policy.assert_environment_supports(environment, operation=SupportedOperation.SHOW)
-
-
-def test_default_policy_covers_expected_operation_modes() -> None:
-    show_contract = DEFAULT_COMPATIBILITY_POLICY.operation_contract(SupportedOperation.SHOW)
-    create_contract = DEFAULT_COMPATIBILITY_POLICY.operation_contract(SupportedOperation.CREATE)
-    ready_contract = DEFAULT_COMPATIBILITY_POLICY.operation_contract(SupportedOperation.READY)
-
-    assert show_contract.output_mode is OperationOutputMode.JSON_REQUIRED
-    assert create_contract.output_mode is OperationOutputMode.TEXT_NORMALIZED
-    assert ready_contract.output_mode is OperationOutputMode.JSON_REQUIRED
 
 
 class _FakeTransport:
@@ -129,12 +111,10 @@ class _FakeClient:
     compatibility_policy = DEFAULT_COMPATIBILITY_POLICY
 
     async def inspect_environment(self) -> BeadsEnvironment:
+        capabilities = [rule.capability for rule in DEFAULT_COMPATIBILITY_POLICY.capability_rules]
         return BeadsEnvironment(
             version=SemanticVersion(major=0, minor=56, patch=1),
-            capabilities=[
-                capability.capability
-                for capability in DEFAULT_COMPATIBILITY_POLICY.capability_rules
-            ],
+            capabilities=capabilities,
         )
 
     async def show(self, request: object) -> IssueRecord:

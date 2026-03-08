@@ -1,10 +1,4 @@
-"""Public contract for the typed Beads client package.
-
-The package defines a transport seam plus typed request, response, error, and
-compatibility models. Higher-level Atelier abstractions should depend on this
-contract rather than calling ``bd`` directly so future in-memory and alternate
-transport implementations can match the same semantics.
-"""
+"""Public contract for the typed Beads client package."""
 
 from .client import AsyncBeadsClient, BeadsTransport
 from .compatibility import (
@@ -41,7 +35,6 @@ from .models import (
     ShowIssueRequest,
     SupportedOperation,
     UpdateIssueRequest,
-    validate_issue_record,
 )
 
 __all__ = [
@@ -76,5 +69,4 @@ __all__ = [
     "UnsupportedOperationError",
     "UnsupportedVersionError",
     "UpdateIssueRequest",
-    "validate_issue_record",
 ]
