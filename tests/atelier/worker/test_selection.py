@@ -197,6 +197,129 @@ def test_stale_family_assigned_epics_reclaims_inactive_assignees_across_families
     assert [item["id"] for item in stale] == ["at-stale", "at-other-family"]
 
 
+def test_stale_family_assigned_epics_reclaims_stale_heartbeat_without_pid_metadata() -> None:
+    issue = {
+        "id": "at-stale-heartbeat",
+        "status": "in_progress",
+        "labels": ["at:epic"],
+        "assignee": "atelier/worker/codex/runtime",
+        "created_at": "2026-02-20T00:00:00+00:00",
+    }
+
+    stale = selection.stale_family_assigned_epics(
+        [issue],
+        agent_id="atelier/worker/codex/p999",
+        is_session_active=lambda _assignee: False,
+        find_agent_issue=lambda _assignee: {
+            "id": "at-agent-runtime",
+            "description": "heartbeat_at: 2026-02-01T00:00:00Z\n",
+        },
+        now=selection.parse_issue_time("2026-03-08T00:00:00+00:00"),
+    )
+
+    assert [item["id"] for item in stale] == ["at-stale-heartbeat"]
+
+
+def test_stale_family_assigned_epics_preserves_live_worker_when_agent_bead_missing() -> None:
+    issue = {
+        "id": "at-live-missing-agent",
+        "status": "in_progress",
+        "labels": ["at:epic"],
+        "assignee": "atelier/worker/codex/p222",
+        "created_at": "2026-02-20T00:00:00+00:00",
+    }
+
+    stale = selection.stale_family_assigned_epics(
+        [issue],
+        agent_id="atelier/worker/codex/p999",
+        is_session_active=lambda _assignee: True,
+        find_agent_issue=lambda _assignee: None,
+    )
+
+    assert stale == []
+
+
+def test_stale_family_assigned_epics_preserves_unknown_worker_when_agent_bead_missing() -> None:
+    issue = {
+        "id": "at-unknown-missing-agent",
+        "status": "in_progress",
+        "labels": ["at:epic"],
+        "assignee": "atelier/worker/codex/runtime",
+        "created_at": "2026-02-20T00:00:00+00:00",
+    }
+
+    stale = selection.stale_family_assigned_epics(
+        [issue],
+        agent_id="atelier/worker/codex/p999",
+        is_session_active=lambda _assignee: False,
+        find_agent_issue=lambda _assignee: None,
+    )
+
+    assert stale == []
+
+
+def test_stale_family_assigned_epics_reclaims_live_worker_when_hook_missing() -> None:
+    issue = {
+        "id": "at-unhooked",
+        "status": "in_progress",
+        "labels": ["at:epic"],
+        "assignee": "atelier/worker/codex/p222",
+        "created_at": "2026-02-20T00:00:00+00:00",
+    }
+
+    stale = selection.stale_family_assigned_epics(
+        [issue],
+        agent_id="atelier/worker/codex/p999",
+        is_session_active=lambda _assignee: True,
+        find_agent_issue=lambda _assignee: {"id": "at-agent-live"},
+        get_agent_hook=lambda _agent_issue: None,
+    )
+
+    assert [item["id"] for item in stale] == ["at-unhooked"]
+
+
+def test_stale_family_assigned_epics_preserves_live_worker_when_hook_lookup_fails() -> None:
+    issue = {
+        "id": "at-hook-error",
+        "status": "in_progress",
+        "labels": ["at:epic"],
+        "assignee": "atelier/worker/codex/p222",
+        "created_at": "2026-02-20T00:00:00+00:00",
+    }
+
+    stale = selection.stale_family_assigned_epics(
+        [issue],
+        agent_id="atelier/worker/codex/p999",
+        is_session_active=lambda _assignee: True,
+        find_agent_issue=lambda _assignee: {"id": "at-agent-live"},
+        get_agent_hook=lambda _agent_issue: selection.AgentHookObservation.unknown(
+            "hook_lookup_failed"
+        ),
+    )
+
+    assert stale == []
+
+
+def test_stale_family_assigned_epics_preserves_live_worker_with_matching_hook() -> None:
+    issue = {
+        "id": "at-active-hook",
+        "status": "in_progress",
+        "labels": ["at:epic"],
+        "assignee": "atelier/worker/codex/p222",
+        "created_at": "2026-02-20T00:00:00+00:00",
+    }
+
+    stale = selection.stale_family_assigned_epics(
+        [issue],
+        agent_id="atelier/worker/codex/p999",
+        is_session_active=lambda _assignee: True,
+        find_agent_issue=lambda _assignee: {"id": "at-agent-live"},
+        get_agent_hook=lambda _agent_issue: "at-active-hook",
+    )
+
+    assert stale == []
+
+
 def test_select_epic_from_ready_changesets_uses_epic_for_child_issue() -> None:
     issues = [
         {"id": "at-epic", "status": "open", "labels": ["at:epic"], "assignee": None},

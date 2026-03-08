@@ -645,6 +645,125 @@ def test_run_worker_once_retries_after_claim_conflict() -> None:
     assert startup_contexts[1].excluded_epic_ids == ("at-conflict",)
 
 
+def test_run_worker_once_retries_claim_as_stale_reclaim_after_claim_time_conflict() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p3c",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p3c",
+    )
+    stale_assignee = "atelier/worker/codex/runtime"
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-conflict",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+
+    claim_calls: list[str | None] = []
+
+    def claim_epic(
+        epic_id: str,
+        *_args: object,
+        allow_takeover_from: str | None = None,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        assert epic_id == "at-conflict"
+        claim_calls.append(allow_takeover_from)
+        if allow_takeover_from is None:
+            raise SystemExit(1)
+        return {"id": epic_id, "title": epic_id}
+
+    def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
+        if args[:2] == ["show", "at-conflict"]:
+            return [{"id": "at-conflict", "assignee": stale_assignee}]
+        return []
+
+    def run_bd_command(
+        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
+    ):  # noqa: ANN001, ARG001
+        if args[:3] == ["slot", "show", "at-stale-agent"]:
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout='{"slots":{"hook":null}}',
+                stderr="",
+            )
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    deps.infra.beads.claim_epic = Mock(side_effect=claim_epic)
+    deps.infra.beads.run_bd_json = Mock(side_effect=run_bd_json)
+    deps.infra.beads.run_bd_command = Mock(side_effect=run_bd_command)
+    deps.infra.beads.find_agent_bead = Mock(
+        side_effect=lambda agent_id, **_kwargs: (
+            {
+                "id": "at-stale-agent",
+                "description": "heartbeat_at: 2026-02-01T00:00:00Z\n",
+            }
+            if agent_id == stale_assignee
+            else {"id": "at-agent"}
+        )
+    )
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p3c"),
+        deps=deps,
+    )
+
+    assert summary.started is False
+    assert summary.reason == "no_ready_changesets"
+    assert summary.epic_id == "at-conflict"
+    assert claim_calls == [None, stale_assignee]
+    assert any(
+        "Retrying stale-assignee reclaim after claim conflict" in str(call.args[0])
+        for call in deps.control._say.call_args_list
+    )
+    deps.infra.beads.clear_agent_hook.assert_any_call(
+        "at-stale-agent",
+        beads_root=Path("/project/.atelier/.beads"),
+        cwd=Path("/repo"),
+        expected_hook="at-conflict",
+    )
+
+
+def test_classify_claim_failure_fails_closed_when_hook_lookup_fails() -> None:
+    stale_assignee = "atelier/worker/codex/p777"
+    beads = SimpleNamespace(
+        run_bd_json=Mock(return_value=[{"id": "at-conflict", "assignee": stale_assignee}]),
+        find_agent_bead=Mock(return_value={"id": "at-stale-agent"}),
+        run_bd_command=Mock(
+            return_value=subprocess.CompletedProcess(
+                args=["slot", "show", "at-stale-agent", "--json"],
+                returncode=1,
+                stdout="",
+                stderr="slot read failed",
+            )
+        ),
+    )
+
+    with patch(
+        "atelier.worker.session.runner.agent_home.is_session_agent_active",
+        return_value=True,
+    ):
+        failure = runner._classify_claim_failure(  # pyright: ignore[reportPrivateUsage]
+            beads=beads,
+            epic_id="at-conflict",
+            agent_id="atelier/worker/codex/p3c",
+            allow_takeover_from=None,
+            beads_root=Path("/project/.atelier/.beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert failure.kind == "assignee_conflict"
+    assert failure.assignee == stale_assignee
+    assert failure.detail == "hook_lookup_failed"
+
+
 def test_run_worker_once_reclaims_stale_explicit_assignment_and_clears_old_hook() -> None:
     agent = AgentHome(
         name="worker",
