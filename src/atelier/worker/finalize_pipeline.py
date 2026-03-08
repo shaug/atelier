@@ -787,16 +787,6 @@ def run_finalize_pipeline(
     if terminal_result is not None:
         return terminal_result
     if branch_pr and pushed and not pr_payload:
-        blocked = _block_incomplete_north_star_review(
-            issue=issue,
-            changeset_id=changeset_id,
-            agent_id=agent_id,
-            beads_root=beads_root,
-            repo_root=repo_root,
-            service=service,
-        )
-        if blocked is not None:
-            return blocked
         integration_ok, integrated_sha = service.changeset_integration_signal(
             issue,
             repo_slug=repo_slug,
@@ -809,6 +799,16 @@ def run_finalize_pipeline(
                 terminal_state="merged",
                 integrated_sha=integrated_sha,
             )
+        blocked = _block_incomplete_north_star_review(
+            issue=issue,
+            changeset_id=changeset_id,
+            agent_id=agent_id,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            service=service,
+        )
+        if blocked is not None:
+            return blocked
     if branch_pr and pushed and not pr_payload:
         return service.handle_pushed_without_pr(
             issue=issue,

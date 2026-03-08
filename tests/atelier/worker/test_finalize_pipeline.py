@@ -1447,3 +1447,59 @@ def test_run_finalize_pipeline_blocks_pr_creation_without_north_star_review(
     assert result.reason == "changeset_blocked_north_star_review"
     assert result.continue_running is False
     assert blocked == ["north-star review checklist incomplete"]
+
+
+def test_run_finalize_pipeline_finalizes_integrated_pushed_changeset_without_pr_gate(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+        "acceptance_criteria": "1) First criterion.\n",
+        "notes": "implementation_2026-03-07:\n- no north-star note yet.\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("north-star blocked audit note must not be recorded")
+        ),
+    )
+
+    service = _FinalizeServiceStub()
+    blocked: list[str] = []
+    finalized: list[tuple[str, str | None]] = []
+    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked.append(reason)
+    service.changeset_integration_signal_fn = lambda _issue, *, repo_slug, git_path: (
+        True,
+        "abc1234",
+    )
+    service.handle_pushed_without_pr_fn = lambda **_kwargs: (_ for _ in ()).throw(
+        AssertionError("PR creation path must not run when integration is already proven")
+    )
+    service.finalize_terminal_changeset_fn = lambda *, context, terminal_state, integrated_sha: (
+        finalized.append((terminal_state, integrated_sha))
+        or FinalizeResult(continue_running=True, reason="changeset_complete")
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_complete"
+    assert result.continue_running is True
+    assert blocked == []
+    assert finalized == [("merged", "abc1234")]
