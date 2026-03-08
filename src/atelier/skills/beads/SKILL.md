@@ -30,6 +30,10 @@ description: >-
      beads.
 1. Show issue details when needed:
    - `bd show <issue-id>`
+   - For planner ownership-policy checks, do not infer execution ownership from
+     the raw `Owner:` header. Use the assignee-based helper instead:
+     `python3 scripts/check_issue_ownership.py <issue-id>`
+   - From an agent home, add `--repo-dir ./worktree` to the helper command.
 1. When creating new issues, prefer explicit fields:
    - `bd create --acceptance ... --design ... --estimate ... --priority ...`
    - use `--notes` / `--append-notes` for addendums without rewriting
@@ -48,6 +52,8 @@ description: >-
 - Beads is the source of truth for intent and sequencing. Execution metadata
   should live in Atelier's project store and be derived from git/PR state rather
   than custom Beads schema.
+- Planner ownership policy keys off `assignee` for executable work. Treat
+  `owner` as metadata only unless a separate contract says otherwise.
 - Lifecycle authority is canonical status + graph shape. `cs:*` lifecycle labels
   are not execution gates.
 - Use labels and description fields according to

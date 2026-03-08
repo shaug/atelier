@@ -145,6 +145,7 @@ def test_install_workspace_skills_serializes_concurrent_writers(
 
 def test_packaged_planning_skills_include_scripts() -> None:
     definitions = skills.load_packaged_skills()
+    assert "scripts/check_issue_ownership.py" in definitions["beads"].files
     assert "scripts/create_changeset.py" in definitions["plan-changesets"].files
     assert "scripts/create_epic.py" in definitions["plan-create-epic"].files
     assert "scripts/refresh_overview.py" in definitions["planner-startup-check"].files
