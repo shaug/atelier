@@ -1,4 +1,4 @@
-"""Public contract for the typed Beads client package."""
+"""Public contract for the reusable Beads library surface."""
 
 from .client import AsyncBeadsClient, BeadsTransport
 from .compatibility import (

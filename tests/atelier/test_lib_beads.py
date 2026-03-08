@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from atelier.beads_client import (
+from atelier.lib.beads import (
     DEFAULT_COMPATIBILITY_POLICY,
     AsyncBeadsClient,
     BeadsCapability,
