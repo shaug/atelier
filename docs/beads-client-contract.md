@@ -71,6 +71,8 @@ models and typed errors as the integration boundary.
 The in-memory implementation planned in `at-s1vc` should implement the same
 `Beads` protocol rather than exposing a parallel API.
 
+- The command-dispatch harness contract lives in
+  `docs/in-memory-beads-command-contract.md`.
 - Reuse the request/response models from `atelier.lib.beads.models`.
 - Preserve the typed error semantics from `atelier.lib.beads.errors`.
 - Support the same v1 operation inventory; do not add extra public methods that
