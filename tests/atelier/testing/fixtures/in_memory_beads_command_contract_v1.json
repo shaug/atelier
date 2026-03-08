@@ -1,0 +1,221 @@
+{
+  "emulated_version": "0.56.1",
+  "default_unimplemented_returncode": 2,
+  "supported_global_flags": [
+    "--actor",
+    "--allow-stale",
+    "--db",
+    "--dolt-auto-commit",
+    "--profile",
+    "--quiet",
+    "--readonly",
+    "--sandbox",
+    "--verbose"
+  ],
+  "routes": [
+    {
+      "family_id": "core-issues",
+      "tier": "tier-0",
+      "command": [
+        "show"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "core-issues",
+      "tier": "tier-0",
+      "command": [
+        "list"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "core-issues",
+      "tier": "tier-0",
+      "command": [
+        "ready"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "core-issues",
+      "tier": "tier-0",
+      "command": [
+        "create"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "core-issues",
+      "tier": "tier-0",
+      "command": [
+        "update"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "core-issues",
+      "tier": "tier-0",
+      "command": [
+        "close"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "dependency-edges",
+      "tier": "tier-0",
+      "command": [
+        "dep",
+        "add"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "dependency-edges",
+      "tier": "tier-0",
+      "command": [
+        "dep",
+        "remove"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "ownership-slots",
+      "tier": "tier-1",
+      "command": [
+        "slot",
+        "show"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "ownership-slots",
+      "tier": "tier-1",
+      "command": [
+        "slot",
+        "set"
+      ],
+      "supports_json_output": false
+    },
+    {
+      "family_id": "ownership-slots",
+      "tier": "tier-1",
+      "command": [
+        "slot",
+        "clear"
+      ],
+      "supports_json_output": false
+    },
+    {
+      "family_id": "startup-config",
+      "tier": "tier-2",
+      "command": [
+        "prime"
+      ],
+      "supports_json_output": false
+    },
+    {
+      "family_id": "startup-config",
+      "tier": "tier-2",
+      "command": [
+        "init"
+      ],
+      "supports_json_output": false
+    },
+    {
+      "family_id": "startup-config",
+      "tier": "tier-2",
+      "command": [
+        "config",
+        "get"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "startup-config",
+      "tier": "tier-2",
+      "command": [
+        "config",
+        "set"
+      ],
+      "supports_json_output": false
+    },
+    {
+      "family_id": "startup-config",
+      "tier": "tier-2",
+      "command": [
+        "types"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "startup-config",
+      "tier": "tier-2",
+      "command": [
+        "rename-prefix"
+      ],
+      "supports_json_output": false
+    },
+    {
+      "family_id": "runtime-admin",
+      "tier": "tier-3",
+      "command": [
+        "stats"
+      ],
+      "supports_json_output": false
+    },
+    {
+      "family_id": "runtime-admin",
+      "tier": "tier-3",
+      "command": [
+        "doctor"
+      ],
+      "supports_json_output": false
+    },
+    {
+      "family_id": "runtime-admin",
+      "tier": "tier-3",
+      "command": [
+        "migrate"
+      ],
+      "supports_json_output": false
+    },
+    {
+      "family_id": "runtime-admin",
+      "tier": "tier-3",
+      "command": [
+        "dolt",
+        "show"
+      ],
+      "supports_json_output": true
+    },
+    {
+      "family_id": "runtime-admin",
+      "tier": "tier-3",
+      "command": [
+        "dolt",
+        "set",
+        "database"
+      ],
+      "supports_json_output": false
+    },
+    {
+      "family_id": "runtime-admin",
+      "tier": "tier-3",
+      "command": [
+        "dolt",
+        "commit"
+      ],
+      "supports_json_output": false
+    },
+    {
+      "family_id": "runtime-admin",
+      "tier": "tier-3",
+      "command": [
+        "vc",
+        "status"
+      ],
+      "supports_json_output": true
+    }
+  ]
+}
