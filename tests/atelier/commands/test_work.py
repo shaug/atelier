@@ -148,6 +148,7 @@ def test_start_worker_applies_env_translated_yes_default(
     assert kwargs["mode"] == "prompt"
     assert kwargs["run_mode"] == "default"
     assert kwargs["args"].yes is True
+    assert kwargs["args"].restart_on_update is False
 
 
 def test_start_worker_cli_values_override_env_defaults(
@@ -164,6 +165,55 @@ def test_start_worker_cli_values_override_env_defaults(
     assert kwargs["mode"] == "auto"
     assert kwargs["run_mode"] == "watch"
     assert kwargs["args"].yes is True
+    assert kwargs["args"].restart_on_update is True
+
+
+def test_start_worker_watch_mode_defaults_restart_on_update() -> None:
+    args = SimpleNamespace(
+        epic_id=None,
+        mode="auto",
+        run_mode="watch",
+        dry_run=True,
+        yes=False,
+        restart_on_update=None,
+    )
+
+    with patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions:
+        work_cmd.start_worker(args)
+
+    assert run_sessions.call_args.kwargs["args"].restart_on_update is True
+
+
+def test_start_worker_watch_mode_allows_restart_opt_out() -> None:
+    args = SimpleNamespace(
+        epic_id=None,
+        mode="auto",
+        run_mode="watch",
+        dry_run=True,
+        yes=False,
+        restart_on_update=False,
+    )
+
+    with patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions:
+        work_cmd.start_worker(args)
+
+    assert run_sessions.call_args.kwargs["args"].restart_on_update is False
+
+
+def test_start_worker_default_mode_requires_restart_opt_in() -> None:
+    args = SimpleNamespace(
+        epic_id=None,
+        mode="auto",
+        run_mode="default",
+        dry_run=True,
+        yes=False,
+        restart_on_update=True,
+    )
+
+    with patch("atelier.commands.work.worker_runtime.run_worker_sessions") as run_sessions:
+        work_cmd.start_worker(args)
+
+    assert run_sessions.call_args.kwargs["args"].restart_on_update is True
 
 
 def test_start_worker_invalid_mode_exits() -> None:

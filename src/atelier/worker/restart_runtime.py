@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -137,6 +137,31 @@ class WorkerStartupRuntime:
         """
         current = self.capture_current_fingerprint(version=version, package_root=package_root)
         return current.changed_from(self.startup_fingerprint)
+
+
+def relaunch_worker_process(
+    startup_runtime: WorkerStartupRuntime,
+    *,
+    chdir_fn: Callable[[Path], None] = os.chdir,
+    execvpe_fn: Callable[[str, list[str], dict[str, str]], None] = os.execvpe,
+) -> None:
+    """Re-exec the current worker using its preserved launch contract.
+
+    Args:
+        startup_runtime: Startup snapshot containing the relaunch contract.
+        chdir_fn: Injectable working-directory changer for tests.
+        execvpe_fn: Injectable exec function for tests.
+
+    Returns:
+        This function does not return on successful ``execvpe``.
+    """
+    contract = startup_runtime.relaunch_contract
+    chdir_fn(contract.cwd)
+    execvpe_fn(
+        contract.exec_target(),
+        list(contract.exec_argv()),
+        contract.exec_env(),
+    )
 
 
 def capture_worker_startup_runtime(

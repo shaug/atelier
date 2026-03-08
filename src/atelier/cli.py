@@ -626,6 +626,20 @@ def work_command(
             click_type=_choice(_RUN_MODE_CHOICES),
         ),
     ] = None,
+    restart_on_update: Annotated[
+        bool,
+        typer.Option(
+            "--restart-on-update",
+            help="restart workers at idle boundaries after runtime updates",
+        ),
+    ] = False,
+    no_restart_on_update: Annotated[
+        bool,
+        typer.Option(
+            "--no-restart-on-update",
+            help="disable idle-boundary restart even when watch mode would enable it",
+        ),
+    ] = False,
     watch_interval: Annotated[
         int | None,
         typer.Option(
@@ -671,12 +685,20 @@ def work_command(
     ] = False,
 ) -> None:
     """Start a worker session."""
+    if restart_on_update and no_restart_on_update:
+        raise typer.BadParameter("cannot use both --restart-on-update and --no-restart-on-update")
+    resolved_restart_on_update: bool | None = None
+    if restart_on_update:
+        resolved_restart_on_update = True
+    elif no_restart_on_update:
+        resolved_restart_on_update = False
     work_cmd.start_worker(
         SimpleNamespace(
             epic_id=epic_id,
             mode=mode,
             select=select,
             run_mode=run_mode,
+            restart_on_update=resolved_restart_on_update,
             watch_interval=watch_interval,
             queue=queue,
             dry_run=dry_run,

@@ -16,6 +16,7 @@ from .. import root_branch as root_branch_module
 from ..config import ProjectConfig
 from ..models import BranchHistory, BranchPrMode, BranchSquashMessage
 from ..work_feedback import ReviewFeedbackSnapshot
+from . import restart_runtime as worker_restart_runtime
 from . import work_command_helpers as worker_work
 from .models import (
     FinalizeResult,
@@ -72,6 +73,23 @@ class ImplicitContinuationDecision:
     should_continue: bool
     reason: str
     epic_id: str | None = None
+
+
+def _restart_runtime_if_updated(args: object, *, emit: Callable[[str], None]) -> None:
+    """Re-exec the worker at an idle boundary when startup runtime changed."""
+    if not bool(getattr(args, "restart_on_update", False)):
+        return
+    startup_runtime = getattr(args, "startup_runtime", None)
+    if startup_runtime is None or not startup_runtime.runtime_changed():
+        return
+    emit("Runtime update detected; restarting worker before the next idle check.")
+    try:
+        worker_restart_runtime.relaunch_worker_process(startup_runtime)
+    except OSError as exc:
+        emit(
+            "Runtime update detected but restart failed; continuing with the current "
+            f"runtime ({type(exc).__name__}: {exc})."
+        )
 
 
 def classify_non_watch_exit_outcome(
@@ -598,6 +616,7 @@ def run_worker_sessions(
         iteration_args = build_iteration_args()
         summary = run_worker_once(iteration_args, mode=mode, dry_run=False, session_key=session_key)
         report_worker_summary(summary, False)
+        _restart_runtime_if_updated(args, emit=emit)
         if summary.started:
             if run_mode == "once":
                 return

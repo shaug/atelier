@@ -516,6 +516,192 @@ def test_run_worker_sessions_watch_logs_and_sleeps_on_no_ready() -> None:
     assert emitted == ["No ready work; watching for updates (sleeping 9s)."]
 
 
+def test_run_worker_sessions_watch_reexecs_before_sleep_when_update_detected() -> None:
+    calls = 0
+    emitted: list[str] = []
+    slept: list[float] = []
+    startup_runtime = type("StartupRuntime", (), {"runtime_changed": lambda self: True})()
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del args, mode, dry_run, session_key
+        nonlocal calls
+        calls += 1
+        return WorkerRunSummary(started=False, reason="no_ready_changesets")
+
+    with pytest.raises(RuntimeError, match="reexec"):
+        with patch(
+            "atelier.worker.runtime.worker_restart_runtime.relaunch_worker_process",
+            side_effect=RuntimeError("reexec"),
+        ) as relaunch:
+            runtime.run_worker_sessions(
+                args=type(
+                    "Args",
+                    (),
+                    {
+                        "queue": False,
+                        "startup_runtime": startup_runtime,
+                        "restart_on_update": True,
+                    },
+                )(),
+                mode="auto",
+                run_mode="watch",
+                dry_run=False,
+                session_key="sess",
+                run_worker_once=run_once,
+                report_worker_summary=lambda _summary, _dry: None,
+                watch_interval_seconds=lambda: 9,
+                dry_run_log=lambda _message: None,
+                emit=emitted.append,
+                sleep_fn=lambda seconds: slept.append(seconds),
+            )
+
+    assert calls == 1
+    assert slept == []
+    assert emitted == ["Runtime update detected; restarting worker before the next idle check."]
+    relaunch.assert_called_once_with(startup_runtime)
+
+
+def test_run_worker_sessions_default_mode_reexecs_only_when_opted_in() -> None:
+    calls = 0
+    emitted: list[str] = []
+    startup_runtime = type("StartupRuntime", (), {"runtime_changed": lambda self: True})()
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del args, mode, dry_run, session_key
+        nonlocal calls
+        calls += 1
+        return WorkerRunSummary(started=True, reason="agent_session_complete")
+
+    with pytest.raises(RuntimeError, match="reexec"):
+        with patch(
+            "atelier.worker.runtime.worker_restart_runtime.relaunch_worker_process",
+            side_effect=RuntimeError("reexec"),
+        ) as relaunch:
+            runtime.run_worker_sessions(
+                args=type(
+                    "Args",
+                    (),
+                    {
+                        "queue": False,
+                        "startup_runtime": startup_runtime,
+                        "restart_on_update": True,
+                    },
+                )(),
+                mode="auto",
+                run_mode="default",
+                dry_run=False,
+                session_key="sess",
+                run_worker_once=run_once,
+                report_worker_summary=lambda _summary, _dry: None,
+                watch_interval_seconds=lambda: 5,
+                dry_run_log=lambda _message: None,
+                emit=emitted.append,
+            )
+
+    assert calls == 1
+    assert emitted == ["Runtime update detected; restarting worker before the next idle check."]
+    relaunch.assert_called_once_with(startup_runtime)
+
+
+def test_run_worker_sessions_no_update_skips_reexec() -> None:
+    emitted: list[str] = []
+    slept: list[float] = []
+    startup_runtime = type("StartupRuntime", (), {"runtime_changed": lambda self: False})()
+    calls = 0
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del args, mode, dry_run, session_key
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return WorkerRunSummary(started=False, reason="no_ready_changesets")
+        raise RuntimeError("stop-loop")
+
+    try:
+        with patch(
+            "atelier.worker.runtime.worker_restart_runtime.relaunch_worker_process"
+        ) as relaunch:
+            runtime.run_worker_sessions(
+                args=type(
+                    "Args",
+                    (),
+                    {
+                        "queue": False,
+                        "startup_runtime": startup_runtime,
+                        "restart_on_update": True,
+                    },
+                )(),
+                mode="auto",
+                run_mode="watch",
+                dry_run=False,
+                session_key="sess",
+                run_worker_once=run_once,
+                report_worker_summary=lambda _summary, _dry: None,
+                watch_interval_seconds=lambda: 11,
+                dry_run_log=lambda _message: None,
+                emit=emitted.append,
+                sleep_fn=lambda seconds: slept.append(seconds),
+            )
+    except RuntimeError as exc:
+        assert str(exc) == "stop-loop"
+
+    assert emitted == ["No ready work; watching for updates (sleeping 11s)."]
+    assert slept == [11]
+    relaunch.assert_not_called()
+
+
+def test_run_worker_sessions_failed_reexec_logs_and_continues() -> None:
+    emitted: list[str] = []
+    slept: list[float] = []
+    startup_runtime = type("StartupRuntime", (), {"runtime_changed": lambda self: True})()
+    calls = 0
+
+    def run_once(args: object, *, mode: str, dry_run: bool, session_key: str) -> WorkerRunSummary:
+        del args, mode, dry_run, session_key
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return WorkerRunSummary(started=False, reason="no_ready_changesets")
+        raise RuntimeError("stop-loop")
+
+    try:
+        with patch(
+            "atelier.worker.runtime.worker_restart_runtime.relaunch_worker_process",
+            side_effect=OSError("exec failed"),
+        ) as relaunch:
+            runtime.run_worker_sessions(
+                args=type(
+                    "Args",
+                    (),
+                    {
+                        "queue": False,
+                        "startup_runtime": startup_runtime,
+                        "restart_on_update": True,
+                    },
+                )(),
+                mode="auto",
+                run_mode="watch",
+                dry_run=False,
+                session_key="sess",
+                run_worker_once=run_once,
+                report_worker_summary=lambda _summary, _dry: None,
+                watch_interval_seconds=lambda: 13,
+                dry_run_log=lambda _message: None,
+                emit=emitted.append,
+                sleep_fn=lambda seconds: slept.append(seconds),
+            )
+    except RuntimeError as exc:
+        assert str(exc) == "stop-loop"
+
+    assert emitted == [
+        "Runtime update detected; restarting worker before the next idle check.",
+        "Runtime update detected but restart failed; continuing with the current runtime (OSError: exec failed).",
+        "No ready work; watching for updates (sleeping 13s).",
+    ]
+    assert slept == [13]
+    assert relaunch.call_count == 1
+
+
 def test_run_worker_sessions_dry_watch_uses_dry_run_log() -> None:
     calls = 0
     logs: list[str] = []
