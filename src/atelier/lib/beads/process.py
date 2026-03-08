@@ -23,6 +23,7 @@ from .errors import (
 )
 from .models import (
     BeadsCapability,
+    BeadsCommandHelp,
     BeadsCommandRequest,
     BeadsCommandResult,
     BeadsEnvironment,
@@ -39,6 +40,7 @@ from .models import (
 )
 
 _SEMVER_SEARCH: Pattern[str] = compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
+_FLAG_SEARCH: Pattern[str] = compile(r"--[a-z0-9][a-z0-9-]*")
 _JSON_FLAG = "--json"
 _CAPABILITY_PROBES = (
     (BeadsCapability.ISSUE_JSON, (("show", "--help"), ("list", "--help"))),
@@ -337,8 +339,7 @@ class SubprocessBeadsClient(Beads):
             result = await self._execute_raw(command)
             if result.returncode != 0:
                 return None
-            help_text = "\n".join(part for part in (result.stdout, result.stderr) if part)
-            if _JSON_FLAG not in help_text:
+            if not decode_help_output(result).supports_json_output:
                 return None
         return capability
 
@@ -378,6 +379,22 @@ class SubprocessBeadsClient(Beads):
 
 
 def _parse_version(result: BeadsCommandResult) -> SemanticVersion:
+    return decode_version_output(result)
+
+
+def decode_version_output(result: BeadsCommandResult) -> SemanticVersion:
+    """Decode ``bd --version`` output into a semantic version.
+
+    Args:
+        result: Raw command result from the Beads transport.
+
+    Returns:
+        Parsed semantic version for the installed ``bd`` executable.
+
+    Raises:
+        BeadsParseError: If no semantic version can be decoded.
+    """
+
     output = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
     match = _SEMVER_SEARCH.search(output)
     if match is not None:
@@ -394,6 +411,25 @@ def _parse_version(result: BeadsCommandResult) -> SemanticVersion:
             result,
             operation=SupportedOperation.INSPECT_ENVIRONMENT,
         ) from exc
+
+
+def decode_help_output(result: BeadsCommandResult) -> BeadsCommandHelp:
+    """Decode ``bd ... --help`` output into normalized command metadata.
+
+    Args:
+        result: Raw command result from the Beads transport.
+
+    Returns:
+        Typed help metadata including normalized long flags.
+    """
+
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    flags = tuple(_FLAG_SEARCH.findall(output))
+    return BeadsCommandHelp(
+        argv=result.argv,
+        flags=flags,
+        supports_json_output=_JSON_FLAG in flags,
+    )
 
 
 def _parse_single_issue(

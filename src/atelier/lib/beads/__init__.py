@@ -20,6 +20,7 @@ from .errors import (
 )
 from .models import (
     BeadsCapability,
+    BeadsCommandHelp,
     BeadsCommandRequest,
     BeadsCommandResult,
     BeadsEnvironment,
@@ -36,7 +37,14 @@ from .models import (
     SupportedOperation,
     UpdateIssueRequest,
 )
-from .process import SubprocessBeadsClient, SubprocessBeadsTransport
+from .process import (
+    SubprocessBeadsClient,
+    SubprocessBeadsTransport,
+    decode_help_output,
+    decode_version_output,
+)
+from .sync import SyncBeadsClient
+from .testing import RecordingBeadsTransport, ScriptedBeadsTransport
 
 __all__ = [
     "DEFAULT_COMPATIBILITY_POLICY",
@@ -46,6 +54,7 @@ __all__ = [
     "Beads",
     "BeadsCapability",
     "BeadsCommandError",
+    "BeadsCommandHelp",
     "BeadsCommandRequest",
     "BeadsCommandResult",
     "BeadsCompatibilityError",
@@ -65,12 +74,17 @@ __all__ = [
     "OperationContract",
     "OperationOutputMode",
     "ReadyIssuesRequest",
+    "RecordingBeadsTransport",
+    "ScriptedBeadsTransport",
     "SemanticVersion",
     "ShowIssueRequest",
     "SubprocessBeadsClient",
     "SubprocessBeadsTransport",
     "SupportedOperation",
+    "SyncBeadsClient",
     "UnsupportedOperationError",
     "UnsupportedVersionError",
     "UpdateIssueRequest",
+    "decode_help_output",
+    "decode_version_output",
 ]

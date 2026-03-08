@@ -300,6 +300,19 @@ class BeadsCommandResult(BeadsModel):
     timed_out: bool = False
 
 
+class BeadsCommandHelp(BeadsModel):
+    """Normalized help metadata for a text-only ``bd`` command."""
+
+    argv: tuple[NonBlankStr, ...]
+    flags: tuple[NonBlankStr, ...] = ()
+    supports_json_output: bool = False
+
+    @field_validator("flags")
+    @classmethod
+    def _dedupe_flags(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _dedupe_strings(value)
+
+
 class BeadsEnvironment(BeadsModel):
     """Installed ``bd`` version and capabilities."""
 

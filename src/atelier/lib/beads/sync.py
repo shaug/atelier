@@ -1,0 +1,65 @@
+"""Synchronous wrappers over the async-first Beads client."""
+
+from __future__ import annotations
+
+import asyncio
+
+from .client import Beads
+from .compatibility import CompatibilityPolicy
+from .models import (
+    BeadsEnvironment,
+    CloseIssueRequest,
+    CreateIssueRequest,
+    DependencyMutationRequest,
+    IssueRecord,
+    ListIssuesRequest,
+    ReadyIssuesRequest,
+    ShowIssueRequest,
+    UpdateIssueRequest,
+)
+
+
+class SyncBeadsClient:
+    """Run the async Beads client behind a synchronous facade.
+
+    Args:
+        async_client: Async-first Beads client to execute.
+
+    Raises:
+        RuntimeError: Raised by ``asyncio.run`` when called from an active
+            event loop.
+    """
+
+    def __init__(self, async_client: Beads) -> None:
+        self._async_client = async_client
+
+    @property
+    def compatibility_policy(self) -> CompatibilityPolicy:
+        return self._async_client.compatibility_policy
+
+    def inspect_environment(self) -> BeadsEnvironment:
+        return asyncio.run(self._async_client.inspect_environment())
+
+    def show(self, request: ShowIssueRequest) -> IssueRecord:
+        return asyncio.run(self._async_client.show(request))
+
+    def list(self, request: ListIssuesRequest) -> tuple[IssueRecord, ...]:
+        return asyncio.run(self._async_client.list(request))
+
+    def ready(self, request: ReadyIssuesRequest) -> tuple[IssueRecord, ...]:
+        return asyncio.run(self._async_client.ready(request))
+
+    def create(self, request: CreateIssueRequest) -> IssueRecord:
+        return asyncio.run(self._async_client.create(request))
+
+    def update(self, request: UpdateIssueRequest) -> IssueRecord:
+        return asyncio.run(self._async_client.update(request))
+
+    def close(self, request: CloseIssueRequest) -> IssueRecord:
+        return asyncio.run(self._async_client.close(request))
+
+    def add_dependency(self, request: DependencyMutationRequest) -> IssueRecord:
+        return asyncio.run(self._async_client.add_dependency(request))
+
+    def remove_dependency(self, request: DependencyMutationRequest) -> IssueRecord:
+        return asyncio.run(self._async_client.remove_dependency(request))
