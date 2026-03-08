@@ -1106,6 +1106,18 @@ def test_run_finalize_pipeline_passes_ready_mode_to_pr_gate(monkeypatch) -> None
         "id": "at-epic.1",
         "labels": [],
         "description": "changeset.work_branch: feat/root-at-epic.1\n",
+        "acceptance_criteria": "1) First criterion.\n",
+        "notes": (
+            "north_star_review.2026-03-07T12:15:00Z:\n"
+            "1) unmet_acceptance_criteria: none\n"
+            "2) required_code_changes_per_criterion:\n"
+            "- AC1: verify finalize can hand off to PR creation.\n"
+            "3) implementation_summary:\n"
+            "- Added the publish gate.\n"
+            "4) completion_checklist:\n"
+            "- AC1 satisfied by verification: ready mode still reaches the PR gate; "
+            "files: tests/atelier/worker/test_finalize_pipeline.py.\n"
+        ),
     }
     monkeypatch.setattr(
         finalize_pipeline.beads,
@@ -1332,3 +1344,162 @@ def test_run_finalize_pipeline_aligns_pr_base_before_pending(monkeypatch) -> Non
     assert result.continue_running is True
     assert aligned == ["main"]
     assert pending == ["at-epic.1"]
+
+
+def test_run_finalize_pipeline_blocks_push_without_north_star_review(monkeypatch) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+        "acceptance_criteria": "1) First criterion.\n2) Second criterion.\n",
+        "notes": "implementation_2026-03-07:\n- no north-star note yet.\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: False,
+    )
+
+    audit_notes: list[str] = []
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_command",
+        lambda args, **_kwargs: audit_notes.append(" ".join(args)),
+    )
+
+    service = _FinalizeServiceStub()
+    blocked: list[str] = []
+    notifications: list[str] = []
+    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked.append(reason)
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("subject"))
+    )
+    service.attempt_push_work_branch_fn = lambda _work_branch: (_ for _ in ()).throw(
+        AssertionError("push must not run when north-star evidence is missing")
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_blocked_north_star_review"
+    assert result.continue_running is False
+    assert blocked == ["north-star review checklist incomplete"]
+    assert notifications == ["NEEDS-DECISION: North-star review incomplete (at-epic.1)"]
+    assert any("publish_blocked: north-star review gate failed" in note for note in audit_notes)
+
+
+def test_run_finalize_pipeline_blocks_pr_creation_without_north_star_review(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+        "acceptance_criteria": "1) First criterion.\n",
+        "notes": (
+            "north_star_review.2026-03-07T12:00:00Z:\n"
+            "1) unmet_acceptance_criteria: AC1 still open\n"
+            "2) required_code_changes_per_criterion:\n"
+            "- AC1: add the publish gate.\n"
+            "3) implementation_summary:\n"
+            "- Partial implementation.\n"
+            "4) completion_checklist:\n"
+            "- AC1 still pending.\n"
+        ),
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_command",
+        lambda *_args, **_kwargs: None,
+    )
+
+    service = _FinalizeServiceStub()
+    blocked: list[str] = []
+    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked.append(reason)
+    service.handle_pushed_without_pr_fn = lambda **_kwargs: (_ for _ in ()).throw(
+        AssertionError("PR creation must not run when north-star evidence is incomplete")
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_blocked_north_star_review"
+    assert result.continue_running is False
+    assert blocked == ["north-star review checklist incomplete"]
+
+
+def test_run_finalize_pipeline_finalizes_integrated_pushed_changeset_without_pr_gate(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+        "acceptance_criteria": "1) First criterion.\n",
+        "notes": "implementation_2026-03-07:\n- no north-star note yet.\n",
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("north-star blocked audit note must not be recorded")
+        ),
+    )
+
+    service = _FinalizeServiceStub()
+    blocked: list[str] = []
+    finalized: list[tuple[str, str | None]] = []
+    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked.append(reason)
+    service.changeset_integration_signal_fn = lambda _issue, *, repo_slug, git_path: (
+        True,
+        "abc1234",
+    )
+    service.handle_pushed_without_pr_fn = lambda **_kwargs: (_ for _ in ()).throw(
+        AssertionError("PR creation path must not run when integration is already proven")
+    )
+    service.finalize_terminal_changeset_fn = lambda *, context, terminal_state, integrated_sha: (
+        finalized.append((terminal_state, integrated_sha))
+        or FinalizeResult(continue_running=True, reason="changeset_complete")
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_complete"
+    assert result.continue_running is True
+    assert blocked == []
+    assert finalized == [("merged", "abc1234")]
