@@ -40,7 +40,7 @@ def test_dispatch_message_delivers_to_active_worker() -> None:
             body="Please investigate.",
             to="atelier/worker/codex/p101-t1",
             from_agent="atelier/planner/codex/p202-t2",
-            thread="at-thread-1",
+            thread="at-thread-1.1",
             reply_to="at-msg-0",
             beads_root=Path("/beads"),
             cwd=Path("/repo"),
@@ -52,9 +52,12 @@ def test_dispatch_message_delivers_to_active_worker() -> None:
     assert call["assignee"] == "atelier/worker/codex/p101-t1"
     assert call["metadata"]["from"] == "atelier/planner/codex/p202-t2"
     assert call["metadata"]["delivery"] == "work-threaded"
-    assert call["metadata"]["thread"] == "at-thread-1"
-    assert call["metadata"]["thread_kind"] == "epic"
+    assert call["metadata"]["thread"] == "at-thread-1.1"
+    assert call["metadata"]["thread_kind"] == "changeset"
+    assert call["metadata"]["thread_target"] == "changeset"
     assert call["metadata"]["audience"] == ["worker"]
+    assert call["metadata"]["audiences"] == ["worker"]
+    assert call["metadata"]["blocking_roles"] == ["worker"]
     assert call["metadata"]["kind"] == "reply"
     assert call["metadata"]["reply_to"] == "at-msg-0"
 
@@ -170,28 +173,32 @@ def test_dispatch_message_non_planner_sender_does_not_reroute() -> None:
     reroute.assert_not_called()
 
 
-def test_dispatch_message_marks_needs_decision_as_blocking() -> None:
+def test_dispatch_message_threaded_needs_decision_to_planner_sets_explicit_routing() -> None:
     module = _load_script_module()
-    with (
-        patch.object(module.agent_home, "is_session_agent_active", return_value=True),
-        patch.object(
-            module.beads, "create_message_bead", return_value={"id": "at-msg-3"}
-        ) as create,
-    ):
-        module.dispatch_message(
-            subject="NEEDS-DECISION: Pick a fallback",
-            body="Choose the safer path.",
+    with patch.object(
+        module.beads, "create_message_bead", return_value={"id": "at-msg-3"}
+    ) as create:
+        result = module.dispatch_message(
+            subject="NEEDS-DECISION: Publish incomplete (at-epic.1)",
+            body="Pick the next publish action.",
             to="atelier/planner/codex/p202-t2",
             from_agent="atelier/worker/codex/p101-t1",
-            thread="at-ue6aj",
+            thread="at-epic.1",
             reply_to=None,
             beads_root=Path("/beads"),
             cwd=Path("/repo"),
         )
 
-    assert create.call_args.kwargs["metadata"]["kind"] == "needs-decision"
-    assert create.call_args.kwargs["metadata"]["blocking"] is True
-    assert create.call_args.kwargs["metadata"]["audience"] == ["planner"]
+    assert result.decision == "delivered"
+    call = create.call_args.kwargs
+    assert call["metadata"]["delivery"] == "work-threaded"
+    assert call["metadata"]["thread_target"] == "changeset"
+    assert call["metadata"]["thread_kind"] == "changeset"
+    assert call["metadata"]["audience"] == ["planner"]
+    assert call["metadata"]["audiences"] == ["planner"]
+    assert call["metadata"]["blocking"] is True
+    assert call["metadata"]["blocking_roles"] == ["planner"]
+    assert call["metadata"]["kind"] == "needs-decision"
 
 
 @pytest.mark.parametrize(

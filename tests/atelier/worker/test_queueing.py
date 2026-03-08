@@ -51,8 +51,13 @@ def test_send_no_ready_changesets_uses_summary_counts() -> None:
     assert "Ready changesets: 0" in kwargs["body"]
     assert kwargs["metadata"]["queue"] == "planner"
     assert kwargs["metadata"]["audience"] == ["planner"]
+    assert kwargs["metadata"]["thread"] == "at-1"
+    assert kwargs["metadata"]["thread_kind"] == "epic"
+    assert kwargs["metadata"]["thread_target"] == "epic"
+    assert kwargs["metadata"]["audiences"] == ["planner"]
     assert kwargs["metadata"]["kind"] == "needs-decision"
     assert kwargs["metadata"]["blocking"] is True
+    assert kwargs["metadata"]["blocking_roles"] == ["planner"]
 
 
 def test_prompt_queue_claim_assume_yes_claims_first_message() -> None:

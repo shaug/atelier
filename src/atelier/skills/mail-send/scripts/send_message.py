@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send a planner message or reroute to executable work for inactive workers."""
+"""Send a threaded work message with compatibility routing for active agents."""
 
 from __future__ import annotations
 
@@ -45,6 +45,26 @@ def _agent_role(agent_id: str) -> str | None:
 
 def _is_inactive_worker(agent_id: str) -> bool:
     return _agent_role(agent_id) == "worker" and not agent_home.is_session_agent_active(agent_id)
+
+
+def _thread_metadata(
+    *,
+    thread: str | None,
+    recipient: str,
+    subject: str,
+) -> dict[str, object]:
+    if not thread:
+        return {}
+    metadata: dict[str, object] = {}
+    recipient_role = _agent_role(recipient)
+    if recipient_role is None:
+        return metadata
+    if recipient_role == "worker":
+        metadata["blocking_roles"] = ["worker"]
+        return metadata
+    if subject.startswith("NEEDS-DECISION:"):
+        metadata["blocking_roles"] = [recipient_role]
+    return metadata
 
 
 def _build_reroute_acceptance() -> str:
@@ -195,17 +215,20 @@ def dispatch_message(
         "from": from_agent,
         "kind": _message_kind(subject=subject, reply_to=reply_to),
     }
-    if thread:
-        metadata["thread"] = thread
-        metadata["thread_kind"] = messages.build_message_contract(
-            {"thread": thread},
-        ).thread_kind
-        metadata["delivery"] = "work-threaded"
-    else:
-        metadata["delivery"] = "agent-addressed"
     audience = _agent_role(to)
     if audience in {"worker", "planner", "operator"}:
         metadata["audience"] = [audience]
+        metadata["audiences"] = [audience]
+    if thread:
+        metadata["thread"] = thread
+        thread_target = messages.infer_thread_target(thread)
+        if thread_target is not None:
+            metadata["thread_kind"] = thread_target
+            metadata["thread_target"] = thread_target
+        metadata["delivery"] = "work-threaded"
+        metadata.update(_thread_metadata(thread=thread, recipient=to, subject=subject))
+    else:
+        metadata["delivery"] = "agent-addressed"
     if subject.startswith("NEEDS-DECISION:"):
         metadata["blocking"] = True
     if reply_to:

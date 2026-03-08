@@ -148,3 +148,43 @@ def test_message_blocks_planner_for_threaded_needs_decision_queue() -> None:
         runtime_role="worker",
         thread_ids={"at-epic"},
     )
+
+
+def test_explicit_threaded_routing_metadata_wins_over_worker_assignee_fallback() -> None:
+    issue = {
+        "id": "at-msg-3",
+        "title": "Review the publish decision",
+        "assignee": "atelier/worker/codex/p100",
+        "description": messages.render_message(
+            {
+                "from": "atelier/planner/codex/p200",
+                "thread": "at-epic.1",
+                "thread_target": "changeset",
+                "audiences": ["planner"],
+                "blocking_roles": ["planner"],
+                "kind": "needs-decision",
+            },
+            "Planner should choose the next publish step.",
+        ),
+    }
+
+    assert not messages.message_blocks_runtime(
+        issue,
+        runtime_role="worker",
+        thread_ids={"at-epic.1"},
+    )
+    assert not messages.message_targets_runtime(
+        issue,
+        runtime_role="worker",
+        thread_ids={"at-epic.1"},
+    )
+    assert messages.message_blocks_runtime(
+        issue,
+        runtime_role="planner",
+        thread_ids={"at-epic.1"},
+    )
+    assert messages.message_targets_runtime(
+        issue,
+        runtime_role="planner",
+        thread_ids={"at-epic.1"},
+    )
