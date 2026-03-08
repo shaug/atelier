@@ -4392,6 +4392,80 @@ def test_create_message_bead_renders_frontmatter() -> None:
     assert result["id"] == "atelier-55"
 
 
+def test_create_message_bead_normalizes_contract_metadata_before_render() -> None:
+    captured: dict[str, object] = {}
+
+    def fake_render(metadata: dict[str, object], body: str) -> str:
+        captured["metadata"] = metadata
+        captured["body"] = body
+        return "body"
+
+    with (
+        patch("atelier.beads.messages.render_message", side_effect=fake_render),
+        patch("atelier.beads._create_issue_with_body", return_value="atelier-56"),
+        patch(
+            "atelier.beads.run_bd_json",
+            return_value=[{"id": "atelier-56", "title": "Hello"}],
+        ),
+    ):
+        beads.create_message_bead(
+            subject="Hello",
+            body="Hi",
+            metadata={"from": "alice", "thread": "at-epic.1", "msg_type": "notification"},
+            assignee="atelier/worker/bob",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert captured["body"] == "Hi"
+    assert captured["metadata"] == {
+        "from": "alice",
+        "delivery": "work-threaded",
+        "thread": "at-epic.1",
+        "thread_kind": "changeset",
+        "audience": ["worker"],
+        "kind": "notification",
+        "msg_type": "notification",
+    }
+
+
+def test_create_message_bead_infers_epic_thread_kind_before_render() -> None:
+    captured: dict[str, object] = {}
+
+    def fake_render(metadata: dict[str, object], body: str) -> str:
+        captured["metadata"] = metadata
+        captured["body"] = body
+        return "body"
+
+    with (
+        patch("atelier.beads.messages.render_message", side_effect=fake_render),
+        patch("atelier.beads._create_issue_with_body", return_value="atelier-57"),
+        patch(
+            "atelier.beads.run_bd_json",
+            return_value=[{"id": "atelier-57", "title": "Hello"}],
+        ),
+    ):
+        beads.create_message_bead(
+            subject="Hello",
+            body="Hi",
+            metadata={"from": "alice", "thread": "at-epic", "msg_type": "notification"},
+            assignee="atelier/worker/bob",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert captured["body"] == "Hi"
+    assert captured["metadata"] == {
+        "from": "alice",
+        "delivery": "work-threaded",
+        "thread": "at-epic",
+        "thread_kind": "epic",
+        "audience": ["worker"],
+        "kind": "notification",
+        "msg_type": "notification",
+    }
+
+
 def test_claim_queue_message_sets_claimed_metadata() -> None:
     description = "---\nqueue: triage\n---\n\nBody\n"
     state: dict[str, object] = {

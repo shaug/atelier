@@ -9,13 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ... import agent_home, changeset_fields, git, lifecycle
+from ... import agent_home, changeset_fields, git, lifecycle, messages
 from ... import beads as beads_runtime
 from ... import exec as exec_util
 from ... import root_branch as root_branch_runtime
 from .. import selection as worker_selection
 from ..context import ChangesetSelectionContext, WorkerRunContext
-from ..models import StartupContractResult, WorkerRunSummary
+from ..models import StartupContractResult, StartupFinalizePreflightResult, WorkerRunSummary
 from ..models_boundary import parse_issue_boundary
 from ..ports import (
     BeadsService,
@@ -45,6 +45,54 @@ _FINALIZE_DEPENDENCY_GATE_SOFT_FAILURE_MARKERS = (
     "to in_progress: blocking dependencies",
 )
 _FINALIZE_DEPENDENCY_GATE_SUMMARY_REASON = "changeset_finalize_in_progress_dependency_gate_failed"
+
+
+def _load_worker_thread_blocking_messages(
+    *,
+    beads: BeadsService,
+    beads_root: Path,
+    repo_root: Path,
+    thread_ids: set[str],
+) -> list[dict[str, object]]:
+    issues = beads.run_bd_json(
+        [
+            "list",
+            "--label",
+            beads_runtime.issue_label("message", beads_root=beads_root),
+            "--label",
+            beads_runtime.issue_label("unread", beads_root=beads_root),
+        ],
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    return [
+        issue
+        for issue in issues
+        if messages.message_blocks_runtime(
+            issue,
+            runtime_role="worker",
+            thread_ids=thread_ids,
+        )
+    ]
+
+
+def _append_work_thread_messages_to_prompt(
+    prompt: str, *, message_issues: list[dict[str, object]]
+) -> str:
+    if not message_issues:
+        return prompt
+    rendered_messages = [
+        f"- {messages.render_work_thread_summary(issue).replace(chr(10), chr(10) + '  ')}"
+        for issue in message_issues
+    ]
+    section = "\n".join(
+        [
+            "",
+            "Blocking work-thread messages to process before coding:",
+            *rendered_messages,
+        ]
+    )
+    return f"{prompt}{section}"
 
 
 def _list_local_branches(*, repo_root: Path, git_path: str | None) -> tuple[str, ...]:
@@ -1293,6 +1341,19 @@ def run_worker_once(
             control.dry_run_log(f"Next changeset: {changeset_id} {changeset_title}")
         else:
             control.say(f"Next changeset: {changeset_id} {changeset_title}")
+        finishstep = control.step("Load work-thread messages", timings=timings, trace=trace)
+        work_thread_messages = _load_worker_thread_blocking_messages(
+            beads=infra.beads,
+            beads_root=beads_root,
+            repo_root=repo_root,
+            thread_ids={selected_epic, str(changeset_id)},
+        )
+        if work_thread_messages:
+            control.say(
+                "Loaded blocking work-thread messages for worker startup: "
+                f"{len(work_thread_messages)}"
+            )
+        finishstep(extra=str(len(work_thread_messages)))
         finishstep = control.step("Startup finalize preflight", timings=timings, trace=trace)
         preflight = lifecycle.startup_finalize_preflight(
             issue=changeset,
@@ -1301,6 +1362,11 @@ def run_worker_once(
             repo_root=repo_root,
             git_path=git_path,
         )
+        if work_thread_messages and preflight.should_finalize_only:
+            preflight = StartupFinalizePreflightResult(
+                should_finalize_only=False,
+                reason=f"{preflight.reason}:worker_thread_messages_pending",
+            )
         finishstep(extra=preflight.reason)
         if preflight.should_finalize_only:
             if dry_run:
@@ -1586,6 +1652,10 @@ def run_worker_once(
             merge_conflict=merge_conflict,
             review_feedback=review_feedback,
             review_pr_url=review_pr_url,
+        )
+        opening_prompt = _append_work_thread_messages_to_prompt(
+            opening_prompt,
+            message_issues=work_thread_messages,
         )
         if review_feedback:
             feedback_before = lifecycle.capture_review_feedback_snapshot(

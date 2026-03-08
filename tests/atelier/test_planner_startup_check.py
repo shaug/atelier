@@ -91,6 +91,38 @@ def test_execute_startup_command_plan_runs_steps_in_order() -> None:
     assert [issue["id"] for issue in result.epics] == ["at-1"]
 
 
+def test_startup_helper_surfaces_threaded_planner_decisions_without_assignee() -> None:
+    helper = planner_startup_check.StartupBeadsInvocationHelper(
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+    )
+    object.__setattr__(
+        helper,
+        "_run_list_query",
+        lambda _args: [
+            {
+                "id": "at-msg-1",
+                "title": "NEEDS-DECISION: Publish incomplete (at-epic.1)",
+                "description": (
+                    "---\n"
+                    "from: atelier/worker/codex/p100\n"
+                    "queue: planner\n"
+                    "thread: at-epic.1\n"
+                    "msg_type: notification\n"
+                    "---\n\n"
+                    "Confirm the next publish step."
+                ),
+            }
+        ],
+    )
+
+    messages_for_planner = helper.list_inbox_messages("atelier/planner/codex/p200")
+
+    assert [issue["id"] for issue in messages_for_planner] == ["at-msg-1"]
+    assert "audience=planner" in str(messages_for_planner[0]["title"])
+    assert "at-epic.1" in str(messages_for_planner[0]["title"])
+
+
 def test_build_startup_triage_model_normalizes_and_sorts_sections() -> None:
     command_result = planner_startup_check.StartupCommandResult(
         inbox_messages=[

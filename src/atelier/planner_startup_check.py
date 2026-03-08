@@ -1,4 +1,4 @@
-"""Deterministic planner-startup command planning and Beads invocation helpers."""
+"""Deterministic planner-startup planning and Beads invocation helpers."""
 
 from __future__ import annotations
 
@@ -476,7 +476,8 @@ def validate_startup_list_invocation(args: list[str]) -> None:
         args: `bd` arguments without the leading binary name.
 
     Raises:
-        ValueError: If the invocation uses unsupported syntax or forbidden flags.
+        ValueError: If the invocation uses unsupported syntax or forbidden
+            flags.
     """
 
     if not args:
@@ -528,16 +529,31 @@ class StartupBeadsInvocationHelper:
     ) -> list[dict[str, object]]:
         """List planner inbox messages via the canonical startup helper path."""
 
-        args = [
-            "list",
-            "--label",
-            beads.issue_label("message", beads_root=self.beads_root),
-            "--assignee",
-            agent_id,
-        ]
+        args = ["list", "--label", beads.issue_label("message", beads_root=self.beads_root)]
         if unread_only:
             args.extend(["--label", beads.issue_label("unread", beads_root=self.beads_root)])
-        return self._run_list_query(args)
+        issues = self._run_list_query(args)
+        matches: list[dict[str, object]] = []
+        seen_ids: set[str] = set()
+        for issue in issues:
+            issue_id = str(issue.get("id") or "").strip()
+            assignee = issue.get("assignee")
+            assignee_match = isinstance(assignee, str) and assignee.strip() == agent_id
+            routed_attention = any(
+                messages.message_blocks_runtime(issue, runtime_role=role)
+                for role in ("planner", "operator")
+            )
+            if not assignee_match and not routed_attention:
+                continue
+            enriched = dict(issue)
+            if routed_attention:
+                enriched["title"] = messages.render_work_thread_summary(issue).replace("\n", " | ")
+            if issue_id and issue_id in seen_ids:
+                continue
+            if issue_id:
+                seen_ids.add(issue_id)
+            matches.append(enriched)
+        return matches
 
     def list_queue_messages(
         self,

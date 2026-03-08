@@ -19,7 +19,7 @@ def _bootstrap_source_import() -> None:
 
 _bootstrap_source_import()
 
-from atelier import agent_home, beads  # noqa: E402
+from atelier import agent_home, beads, messages  # noqa: E402
 from atelier.executable_work_validation import (  # noqa: E402
     compact_excerpt,
     validate_executable_work_payload,
@@ -191,9 +191,23 @@ def dispatch_message(
             recipient=to,
         )
 
-    metadata: dict[str, object] = {"from": from_agent}
+    metadata: dict[str, object] = {
+        "from": from_agent,
+        "kind": _message_kind(subject=subject, reply_to=reply_to),
+    }
     if thread:
         metadata["thread"] = thread
+        metadata["thread_kind"] = messages.build_message_contract(
+            {"thread": thread},
+        ).thread_kind
+        metadata["delivery"] = "work-threaded"
+    else:
+        metadata["delivery"] = "agent-addressed"
+    audience = _agent_role(to)
+    if audience in {"worker", "planner", "operator"}:
+        metadata["audience"] = [audience]
+    if subject.startswith("NEEDS-DECISION:"):
+        metadata["blocking"] = True
     if reply_to:
         metadata["reply_to"] = reply_to
 
@@ -209,6 +223,15 @@ def dispatch_message(
     if not message_id:
         raise RuntimeError("created message bead is missing an id")
     return DispatchOutcome(decision="delivered", issue_id=message_id, recipient=to)
+
+
+def _message_kind(*, subject: str, reply_to: str | None) -> str:
+    normalized_subject = subject.strip()
+    if normalized_subject.startswith("NEEDS-DECISION:"):
+        return "needs-decision"
+    if reply_to:
+        return "reply"
+    return "instruction"
 
 
 def main() -> None:

@@ -45,7 +45,14 @@ def send_needs_decision(
     beads.create_message_bead(
         subject=subject,
         body=body,
-        metadata={"from": agent_id, "queue": "overseer", "msg_type": "notification"},
+        metadata={
+            "from": agent_id,
+            "queue": "overseer",
+            "msg_type": "notification",
+            "kind": "needs-decision",
+            "blocking": True,
+            "audience": ["operator"],
+        },
         beads_root=beads_root,
         cwd=repo_root,
     )
@@ -70,6 +77,9 @@ def send_planner_notification(
         "from": agent_id,
         "queue": "planner",
         "msg_type": "notification",
+        "kind": "needs-decision" if subject.startswith("NEEDS-DECISION:") else "notification",
+        "blocking": subject.startswith("NEEDS-DECISION:"),
+        "audience": ["planner"],
     }
     if thread_id:
         metadata["thread"] = thread_id

@@ -22,6 +22,10 @@ description: >-
 1. Use the dispatch script:
    - `python skills/mail-send/scripts/send_message.py --subject "<subject>" --body "<body>" --to "<to>" --from "<from>" [--thread "<thread>"] [--reply-to "<reply_to>"] [--beads-dir "<beads_dir>"]`
 1. Do not create planner-to-worker message beads directly with `bd create`.
+1. Treat work-threaded delivery as the durable default:
+   - when `thread` is present, the script emits work-thread metadata (`thread`,
+     `thread_kind`, `audience`, `kind`, `delivery`)
+   - assignee-based delivery without a work thread is compatibility routing only
 1. The script enforces worker liveness checks:
    - active worker recipient: create an `at:message` bead assigned to `to`
    - inactive worker recipient: create an unassigned executable reroute epic

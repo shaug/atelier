@@ -1777,6 +1777,100 @@ def test_run_worker_once_skips_redundant_mark_in_progress_for_in_progress_change
     deps.infra.worker_session_agent.start_agent_session.assert_called_once()
 
 
+def test_run_worker_once_loads_worker_thread_messages_before_agent_start() -> None:
+    agent = AgentHome(
+        name="worker",
+        agent_id="atelier/worker/codex/p-thread",
+        role="worker",
+        path=Path("/tmp/worker"),
+        session_key="p-thread",
+    )
+    deps = _build_runner_deps(
+        startup_result=StartupContractResult(
+            epic_id="at-epic",
+            changeset_id=None,
+            should_exit=False,
+            reason="selected_auto",
+        ),
+        preview_agent=agent,
+    )
+    changeset_issue = {
+        "id": "at-epic.1",
+        "title": "Handle threaded startup messages",
+        "status": "open",
+        "labels": [],
+        "description": "",
+    }
+    threaded_message = {
+        "id": "at-msg-1",
+        "title": "Worker handoff",
+        "assignee": "atelier/worker/codex/p-old",
+        "description": (
+            "---\n"
+            "from: atelier/planner/codex/p200\n"
+            "thread: at-epic.1\n"
+            "---\n\n"
+            "Review the work-thread handoff before proceeding."
+        ),
+    }
+
+    def run_bd_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:  # noqa: ARG001
+        if args[:2] == ["show", "at-epic.1"]:
+            return [changeset_issue]
+        if args and args[0] == "list":
+            return [threaded_message]
+        return []
+
+    deps.infra.beads.run_bd_json = Mock(side_effect=run_bd_json)
+    deps.lifecycle.next_changeset = lambda **_kwargs: changeset_issue
+    deps.lifecycle.startup_finalize_preflight = lambda **_kwargs: StartupFinalizePreflightResult(
+        should_finalize_only=True,
+        reason="finalize_only:pr_lifecycle_merged_integration_proven",
+    )
+    deps.infra.worker_session_worktree.prepare_worktrees = Mock(
+        return_value=SimpleNamespace(
+            epic_worktree_path=Path("/tmp/epic"),
+            changeset_worktree_path=Path("/tmp/changeset"),
+            branch="feat/root-at-epic.1",
+        )
+    )
+    deps.infra.worker_session_agent.prepare_agent_session = Mock(
+        return_value=SimpleNamespace(
+            agent_spec=SimpleNamespace(name="demo", display_name="Demo"),
+            agent_options=[],
+            project_enlistment=Path("/repo"),
+            workspace_branch="feat/root",
+            env={},
+        )
+    )
+    deps.infra.worker_session_agent.start_agent_session = Mock(
+        return_value=SimpleNamespace(
+            started_at=dt.datetime.now(dt.timezone.utc),
+            returncode=0,
+        )
+    )
+    deps.lifecycle.finalize_changeset = lambda **_kwargs: FinalizeResult(
+        continue_running=True,
+        reason="changeset_review_pending",
+    )
+    deps.commands.worker_opening_prompt = Mock(return_value="open-prompt")
+
+    summary = runner.run_worker_once(
+        SimpleNamespace(epic_id=None, queue=False, yes=False, reconcile=False),
+        run_context=WorkerRunContext(mode="auto", dry_run=False, session_key="p-thread"),
+        deps=deps,
+    )
+
+    assert summary.started is True
+    assert summary.reason == "agent_session_complete"
+    deps.infra.worker_session_agent.start_agent_session.assert_called_once()
+    start_kwargs = deps.infra.worker_session_agent.start_agent_session.call_args.kwargs
+    assert (
+        "Blocking work-thread messages to process before coding" in start_kwargs["opening_prompt"]
+    )
+    assert "Review the work-thread handoff before proceeding." in start_kwargs["opening_prompt"]
+
+
 def test_run_worker_once_followup_dependency_gate_skip_is_non_blocking() -> None:
     for startup_reason in ("review_feedback", "merge_conflict"):
         agent = AgentHome(
