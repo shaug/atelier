@@ -83,6 +83,42 @@ builders for canonical issue envelopes.
 These builders are intentionally payload-oriented. They do not implement
 persistence or command semantics by themselves.
 
+## Tier 0 Semantic Notes
+
+This changeset wires real Tier 0 stateful semantics behind the `core-issues`
+family and exposes them through a typed in-memory client adapter in
+`atelier.testing.beads`.
+
+- `build_in_memory_beads_client()` returns the shared `atelier.lib.beads.Beads`
+  protocol backed by the in-memory dispatcher.
+- The default in-memory compatibility policy currently validates only the
+  implemented Tier 0 operations: `show`, `list`, `ready`, `create`, `update`,
+  and `close`, even though `inspect_environment()` still reports help-probed
+  capabilities for later documented routes.
+- `list` supports the filtering forms used by current Atelier callsites:
+  `--parent`, `--status`, `--assignee`, `--title-contains`, repeated `--label`,
+  `--all`, and `--limit`.
+- `ready` uses Atelier's shared lifecycle helpers: runnable results must be leaf
+  work beads, have active lifecycle status, and have all dependencies in a
+  terminal satisfied state.
+- `create`, `update`, and `close` preserve parent/child and dependency
+  relationships so higher-level planner/worker assertions can observe stable
+  graph behavior across mutations.
+
+## Intentional Tier 0 Deltas
+
+- Dependency mutation commands (`dep add`, `dep remove`) remain documented but
+  intentionally unimplemented in this slice; later changesets add their real
+  semantics.
+- The in-memory command handler only accepts the argv shapes covered by the v1
+  typed client plus the documented Tier 0 filters above. Non-contract flags such
+  as `--silent`, `--body-file`, `--add-label`, and `--remove-label` fail closed
+  instead of approximating subprocess-specific behavior.
+- Dependency readiness currently requires terminal lifecycle closure, not PR
+  integration metadata. This keeps Tier 0 tests aligned with the planner/worker
+  state transitions that depend on basic blocker closure while leaving
+  sequential publish semantics to later slices.
+
 ## Non-Goals
 
 - No production runtime wiring in this slice
@@ -94,6 +130,9 @@ persistence or command semantics by themselves.
 ## Proof Artifacts
 
 - `src/atelier/testing/beads/contract.py`
+- `src/atelier/testing/beads/client.py`
+- `src/atelier/testing/beads/core_issues.py`
 - `src/atelier/testing/beads/dispatcher.py`
 - `src/atelier/testing/beads/fixtures.py`
+- `src/atelier/testing/beads/store.py`
 - `tests/atelier/testing/test_in_memory_beads.py`
