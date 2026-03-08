@@ -80,15 +80,25 @@ def _restart_runtime_if_updated(args: object, *, emit: Callable[[str], None]) ->
     if not bool(getattr(args, "restart_on_update", False)):
         return
     startup_runtime = getattr(args, "startup_runtime", None)
-    if startup_runtime is None or not startup_runtime.runtime_changed():
+    if startup_runtime is None:
         return
-    emit("Runtime update detected; restarting worker before the next idle check.")
+    decision = startup_runtime.plan_restart()
+    if decision is None:
+        return
+    setattr(args, "startup_runtime", decision.startup_runtime)
+    emit(decision.message)
+    if not decision.should_restart:
+        return
     try:
-        worker_restart_runtime.relaunch_worker_process(startup_runtime)
+        worker_restart_runtime.relaunch_worker_process(decision.startup_runtime)
     except OSError as exc:
+        loop_state = decision.startup_runtime.restart_loop_state
+        wait_seconds = loop_state.remaining_cooldown(
+            now=worker_restart_runtime.current_restart_timestamp()
+        )
         emit(
             "Runtime update detected but restart failed; continuing with the current "
-            f"runtime ({type(exc).__name__}: {exc})."
+            f"runtime ({type(exc).__name__}: {exc}; next retry in {wait_seconds}s)."
         )
 
 
@@ -527,11 +537,13 @@ def run_worker_sessions(
 
     def build_iteration_args() -> object:
         try:
-            # Deep-clone args so nested mutable fields cannot leak across loop iterations.
+            # Deep-clone args so nested mutable fields cannot leak
+            # across loop iterations.
             iteration_args = copy.deepcopy(args)
         except (TypeError, copy.Error) as exc:
-            # Preserve behavior for uncommon non-deepcopyable args objects, but keep a
-            # diagnostic breadcrumb when we must fall back to shallow copy semantics.
+            # Preserve behavior for uncommon non-deepcopyable args
+            # objects, but keep a diagnostic breadcrumb when we
+            # must fall back to shallow copy semantics.
             atelier_log.debug(
                 "Falling back to shallow args copy after deepcopy failure: "
                 f"{type(exc).__name__}: {exc}"
@@ -540,7 +552,8 @@ def run_worker_sessions(
         if explicit_epic_requested:
             setattr(iteration_args, "epic_id", explicit_epic_id)
             return iteration_args
-        # Guard against accidental explicit-mode carryover across implicit retries.
+        # Guard against accidental explicit-mode carryover across
+        # implicit retries.
         setattr(iteration_args, "epic_id", None)
         setattr(
             iteration_args,
