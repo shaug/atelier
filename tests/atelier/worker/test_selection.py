@@ -220,6 +220,44 @@ def test_stale_family_assigned_epics_reclaims_stale_heartbeat_without_pid_metada
     assert [item["id"] for item in stale] == ["at-stale-heartbeat"]
 
 
+def test_stale_family_assigned_epics_preserves_live_worker_when_agent_bead_missing() -> None:
+    issue = {
+        "id": "at-live-missing-agent",
+        "status": "in_progress",
+        "labels": ["at:epic"],
+        "assignee": "atelier/worker/codex/p222",
+        "created_at": "2026-02-20T00:00:00+00:00",
+    }
+
+    stale = selection.stale_family_assigned_epics(
+        [issue],
+        agent_id="atelier/worker/codex/p999",
+        is_session_active=lambda _assignee: True,
+        find_agent_issue=lambda _assignee: None,
+    )
+
+    assert stale == []
+
+
+def test_stale_family_assigned_epics_preserves_unknown_worker_when_agent_bead_missing() -> None:
+    issue = {
+        "id": "at-unknown-missing-agent",
+        "status": "in_progress",
+        "labels": ["at:epic"],
+        "assignee": "atelier/worker/codex/runtime",
+        "created_at": "2026-02-20T00:00:00+00:00",
+    }
+
+    stale = selection.stale_family_assigned_epics(
+        [issue],
+        agent_id="atelier/worker/codex/p999",
+        is_session_active=lambda _assignee: False,
+        find_agent_issue=lambda _assignee: None,
+    )
+
+    assert stale == []
+
+
 def test_stale_family_assigned_epics_reclaims_live_worker_when_hook_missing() -> None:
     issue = {
         "id": "at-unhooked",

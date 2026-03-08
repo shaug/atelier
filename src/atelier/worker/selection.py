@@ -130,7 +130,7 @@ def evaluate_epic_assignee_reclaimability(
     if agent_issue is None:
         return EpicAssigneeReclaimEvaluation(
             assignee=assignee,
-            reclaimable=find_agent_issue is not None,
+            reclaimable=False,
             detail=f"agent_bead_missing({assignee})",
         )
 
