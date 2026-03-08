@@ -35,6 +35,9 @@ def test_contract_docs_publish_route_inventory() -> None:
     assert "In-Memory Beads Command Contract" in content
     assert "source contract" in content
     assert IN_MEMORY_BEADS_VERSION in content
+    assert "| Family id | Tier | Routes | `--json` routes |" in content
+    assert "| `core-issues` | Tier 0 |" in content
+    assert "| `runtime-admin` | Tier 3 |" in content
     for flag in SUPPORTED_GLOBAL_FLAGS:
         assert flag in content
     for route in DOCUMENTED_COMMAND_ROUTES:
