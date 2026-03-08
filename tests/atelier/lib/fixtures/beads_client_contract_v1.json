@@ -1,0 +1,112 @@
+{
+  "minimum_version": "0.56.1",
+  "maximum_version_exclusive": null,
+  "capabilities": [
+    "version-reporting",
+    "issue-json",
+    "issue-mutation",
+    "dependency-mutation",
+    "ready-discovery"
+  ],
+  "operations": [
+    {
+      "operation": "inspect-environment",
+      "method": "inspect_environment",
+      "output_mode": "text-normalized",
+      "required_capabilities": []
+    },
+    {
+      "operation": "show",
+      "method": "show",
+      "output_mode": "json-required",
+      "required_capabilities": [
+        "version-reporting",
+        "issue-json"
+      ]
+    },
+    {
+      "operation": "list",
+      "method": "list",
+      "output_mode": "json-required",
+      "required_capabilities": [
+        "version-reporting",
+        "issue-json"
+      ]
+    },
+    {
+      "operation": "ready",
+      "method": "ready",
+      "output_mode": "json-required",
+      "required_capabilities": [
+        "version-reporting",
+        "issue-json",
+        "ready-discovery"
+      ]
+    },
+    {
+      "operation": "create",
+      "method": "create",
+      "output_mode": "json-required",
+      "required_capabilities": [
+        "version-reporting",
+        "issue-mutation"
+      ]
+    },
+    {
+      "operation": "update",
+      "method": "update",
+      "output_mode": "json-required",
+      "required_capabilities": [
+        "version-reporting",
+        "issue-mutation"
+      ]
+    },
+    {
+      "operation": "close",
+      "method": "close",
+      "output_mode": "json-required",
+      "required_capabilities": [
+        "version-reporting",
+        "issue-mutation"
+      ]
+    },
+    {
+      "operation": "dep-add",
+      "method": "add_dependency",
+      "output_mode": "json-required",
+      "required_capabilities": [
+        "version-reporting",
+        "issue-json",
+        "dependency-mutation"
+      ]
+    },
+    {
+      "operation": "dep-remove",
+      "method": "remove_dependency",
+      "output_mode": "json-required",
+      "required_capabilities": [
+        "version-reporting",
+        "issue-json",
+        "dependency-mutation"
+      ]
+    }
+  ],
+  "unsupported_surface": [
+    "blocked",
+    "doctor",
+    "dolt",
+    "edit",
+    "prime",
+    "stats"
+  ],
+  "downstream_contract": {
+    "at-s1vc": {
+      "role": "Alternative implementation",
+      "rule": "Implement the Beads protocol and reuse the shared models and typed errors."
+    },
+    "at-njpt4": {
+      "role": "Higher-level Atelier store abstraction",
+      "rule": "Build on the Beads protocol and typed models instead of reconstructing bd subprocess glue."
+    }
+  }
+}
