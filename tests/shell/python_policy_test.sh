@@ -58,7 +58,30 @@ test_supported_python_venv_pins_uv_to_python_311() {
   assert_equals 0 "$?"
 
   actual="$(cat "${args_file}")"
-  assert_equals "venv --python 3.11 --clear" "${actual}"
+  assert_equals "venv --python 3.11 --allow-existing --clear" "${actual}"
+}
+
+test_supported_python_venv_recreates_invalid_default_environment() {
+  TMP_DIR="$(mktemp -d)"
+
+  local args_file actual
+  args_file="${TMP_DIR}/uv-args.txt"
+  mkdir -p "${TMP_DIR}/.venv/bin"
+  printf '%s\n' '#!/usr/bin/env bash' > "${TMP_DIR}/.venv/bin/atelier"
+  setup_fake_uv "${TMP_DIR}"
+
+  (
+    cd "${TMP_DIR}"
+    PATH="${TMP_DIR}:${PATH}" \
+      ATELIER_TEST_ARGS_FILE="${args_file}" \
+      bash "${SUPPORTED_PYTHON}" venv >/dev/null 2>&1
+  )
+  assert_equals 0 "$?"
+
+  assert_directory_not_exists "${TMP_DIR}/.venv"
+
+  actual="$(cat "${args_file}")"
+  assert_equals "venv --python 3.11 --allow-existing" "${actual}"
 }
 
 test_lint_gate_pins_uv_tooling_to_python_311() {

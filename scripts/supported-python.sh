@@ -2,9 +2,30 @@
 set -euo pipefail
 
 SUPPORTED_PYTHON_VERSION="3.11"
+DEFAULT_VENV_PATH=".venv"
 
 usage() {
   echo "Usage: scripts/supported-python.sh <version|run|venv> [args...]" >&2
+}
+
+is_valid_venv() {
+  local venv_path="$1"
+
+  [[ -f "${venv_path}/pyvenv.cfg" ]] || return 1
+  [[ -x "${venv_path}/bin/python" || -x "${venv_path}/bin/python3" ]] && return 0
+  [[ -x "${venv_path}/Scripts/python.exe" ]]
+}
+
+remove_invalid_default_venv() {
+  if [[ ! -e "${DEFAULT_VENV_PATH}" ]]; then
+    return
+  fi
+
+  if is_valid_venv "${DEFAULT_VENV_PATH}"; then
+    return
+  fi
+
+  rm -rf "${DEFAULT_VENV_PATH}"
 }
 
 main() {
@@ -25,7 +46,10 @@ main() {
       ;;
     venv)
       shift
-      exec uv venv --python "${SUPPORTED_PYTHON_VERSION}" "$@"
+      if [[ $# -eq 0 || ( $# -eq 1 && "$1" == --* ) ]]; then
+        remove_invalid_default_venv
+      fi
+      exec uv venv --python "${SUPPORTED_PYTHON_VERSION}" --allow-existing "$@"
       ;;
     *)
       usage
