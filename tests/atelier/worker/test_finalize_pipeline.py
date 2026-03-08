@@ -1449,6 +1449,72 @@ def test_run_finalize_pipeline_blocks_pr_creation_without_north_star_review(
     assert blocked == ["north-star review checklist incomplete"]
 
 
+def test_run_finalize_pipeline_blocks_push_when_required_mapping_omits_criterion(
+    monkeypatch,
+) -> None:
+    issue = {
+        "id": "at-epic.1",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/root-at-epic.1\n",
+        "acceptance_criteria": "1) First criterion.\n2) Second criterion.\n",
+        "notes": (
+            "north_star_review.2026-03-07T12:30:00Z:\n"
+            "1) unmet_acceptance_criteria: none\n"
+            "2) required_code_changes_per_criterion:\n"
+            "- AC1: add the publish gate.\n"
+            "3) implementation_summary:\n"
+            "- Added the publish gate and tests.\n"
+            "4) completion_checklist:\n"
+            "- AC1 satisfied by commit abc1234; "
+            "files: src/atelier/worker/finalize_publish_gate.py.\n"
+            "- AC2 satisfied by commit abc1234; "
+            "files: tests/atelier/worker/test_finalize_pipeline.py.\n"
+        ),
+    }
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_json",
+        lambda *_args, **_kwargs: [issue],
+    )
+    monkeypatch.setattr(
+        finalize_pipeline.git,
+        "git_ref_exists",
+        lambda *_args, **_kwargs: False,
+    )
+
+    audit_notes: list[str] = []
+    monkeypatch.setattr(
+        finalize_pipeline.beads,
+        "run_bd_command",
+        lambda args, **_kwargs: audit_notes.append(" ".join(args)),
+    )
+
+    service = _FinalizeServiceStub()
+    blocked: list[str] = []
+    notifications: list[str] = []
+    service.mark_changeset_blocked_fn = lambda _changeset_id, *, reason: blocked.append(reason)
+    service.send_planner_notification_fn = lambda **kwargs: notifications.append(
+        str(kwargs.get("body"))
+    )
+    service.attempt_push_work_branch_fn = lambda _work_branch: (_ for _ in ()).throw(
+        AssertionError("push must not run when criterion mapping is incomplete")
+    )
+
+    result = finalize_pipeline.run_finalize_pipeline(
+        context=_pipeline_context(),
+        service=service,
+    )
+
+    assert result.reason == "changeset_blocked_north_star_review"
+    assert result.continue_running is False
+    assert blocked == ["north-star review checklist incomplete"]
+    assert any(
+        "required_code_changes_per_criterion" in body and "AC2" in body for body in notifications
+    )
+    assert any("publish_blocked: north-star review gate failed" in note for note in audit_notes)
+
+
 def test_run_finalize_pipeline_finalizes_integrated_pushed_changeset_without_pr_gate(
     monkeypatch,
 ) -> None:
