@@ -45,8 +45,9 @@ def _bootstrap_source_import() -> None:
         src_dir = resolved / "src"
         if not (src_dir / "atelier" / "__init__.py").is_file():
             continue
-        if str(src_dir) not in sys.path:
-            sys.path.insert(0, str(src_dir))
+        src_dir_entry = str(src_dir)
+        sys.path[:] = [entry for entry in sys.path if entry != src_dir_entry]
+        sys.path.insert(0, src_dir_entry)
         return
 
 
