@@ -44,6 +44,7 @@ from atelier.lib.beads import (
     decode_help_output,
     decode_version_output,
 )
+from atelier.testing.beads import IssueFixtureBuilder, build_in_memory_beads_client
 
 
 def test_issue_record_preserves_unknown_fields() -> None:
@@ -266,6 +267,120 @@ def _probe_responses() -> dict[tuple[str, ...], BeadsCommandResult]:
     }
 
 
+def _shared_contract_seed_issues() -> tuple[dict[str, object], ...]:
+    builder = IssueFixtureBuilder()
+    return (
+        builder.issue(
+            "at-epic",
+            title="Epic",
+            issue_type="epic",
+            status="open",
+            labels=("at:epic",),
+        ),
+        builder.issue(
+            "at-1",
+            title="Alpha",
+            parent="at-epic",
+            status="open",
+            labels=("atelier",),
+        ),
+        builder.issue(
+            "at-2",
+            title="Blocked",
+            parent="at-epic",
+            status="open",
+            dependencies=("at-1",),
+        ),
+    )
+
+
+def _build_shared_contract_client(*, backend: str) -> SyncBeadsClient:
+    if backend == "in-memory":
+        client, _store = build_in_memory_beads_client(issues=_shared_contract_seed_issues())
+        return SyncBeadsClient(client)
+    if backend != "subprocess":
+        raise AssertionError(f"unexpected backend: {backend}")
+
+    responses = _probe_responses()
+    responses.update(
+        dict(
+            [
+                _result(
+                    ("bd", "show", "at-1", "--json"),
+                    stdout=(
+                        '[{"id":"at-1","title":"Alpha","issue_type":"task",'
+                        '"parent":{"id":"at-epic"},"labels":["atelier"]}]'
+                    ),
+                ),
+                _result(
+                    (
+                        "bd",
+                        "list",
+                        "--json",
+                        "--parent",
+                        "at-epic",
+                        "--status",
+                        "open",
+                        "--label",
+                        "atelier",
+                    ),
+                    stdout=(
+                        '[{"id":"at-1","issue_type":"task","parent":{"id":"at-epic"},'
+                        '"labels":["atelier"]}]'
+                    ),
+                ),
+                _result(
+                    ("bd", "ready", "--json", "--parent", "at-epic"),
+                    stdout='[{"id":"at-1","issue_type":"task","parent":{"id":"at-epic"}}]',
+                ),
+                _result(
+                    (
+                        "bd",
+                        "create",
+                        "--title",
+                        "New issue",
+                        "--type",
+                        "task",
+                        "--json",
+                        "--description",
+                        "desc",
+                        "--parent",
+                        "at-epic",
+                        "--labels",
+                        "one,two",
+                    ),
+                    stdout='{"id":"at-3","issue_type":"task","parent":{"id":"at-epic"}}',
+                ),
+                _result(
+                    (
+                        "bd",
+                        "update",
+                        "at-3",
+                        "--json",
+                        "--status",
+                        "in_progress",
+                        "--set-labels",
+                        "one",
+                    ),
+                    stdout=(
+                        '[{"id":"at-3","status":"in_progress","issue_type":"task",'
+                        '"parent":{"id":"at-epic"},"labels":["one"]}]'
+                    ),
+                ),
+                _result(
+                    ("bd", "close", "at-3", "--json", "--reason", "done"),
+                    stdout='[{"id":"at-3","status":"closed","issue_type":"task"}]',
+                ),
+            ]
+        ),
+    )
+    client = SubprocessBeadsClient(
+        transport=ScriptedBeadsTransport(responses),
+        env={"BEADS_DIR": "/repo/.beads"},
+    )
+    return SyncBeadsClient(client)
+
+
 def test_subprocess_transport_raises_typed_timeout() -> None:
     process = _FakeProcess(returncode=None, hang=True)
 
@@ -289,56 +404,52 @@ def test_subprocess_transport_raises_typed_timeout() -> None:
     assert process.killed is True
 
 
-def test_subprocess_client_decodes_core_json_commands() -> None:
+@pytest.mark.parametrize("backend", ["in-memory", "subprocess"])
+def test_shared_client_contract_supports_tier_zero_issue_flow(backend: str) -> None:
+    sync_client = _build_shared_contract_client(backend=backend)
+
+    environment = sync_client.inspect_environment()
+    shown = sync_client.show(ShowIssueRequest(issue_id="at-1"))
+    listed = sync_client.list(
+        ListIssuesRequest(parent_id="at-epic", status="open", labels=("atelier",))
+    )
+    ready = sync_client.ready(ReadyIssuesRequest(parent_id="at-epic"))
+    created = sync_client.create(
+        CreateIssueRequest(
+            title="New issue",
+            type="task",
+            description="desc",
+            parent_id="at-epic",
+            labels=("one", "two"),
+        )
+    )
+    updated = sync_client.update(
+        UpdateIssueRequest(
+            issue_id=created.id,
+            status="in_progress",
+            labels=("one",),
+        )
+    )
+    closed = sync_client.close(CloseIssueRequest(issue_id=created.id, reason="done"))
+
+    assert {
+        BeadsCapability.VERSION_REPORTING,
+        BeadsCapability.ISSUE_JSON,
+        BeadsCapability.ISSUE_MUTATION,
+        BeadsCapability.READY_DISCOVERY,
+    }.issubset(set(environment.capabilities))
+    assert (shown.id, listed[0].id, ready[0].id) == ("at-1", "at-1", "at-1")
+    assert created.parent and created.parent.id == "at-epic"
+    assert updated.status == "in_progress"
+    assert updated.labels == ("one",)
+    assert closed.status == "closed"
+
+
+def test_subprocess_client_decodes_dependency_mutations() -> None:
     responses = _probe_responses()
     responses.update(
         dict(
             [
-                _result(
-                    ("bd", "show", "at-1", "--json"),
-                    stdout='[{"id":"at-1","title":"Alpha","issue_type":"task"}]',
-                ),
-                _result(
-                    ("bd", "list", "--json", "--status", "open", "--label", "atelier"),
-                    stdout='[{"id":"at-1","issue_type":"task"}]',
-                ),
-                _result(
-                    ("bd", "ready", "--json", "--parent", "at-epic"),
-                    stdout='[{"id":"at-2","issue_type":"task"}]',
-                ),
-                _result(
-                    (
-                        "bd",
-                        "create",
-                        "--title",
-                        "New issue",
-                        "--type",
-                        "task",
-                        "--json",
-                        "--description",
-                        "desc",
-                        "--labels",
-                        "one,two",
-                    ),
-                    stdout='{"id":"at-3","issue_type":"task"}',
-                ),
-                _result(
-                    (
-                        "bd",
-                        "update",
-                        "at-3",
-                        "--json",
-                        "--status",
-                        "in_progress",
-                        "--set-labels",
-                        "one",
-                    ),
-                    stdout='[{"id":"at-3","status":"in_progress","issue_type":"task"}]',
-                ),
-                _result(
-                    ("bd", "close", "at-3", "--json", "--reason", "done"),
-                    stdout='[{"id":"at-3","status":"closed","issue_type":"task"}]',
-                ),
                 _result(
                     ("bd", "dep", "add", "at-2", "at-1", "--json"),
                     stdout='{"issue_id":"at-2","depends_on_id":"at-1","status":"added","type":"blocks"}',
@@ -362,40 +473,20 @@ def test_subprocess_client_decodes_core_json_commands() -> None:
             stdout='[{"id":"at-2","issue_type":"task"}]',
         ),
     ]
-    transport = ScriptedBeadsTransport(responses)
-    client = SubprocessBeadsClient(transport=transport, env={"BEADS_DIR": "/repo/.beads"})
+    client = SubprocessBeadsClient(
+        transport=ScriptedBeadsTransport(responses),
+        env={"BEADS_DIR": "/repo/.beads"},
+    )
 
-    shown = _run(client.show(ShowIssueRequest(issue_id="at-1")))
-    listed = _run(client.list(ListIssuesRequest(status="open", labels=("atelier",))))
-    ready = _run(client.ready(ReadyIssuesRequest(parent_id="at-epic")))
-    created = _run(
-        client.create(
-            CreateIssueRequest(
-                title="New issue",
-                type="task",
-                description="desc",
-                labels=("one", "two"),
-            )
-        )
-    )
-    updated = _run(
-        client.update(
-            UpdateIssueRequest(
-                issue_id="at-3",
-                status="in_progress",
-                labels=("one",),
-            )
-        )
-    )
-    closed = _run(client.close(CloseIssueRequest(issue_id="at-3", reason="done")))
     added = _run(
         client.add_dependency(DependencyMutationRequest(issue_id="at-2", dependency_id="at-1"))
     )
-    _run(client.remove_dependency(DependencyMutationRequest(issue_id="at-2", dependency_id="at-1")))
+    removed = _run(
+        client.remove_dependency(DependencyMutationRequest(issue_id="at-2", dependency_id="at-1"))
+    )
 
-    assert (shown.id, listed[0].id, ready[0].id) == ("at-1", "at-1", "at-2")
-    assert (created.id, updated.status, closed.status) == ("at-3", "in_progress", "closed")
     assert added.dependencies[0].id == "at-1"
+    assert removed.dependencies == ()
 
 
 @pytest.mark.parametrize(

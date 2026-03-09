@@ -23,6 +23,14 @@ default:
 - `tests/atelier/worker/test_changeset_state.py`
 - `tests/atelier/worker/test_work_startup_runtime.py`
 
+The shared client-contract suite also defaults to the in-memory backend for Tier
+0 Beads semantics, while keeping subprocess-specific assertions explicit:
+
+- `tests/atelier/lib/test_beads.py` Shared
+  `show`/`list`/`ready`/`create`/`update`/`close` coverage now runs against
+  `build_in_memory_beads_client(...)`, while help/version probing, timeouts, and
+  dependency mutation remain process-backed tests by exception.
+
 Keep real-`bd` integration coverage explicit in suites such as:
 
 - `tests/shell/publish_scripts_test.sh`
@@ -83,6 +91,14 @@ compatibility fixture tests.
 
 Reserve `build_startup_admin_fixture(...)` for compatibility tests that need to
 assert raw `bd stats`, `migrate`, or `dolt show` command behavior.
+
+### Fixture Ergonomics Note
+
+The shared-client migration exposed one current Tier 0 gap:
+`build_in_memory_beads_client(...)` does not implement dependency mutation yet.
+Keep `dep add` and `dep remove` assertions in explicit subprocess tests until
+the in-memory contract grows that semantic, instead of falling back to broad CLI
+monkeypatching for the whole module.
 
 ### Runtime And Reliability Impact
 
