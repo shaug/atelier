@@ -184,16 +184,38 @@ class BeadsStartupState(BeadsModel):
 
     classification: NonBlankStr
     migration_eligible: bool
-    has_dolt_store: bool
-    has_legacy_sqlite: bool
-    dolt_issue_total: StrictInt | None = None
-    legacy_issue_total: StrictInt | None = None
+    active_backend_ready: bool = Field(
+        validation_alias=AliasChoices("active_backend_ready", "has_dolt_store"),
+    )
+    recoverable_legacy_present: bool = Field(
+        validation_alias=AliasChoices("recoverable_legacy_present", "has_legacy_sqlite"),
+    )
+    active_issue_total: StrictInt | None = Field(
+        default=None,
+        validation_alias=AliasChoices("active_issue_total", "dolt_issue_total"),
+    )
+    recoverable_issue_total: StrictInt | None = Field(
+        default=None,
+        validation_alias=AliasChoices("recoverable_issue_total", "legacy_issue_total"),
+    )
     reason: NonBlankStr
     backend: NonBlankStr | None = None
-    dolt_count_source: NonBlankStr = "unavailable"
-    legacy_count_source: NonBlankStr = "unavailable"
-    dolt_detail: NonBlankStr | None = None
-    legacy_detail: NonBlankStr | None = None
+    active_issue_source: NonBlankStr = Field(
+        default="unavailable",
+        validation_alias=AliasChoices("active_issue_source", "dolt_count_source"),
+    )
+    recoverable_issue_source: NonBlankStr = Field(
+        default="unavailable",
+        validation_alias=AliasChoices("recoverable_issue_source", "legacy_count_source"),
+    )
+    active_probe_detail: NonBlankStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("active_probe_detail", "dolt_detail"),
+    )
+    recoverable_probe_detail: NonBlankStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("recoverable_probe_detail", "legacy_detail"),
+    )
 
     def diagnostics(self) -> tuple[str, ...]:
         """Render stable startup diagnostics lines."""
@@ -202,24 +224,28 @@ class BeadsStartupState(BeadsModel):
             f"classification={self.classification}",
             "migration_eligible=" + ("yes" if self.migration_eligible else "no"),
             "configured_backend=" + (self.backend if self.backend else "unspecified"),
-            "dolt_store=" + ("present" if self.has_dolt_store else "missing"),
-            "legacy_sqlite=" + ("present" if self.has_legacy_sqlite else "missing"),
-            "dolt_issue_total="
-            + (str(self.dolt_issue_total) if self.dolt_issue_total is not None else "unavailable"),
-            f"dolt_count_source={self.dolt_count_source}",
-            "legacy_issue_total="
+            "active_backend=" + ("ready" if self.active_backend_ready else "not_ready"),
+            "recoverable_legacy=" + ("present" if self.recoverable_legacy_present else "absent"),
+            "active_issue_total="
             + (
-                str(self.legacy_issue_total)
-                if self.legacy_issue_total is not None
+                str(self.active_issue_total)
+                if self.active_issue_total is not None
                 else "unavailable"
             ),
-            f"legacy_count_source={self.legacy_count_source}",
+            f"active_issue_source={self.active_issue_source}",
+            "recoverable_issue_total="
+            + (
+                str(self.recoverable_issue_total)
+                if self.recoverable_issue_total is not None
+                else "unavailable"
+            ),
+            f"recoverable_issue_source={self.recoverable_issue_source}",
             f"reason={self.reason}",
         ]
-        if self.dolt_detail:
-            details.append(f"dolt_detail={self.dolt_detail}")
-        if self.legacy_detail:
-            details.append(f"legacy_detail={self.legacy_detail}")
+        if self.active_probe_detail:
+            details.append(f"active_probe_detail={self.active_probe_detail}")
+        if self.recoverable_probe_detail:
+            details.append(f"recoverable_probe_detail={self.recoverable_probe_detail}")
         return tuple(details)
 
 

@@ -70,8 +70,8 @@ unsupported nearby surface area include `blocked`, `doctor`, `dolt`, `edit`,
 The shared `Beads` protocol exposes issue semantics plus one startup semantic:
 
 - `inspect_startup_state()` returns a typed `BeadsStartupState` describing
-  whether the configured backend is healthy, missing legacy migration, or needs
-  operator attention.
+  whether the active backend is healthy, whether recoverable legacy data still
+  needs migration, or whether startup needs operator attention.
 
 Boundary ownership is explicit:
 

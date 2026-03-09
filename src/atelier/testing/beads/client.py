@@ -72,11 +72,11 @@ def _default_startup_state() -> BeadsStartupState:
     return BeadsStartupState(
         classification="in_memory_backend",
         migration_eligible=False,
-        has_dolt_store=False,
-        has_legacy_sqlite=False,
-        dolt_issue_total=None,
-        legacy_issue_total=None,
-        reason="in_memory_backend_has_no_legacy_startup_storage",
+        active_backend_ready=False,
+        recoverable_legacy_present=False,
+        active_issue_total=None,
+        recoverable_issue_total=None,
+        reason="in_memory_backend_has_no_recoverable_legacy_state",
         backend="in-memory",
     )
 

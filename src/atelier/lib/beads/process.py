@@ -44,9 +44,9 @@ _SEMVER_SEARCH: Pattern[str] = compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
 _FLAG_SEARCH: Pattern[str] = compile(r"--[a-z0-9][a-z0-9-]*")
 _JSON_FLAG = "--json"
 _STARTUP_COUNT_SKEW_RECHECK_ATTEMPTS = 2
-_STARTUP_HEALTHY = "healthy_dolt"
-_STARTUP_MISSING_DOLT = "missing_dolt_with_legacy_sqlite"
-_STARTUP_INSUFFICIENT_DOLT = "insufficient_dolt_vs_legacy_data"
+_STARTUP_HEALTHY = "healthy_active_backend"
+_STARTUP_MISSING_ACTIVE = "recoverable_legacy_data_without_active_backend"
+_STARTUP_INSUFFICIENT_ACTIVE = "recoverable_legacy_data_exceeds_active_data"
 _STARTUP_UNKNOWN = "startup_state_unknown"
 _EMBEDDED_BACKEND_PANIC_MARKERS = (
     "panic: runtime error",
@@ -261,10 +261,10 @@ class SubprocessBeadsClient(Beads):
             return BeadsStartupState(
                 classification=_STARTUP_UNKNOWN,
                 migration_eligible=False,
-                has_dolt_store=False,
-                has_legacy_sqlite=False,
-                dolt_issue_total=None,
-                legacy_issue_total=None,
+                active_backend_ready=False,
+                recoverable_legacy_present=False,
+                active_issue_total=None,
+                recoverable_issue_total=None,
                 reason="beads_root_not_configured",
             )
 
@@ -276,10 +276,10 @@ class SubprocessBeadsClient(Beads):
             return BeadsStartupState(
                 classification=_STARTUP_UNKNOWN,
                 migration_eligible=False,
-                has_dolt_store=has_dolt_store,
-                has_legacy_sqlite=has_legacy_sqlite,
-                dolt_issue_total=None,
-                legacy_issue_total=None,
+                active_backend_ready=has_dolt_store,
+                recoverable_legacy_present=has_legacy_sqlite,
+                active_issue_total=None,
+                recoverable_issue_total=None,
                 reason="beads_root_missing",
                 backend=configured_backend,
             )
@@ -308,41 +308,41 @@ class SubprocessBeadsClient(Beads):
         )
 
         if dolt_issue_total is None:
-            dolt_count_source = "unavailable"
+            active_issue_source = "unavailable"
         elif has_dolt_store:
-            dolt_count_source = "bd_stats_dolt_store"
+            active_issue_source = "backend_issue_stats"
         elif dolt_backend_expected:
-            dolt_count_source = "bd_stats_without_dolt_store"
+            active_issue_source = "backend_issue_stats_without_ready_marker"
         else:
-            dolt_count_source = "bd_stats_non_dolt_backend"
+            active_issue_source = "backend_issue_stats_non_default_backend"
 
-        legacy_count_source = (
-            "bd_stats_legacy_sqlite" if legacy_issue_total is not None else "unavailable"
+        recoverable_issue_source = (
+            "recoverable_issue_stats" if legacy_issue_total is not None else "unavailable"
         )
         legacy_has_data = bool(legacy_issue_total and legacy_issue_total > 0)
         common_state = {
-            "has_dolt_store": has_dolt_store,
-            "has_legacy_sqlite": has_legacy_sqlite,
-            "dolt_issue_total": dolt_issue_total,
-            "legacy_issue_total": legacy_issue_total,
+            "active_backend_ready": has_dolt_store,
+            "recoverable_legacy_present": has_legacy_sqlite,
+            "active_issue_total": dolt_issue_total,
+            "recoverable_issue_total": legacy_issue_total,
             "backend": configured_backend,
-            "dolt_count_source": dolt_count_source,
-            "legacy_count_source": legacy_count_source,
-            "dolt_detail": dolt_detail,
-            "legacy_detail": legacy_detail,
+            "active_issue_source": active_issue_source,
+            "recoverable_issue_source": recoverable_issue_source,
+            "active_probe_detail": dolt_detail,
+            "recoverable_probe_detail": legacy_detail,
         }
 
         if not has_dolt_store:
             if legacy_has_data and dolt_backend_expected:
                 return BeadsStartupState(
-                    classification=_STARTUP_MISSING_DOLT,
+                    classification=_STARTUP_MISSING_ACTIVE,
                     migration_eligible=True,
-                    reason="legacy_sqlite_has_data_while_dolt_is_unavailable",
+                    reason="recoverable_legacy_data_available_while_active_backend_is_unavailable",
                     **common_state,
                 )
-            reason = "dolt_store_missing_without_recoverable_legacy_data"
+            reason = "active_backend_unavailable_without_recoverable_legacy_data"
             if configured_backend and configured_backend != "dolt":
-                reason = "dolt_store_missing_for_non_dolt_backend"
+                reason = "active_backend_unavailable_for_configured_backend"
             return BeadsStartupState(
                 classification=_STARTUP_UNKNOWN,
                 migration_eligible=False,
@@ -357,23 +357,23 @@ class SubprocessBeadsClient(Beads):
                 and legacy_issue_total > dolt_issue_total
             ):
                 return BeadsStartupState(
-                    classification=_STARTUP_INSUFFICIENT_DOLT,
+                    classification=_STARTUP_INSUFFICIENT_ACTIVE,
                     migration_eligible=True,
-                    reason="legacy_issue_total_exceeds_dolt_issue_total",
+                    reason="recoverable_issue_total_exceeds_active_issue_total",
                     **common_state,
                 )
             return BeadsStartupState(
                 classification=_STARTUP_HEALTHY,
                 migration_eligible=False,
-                reason="dolt_issue_total_is_healthy",
+                reason="active_issue_total_covers_recoverable_legacy_data",
                 **common_state,
             )
 
         if legacy_has_data and _is_embedded_backend_panic(dolt_detail or ""):
             return BeadsStartupState(
-                classification=_STARTUP_MISSING_DOLT,
+                classification=_STARTUP_MISSING_ACTIVE,
                 migration_eligible=True,
-                reason="legacy_sqlite_has_data_while_dolt_is_unavailable",
+                reason="recoverable_legacy_data_available_while_active_backend_is_unavailable",
                 **common_state,
             )
         return BeadsStartupState(

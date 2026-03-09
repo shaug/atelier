@@ -65,16 +65,16 @@ from atelier.testing.beads import build_in_memory_beads_client
 
 client, _store = build_in_memory_beads_client(
     startup_state=BeadsStartupState(
-        classification="healthy_dolt",
+        classification="healthy_active_backend",
         migration_eligible=False,
-        has_dolt_store=True,
-        has_legacy_sqlite=True,
-        dolt_issue_total=3,
-        legacy_issue_total=3,
-        reason="dolt_issue_total_is_healthy",
+        active_backend_ready=True,
+        recoverable_legacy_present=True,
+        active_issue_total=3,
+        recoverable_issue_total=3,
+        reason="active_issue_total_covers_recoverable_legacy_data",
         backend="dolt",
-        dolt_count_source="bd_stats_dolt_store",
-        legacy_count_source="bd_stats_legacy_sqlite",
+        active_issue_source="backend_issue_stats",
+        recoverable_issue_source="recoverable_issue_stats",
     )
 )
 
