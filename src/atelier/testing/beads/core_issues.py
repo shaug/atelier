@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 from .contract import InMemoryBeadsCommandRoute
 from .dispatcher import CommandEnvelope, CommandInvocation
-from .store import InMemoryIssueStore
+from .store import UNSET_UPDATE_FIELD, InMemoryIssueStore
 
 
 def _parse_int(value: str, *, flag: str) -> int:
@@ -18,6 +19,28 @@ def _parse_int(value: str, *, flag: str) -> int:
 
 def _strip_json_flag(tokens: Sequence[str]) -> list[str]:
     return [token for token in tokens if token != "--json"]
+
+
+def _claim_actor(invocation: CommandInvocation) -> str | None:
+    tokens = list(invocation.global_tokens)
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--actor" and index + 1 < len(tokens):
+            return tokens[index + 1].strip() or None
+        if token.startswith("--actor="):
+            return token.partition("=")[2].strip() or None
+        index += 1
+    if invocation.env is None:
+        return None
+    actor = invocation.env.get("BD_ACTOR") or invocation.env.get("ATELIER_AGENT_ID")
+    if not isinstance(actor, str):
+        return None
+    return actor.strip() or None
+
+
+def _read_body_file(path_value: str) -> str:
+    return Path(path_value).read_text(encoding="utf-8")
 
 
 class InMemoryCoreIssuesHandler:
@@ -42,7 +65,7 @@ class InMemoryCoreIssuesHandler:
             if route.command == ("create",):
                 return self._create(tokens)
             if route.command == ("update",):
-                return self._update(tokens)
+                return self._update(tokens, invocation)
             if route.command == ("close",):
                 return self._close(tokens)
         except KeyError as exc:
@@ -54,13 +77,18 @@ class InMemoryCoreIssuesHandler:
     def _show(self, tokens: Sequence[str]) -> CommandEnvelope:
         if len(tokens) != 1:
             raise ValueError("show requires exactly one issue id")
-        return CommandEnvelope.json_payload([self._store.show(tokens[0])])
+        try:
+            payload = self._store.show(tokens[0])
+        except KeyError:
+            return CommandEnvelope.json_payload([])
+        return CommandEnvelope.json_payload([payload])
 
     def _list(self, tokens: Sequence[str]) -> CommandEnvelope:
         parent_id: str | None = None
         status: str | None = None
         assignee: str | None = None
         title_query: str | None = None
+        title: str | None = None
         labels: list[str] = []
         include_closed = False
         limit: int | None = None
@@ -75,6 +103,7 @@ class InMemoryCoreIssuesHandler:
                 "--parent",
                 "--status",
                 "--assignee",
+                "--title",
                 "--title-contains",
                 "--label",
                 "--limit",
@@ -88,6 +117,8 @@ class InMemoryCoreIssuesHandler:
                     status = value
                 elif token == "--assignee":
                     assignee = value
+                elif token == "--title":
+                    title = value
                 elif token == "--title-contains":
                     title_query = value
                 elif token == "--label":
@@ -105,6 +136,7 @@ class InMemoryCoreIssuesHandler:
                 status=status,
                 assignee=assignee,
                 title_query=title_query,
+                title=title,
                 labels=tuple(labels),
                 include_closed=include_closed,
                 limit=limit,
@@ -135,6 +167,7 @@ class InMemoryCoreIssuesHandler:
         priority: int | None = None
         estimate: int | None = None
         labels: tuple[str, ...] = ()
+        body_file: str | None = None
         index = 0
         while index < len(tokens):
             token = tokens[index]
@@ -142,6 +175,7 @@ class InMemoryCoreIssuesHandler:
                 "--title",
                 "--type",
                 "--description",
+                "--body-file",
                 "--design",
                 "--acceptance",
                 "--assignee",
@@ -160,6 +194,8 @@ class InMemoryCoreIssuesHandler:
                 issue_type = value
             elif token == "--description":
                 description = value
+            elif token == "--body-file":
+                body_file = value
             elif token == "--design":
                 design = value
             elif token == "--acceptance":
@@ -179,6 +215,8 @@ class InMemoryCoreIssuesHandler:
             raise ValueError("create requires --title")
         if not issue_type:
             raise ValueError("create requires --type")
+        if body_file is not None:
+            description = _read_body_file(body_file)
         return CommandEnvelope.json_payload(
             [
                 self._store.create(
@@ -196,7 +234,11 @@ class InMemoryCoreIssuesHandler:
             ]
         )
 
-    def _update(self, tokens: Sequence[str]) -> CommandEnvelope:
+    def _update(
+        self,
+        tokens: Sequence[str],
+        invocation: CommandInvocation,
+    ) -> CommandEnvelope:
         if not tokens:
             raise ValueError("update requires an issue id")
         issue_id = tokens[0]
@@ -205,16 +247,24 @@ class InMemoryCoreIssuesHandler:
         design: str | None = None
         acceptance_criteria: str | None = None
         status: str | None = None
-        assignee: str | None = None
+        assignee: str | None | object = None
+        assignee_specified = False
         priority: int | None = None
         estimate: int | None = None
         labels: list[str] | None = None
+        add_labels: list[str] = []
+        remove_labels: list[str] = []
+        append_notes: list[str] = []
+        body_file: str | None = None
+        claim = False
         index = 1
         while index < len(tokens):
             token = tokens[index]
             if token not in {
+                "--claim",
                 "--title",
                 "--description",
+                "--body-file",
                 "--design",
                 "--acceptance",
                 "--status",
@@ -222,8 +272,15 @@ class InMemoryCoreIssuesHandler:
                 "--priority",
                 "--estimate",
                 "--set-labels",
+                "--add-label",
+                "--remove-label",
+                "--append-notes",
             }:
                 raise ValueError(f"unsupported update flag: {token}")
+            if token == "--claim":
+                claim = True
+                index += 1
+                continue
             if index + 1 >= len(tokens):
                 raise ValueError(f"{token} requires a value")
             value = tokens[index + 1]
@@ -231,6 +288,8 @@ class InMemoryCoreIssuesHandler:
                 title = value
             elif token == "--description":
                 description = value
+            elif token == "--body-file":
+                body_file = value
             elif token == "--design":
                 design = value
             elif token == "--acceptance":
@@ -239,6 +298,7 @@ class InMemoryCoreIssuesHandler:
                 status = value
             elif token == "--assignee":
                 assignee = value
+                assignee_specified = True
             elif token == "--priority":
                 priority = _parse_int(value, flag="--priority")
             elif token == "--estimate":
@@ -247,7 +307,23 @@ class InMemoryCoreIssuesHandler:
                 if labels is None:
                     labels = []
                 labels.append(value)
+            elif token == "--add-label":
+                add_labels.append(value)
+            elif token == "--remove-label":
+                remove_labels.append(value)
+            elif token == "--append-notes":
+                append_notes.append(value)
             index += 2
+        if claim:
+            actor = _claim_actor(invocation)
+            if actor is None:
+                raise ValueError("claim requires --actor or BD_ACTOR")
+            try:
+                self._store.claim(issue_id, actor=actor)
+            except ValueError as exc:
+                return CommandEnvelope(returncode=1, stderr=str(exc))
+        if body_file is not None:
+            description = _read_body_file(body_file)
         if all(
             value is None
             for value in (
@@ -256,12 +332,11 @@ class InMemoryCoreIssuesHandler:
                 design,
                 acceptance_criteria,
                 status,
-                assignee,
                 priority,
                 estimate,
                 labels,
             )
-        ):
+        ) and not (assignee_specified or add_labels or remove_labels or append_notes or claim):
             raise ValueError("update requires at least one field change")
         return CommandEnvelope.json_payload(
             [
@@ -272,10 +347,13 @@ class InMemoryCoreIssuesHandler:
                     design=design,
                     acceptance_criteria=acceptance_criteria,
                     status=status,
-                    assignee=assignee,
+                    assignee=assignee if assignee_specified else UNSET_UPDATE_FIELD,
                     priority=priority,
                     estimate=estimate,
                     labels=None if labels is None else tuple(labels),
+                    add_labels=tuple(add_labels),
+                    remove_labels=tuple(remove_labels),
+                    append_notes=tuple(append_notes),
                 )
             ]
         )

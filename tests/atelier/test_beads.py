@@ -11,6 +11,7 @@ import pytest
 
 import atelier.beads as beads
 from atelier import exec as exec_util
+from atelier.testing.beads import InMemoryBeadsBackend, IssueFixtureBuilder, patch_in_memory_beads
 
 
 @pytest.fixture(autouse=True)
@@ -4370,6 +4371,175 @@ def test_get_agent_hook_backfills_slot() -> None:
 
     assert hook == "epic-2"
     assert any(args[:2] == ["slot", "set"] for args in calls)
+
+
+def test_set_clear_and_get_agent_hook_with_in_memory_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    builder = IssueFixtureBuilder()
+    backend = InMemoryBeadsBackend(
+        seeded_issues=(
+            builder.issue(
+                "at-agent",
+                issue_type="agent",
+                labels=("at:agent",),
+                description="agent_id: atelier/worker/codex/p100\n",
+            ),
+        )
+    )
+    monkeypatch.setenv("ATELIER_AGENT_ID", "atelier/worker/codex/p100")
+    monkeypatch.setenv("BD_ACTOR", "atelier/worker/codex/p100")
+
+    with patch_in_memory_beads(backend):
+        beads.set_agent_hook("at-agent", "at-epic", beads_root=beads_root, cwd=repo_root)
+        assert beads.get_agent_hook("at-agent", beads_root=beads_root, cwd=repo_root) == "at-epic"
+
+        beads.clear_agent_hook(
+            "at-agent",
+            beads_root=beads_root,
+            cwd=repo_root,
+            expected_hook="at-epic",
+        )
+
+        issue = beads.run_bd_json(["show", "at-agent"], beads_root=beads_root, cwd=repo_root)[0]
+        hook = beads.get_agent_hook("at-agent", beads_root=beads_root, cwd=repo_root)
+
+    assert hook is None
+    assert "hook_bead: null" in str(issue.get("description"))
+
+
+def test_claim_epic_takeover_uses_in_memory_claim_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    builder = IssueFixtureBuilder()
+    agent_id = "atelier/worker/codex/p200"
+    stale_agent = "atelier/worker/codex/p111"
+    backend = InMemoryBeadsBackend(
+        seeded_issues=(
+            builder.issue(
+                "at-epic",
+                issue_type="epic",
+                labels=("at:epic", "at:hooked"),
+                status="in_progress",
+                assignee=stale_agent,
+            ),
+        )
+    )
+    monkeypatch.setenv("ATELIER_AGENT_ID", agent_id)
+    monkeypatch.setenv("BD_ACTOR", agent_id)
+
+    with patch_in_memory_beads(backend):
+        claimed = beads.claim_epic(
+            "at-epic",
+            agent_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+            allow_takeover_from=stale_agent,
+        )
+
+    assert claimed["assignee"] == agent_id
+    assert claimed["status"] == "in_progress"
+    assert "at:hooked" in claimed["labels"]
+
+
+def test_claim_queue_message_and_mark_read_with_in_memory_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    builder = IssueFixtureBuilder()
+    agent_id = "atelier/worker/codex/p300"
+    backend = InMemoryBeadsBackend(
+        seeded_issues=(
+            builder.issue(
+                "msg-1",
+                labels=("at:message", "at:unread"),
+                description="---\nqueue: triage\nthread: at-epic.1\n---\n\nBody\n",
+            ),
+        )
+    )
+    monkeypatch.setenv("ATELIER_AGENT_ID", agent_id)
+    monkeypatch.setenv("BD_ACTOR", agent_id)
+
+    with patch_in_memory_beads(backend):
+        claimed = beads.claim_queue_message(
+            "msg-1",
+            agent_id,
+            beads_root=beads_root,
+            cwd=repo_root,
+        )
+        beads.mark_message_read("msg-1", beads_root=beads_root, cwd=repo_root)
+        unread = beads.list_queue_messages(beads_root=beads_root, cwd=repo_root)
+        all_messages = beads.list_queue_messages(
+            beads_root=beads_root,
+            cwd=repo_root,
+            unclaimed_only=False,
+            unread_only=False,
+        )
+
+    assert claimed["assignee"] == agent_id
+    assert "claimed_by: " + agent_id in str(claimed.get("description"))
+    assert unread == []
+    assert len(all_messages) == 1
+    assert all_messages[0]["claimed_by"] == agent_id
+
+
+def test_close_epic_if_complete_clears_hook_with_in_memory_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    builder = IssueFixtureBuilder()
+    agent_id = "atelier/worker/codex/p400"
+    backend = InMemoryBeadsBackend(
+        seeded_issues=(
+            builder.issue(
+                "at-agent",
+                issue_type="agent",
+                labels=("at:agent",),
+                description=f"agent_id: {agent_id}\n",
+            ),
+            builder.issue(
+                "at-epic",
+                issue_type="epic",
+                labels=("at:epic", "at:hooked"),
+                status="closed",
+                assignee=agent_id,
+                description="pr_state: merged\n",
+            ),
+        )
+    )
+    monkeypatch.setenv("ATELIER_AGENT_ID", agent_id)
+    monkeypatch.setenv("BD_ACTOR", agent_id)
+
+    with patch_in_memory_beads(backend):
+        beads.set_agent_hook("at-agent", "at-epic", beads_root=beads_root, cwd=repo_root)
+        closed = beads.close_epic_if_complete(
+            "at-epic",
+            agent_bead_id="at-agent",
+            beads_root=beads_root,
+            cwd=repo_root,
+        )
+        hook = beads.get_agent_hook("at-agent", beads_root=beads_root, cwd=repo_root)
+
+    assert closed is True
+    assert hook is None
 
 
 def test_create_message_bead_renders_frontmatter() -> None:
