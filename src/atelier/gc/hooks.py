@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import beads
-from .common import build_gc_beads_client, log_warning, parse_rfc3339, try_show_issue
+from ..lib.beads import build_sync_beads_client
+from .common import log_warning, parse_rfc3339, try_show_issue
 from .models import GcAction
 
 
@@ -43,7 +44,7 @@ def collect_hooks(
     now = dt.datetime.now(tz=dt.timezone.utc)
     stale_delta = dt.timedelta(hours=stale_hours)
     actions: list[GcAction] = []
-    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
+    client = build_sync_beads_client(beads_root=beads_root, cwd=repo_root)
 
     agent_issues = beads.run_bd_json(
         [

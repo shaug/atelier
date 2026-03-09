@@ -8,11 +8,10 @@ from pathlib import Path
 
 from .. import beads, changesets, git, worktrees
 from ..io import die, say, select
-from ..lib.beads import SyncBeadsProtocol
+from ..lib.beads import SyncBeadsProtocol, build_sync_beads_client
 from .common import (
     branch_integrated_into_target,
     branch_lookup_ref,
-    build_gc_beads_client,
     log_debug,
     log_warning,
     normalize_branch,
@@ -289,7 +288,7 @@ def collect_resolved_epic_artifacts(
         beads_root=beads_root,
         repo_root=repo_root,
     )
-    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
+    client = build_sync_beads_client(beads_root=beads_root, cwd=repo_root)
     default_branch = git.git_default_branch(repo_root, git_path=git_path) or ""
     for path in meta_dir.glob("*.json"):
         mapping = worktrees.load_mapping(path)
@@ -693,7 +692,7 @@ def collect_orphan_worktrees(
         beads_root=beads_root,
         repo_root=repo_root,
     )
-    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
+    client = build_sync_beads_client(beads_root=beads_root, cwd=repo_root)
     for path in meta_dir.glob("*.json"):
         mapping = worktrees.load_mapping(path)
         if not mapping:

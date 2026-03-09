@@ -13,7 +13,6 @@ from ..lib.beads import (
     IssueRecord,
     ShowIssueRequest,
     SyncBeadsProtocol,
-    build_sync_beads_client,
 )
 
 
@@ -65,10 +64,6 @@ def normalize_branch(value: object) -> str | None:
     if not cleaned or cleaned.lower() == "null":
         return None
     return cleaned
-
-
-def build_gc_beads_client(*, beads_root: Path, cwd: Path) -> SyncBeadsProtocol:
-    return build_sync_beads_client(beads_root=beads_root, cwd=cwd)
 
 
 def try_show_issue(

@@ -5,9 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import beads, messages
-from ..lib.beads import CloseIssueRequest, ListIssuesRequest, UpdateIssueRequest
+from ..lib.beads import (
+    CloseIssueRequest,
+    ListIssuesRequest,
+    UpdateIssueRequest,
+    build_sync_beads_client,
+)
 from .common import (
-    build_gc_beads_client,
     coerce_float,
     parse_rfc3339,
     try_show_issue,
@@ -34,7 +38,7 @@ def collect_message_claims(
     now = dt.datetime.now(tz=dt.timezone.utc)
     stale_delta = dt.timedelta(hours=stale_hours)
     actions: list[GcAction] = []
-    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
+    client = build_sync_beads_client(beads_root=beads_root, cwd=repo_root)
     issues = client.list(
         ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),))
     )
@@ -104,7 +108,7 @@ def collect_message_retention(
 
     now = dt.datetime.now(tz=dt.timezone.utc)
     actions: list[GcAction] = []
-    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
+    client = build_sync_beads_client(beads_root=beads_root, cwd=repo_root)
     issues = client.list(
         ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),))
     )

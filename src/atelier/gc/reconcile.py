@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import beads, config, prs, worktrees
-from ..lib.beads import IssueRecord
+from ..lib.beads import IssueRecord, build_sync_beads_client
 from ..worker import stale_pr_lifecycle
-from .common import build_gc_beads_client, normalize_branch, try_show_issue
+from .common import normalize_branch, try_show_issue
 
 
 def _issue_integrated_sha(issue: IssueRecord) -> str | None:
@@ -64,7 +64,7 @@ def reconcile_preview_lines(
                 f"mapped worktrees ({len(worktree_paths)}): "
                 + (", ".join(worktree_paths) if worktree_paths else "(none)")
             )
-    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
+    client = build_sync_beads_client(beads_root=beads_root, cwd=repo_root)
     epic_issue = try_show_issue(epic_id, client=client)
     if epic_issue:
         fields = beads.parse_description_fields(epic_issue.description)

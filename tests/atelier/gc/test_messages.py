@@ -29,7 +29,7 @@ def test_collect_message_retention_closes_expired_channel_messages() -> None:
     )
     sync_client, store = _seed_sync_client(issue)
 
-    with patch("atelier.gc.common.build_sync_beads_client", return_value=sync_client):
+    with patch("atelier.gc.messages.build_sync_beads_client", return_value=sync_client):
         actions = gc_messages.collect_message_retention(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
@@ -54,7 +54,7 @@ def test_collect_message_retention_skips_non_expired() -> None:
     )
     sync_client, _store = _seed_sync_client(issue)
 
-    with patch("atelier.gc.common.build_sync_beads_client", return_value=sync_client):
+    with patch("atelier.gc.messages.build_sync_beads_client", return_value=sync_client):
         actions = gc_messages.collect_message_retention(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
@@ -85,7 +85,7 @@ def test_collect_message_claims_releases_stale_claim_and_clears_assignment() -> 
     )
     sync_client, store = _seed_sync_client(issue)
 
-    with patch("atelier.gc.common.build_sync_beads_client", return_value=sync_client):
+    with patch("atelier.gc.messages.build_sync_beads_client", return_value=sync_client):
         actions = gc_messages.collect_message_claims(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
@@ -141,7 +141,7 @@ def test_collect_message_claims_skips_release_when_claim_owner_changes() -> None
     )
 
     with (
-        patch("atelier.gc.common.build_sync_beads_client", return_value=sync_client),
+        patch("atelier.gc.messages.build_sync_beads_client", return_value=sync_client),
         patch("atelier.gc.messages.try_show_issue", return_value=current_issue),
     ):
         actions = gc_messages.collect_message_claims(
@@ -183,7 +183,7 @@ def test_collect_message_claims_skips_release_when_assignee_changes_from_unassig
     )
 
     with (
-        patch("atelier.gc.common.build_sync_beads_client", return_value=sync_client),
+        patch("atelier.gc.messages.build_sync_beads_client", return_value=sync_client),
         patch("atelier.gc.messages.try_show_issue", return_value=current_issue),
     ):
         actions = gc_messages.collect_message_claims(
