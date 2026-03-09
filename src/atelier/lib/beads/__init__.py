@@ -44,7 +44,7 @@ from .process import (
     decode_help_output,
     decode_version_output,
 )
-from .sync import SyncBeadsClient
+from .sync import SyncBeadsClient, build_sync_beads_client
 from .testing import RecordingBeadsTransport, ScriptedBeadsTransport
 
 __all__ = [
@@ -87,6 +87,7 @@ __all__ = [
     "UnsupportedOperationError",
     "UnsupportedVersionError",
     "UpdateIssueRequest",
+    "build_sync_beads_client",
     "decode_help_output",
     "decode_version_output",
 ]

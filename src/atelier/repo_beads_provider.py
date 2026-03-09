@@ -22,9 +22,8 @@ from .lib.beads import (
     IssueRecord,
     ListIssuesRequest,
     ShowIssueRequest,
-    SubprocessBeadsClient,
-    SyncBeadsClient,
     UpdateIssueRequest,
+    build_sync_beads_client,
 )
 
 
@@ -38,23 +37,6 @@ class _SyncBeadsProtocol(Protocol):
     def update(self, request: UpdateIssueRequest) -> IssueRecord: ...
 
     def close(self, request: CloseIssueRequest) -> IssueRecord: ...
-
-
-def _build_beads_client(
-    *,
-    repo_root: Path,
-    beads_root: Path,
-    readonly: bool = False,
-) -> _SyncBeadsProtocol:
-    global_args: tuple[str, ...] = ("--readonly",) if readonly else ()
-    return SyncBeadsClient(
-        SubprocessBeadsClient(
-            cwd=repo_root,
-            beads_root=beads_root,
-            env={"BEADS_DIR": str(beads_root)},
-            global_args=global_args,
-        )
-    )
 
 
 @dataclass(frozen=True)
@@ -219,8 +201,8 @@ class RepoBeadsProvider:
         return beads_root
 
     def _client(self, *, readonly: bool = False) -> _SyncBeadsProtocol:
-        return _build_beads_client(
-            repo_root=self.repo_root,
+        return build_sync_beads_client(
+            cwd=self.repo_root,
             beads_root=self._beads_root(),
             readonly=readonly,
         )

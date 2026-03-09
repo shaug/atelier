@@ -41,6 +41,7 @@ from atelier.lib.beads import (
     SyncBeadsClient,
     UnsupportedVersionError,
     UpdateIssueRequest,
+    build_sync_beads_client,
     decode_help_output,
     decode_version_output,
 )
@@ -697,6 +698,37 @@ def test_sync_beads_client_wraps_async_client() -> None:
 
     assert environment.version == SemanticVersion(major=0, minor=56, patch=1)
     assert issue.id == "at-1"
+
+
+def test_build_sync_beads_client_sets_beads_root_and_readonly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: dict[str, object] = {}
+
+    class _FakeSyncClient:
+        def __init__(self, async_client: object) -> None:
+            created["async_client"] = async_client
+
+    def fake_subprocess_client(**kwargs: object) -> object:
+        created["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr("atelier.lib.beads.sync.SubprocessBeadsClient", fake_subprocess_client)
+    monkeypatch.setattr("atelier.lib.beads.sync.SyncBeadsClient", _FakeSyncClient)
+
+    client = build_sync_beads_client(
+        cwd=Path("/repo"),
+        beads_root=Path("/repo/.beads"),
+        readonly=True,
+    )
+
+    assert isinstance(client, _FakeSyncClient)
+    assert created["kwargs"] == {
+        "cwd": Path("/repo"),
+        "beads_root": Path("/repo/.beads"),
+        "env": {"BEADS_DIR": "/repo/.beads"},
+        "global_args": ("--readonly",),
+    }
 
 
 def test_subprocess_client_inspects_startup_state_from_configured_beads_root(

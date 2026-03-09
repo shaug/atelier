@@ -15,9 +15,8 @@ from ..lib.beads import (
     IssueRecord,
     ListIssuesRequest,
     ShowIssueRequest,
-    SubprocessBeadsClient,
-    SyncBeadsClient,
     UpdateIssueRequest,
+    build_sync_beads_client,
 )
 
 
@@ -99,16 +98,6 @@ def _issue_record_to_payload(record: IssueRecord) -> dict[str, object]:
     return record.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
-def _build_beads_client(*, beads_root: Path, cwd: Path) -> _SyncBeadsProtocol:
-    return SyncBeadsClient(
-        SubprocessBeadsClient(
-            cwd=cwd,
-            beads_root=beads_root,
-            env={"BEADS_DIR": str(beads_root)},
-        )
-    )
-
-
 def try_show_issue(
     issue_id: object,
     *,
@@ -129,7 +118,7 @@ def try_show_issue(
         )
         return None
     try:
-        record = _build_beads_client(beads_root=beads_root, cwd=cwd).show(
+        record = build_sync_beads_client(beads_root=beads_root, cwd=cwd).show(
             ShowIssueRequest(issue_id=cleaned)
         )
     except BeadError as exc:
@@ -149,7 +138,7 @@ def list_issues(
     beads_root: Path,
     cwd: Path,
 ) -> list[dict[str, object]]:
-    records = _build_beads_client(beads_root=beads_root, cwd=cwd).list(request)
+    records = build_sync_beads_client(beads_root=beads_root, cwd=cwd).list(request)
     return [_issue_record_to_payload(record) for record in records]
 
 
@@ -159,7 +148,7 @@ def update_issue(
     beads_root: Path,
     cwd: Path,
 ) -> dict[str, object]:
-    record = _build_beads_client(beads_root=beads_root, cwd=cwd).update(request)
+    record = build_sync_beads_client(beads_root=beads_root, cwd=cwd).update(request)
     return _issue_record_to_payload(record)
 
 
@@ -169,7 +158,7 @@ def close_issue(
     beads_root: Path,
     cwd: Path,
 ) -> dict[str, object]:
-    record = _build_beads_client(beads_root=beads_root, cwd=cwd).close(request)
+    record = build_sync_beads_client(beads_root=beads_root, cwd=cwd).close(request)
     return _issue_record_to_payload(record)
 
 

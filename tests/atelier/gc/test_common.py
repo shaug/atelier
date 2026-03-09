@@ -100,7 +100,7 @@ def test_try_show_issue_returns_none_when_bd_show_fails() -> None:
         )
     )
     with (
-        patch("atelier.gc.common._build_beads_client", return_value=client) as build_client,
+        patch("atelier.gc.common.build_sync_beads_client", return_value=client) as build_client,
         patch("atelier.gc.common.log_warning") as log_warning,
     ):
         result = gc_common.try_show_issue("missing", beads_root=Path("/beads"), cwd=Path("/repo"))
@@ -137,7 +137,7 @@ def test_try_show_issue_skips_placeholder_id_without_lookup() -> None:
 def test_try_show_issue_returns_issue_payload_on_success() -> None:
     payload = {"id": "at-123", "title": "Issue", "status": "open", "labels": []}
     client = _FakeBeadsClient(record=IssueRecord.model_validate(payload))
-    with patch("atelier.gc.common._build_beads_client", return_value=client):
+    with patch("atelier.gc.common.build_sync_beads_client", return_value=client):
         result = gc_common.try_show_issue(" at-123 ", beads_root=Path("/beads"), cwd=Path("/repo"))
 
     assert result is not None

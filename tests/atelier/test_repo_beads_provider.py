@@ -104,14 +104,16 @@ def test_repo_beads_provider_import_uses_readonly(
     seen: dict[str, object] = {}
 
     def fake_build_beads_client(
-        *, repo_root: Path, beads_root: Path, readonly: bool = False
+        *, cwd: Path, beads_root: Path, readonly: bool = False
     ) -> _FakeBeadsClient:
-        seen["repo_root"] = repo_root
+        seen["cwd"] = cwd
         seen["beads_root"] = beads_root
         seen["readonly"] = readonly
         return client
 
-    monkeypatch.setattr("atelier.repo_beads_provider._build_beads_client", fake_build_beads_client)
+    monkeypatch.setattr(
+        "atelier.repo_beads_provider.build_sync_beads_client", fake_build_beads_client
+    )
 
     records = provider.import_tickets(
         ExternalTicketImportRequest(
@@ -128,7 +130,7 @@ def test_repo_beads_provider_import_uses_readonly(
     assert records[0].body is None
 
     assert seen == {
-        "repo_root": tmp_path,
+        "cwd": tmp_path,
         "beads_root": tmp_path / ".beads",
         "readonly": True,
     }
@@ -156,7 +158,7 @@ def test_repo_beads_provider_link_reads_issue(
         )
     )
     monkeypatch.setattr(
-        "atelier.repo_beads_provider._build_beads_client",
+        "atelier.repo_beads_provider.build_sync_beads_client",
         lambda **_kwargs: client,
     )
 
@@ -194,7 +196,9 @@ def test_repo_beads_provider_create_ticket_when_allowed(
         seen["kwargs"] = kwargs
         return client
 
-    monkeypatch.setattr("atelier.repo_beads_provider._build_beads_client", fake_build_beads_client)
+    monkeypatch.setattr(
+        "atelier.repo_beads_provider.build_sync_beads_client", fake_build_beads_client
+    )
 
     record = provider.create_ticket(
         ExternalTicketCreateRequest(
@@ -215,7 +219,7 @@ def test_repo_beads_provider_create_ticket_when_allowed(
         )
     ]
     assert seen["kwargs"] == {
-        "repo_root": tmp_path,
+        "cwd": tmp_path,
         "beads_root": tmp_path / ".beads",
         "readonly": False,
     }
@@ -253,7 +257,9 @@ def test_repo_beads_provider_update_preserves_external_ticket_metadata(
     def fake_build_beads_client(*, readonly: bool = False, **_kwargs: object) -> _FakeBeadsClient:
         return read_client if readonly else write_client
 
-    monkeypatch.setattr("atelier.repo_beads_provider._build_beads_client", fake_build_beads_client)
+    monkeypatch.setattr(
+        "atelier.repo_beads_provider.build_sync_beads_client", fake_build_beads_client
+    )
 
     provider.update_ticket(
         ExternalTicketRef(provider="beads", ticket_id="bd-9"),
@@ -275,7 +281,7 @@ def test_repo_beads_provider_close_uses_typed_client(
     provider = RepoBeadsProvider(repo_root=tmp_path, allow_write=True)
     write_client = _FakeBeadsClient()
     monkeypatch.setattr(
-        "atelier.repo_beads_provider._build_beads_client",
+        "atelier.repo_beads_provider.build_sync_beads_client",
         lambda **_kwargs: write_client,
     )
     monkeypatch.setattr(

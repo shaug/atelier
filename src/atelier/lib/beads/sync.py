@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from .client import Beads
 from .compatibility import CompatibilityPolicy
@@ -18,6 +19,7 @@ from .models import (
     ShowIssueRequest,
     UpdateIssueRequest,
 )
+from .process import SubprocessBeadsClient
 
 
 class SyncBeadsClient:
@@ -67,3 +69,31 @@ class SyncBeadsClient:
 
     def remove_dependency(self, request: DependencyMutationRequest) -> IssueRecord:
         return asyncio.run(self._async_client.remove_dependency(request))
+
+
+def build_sync_beads_client(
+    *,
+    cwd: Path,
+    beads_root: Path,
+    readonly: bool = False,
+) -> SyncBeadsClient:
+    """Build a sync Beads client for low-level boundary helpers.
+
+    Args:
+        cwd: Repository-local working directory for ``bd`` subprocesses.
+        beads_root: Root of the Beads store to target.
+        readonly: Whether to prepend ``--readonly`` to every ``bd`` command.
+
+    Returns:
+        A synchronous facade over the subprocess-backed Beads client.
+    """
+
+    global_args: tuple[str, ...] = ("--readonly",) if readonly else ()
+    return SyncBeadsClient(
+        SubprocessBeadsClient(
+            cwd=cwd,
+            beads_root=beads_root,
+            env={"BEADS_DIR": str(beads_root)},
+            global_args=global_args,
+        )
+    )
