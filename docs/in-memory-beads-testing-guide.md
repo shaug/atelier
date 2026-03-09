@@ -23,6 +23,14 @@ default:
 - `tests/atelier/worker/test_changeset_state.py`
 - `tests/atelier/worker/test_work_startup_runtime.py`
 
+Additional targeted worker-session coverage now uses the in-memory backend for
+Beads semantics:
+
+- `tests/atelier/worker/test_session_worktree.py`
+  `prepare_worktrees()` metadata and workspace-parent alignment cases seed
+  issues through `atelier.testing.beads`, while targeted failure injection stays
+  local to the specific `bd show` call under test.
+
 Keep real-`bd` integration coverage explicit in suites such as:
 
 - `tests/shell/publish_scripts_test.sh`
@@ -83,6 +91,15 @@ compatibility fixture tests.
 
 Reserve `build_startup_admin_fixture(...)` for compatibility tests that need to
 assert raw `bd stats`, `migrate`, or `dolt show` command behavior.
+
+### Fixture Ergonomics Note
+
+The `prepare_worktrees()` migration exposed one deliberate seam:
+`atelier.testing.beads` virtualizes Beads semantics, not the surrounding
+filesystem. Tests still need explicit temp directories, mapping files, and
+`.git` markers when worktree orchestration logic reads local state. Keep that
+split explicit instead of broadening the Beads harness into a fake worktree
+runtime.
 
 ### Runtime And Reliability Impact
 
