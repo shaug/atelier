@@ -83,6 +83,48 @@ builders for canonical issue envelopes.
 These builders are intentionally payload-oriented. They do not implement
 persistence or command semantics by themselves.
 
+## Tier 0 Semantic Notes
+
+This changeset wires real Tier 0 stateful semantics behind the `core-issues`
+family and exposes them through a typed in-memory client in
+`atelier.testing.beads`.
+
+- `build_in_memory_beads_client()` returns the shared `atelier.lib.beads.Beads`
+  protocol backed directly by the in-memory store.
+- The Tier 0 backend semantics now live directly in `InMemoryBeadsClient` and
+  `InMemoryIssueStore`. The dispatcher remains an optional command-harness seam
+  from `at-s1vc.1` for explicit route-level tests; it is not part of the typed
+  backend path.
+- The default in-memory compatibility policy currently validates only the
+  implemented Tier 0 operations: `show`, `list`, `ready`, `create`, `update`,
+  and `close`, even though `inspect_environment()` still reports help-probed
+  capabilities for later documented routes.
+- `list` supports the filtering forms used by current Atelier callsites:
+  `--parent`, `--status`, `--assignee`, `--title-contains`, repeated `--label`,
+  `--all`, and `--limit`.
+- `ready` uses Atelier's shared lifecycle helpers: runnable results must be leaf
+  work beads, have active lifecycle status, and have all dependencies in a
+  satisfied terminal state. Closed changeset dependencies still require stored
+  integration evidence such as `pr_state: merged` or the `cs:merged` label,
+  matching worker startup's default dependency gate.
+- `create`, `update`, and `close` preserve parent/child and dependency
+  relationships so higher-level planner/worker assertions can observe stable
+  graph behavior across mutations.
+
+## Intentional Tier 0 Deltas
+
+- Dependency mutation commands (`dep add`, `dep remove`) remain documented but
+  intentionally unimplemented in this slice; later changesets add their real
+  semantics.
+- The in-memory command handler only accepts the argv shapes covered by the v1
+  typed client plus the documented Tier 0 filters above. Non-contract flags such
+  as `--silent`, `--body-file`, `--add-label`, and `--remove-label` fail closed
+  instead of approximating subprocess-specific behavior.
+- Dependency readiness does not emulate live integration probes. Tier 0 only
+  honors stored integration evidence already present on the dependency issue,
+  such as `pr_state: merged` or `cs:merged`; it does not synthesize merge proof
+  from git state or verify `changeset.integrated_sha`.
+
 ## Non-Goals
 
 - No production runtime wiring in this slice
@@ -94,6 +136,9 @@ persistence or command semantics by themselves.
 ## Proof Artifacts
 
 - `src/atelier/testing/beads/contract.py`
+- `src/atelier/testing/beads/client.py`
+- `src/atelier/testing/beads/core_issues.py`
 - `src/atelier/testing/beads/dispatcher.py`
 - `src/atelier/testing/beads/fixtures.py`
+- `src/atelier/testing/beads/store.py`
 - `tests/atelier/testing/test_in_memory_beads.py`
