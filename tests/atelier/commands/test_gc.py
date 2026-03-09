@@ -41,6 +41,8 @@ def test_gc_reconcile_flag_runs_changeset_reconciliation(_patch_gc_prime) -> Non
             return_value=Path("/beads"),
         ),
         patch("atelier.beads.run_bd_json", return_value=[]),
+        patch("atelier.gc.messages.collect_message_claims", return_value=[]),
+        patch("atelier.gc.messages.collect_message_retention", return_value=[]),
         patch(
             "atelier.commands.gc.work_cmd.list_reconcile_epic_candidates",
             return_value={"at-wjj": ["at-wjj.1"]},
@@ -97,6 +99,8 @@ def test_gc_reconcile_flag_prompts_and_skips_without_confirmation() -> None:
             return_value=Path("/beads"),
         ),
         patch("atelier.beads.run_bd_json", return_value=[]),
+        patch("atelier.gc.messages.collect_message_claims", return_value=[]),
+        patch("atelier.gc.messages.collect_message_retention", return_value=[]),
         patch(
             "atelier.commands.gc.work_cmd.list_reconcile_epic_candidates",
             return_value={"at-wjj": ["at-wjj.1", "at-wjj.2"]},
@@ -146,6 +150,8 @@ def test_gc_reconcile_flag_prompts_and_runs_with_confirmation() -> None:
             return_value=Path("/beads"),
         ),
         patch("atelier.beads.run_bd_json", return_value=[]),
+        patch("atelier.gc.messages.collect_message_claims", return_value=[]),
+        patch("atelier.gc.messages.collect_message_retention", return_value=[]),
         patch(
             "atelier.commands.gc.work_cmd.list_reconcile_epic_candidates",
             return_value={"at-wjj": ["at-wjj.1", "at-wjj.2", "at-wjj.3", "at-wjj.4"]},
@@ -211,6 +217,8 @@ def test_gc_reconcile_flag_no_candidates_skips_prompts() -> None:
             return_value=Path("/beads"),
         ),
         patch("atelier.beads.run_bd_json", return_value=[]),
+        patch("atelier.gc.messages.collect_message_claims", return_value=[]),
+        patch("atelier.gc.messages.collect_message_retention", return_value=[]),
         patch(
             "atelier.commands.gc.work_cmd.list_reconcile_epic_candidates",
             return_value={},

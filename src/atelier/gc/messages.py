@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 from .. import beads, messages
-from .common import coerce_float, parse_rfc3339
+from ..lib.beads import CloseIssueRequest, ListIssuesRequest, UpdateIssueRequest
+from .common import (
+    close_issue,
+    coerce_float,
+    list_issues,
+    parse_rfc3339,
+    try_show_issue,
+    update_issue,
+)
 from .models import GcAction
 
 
@@ -29,8 +36,8 @@ def collect_message_claims(
     now = dt.datetime.now(tz=dt.timezone.utc)
     stale_delta = dt.timedelta(hours=stale_hours)
     actions: list[GcAction] = []
-    issues = beads.run_bd_json(
-        ["list", "--label", beads.issue_label("message", beads_root=beads_root)],
+    issues = list_issues(
+        ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),)),
         beads_root=beads_root,
         cwd=repo_root,
     )
@@ -60,10 +67,9 @@ def collect_message_claims(
             stale_claimed_by: str | None = expected_claimed_by,
             stale_claimed_at: str | None = expected_claimed_at,
         ) -> None:
-            current = beads.run_bd_json(["show", message_id], beads_root=beads_root, cwd=repo_root)
-            if not current:
+            issue_payload = try_show_issue(message_id, beads_root=beads_root, cwd=repo_root)
+            if issue_payload is None:
                 return
-            issue_payload = current[0]
             current_assignee = _clean_optional_string(issue_payload.get("assignee"))
             if current_assignee != stale_assignee:
                 return
@@ -75,28 +81,20 @@ def collect_message_claims(
             current_claimed_at = _clean_optional_string(current_payload.metadata.get("claimed_at"))
             if current_claimed_by != stale_claimed_by or current_claimed_at != stale_claimed_at:
                 return
-            if current_assignee:
-                beads.run_bd_command(
-                    ["update", message_id, "--assignee", "", "--status", "open"],
-                    beads_root=beads_root,
-                    cwd=repo_root,
-                    allow_failure=True,
-                )
             metadata = dict(current_payload.metadata)
             metadata["claimed_by"] = None
             metadata["claimed_at"] = None
             updated = messages.render_message(metadata, current_payload.body)
-            with NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
-                handle.write(updated)
-                temp_path = handle.name
-            try:
-                beads.run_bd_command(
-                    ["update", message_id, "--body-file", temp_path],
-                    beads_root=beads_root,
-                    cwd=repo_root,
-                )
-            finally:
-                Path(temp_path).unlink(missing_ok=True)
+            update_issue(
+                UpdateIssueRequest(
+                    issue_id=message_id,
+                    assignee="" if current_assignee else None,
+                    status="open" if current_assignee else None,
+                    description=updated,
+                ),
+                beads_root=beads_root,
+                cwd=repo_root,
+            )
 
         actions.append(GcAction(description=description_text, apply=_apply_release))
     return actions
@@ -111,8 +109,8 @@ def collect_message_retention(
 
     now = dt.datetime.now(tz=dt.timezone.utc)
     actions: list[GcAction] = []
-    issues = beads.run_bd_json(
-        ["list", "--label", beads.issue_label("message", beads_root=beads_root)],
+    issues = list_issues(
+        ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),)),
         beads_root=beads_root,
         cwd=repo_root,
     )
@@ -142,11 +140,10 @@ def collect_message_retention(
         description_text = f"Close expired channel message {issue_id}"
 
         def _apply_close(message_id: str = issue_id) -> None:
-            beads.run_bd_command(
-                ["close", message_id],
+            close_issue(
+                CloseIssueRequest(issue_id=message_id),
                 beads_root=beads_root,
                 cwd=repo_root,
-                allow_failure=True,
             )
 
         actions.append(GcAction(description=description_text, apply=_apply_close))

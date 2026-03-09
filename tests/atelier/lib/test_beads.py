@@ -75,6 +75,12 @@ def test_update_request_requires_a_field_change() -> None:
         UpdateIssueRequest(issue_id="at-1")
 
 
+def test_update_request_allows_empty_assignee_to_clear_assignment() -> None:
+    request = UpdateIssueRequest(issue_id="at-1", assignee="")
+
+    assert request.assignee == ""
+
+
 def test_compatibility_policy_rejects_unsupported_version() -> None:
     environment = BeadsEnvironment(
         version=SemanticVersion(major=0, minor=56, patch=0),
@@ -524,6 +530,24 @@ def test_subprocess_client_supports_global_args() -> None:
     issue = _run(client.show(ShowIssueRequest(issue_id="at-1")))
 
     assert issue.id == "at-1"
+
+
+def test_subprocess_client_update_supports_clearing_assignee() -> None:
+    responses = _probe_responses()
+    responses.update(
+        [
+            _result(
+                ("bd", "update", "at-3", "--json", "--assignee", ""),
+                stdout='[{"id":"at-3","status":"open","issue_type":"task"}]',
+            ),
+        ]
+    )
+    client = SubprocessBeadsClient(transport=ScriptedBeadsTransport(responses))
+
+    updated = _run(client.update(UpdateIssueRequest(issue_id="at-3", assignee="")))
+
+    assert updated.id == "at-3"
+    assert updated.status == "open"
 
 
 @pytest.mark.parametrize(

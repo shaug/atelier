@@ -2,45 +2,34 @@
 
 import datetime as dt
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import atelier.gc.messages as gc_messages
-from atelier.messages import render_message
+from atelier.lib.beads import SyncBeadsClient
+from atelier.messages import parse_message, render_message
+from atelier.testing.beads import IssueFixtureBuilder, build_in_memory_beads_client
+
+
+def _seed_sync_client(*issues: dict[str, object]) -> tuple[SyncBeadsClient, object]:
+    client, store = build_in_memory_beads_client(issues=issues)
+    return SyncBeadsClient(client), store
 
 
 def test_collect_message_retention_closes_expired_channel_messages() -> None:
+    builder = IssueFixtureBuilder()
     description = render_message(
         {"channel": "ops", "retention_days": 1},
         "hello",
     )
-    issue = {
-        "id": "msg-1",
-        "description": description,
-        "created_at": "2026-01-01T00:00:00Z",
-    }
+    issue = builder.issue(
+        "msg-1",
+        labels=("at:message",),
+        description=description,
+        created_at="2026-01-01T00:00:00Z",
+    )
+    sync_client, store = _seed_sync_client(issue)
 
-    calls: list[list[str]] = []
-
-    def fake_run_bd_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        if args[:3] == ["list", "--label", "at:message"]:
-            return [issue]
-        if args[:2] == ["show", "msg-1"]:
-            return [issue]
-        return []
-
-    def fake_run_bd_command(
-        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ) -> object:
-        calls.append(args)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
-    ):
+    with patch("atelier.gc.common._build_beads_client", return_value=sync_client):
         actions = gc_messages.collect_message_retention(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
@@ -48,30 +37,24 @@ def test_collect_message_retention_closes_expired_channel_messages() -> None:
         assert len(actions) == 1
         actions[0].apply()
 
-    assert any(cmd[:2] == ["close", "msg-1"] for cmd in calls)
+    assert store.show("msg-1")["status"] == "closed"
 
 
 def test_collect_message_retention_skips_non_expired() -> None:
+    builder = IssueFixtureBuilder()
     description = render_message(
         {"channel": "ops", "retention_days": 365},
         "hello",
     )
-    issue = {
-        "id": "msg-1",
-        "description": description,
-        "created_at": "2026-02-27T00:00:00Z",
-    }
+    issue = builder.issue(
+        "msg-1",
+        labels=("at:message",),
+        description=description,
+        created_at="2026-02-27T00:00:00Z",
+    )
+    sync_client, _store = _seed_sync_client(issue)
 
-    def fake_run_bd_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        if args[:3] == ["list", "--label", "at:message"]:
-            return [issue]
-        if args[:2] == ["show", "msg-1"]:
-            return [issue]
-        return []
-
-    with patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json):
+    with patch("atelier.gc.common._build_beads_client", return_value=sync_client):
         actions = gc_messages.collect_message_retention(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
@@ -80,7 +63,8 @@ def test_collect_message_retention_skips_non_expired() -> None:
     assert actions == []
 
 
-def test_collect_message_claims_releases_stale_claim() -> None:
+def test_collect_message_claims_releases_stale_claim_and_clears_assignment() -> None:
+    builder = IssueFixtureBuilder()
     now = dt.datetime.now(tz=dt.timezone.utc)
     stale_time = (now - dt.timedelta(hours=25)).isoformat()
     description = render_message(
@@ -92,32 +76,16 @@ def test_collect_message_claims_releases_stale_claim() -> None:
         },
         "hello",
     )
-    issue = {
-        "id": "msg-1",
-        "description": description,
-    }
+    issue = builder.issue(
+        "msg-1",
+        labels=("at:message",),
+        assignee="agent-1",
+        status="blocked",
+        description=description,
+    )
+    sync_client, store = _seed_sync_client(issue)
 
-    commands: list[list[str]] = []
-
-    def fake_run_bd_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        if args[:3] == ["list", "--label", "at:message"]:
-            return [issue]
-        if args[:2] == ["show", "msg-1"]:
-            return [issue]
-        return []
-
-    def fake_run_bd_command(
-        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ) -> object:
-        commands.append(args)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
-    ):
+    with patch("atelier.gc.common._build_beads_client", return_value=sync_client):
         actions = gc_messages.collect_message_claims(
             beads_root=Path("/beads"),
             repo_root=Path("/repo"),
@@ -126,10 +94,16 @@ def test_collect_message_claims_releases_stale_claim() -> None:
         assert len(actions) == 1
         actions[0].apply()
 
-    assert any(cmd[:2] == ["update", "msg-1"] and "--body-file" in cmd for cmd in commands)
+    updated = store.show("msg-1")
+    assert updated["status"] == "open"
+    assert "assignee" not in updated
+    payload = parse_message(str(updated["description"]))
+    assert payload.metadata["claimed_by"] is None
+    assert payload.metadata["claimed_at"] is None
 
 
 def test_collect_message_claims_skips_release_when_claim_owner_changes() -> None:
+    builder = IssueFixtureBuilder()
     now = dt.datetime.now(tz=dt.timezone.utc)
     stale_time = (now - dt.timedelta(hours=25)).isoformat()
     fresh_time = (now - dt.timedelta(hours=1)).isoformat()
@@ -151,37 +125,22 @@ def test_collect_message_claims_skips_release_when_claim_owner_changes() -> None
         },
         "hello",
     )
-    listed_issue = {
-        "id": "msg-1",
-        "assignee": "agent-1",
-        "description": stale_description,
-    }
-    current_issue = {
-        "id": "msg-1",
-        "assignee": "agent-2",
-        "description": current_description,
-    }
-
-    commands: list[list[str]] = []
-
-    def fake_run_bd_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        if args[:3] == ["list", "--label", "at:message"]:
-            return [listed_issue]
-        if args[:2] == ["show", "msg-1"]:
-            return [current_issue]
-        return []
-
-    def fake_run_bd_command(
-        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ) -> object:
-        commands.append(args)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    listed_issue = builder.issue(
+        "msg-1",
+        labels=("at:message",),
+        assignee="agent-1",
+        description=stale_description,
+    )
+    sync_client, store = _seed_sync_client(listed_issue)
+    current_issue = builder.issue(
+        "msg-1",
+        assignee="agent-2",
+        description=current_description,
+    )
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+        patch("atelier.gc.common._build_beads_client", return_value=sync_client),
+        patch("atelier.gc.messages.try_show_issue", return_value=current_issue),
     ):
         actions = gc_messages.collect_message_claims(
             beads_root=Path("/beads"),
@@ -191,10 +150,11 @@ def test_collect_message_claims_skips_release_when_claim_owner_changes() -> None
         assert len(actions) == 1
         actions[0].apply()
 
-    assert commands == []
+    assert store.show("msg-1")["assignee"] == "agent-1"
 
 
 def test_collect_message_claims_skips_release_when_assignee_changes_from_unassigned() -> None:
+    builder = IssueFixtureBuilder()
     now = dt.datetime.now(tz=dt.timezone.utc)
     stale_time = (now - dt.timedelta(hours=25)).isoformat()
     stale_description = render_message(
@@ -206,36 +166,21 @@ def test_collect_message_claims_skips_release_when_assignee_changes_from_unassig
         },
         "hello",
     )
-    listed_issue = {
-        "id": "msg-1",
-        "description": stale_description,
-    }
-    current_issue = {
-        "id": "msg-1",
-        "assignee": "agent-2",
-        "description": stale_description,
-    }
-
-    commands: list[list[str]] = []
-
-    def fake_run_bd_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        if args[:3] == ["list", "--label", "at:message"]:
-            return [listed_issue]
-        if args[:2] == ["show", "msg-1"]:
-            return [current_issue]
-        return []
-
-    def fake_run_bd_command(
-        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ) -> object:
-        commands.append(args)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    listed_issue = builder.issue(
+        "msg-1",
+        labels=("at:message",),
+        description=stale_description,
+    )
+    sync_client, store = _seed_sync_client(listed_issue)
+    current_issue = builder.issue(
+        "msg-1",
+        assignee="agent-2",
+        description=stale_description,
+    )
 
     with (
-        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
-        patch("atelier.beads.run_bd_command", side_effect=fake_run_bd_command),
+        patch("atelier.gc.common._build_beads_client", return_value=sync_client),
+        patch("atelier.gc.messages.try_show_issue", return_value=current_issue),
     ):
         actions = gc_messages.collect_message_claims(
             beads_root=Path("/beads"),
@@ -245,4 +190,5 @@ def test_collect_message_claims_skips_release_when_assignee_changes_from_unassig
         assert len(actions) == 1
         actions[0].apply()
 
-    assert commands == []
+    payload = parse_message(str(store.show("msg-1")["description"]))
+    assert payload.metadata["claimed_by"] == "agent-1"

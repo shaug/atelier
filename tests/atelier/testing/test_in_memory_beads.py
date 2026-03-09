@@ -451,6 +451,32 @@ def test_in_memory_client_supports_representative_worker_flow() -> None:
     assert [child.id for child in parent.children] == ["at-2"]
 
 
+def test_in_memory_client_update_supports_clearing_assignee() -> None:
+    builder = IssueFixtureBuilder()
+    client, store = build_in_memory_beads_client(
+        issues=(
+            builder.issue(
+                1,
+                title="Claimed message",
+                assignee="agent-1",
+            ),
+        )
+    )
+    sync = SyncBeadsClient(client)
+
+    updated = sync.update(
+        UpdateIssueRequest(
+            issue_id="at-1",
+            assignee="",
+            status="open",
+        )
+    )
+
+    assert updated.id == "at-1"
+    assert updated.status == "open"
+    assert "assignee" not in store.show("at-1")
+
+
 def test_in_memory_tier_zero_policy_tracks_only_implemented_operations() -> None:
     assert {
         contract.operation for contract in IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY.operations

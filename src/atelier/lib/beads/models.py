@@ -263,7 +263,7 @@ class UpdateIssueRequest(BeadsModel):
     design: NonBlankStr | None = None
     acceptance_criteria: NonBlankStr | None = None
     status: NonBlankStr | None = None
-    assignee: NonBlankStr | None = None
+    assignee: StrictStr | None = None
     priority: StrictInt | None = None
     estimate: StrictInt | None = None
     labels: tuple[NonBlankStr, ...] | None = None
@@ -309,7 +309,7 @@ class BeadsCommandRequest(BeadsModel):
     """Low-level transport request."""
 
     operation: SupportedOperation
-    argv: tuple[NonBlankStr, ...]
+    argv: tuple[StrictStr, ...]
     expects_json: bool = True
     cwd: Path | None = None
     env: dict[NonBlankStr, StrictStr] | None = None
@@ -319,7 +319,7 @@ class BeadsCommandRequest(BeadsModel):
 class BeadsCommandResult(BeadsModel):
     """Low-level transport result."""
 
-    argv: tuple[NonBlankStr, ...]
+    argv: tuple[StrictStr, ...]
     returncode: StrictInt
     stdout: StrictStr = ""
     stderr: StrictStr = ""
