@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send a threaded work message and persist it on the original work item."""
+"""Send a work-threaded message and persist it on the original work item."""
 
 from __future__ import annotations
 
@@ -69,6 +69,11 @@ def dispatch_message(
     beads_root: Path,
     cwd: Path,
 ) -> DispatchOutcome:
+    if not thread:
+        raise RuntimeError(
+            "mail-send requires --thread <epic-or-changeset>; "
+            "agent-addressed delivery is not supported"
+        )
     metadata: dict[str, object] = {
         "from": from_agent,
         "kind": _message_kind(subject=subject, reply_to=reply_to),
@@ -77,16 +82,13 @@ def dispatch_message(
     if audience in {"worker", "planner", "operator"}:
         metadata["audience"] = [audience]
         metadata["audiences"] = [audience]
-    if thread:
-        metadata["thread"] = thread
-        thread_target = messages.infer_thread_target(thread)
-        if thread_target is not None:
-            metadata["thread_kind"] = thread_target
-            metadata["thread_target"] = thread_target
-        metadata["delivery"] = "work-threaded"
-        metadata.update(_thread_metadata(thread=thread, recipient=to, subject=subject))
-    else:
-        metadata["delivery"] = "agent-addressed"
+    metadata["thread"] = thread
+    thread_target = messages.infer_thread_target(thread)
+    if thread_target is not None:
+        metadata["thread_kind"] = thread_target
+        metadata["thread_target"] = thread_target
+    metadata["delivery"] = "work-threaded"
+    metadata.update(_thread_metadata(thread=thread, recipient=to, subject=subject))
     if subject.startswith("NEEDS-DECISION:"):
         metadata["blocking"] = True
     if reply_to:
@@ -121,7 +123,11 @@ def main() -> None:
     parser.add_argument("--body", required=True, help="Message body")
     parser.add_argument("--to", required=True, help="Recipient agent id")
     parser.add_argument("--from", dest="from_agent", required=True, help="Sender agent id")
-    parser.add_argument("--thread", default="", help="Optional thread id")
+    parser.add_argument(
+        "--thread",
+        required=True,
+        help="Work thread id (epic or changeset bead id)",
+    )
     parser.add_argument("--reply-to", default="", help="Optional reply message id")
     parser.add_argument(
         "--beads-dir",

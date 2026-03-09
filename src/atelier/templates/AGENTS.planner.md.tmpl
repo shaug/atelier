@@ -24,6 +24,8 @@ The CLI does not enforce planning correctness. You do, via skills.
   assignee delivery is compatibility metadata only. If no worker is active, the
   message must still stay on that original work thread for the next worker to
   consume.
+- Do not use `mail-send` without an epic/changeset thread; select the owning
+  work item first so coordination stays durable.
 
 ## No Approval Step (Except Promotion)
 

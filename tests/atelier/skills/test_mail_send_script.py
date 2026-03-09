@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from atelier import messages
 
 
@@ -153,15 +155,15 @@ def test_inactive_worker_threaded_message_is_discoverable_by_later_worker() -> N
     assert messages.work_thread_routing(issue).thread_id == "at-es93n.1"
 
 
-def test_dispatch_message_non_planner_sender_does_not_reroute() -> None:
+def test_dispatch_message_without_thread_fails_closed() -> None:
     module = _load_script_module()
     with (
-        patch.object(module.agent_home, "is_session_agent_active", return_value=False),
         patch.object(
             module.beads, "create_message_bead", return_value={"id": "at-msg-2"}
         ) as create,
+        pytest.raises(RuntimeError, match="mail-send requires --thread"),
     ):
-        result = module.dispatch_message(
+        module.dispatch_message(
             subject="Heads up",
             body="FYI",
             to="atelier/worker/codex/p404-t4",
@@ -172,12 +174,7 @@ def test_dispatch_message_non_planner_sender_does_not_reroute() -> None:
             cwd=Path("/repo"),
         )
 
-    assert result.decision == "delivered"
-    assert result.issue_id == "at-msg-2"
-    create.assert_called_once()
-    assert create.call_args.kwargs["metadata"]["delivery"] == "agent-addressed"
-    assert create.call_args.kwargs["metadata"]["audience"] == ["worker"]
-    assert create.call_args.kwargs["metadata"]["kind"] == "instruction"
+    create.assert_not_called()
 
 
 def test_dispatch_message_threaded_needs_decision_to_planner_sets_explicit_routing() -> None:
