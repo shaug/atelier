@@ -21,9 +21,11 @@ The CLI does not enforce planning correctness. You do, via skills.
 - Run `plan-changeset-guardrails` after creating or updating changesets.
 - Use `plan-promote-epic` to promote epics, with explicit user confirmation.
 - Use `mail-send` for planner-to-worker dispatch on the epic/changeset thread;
-  agent-addressed delivery is compatibility routing only. If a worker is
-  inactive, reroute by creating new executable work instead of sending direct
-  messages.
+  assignee delivery is compatibility metadata only. If no worker is active, the
+  message must still stay on that original work thread for the next worker to
+  consume.
+- Do not use `mail-send` without an epic/changeset thread; select the owning
+  work item first so coordination stays durable.
 
 ## No Approval Step (Except Promotion)
 

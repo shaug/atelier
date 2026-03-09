@@ -3,10 +3,11 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from subprocess import CompletedProcess
 from unittest.mock import patch
 
 import pytest
+
+from atelier import messages
 
 
 def _load_script_module():
@@ -86,74 +87,83 @@ def test_dispatch_message_infers_epic_thread_kind_for_top_level_work_thread() ->
     assert create.call_args.kwargs["metadata"]["thread_kind"] == "epic"
 
 
-def test_dispatch_message_reroutes_when_worker_inactive() -> None:
+def test_dispatch_message_keeps_threaded_message_on_original_work_when_worker_inactive() -> None:
     module = _load_script_module()
     with (
         patch.object(module.agent_home, "is_session_agent_active", return_value=False),
-        patch.object(module, "_create_reroute_epic", return_value={"id": "at-epic-5"}) as reroute,
-        patch.object(module.beads, "create_message_bead") as create_message,
+        patch.object(
+            module.beads, "create_message_bead", return_value={"id": "at-msg-5"}
+        ) as create_message,
     ):
         result = module.dispatch_message(
             subject="Fix failing check",
             body="Please investigate CI logs.",
             to="atelier/worker/codex/p303-t3",
             from_agent="atelier/planner/codex/p202-t2",
-            thread=None,
+            thread="at-es93n.1",
             reply_to=None,
             beads_root=Path("/beads"),
             cwd=Path("/repo"),
         )
 
-    assert result.decision == "rerouted_inactive_worker"
-    assert result.issue_id == "at-epic-5"
-    reroute.assert_called_once()
-    create_message.assert_not_called()
+    assert result.decision == "delivered"
+    assert result.issue_id == "at-msg-5"
+    call = create_message.call_args.kwargs
+    assert call["assignee"] == "atelier/worker/codex/p303-t3"
+    assert call["metadata"]["delivery"] == "work-threaded"
+    assert call["metadata"]["thread"] == "at-es93n.1"
+    assert call["metadata"]["thread_kind"] == "changeset"
+    assert call["metadata"]["thread_target"] == "changeset"
+    assert call["metadata"]["audience"] == ["worker"]
+    assert call["metadata"]["audiences"] == ["worker"]
+    assert call["metadata"]["blocking_roles"] == ["worker"]
 
 
-def test_create_reroute_epic_writes_diagnostics_without_status_flag() -> None:
-    module = _load_script_module()
-    captured_args: list[str] = []
-
-    def _fake_run_bd_command(args: list[str], *, beads_root: Path, cwd: Path):
-        captured_args.extend(args)
-        return CompletedProcess(args=["bd", *args], returncode=0, stdout="at-epic-9\n", stderr="")
-
-    with (
-        patch.object(module.beads, "run_bd_command", side_effect=_fake_run_bd_command),
-        patch.object(module.beads, "run_bd_json", return_value=[{"id": "at-epic-9"}]),
-    ):
-        created = module._create_reroute_epic(
-            subject="Investigate stale task",
-            body="Original payload",
-            sender="atelier/planner/codex/p11",
-            recipient="atelier/worker/codex/p22",
-            thread="at-thread",
-            reply_to="at-msg-2",
-            beads_root=Path("/beads"),
-            cwd=Path("/repo"),
-        )
-
-    assert created["id"] == "at-epic-9"
-    assert "--label" in captured_args
-    assert "at:epic" in captured_args
-    assert "--status" not in captured_args
-    description = captured_args[captured_args.index("--description") + 1]
-    assert "routing.decision: rerouted_inactive_worker" in description
-    assert "routing.inactive_worker: atelier/worker/codex/p22" in description
-    assert "routing.thread: at-thread" in description
-    assert "routing.reply_to: at-msg-2" in description
-
-
-def test_dispatch_message_non_planner_sender_does_not_reroute() -> None:
+def test_inactive_worker_threaded_message_is_discoverable_by_later_worker() -> None:
     module = _load_script_module()
     with (
         patch.object(module.agent_home, "is_session_agent_active", return_value=False),
         patch.object(
-            module.beads, "create_message_bead", return_value={"id": "at-msg-2"}
-        ) as create,
-        patch.object(module, "_create_reroute_epic") as reroute,
+            module.beads, "create_message_bead", return_value={"id": "at-msg-6"}
+        ) as create_message,
     ):
         result = module.dispatch_message(
+            subject="Resume blocked work",
+            body="Finish the pending review feedback before coding.",
+            to="atelier/worker/codex/p404-t4",
+            from_agent="atelier/planner/codex/p202-t2",
+            thread="at-es93n.1",
+            reply_to=None,
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
+
+    assert result.decision == "delivered"
+    call = create_message.call_args.kwargs
+    issue = {
+        "id": result.issue_id,
+        "title": "Resume blocked work",
+        "assignee": call["assignee"],
+        "description": messages.render_message(call["metadata"], call["body"]),
+    }
+
+    assert messages.message_blocks_runtime(
+        issue,
+        runtime_role="worker",
+        thread_ids={"at-es93n.1"},
+    )
+    assert messages.work_thread_routing(issue).thread_id == "at-es93n.1"
+
+
+def test_dispatch_message_without_thread_fails_closed() -> None:
+    module = _load_script_module()
+    with (
+        patch.object(
+            module.beads, "create_message_bead", return_value={"id": "at-msg-2"}
+        ) as create,
+        pytest.raises(RuntimeError, match="mail-send requires --thread"),
+    ):
+        module.dispatch_message(
             subject="Heads up",
             body="FYI",
             to="atelier/worker/codex/p404-t4",
@@ -164,13 +174,7 @@ def test_dispatch_message_non_planner_sender_does_not_reroute() -> None:
             cwd=Path("/repo"),
         )
 
-    assert result.decision == "delivered"
-    assert result.issue_id == "at-msg-2"
-    create.assert_called_once()
-    assert create.call_args.kwargs["metadata"]["delivery"] == "agent-addressed"
-    assert create.call_args.kwargs["metadata"]["audience"] == ["worker"]
-    assert create.call_args.kwargs["metadata"]["kind"] == "instruction"
-    reroute.assert_not_called()
+    create.assert_not_called()
 
 
 def test_dispatch_message_threaded_needs_decision_to_planner_sets_explicit_routing() -> None:
@@ -199,44 +203,3 @@ def test_dispatch_message_threaded_needs_decision_to_planner_sets_explicit_routi
     assert call["metadata"]["blocking"] is True
     assert call["metadata"]["blocking_roles"] == ["planner"]
     assert call["metadata"]["kind"] == "needs-decision"
-
-
-@pytest.mark.parametrize(
-    ("incident_id", "subject", "body"),
-    [
-        ("at-5j4z", "/", "/"),
-        ("at-adjt", "/", "Investigate dependency drift in planner handoff"),
-        ("at-b22t", "Fix worker startup contract", "/"),
-        ("at-dc89", "x", "y"),
-    ],
-)
-def test_dispatch_message_reroute_rejects_incident_placeholder_shapes(
-    incident_id: str,
-    subject: str,
-    body: str,
-) -> None:
-    module = _load_script_module()
-    with (
-        patch.object(module.agent_home, "is_session_agent_active", return_value=False),
-        patch.object(module, "_create_reroute_epic") as reroute,
-        patch.object(module.beads, "create_message_bead") as create_message,
-    ):
-        with pytest.raises(RuntimeError) as excinfo:
-            module.dispatch_message(
-                subject=subject,
-                body=body,
-                to="atelier/worker/codex/p303-t3",
-                from_agent="atelier/planner/codex/p202-t2",
-                thread=None,
-                reply_to=None,
-                beads_root=Path("/beads"),
-                cwd=Path("/repo"),
-            )
-
-    detail = str(excinfo.value)
-    assert "invalid executable work payload for inactive-worker reroute epic creation" in detail, (
-        incident_id
-    )
-    assert "planner-context: NEEDS-DECISION" in detail, incident_id
-    reroute.assert_not_called()
-    create_message.assert_not_called()
