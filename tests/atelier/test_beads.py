@@ -5952,6 +5952,41 @@ def test_update_changeset_review_feedback_cursor_updates_description() -> None:
     assert "review.last_feedback_seen_at: 2026-02-20T12:00:00Z" in captured["description"]
 
 
+def test_update_changeset_review_preserves_missing_fields_when_requested() -> None:
+    state = {
+        "description": (
+            "pr_url: https://example.test/pr/42\n"
+            "pr_number: 42\n"
+            "pr_state: draft-pr\n"
+            "review_owner: reviewer-a\n"
+        )
+    }
+
+    def fake_json(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
+        return [{"id": "atelier-99", "description": state["description"]}]
+
+    def fake_update(issue_id: str, description: str, *, beads_root: Path, cwd: Path) -> None:
+        del issue_id, beads_root, cwd
+        state["description"] = description
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_json),
+        patch("atelier.beads._update_issue_description", side_effect=fake_update),
+    ):
+        beads.update_changeset_review(
+            "atelier-99",
+            beads.changesets.ReviewMetadata(pr_state="in-review"),
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            preserve_missing=True,
+        )
+
+    assert "pr_url: https://example.test/pr/42" in state["description"]
+    assert "pr_number: 42" in state["description"]
+    assert "pr_state: in-review" in state["description"]
+    assert "review_owner: reviewer-a" in state["description"]
+
+
 def test_update_issue_description_fields_retries_after_interleaved_overwrite() -> None:
     state = {"description": "hook_bead: epic-1\npr_state: draft-pr\n"}
     writes = 0

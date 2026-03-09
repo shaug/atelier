@@ -44,6 +44,46 @@ def test_changeset_base_branch_prefers_workspace_parent_for_first_reviewable(mon
     assert base == "main"
 
 
+def test_update_changeset_review_from_pr_preserves_existing_review_owner(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        work_finalization_state.prs,
+        "has_review_requests",
+        lambda _payload: False,
+    )
+    monkeypatch.setattr(
+        work_finalization_state.prs,
+        "lifecycle_state",
+        lambda _payload, *, pushed, review_requested: "pr-open",
+    )
+    monkeypatch.setattr(
+        work_finalization_state.beads,
+        "update_changeset_review",
+        lambda changeset_id, metadata, **kwargs: captured.update(
+            {
+                "changeset_id": changeset_id,
+                "metadata": metadata,
+                **kwargs,
+            }
+        ),
+    )
+
+    work_finalization_state.update_changeset_review_from_pr(
+        "at-epic.1",
+        pr_payload={"url": "https://example.test/pr/42", "number": 42},
+        pushed=True,
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    assert captured["changeset_id"] == "at-epic.1"
+    assert captured["metadata"].pr_url == "https://example.test/pr/42"
+    assert captured["metadata"].pr_number == "42"
+    assert captured["metadata"].pr_state == "pr-open"
+    assert captured["preserve_missing"] is True
+
+
 def test_changeset_parent_branch_normalizes_collapsed_root_to_default(monkeypatch) -> None:
     issue = {
         "description": ("changeset.root_branch: feat/root\nchangeset.parent_branch: feat/root\n"),

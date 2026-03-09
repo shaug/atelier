@@ -938,6 +938,7 @@ def update_changeset_review_from_pr(
         metadata,
         beads_root=beads_root,
         cwd=repo_root,
+        preserve_missing=True,
     )
 
 
