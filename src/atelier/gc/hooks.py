@@ -5,22 +5,29 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import beads
-from .common import IssueLike, issue_labels, issue_value, log_warning, parse_rfc3339, try_show_issue
+from .common import log_warning, parse_rfc3339, try_show_issue
 from .models import GcAction
 
 
-def release_epic(epic: IssueLike, *, beads_root: Path, cwd: Path) -> None:
-    epic_id = str(issue_value(epic, "id") or "")
+def _issue_labels(issue: dict[str, object]) -> set[str]:
+    labels = issue.get("labels")
+    if not isinstance(labels, (list, tuple)):
+        return set()
+    return {str(label) for label in labels if label}
+
+
+def release_epic(epic: dict[str, object], *, beads_root: Path, cwd: Path) -> None:
+    epic_id = str(epic.get("id") or "")
     if not epic_id:
         return
-    assignee_value = issue_value(epic, "assignee")
+    assignee_value = epic.get("assignee")
     expected_assignee = assignee_value if isinstance(assignee_value, str) else ""
     beads.release_epic_assignment(
         epic_id,
         beads_root=beads_root,
         cwd=cwd,
         expected_assignee=expected_assignee,
-        expected_hooked=beads.has_issue_label(issue_labels(epic), "hooked", beads_root=beads_root),
+        expected_hooked=beads.has_issue_label(_issue_labels(epic), "hooked", beads_root=beads_root),
     )
 
 
@@ -114,12 +121,17 @@ def collect_hooks(
             cwd=repo_root,
             context=f"agent hook metadata for {agent_id}",
         )
+        epic_payload = (
+            epic.model_dump(mode="json", by_alias=True, exclude_none=True)
+            if epic is not None
+            else None
+        )
         description = f"Release stale hook for {agent_id} (epic {hook_bead})"
         hook_value = hook_bead if isinstance(hook_bead, str) else None
 
         def _apply_release(
             agent_bead_id: str = issue_id,
-            epic_issue: IssueLike | None = epic,
+            epic_issue: dict[str, object] | None = epic_payload,
             expected_hook: str | None = hook_value,
         ) -> None:
             if epic_issue:
@@ -134,7 +146,7 @@ def collect_hooks(
         actions.append(GcAction(description=description, apply=_apply_release))
 
     for epic in epics:
-        labels = issue_labels(epic)
+        labels = _issue_labels(epic)
         assignee = epic.get("assignee")
         epic_id = epic.get("id")
         description = epic.get("description")

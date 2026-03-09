@@ -10,7 +10,6 @@ from .common import (
     build_gc_beads_client,
     close_issue,
     coerce_float,
-    issue_value,
     list_issues,
     parse_rfc3339,
     try_show_issue,
@@ -132,7 +131,7 @@ def collect_message_retention(
         if isinstance(expires_at, str):
             expiry_time = parse_rfc3339(expires_at)
         if expiry_time is None and retention_days is not None:
-            created_at_raw = issue_value(issue, "created_at")
+            created_at_raw = issue.extra_fields.get("created_at")
             created_at = parse_rfc3339(created_at_raw if isinstance(created_at_raw, str) else None)
             if created_at is not None:
                 expiry_time = created_at + dt.timedelta(days=retention_days)

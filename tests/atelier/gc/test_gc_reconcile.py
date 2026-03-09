@@ -5,18 +5,23 @@ from unittest.mock import patch
 
 import atelier.gc.reconcile as gc_reconcile
 from atelier import config, prs
+from atelier.lib.beads import IssueRecord
 
 
 def test_reconcile_preview_lines_includes_epic_and_changeset_info() -> None:
-    epic = {
-        "id": "at-epic",
-        "description": ("workspace.root_branch: feat/root\nworkspace.parent_branch: main\n"),
-    }
-    changeset = {
-        "id": "at-epic.1",
-        "status": "closed",
-        "description": "changeset.integrated_sha: abc123\n",
-    }
+    epic = IssueRecord.model_validate(
+        {
+            "id": "at-epic",
+            "description": ("workspace.root_branch: feat/root\nworkspace.parent_branch: main\n"),
+        }
+    )
+    changeset = IssueRecord.model_validate(
+        {
+            "id": "at-epic.1",
+            "status": "closed",
+            "description": "changeset.integrated_sha: abc123\n",
+        }
+    )
 
     def fake_try_show_issue(issue_id: str, *, beads_root: Path, cwd: Path):
         if issue_id == "at-epic":
@@ -44,7 +49,7 @@ def test_reconcile_preview_lines_includes_epic_and_changeset_info() -> None:
 
 def test_reconcile_preview_lines_includes_mapping_when_project_dir_given() -> None:
     project_dir = Path("/project")
-    epic = {"id": "at-epic", "description": ""}
+    epic = IssueRecord.model_validate({"id": "at-epic"})
 
     mapping = type(
         "Mapping",
@@ -78,11 +83,13 @@ def test_reconcile_preview_lines_reports_operator_triage_for_stale_metadata() ->
         project=config.ProjectSection(origin="https://github.com/org/repo"),
         branch=config.BranchConfig(pr=True),
     )
-    issue = {
-        "id": "at-epic.1",
-        "status": "blocked",
-        "description": "changeset.work_branch: feat/root-at-epic.1\npr_state: draft-pr\n",
-    }
+    issue = IssueRecord.model_validate(
+        {
+            "id": "at-epic.1",
+            "status": "blocked",
+            "description": "changeset.work_branch: feat/root-at-epic.1\npr_state: draft-pr\n",
+        }
+    )
 
     with (
         patch("atelier.gc.reconcile.try_show_issue", return_value=issue),

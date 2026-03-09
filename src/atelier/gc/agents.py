@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import agent_home, beads
-from .common import issue_labels, try_show_issue
 from .hooks import release_epic
 from .models import GcAction
 

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Mapping
 from pathlib import Path
 
-from .. import beads, changesets, git, lifecycle
 from .. import exec as exec_util
+from .. import git
 from .. import log as atelier_log
 from ..lib.beads import (
     BeadError,
@@ -19,8 +18,6 @@ from ..lib.beads import (
     UpdateIssueRequest,
     build_sync_beads_client,
 )
-
-IssueLike = IssueRecord | Mapping[str, object]
 
 
 def log_debug(message: str) -> None:
@@ -62,34 +59,6 @@ def parse_rfc3339(value: str | None) -> dt.datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt.timezone.utc)
     return parsed
-
-
-def issue_value(issue: IssueLike, key: str) -> object | None:
-    if isinstance(issue, IssueRecord):
-        if hasattr(issue, key):
-            return getattr(issue, key)
-        return issue.extra_fields.get(key)
-    return issue.get(key)
-
-
-def issue_payload(issue: IssueLike) -> dict[str, object]:
-    if isinstance(issue, IssueRecord):
-        return issue.model_dump(mode="json", by_alias=True, exclude_none=True)
-    return dict(issue)
-
-
-def issue_labels(issue: IssueLike) -> set[str]:
-    labels = issue_value(issue, "labels")
-    if not isinstance(labels, (list, tuple)):
-        return set()
-    return {str(label) for label in labels if label}
-
-
-def issue_sort_key(issue: IssueLike) -> str:
-    issue_id = issue_value(issue, "id")
-    if isinstance(issue_id, str):
-        return issue_id
-    return ""
 
 
 def normalize_branch(value: object) -> str | None:
@@ -217,41 +186,6 @@ def branch_integrated_into_target(
         if fully_applied is True:
             return True
     return False
-
-
-def changeset_review_state(issue: IssueLike) -> str:
-    description = issue_value(issue, "description")
-    review = changesets.parse_review_metadata(description if isinstance(description, str) else "")
-    return (review.pr_state or "").strip().lower()
-
-
-def issue_integrated_sha(issue: IssueLike) -> str | None:
-    description = issue_value(issue, "description")
-    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    integrated = fields.get("changeset.integrated_sha")
-    if isinstance(integrated, str):
-        value = integrated.strip()
-        if value and value.lower() != "null":
-            return value
-    notes = issue_value(issue, "notes")
-    if not isinstance(notes, str) or not notes.strip():
-        return None
-    for line in notes.splitlines():
-        if "changeset.integrated_sha" not in line:
-            continue
-        _prefix, _sep, suffix = line.partition(":")
-        value = suffix.strip()
-        if value and value.lower() != "null":
-            return value
-    return None
-
-
-def is_merged_closed_changeset(issue: IssueLike) -> bool:
-    if lifecycle.canonical_lifecycle_status(issue_value(issue, "status")) != "closed":
-        return False
-    if issue_integrated_sha(issue):
-        return True
-    return changeset_review_state(issue) == "merged"
 
 
 def workspace_branch_from_labels(labels: set[str]) -> str | None:
