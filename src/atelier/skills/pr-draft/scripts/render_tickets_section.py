@@ -10,8 +10,22 @@ import subprocess
 import sys
 from pathlib import Path
 
-from atelier.bd_invocation import with_bd_mode
-from atelier.worker import publish as worker_publish
+_SHARED_SCRIPTS_ROOT = Path(__file__).resolve().parents[2] / "shared" / "scripts"
+if str(_SHARED_SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SHARED_SCRIPTS_ROOT))
+
+from projected_bootstrap import (  # noqa: E402  # pyright: ignore[reportMissingImports]
+    bootstrap_projected_atelier_script,
+)
+
+_BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
+    script_path=Path(__file__).resolve(),
+    argv=sys.argv[1:],
+    require_runtime_health=__name__ == "__main__",
+)
+
+from atelier.bd_invocation import with_bd_mode  # noqa: E402
+from atelier.worker import publish as worker_publish  # noqa: E402
 
 
 def render_ticket_section(issue: dict[str, object]) -> str:

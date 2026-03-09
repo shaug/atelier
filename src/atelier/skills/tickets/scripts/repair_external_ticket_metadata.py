@@ -8,14 +8,19 @@ import os
 import sys
 from pathlib import Path
 
+_SHARED_SCRIPTS_ROOT = Path(__file__).resolve().parents[2] / "shared" / "scripts"
+if str(_SHARED_SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SHARED_SCRIPTS_ROOT))
 
-def _bootstrap_source_import() -> None:
-    src_dir = Path(__file__).resolve().parents[4]
-    if src_dir.is_dir() and str(src_dir) not in sys.path:
-        sys.path.insert(0, str(src_dir))
+from projected_bootstrap import (  # noqa: E402  # pyright: ignore[reportMissingImports]
+    bootstrap_projected_atelier_script,
+)
 
-
-_bootstrap_source_import()
+_BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
+    script_path=Path(__file__).resolve(),
+    argv=sys.argv[1:],
+    require_runtime_health=__name__ == "__main__",
+)
 
 from atelier import beads  # noqa: E402
 

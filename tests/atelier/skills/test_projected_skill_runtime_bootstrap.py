@@ -9,6 +9,10 @@ from pathlib import Path
 import pytest
 
 
+def _skills_source_root() -> Path:
+    return Path(__file__).resolve().parents[3] / "src" / "atelier" / "skills"
+
+
 def _copy_script(
     tmp_path: Path,
     *,
@@ -30,14 +34,16 @@ def _copy_script_into_agent_home(
     skill_name: str,
     script_name: str,
 ) -> Path:
-    source_script = (
-        Path(__file__).resolve().parents[3]
-        / "src"
-        / "atelier"
-        / "skills"
-        / skill_name
-        / "scripts"
-        / script_name
+    skills_root = _skills_source_root()
+    source_script = skills_root / skill_name / "scripts" / script_name
+    projected_bootstrap = skills_root / "shared" / "scripts" / "projected_bootstrap.py"
+    projected_bootstrap_target = (
+        agent_home / "skills" / "shared" / "scripts" / "projected_bootstrap.py"
+    )
+    projected_bootstrap_target.parent.mkdir(parents=True, exist_ok=True)
+    projected_bootstrap_target.write_text(
+        projected_bootstrap.read_text(encoding="utf-8"),
+        encoding="utf-8",
     )
     script_dir = agent_home / "skills" / skill_name / "scripts"
     script_dir.mkdir(parents=True, exist_ok=True)
@@ -155,6 +161,25 @@ def _ambient_python_executable() -> str:
         if version_probe.returncode == 0 and version_probe.stdout.strip() == "True":
             return str(candidate)
     pytest.skip("no distinct Python 3.10+ executable available for projected-runtime test")
+
+
+def test_all_projected_skill_scripts_importing_atelier_use_shared_bootstrap() -> None:
+    skills_root = _skills_source_root()
+    importing_scripts: list[Path] = []
+    missing_bootstrap: list[Path] = []
+
+    for path in sorted(skills_root.rglob("scripts/*.py")):
+        if path == skills_root / "shared" / "scripts" / "projected_bootstrap.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "from atelier" not in text and "import atelier" not in text:
+            continue
+        importing_scripts.append(path)
+        if "projected_bootstrap" not in text or "bootstrap_projected_atelier_script" not in text:
+            missing_bootstrap.append(path)
+
+    assert importing_scripts
+    assert missing_bootstrap == []
 
 
 def test_projected_create_epic_prefers_agent_worktree_source(tmp_path: Path) -> None:
@@ -352,6 +377,77 @@ def test_projected_check_guardrails_reorders_repo_src_ahead_of_installed_package
     assert completed.returncode == 0
     assert sentinel_path.read_text(encoding="utf-8") == str(
         repo_root / "src" / "atelier" / "beads_context.py"
+    )
+
+
+def test_projected_render_tickets_section_reorders_repo_src_ahead_of_installed_package(
+    tmp_path: Path,
+) -> None:
+    agent_home, projected_script = _copy_script(
+        tmp_path,
+        skill_name="pr-draft",
+        script_name="render_tickets_section.py",
+    )
+    repo_root = _fake_repo(
+        tmp_path,
+        sentinel_import="bootstrap_marker",
+        extra_modules={
+            "bd_invocation.py": (
+                "def with_bd_mode(*args, beads_dir=None, env=None):\n    return ['bd', *args]\n"
+            ),
+            "worker/__init__.py": "",
+            "worker/publish.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text(__file__, encoding='utf-8')\n"
+                "\n"
+                "def render_pr_ticket_lines(_issue):\n"
+                "    return ['- repo']\n"
+            ),
+        },
+    )
+    (agent_home / "worktree").symlink_to(repo_root)
+    installed_root = _fake_installed_package(
+        tmp_path,
+        modules={
+            "bd_invocation.py": (
+                "def with_bd_mode(*args, beads_dir=None, env=None):\n"
+                "    return ['installed', *args]\n"
+            ),
+            "worker/__init__.py": "",
+            "worker/publish.py": (
+                "from pathlib import Path\n"
+                "import os\n"
+                "\n"
+                "Path(os.environ['BOOTSTRAP_SENTINEL']).write_text('installed', encoding='utf-8')\n"
+                "\n"
+                "def render_pr_ticket_lines(_issue):\n"
+                "    return ['- installed']\n"
+            ),
+        },
+    )
+    sentinel_path = tmp_path / "render-tickets-section-sentinel.txt"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(projected_script),
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=agent_home,
+        env={
+            "BOOTSTRAP_SENTINEL": str(sentinel_path),
+            "PYTHONPATH": os.pathsep.join([str(installed_root), str(repo_root / "src")]),
+        },
+    )
+
+    assert completed.returncode == 0
+    assert sentinel_path.read_text(encoding="utf-8") == str(
+        repo_root / "src" / "atelier" / "worker" / "publish.py"
     )
 
 

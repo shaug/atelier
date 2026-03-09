@@ -27,6 +27,15 @@ when launching planner/worker/editor/shell subprocesses.
   bootstrap bugs and installed-tool dependency-health failures are treated as
   separate classes. Helpers fail closed before import-time crashes when the
   selected interpreter cannot import `pydantic_core._pydantic_core`.
+- The recurring cross-project drift after `at-g5a19`, `at-34t6h`, and
+  `at-s6qu4` was that projected helper entrypoints were still using multiple
+  bootstrap contracts. Some scripts re-execed into the repo runtime, while
+  others still imported `atelier` directly or only reordered `sys.path`.
+  Projected skill scripts that import `atelier` now share
+  `src/atelier/skills/shared/scripts/projected_bootstrap.py`, so repo-source
+  selection, runtime re-exec, and dependency-health diagnostics stay in
+  lockstep for every helper entrypoint instead of drifting one script at a
+  time.
 - Runtime warnings about removed inherited keys are now immediate guidance for
   explicit launch context, not future deprecation notices.
 
