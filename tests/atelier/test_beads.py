@@ -11,7 +11,13 @@ import pytest
 
 import atelier.beads as beads
 from atelier import exec as exec_util
-from atelier.testing.beads import InMemoryBeadsBackend, IssueFixtureBuilder, patch_in_memory_beads
+from atelier.testing.beads import (
+    CommandEnvelope,
+    InMemoryBeadsBackend,
+    IssueFixtureBuilder,
+    build_startup_admin_fixture,
+    patch_in_memory_beads,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -2955,6 +2961,124 @@ def test_detect_startup_beads_state_resamples_transient_mismatch(tmp_path: Path)
     assert state.legacy_issue_total == 4
     assert dolt_calls >= 2
     assert legacy_calls >= 2
+
+
+def test_detect_startup_beads_state_accepts_in_memory_healthy_fixture(tmp_path: Path) -> None:
+    fixture = build_startup_admin_fixture(
+        tmp_path=tmp_path,
+        has_dolt_store=True,
+        legacy_issue_total=12,
+        dolt_issue_totals=(12,),
+    )
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fixture.runner.run):
+        state = beads.detect_startup_beads_state(
+            beads_root=fixture.beads_root,
+            cwd=fixture.repo_root,
+        )
+
+    assert state.classification == "healthy_dolt"
+    assert state.migration_eligible is False
+    assert state.dolt_issue_total == 12
+    assert state.legacy_issue_total == 12
+
+
+def test_detect_startup_beads_state_accepts_in_memory_degraded_fixture(tmp_path: Path) -> None:
+    panic = CommandEnvelope(
+        returncode=2,
+        stderr=(
+            "panic: runtime error: invalid memory address or nil pointer dereference\n"
+            "doltdb.(*DoltDB).SetCrashOnFatalError"
+        ),
+    )
+    fixture = build_startup_admin_fixture(
+        tmp_path=tmp_path,
+        has_dolt_store=False,
+        legacy_issue_total=8,
+        dolt_issue_totals=(0,),
+    )
+    fixture.state.active_stats_replies = [panic]
+
+    with patch("atelier.beads.exec.run_with_runner", side_effect=fixture.runner.run):
+        state = beads.detect_startup_beads_state(
+            beads_root=fixture.beads_root,
+            cwd=fixture.repo_root,
+        )
+
+    assert state.classification == "missing_dolt_with_legacy_sqlite"
+    assert state.migration_eligible is True
+    assert state.dolt_issue_total is None
+    assert state.legacy_issue_total == 8
+
+
+def test_run_bd_command_prime_auto_migrates_with_in_memory_fixture(tmp_path: Path) -> None:
+    fixture = build_startup_admin_fixture(
+        tmp_path=tmp_path,
+        has_dolt_store=True,
+        legacy_issue_total=8,
+        dolt_issue_totals=(3,),
+        migrate_apply_reply=CommandEnvelope.json_payload({"migrated": 8}),
+    )
+    diagnostics: list[str] = []
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.bd_invocation.detect_bd_version", return_value=(0, 56, 1)),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fixture.runner.run),
+        patch("atelier.beads.say", side_effect=diagnostics.append),
+    ):
+        result = beads.run_bd_command(
+            ["prime"], beads_root=fixture.beads_root, cwd=fixture.repo_root
+        )
+
+    assert result.returncode == 0
+    assert diagnostics
+    assert "auto-upgrade migrated" in diagnostics[0]
+    assert "active Dolt issue count (3) is below legacy SQLite issue count (8)" in diagnostics[0]
+    assert any("migrate" in " ".join(call) for call in fixture.state.call_log)
+
+
+def test_run_bd_command_prime_reports_in_memory_capability_block(tmp_path: Path) -> None:
+    fixture = build_startup_admin_fixture(
+        tmp_path=tmp_path,
+        has_dolt_store=False,
+        legacy_issue_total=8,
+        dolt_issue_totals=(0,),
+        migrate_inspect_reply=CommandEnvelope(
+            returncode=1,
+            stdout=(
+                '{"error":"dolt_not_available","message":"Dolt backend requires CGO. '
+                'This binary was built without CGO support."}'
+            ),
+        ),
+    )
+    fixture.state.active_stats_replies = [
+        CommandEnvelope(
+            returncode=2,
+            stderr=(
+                "panic: runtime error: invalid memory address or nil pointer dereference\n"
+                "doltdb.(*DoltDB).SetCrashOnFatalError"
+            ),
+        )
+    ]
+    diagnostics: list[str] = []
+
+    with (
+        patch("atelier.beads.bd_invocation.ensure_supported_bd_version"),
+        patch("atelier.beads.bd_invocation.detect_bd_version", return_value=(0, 56, 1)),
+        patch("atelier.beads.exec.run_with_runner", side_effect=fixture.runner.run),
+        patch("atelier.beads.say", side_effect=diagnostics.append),
+    ):
+        prime_result = beads.run_bd_command(
+            ["prime"],
+            beads_root=fixture.beads_root,
+            cwd=fixture.repo_root,
+        )
+
+    assert prime_result.returncode == 0
+    assert diagnostics
+    assert "auto-upgrade blocked" in diagnostics[0]
+    assert "requires a `bd` build with Dolt/CGO support" in diagnostics[0]
 
 
 def test_verify_migration_parity_with_resample_handles_transient_skew() -> None:
