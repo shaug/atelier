@@ -282,6 +282,8 @@ def test_gc_orphan_worktree_dirty_prompts_force_or_exit() -> None:
             ),
             patch("atelier.beads.run_bd_json", return_value=[]),
             patch("atelier.gc.worktrees.try_show_issue", return_value=None),
+            patch("atelier.gc.messages.collect_message_claims", return_value=[]),
+            patch("atelier.gc.messages.collect_message_retention", return_value=[]),
             patch(
                 "atelier.git.git_status_porcelain",
                 return_value=[" M foo.py", "?? bar.txt"],
@@ -345,6 +347,8 @@ def test_gc_orphan_worktree_dirty_force_remove_calls_force() -> None:
             ),
             patch("atelier.beads.run_bd_json", return_value=[]),
             patch("atelier.gc.worktrees.try_show_issue", return_value=None),
+            patch("atelier.gc.messages.collect_message_claims", return_value=[]),
+            patch("atelier.gc.messages.collect_message_retention", return_value=[]),
             patch(
                 "atelier.git.git_status_porcelain",
                 return_value=[" M foo.py"],
