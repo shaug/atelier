@@ -98,6 +98,26 @@ def test_try_show_issue_returns_none_when_bd_show_fails() -> None:
     log_warning.assert_called_once()
 
 
+def test_try_show_issue_skips_placeholder_id_without_lookup() -> None:
+    with (
+        patch("atelier.gc.common.beads.run_bd_command") as run_bd_command,
+        patch("atelier.gc.common.log_warning") as log_warning,
+    ):
+        result = gc_common.try_show_issue(
+            " null ",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+            context="agent hook metadata for worker-1",
+        )
+
+    assert result is None
+    run_bd_command.assert_not_called()
+    log_warning.assert_called_once_with(
+        "gc ignored malformed placeholder Beads id ' null ' "
+        "in agent hook metadata for worker-1; treating metadata as unresolved"
+    )
+
+
 def test_try_show_issue_returns_issue_payload_on_success() -> None:
     payload = {"id": "at-123", "title": "Issue", "status": "open", "labels": []}
     with patch(
@@ -108,7 +128,17 @@ def test_try_show_issue_returns_issue_payload_on_success() -> None:
             stdout='{"id":"at-123","title":"Issue","status":"open","labels":[]}',
             stderr="",
         ),
-    ):
-        result = gc_common.try_show_issue("at-123", beads_root=Path("/beads"), cwd=Path("/repo"))
+    ) as run_bd_command:
+        result = gc_common.try_show_issue(
+            " at-123 ",
+            beads_root=Path("/beads"),
+            cwd=Path("/repo"),
+        )
 
     assert result == payload
+    run_bd_command.assert_called_once_with(
+        ["show", "at-123", "--json"],
+        beads_root=Path("/beads"),
+        cwd=Path("/repo"),
+        allow_failure=True,
+    )

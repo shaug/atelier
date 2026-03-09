@@ -464,6 +464,56 @@ def test_collect_resolved_epic_artifacts_skips_ambiguous_branch_only_metadata_ma
         assert actions == []
 
 
+def test_collect_resolved_epic_artifacts_skips_placeholder_mapping_epic_id() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        project_dir = root / "data"
+        repo_root = root / "repo"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        repo_root.mkdir(parents=True, exist_ok=True)
+        mapping_path = worktrees.mapping_path(project_dir, "null")
+        mapping_path.parent.mkdir(parents=True, exist_ok=True)
+        worktrees.write_mapping(
+            mapping_path,
+            worktrees.WorktreeMapping(
+                epic_id="null",
+                worktree_path="worktrees/at-closed",
+                root_branch="feat/closed",
+                changesets={},
+                changeset_worktrees={},
+            ),
+        )
+        matching_epic = {
+            "id": "at-closed",
+            "status": "closed",
+            "description": "workspace.root_branch: feat/closed\nworkspace.parent_branch: main\n",
+            "labels": ["at:epic", "workspace:feat/closed"],
+        }
+
+        with (
+            patch("atelier.beads.list_epics", return_value=[matching_epic]),
+            patch("atelier.beads.list_descendant_changesets", return_value=[]),
+            patch(
+                "atelier.gc.worktrees.try_show_issue",
+                side_effect=AssertionError("placeholder epic_id should not trigger issue lookup"),
+            ),
+            patch("atelier.gc.worktrees.log_warning") as log_warning,
+        ):
+            actions = gc_worktrees.collect_resolved_epic_artifacts(
+                project_dir=project_dir,
+                beads_root=Path("/beads"),
+                repo_root=repo_root,
+                git_path="git",
+                assume_yes=False,
+            )
+
+        assert actions == []
+        log_warning.assert_called_once_with(
+            "gc ignored malformed placeholder worktree metadata "
+            "epic_id='null' at 'worktrees/at-closed'"
+        )
+
+
 def test_collect_orphan_worktrees_resolves_prefix_migrated_mapping_by_metadata() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

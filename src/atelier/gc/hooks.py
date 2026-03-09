@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import beads
-from .common import issue_labels, parse_rfc3339, try_show_issue
+from .common import issue_labels, log_warning, parse_rfc3339, try_show_issue
 from .models import GcAction
 
 
@@ -50,6 +50,21 @@ def collect_hooks(
         cwd=repo_root,
     )
     agents: dict[str, dict[str, object]] = {}
+
+    def _normalize_hook_bead(value: object, *, agent_id: str) -> str | None:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if cleaned.lower() == "null":
+            log_warning(
+                "gc ignored malformed placeholder hook metadata "
+                f"for agent {agent_id!r}: hook_bead={value!r}"
+            )
+            return None
+        return cleaned
+
     for issue in agent_issues:
         description = issue.get("description")
         fields = beads.parse_description_fields(description if isinstance(description, str) else "")
@@ -65,6 +80,7 @@ def collect_hooks(
             hook_bead = beads.get_agent_hook(issue_id, beads_root=beads_root, cwd=repo_root)
         if not hook_bead:
             hook_bead = fields.get("hook_bead")
+        hook_bead = _normalize_hook_bead(hook_bead, agent_id=agent_id)
         agents[agent_id] = {
             "issue": issue,
             "issue_id": issue_id,
@@ -92,7 +108,12 @@ def collect_hooks(
         issue_id = issue.get("id") if isinstance(issue, dict) else None
         if not isinstance(issue_id, str) or not issue_id:
             continue
-        epic = try_show_issue(hook_bead, beads_root=beads_root, cwd=repo_root)
+        epic = try_show_issue(
+            hook_bead,
+            beads_root=beads_root,
+            cwd=repo_root,
+            context=f"agent hook metadata for {agent_id}",
+        )
         description = f"Release stale hook for {agent_id} (epic {hook_bead})"
         hook_value = hook_bead if isinstance(hook_bead, str) else None
 
