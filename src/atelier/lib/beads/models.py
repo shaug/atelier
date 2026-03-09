@@ -103,6 +103,7 @@ class SupportedOperation(str, Enum):
     """Supported Beads operations."""
 
     INSPECT_ENVIRONMENT = "inspect-environment"
+    INSPECT_STARTUP_STATE = "inspect-startup-state"
     CREATE = "create"
     UPDATE = "update"
     SHOW = "show"
@@ -176,6 +177,31 @@ class IssueRecord(BeadsModel):
         if not isinstance(value, (list, tuple)):
             raise ValueError("references must be a list or tuple")
         return tuple(IssueReference.model_validate(item) for item in value)
+
+
+class BeadsStartupState(BeadsModel):
+    """Semantic startup-state classification for one Beads backend."""
+
+    classification: NonBlankStr
+    migration_eligible: bool
+    active_backend_ready: bool = Field(
+        validation_alias=AliasChoices("active_backend_ready", "has_dolt_store"),
+    )
+    operator_attention_required: bool = False
+    reason: NonBlankStr
+    backend: NonBlankStr | None = None
+
+    def diagnostics(self) -> tuple[str, ...]:
+        """Render stable startup diagnostics lines."""
+
+        return (
+            f"classification={self.classification}",
+            "migration_eligible=" + ("yes" if self.migration_eligible else "no"),
+            "operator_attention_required=" + ("yes" if self.operator_attention_required else "no"),
+            "configured_backend=" + (self.backend if self.backend else "unspecified"),
+            "active_backend=" + ("ready" if self.active_backend_ready else "not_ready"),
+            f"reason={self.reason}",
+        )
 
 
 class ShowIssueRequest(BeadsModel):

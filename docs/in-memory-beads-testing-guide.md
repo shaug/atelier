@@ -57,6 +57,33 @@ Use `IssueFixtureBuilder` for deterministic Beads payloads and
 `messages.render_message(...)` when a test needs queue or threaded-message
 frontmatter.
 
+When a test needs startup classification semantics, prefer the typed client:
+
+```python
+from atelier.lib.beads import BeadsStartupState, SyncBeadsClient
+from atelier.testing.beads import build_in_memory_beads_client
+
+client, _store = build_in_memory_beads_client(
+    startup_state=BeadsStartupState(
+        classification="ready",
+        migration_eligible=False,
+        active_backend_ready=True,
+        operator_attention_required=False,
+        reason="backend_ready",
+        backend="dolt",
+    )
+)
+
+startup = SyncBeadsClient(client).inspect_startup_state()
+```
+
+Keep typed-client startup assertions focused on semantic readiness, migration,
+and operator-attention signals. Raw counts and probe provenance belong only in
+compatibility fixture tests.
+
+Reserve `build_startup_admin_fixture(...)` for compatibility tests that need to
+assert raw `bd stats`, `migrate`, or `dolt show` command behavior.
+
 ### Runtime And Reliability Impact
 
 Measured on March 9, 2026 with warm `pytest` runs on CPython 3.11.12:

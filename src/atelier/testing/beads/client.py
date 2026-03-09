@@ -9,6 +9,7 @@ from atelier.lib.beads import (
     Beads,
     BeadsCapability,
     BeadsEnvironment,
+    BeadsStartupState,
     CloseIssueRequest,
     CompatibilityPolicy,
     CreateIssueRequest,
@@ -67,6 +68,17 @@ _TIER_ZERO_CAPABILITIES = (
 )
 
 
+def _default_startup_state() -> BeadsStartupState:
+    return BeadsStartupState(
+        classification="ready",
+        migration_eligible=False,
+        active_backend_ready=True,
+        operator_attention_required=False,
+        reason="backend_ready",
+        backend="in-memory",
+    )
+
+
 class InMemoryBeadsClient(Beads):
     """Typed Beads client backed directly by the in-memory issue store."""
 
@@ -75,6 +87,7 @@ class InMemoryBeadsClient(Beads):
         *,
         issue_store: InMemoryIssueStore,
         compatibility_policy: CompatibilityPolicy = IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY,
+        startup_state: BeadsStartupState | None = None,
     ) -> None:
         self._issue_store = issue_store
         self._compatibility_policy = compatibility_policy
@@ -82,6 +95,7 @@ class InMemoryBeadsClient(Beads):
             version=SemanticVersion.model_validate(IN_MEMORY_BEADS_VERSION),
             capabilities=_TIER_ZERO_CAPABILITIES,
         )
+        self._startup_state = startup_state or _default_startup_state()
 
     @property
     def compatibility_policy(self) -> CompatibilityPolicy:
@@ -95,6 +109,9 @@ class InMemoryBeadsClient(Beads):
                 operation=contract.operation,
             )
         return self._environment
+
+    async def inspect_startup_state(self) -> BeadsStartupState:
+        return self._startup_state
 
     async def show(self, request: ShowIssueRequest) -> IssueRecord:
         await self._ensure_operation_supported(SupportedOperation.SHOW)
@@ -223,6 +240,7 @@ def build_in_memory_beads_client(
     issues: Iterable[Mapping[str, object]] = (),
     prefix: str = "at",
     compatibility_policy: CompatibilityPolicy = IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY,
+    startup_state: BeadsStartupState | None = None,
 ) -> tuple[Beads, InMemoryIssueStore]:
     """Build a typed Beads client backed directly by the in-memory store.
 
@@ -230,6 +248,8 @@ def build_in_memory_beads_client(
         issues: Initial issue payloads to seed into the shared store.
         prefix: Prefix used for generated numeric ids.
         compatibility_policy: Supported-operation policy for the typed client.
+        startup_state: Optional semantic startup state returned directly by the
+            typed in-memory Beads client.
 
     Returns:
         Tuple of the typed Beads client and the shared in-memory issue store it
@@ -240,6 +260,7 @@ def build_in_memory_beads_client(
     client = InMemoryBeadsClient(
         issue_store=store,
         compatibility_policy=compatibility_policy,
+        startup_state=startup_state,
     )
     return client, store
 

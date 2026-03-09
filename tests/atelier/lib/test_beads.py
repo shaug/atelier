@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -16,6 +17,7 @@ from atelier.lib.beads import (
     BeadsCommandResult,
     BeadsEnvironment,
     BeadsParseError,
+    BeadsStartupState,
     BeadsTimeoutError,
     BeadsTransport,
     CapabilityMismatchError,
@@ -137,6 +139,16 @@ class _FakeClient:
         return BeadsEnvironment(
             version=SemanticVersion(major=0, minor=56, patch=1),
             capabilities=capabilities,
+        )
+
+    async def inspect_startup_state(self) -> BeadsStartupState:
+        return BeadsStartupState(
+            classification="ready",
+            migration_eligible=False,
+            active_backend_ready=True,
+            operator_attention_required=False,
+            reason="backend_ready",
+            backend="in-memory",
         )
 
     async def show(self, request: object) -> IssueRecord:
@@ -533,3 +545,44 @@ def test_sync_beads_client_wraps_async_client() -> None:
 
     assert environment.version == SemanticVersion(major=0, minor=56, patch=1)
     assert issue.id == "at-1"
+
+
+def test_subprocess_client_inspects_startup_state_from_configured_beads_root(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    (beads_root / "dolt" / "beads_at" / ".dolt").mkdir(parents=True)
+    (beads_root / "beads.db").write_bytes(b"")
+    (beads_root / "metadata.json").write_text('{"backend":"dolt"}\n', encoding="utf-8")
+    responses = _probe_responses()
+    responses.update(
+        {
+            ("bd", "stats", "--json"): BeadsCommandResult(
+                argv=("bd", "stats", "--json"),
+                returncode=0,
+                stdout='{"summary":{"total_issues":7}}',
+                stderr="",
+            ),
+            ("bd", "--db", str(beads_root / "beads.db"), "stats", "--json"): BeadsCommandResult(
+                argv=("bd", "--db", str(beads_root / "beads.db"), "stats", "--json"),
+                returncode=0,
+                stdout='{"summary":{"total_issues":7}}',
+                stderr="",
+            ),
+        }
+    )
+    client = SubprocessBeadsClient(
+        transport=ScriptedBeadsTransport(responses),
+        env={"BEADS_DIR": str(beads_root)},
+    )
+
+    startup = _run(client.inspect_startup_state())
+
+    assert startup.classification == "ready"
+    assert startup.migration_eligible is False
+    assert startup.active_backend_ready is True
+    assert startup.operator_attention_required is False
+    assert startup.backend == "dolt"
+    assert startup.reason == "backend_ready"
+    assert startup.diagnostics()[0] == "classification=ready"
+    assert "active_issue_total" not in startup.model_dump()

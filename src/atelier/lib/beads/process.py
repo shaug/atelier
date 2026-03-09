@@ -27,6 +27,7 @@ from .models import (
     BeadsCommandRequest,
     BeadsCommandResult,
     BeadsEnvironment,
+    BeadsStartupState,
     CloseIssueRequest,
     CreateIssueRequest,
     DependencyMutationRequest,
@@ -42,6 +43,15 @@ from .models import (
 _SEMVER_SEARCH: Pattern[str] = compile(r"\bv?(\d+)\.(\d+)\.(\d+)\b")
 _FLAG_SEARCH: Pattern[str] = compile(r"--[a-z0-9][a-z0-9-]*")
 _JSON_FLAG = "--json"
+_STARTUP_COUNT_SKEW_RECHECK_ATTEMPTS = 2
+_STARTUP_READY = "ready"
+_STARTUP_RECOVERY_REQUIRED = "recovery_required"
+_STARTUP_ATTENTION_REQUIRED = "attention_required"
+_EMBEDDED_BACKEND_PANIC_MARKERS = (
+    "panic: runtime error",
+    "invalid memory address or nil pointer dereference",
+    "setcrashonfatalerror",
+)
 _CAPABILITY_PROBES = (
     (BeadsCapability.ISSUE_JSON, (("show", "--help"), ("list", "--help"))),
     (
@@ -141,6 +151,58 @@ def _extend_optional_args(argv: list[str], *items: tuple[str, object | None]) ->
             argv.extend([flag, str(value)])
 
 
+def _short_detail(value: str | None) -> str | None:
+    if not value:
+        return None
+    flattened = " ".join(part for part in value.strip().splitlines() if part.strip())
+    if not flattened:
+        return None
+    return flattened[:220]
+
+
+def _configured_backend(beads_root: Path) -> str | None:
+    metadata_path = beads_root / "metadata.json"
+    try:
+        raw = metadata_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not raw.strip():
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("backend")
+    if not isinstance(value, str):
+        return None
+    backend = value.strip().lower()
+    return backend or None
+
+
+def _startup_dolt_store_exists(beads_root: Path) -> bool:
+    dolt_root = beads_root / "dolt"
+    if not dolt_root.is_dir():
+        return False
+    return any(candidate.is_dir() for candidate in dolt_root.glob("**/.dolt"))
+
+
+def _extract_total_issues(payload: object) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return None
+    total = summary.get("total_issues")
+    return total if isinstance(total, int) else None
+
+
+def _is_embedded_backend_panic(detail: str) -> bool:
+    normalized = detail.lower()
+    return any(marker in normalized for marker in _EMBEDDED_BACKEND_PANIC_MARKERS)
+
+
 class SubprocessBeadsClient(Beads):
     def __init__(
         self,
@@ -149,6 +211,7 @@ class SubprocessBeadsClient(Beads):
         compatibility_policy: CompatibilityPolicy = DEFAULT_COMPATIBILITY_POLICY,
         executable: str = "bd",
         cwd: Path | None = None,
+        beads_root: Path | None = None,
         env: Mapping[str, str] | None = None,
         timeout_seconds: float = 30.0,
     ) -> None:
@@ -156,6 +219,7 @@ class SubprocessBeadsClient(Beads):
         self._compatibility_policy = compatibility_policy
         self._executable = executable
         self._cwd = cwd
+        self._beads_root = beads_root
         self._env = dict(env or {})
         self._timeout_seconds = timeout_seconds
         self._environment_cache: BeadsEnvironment | None = None
@@ -189,6 +253,117 @@ class SubprocessBeadsClient(Beads):
             self.compatibility_policy.assert_environment_supports(environment, operation=operation)
         self._environment_cache = environment
         return environment
+
+    async def inspect_startup_state(self) -> BeadsStartupState:
+        beads_root = self._resolve_beads_root()
+        if beads_root is None:
+            return BeadsStartupState(
+                classification=_STARTUP_ATTENTION_REQUIRED,
+                migration_eligible=False,
+                active_backend_ready=False,
+                operator_attention_required=True,
+                reason="startup_configuration_missing",
+            )
+
+        has_legacy_sqlite = (beads_root / "beads.db").is_file()
+        has_dolt_store = _startup_dolt_store_exists(beads_root)
+        configured_backend = _configured_backend(beads_root)
+        dolt_backend_expected = configured_backend in {None, "dolt"}
+        if not beads_root.exists():
+            return BeadsStartupState(
+                classification=_STARTUP_ATTENTION_REQUIRED,
+                migration_eligible=False,
+                active_backend_ready=has_dolt_store,
+                operator_attention_required=True,
+                reason="startup_configuration_missing",
+                backend=configured_backend,
+            )
+
+        (
+            dolt_issue_total,
+            dolt_detail,
+            legacy_issue_total,
+            legacy_detail,
+        ) = await self._read_startup_issue_totals(
+            beads_root=beads_root, has_legacy_sqlite=has_legacy_sqlite
+        )
+        (
+            dolt_issue_total,
+            dolt_detail,
+            legacy_issue_total,
+            legacy_detail,
+        ) = await self._stabilize_startup_issue_totals(
+            beads_root=beads_root,
+            has_dolt_store=has_dolt_store,
+            has_legacy_sqlite=has_legacy_sqlite,
+            dolt_issue_total=dolt_issue_total,
+            dolt_detail=dolt_detail,
+            legacy_issue_total=legacy_issue_total,
+            legacy_detail=legacy_detail,
+        )
+
+        legacy_has_data = bool(legacy_issue_total and legacy_issue_total > 0)
+        common_state = {
+            "active_backend_ready": has_dolt_store,
+            "backend": configured_backend,
+        }
+
+        if not has_dolt_store:
+            if legacy_has_data and dolt_backend_expected:
+                return BeadsStartupState(
+                    classification=_STARTUP_RECOVERY_REQUIRED,
+                    migration_eligible=True,
+                    operator_attention_required=False,
+                    reason="recoverable_data_requires_migration",
+                    **common_state,
+                )
+            reason = "active_backend_unavailable"
+            if configured_backend and configured_backend != "dolt":
+                reason = "configured_backend_unavailable"
+            return BeadsStartupState(
+                classification=_STARTUP_ATTENTION_REQUIRED,
+                migration_eligible=False,
+                operator_attention_required=True,
+                reason=reason,
+                **common_state,
+            )
+
+        if dolt_issue_total is not None:
+            if (
+                has_legacy_sqlite
+                and legacy_issue_total is not None
+                and legacy_issue_total > dolt_issue_total
+            ):
+                return BeadsStartupState(
+                    classification=_STARTUP_RECOVERY_REQUIRED,
+                    migration_eligible=True,
+                    operator_attention_required=False,
+                    reason="recoverable_data_requires_migration",
+                    **common_state,
+                )
+            return BeadsStartupState(
+                classification=_STARTUP_READY,
+                migration_eligible=False,
+                operator_attention_required=False,
+                reason="backend_ready",
+                **common_state,
+            )
+
+        if legacy_has_data and _is_embedded_backend_panic(dolt_detail or ""):
+            return BeadsStartupState(
+                classification=_STARTUP_RECOVERY_REQUIRED,
+                migration_eligible=True,
+                operator_attention_required=False,
+                reason="recoverable_data_requires_migration",
+                **common_state,
+            )
+        return BeadsStartupState(
+            classification=_STARTUP_ATTENTION_REQUIRED,
+            migration_eligible=False,
+            operator_attention_required=True,
+            reason="startup_state_requires_operator_attention",
+            **common_state,
+        )
 
     async def show(self, request: ShowIssueRequest) -> IssueRecord:
         await self._ensure_environment_supports(SupportedOperation.SHOW)
@@ -348,6 +523,75 @@ class SubprocessBeadsClient(Beads):
             await self.inspect_environment(),
             operation=operation,
         )
+
+    def _resolve_beads_root(self) -> Path | None:
+        if self._beads_root is not None:
+            return self._beads_root
+        if isinstance(raw := self._env.get("BEADS_DIR"), str) and raw.strip():
+            return Path(raw)
+        if isinstance(raw := os.environ.get("BEADS_DIR"), str) and raw.strip():
+            return Path(raw)
+        return None
+
+    async def _read_stats_total(self, argv: Sequence[str]) -> tuple[int | None, str | None]:
+        result = await self._execute_raw(argv, operation=SupportedOperation.INSPECT_STARTUP_STATE)
+        if result.returncode != 0:
+            return None, _short_detail(result.stderr.strip() or result.stdout.strip())
+        raw = (result.stdout or "").strip()
+        if not raw:
+            return None, "empty stats payload"
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            return None, f"invalid stats payload ({exc})"
+        issue_total = _extract_total_issues(payload)
+        if issue_total is None:
+            return None, "stats payload missing summary.total_issues"
+        return issue_total, None
+
+    async def _read_startup_issue_totals(
+        self,
+        *,
+        beads_root: Path,
+        has_legacy_sqlite: bool,
+    ) -> tuple[int | None, str | None, int | None, str | None]:
+        dolt_issue_total, dolt_detail = await self._read_stats_total(("stats", "--json"))
+        legacy_issue_total: int | None = None
+        legacy_detail: str | None = None
+        if has_legacy_sqlite:
+            legacy_issue_total, legacy_detail = await self._read_stats_total(
+                ("--db", str(beads_root / "beads.db"), "stats", "--json")
+            )
+        return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
+
+    async def _stabilize_startup_issue_totals(
+        self,
+        *,
+        beads_root: Path,
+        has_dolt_store: bool,
+        has_legacy_sqlite: bool,
+        dolt_issue_total: int | None,
+        dolt_detail: str | None,
+        legacy_issue_total: int | None,
+        legacy_detail: str | None,
+    ) -> tuple[int | None, str | None, int | None, str | None]:
+        if not has_dolt_store or not has_legacy_sqlite:
+            return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
+        for _ in range(_STARTUP_COUNT_SKEW_RECHECK_ATTEMPTS):
+            if dolt_issue_total is None or legacy_issue_total is None:
+                return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
+            if legacy_issue_total <= dolt_issue_total:
+                return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
+            (
+                dolt_issue_total,
+                dolt_detail,
+                legacy_issue_total,
+                legacy_detail,
+            ) = await self._read_startup_issue_totals(
+                beads_root=beads_root,
+                has_legacy_sqlite=has_legacy_sqlite,
+            )
+        return dolt_issue_total, dolt_detail, legacy_issue_total, legacy_detail
 
     async def _execute(self, operation: SupportedOperation, *argv: str) -> BeadsCommandResult:
         result = await self._execute_raw(argv, operation=operation)

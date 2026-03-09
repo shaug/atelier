@@ -24,6 +24,11 @@ Environments are validated through
 and supported capabilities. All other supported operations require JSON-backed
 decoding and return typed models rather than raw stdout.
 
+`inspect_startup_state()` is the shared semantic escape hatch for startup and
+legacy-migration classification. It is intentionally not part of the published
+raw command inventory below because callers should not depend on specific
+filesystem probes, `bd stats` argv shapes, or Dolt marker layouts.
+
 ## Supported Command Inventory
 
 The v1 client contract is intentionally narrow. The supported operations are:
@@ -60,6 +65,27 @@ added to the typed client surface and compatibility policy. Examples of
 unsupported nearby surface area include `blocked`, `doctor`, `dolt`, `edit`,
 `prime`, `stats`, and prefix-management flows.
 
+## Semantic Boundary
+
+The shared `Beads` protocol exposes issue semantics plus one startup semantic:
+
+- `inspect_startup_state()` returns a typed `BeadsStartupState` describing
+  whether the active backend is healthy, whether recoverable legacy data still
+  needs migration, or whether startup needs operator attention. The shared model
+  exposes only semantic readiness/recovery flags plus a stable reason; it does
+  not publish issue totals, probe provenance, or storage-artifact details.
+
+Boundary ownership is explicit:
+
+- The process-backed `SubprocessBeadsClient` owns `BEADS_DIR`, repository cwd,
+  runtime metadata reads, `bd stats` probing, and any filesystem/Dolt marker
+  inspection needed to answer `inspect_startup_state()`.
+- The in-memory backend answers `inspect_startup_state()` directly from
+  configured semantic state. It does not need fake `beads.db` or `.dolt`
+  artifacts for typed-client callers.
+- Compatibility fixtures that emulate raw startup/admin commands remain
+  test-only helpers and are not the shared client boundary.
+
 ## Downstream Adoption Rules
 
 `atelier.lib.beads.client.Beads` is the canonical downstream dependency.
@@ -79,6 +105,8 @@ The in-memory implementation planned in `at-s1vc` should implement the same
   bypass the shared contract.
 - Provide `inspect_environment()` results that can be validated against the same
   `CompatibilityPolicy`, even though the transport is not subprocess backed.
+- Answer `inspect_startup_state()` semantically rather than recreating the
+  process-backed filesystem probes in higher-level callers.
 
 ### `at-njpt4`: higher-level Atelier store contract
 
@@ -88,8 +116,8 @@ reusable Beads client instead of reconstructing `bd` subprocess glue.
 - Depend on the `Beads` protocol, not directly on `SubprocessBeadsClient`.
 - Consume typed `IssueRecord` and request models instead of parsing `bd` stdout
   or rebuilding argv.
-- Keep raw command construction, transport, and compatibility probing inside
-  `atelier.lib.beads`.
+- Keep raw command construction, transport, compatibility probing, and startup
+  storage inspection inside `atelier.lib.beads`.
 - Use `SyncBeadsClient` only at synchronous call boundaries; keep the core
   integration async-first where possible.
 
