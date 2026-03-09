@@ -7,8 +7,25 @@ import argparse
 import sys
 from pathlib import Path
 
-from atelier import beads
-from atelier.beads_context import resolve_runtime_repo_dir_hint, resolve_skill_beads_context
+_SKILLS_ROOT = Path(__file__).resolve().parents[2]
+if str(_SKILLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SKILLS_ROOT))
+
+from _projected_bootstrap import (  # noqa: E402  # pyright: ignore[reportMissingImports]
+    bootstrap_projected_atelier_script,
+)
+
+_BOOTSTRAP_REPO_ROOT = bootstrap_projected_atelier_script(
+    script_path=Path(__file__).resolve(),
+    argv=sys.argv[1:],
+    require_runtime_health=__name__ == "__main__",
+)
+
+from atelier import beads  # noqa: E402
+from atelier.beads_context import (  # noqa: E402
+    resolve_runtime_repo_dir_hint,
+    resolve_skill_beads_context,
+)
 
 _MISSING_DOLT = "missing_dolt_with_legacy_sqlite"
 _INSUFFICIENT_DOLT = "insufficient_dolt_vs_legacy_data"
