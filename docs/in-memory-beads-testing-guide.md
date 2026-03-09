@@ -57,6 +57,33 @@ Use `IssueFixtureBuilder` for deterministic Beads payloads and
 `messages.render_message(...)` when a test needs queue or threaded-message
 frontmatter.
 
+When a test needs startup classification semantics, prefer the typed client:
+
+```python
+from atelier.lib.beads import BeadsStartupState, SyncBeadsClient
+from atelier.testing.beads import build_in_memory_beads_client
+
+client, _store = build_in_memory_beads_client(
+    startup_state=BeadsStartupState(
+        classification="healthy_dolt",
+        migration_eligible=False,
+        has_dolt_store=True,
+        has_legacy_sqlite=True,
+        dolt_issue_total=3,
+        legacy_issue_total=3,
+        reason="dolt_issue_total_is_healthy",
+        backend="dolt",
+        dolt_count_source="bd_stats_dolt_store",
+        legacy_count_source="bd_stats_legacy_sqlite",
+    )
+)
+
+startup = SyncBeadsClient(client).inspect_startup_state()
+```
+
+Reserve `build_startup_admin_fixture(...)` for compatibility tests that need to
+assert raw `bd stats`, `migrate`, or `dolt show` command behavior.
+
 ### Runtime And Reliability Impact
 
 Measured on March 9, 2026 with warm `pytest` runs on CPython 3.11.12:

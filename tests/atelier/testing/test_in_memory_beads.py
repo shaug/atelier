@@ -11,6 +11,7 @@ from atelier.lib.beads import (
     Beads,
     BeadsCapability,
     BeadsCommandResult,
+    BeadsStartupState,
     CloseIssueRequest,
     CreateIssueRequest,
     IssueRecord,
@@ -67,7 +68,9 @@ def test_contract_docs_publish_route_inventory() -> None:
     assert "Intentional Tier 0 Deltas" in content
     assert "dep add" in content
     assert "dep remove" in content
+    assert "compatibility-only runtime-admin fixture" in content
     assert "build_startup_admin_fixture" in content
+    assert "inspect_startup_state()" in content
     assert "No emulation of real Dolt storage internals" in content
     for flag in SUPPORTED_GLOBAL_FLAGS:
         assert flag in content
@@ -325,6 +328,28 @@ def test_in_memory_client_supports_representative_planner_flow() -> None:
     assert [issue.id for issue in ready_after] == []
     assert [issue.id for issue in ready_after_merge] == ["at-3"]
     assert [issue.id for issue in listed_all] == ["at-2", "at-3", "at-4"]
+
+
+def test_in_memory_client_reports_configured_startup_state_directly() -> None:
+    startup_state = BeadsStartupState(
+        classification="healthy_dolt",
+        migration_eligible=False,
+        has_dolt_store=True,
+        has_legacy_sqlite=True,
+        dolt_issue_total=9,
+        legacy_issue_total=9,
+        reason="dolt_issue_total_is_healthy",
+        backend="dolt",
+        dolt_count_source="bd_stats_dolt_store",
+        legacy_count_source="bd_stats_legacy_sqlite",
+    )
+    client, _store = build_in_memory_beads_client(startup_state=startup_state)
+    sync = SyncBeadsClient(client)
+
+    reported = sync.inspect_startup_state()
+
+    assert reported == startup_state
+    assert reported.diagnostics()[0] == "classification=healthy_dolt"
 
 
 def test_typed_client_mutates_the_store_directly() -> None:

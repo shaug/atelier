@@ -158,7 +158,8 @@ family and exposes them through a typed in-memory client in
   from git state or verify `changeset.integrated_sha`.
 
 `atelier.testing.beads.build_startup_admin_fixture(...)` provides the
-deterministic Tier 2/3 runtime fixture used by startup/admin tests.
+deterministic compatibility-only runtime-admin fixture used by startup/admin
+command tests.
 
 - It materializes optional synthetic `beads.db` and `.dolt` markers under a temp
   `.beads` root so startup classification can exercise healthy and degraded
@@ -167,6 +168,10 @@ deterministic Tier 2/3 runtime fixture used by startup/admin tests.
   can patch `exec.run_with_runner` instead of rewriting production code paths.
 - It records command argv history for assertions about migration, diagnostics,
   and repair sequencing.
+
+Typed-client startup semantics should use `build_in_memory_beads_client()` and
+`inspect_startup_state()` instead of this fixture whenever the test does not
+need raw `bd` command compatibility.
 
 ## Non-Goals
 

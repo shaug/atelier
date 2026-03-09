@@ -103,6 +103,7 @@ class SupportedOperation(str, Enum):
     """Supported Beads operations."""
 
     INSPECT_ENVIRONMENT = "inspect-environment"
+    INSPECT_STARTUP_STATE = "inspect-startup-state"
     CREATE = "create"
     UPDATE = "update"
     SHOW = "show"
@@ -176,6 +177,50 @@ class IssueRecord(BeadsModel):
         if not isinstance(value, (list, tuple)):
             raise ValueError("references must be a list or tuple")
         return tuple(IssueReference.model_validate(item) for item in value)
+
+
+class BeadsStartupState(BeadsModel):
+    """Semantic startup-state classification for one Beads backend."""
+
+    classification: NonBlankStr
+    migration_eligible: bool
+    has_dolt_store: bool
+    has_legacy_sqlite: bool
+    dolt_issue_total: StrictInt | None = None
+    legacy_issue_total: StrictInt | None = None
+    reason: NonBlankStr
+    backend: NonBlankStr | None = None
+    dolt_count_source: NonBlankStr = "unavailable"
+    legacy_count_source: NonBlankStr = "unavailable"
+    dolt_detail: NonBlankStr | None = None
+    legacy_detail: NonBlankStr | None = None
+
+    def diagnostics(self) -> tuple[str, ...]:
+        """Render stable startup diagnostics lines."""
+
+        details = [
+            f"classification={self.classification}",
+            "migration_eligible=" + ("yes" if self.migration_eligible else "no"),
+            "configured_backend=" + (self.backend if self.backend else "unspecified"),
+            "dolt_store=" + ("present" if self.has_dolt_store else "missing"),
+            "legacy_sqlite=" + ("present" if self.has_legacy_sqlite else "missing"),
+            "dolt_issue_total="
+            + (str(self.dolt_issue_total) if self.dolt_issue_total is not None else "unavailable"),
+            f"dolt_count_source={self.dolt_count_source}",
+            "legacy_issue_total="
+            + (
+                str(self.legacy_issue_total)
+                if self.legacy_issue_total is not None
+                else "unavailable"
+            ),
+            f"legacy_count_source={self.legacy_count_source}",
+            f"reason={self.reason}",
+        ]
+        if self.dolt_detail:
+            details.append(f"dolt_detail={self.dolt_detail}")
+        if self.legacy_detail:
+            details.append(f"legacy_detail={self.legacy_detail}")
+        return tuple(details)
 
 
 class ShowIssueRequest(BeadsModel):

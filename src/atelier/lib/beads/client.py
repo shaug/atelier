@@ -9,6 +9,7 @@ from .models import (
     BeadsCommandRequest,
     BeadsCommandResult,
     BeadsEnvironment,
+    BeadsStartupState,
     CloseIssueRequest,
     CreateIssueRequest,
     DependencyMutationRequest,
@@ -35,6 +36,8 @@ class Beads(Protocol):
     def compatibility_policy(self) -> CompatibilityPolicy: ...
 
     async def inspect_environment(self) -> BeadsEnvironment: ...
+
+    async def inspect_startup_state(self) -> BeadsStartupState: ...
 
     async def show(self, request: ShowIssueRequest) -> IssueRecord: ...
 

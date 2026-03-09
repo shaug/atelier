@@ -8,6 +8,7 @@ from .client import Beads
 from .compatibility import CompatibilityPolicy
 from .models import (
     BeadsEnvironment,
+    BeadsStartupState,
     CloseIssueRequest,
     CreateIssueRequest,
     DependencyMutationRequest,
@@ -39,6 +40,9 @@ class SyncBeadsClient:
 
     def inspect_environment(self) -> BeadsEnvironment:
         return asyncio.run(self._async_client.inspect_environment())
+
+    def inspect_startup_state(self) -> BeadsStartupState:
+        return asyncio.run(self._async_client.inspect_startup_state())
 
     def show(self, request: ShowIssueRequest) -> IssueRecord:
         return asyncio.run(self._async_client.show(request))
