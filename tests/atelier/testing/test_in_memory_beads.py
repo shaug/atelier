@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from atelier import exec as exec_util
 from atelier.lib.beads import (
     Beads,
     BeadsCapability,
@@ -23,6 +24,7 @@ from atelier.lib.beads import (
     decode_version_output,
 )
 from atelier.testing.beads import (
+    DEFAULT_PRIME_FULL_OUTPUT,
     DEFAULT_UNIMPLEMENTED_RETURN_CODE,
     DOCUMENTED_COMMAND_ROUTES,
     IN_MEMORY_BEADS_VERSION,
@@ -33,9 +35,12 @@ from atelier.testing.beads import (
     InMemoryBeadsClient,
     InMemoryBeadsCommandBackend,
     InMemoryBeadsDispatcher,
+    InMemoryStartupAdminBackend,
+    InMemoryStartupAdminState,
     IssueFixtureBuilder,
     build_in_memory_beads_client,
     build_in_memory_issue_store,
+    build_startup_admin_fixture,
     normalize_invocation,
 )
 from atelier.testing.beads.core_issues import InMemoryCoreIssuesHandler
@@ -62,6 +67,8 @@ def test_contract_docs_publish_route_inventory() -> None:
     assert "Intentional Tier 0 Deltas" in content
     assert "dep add" in content
     assert "dep remove" in content
+    assert "build_startup_admin_fixture" in content
+    assert "No emulation of real Dolt storage internals" in content
     for flag in SUPPORTED_GLOBAL_FLAGS:
         assert flag in content
     for route in DOCUMENTED_COMMAND_ROUTES:
@@ -502,3 +509,100 @@ def test_stateful_backend_allows_only_one_concurrent_claim_winner() -> None:
     assert len(winners) == 1
     assert len(failures) == 1
     assert backend.state.show("at-epic")["assignee"] == winners[0]
+
+
+def test_startup_admin_backend_config_types_and_rename_round_trip() -> None:
+    state = InMemoryStartupAdminState(
+        issue_prefix="old",
+        custom_types=("agent",),
+        rename_pending_count=2,
+    )
+    backend = InMemoryStartupAdminBackend(state=state)
+
+    config_before = backend.run(["bd", "config", "get", "issue_prefix", "--json"])
+    types_before = backend.run(["bd", "types", "--json"])
+    rename_preview = backend.run(["bd", "rename-prefix", "new-", "--repair", "--dry-run"])
+    rename_apply = backend.run(["bd", "rename-prefix", "new-", "--repair"])
+    config_after = backend.run(["bd", "config", "get", "issue_prefix", "--json"])
+
+    assert json.loads(config_before.stdout)["value"] == "old"
+    assert json.loads(types_before.stdout)["custom_types"] == [{"name": "agent"}]
+    assert "Would rename 2 issues from prefix 'old' to 'new'" in rename_preview.stdout
+    assert "Renamed 2 issues from prefix 'old' to 'new'" in rename_apply.stdout
+    assert json.loads(config_after.stdout)["value"] == "new"
+
+
+def test_startup_admin_backend_runtime_admin_routes_update_state(tmp_path: Path) -> None:
+    fixture = build_startup_admin_fixture(
+        tmp_path=tmp_path,
+        has_dolt_store=False,
+        legacy_issue_total=8,
+        dolt_issue_totals=(2,),
+        dolt_auto_commit="batch",
+        vc_status_payload={"working_set": {"tables": ["issues"]}},
+    )
+    backend = fixture.backend
+
+    stats_active = backend.run(["bd", "stats", "--json"])
+    stats_legacy = backend.run(
+        ["bd", "--db", str(fixture.beads_root / "beads.db"), "stats", "--json"]
+    )
+    inspect_migrate = backend.run(
+        [
+            "bd",
+            "--db",
+            str(fixture.beads_root / "beads.db"),
+            "migrate",
+            "--to-dolt",
+            "--inspect",
+            "--json",
+        ]
+    )
+    apply_migrate = backend.run(
+        [
+            "bd",
+            "--db",
+            str(fixture.beads_root / "beads.db"),
+            "migrate",
+            "--to-dolt",
+            "--yes",
+            "--json",
+        ]
+    )
+    dolt_show = backend.run(["bd", "dolt", "show", "--json"])
+    set_database = backend.run(["bd", "dolt", "set", "database", "beads_ops", "--update-config"])
+    vc_status = backend.run(["bd", "vc", "status", "--json"])
+
+    assert json.loads(stats_active.stdout)["summary"]["total_issues"] == 2
+    assert json.loads(stats_legacy.stdout)["summary"]["total_issues"] == 8
+    assert json.loads(inspect_migrate.stdout) == {"inspect": "ok"}
+    assert json.loads(apply_migrate.stdout) == {"migrated": 8}
+    assert (fixture.beads_root / "dolt" / "beads_at" / ".dolt").is_dir()
+    assert json.loads(dolt_show.stdout)["database"] == "beads_at"
+    assert set_database.returncode == 0
+    assert fixture.state.dolt_database == "beads_ops"
+    assert json.loads(vc_status.stdout)["working_set"]["tables"] == ["issues"]
+
+
+def test_startup_admin_fixture_runner_adapts_to_exec_requests(tmp_path: Path) -> None:
+    fixture = build_startup_admin_fixture(
+        tmp_path=tmp_path,
+        has_dolt_store=True,
+        legacy_issue_total=4,
+        dolt_issue_totals=(4,),
+        dolt_auto_commit="batch",
+        vc_status_payload={"working_set": {"tables": ["issues"]}},
+        prime_full_output=DEFAULT_PRIME_FULL_OUTPUT,
+    )
+
+    result = fixture.runner.run(
+        exec_util.CommandRequest(
+            argv=("bd", "prime", "--full"),
+            cwd=fixture.repo_root,
+            env={},
+        )
+    )
+
+    assert result is not None
+    assert "bd dolt commit" in result.stdout
+    assert result.returncode == 0

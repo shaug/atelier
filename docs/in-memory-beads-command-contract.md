@@ -66,6 +66,13 @@ Notes:
   `types.custom`, and `dolt.auto-commit`.
 - `config set` covers current runtime writes such as `issue_prefix`,
   `types.custom`, and `beads.role`.
+- `rename-prefix` dry-run fidelity is limited to the summary text that
+  `preview_issue_prefix_rename()` parses today; the in-memory backend does not
+  attempt to emulate real issue-by-issue rename side effects.
+- `stats`, `migrate`, `dolt show`, and `vc status` fidelity is limited to the
+  JSON fields Atelier startup/runtime logic currently reads: issue totals,
+  migration inspect/apply status, `connection_ok`, `database`, and working-set
+  dirty markers.
 - The dispatcher publishes parseable help output for each documented route even
   before that route has real stateful behavior.
 
@@ -150,6 +157,17 @@ family and exposes them through a typed in-memory client in
   such as `pr_state: merged` or `cs:merged`; it does not synthesize merge proof
   from git state or verify `changeset.integrated_sha`.
 
+`atelier.testing.beads.build_startup_admin_fixture(...)` provides the
+deterministic Tier 2/3 runtime fixture used by startup/admin tests.
+
+- It materializes optional synthetic `beads.db` and `.dolt` markers under a temp
+  `.beads` root so startup classification can exercise healthy and degraded
+  branches without a live Dolt process.
+- It exposes an `atelier.exec.CommandRunner` adapter so existing runtime tests
+  can patch `exec.run_with_runner` instead of rewriting production code paths.
+- It records command argv history for assertions about migration, diagnostics,
+  and repair sequencing.
+
 ## Non-Goals
 
 - No production runtime wiring in this slice
@@ -157,6 +175,8 @@ family and exposes them through a typed in-memory client in
 - No parallel public API outside `atelier.testing.beads`
 - No attempt to reimplement the full `bd` CLI before command-family changesets
   land
+- No emulation of real Dolt storage internals, SQL behavior, or concurrent
+  process coordination beyond the specific startup/admin probes Atelier parses
 
 ## Proof Artifacts
 
@@ -168,4 +188,5 @@ family and exposes them through a typed in-memory client in
 - `src/atelier/testing/beads/backend.py`
 - `src/atelier/testing/beads/store.py`
 - `src/atelier/testing/beads/patch.py`
+- `src/atelier/testing/beads/startup_admin.py`
 - `tests/atelier/testing/test_in_memory_beads.py`
