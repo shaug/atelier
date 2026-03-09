@@ -75,9 +75,27 @@ def normalize_branch(value: object) -> str | None:
     return cleaned
 
 
-def try_show_issue(issue_id: str, *, beads_root: Path, cwd: Path) -> dict[str, object] | None:
+def try_show_issue(
+    issue_id: object,
+    *,
+    beads_root: Path,
+    cwd: Path,
+    context: str | None = None,
+) -> dict[str, object] | None:
+    if not isinstance(issue_id, str):
+        return None
+    cleaned = issue_id.strip()
+    if not cleaned:
+        return None
+    if cleaned.lower() == "null":
+        detail = f" in {context}" if context else ""
+        log_warning(
+            "gc ignored malformed placeholder Beads id "
+            f"{issue_id!r}{detail}; treating metadata as unresolved"
+        )
+        return None
     result = beads.run_bd_command(
-        ["show", issue_id, "--json"],
+        ["show", cleaned, "--json"],
         beads_root=beads_root,
         cwd=cwd,
         allow_failure=True,
@@ -87,7 +105,7 @@ def try_show_issue(issue_id: str, *, beads_root: Path, cwd: Path) -> dict[str, o
         if not detail:
             detail = f"bd show exited with code {result.returncode}"
         log_warning(
-            f"gc issue lookup failed for {issue_id!r}: {detail}; treating mapping as unresolved"
+            f"gc issue lookup failed for {cleaned!r}: {detail}; treating mapping as unresolved"
         )
         return None
     raw = result.stdout.strip() if result.stdout else ""
@@ -96,7 +114,7 @@ def try_show_issue(issue_id: str, *, beads_root: Path, cwd: Path) -> dict[str, o
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
-        log_warning(f"gc issue lookup returned invalid JSON for {issue_id!r}; skipping")
+        log_warning(f"gc issue lookup returned invalid JSON for {cleaned!r}; skipping")
         return None
     if isinstance(payload, dict):
         issues: list[dict[str, object]] = [payload]
@@ -107,7 +125,7 @@ def try_show_issue(issue_id: str, *, beads_root: Path, cwd: Path) -> dict[str, o
     try:
         records = beads.parse_issue_records(issues, source="gc.try_show_issue")
     except ValueError:
-        log_warning(f"gc issue lookup returned invalid issue payload for {issue_id!r}; skipping")
+        log_warning(f"gc issue lookup returned invalid issue payload for {cleaned!r}; skipping")
         return None
     if records:
         return records[0].raw

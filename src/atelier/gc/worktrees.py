@@ -16,6 +16,7 @@ from .common import (
     issue_integrated_sha,
     issue_labels,
     log_debug,
+    log_warning,
     normalize_branch,
     run_git_gc_command,
     try_show_issue,
@@ -153,6 +154,16 @@ def _resolve_mapping_issue(
     beads_root: Path,
     repo_root: Path,
 ) -> _MappingIssueLookup:
+    mapping_epic_id = mapping.epic_id.strip()
+    if not mapping_epic_id:
+        return _MappingIssueLookup(issue=None, source="unresolved")
+    if mapping_epic_id.lower() == "null":
+        log_warning(
+            "gc ignored malformed placeholder worktree metadata "
+            f"epic_id={mapping.epic_id!r} at {mapping.worktree_path!r}"
+        )
+        return _MappingIssueLookup(issue=None, source="skip-placeholder")
+
     candidate_scores: dict[str, int] = defaultdict(int)
     mapping_worktree = _normalize_mapping_worktree_key(
         project_dir=project_dir,
@@ -178,20 +189,20 @@ def _resolve_mapping_issue(
                     if mapping_worktree
                     else f"metadata(branch) score={top_score}"
                 )
-                if resolved_epic_id != mapping.epic_id:
+                if resolved_epic_id != mapping_epic_id:
                     log_debug(
                         "resolved mapping epic id "
-                        f"{mapping.epic_id!r} -> {resolved_epic_id!r} via {source}"
+                        f"{mapping_epic_id!r} -> {resolved_epic_id!r} via {source}"
                     )
                 return _MappingIssueLookup(issue=resolved_issue, source=source)
         else:
             log_debug(
                 "ambiguous mapping metadata resolution "
-                f"epic_id={mapping.epic_id!r} score={top_score} "
+                f"epic_id={mapping_epic_id!r} score={top_score} "
                 f"candidates={','.join(sorted(top_candidates))}"
             )
 
-    direct = index.epics_by_id.get(mapping.epic_id)
+    direct = index.epics_by_id.get(mapping_epic_id)
     if direct is not None:
         return _MappingIssueLookup(issue=direct, source="direct-index")
 
@@ -199,7 +210,12 @@ def _resolve_mapping_issue(
         log_debug(f"skip non-bead mapping key {mapping.epic_id!r} at {mapping.worktree_path!r}")
         return _MappingIssueLookup(issue=None, source="skip-non-bead")
 
-    issue = try_show_issue(mapping.epic_id, beads_root=beads_root, cwd=repo_root)
+    issue = try_show_issue(
+        mapping_epic_id,
+        beads_root=beads_root,
+        cwd=repo_root,
+        context=f"worktree mapping {mapping.worktree_path}",
+    )
     if issue is not None:
         return _MappingIssueLookup(issue=issue, source="direct-bd-show")
     return _MappingIssueLookup(issue=None, source="unresolved")

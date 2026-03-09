@@ -135,3 +135,41 @@ def test_collect_hooks_scans_all_agent_pages_before_releasing_stale_hooks() -> N
         f"Release stale hook for agent-{total_agents - 1} (epic epic-{total_agents - 1})"
     )
     run_bd_json.assert_called_once_with(expected_args, beads_root=beads_root, cwd=repo_root)
+
+
+def test_collect_hooks_skips_placeholder_hook_without_issue_lookup() -> None:
+    agent_issue = {
+        "id": "agent-1",
+        "title": "atelier/worker/codex/p4242-t1",
+        "labels": ["at:agent"],
+        "description": "agent_id: agent-1\nhook_bead: null\n",
+    }
+
+    def fake_run_bd_json(
+        args: list[str], *, beads_root: Path, cwd: Path
+    ) -> list[dict[str, object]]:
+        if args[:3] == ["list", "--label", "at:agent"]:
+            return [agent_issue]
+        return []
+
+    with (
+        patch("atelier.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch("atelier.beads.list_epics", return_value=[]),
+        patch("atelier.beads.get_agent_hook", return_value="null"),
+        patch(
+            "atelier.gc.hooks.try_show_issue",
+            side_effect=AssertionError("placeholder hook should not trigger issue lookup"),
+        ),
+        patch("atelier.gc.hooks.log_warning") as log_warning,
+    ):
+        actions = gc_hooks.collect_hooks(
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+            stale_hours=24.0,
+            include_missing_heartbeat=True,
+        )
+
+    assert actions == []
+    log_warning.assert_called_once_with(
+        "gc ignored malformed placeholder hook metadata for agent 'agent-1': hook_bead='null'"
+    )
