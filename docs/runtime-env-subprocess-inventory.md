@@ -32,9 +32,10 @@ when launching planner/worker/editor/shell subprocesses.
   bootstrap contracts. Some scripts re-execed into the repo runtime, while
   others still imported `atelier` directly or only reordered `sys.path`.
   Projected skill scripts that import `atelier` now share
-  `src/atelier/skills/_projected_bootstrap.py`, so repo-source selection,
-  runtime re-exec, and dependency-health diagnostics stay in lockstep for every
-  helper entrypoint instead of drifting one script at a time.
+  `src/atelier/skills/shared/scripts/projected_bootstrap.py`, so repo-source
+  selection, runtime re-exec, and dependency-health diagnostics stay in
+  lockstep for every helper entrypoint instead of drifting one script at a
+  time.
 - Runtime warnings about removed inherited keys are now immediate guidance for
   explicit launch context, not future deprecation notices.
 

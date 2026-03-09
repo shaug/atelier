@@ -36,8 +36,10 @@ def _copy_script_into_agent_home(
 ) -> Path:
     skills_root = _skills_source_root()
     source_script = skills_root / skill_name / "scripts" / script_name
-    projected_bootstrap = skills_root / "_projected_bootstrap.py"
-    projected_bootstrap_target = agent_home / "skills" / "_projected_bootstrap.py"
+    projected_bootstrap = skills_root / "shared" / "scripts" / "projected_bootstrap.py"
+    projected_bootstrap_target = (
+        agent_home / "skills" / "shared" / "scripts" / "projected_bootstrap.py"
+    )
     projected_bootstrap_target.parent.mkdir(parents=True, exist_ok=True)
     projected_bootstrap_target.write_text(
         projected_bootstrap.read_text(encoding="utf-8"),
@@ -167,11 +169,13 @@ def test_all_projected_skill_scripts_importing_atelier_use_shared_bootstrap() ->
     missing_bootstrap: list[Path] = []
 
     for path in sorted(skills_root.rglob("scripts/*.py")):
+        if path == skills_root / "shared" / "scripts" / "projected_bootstrap.py":
+            continue
         text = path.read_text(encoding="utf-8")
         if "from atelier" not in text and "import atelier" not in text:
             continue
         importing_scripts.append(path)
-        if "_projected_bootstrap" not in text or "bootstrap_projected_atelier_script" not in text:
+        if "projected_bootstrap" not in text or "bootstrap_projected_atelier_script" not in text:
             missing_bootstrap.append(path)
 
     assert importing_scripts

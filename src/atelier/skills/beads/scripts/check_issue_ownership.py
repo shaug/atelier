@@ -8,11 +8,11 @@ import json
 import sys
 from pathlib import Path
 
-_SKILLS_ROOT = Path(__file__).resolve().parents[2]
-if str(_SKILLS_ROOT) not in sys.path:
-    sys.path.insert(0, str(_SKILLS_ROOT))
+_SHARED_SCRIPTS_ROOT = Path(__file__).resolve().parents[2] / "shared" / "scripts"
+if str(_SHARED_SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SHARED_SCRIPTS_ROOT))
 
-from _projected_bootstrap import (  # noqa: E402  # pyright: ignore[reportMissingImports]
+from projected_bootstrap import (  # noqa: E402  # pyright: ignore[reportMissingImports]
     bootstrap_projected_atelier_script,
 )
 
