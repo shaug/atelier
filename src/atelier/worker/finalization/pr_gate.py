@@ -739,6 +739,7 @@ def set_changeset_review_pending_state(
             changesets.ReviewMetadata(pr_state=fallback_pr_state),
             beads_root=beads_root,
             cwd=repo_root,
+            preserve_missing=True,
         )
 
 

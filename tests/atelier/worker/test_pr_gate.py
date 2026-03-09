@@ -174,6 +174,43 @@ def test_handle_pushed_without_pr_returns_review_pending_when_strategy_blocks(
     assert result.finalize_result.reason == "changeset_review_pending"
 
 
+def test_set_changeset_review_pending_state_fallback_preserves_existing_review_fields(
+    monkeypatch,
+) -> None:
+    marked: list[str] = []
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        pr_gate.beads,
+        "update_changeset_review",
+        lambda changeset_id, metadata, **kwargs: captured.update(
+            {
+                "changeset_id": changeset_id,
+                "metadata": metadata,
+                **kwargs,
+            }
+        ),
+    )
+
+    pr_gate.set_changeset_review_pending_state(
+        changeset_id="at-123.1",
+        pr_payload=None,
+        pushed=True,
+        fallback_pr_state="pr-open",
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        mark_changeset_in_progress=lambda changeset_id, **_kwargs: marked.append(changeset_id),
+        update_changeset_review_from_pr=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("PR payload path should not run")
+        ),
+    )
+
+    assert marked == ["at-123.1"]
+    assert captured["changeset_id"] == "at-123.1"
+    assert captured["metadata"].pr_state == "pr-open"
+    assert captured["preserve_missing"] is True
+
+
 def test_handle_pushed_without_pr_reports_failure_when_pr_create_fails(
     monkeypatch,
 ) -> None:

@@ -6145,19 +6145,50 @@ def update_changeset_review(
     *,
     beads_root: Path,
     cwd: Path,
-) -> None:
-    """Update review metadata fields for a changeset bead."""
-    _update_description_fields_optimistic(
-        changeset_id,
-        fields={
+    preserve_missing: bool = False,
+) -> dict[str, object]:
+    """Update review metadata fields for a changeset bead.
+
+    Args:
+        changeset_id: Changeset bead identifier.
+        metadata: Review metadata values to persist.
+        beads_root: Path to the Beads store.
+        cwd: Repository working directory for `bd`.
+        preserve_missing: When true, keep existing description-field values for
+            review metadata keys omitted from ``metadata`` instead of writing
+            ``null``. This is required for partial review-state refreshes that
+            only intend to mutate a subset of the review fields.
+
+    Returns:
+        The refreshed issue payload after the update.
+    """
+    with _issue_write_lock(changeset_id, beads_root=beads_root):
+        fields = {
             "pr_url": metadata.pr_url,
             "pr_number": metadata.pr_number,
             "pr_state": metadata.pr_state,
             "review_owner": metadata.review_owner,
-        },
-        beads_root=beads_root,
-        cwd=cwd,
-    )
+        }
+        if preserve_missing:
+            issues = run_bd_json(["show", changeset_id], beads_root=beads_root, cwd=cwd)
+            if not issues:
+                die(f"changeset not found: {changeset_id}")
+            issue = issues[0]
+            existing = changesets.parse_review_metadata(_issue_description(issue))
+            if metadata.pr_url is None:
+                fields["pr_url"] = existing.pr_url
+            if metadata.pr_number is None:
+                fields["pr_number"] = existing.pr_number
+            if metadata.pr_state is None:
+                fields["pr_state"] = existing.pr_state
+            if metadata.review_owner is None:
+                fields["review_owner"] = existing.review_owner
+        return _update_description_fields_optimistic(
+            changeset_id,
+            fields=fields,
+            beads_root=beads_root,
+            cwd=cwd,
+        )
 
 
 def update_changeset_review_feedback_cursor(
