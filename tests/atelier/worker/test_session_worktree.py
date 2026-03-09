@@ -5,12 +5,7 @@ from unittest.mock import ANY, Mock, call, patch
 
 import pytest
 
-from atelier import beads, worktrees
-from atelier.testing.beads import (
-    InMemoryBeadsBackend,
-    IssueFixtureBuilder,
-    patch_in_memory_beads,
-)
+from atelier import worktrees
 from atelier.worker.session import worktree
 
 
@@ -23,17 +18,6 @@ class _TestControl:
 
     def dry_run_log(self, message: str) -> None:
         self.logs.append(message)
-
-
-def _seed_beads_backend(
-    tmp_path: Path,
-    *issues: dict[str, object],
-) -> tuple[InMemoryBeadsBackend, Path, Path]:
-    beads_root = tmp_path / ".beads"
-    repo_root = tmp_path / "repo"
-    beads_root.mkdir(exist_ok=True)
-    repo_root.mkdir(parents=True, exist_ok=True)
-    return InMemoryBeadsBackend(seeded_issues=issues), beads_root, repo_root
 
 
 def test_prepare_worktrees_dry_run_derives_changeset_branch(tmp_path: Path) -> None:
@@ -407,27 +391,12 @@ def test_startup_worktree_preflight_ignores_non_actionable_prefix_drift() -> Non
 
 def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: Path) -> None:
     logs: list[str] = []
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
     changeset_worktree_path = tmp_path / "worktrees" / "at-gnc.1"
     changeset_worktree_path.mkdir(parents=True)
     (changeset_worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
-    builder = IssueFixtureBuilder()
-    backend, beads_root, repo_root = _seed_beads_backend(
-        tmp_path,
-        builder.issue(
-            "at-gnc",
-            issue_type="epic",
-            labels=("at:epic",),
-            description="workspace.root_branch: feat/gnc\nworktree_path: worktrees/at-gnc\n",
-        ),
-        builder.issue("at-gnc.1", parent="at-gnc"),
-        builder.issue(
-            "at-1my",
-            issue_type="epic",
-            labels=("at:epic",),
-            description="workspace.root_branch: feat/1my\nworktree_path: worktrees/at-1my\n",
-        ),
-        builder.issue("at-1my.1", parent="at-1my"),
-    )
+
     mapping = worktrees.WorktreeMapping(
         epic_id="at-gnc",
         worktree_path="worktrees/at-gnc",
@@ -435,9 +404,59 @@ def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: 
         changesets={"at-gnc.1": "feat/gnc-at-gnc.1"},
         changeset_worktrees={"at-gnc.1": "worktrees/at-gnc.1"},
     )
+    epics = [
+        {
+            "id": "at-gnc",
+            "labels": ["at:epic"],
+            "description": "workspace.root_branch: feat/gnc\nworktree_path: worktrees/at-gnc\n",
+        },
+        {
+            "id": "at-1my",
+            "labels": ["at:epic"],
+            "description": "workspace.root_branch: feat/1my\nworktree_path: worktrees/at-1my\n",
+        },
+    ]
+    descendants_by_epic = {
+        "at-gnc": [{"id": "at-gnc.1"}],
+        "at-1my": [{"id": "at-1my.1"}],
+    }
+
+    def fake_descendants(
+        parent_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        include_closed: bool = False,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd, include_closed
+        return descendants_by_epic.get(parent_id, [])
+
+    work_children_by_parent = {
+        "at-gnc": [{"id": "at-gnc.1", "labels": [], "type": "task"}],
+        "at-1my": [{"id": "at-1my.1", "labels": [], "type": "task"}],
+        "at-gnc.1": [],
+        "at-1my.1": [],
+    }
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        if args[:2] == ["list", "--parent"] and len(args) >= 3:
+            parent = args[2]
+            return work_children_by_parent.get(parent, [])
+        if "at:epic" in args:
+            return epics
+        return []
+
     with (
-        patch_in_memory_beads(backend),
-        patch("atelier.worker.session.worktree.git.git_origin_url", return_value=None),
+        patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.worker.session.worktree.beads.list_descendant_changesets",
+            side_effect=fake_descendants,
+        ),
         patch(
             "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership",
             return_value=("at-1my", "at-gnc"),
@@ -456,10 +475,6 @@ def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: 
             return_value=changeset_worktree_path,
         ),
         patch("atelier.worker.session.worktree.worktrees.ensure_changeset_checkout"),
-        patch(
-            "atelier.worker.session.worktree.git.git_current_branch",
-            return_value="feat/gnc-at-gnc.1",
-        ),
         patch("atelier.worker.session.worktree.git.git_rev_parse", return_value="abc1234"),
         patch("atelier.worker.session.worktree.beads.update_changeset_branch_metadata"),
     ):
@@ -468,7 +483,7 @@ def test_prepare_worktrees_reconciles_ownership_before_worktree_setup(tmp_path: 
                 dry_run=False,
                 project_data_dir=tmp_path,
                 repo_root=repo_root,
-                beads_root=beads_root,
+                beads_root=tmp_path / "beads",
                 selected_epic="at-gnc",
                 changeset_id="at-gnc.1",
                 root_branch_value="feat/gnc",
@@ -502,26 +517,12 @@ def test_prepare_worktrees_review_feedback_resume_logs_lineage_mapping_path_synt
     tmp_path: Path,
 ) -> None:
     logs: list[str] = []
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
     changeset_worktree_path = tmp_path / "worktrees" / "at-legacy.1"
     changeset_worktree_path.mkdir(parents=True)
     (changeset_worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
-    builder = IssueFixtureBuilder()
-    backend, beads_root, repo_root = _seed_beads_backend(
-        tmp_path,
-        builder.issue(
-            "ts-new",
-            issue_type="epic",
-            labels=("at:epic",),
-            description="workspace.root_branch: feat/new\n",
-        ),
-        builder.issue("ts-new.1", parent="ts-new", labels=("review-feedback",)),
-        builder.issue(
-            "at-legacy",
-            issue_type="epic",
-            labels=("at:epic",),
-            description="workspace.root_branch: feat/legacy\nworktree_path: worktrees/at-legacy\n",
-        ),
-    )
+
     mapping = worktrees.WorktreeMapping(
         epic_id="ts-new",
         worktree_path="worktrees/at-legacy",
@@ -529,6 +530,46 @@ def test_prepare_worktrees_review_feedback_resume_logs_lineage_mapping_path_synt
         changesets={"ts-new.1": "feat/legacy-ts-new.1"},
         changeset_worktrees={"ts-new.1": "worktrees/at-legacy.1"},
     )
+    epics = [
+        {
+            "id": "ts-new",
+            "labels": ["at:epic"],
+            "description": "workspace.root_branch: feat/new\n",
+        },
+        {
+            "id": "at-legacy",
+            "labels": ["at:epic"],
+            "description": "workspace.root_branch: feat/legacy\nworktree_path: worktrees/at-legacy\n",
+        },
+    ]
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:2] == ["list", "--parent"] and len(args) >= 3:
+            parent = args[2]
+            if parent == "ts-new":
+                return [{"id": "ts-new.1", "labels": ["review-feedback"], "type": "task"}]
+            return []
+        if "at:epic" in args:
+            return epics
+        return []
+
+    def fake_descendants(
+        parent_id: str,
+        *,
+        beads_root: Path,
+        cwd: Path,
+        include_closed: bool = False,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd, include_closed
+        if parent_id == "ts-new":
+            return [{"id": "ts-new.1"}]
+        return []
 
     def fake_reconcile(
         project_data_dir: Path,
@@ -549,8 +590,11 @@ def test_prepare_worktrees_review_feedback_resume_logs_lineage_mapping_path_synt
         return ("ts-new",)
 
     with (
-        patch_in_memory_beads(backend),
-        patch("atelier.worker.session.worktree.git.git_origin_url", return_value=None),
+        patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.worker.session.worktree.beads.list_descendant_changesets",
+            side_effect=fake_descendants,
+        ),
         patch(
             "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership",
             side_effect=fake_reconcile,
@@ -569,10 +613,6 @@ def test_prepare_worktrees_review_feedback_resume_logs_lineage_mapping_path_synt
             return_value=changeset_worktree_path,
         ),
         patch("atelier.worker.session.worktree.worktrees.ensure_changeset_checkout"),
-        patch(
-            "atelier.worker.session.worktree.git.git_current_branch",
-            return_value="feat/legacy-ts-new.1",
-        ),
         patch("atelier.worker.session.worktree.git.git_rev_parse", return_value="abc1234"),
         patch("atelier.worker.session.worktree.beads.update_changeset_branch_metadata"),
     ):
@@ -581,7 +621,7 @@ def test_prepare_worktrees_review_feedback_resume_logs_lineage_mapping_path_synt
                 dry_run=False,
                 project_data_dir=tmp_path,
                 repo_root=repo_root,
-                beads_root=beads_root,
+                beads_root=tmp_path / "beads",
                 selected_epic="ts-new",
                 changeset_id="ts-new.1",
                 root_branch_value="feat/new",
@@ -780,24 +820,11 @@ def test_lookup_open_pr_head_does_not_force_refresh_on_failed_lookup() -> None:
 
 def test_prepare_worktrees_aligns_child_workspace_parent_branch_from_epic(tmp_path: Path) -> None:
     logs: list[str] = []
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
     changeset_worktree_path = tmp_path / "worktrees" / "at-epic.1"
     changeset_worktree_path.mkdir(parents=True)
     (changeset_worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
-    builder = IssueFixtureBuilder()
-    backend, beads_root, repo_root = _seed_beads_backend(
-        tmp_path,
-        builder.issue(
-            "at-epic",
-            issue_type="epic",
-            labels=("at:epic",),
-            description="workspace.root_branch: feat/epic\n",
-        ),
-        builder.issue(
-            "at-epic.1",
-            parent="at-epic",
-            description="changeset.root_branch: feat/epic\n",
-        ),
-    )
     mapping = worktrees.WorktreeMapping(
         epic_id="at-epic",
         worktree_path="worktrees/at-epic",
@@ -805,9 +832,37 @@ def test_prepare_worktrees_aligns_child_workspace_parent_branch_from_epic(tmp_pa
         changesets={"at-epic.1": "feat/epic-at-epic.1"},
         changeset_worktrees={"at-epic.1": "worktrees/at-epic.1"},
     )
+    epics = [
+        {
+            "id": "at-epic",
+            "labels": ["at:epic"],
+            "description": "workspace.root_branch: feat/epic\n",
+        }
+    ]
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:3] == ["list", "--label", "at:epic"]:
+            return epics
+        if args[:2] == ["list", "--parent"] and len(args) >= 3:
+            return (
+                [{"id": "at-epic.1", "labels": [], "type": "task"}] if args[2] == "at-epic" else []
+            )
+        if args == ["show", "at-epic.1"]:
+            return [{"id": "at-epic.1", "description": "changeset.root_branch: feat/epic\n"}]
+        return []
+
     with (
-        patch_in_memory_beads(backend),
-        patch("atelier.worker.session.worktree.git.git_origin_url", return_value=None),
+        patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.worker.session.worktree.beads.list_descendant_changesets",
+            return_value=[{"id": "at-epic.1"}],
+        ),
         patch(
             "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership", return_value=()
         ),
@@ -825,18 +880,18 @@ def test_prepare_worktrees_aligns_child_workspace_parent_branch_from_epic(tmp_pa
             return_value=changeset_worktree_path,
         ),
         patch("atelier.worker.session.worktree.worktrees.ensure_changeset_checkout"),
-        patch(
-            "atelier.worker.session.worktree.git.git_current_branch",
-            return_value="feat/epic-at-epic.1",
-        ),
         patch("atelier.worker.session.worktree.git.git_rev_parse", return_value="abc1234"),
+        patch(
+            "atelier.worker.session.worktree.beads.update_workspace_parent_branch"
+        ) as update_parent,
+        patch("atelier.worker.session.worktree.beads.update_changeset_branch_metadata"),
     ):
         worktree.prepare_worktrees(
             context=worktree.WorktreePreparationContext(
                 dry_run=False,
                 project_data_dir=tmp_path,
                 repo_root=repo_root,
-                beads_root=beads_root,
+                beads_root=tmp_path / ".beads",
                 selected_epic="at-epic",
                 changeset_id="at-epic.1",
                 root_branch_value="feat/epic",
@@ -848,8 +903,13 @@ def test_prepare_worktrees_aligns_child_workspace_parent_branch_from_epic(tmp_pa
             control=_TestControl(logs),
         )
 
-    updated_issue = backend.state.show("at-epic.1")
-    assert "workspace.parent_branch: main" in str(updated_issue.get("description"))
+    update_parent.assert_called_once_with(
+        "at-epic.1",
+        "main",
+        beads_root=tmp_path / ".beads",
+        cwd=repo_root,
+        allow_override=False,
+    )
     assert any("Aligned workspace.parent_branch for at-epic.1: main" in line for line in logs)
 
 
@@ -857,26 +917,11 @@ def test_prepare_worktrees_preserves_existing_non_root_child_workspace_parent_br
     tmp_path: Path,
 ) -> None:
     logs: list[str] = []
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
     changeset_worktree_path = tmp_path / "worktrees" / "at-epic.1"
     changeset_worktree_path.mkdir(parents=True)
     (changeset_worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
-    builder = IssueFixtureBuilder()
-    backend, beads_root, repo_root = _seed_beads_backend(
-        tmp_path,
-        builder.issue(
-            "at-epic",
-            issue_type="epic",
-            labels=("at:epic",),
-            description="workspace.root_branch: feat/epic\n",
-        ),
-        builder.issue(
-            "at-epic.1",
-            parent="at-epic",
-            description=(
-                "changeset.root_branch: feat/epic\nworkspace.parent_branch: release/2026.03\n"
-            ),
-        ),
-    )
     mapping = worktrees.WorktreeMapping(
         epic_id="at-epic",
         worktree_path="worktrees/at-epic",
@@ -884,9 +929,45 @@ def test_prepare_worktrees_preserves_existing_non_root_child_workspace_parent_br
         changesets={"at-epic.1": "feat/epic-at-epic.1"},
         changeset_worktrees={"at-epic.1": "worktrees/at-epic.1"},
     )
+    epics = [
+        {
+            "id": "at-epic",
+            "labels": ["at:epic"],
+            "description": "workspace.root_branch: feat/epic\n",
+        }
+    ]
+
+    def fake_run_bd_json(
+        args: list[str],
+        *,
+        beads_root: Path,
+        cwd: Path,
+    ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:3] == ["list", "--label", "at:epic"]:
+            return epics
+        if args[:2] == ["list", "--parent"] and len(args) >= 3:
+            return (
+                [{"id": "at-epic.1", "labels": [], "type": "task"}] if args[2] == "at-epic" else []
+            )
+        if args == ["show", "at-epic.1"]:
+            return [
+                {
+                    "id": "at-epic.1",
+                    "description": (
+                        "changeset.root_branch: feat/epic\n"
+                        "workspace.parent_branch: release/2026.03\n"
+                    ),
+                }
+            ]
+        return []
+
     with (
-        patch_in_memory_beads(backend),
-        patch("atelier.worker.session.worktree.git.git_origin_url", return_value=None),
+        patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.worker.session.worktree.beads.list_descendant_changesets",
+            return_value=[{"id": "at-epic.1"}],
+        ),
         patch(
             "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership", return_value=()
         ),
@@ -904,18 +985,18 @@ def test_prepare_worktrees_preserves_existing_non_root_child_workspace_parent_br
             return_value=changeset_worktree_path,
         ),
         patch("atelier.worker.session.worktree.worktrees.ensure_changeset_checkout"),
-        patch(
-            "atelier.worker.session.worktree.git.git_current_branch",
-            return_value="feat/epic-at-epic.1",
-        ),
         patch("atelier.worker.session.worktree.git.git_rev_parse", return_value="abc1234"),
+        patch(
+            "atelier.worker.session.worktree.beads.update_workspace_parent_branch"
+        ) as update_parent,
+        patch("atelier.worker.session.worktree.beads.update_changeset_branch_metadata"),
     ):
         worktree.prepare_worktrees(
             context=worktree.WorktreePreparationContext(
                 dry_run=False,
                 project_data_dir=tmp_path,
                 repo_root=repo_root,
-                beads_root=beads_root,
+                beads_root=tmp_path / ".beads",
                 selected_epic="at-epic",
                 changeset_id="at-epic.1",
                 root_branch_value="feat/epic",
@@ -927,9 +1008,7 @@ def test_prepare_worktrees_preserves_existing_non_root_child_workspace_parent_br
             control=_TestControl(logs),
         )
 
-    updated_issue = backend.state.show("at-epic.1")
-    assert "workspace.parent_branch: release/2026.03" in str(updated_issue.get("description"))
-    assert "workspace.parent_branch: main" not in str(updated_issue.get("description"))
+    update_parent.assert_not_called()
     assert any(
         "Skipped workspace.parent_branch alignment for at-epic.1: preserving existing "
         "non-root value 'release/2026.03' instead of epic parent 'main'" in line
@@ -941,24 +1020,11 @@ def test_prepare_worktrees_skips_child_workspace_parent_alignment_on_beads_looku
     tmp_path: Path,
 ) -> None:
     logs: list[str] = []
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
     changeset_worktree_path = tmp_path / "worktrees" / "at-epic.1"
     changeset_worktree_path.mkdir(parents=True)
     (changeset_worktree_path / ".git").write_text("gitdir: /tmp/gitdir", encoding="utf-8")
-    builder = IssueFixtureBuilder()
-    backend, beads_root, repo_root = _seed_beads_backend(
-        tmp_path,
-        builder.issue(
-            "at-epic",
-            issue_type="epic",
-            labels=("at:epic",),
-            description="workspace.root_branch: feat/epic\n",
-        ),
-        builder.issue(
-            "at-epic.1",
-            parent="at-epic",
-            description="changeset.root_branch: feat/epic\n",
-        ),
-    )
     mapping = worktrees.WorktreeMapping(
         epic_id="at-epic",
         worktree_path="worktrees/at-epic",
@@ -966,23 +1032,37 @@ def test_prepare_worktrees_skips_child_workspace_parent_alignment_on_beads_looku
         changesets={"at-epic.1": "feat/epic-at-epic.1"},
         changeset_worktrees={"at-epic.1": "worktrees/at-epic.1"},
     )
-    real_run_bd_json = beads.run_bd_json
+    epics = [
+        {
+            "id": "at-epic",
+            "labels": ["at:epic"],
+            "description": "workspace.root_branch: feat/epic\n",
+        }
+    ]
 
-    def fail_show_lookup(
+    def fake_run_bd_json(
         args: list[str],
         *,
         beads_root: Path,
         cwd: Path,
     ) -> list[dict[str, object]]:
+        del beads_root, cwd
+        if args[:3] == ["list", "--label", "at:epic"]:
+            return epics
+        if args[:2] == ["list", "--parent"] and len(args) >= 3:
+            return (
+                [{"id": "at-epic.1", "labels": [], "type": "task"}] if args[2] == "at-epic" else []
+            )
         if args == ["show", "at-epic.1"]:
             raise SystemExit(1)
-        return real_run_bd_json(args, beads_root=beads_root, cwd=cwd)
+        return []
 
     with (
-        patch_in_memory_beads(backend),
-        patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fail_show_lookup),
-        patch("atelier.worker.session.worktree._startup_worktree_preflight"),
-        patch("atelier.worker.session.worktree.git.git_origin_url", return_value=None),
+        patch("atelier.worker.session.worktree.beads.run_bd_json", side_effect=fake_run_bd_json),
+        patch(
+            "atelier.worker.session.worktree.beads.list_descendant_changesets",
+            return_value=[{"id": "at-epic.1"}],
+        ),
         patch(
             "atelier.worker.session.worktree.worktrees.reconcile_mapping_ownership", return_value=()
         ),
@@ -1000,11 +1080,10 @@ def test_prepare_worktrees_skips_child_workspace_parent_alignment_on_beads_looku
             return_value=changeset_worktree_path,
         ),
         patch("atelier.worker.session.worktree.worktrees.ensure_changeset_checkout"),
-        patch(
-            "atelier.worker.session.worktree.git.git_current_branch",
-            return_value="feat/epic-at-epic.1",
-        ),
         patch("atelier.worker.session.worktree.git.git_rev_parse", return_value="abc1234"),
+        patch(
+            "atelier.worker.session.worktree.beads.update_workspace_parent_branch"
+        ) as update_parent,
         patch("atelier.worker.session.worktree.beads.update_changeset_branch_metadata"),
     ):
         worktree.prepare_worktrees(
@@ -1012,7 +1091,7 @@ def test_prepare_worktrees_skips_child_workspace_parent_alignment_on_beads_looku
                 dry_run=False,
                 project_data_dir=tmp_path,
                 repo_root=repo_root,
-                beads_root=beads_root,
+                beads_root=tmp_path / ".beads",
                 selected_epic="at-epic",
                 changeset_id="at-epic.1",
                 root_branch_value="feat/epic",
@@ -1024,8 +1103,7 @@ def test_prepare_worktrees_skips_child_workspace_parent_alignment_on_beads_looku
             control=_TestControl(logs),
         )
 
-    updated_issue = backend.state.show("at-epic.1")
-    assert "workspace.parent_branch:" not in str(updated_issue.get("description"))
+    update_parent.assert_not_called()
     assert any(
         "Skipped workspace.parent_branch alignment for at-epic.1: unable to read metadata from "
         "beads (bd show exit 1)" in line

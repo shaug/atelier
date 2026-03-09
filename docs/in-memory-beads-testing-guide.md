@@ -23,13 +23,13 @@ default:
 - `tests/atelier/worker/test_changeset_state.py`
 - `tests/atelier/worker/test_work_startup_runtime.py`
 
-Additional targeted worker-session coverage now uses the in-memory backend for
-Beads semantics:
+The shared client-contract suite also defaults to the in-memory backend for Tier
+0 Beads semantics, while keeping subprocess-specific assertions explicit:
 
-- `tests/atelier/worker/test_session_worktree.py`
-  `prepare_worktrees()` metadata and workspace-parent alignment cases seed
-  issues through `atelier.testing.beads`, while targeted failure injection stays
-  local to the specific `bd show` call under test.
+- `tests/atelier/lib/test_beads.py` Shared
+  `show`/`list`/`ready`/`create`/`update`/`close` coverage now runs against
+  `build_in_memory_beads_client(...)`, while help/version probing, timeouts, and
+  dependency mutation remain process-backed tests by exception.
 
 Keep real-`bd` integration coverage explicit in suites such as:
 
@@ -94,12 +94,11 @@ assert raw `bd stats`, `migrate`, or `dolt show` command behavior.
 
 ### Fixture Ergonomics Note
 
-The `prepare_worktrees()` migration exposed one deliberate seam:
-`atelier.testing.beads` virtualizes Beads semantics, not the surrounding
-filesystem. Tests still need explicit temp directories, mapping files, and
-`.git` markers when worktree orchestration logic reads local state. Keep that
-split explicit instead of broadening the Beads harness into a fake worktree
-runtime.
+The shared-client migration exposed one current Tier 0 gap:
+`build_in_memory_beads_client(...)` does not implement dependency mutation yet.
+Keep `dep add` and `dep remove` assertions in explicit subprocess tests until
+the in-memory contract grows that semantic, instead of falling back to broad CLI
+monkeypatching for the whole module.
 
 ### Runtime And Reliability Impact
 
