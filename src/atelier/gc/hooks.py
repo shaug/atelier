@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import beads
-from .common import log_warning, parse_rfc3339, try_show_issue
+from .common import build_gc_beads_client, log_warning, parse_rfc3339, try_show_issue
 from .models import GcAction
 
 
@@ -43,6 +43,7 @@ def collect_hooks(
     now = dt.datetime.now(tz=dt.timezone.utc)
     stale_delta = dt.timedelta(hours=stale_hours)
     actions: list[GcAction] = []
+    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
 
     agent_issues = beads.run_bd_json(
         [
@@ -117,8 +118,7 @@ def collect_hooks(
             continue
         epic = try_show_issue(
             hook_bead,
-            beads_root=beads_root,
-            cwd=repo_root,
+            client=client,
             context=f"agent hook metadata for {agent_id}",
         )
         epic_payload = (

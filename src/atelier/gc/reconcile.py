@@ -7,7 +7,7 @@ from pathlib import Path
 from .. import beads, config, prs, worktrees
 from ..lib.beads import IssueRecord
 from ..worker import stale_pr_lifecycle
-from .common import normalize_branch, try_show_issue
+from .common import build_gc_beads_client, normalize_branch, try_show_issue
 
 
 def _issue_integrated_sha(issue: IssueRecord) -> str | None:
@@ -64,7 +64,8 @@ def reconcile_preview_lines(
                 f"mapped worktrees ({len(worktree_paths)}): "
                 + (", ".join(worktree_paths) if worktree_paths else "(none)")
             )
-    epic_issue = try_show_issue(epic_id, beads_root=beads_root, cwd=repo_root)
+    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
+    epic_issue = try_show_issue(epic_id, client=client)
     if epic_issue:
         fields = beads.parse_description_fields(epic_issue.description)
         root_branch = normalize_branch(fields.get("workspace.root_branch"))
@@ -80,7 +81,7 @@ def reconcile_preview_lines(
     if changesets:
         lines.append(f"changesets to reconcile: {', '.join(changesets)}")
     for changeset_id in changesets:
-        issue = try_show_issue(changeset_id, beads_root=beads_root, cwd=repo_root)
+        issue = try_show_issue(changeset_id, client=client)
         if not issue:
             lines.append(f"{changeset_id}: status=unknown integrated_sha=missing")
             continue

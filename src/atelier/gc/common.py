@@ -77,9 +77,7 @@ def build_gc_beads_client(*, beads_root: Path, cwd: Path) -> SyncBeadsProtocol:
 def try_show_issue(
     issue_id: object,
     *,
-    beads_root: Path | None = None,
-    cwd: Path | None = None,
-    client: SyncBeadsProtocol | None = None,
+    client: SyncBeadsProtocol,
     context: str | None = None,
 ) -> IssueRecord | None:
     if not isinstance(issue_id, str):
@@ -94,10 +92,6 @@ def try_show_issue(
             f"{issue_id!r}{detail}; treating metadata as unresolved"
         )
         return None
-    if client is None:
-        if beads_root is None or cwd is None:
-            raise ValueError("client or beads_root/cwd is required for issue lookups")
-        client = build_gc_beads_client(beads_root=beads_root, cwd=cwd)
     try:
         record = client.show(ShowIssueRequest(issue_id=cleaned))
     except BeadError as exc:
@@ -114,42 +108,24 @@ def try_show_issue(
 def list_issues(
     request: ListIssuesRequest,
     *,
-    beads_root: Path | None = None,
-    cwd: Path | None = None,
-    client: SyncBeadsProtocol | None = None,
+    client: SyncBeadsProtocol,
 ) -> tuple[IssueRecord, ...]:
-    if client is None:
-        if beads_root is None or cwd is None:
-            raise ValueError("client or beads_root/cwd is required for issue listing")
-        client = build_gc_beads_client(beads_root=beads_root, cwd=cwd)
     return client.list(request)
 
 
 def update_issue(
     request: UpdateIssueRequest,
     *,
-    beads_root: Path | None = None,
-    cwd: Path | None = None,
-    client: SyncBeadsProtocol | None = None,
+    client: SyncBeadsProtocol,
 ) -> IssueRecord:
-    if client is None:
-        if beads_root is None or cwd is None:
-            raise ValueError("client or beads_root/cwd is required for issue updates")
-        client = build_gc_beads_client(beads_root=beads_root, cwd=cwd)
     return client.update(request)
 
 
 def close_issue(
     request: CloseIssueRequest,
     *,
-    beads_root: Path | None = None,
-    cwd: Path | None = None,
-    client: SyncBeadsProtocol | None = None,
+    client: SyncBeadsProtocol,
 ) -> IssueRecord:
-    if client is None:
-        if beads_root is None or cwd is None:
-            raise ValueError("client or beads_root/cwd is required for issue close")
-        client = build_gc_beads_client(beads_root=beads_root, cwd=cwd)
     return client.close(request)
 
 

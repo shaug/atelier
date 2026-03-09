@@ -8,9 +8,11 @@ from pathlib import Path
 
 from .. import beads, changesets, git, worktrees
 from ..io import die, say, select
+from ..lib.beads import SyncBeadsProtocol
 from .common import (
     branch_integrated_into_target,
     branch_lookup_ref,
+    build_gc_beads_client,
     log_debug,
     log_warning,
     normalize_branch,
@@ -195,8 +197,7 @@ def _resolve_mapping_issue(
     mapping: worktrees.WorktreeMapping,
     index: _MappingIssueLookupIndex,
     project_dir: Path,
-    beads_root: Path,
-    repo_root: Path,
+    client: SyncBeadsProtocol,
 ) -> _MappingIssueLookup:
     mapping_epic_id = mapping.epic_id.strip()
     if not mapping_epic_id:
@@ -256,8 +257,7 @@ def _resolve_mapping_issue(
 
     issue = try_show_issue(
         mapping_epic_id,
-        beads_root=beads_root,
-        cwd=repo_root,
+        client=client,
         context=f"worktree mapping {mapping.worktree_path}",
     )
     if issue is not None:
@@ -289,6 +289,7 @@ def collect_resolved_epic_artifacts(
         beads_root=beads_root,
         repo_root=repo_root,
     )
+    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
     default_branch = git.git_default_branch(repo_root, git_path=git_path) or ""
     for path in meta_dir.glob("*.json"):
         mapping = worktrees.load_mapping(path)
@@ -301,8 +302,7 @@ def collect_resolved_epic_artifacts(
             mapping=mapping,
             index=lookup_index,
             project_dir=project_dir,
-            beads_root=beads_root,
-            repo_root=repo_root,
+            client=client,
         )
         epic = lookup.issue
         if not epic:
@@ -693,6 +693,7 @@ def collect_orphan_worktrees(
         beads_root=beads_root,
         repo_root=repo_root,
     )
+    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
     for path in meta_dir.glob("*.json"):
         mapping = worktrees.load_mapping(path)
         if not mapping:
@@ -704,8 +705,7 @@ def collect_orphan_worktrees(
             mapping=mapping,
             index=lookup_index,
             project_dir=project_dir,
-            beads_root=beads_root,
-            repo_root=repo_root,
+            client=client,
         )
         if lookup.issue is not None:
             continue

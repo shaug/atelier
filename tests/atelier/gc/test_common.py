@@ -1,6 +1,5 @@
 """Tests for gc.common."""
 
-from pathlib import Path
 from unittest.mock import patch
 
 import atelier.gc.common as gc_common
@@ -70,35 +69,25 @@ def test_try_show_issue_returns_none_when_bd_show_fails() -> None:
             'Error fetching missing: no issue found matching "missing"'
         )
     )
-    with (
-        patch("atelier.gc.common.build_sync_beads_client", return_value=client) as build_client,
-        patch("atelier.gc.common.log_warning") as log_warning,
-    ):
-        result = gc_common.try_show_issue("missing", beads_root=Path("/beads"), cwd=Path("/repo"))
+    with patch("atelier.gc.common.log_warning") as log_warning:
+        result = gc_common.try_show_issue("missing", client=client)
 
     assert result is None
-    build_client.assert_called_once_with(
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
     assert client.show_requests == [ShowIssueRequest(issue_id="missing")]
     log_warning.assert_called_once()
 
 
 def test_try_show_issue_skips_placeholder_id_without_lookup() -> None:
-    with (
-        patch("atelier.gc.common.build_sync_beads_client") as build_client,
-        patch("atelier.gc.common.log_warning") as log_warning,
-    ):
+    client = _FakeBeadsClient()
+    with patch("atelier.gc.common.log_warning") as log_warning:
         result = gc_common.try_show_issue(
             " null ",
-            beads_root=Path("/beads"),
-            cwd=Path("/repo"),
+            client=client,
             context="agent hook metadata for worker-1",
         )
 
     assert result is None
-    build_client.assert_not_called()
+    assert client.show_requests == []
     log_warning.assert_called_once_with(
         "gc ignored malformed placeholder Beads id ' null ' "
         "in agent hook metadata for worker-1; treating metadata as unresolved"
@@ -108,8 +97,7 @@ def test_try_show_issue_skips_placeholder_id_without_lookup() -> None:
 def test_try_show_issue_returns_issue_payload_on_success() -> None:
     payload = {"id": "at-123", "title": "Issue", "status": "open", "labels": []}
     client = _FakeBeadsClient(record=IssueRecord.model_validate(payload))
-    with patch("atelier.gc.common.build_sync_beads_client", return_value=client):
-        result = gc_common.try_show_issue(" at-123 ", beads_root=Path("/beads"), cwd=Path("/repo"))
+    result = gc_common.try_show_issue(" at-123 ", client=client)
 
     assert result is not None
     assert result.id == payload["id"]

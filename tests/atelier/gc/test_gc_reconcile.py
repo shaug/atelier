@@ -23,7 +23,7 @@ def test_reconcile_preview_lines_includes_epic_and_changeset_info() -> None:
         }
     )
 
-    def fake_try_show_issue(issue_id: str, *, beads_root: Path, cwd: Path):
+    def fake_try_show_issue(issue_id: str, *, client: object):
         if issue_id == "at-epic":
             return epic
         if issue_id == "at-epic.1":
