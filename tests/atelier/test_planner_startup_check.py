@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from atelier import planner_startup_check
+from atelier import messages, planner_startup_check
+from atelier.testing.beads import InMemoryBeadsBackend, IssueFixtureBuilder, patch_in_memory_beads
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "planner_startup_check"
 
@@ -121,6 +122,163 @@ def test_startup_helper_surfaces_threaded_planner_decisions_without_assignee() -
     assert [issue["id"] for issue in messages_for_planner] == ["at-msg-1"]
     assert "audience=planner" in str(messages_for_planner[0]["title"])
     assert "at-epic.1" in str(messages_for_planner[0]["title"])
+
+
+def test_startup_helper_uses_in_memory_backend_for_inbox_queue_and_epic_queries(
+    tmp_path: Path,
+) -> None:
+    beads_root = tmp_path / ".beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    helper = planner_startup_check.StartupBeadsInvocationHelper(
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    builder = IssueFixtureBuilder()
+    backend = InMemoryBeadsBackend(
+        seeded_issues=(
+            builder.issue(
+                "at-msg-routed",
+                title="NEEDS-DECISION: Publish incomplete (at-epic.1)",
+                issue_type="message",
+                labels=("at:message", "at:unread"),
+                description=messages.render_message(
+                    {
+                        "from": "atelier/worker/codex/p100",
+                        "thread": "at-epic.1",
+                        "thread_kind": "changeset",
+                        "audience": ["planner"],
+                        "kind": "notification",
+                    },
+                    "Confirm the next publish step.",
+                ),
+            ),
+            builder.issue(
+                "at-msg-assigned",
+                title="Assigned planner note",
+                issue_type="message",
+                labels=("at:message", "at:unread"),
+                assignee="atelier/planner/codex/p200",
+                description="Direct assignee routing.",
+            ),
+            builder.issue(
+                "at-msg-queue",
+                title="Queued planner work",
+                issue_type="message",
+                labels=("at:message", "at:unread"),
+                description=messages.render_message(
+                    {
+                        "from": "atelier/worker/codex/p100",
+                        "queue": "planner",
+                    },
+                    "Queue this follow-up.",
+                ),
+            ),
+            builder.issue(
+                "at-msg-worker",
+                title="Worker-only thread",
+                issue_type="message",
+                labels=("at:message", "at:unread"),
+                description=messages.render_message(
+                    {
+                        "from": "atelier/worker/codex/p100",
+                        "thread": "at-worker.1",
+                        "thread_kind": "changeset",
+                        "audience": ["worker"],
+                    },
+                    "Worker follow-up.",
+                ),
+            ),
+            builder.issue(
+                "at-epic-open",
+                title="Open epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                status="open",
+            ),
+            builder.issue(
+                "at-epic-closed",
+                title="Closed epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                status="closed",
+            ),
+        )
+    )
+
+    with patch_in_memory_beads(backend):
+        inbox_messages = helper.list_inbox_messages("atelier/planner/codex/p200")
+        queued_messages = helper.list_queue_messages(queue="planner")
+        epics = helper.list_epics()
+
+    assert [issue["id"] for issue in inbox_messages] == [
+        "at-msg-routed",
+        "at-msg-assigned",
+    ]
+    assert "audience=planner" in str(inbox_messages[0]["title"])
+    assert "changeset=at-epic.1" in str(inbox_messages[0]["title"])
+    assert [issue["id"] for issue in queued_messages] == ["at-msg-queue"]
+    assert queued_messages[0]["claimed_by"] is None
+    assert queued_messages[0]["queue"] == "planner"
+    assert [issue["id"] for issue in epics] == ["at-epic-open"]
+
+
+def test_startup_helper_lists_leaf_descendants_with_in_memory_backend(tmp_path: Path) -> None:
+    beads_root = tmp_path / ".beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    helper = planner_startup_check.StartupBeadsInvocationHelper(
+        beads_root=beads_root,
+        cwd=repo_root,
+    )
+    builder = IssueFixtureBuilder()
+    backend = InMemoryBeadsBackend(
+        seeded_issues=(
+            builder.issue(
+                "at-epic",
+                title="Epic",
+                issue_type="epic",
+                labels=("at:epic",),
+                status="in_progress",
+            ),
+            builder.issue(
+                "at-epic.1",
+                title="Container changeset",
+                parent="at-epic",
+                issue_type="task",
+                status="in_progress",
+            ),
+            builder.issue(
+                "at-epic.1.1",
+                title="Leaf changeset",
+                parent="at-epic.1",
+                issue_type="task",
+                status="open",
+            ),
+            builder.issue(
+                "at-epic.2",
+                title="Second leaf",
+                parent="at-epic",
+                issue_type="task",
+                status="open",
+            ),
+            builder.issue(
+                "at-msg-ignored",
+                title="Thread message",
+                parent="at-epic",
+                issue_type="message",
+                labels=("at:message",),
+                status="open",
+            ),
+        )
+    )
+
+    with patch_in_memory_beads(backend):
+        descendants = helper.list_descendant_changesets("at-epic")
+
+    assert [issue["id"] for issue in descendants] == ["at-epic.2", "at-epic.1.1"]
 
 
 def test_build_startup_triage_model_normalizes_and_sorts_sections() -> None:

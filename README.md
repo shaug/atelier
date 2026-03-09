@@ -735,6 +735,14 @@ bash tests/shell/run.sh
 `atelier.skill_frontmatter_validation` enforces required AgentSkills frontmatter
 rules (`name`, `description`, format/length, and name-directory match).
 
+Planner and worker unit-service suites should use the in-memory Beads backend
+from `atelier.testing.beads` by default. Keep real-`bd` coverage explicit in
+shell tests and command-integration tests that verify subprocess wiring or
+publish flows. See
+[`docs/in-memory-beads-testing-guide.md`](docs/in-memory-beads-testing-guide.md)
+for the backend-selection rule, an example harness, and current migrated
+coverage.
+
 ## License
 
 MIT. See LICENSE.
