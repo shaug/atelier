@@ -57,6 +57,7 @@ from .fixtures import (
 from .fixtures import (
     build_issue_reference as build_issue_reference,
 )
+from .patch import patch_in_memory_beads
 from .startup_admin import (
     DEFAULT_PRIME_FULL_OUTPUT as DEFAULT_PRIME_FULL_OUTPUT,
 )
@@ -78,7 +79,6 @@ from .startup_admin import (
 from .startup_admin import (
     build_startup_admin_fixture as build_startup_admin_fixture,
 )
-from .patch import patch_in_memory_beads
 from .store import UNSET_UPDATE_FIELD, InMemoryIssueStore, StoredIssue
 
 __all__ = [
