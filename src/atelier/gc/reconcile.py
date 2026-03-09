@@ -6,7 +6,13 @@ from pathlib import Path
 
 from .. import beads, config, prs, worktrees
 from ..worker import stale_pr_lifecycle
-from .common import issue_integrated_sha, normalize_branch, try_show_issue
+from .common import (
+    issue_integrated_sha,
+    issue_payload,
+    issue_value,
+    normalize_branch,
+    try_show_issue,
+)
 
 
 def reconcile_preview_lines(
@@ -45,7 +51,7 @@ def reconcile_preview_lines(
             )
     epic_issue = try_show_issue(epic_id, beads_root=beads_root, cwd=repo_root)
     if epic_issue:
-        description_raw = epic_issue.get("description")
+        description_raw = issue_value(epic_issue, "description")
         description = description_raw if isinstance(description_raw, str) else None
         fields = beads.parse_description_fields(description)
         root_branch = normalize_branch(fields.get("workspace.root_branch"))
@@ -65,12 +71,12 @@ def reconcile_preview_lines(
         if not issue:
             lines.append(f"{changeset_id}: status=unknown integrated_sha=missing")
             continue
-        status = str(issue.get("status") or "unknown")
+        status = str(issue_value(issue, "status") or "unknown")
         integrated_sha = issue_integrated_sha(issue) or "missing"
         lines.append(f"{changeset_id}: status={status} integrated_sha={integrated_sha}")
         if project_config is not None and project_config.branch.pr:
             classification = stale_pr_lifecycle.classify_stale_terminal_pr_lifecycle(
-                issue,
+                issue_payload(issue),
                 repo_slug=repo_slug,
                 repo_root=repo_root,
                 branch_pr=True,

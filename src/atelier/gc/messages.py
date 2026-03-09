@@ -7,8 +7,10 @@ from pathlib import Path
 from .. import beads, messages
 from ..lib.beads import CloseIssueRequest, ListIssuesRequest, UpdateIssueRequest
 from .common import (
+    build_gc_beads_client,
     close_issue,
     coerce_float,
+    issue_value,
     list_issues,
     parse_rfc3339,
     try_show_issue,
@@ -36,16 +38,16 @@ def collect_message_claims(
     now = dt.datetime.now(tz=dt.timezone.utc)
     stale_delta = dt.timedelta(hours=stale_hours)
     actions: list[GcAction] = []
+    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
     issues = list_issues(
         ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),)),
-        beads_root=beads_root,
-        cwd=repo_root,
+        client=client,
     )
     for issue in issues:
-        issue_id = issue.get("id")
+        issue_id = issue.id
         if not isinstance(issue_id, str) or not issue_id:
             continue
-        description = issue.get("description")
+        description = issue.description
         if not isinstance(description, str):
             continue
         payload = messages.parse_message(description)
@@ -57,7 +59,7 @@ def collect_message_claims(
         if claimed_time is None or now - claimed_time <= stale_delta:
             continue
         description_text = f"Release stale queue claim for message {issue_id}"
-        expected_assignee = _clean_optional_string(issue.get("assignee"))
+        expected_assignee = _clean_optional_string(issue.assignee)
         expected_claimed_by = _clean_optional_string(payload.metadata.get("claimed_by"))
         expected_claimed_at = _clean_optional_string(payload.metadata.get("claimed_at"))
 
@@ -67,13 +69,13 @@ def collect_message_claims(
             stale_claimed_by: str | None = expected_claimed_by,
             stale_claimed_at: str | None = expected_claimed_at,
         ) -> None:
-            issue_payload = try_show_issue(message_id, beads_root=beads_root, cwd=repo_root)
-            if issue_payload is None:
+            current_issue = try_show_issue(message_id, client=client)
+            if current_issue is None:
                 return
-            current_assignee = _clean_optional_string(issue_payload.get("assignee"))
+            current_assignee = _clean_optional_string(current_issue.assignee)
             if current_assignee != stale_assignee:
                 return
-            description = issue_payload.get("description")
+            description = current_issue.description
             if not isinstance(description, str):
                 return
             current_payload = messages.parse_message(description)
@@ -92,8 +94,7 @@ def collect_message_claims(
                     status="open" if current_assignee else None,
                     description=updated,
                 ),
-                beads_root=beads_root,
-                cwd=repo_root,
+                client=client,
             )
 
         actions.append(GcAction(description=description_text, apply=_apply_release))
@@ -109,16 +110,16 @@ def collect_message_retention(
 
     now = dt.datetime.now(tz=dt.timezone.utc)
     actions: list[GcAction] = []
+    client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
     issues = list_issues(
         ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),)),
-        beads_root=beads_root,
-        cwd=repo_root,
+        client=client,
     )
     for issue in issues:
-        issue_id = issue.get("id")
+        issue_id = issue.id
         if not isinstance(issue_id, str) or not issue_id:
             continue
-        description = issue.get("description")
+        description = issue.description
         if not isinstance(description, str):
             continue
         payload = messages.parse_message(description)
@@ -131,7 +132,7 @@ def collect_message_retention(
         if isinstance(expires_at, str):
             expiry_time = parse_rfc3339(expires_at)
         if expiry_time is None and retention_days is not None:
-            created_at_raw = issue.get("created_at")
+            created_at_raw = issue_value(issue, "created_at")
             created_at = parse_rfc3339(created_at_raw if isinstance(created_at_raw, str) else None)
             if created_at is not None:
                 expiry_time = created_at + dt.timedelta(days=retention_days)
@@ -142,8 +143,7 @@ def collect_message_retention(
         def _apply_close(message_id: str = issue_id) -> None:
             close_issue(
                 CloseIssueRequest(issue_id=message_id),
-                beads_root=beads_root,
-                cwd=repo_root,
+                client=client,
             )
 
         actions.append(GcAction(description=description_text, apply=_apply_close))

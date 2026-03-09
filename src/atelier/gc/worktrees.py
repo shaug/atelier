@@ -9,12 +9,14 @@ from pathlib import Path
 from .. import beads, git, worktrees
 from ..io import die, say, select
 from .common import (
+    IssueLike,
     branch_integrated_into_target,
     branch_lookup_ref,
     changeset_review_state,
     is_merged_closed_changeset,
     issue_integrated_sha,
     issue_labels,
+    issue_value,
     log_debug,
     log_warning,
     normalize_branch,
@@ -40,7 +42,7 @@ class _MappingIssueLookupIndex:
 
 @dataclass(frozen=True)
 class _MappingIssueLookup:
-    issue: dict[str, object] | None
+    issue: IssueLike | None
     source: str
 
 
@@ -260,9 +262,9 @@ def collect_resolved_epic_artifacts(
         epic = lookup.issue
         if not epic:
             continue
-        epic_id_raw = epic.get("id")
+        epic_id_raw = issue_value(epic, "id")
         epic_id = epic_id_raw.strip() if isinstance(epic_id_raw, str) else mapping_epic_id
-        status = str(epic.get("status") or "").strip().lower()
+        status = str(issue_value(epic, "status") or "").strip().lower()
         if status not in {"closed", "done"}:
             continue
         labels = issue_labels(epic)
@@ -275,7 +277,7 @@ def collect_resolved_epic_artifacts(
             merged_markers.append("pr_state=merged")
         has_integrated_sha = issue_integrated_sha(epic) is not None
 
-        description = epic.get("description")
+        description = issue_value(epic, "description")
         fields = beads.parse_description_fields(description if isinstance(description, str) else "")
         parent_branch = normalize_branch(fields.get("workspace.parent_branch"))
         if not parent_branch:

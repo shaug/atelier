@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import atelier.gc.messages as gc_messages
-from atelier.lib.beads import SyncBeadsClient
+from atelier.lib.beads import IssueRecord, SyncBeadsClient
 from atelier.messages import parse_message, render_message
 from atelier.testing.beads import IssueFixtureBuilder, build_in_memory_beads_client
 
@@ -132,10 +132,12 @@ def test_collect_message_claims_skips_release_when_claim_owner_changes() -> None
         description=stale_description,
     )
     sync_client, store = _seed_sync_client(listed_issue)
-    current_issue = builder.issue(
-        "msg-1",
-        assignee="agent-2",
-        description=current_description,
+    current_issue = IssueRecord.model_validate(
+        builder.issue(
+            "msg-1",
+            assignee="agent-2",
+            description=current_description,
+        )
     )
 
     with (
@@ -172,10 +174,12 @@ def test_collect_message_claims_skips_release_when_assignee_changes_from_unassig
         description=stale_description,
     )
     sync_client, store = _seed_sync_client(listed_issue)
-    current_issue = builder.issue(
-        "msg-1",
-        assignee="agent-2",
-        description=stale_description,
+    current_issue = IssueRecord.model_validate(
+        builder.issue(
+            "msg-1",
+            assignee="agent-2",
+            description=stale_description,
+        )
     )
 
     with (

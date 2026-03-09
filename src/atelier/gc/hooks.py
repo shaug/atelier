@@ -5,15 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import beads
-from .common import issue_labels, log_warning, parse_rfc3339, try_show_issue
+from .common import IssueLike, issue_labels, issue_value, log_warning, parse_rfc3339, try_show_issue
 from .models import GcAction
 
 
-def release_epic(epic: dict[str, object], *, beads_root: Path, cwd: Path) -> None:
-    epic_id = str(epic.get("id") or "")
+def release_epic(epic: IssueLike, *, beads_root: Path, cwd: Path) -> None:
+    epic_id = str(issue_value(epic, "id") or "")
     if not epic_id:
         return
-    assignee_value = epic.get("assignee")
+    assignee_value = issue_value(epic, "assignee")
     expected_assignee = assignee_value if isinstance(assignee_value, str) else ""
     beads.release_epic_assignment(
         epic_id,
@@ -119,7 +119,7 @@ def collect_hooks(
 
         def _apply_release(
             agent_bead_id: str = issue_id,
-            epic_issue: dict[str, object] | None = epic,
+            epic_issue: IssueLike | None = epic,
             expected_hook: str | None = hook_value,
         ) -> None:
             if epic_issue:

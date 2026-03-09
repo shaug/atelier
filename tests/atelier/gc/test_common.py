@@ -141,8 +141,8 @@ def test_try_show_issue_returns_issue_payload_on_success() -> None:
         result = gc_common.try_show_issue(" at-123 ", beads_root=Path("/beads"), cwd=Path("/repo"))
 
     assert result is not None
-    assert result["id"] == payload["id"]
-    assert result["title"] == payload["title"]
-    assert result["status"] == payload["status"]
-    assert result["labels"] == payload["labels"]
+    assert result.id == payload["id"]
+    assert result.title == payload["title"]
+    assert result.status == payload["status"]
+    assert result.labels == tuple(payload["labels"])
     assert client.show_requests == [ShowIssueRequest(issue_id="at-123")]

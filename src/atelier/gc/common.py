@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Mapping
 from pathlib import Path
 
 from .. import beads, changesets, git, lifecycle
@@ -18,6 +19,8 @@ from ..lib.beads import (
     UpdateIssueRequest,
     build_sync_beads_client,
 )
+
+IssueLike = IssueRecord | Mapping[str, object]
 
 
 def log_debug(message: str) -> None:
@@ -61,15 +64,29 @@ def parse_rfc3339(value: str | None) -> dt.datetime | None:
     return parsed
 
 
-def issue_labels(issue: dict[str, object]) -> set[str]:
-    labels = issue.get("labels")
-    if not isinstance(labels, list):
+def issue_value(issue: IssueLike, key: str) -> object | None:
+    if isinstance(issue, IssueRecord):
+        if hasattr(issue, key):
+            return getattr(issue, key)
+        return issue.extra_fields.get(key)
+    return issue.get(key)
+
+
+def issue_payload(issue: IssueLike) -> dict[str, object]:
+    if isinstance(issue, IssueRecord):
+        return issue.model_dump(mode="json", by_alias=True, exclude_none=True)
+    return dict(issue)
+
+
+def issue_labels(issue: IssueLike) -> set[str]:
+    labels = issue_value(issue, "labels")
+    if not isinstance(labels, (list, tuple)):
         return set()
     return {str(label) for label in labels if label}
 
 
-def issue_sort_key(issue: dict[str, object]) -> str:
-    issue_id = issue.get("id")
+def issue_sort_key(issue: IssueLike) -> str:
+    issue_id = issue_value(issue, "id")
     if isinstance(issue_id, str):
         return issue_id
     return ""
@@ -84,21 +101,18 @@ def normalize_branch(value: object) -> str | None:
     return cleaned
 
 
-def _issue_record_to_payload(record: IssueRecord) -> dict[str, object]:
-    return record.model_dump(mode="json", by_alias=True, exclude_none=True)
-
-
-def _client(*, beads_root: Path, cwd: Path) -> SyncBeadsProtocol:
+def build_gc_beads_client(*, beads_root: Path, cwd: Path) -> SyncBeadsProtocol:
     return build_sync_beads_client(beads_root=beads_root, cwd=cwd)
 
 
 def try_show_issue(
     issue_id: object,
     *,
-    beads_root: Path,
-    cwd: Path,
+    beads_root: Path | None = None,
+    cwd: Path | None = None,
+    client: SyncBeadsProtocol | None = None,
     context: str | None = None,
-) -> dict[str, object] | None:
+) -> IssueRecord | None:
     if not isinstance(issue_id, str):
         return None
     cleaned = issue_id.strip()
@@ -111,8 +125,12 @@ def try_show_issue(
             f"{issue_id!r}{detail}; treating metadata as unresolved"
         )
         return None
+    if client is None:
+        if beads_root is None or cwd is None:
+            raise ValueError("client or beads_root/cwd is required for issue lookups")
+        client = build_gc_beads_client(beads_root=beads_root, cwd=cwd)
     try:
-        record = _client(beads_root=beads_root, cwd=cwd).show(ShowIssueRequest(issue_id=cleaned))
+        record = client.show(ShowIssueRequest(issue_id=cleaned))
     except BeadError as exc:
         detail = " ".join(str(exc).split())
         if not detail:
@@ -121,37 +139,49 @@ def try_show_issue(
             f"gc issue lookup failed for {cleaned!r}: {detail}; treating mapping as unresolved"
         )
         return None
-    return _issue_record_to_payload(record)
+    return record
 
 
 def list_issues(
     request: ListIssuesRequest,
     *,
-    beads_root: Path,
-    cwd: Path,
-) -> list[dict[str, object]]:
-    records = _client(beads_root=beads_root, cwd=cwd).list(request)
-    return [_issue_record_to_payload(record) for record in records]
+    beads_root: Path | None = None,
+    cwd: Path | None = None,
+    client: SyncBeadsProtocol | None = None,
+) -> tuple[IssueRecord, ...]:
+    if client is None:
+        if beads_root is None or cwd is None:
+            raise ValueError("client or beads_root/cwd is required for issue listing")
+        client = build_gc_beads_client(beads_root=beads_root, cwd=cwd)
+    return client.list(request)
 
 
 def update_issue(
     request: UpdateIssueRequest,
     *,
-    beads_root: Path,
-    cwd: Path,
-) -> dict[str, object]:
-    record = _client(beads_root=beads_root, cwd=cwd).update(request)
-    return _issue_record_to_payload(record)
+    beads_root: Path | None = None,
+    cwd: Path | None = None,
+    client: SyncBeadsProtocol | None = None,
+) -> IssueRecord:
+    if client is None:
+        if beads_root is None or cwd is None:
+            raise ValueError("client or beads_root/cwd is required for issue updates")
+        client = build_gc_beads_client(beads_root=beads_root, cwd=cwd)
+    return client.update(request)
 
 
 def close_issue(
     request: CloseIssueRequest,
     *,
-    beads_root: Path,
-    cwd: Path,
-) -> dict[str, object]:
-    record = _client(beads_root=beads_root, cwd=cwd).close(request)
-    return _issue_record_to_payload(record)
+    beads_root: Path | None = None,
+    cwd: Path | None = None,
+    client: SyncBeadsProtocol | None = None,
+) -> IssueRecord:
+    if client is None:
+        if beads_root is None or cwd is None:
+            raise ValueError("client or beads_root/cwd is required for issue close")
+        client = build_gc_beads_client(beads_root=beads_root, cwd=cwd)
+    return client.close(request)
 
 
 def branch_lookup_ref(
@@ -189,21 +219,21 @@ def branch_integrated_into_target(
     return False
 
 
-def changeset_review_state(issue: dict[str, object]) -> str:
-    description = issue.get("description")
+def changeset_review_state(issue: IssueLike) -> str:
+    description = issue_value(issue, "description")
     review = changesets.parse_review_metadata(description if isinstance(description, str) else "")
     return (review.pr_state or "").strip().lower()
 
 
-def issue_integrated_sha(issue: dict[str, object]) -> str | None:
-    description = issue.get("description")
+def issue_integrated_sha(issue: IssueLike) -> str | None:
+    description = issue_value(issue, "description")
     fields = beads.parse_description_fields(description if isinstance(description, str) else "")
     integrated = fields.get("changeset.integrated_sha")
     if isinstance(integrated, str):
         value = integrated.strip()
         if value and value.lower() != "null":
             return value
-    notes = issue.get("notes")
+    notes = issue_value(issue, "notes")
     if not isinstance(notes, str) or not notes.strip():
         return None
     for line in notes.splitlines():
@@ -216,8 +246,8 @@ def issue_integrated_sha(issue: dict[str, object]) -> str | None:
     return None
 
 
-def is_merged_closed_changeset(issue: dict[str, object]) -> bool:
-    if lifecycle.canonical_lifecycle_status(issue.get("status")) != "closed":
+def is_merged_closed_changeset(issue: IssueLike) -> bool:
+    if lifecycle.canonical_lifecycle_status(issue_value(issue, "status")) != "closed":
         return False
     if issue_integrated_sha(issue):
         return True
