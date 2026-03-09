@@ -180,6 +180,112 @@ def test_evaluate_guardrails_flags_missing_done_definition() -> None:
     assert any("missing explicit done definition" in item for item in report.violations)
 
 
+def test_evaluate_guardrails_accepts_block_style_edge_cases_in_design() -> None:
+    module = _load_script_module()
+    epic = {
+        "id": "at-epic",
+        "labels": ["at:epic"],
+        "description": (
+            "intent: Keep planner authoring validation deterministic.\n"
+            "rationale: Valid planner fields should not be reported as missing.\n"
+            "non_goals: Do not redesign planning workflows.\n"
+            "constraints: Preserve explicit authoring rules and deterministic checks.\n"
+            "related_context: plan-changeset-guardrails.\n"
+            "done_definition: Done when valid planner beads no longer fail validation."
+        ),
+        "design": (
+            "edge_cases:\n"
+            "- duplicate fields across description and notes\n"
+            "- block-style field values in structured planner docs"
+        ),
+        "notes": (
+            "LOC estimate: 240\n"
+            "Invariant impact map:\n"
+            "- mutation entry points\n"
+            "- recovery paths\n"
+            "- external side-effect adapters\n"
+            "Re-split triggers:\n"
+            "- split if parser repair expands into broader planner-authoring redesign\n"
+            "- split if review reveals a new concern domain beyond checker alignment\n"
+            "Planner action on split:\n"
+            "- capture deferred follow-on work immediately.\n"
+            "Review scope growth guidance:\n"
+            "- defer unrelated authoring-style cleanups."
+        ),
+    }
+
+    report = module._evaluate_guardrails(
+        epic_issue=epic,
+        child_changesets=[],
+        target_changesets=[epic],
+    )
+
+    assert not any(
+        "missing planner authoring contract fields" in item for item in report.violations
+    )
+
+
+def test_evaluate_guardrails_accepts_bulleted_authoring_aliases_in_notes() -> None:
+    module = _load_script_module()
+    child = {
+        "id": "at-epic.1",
+        "labels": [],
+        "notes": (
+            "- intent: Normalize supported planner field variants.\n"
+            "- rationale: Historic planner notes may use bullet-prefixed entries.\n"
+            "- non-goal: Do not weaken the authoring rules.\n"
+            "- constraint: Keep validation deterministic.\n"
+            "- edge-case: Structured notes may carry the only executable context.\n"
+            "- related-beads: at-e1yzp, at-k0ako.\n"
+            "- success-definition: Done when bullet-prefixed aliases validate.\n"
+            "LOC estimate: 180"
+        ),
+    }
+
+    report = module._evaluate_guardrails(
+        epic_issue=None,
+        child_changesets=[],
+        target_changesets=[child],
+    )
+
+    assert report.violations == []
+
+
+def test_evaluate_guardrails_accepts_broad_redesign_resplit_trigger_wording() -> None:
+    module = _load_script_module()
+    epic = {
+        "id": "at-epic",
+        "labels": ["at:epic"],
+        "title": "Fix planner guardrail literalism",
+        "description": _planner_contract_text(),
+        "notes": (
+            "LOC estimate: 240\n"
+            "Invariant impact map:\n"
+            "- mutation entry points\n"
+            "- recovery paths\n"
+            "- external side-effect adapters\n"
+            "Re-split triggers:\n"
+            "- split if parser repair and planner-authoring contract normalization become "
+            "separate review-sized concerns with independent tests.\n"
+            "- split if the work expands into broad planner-skill redesign instead of "
+            "checker/contract alignment.\n"
+            "Planner action on split:\n"
+            "- capture deferred follow-on work immediately.\n"
+            "Review scope growth guidance:\n"
+            "- defer unrelated authoring-style cleanups."
+        ),
+        "acceptance_criteria": "Done when valid guardrail notes no longer raise false negatives.",
+    }
+
+    report = module._evaluate_guardrails(
+        epic_issue=epic,
+        child_changesets=[],
+        target_changesets=[epic],
+    )
+
+    assert not any("missing explicit re-split triggers" in item for item in report.violations)
+
+
 def test_evaluate_guardrails_flags_cross_cutting_guardrail_gaps() -> None:
     module = _load_script_module()
     epic = {

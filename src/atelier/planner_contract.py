@@ -14,7 +14,9 @@ from typing import Final
 from .executable_work_validation import normalize_text
 
 _KEY_PATTERN: Final[re.Pattern[str]] = re.compile(r"[^a-z0-9]+")
-_LINE_FIELD_PATTERN: Final[re.Pattern[str]] = re.compile(r"^\s*([^:]+):\s*(.+?)\s*$")
+_FIELD_HEADER_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^\s*(?:[-*+]\s+|\d+[.)]\s+)?([^:]+):\s*(.*?)\s*$"
+)
 _TEXT_FIELDS: Final[tuple[str, ...]] = ("description", "notes", "design")
 _REQUIRED_FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
     "intent": ("intent",),
@@ -34,6 +36,13 @@ _DONE_DEFINITION_ALIASES: Final[tuple[str, ...]] = (
     "success_definition",
 )
 _ACCEPTANCE_FIELDS: Final[tuple[str, ...]] = ("acceptance_criteria", "acceptance")
+_SUPPORTED_FIELD_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        alias
+        for aliases in (*_REQUIRED_FIELD_ALIASES.values(), _DONE_DEFINITION_ALIASES)
+        for alias in aliases
+    }
+)
 _PLACEHOLDER_VALUES: Final[frozenset[str]] = frozenset(
     {
         "/",
@@ -104,14 +113,37 @@ def _collect_fields(issues: Sequence[Mapping[str, object]]) -> dict[str, tuple[s
 
 def _iter_field_lines(text: str) -> tuple[tuple[str, str], ...]:
     parsed: list[tuple[str, str]] = []
-    for line in text.splitlines():
-        match = _LINE_FIELD_PATTERN.match(line)
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        match = _FIELD_HEADER_PATTERN.match(lines[index])
         if match is None:
+            index += 1
             continue
         normalized_key = _normalize_key(match.group(1))
-        if not normalized_key:
+        if normalized_key not in _SUPPORTED_FIELD_KEYS:
+            index += 1
             continue
-        parsed.append((normalized_key, match.group(2).strip()))
+        inline_value = match.group(2).strip()
+        if inline_value:
+            parsed.append((normalized_key, inline_value))
+            index += 1
+            continue
+
+        block_lines: list[str] = []
+        index += 1
+        while index < len(lines):
+            next_line = lines[index]
+            next_match = _FIELD_HEADER_PATTERN.match(next_line)
+            if next_match is not None:
+                next_key = _normalize_key(next_match.group(1))
+                if next_key in _SUPPORTED_FIELD_KEYS:
+                    break
+            stripped_line = next_line.strip()
+            if stripped_line:
+                block_lines.append(stripped_line)
+            index += 1
+        parsed.append((normalized_key, "\n".join(block_lines).strip()))
     return tuple(parsed)
 
 

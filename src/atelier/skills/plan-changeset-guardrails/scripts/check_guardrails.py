@@ -119,12 +119,14 @@ _CONCERN_DOMAINS: dict[str, re.Pattern[str]] = {
     ),
 }
 _RESPLIT_THRESHOLD_TRIGGER = re.compile(
-    r"\b(?:re[- ]?split trigger|split trigger|loc threshold|file threshold)\b",
+    r"\b(?:re[- ]?split triggers?|split triggers?|re[- ]?split criteria|"
+    r"split criteria|loc threshold|file threshold)\b",
     re.IGNORECASE,
 )
 _RESPLIT_THRESHOLD_NUMERIC = re.compile(r">\s*(?:400|800)\b")
 _RESPLIT_NEW_DOMAIN_TRIGGER = re.compile(
-    r"\b(?:new concern domain|additional concern domain|new domain during review)\b",
+    r"\b(?:new concern domain|additional concern domain|new domain during review|"
+    r"expand(?:s)? into broad [a-z0-9/ -]+ redesign|broad [a-z0-9/ -]+ redesign)\b",
     re.IGNORECASE,
 )
 _DEFERRED_FOLLOW_ON_ACTION = re.compile(
