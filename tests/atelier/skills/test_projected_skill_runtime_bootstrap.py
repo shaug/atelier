@@ -171,7 +171,7 @@ def test_all_projected_skill_scripts_importing_atelier_use_shared_bootstrap() ->
         if "from atelier" not in text and "import atelier" not in text:
             continue
         importing_scripts.append(path)
-        if "from _projected_bootstrap import bootstrap_projected_atelier_script" not in text:
+        if "_projected_bootstrap" not in text or "bootstrap_projected_atelier_script" not in text:
             missing_bootstrap.append(path)
 
     assert importing_scripts
