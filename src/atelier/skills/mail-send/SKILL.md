@@ -1,20 +1,21 @@
 ---
 name: mail-send
 description: >-
-  Send a work-threaded message with compatibility routing to an agent by
-  creating a message issue with YAML frontmatter.
+  Send a work-threaded message by creating a message issue with YAML
+  frontmatter.
 ---
 
 # Mail send
 
-Work-threaded messages are the durable default. Use `to`/assignee only as a
-compatibility routing hint for the currently active runtime.
+Work-threaded messages are the durable coordination path. Use `to` only to
+describe the intended audience and, when helpful, to nudge the current runtime.
 
 ## Inputs
 
 - subject: Message subject line.
 - body: Message body content.
-- to: Recipient agent id used for compatibility routing.
+- to: Recipient agent id used to derive audience metadata and optional assignee
+  hints.
 - from: Sender agent id.
 - thread: Optional work thread id (epic or changeset bead id). Required for
   durable work-scoped coordination.
@@ -28,28 +29,22 @@ compatibility routing hint for the currently active runtime.
 1. For durable work coordination, always provide `--thread <epic-or-changeset>`:
    - the script adds `thread_target`, `audiences`, and default `kind` metadata
    - worker-targeted threaded messages also add `blocking_roles: [worker]`
-1. Treat agent-addressed delivery as compatibility routing only:
-   - assignee helps the current runtime notice the message
-   - thread metadata remains the durable source of truth
 1. Do not create planner-to-worker message beads directly with `bd create`.
-1. Treat work-threaded delivery as the durable default:
+1. Treat work-threaded delivery as the durable model:
    - when `thread` is present, the script emits work-thread metadata (`thread`,
      `thread_kind`, `audience`, `kind`, `delivery`)
-   - assignee-based delivery without a work thread is compatibility routing only
-1. The script enforces worker liveness checks:
-   - active worker recipient: create an `at:message` bead assigned to `to`
-   - inactive worker recipient: create an unassigned executable reroute epic
-     (`at:epic`, status `open`) with routing diagnostics
-1. Inactive worker reroutes enforce executable-work quality checks on
-   `subject`/`body`; low-information placeholders fail closed with deterministic
-   diagnostics and a `planner-context: NEEDS-DECISION` hint.
+   - the message stays attached to that original epic or changeset even when no
+     worker is currently active
+   - assignee metadata may still help an active runtime notice the message, but
+     it is not the durable coordination path
+1. Use unthreaded messages only when no specific work item exists to carry the
+   durable context.
 
 ## Verification
 
-- Active recipient path: message bead exists, is assigned to the recipient for
-  compatibility routing, and carries explicit work-thread metadata when
-  `--thread` is provided.
-- Inactive worker path: no worker-targeted message bead is created; reroute epic
-  exists with `routing.inactive_worker` and `routing.decision`.
+- Threaded path: message bead exists on the original epic/changeset thread and
+  carries explicit work-thread metadata when `--thread` is provided.
+- Inactive worker path: the same threaded message is still created on the
+  original work item, so a later worker can discover it there.
 - Follow `docs/work-threaded-message-migration.md` for planner/worker/operator
   migration guidance.
