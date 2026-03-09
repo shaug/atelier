@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Sequence
 
 from . import beads, paths
 from .external_providers import (
@@ -22,21 +22,10 @@ from .lib.beads import (
     IssueRecord,
     ListIssuesRequest,
     ShowIssueRequest,
+    SyncBeadsProtocol,
     UpdateIssueRequest,
     build_sync_beads_client,
 )
-
-
-class _SyncBeadsProtocol(Protocol):
-    def list(self, request: ListIssuesRequest) -> tuple[IssueRecord, ...]: ...
-
-    def show(self, request: ShowIssueRequest) -> IssueRecord: ...
-
-    def create(self, request: CreateIssueRequest) -> IssueRecord: ...
-
-    def update(self, request: UpdateIssueRequest) -> IssueRecord: ...
-
-    def close(self, request: CloseIssueRequest) -> IssueRecord: ...
 
 
 @dataclass(frozen=True)
@@ -200,7 +189,7 @@ class RepoBeadsProvider:
             raise RuntimeError(f"missing Beads store at {beads_root}")
         return beads_root
 
-    def _client(self, *, readonly: bool = False) -> _SyncBeadsProtocol:
+    def _client(self, *, readonly: bool = False) -> SyncBeadsProtocol:
         return build_sync_beads_client(
             cwd=self.repo_root,
             beads_root=self._beads_root(),

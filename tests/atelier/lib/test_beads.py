@@ -39,6 +39,7 @@ from atelier.lib.beads import (
     SubprocessBeadsTransport,
     SupportedOperation,
     SyncBeadsClient,
+    SyncBeadsProtocol,
     UnsupportedVersionError,
     UpdateIssueRequest,
     build_sync_beads_client,
@@ -698,6 +699,7 @@ def test_sync_beads_client_wraps_async_client() -> None:
 
     assert environment.version == SemanticVersion(major=0, minor=56, patch=1)
     assert issue.id == "at-1"
+    assert isinstance(sync_client, SyncBeadsProtocol)
 
 
 def test_build_sync_beads_client_sets_beads_root_and_readonly(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
-from typing import Protocol
 
 from .. import beads, changesets, git, lifecycle
 from .. import exec as exec_util
@@ -15,6 +14,7 @@ from ..lib.beads import (
     IssueRecord,
     ListIssuesRequest,
     ShowIssueRequest,
+    SyncBeadsProtocol,
     UpdateIssueRequest,
     build_sync_beads_client,
 )
@@ -84,18 +84,12 @@ def normalize_branch(value: object) -> str | None:
     return cleaned
 
 
-class _SyncBeadsProtocol(Protocol):
-    def show(self, request: ShowIssueRequest) -> IssueRecord: ...
-
-    def list(self, request: ListIssuesRequest) -> tuple[IssueRecord, ...]: ...
-
-    def update(self, request: UpdateIssueRequest) -> IssueRecord: ...
-
-    def close(self, request: CloseIssueRequest) -> IssueRecord: ...
-
-
 def _issue_record_to_payload(record: IssueRecord) -> dict[str, object]:
     return record.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+
+def _client(*, beads_root: Path, cwd: Path) -> SyncBeadsProtocol:
+    return build_sync_beads_client(beads_root=beads_root, cwd=cwd)
 
 
 def try_show_issue(
@@ -118,9 +112,7 @@ def try_show_issue(
         )
         return None
     try:
-        record = build_sync_beads_client(beads_root=beads_root, cwd=cwd).show(
-            ShowIssueRequest(issue_id=cleaned)
-        )
+        record = _client(beads_root=beads_root, cwd=cwd).show(ShowIssueRequest(issue_id=cleaned))
     except BeadError as exc:
         detail = " ".join(str(exc).split())
         if not detail:
@@ -138,7 +130,7 @@ def list_issues(
     beads_root: Path,
     cwd: Path,
 ) -> list[dict[str, object]]:
-    records = build_sync_beads_client(beads_root=beads_root, cwd=cwd).list(request)
+    records = _client(beads_root=beads_root, cwd=cwd).list(request)
     return [_issue_record_to_payload(record) for record in records]
 
 
@@ -148,7 +140,7 @@ def update_issue(
     beads_root: Path,
     cwd: Path,
 ) -> dict[str, object]:
-    record = build_sync_beads_client(beads_root=beads_root, cwd=cwd).update(request)
+    record = _client(beads_root=beads_root, cwd=cwd).update(request)
     return _issue_record_to_payload(record)
 
 
@@ -158,7 +150,7 @@ def close_issue(
     beads_root: Path,
     cwd: Path,
 ) -> dict[str, object]:
-    record = build_sync_beads_client(beads_root=beads_root, cwd=cwd).close(request)
+    record = _client(beads_root=beads_root, cwd=cwd).close(request)
     return _issue_record_to_payload(record)
 
 
