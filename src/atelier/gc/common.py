@@ -10,12 +10,9 @@ from .. import git
 from .. import log as atelier_log
 from ..lib.beads import (
     BeadError,
-    CloseIssueRequest,
     IssueRecord,
-    ListIssuesRequest,
     ShowIssueRequest,
     SyncBeadsProtocol,
-    UpdateIssueRequest,
     build_sync_beads_client,
 )
 
@@ -103,30 +100,6 @@ def try_show_issue(
         )
         return None
     return record
-
-
-def list_issues(
-    request: ListIssuesRequest,
-    *,
-    client: SyncBeadsProtocol,
-) -> tuple[IssueRecord, ...]:
-    return client.list(request)
-
-
-def update_issue(
-    request: UpdateIssueRequest,
-    *,
-    client: SyncBeadsProtocol,
-) -> IssueRecord:
-    return client.update(request)
-
-
-def close_issue(
-    request: CloseIssueRequest,
-    *,
-    client: SyncBeadsProtocol,
-) -> IssueRecord:
-    return client.close(request)
 
 
 def branch_lookup_ref(

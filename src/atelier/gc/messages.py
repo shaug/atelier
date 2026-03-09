@@ -8,12 +8,9 @@ from .. import beads, messages
 from ..lib.beads import CloseIssueRequest, ListIssuesRequest, UpdateIssueRequest
 from .common import (
     build_gc_beads_client,
-    close_issue,
     coerce_float,
-    list_issues,
     parse_rfc3339,
     try_show_issue,
-    update_issue,
 )
 from .models import GcAction
 
@@ -38,9 +35,8 @@ def collect_message_claims(
     stale_delta = dt.timedelta(hours=stale_hours)
     actions: list[GcAction] = []
     client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
-    issues = list_issues(
-        ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),)),
-        client=client,
+    issues = client.list(
+        ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),))
     )
     for issue in issues:
         issue_id = issue.id
@@ -86,14 +82,13 @@ def collect_message_claims(
             metadata["claimed_by"] = None
             metadata["claimed_at"] = None
             updated = messages.render_message(metadata, current_payload.body)
-            update_issue(
+            client.update(
                 UpdateIssueRequest(
                     issue_id=message_id,
                     assignee="" if current_assignee else None,
                     status="open" if current_assignee else None,
                     description=updated,
-                ),
-                client=client,
+                )
             )
 
         actions.append(GcAction(description=description_text, apply=_apply_release))
@@ -110,9 +105,8 @@ def collect_message_retention(
     now = dt.datetime.now(tz=dt.timezone.utc)
     actions: list[GcAction] = []
     client = build_gc_beads_client(beads_root=beads_root, cwd=repo_root)
-    issues = list_issues(
-        ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),)),
-        client=client,
+    issues = client.list(
+        ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),))
     )
     for issue in issues:
         issue_id = issue.id
@@ -140,10 +134,7 @@ def collect_message_retention(
         description_text = f"Close expired channel message {issue_id}"
 
         def _apply_close(message_id: str = issue_id) -> None:
-            close_issue(
-                CloseIssueRequest(issue_id=message_id),
-                client=client,
-            )
+            client.close(CloseIssueRequest(issue_id=message_id))
 
         actions.append(GcAction(description=description_text, apply=_apply_close))
     return actions
