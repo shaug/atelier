@@ -173,6 +173,7 @@ def test_normalize_invocation_preserves_command_and_global_tokens() -> None:
     assert invocation.command_tokens == ("vc", "status", "--json")
     assert invocation.requests_json is True
 
+
 def test_dispatcher_implements_tier_zero_core_issue_commands() -> None:
     builder = IssueFixtureBuilder()
     store = build_in_memory_issue_store(

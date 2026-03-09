@@ -336,9 +336,7 @@ class InMemoryCoreIssuesHandler:
                 estimate,
                 labels,
             )
-        ) and not (
-            assignee_specified or add_labels or remove_labels or append_notes or claim
-        ):
+        ) and not (assignee_specified or add_labels or remove_labels or append_notes or claim):
             raise ValueError("update requires at least one field change")
         return CommandEnvelope.json_payload(
             [

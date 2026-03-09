@@ -85,10 +85,10 @@ used by the typed Tier 0 client and by the optional command backend:
   `hook`
 
 `InMemoryBeadsBackend` is now a thin command-harness adapter that composes
-`InMemoryIssueStore`, `InMemoryCoreIssuesHandler`, and Tier 1 slot handlers.
-It does not maintain a second issue state model. Tests provide the issue graph
-they need up front, then route `atelier.beads` command execution through the
-shared store with `patch_in_memory_beads(...)`.
+`InMemoryIssueStore`, `InMemoryCoreIssuesHandler`, and Tier 1 slot handlers. It
+does not maintain a second issue state model. Tests provide the issue graph they
+need up front, then route `atelier.beads` command execution through the shared
+store with `patch_in_memory_beads(...)`.
 
 Commands outside this implemented subset continue to fail explicitly with the
 published `not implemented yet` marker.

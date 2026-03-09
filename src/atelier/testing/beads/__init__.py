@@ -34,7 +34,7 @@ from .fixtures import (
     build_issue_reference,
 )
 from .patch import patch_in_memory_beads
-from .store import InMemoryIssueStore, StoredIssue, UNSET_UPDATE_FIELD
+from .store import UNSET_UPDATE_FIELD, InMemoryIssueStore, StoredIssue
 
 __all__ = [
     "DEFAULT_FIXTURE_TIMESTAMP",
@@ -43,6 +43,7 @@ __all__ = [
     "IN_MEMORY_BEADS_VERSION",
     "IN_MEMORY_TIER_ZERO_COMPATIBILITY_POLICY",
     "SUPPORTED_GLOBAL_FLAGS",
+    "UNSET_UPDATE_FIELD",
     "CommandEnvelope",
     "CommandFamilyHandler",
     "CommandInvocation",
@@ -56,7 +57,6 @@ __all__ = [
     "InMemoryOwnershipSlotsHandler",
     "IssueFixtureBuilder",
     "StoredIssue",
-    "UNSET_UPDATE_FIELD",
     "build_in_memory_beads_client",
     "build_in_memory_dispatcher",
     "build_in_memory_issue_store",

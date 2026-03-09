@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from re import Pattern, compile
-import threading
 
 from atelier import changeset_fields, lifecycle
 from atelier.lib.beads import IssueRecord
@@ -114,8 +114,7 @@ class InMemoryIssueStore:
         self._issues: dict[str, StoredIssue] = {}
         self._order: list[str] = []
         self._slots: dict[str, dict[str, str]] = {
-            issue_id: _clean_slot_map(slot_map)
-            for issue_id, slot_map in (slots or {}).items()
+            issue_id: _clean_slot_map(slot_map) for issue_id, slot_map in (slots or {}).items()
         }
         self._next_numeric_id = 1
         self._event_counter = 0
@@ -464,4 +463,4 @@ def _clean_slot_map(slot_map: Mapping[str, str]) -> dict[str, str]:
     return cleaned
 
 
-__all__ = ["InMemoryIssueStore", "StoredIssue", "UNSET_UPDATE_FIELD"]
+__all__ = ["UNSET_UPDATE_FIELD", "InMemoryIssueStore", "StoredIssue"]
