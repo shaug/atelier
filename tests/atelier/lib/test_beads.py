@@ -398,6 +398,134 @@ def test_subprocess_client_decodes_core_json_commands() -> None:
     assert added.dependencies[0].id == "at-1"
 
 
+def test_subprocess_client_supports_global_args() -> None:
+    responses = _probe_responses()
+    responses.update(
+        {
+            (
+                "bd",
+                "--readonly",
+                "--version",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "--version"),
+                returncode=0,
+                stdout="bd version 0.56.1",
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "show",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "show", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "list",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "list", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "create",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "create", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "update",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "update", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "close",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "close", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "dep",
+                "add",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "dep", "add", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "dep",
+                "remove",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "dep", "remove", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "ready",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "ready", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "show",
+                "at-1",
+                "--json",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "show", "at-1", "--json"),
+                returncode=0,
+                stdout='[{"id":"at-1","issue_type":"task"}]',
+                stderr="",
+            ),
+        }
+    )
+    client = SubprocessBeadsClient(
+        transport=ScriptedBeadsTransport(responses),
+        global_args=("--readonly",),
+    )
+
+    issue = _run(client.show(ShowIssueRequest(issue_id="at-1")))
+
+    assert issue.id == "at-1"
+
+
 @pytest.mark.parametrize(
     ("argv", "stdout", "returncode", "stderr", "match", "client_request", "error_type"),
     [

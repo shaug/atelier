@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from pathlib import Path
+from typing import Protocol
 
 from .. import beads, changesets, git, lifecycle
 from .. import exec as exec_util
 from .. import log as atelier_log
+from ..lib.beads import (
+    BeadError,
+    CloseIssueRequest,
+    IssueRecord,
+    ListIssuesRequest,
+    ShowIssueRequest,
+    SubprocessBeadsClient,
+    SyncBeadsClient,
+    UpdateIssueRequest,
+)
 
 
 def log_debug(message: str) -> None:
@@ -75,6 +85,30 @@ def normalize_branch(value: object) -> str | None:
     return cleaned
 
 
+class _SyncBeadsProtocol(Protocol):
+    def show(self, request: ShowIssueRequest) -> IssueRecord: ...
+
+    def list(self, request: ListIssuesRequest) -> tuple[IssueRecord, ...]: ...
+
+    def update(self, request: UpdateIssueRequest) -> IssueRecord: ...
+
+    def close(self, request: CloseIssueRequest) -> IssueRecord: ...
+
+
+def _issue_record_to_payload(record: IssueRecord) -> dict[str, object]:
+    return record.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+
+def _build_beads_client(*, beads_root: Path, cwd: Path) -> _SyncBeadsProtocol:
+    return SyncBeadsClient(
+        SubprocessBeadsClient(
+            cwd=cwd,
+            beads_root=beads_root,
+            env={"BEADS_DIR": str(beads_root)},
+        )
+    )
+
+
 def try_show_issue(
     issue_id: object,
     *,
@@ -94,42 +128,49 @@ def try_show_issue(
             f"{issue_id!r}{detail}; treating metadata as unresolved"
         )
         return None
-    result = beads.run_bd_command(
-        ["show", cleaned, "--json"],
-        beads_root=beads_root,
-        cwd=cwd,
-        allow_failure=True,
-    )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
+    try:
+        record = _build_beads_client(beads_root=beads_root, cwd=cwd).show(
+            ShowIssueRequest(issue_id=cleaned)
+        )
+    except BeadError as exc:
+        detail = " ".join(str(exc).split())
         if not detail:
-            detail = f"bd show exited with code {result.returncode}"
+            detail = "bd show failed"
         log_warning(
             f"gc issue lookup failed for {cleaned!r}: {detail}; treating mapping as unresolved"
         )
         return None
-    raw = result.stdout.strip() if result.stdout else ""
-    if not raw:
-        return None
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        log_warning(f"gc issue lookup returned invalid JSON for {cleaned!r}; skipping")
-        return None
-    if isinstance(payload, dict):
-        issues: list[dict[str, object]] = [payload]
-    elif isinstance(payload, list):
-        issues = [entry for entry in payload if isinstance(entry, dict)]
-    else:
-        return None
-    try:
-        records = beads.parse_issue_records(issues, source="gc.try_show_issue")
-    except ValueError:
-        log_warning(f"gc issue lookup returned invalid issue payload for {cleaned!r}; skipping")
-        return None
-    if records:
-        return records[0].raw
-    return None
+    return _issue_record_to_payload(record)
+
+
+def list_issues(
+    request: ListIssuesRequest,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> list[dict[str, object]]:
+    records = _build_beads_client(beads_root=beads_root, cwd=cwd).list(request)
+    return [_issue_record_to_payload(record) for record in records]
+
+
+def update_issue(
+    request: UpdateIssueRequest,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> dict[str, object]:
+    record = _build_beads_client(beads_root=beads_root, cwd=cwd).update(request)
+    return _issue_record_to_payload(record)
+
+
+def close_issue(
+    request: CloseIssueRequest,
+    *,
+    beads_root: Path,
+    cwd: Path,
+) -> dict[str, object]:
+    record = _build_beads_client(beads_root=beads_root, cwd=cwd).close(request)
+    return _issue_record_to_payload(record)
 
 
 def branch_lookup_ref(

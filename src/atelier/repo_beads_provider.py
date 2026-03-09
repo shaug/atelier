@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
+from typing import Protocol, Sequence
 
 from . import beads, paths
-from .beads import run_bd_json
 from .external_providers import (
     ExternalProviderCapabilities,
     ExternalTicketCreateRequest,
@@ -18,6 +16,45 @@ from .external_providers import (
     ExternalTicketSyncOptions,
 )
 from .external_tickets import ExternalTicketRef, normalize_state
+from .lib.beads import (
+    CloseIssueRequest,
+    CreateIssueRequest,
+    IssueRecord,
+    ListIssuesRequest,
+    ShowIssueRequest,
+    SubprocessBeadsClient,
+    SyncBeadsClient,
+    UpdateIssueRequest,
+)
+
+
+class _SyncBeadsProtocol(Protocol):
+    def list(self, request: ListIssuesRequest) -> tuple[IssueRecord, ...]: ...
+
+    def show(self, request: ShowIssueRequest) -> IssueRecord: ...
+
+    def create(self, request: CreateIssueRequest) -> IssueRecord: ...
+
+    def update(self, request: UpdateIssueRequest) -> IssueRecord: ...
+
+    def close(self, request: CloseIssueRequest) -> IssueRecord: ...
+
+
+def _build_beads_client(
+    *,
+    repo_root: Path,
+    beads_root: Path,
+    readonly: bool = False,
+) -> _SyncBeadsProtocol:
+    global_args: tuple[str, ...] = ("--readonly",) if readonly else ()
+    return SyncBeadsClient(
+        SubprocessBeadsClient(
+            cwd=repo_root,
+            beads_root=beads_root,
+            env={"BEADS_DIR": str(beads_root)},
+            global_args=global_args,
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -48,56 +85,51 @@ class RepoBeadsProvider:
     def import_tickets(
         self, request: ExternalTicketImportRequest
     ) -> Sequence[ExternalTicketRecord]:
-        args = ["--readonly", "list"]
-        if request.include_closed:
-            args.append("--all")
-        if request.limit:
-            args.extend(["--limit", str(request.limit)])
-        if request.query:
-            args.extend(["--title", request.query])
-        payload = self._run_bd(args)
+        issues = self._client(readonly=True).list(
+            ListIssuesRequest(
+                include_closed=request.include_closed,
+                limit=request.limit,
+                title_query=request.query,
+            )
+        )
         sync_options = request.sync_options or self.sync_options
         records: list[ExternalTicketRecord] = []
-        for entry in payload:
-            record = _issue_payload_to_record(entry, sync_options=sync_options)
+        for issue in issues:
+            record = _issue_payload_to_record(
+                _issue_record_to_payload(issue),
+                sync_options=sync_options,
+            )
             if record:
                 records.append(record)
         return records
 
     def link_ticket(self, request: ExternalTicketLinkRequest) -> ExternalTicketRecord:
-        payload = self._run_bd(["--readonly", "show", request.ticket.ticket_id])
-        if not payload:
-            raise RuntimeError(f"Beads issue not found: {request.ticket.ticket_id}")
+        record = self._client(readonly=True).show(
+            ShowIssueRequest(issue_id=request.ticket.ticket_id)
+        )
         sync_options = request.sync_options or self.sync_options
-        record = _issue_payload_to_record(payload[0], sync_options=sync_options)
-        if not record:
+        parsed = _issue_payload_to_record(
+            _issue_record_to_payload(record), sync_options=sync_options
+        )
+        if not parsed:
             raise RuntimeError(f"Failed to parse Beads issue: {request.ticket.ticket_id}")
-        return record
+        return parsed
 
     def create_ticket(self, request: ExternalTicketCreateRequest) -> ExternalTicketRecord:
         if not self.allow_write:
             raise RuntimeError("Repo Beads export disabled (allow_write=false)")
-        issue_type = _resolve_issue_type(request.labels)
-        args = [
-            "create",
-            "--title",
-            request.title,
-            "--type",
-            issue_type,
-            "--silent",
-        ]
-        if request.body:
-            args.extend(["--description", request.body])
-        if request.labels:
-            args.extend(["--labels", ",".join(request.labels)])
-        result = self._run_bd_command(args)
-        issue_id = result.stdout.strip()
-        if not issue_id:
-            raise RuntimeError("Failed to create Beads issue")
-        payload = self._run_bd(["--readonly", "show", issue_id])
-        if not payload:
-            raise RuntimeError("Failed to read created Beads issue")
-        record = _issue_payload_to_record(payload[0], sync_options=self.sync_options)
+        created = self._client().create(
+            CreateIssueRequest(
+                title=request.title,
+                type=_resolve_issue_type(request.labels),
+                description=request.body,
+                labels=request.labels,
+            )
+        )
+        record = _issue_payload_to_record(
+            _issue_record_to_payload(created),
+            sync_options=self.sync_options,
+        )
         if not record:
             raise RuntimeError("Failed to parse created Beads issue")
         return record
@@ -105,7 +137,7 @@ class RepoBeadsProvider:
     def set_in_progress(self, ref: ExternalTicketRef) -> ExternalTicketRef:
         if not self.allow_write:
             raise RuntimeError("Repo Beads export disabled (allow_write=false)")
-        self._run_bd_command(["update", ref.ticket_id, "--status", "in_progress"])
+        self._client().update(UpdateIssueRequest(issue_id=ref.ticket_id, status="in_progress"))
         return self.sync_state(ref)
 
     def update_ticket(
@@ -119,20 +151,23 @@ class RepoBeadsProvider:
             raise RuntimeError("Repo Beads export disabled (allow_write=false)")
         if not title and body is None:
             return ref
-        args = ["update", ref.ticket_id]
-        if title:
-            args.extend(["--title", title])
+        description = None
         if body is not None:
-            payload = self._run_bd(["--readonly", "show", ref.ticket_id])
-            if not payload:
-                raise RuntimeError(f"Beads issue not found: {ref.ticket_id}")
-            description = payload[0].get("description")
+            existing = self._client(readonly=True).show(ShowIssueRequest(issue_id=ref.ticket_id))
+            payload = _issue_record_to_payload(existing)
+            description = payload.get("description")
             merged = beads.merge_description_preserving_metadata(
                 description if isinstance(description, str) else "",
                 body,
             )
-            args.extend(["--description", merged])
-        self._run_bd_command(args)
+            description = merged
+        self._client().update(
+            UpdateIssueRequest(
+                issue_id=ref.ticket_id,
+                title=title,
+                description=description,
+            )
+        )
         return self.sync_state(ref)
 
     def create_child_ticket(
@@ -146,16 +181,15 @@ class RepoBeadsProvider:
         if not self.allow_write:
             raise RuntimeError("Repo Beads export disabled (allow_write=false)")
         del ref
-        args = ["create", "--title", title, "--type", "task", "--silent"]
-        if body:
-            args.extend(["--description", body])
-        if labels:
-            args.extend(["--labels", ",".join(labels)])
-        result = self._run_bd_command(args)
-        issue_id = result.stdout.strip()
-        if not issue_id:
-            raise RuntimeError("Failed to create child Beads issue")
-        return ExternalTicketRef(provider="beads", ticket_id=issue_id)
+        created = self._client().create(
+            CreateIssueRequest(
+                title=title,
+                type="task",
+                description=body,
+                labels=labels,
+            )
+        )
+        return ExternalTicketRef(provider="beads", ticket_id=created.id)
 
     def close_ticket(
         self,
@@ -166,38 +200,34 @@ class RepoBeadsProvider:
         del comment  # Not supported by Beads close command.
         if not self.allow_write:
             raise RuntimeError("Repo Beads export disabled (allow_write=false)")
-        beads_root = self.beads_root or (self.repo_root / paths.BEADS_DIRNAME)
-        if not beads_root.exists():
-            raise RuntimeError(f"missing Beads store at {beads_root}")
-        beads.close_issue(
-            ref.ticket_id,
-            beads_root=beads_root,
-            cwd=self.repo_root,
-        )
+        self._client().close(CloseIssueRequest(issue_id=ref.ticket_id))
         return self.sync_state(ref)
 
     def sync_state(self, ref: ExternalTicketRef) -> ExternalTicketRef:
         if not self.sync_options.include_state:
             return ref
-        payload = self._run_bd(["--readonly", "show", ref.ticket_id])
-        if not payload:
-            return ref
-        refreshed = _issue_payload_to_ref(payload[0], sync_options=self.sync_options)
+        payload = _issue_record_to_payload(
+            self._client(readonly=True).show(ShowIssueRequest(issue_id=ref.ticket_id))
+        )
+        refreshed = _issue_payload_to_ref(payload, sync_options=self.sync_options)
         return refreshed or ref
 
-    def _run_bd(self, args: list[str]) -> list[dict[str, object]]:
+    def _beads_root(self) -> Path:
         beads_root = self.beads_root or (self.repo_root / paths.BEADS_DIRNAME)
         if not beads_root.exists():
             raise RuntimeError(f"missing Beads store at {beads_root}")
-        return run_bd_json(args, beads_root=beads_root, cwd=self.repo_root)
+        return beads_root
 
-    def _run_bd_command(self, args: list[str]) -> subprocess.CompletedProcess[str]:
-        from .beads import run_bd_command
+    def _client(self, *, readonly: bool = False) -> _SyncBeadsProtocol:
+        return _build_beads_client(
+            repo_root=self.repo_root,
+            beads_root=self._beads_root(),
+            readonly=readonly,
+        )
 
-        beads_root = self.beads_root or (self.repo_root / paths.BEADS_DIRNAME)
-        if not beads_root.exists():
-            raise RuntimeError(f"missing Beads store at {beads_root}")
-        return run_bd_command(args, beads_root=beads_root, cwd=self.repo_root)
+
+def _issue_record_to_payload(record: IssueRecord) -> dict[str, object]:
+    return record.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
 def _issue_payload_to_record(

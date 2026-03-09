@@ -210,6 +210,7 @@ class SubprocessBeadsClient(Beads):
         transport: BeadsTransport | None = None,
         compatibility_policy: CompatibilityPolicy = DEFAULT_COMPATIBILITY_POLICY,
         executable: str = "bd",
+        global_args: Sequence[str] = (),
         cwd: Path | None = None,
         beads_root: Path | None = None,
         env: Mapping[str, str] | None = None,
@@ -218,6 +219,7 @@ class SubprocessBeadsClient(Beads):
         self._transport = transport or SubprocessBeadsTransport()
         self._compatibility_policy = compatibility_policy
         self._executable = executable
+        self._global_args = tuple(global_args)
         self._cwd = cwd
         self._beads_root = beads_root
         self._env = dict(env or {})
@@ -613,7 +615,7 @@ class SubprocessBeadsClient(Beads):
         return await self._transport.execute(
             BeadsCommandRequest(
                 operation=operation,
-                argv=(self._executable, *argv),
+                argv=(self._executable, *self._global_args, *argv),
                 expects_json="--json" in argv,
                 cwd=self._cwd,
                 env=self._env or None,

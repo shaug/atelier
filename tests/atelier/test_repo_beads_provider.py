@@ -11,7 +11,74 @@ from atelier.external_providers import (
     ExternalTicketSyncOptions,
 )
 from atelier.external_tickets import ExternalTicketRef
+from atelier.lib.beads import (
+    CloseIssueRequest,
+    CreateIssueRequest,
+    IssueRecord,
+    ListIssuesRequest,
+    ShowIssueRequest,
+    UpdateIssueRequest,
+)
 from atelier.repo_beads_provider import RepoBeadsProvider
+
+
+class _FakeBeadsClient:
+    def __init__(
+        self,
+        *,
+        list_result: tuple[IssueRecord, ...] = (),
+        show_result: IssueRecord | None = None,
+    ) -> None:
+        self.list_result = list_result
+        self.show_result = show_result
+        self.list_requests: list[ListIssuesRequest] = []
+        self.show_requests: list[ShowIssueRequest] = []
+        self.create_requests: list[CreateIssueRequest] = []
+        self.update_requests: list[UpdateIssueRequest] = []
+        self.close_requests: list[CloseIssueRequest] = []
+
+    def list(self, request: ListIssuesRequest) -> tuple[IssueRecord, ...]:
+        self.list_requests.append(request)
+        return self.list_result
+
+    def show(self, request: ShowIssueRequest) -> IssueRecord:
+        self.show_requests.append(request)
+        if self.show_result is None:
+            raise AssertionError("show_result was not configured")
+        return self.show_result
+
+    def create(self, request: CreateIssueRequest) -> IssueRecord:
+        self.create_requests.append(request)
+        return IssueRecord.model_validate(
+            {
+                "id": "bd-9",
+                "title": request.title,
+                "description": request.description,
+                "status": "open",
+                "labels": list(request.labels),
+                "updated_at": "2026-02-08T12:00:00Z",
+            }
+        )
+
+    def update(self, request: UpdateIssueRequest) -> IssueRecord:
+        self.update_requests.append(request)
+        return IssueRecord.model_validate(
+            {
+                "id": request.issue_id,
+                "status": request.status or "open",
+                "updated_at": "2026-02-24T22:00:00Z",
+            }
+        )
+
+    def close(self, request: CloseIssueRequest) -> IssueRecord:
+        self.close_requests.append(request)
+        return IssueRecord.model_validate(
+            {
+                "id": request.issue_id,
+                "status": "closed",
+                "updated_at": "2026-02-24T22:00:00Z",
+            }
+        )
 
 
 def test_repo_beads_provider_import_uses_readonly(
@@ -19,28 +86,32 @@ def test_repo_beads_provider_import_uses_readonly(
 ) -> None:
     (tmp_path / ".beads").mkdir()
     provider = RepoBeadsProvider(repo_root=tmp_path)
-    payload = [
-        {
-            "id": "bd-1",
-            "title": "Docs",
-            "description": "Details",
-            "acceptance_criteria": "AC1",
-            "status": "open",
-            "updated_at": "2026-02-08T10:00:00Z",
-            "labels": ["p1"],
-        }
-    ]
+    client = _FakeBeadsClient(
+        list_result=(
+            IssueRecord.model_validate(
+                {
+                    "id": "bd-1",
+                    "title": "Docs",
+                    "description": "Details",
+                    "acceptance_criteria": "AC1",
+                    "status": "open",
+                    "updated_at": "2026-02-08T10:00:00Z",
+                    "labels": ["p1"],
+                }
+            ),
+        )
+    )
     seen: dict[str, object] = {}
 
-    def fake_run_bd_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        seen["args"] = args
+    def fake_build_beads_client(
+        *, repo_root: Path, beads_root: Path, readonly: bool = False
+    ) -> _FakeBeadsClient:
+        seen["repo_root"] = repo_root
         seen["beads_root"] = beads_root
-        seen["cwd"] = cwd
-        return payload
+        seen["readonly"] = readonly
+        return client
 
-    monkeypatch.setattr("atelier.repo_beads_provider.run_bd_json", fake_run_bd_json)
+    monkeypatch.setattr("atelier.repo_beads_provider._build_beads_client", fake_build_beads_client)
 
     records = provider.import_tickets(
         ExternalTicketImportRequest(
@@ -56,13 +127,14 @@ def test_repo_beads_provider_import_uses_readonly(
     assert records[0].ref.state == "open"
     assert records[0].body is None
 
-    args = seen["args"]
-    assert isinstance(args, list)
-    assert "--readonly" in args
-    assert "list" in args
-    assert "--all" in args
-    assert "--limit" in args
-    assert "--title" in args
+    assert seen == {
+        "repo_root": tmp_path,
+        "beads_root": tmp_path / ".beads",
+        "readonly": True,
+    }
+    assert client.list_requests == [
+        ListIssuesRequest(include_closed=True, limit=5, title_query="Docs")
+    ]
 
 
 def test_repo_beads_provider_link_reads_issue(
@@ -70,26 +142,23 @@ def test_repo_beads_provider_link_reads_issue(
 ) -> None:
     (tmp_path / ".beads").mkdir()
     provider = RepoBeadsProvider(repo_root=tmp_path)
-    payload = [
-        {
-            "id": "bd-2",
-            "title": "Link",
-            "description": "More details",
-            "acceptance_criteria": "AC2",
-            "status": "in_progress",
-            "updated_at": "2026-02-08T11:00:00Z",
-            "labels": ["p2"],
-        }
-    ]
-    seen: dict[str, object] = {}
-
-    def fake_run_bd_json(
-        args: list[str], *, beads_root: Path, cwd: Path
-    ) -> list[dict[str, object]]:
-        seen["args"] = args
-        return payload
-
-    monkeypatch.setattr("atelier.repo_beads_provider.run_bd_json", fake_run_bd_json)
+    client = _FakeBeadsClient(
+        show_result=IssueRecord.model_validate(
+            {
+                "id": "bd-2",
+                "title": "Link",
+                "description": "More details",
+                "acceptance_criteria": "AC2",
+                "status": "in_progress",
+                "updated_at": "2026-02-08T11:00:00Z",
+                "labels": ["p2"],
+            }
+        )
+    )
+    monkeypatch.setattr(
+        "atelier.repo_beads_provider._build_beads_client",
+        lambda **_kwargs: client,
+    )
 
     record = provider.link_ticket(
         ExternalTicketLinkRequest(
@@ -100,11 +169,7 @@ def test_repo_beads_provider_link_reads_issue(
     assert record.ref.ticket_id == "bd-2"
     assert record.body == "More details\n\nAcceptance criteria:\nAC2"
     assert record.ref.state == "in_progress"
-
-    args = seen["args"]
-    assert isinstance(args, list)
-    assert "--readonly" in args
-    assert "show" in args
+    assert client.show_requests == [ShowIssueRequest(issue_id="bd-2")]
 
 
 def test_repo_beads_provider_create_requires_allow_write(
@@ -122,35 +187,14 @@ def test_repo_beads_provider_create_ticket_when_allowed(
 ) -> None:
     (tmp_path / ".beads").mkdir()
     provider = RepoBeadsProvider(repo_root=tmp_path, allow_write=True)
-    payload = [
-        {
-            "id": "bd-9",
-            "title": "Exported",
-            "description": "Body",
-            "status": "open",
-            "updated_at": "2026-02-08T12:00:00Z",
-            "labels": ["epic"],
-        }
-    ]
-    created: dict[str, object] = {}
+    client = _FakeBeadsClient()
+    seen: dict[str, object] = {}
 
-    def fake_run_bd_command(
-        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ) -> object:
-        created["args"] = args
-        created["beads_root"] = beads_root
-        created["cwd"] = cwd
+    def fake_build_beads_client(**kwargs: object) -> _FakeBeadsClient:
+        seen["kwargs"] = kwargs
+        return client
 
-        class Result:
-            stdout = "bd-9\n"
-
-        return Result()
-
-    def fake_run_bd(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
-        return payload
-
-    monkeypatch.setattr("atelier.beads.run_bd_command", fake_run_bd_command)
-    monkeypatch.setattr("atelier.repo_beads_provider.run_bd_json", fake_run_bd)
+    monkeypatch.setattr("atelier.repo_beads_provider._build_beads_client", fake_build_beads_client)
 
     record = provider.create_ticket(
         ExternalTicketCreateRequest(
@@ -162,11 +206,19 @@ def test_repo_beads_provider_create_ticket_when_allowed(
     )
     assert record.ref.ticket_id == "bd-9"
     assert record.title == "Exported"
-
-    args = created["args"]
-    assert isinstance(args, list)
-    assert "create" in args
-    assert "--silent" in args
+    assert client.create_requests == [
+        CreateIssueRequest(
+            title="Exported",
+            type="epic",
+            description="Body",
+            labels=("epic",),
+        )
+    ]
+    assert seen["kwargs"] == {
+        "repo_root": tmp_path,
+        "beads_root": tmp_path / ".beads",
+        "readonly": False,
+    }
 
 
 def test_repo_beads_provider_update_preserves_external_ticket_metadata(
@@ -182,73 +234,50 @@ def test_repo_beads_provider_update_preserves_external_ticket_metadata(
             include_notes=False,
         ),
     )
-    captured: dict[str, object] = {}
+    read_client = _FakeBeadsClient(
+        show_result=IssueRecord.model_validate(
+            {
+                "id": "bd-9",
+                "description": (
+                    "scope: old\n"
+                    "external_tickets: "
+                    '[{"provider":"github","id":"174","direction":"export"}]\n'
+                ),
+                "status": "open",
+                "updated_at": "2026-02-24T22:00:00Z",
+            }
+        )
+    )
+    write_client = _FakeBeadsClient()
 
-    def fake_run_bd(args: list[str], *, beads_root: Path, cwd: Path) -> list[dict[str, object]]:
-        if args[:2] == ["--readonly", "show"]:
-            return [
-                {
-                    "id": "bd-9",
-                    "description": (
-                        "scope: old\n"
-                        "external_tickets: "
-                        '[{"provider":"github","id":"174","direction":"export"}]\n'
-                    ),
-                    "status": "open",
-                    "updated_at": "2026-02-24T22:00:00Z",
-                }
-            ]
-        return []
+    def fake_build_beads_client(*, readonly: bool = False, **_kwargs: object) -> _FakeBeadsClient:
+        return read_client if readonly else write_client
 
-    def fake_run_bd_command(
-        args: list[str], *, beads_root: Path, cwd: Path, allow_failure: bool = False
-    ) -> object:
-        captured["args"] = args
-
-        class Result:
-            stdout = ""
-
-        return Result()
-
-    monkeypatch.setattr("atelier.repo_beads_provider.run_bd_json", fake_run_bd)
-    monkeypatch.setattr("atelier.beads.run_bd_command", fake_run_bd_command)
+    monkeypatch.setattr("atelier.repo_beads_provider._build_beads_client", fake_build_beads_client)
 
     provider.update_ticket(
         ExternalTicketRef(provider="beads", ticket_id="bd-9"),
         body="Intent\nupdated description\n",
     )
 
-    args = captured.get("args")
-    assert isinstance(args, list)
-    assert "--description" in args
-    description = args[args.index("--description") + 1]
-    assert isinstance(description, str)
+    assert read_client.show_requests == [ShowIssueRequest(issue_id="bd-9")]
+    assert len(write_client.update_requests) == 1
+    description = write_client.update_requests[0].description
     assert "Intent" in description
     assert "external_tickets:" in description
     assert '"id":"174"' in description
 
 
-def test_repo_beads_provider_close_uses_close_issue_helper(
+def test_repo_beads_provider_close_uses_typed_client(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     (tmp_path / ".beads").mkdir()
     provider = RepoBeadsProvider(repo_root=tmp_path, allow_write=True)
-    captured: dict[str, object] = {}
-
-    def fake_close_issue(
-        issue_id: str,
-        *,
-        beads_root: Path,
-        cwd: Path,
-        allow_failure: bool = False,
-    ) -> object:
-        captured["issue_id"] = issue_id
-        captured["beads_root"] = beads_root
-        captured["cwd"] = cwd
-        captured["allow_failure"] = allow_failure
-        return object()
-
-    monkeypatch.setattr("atelier.beads.close_issue", fake_close_issue)
+    write_client = _FakeBeadsClient()
+    monkeypatch.setattr(
+        "atelier.repo_beads_provider._build_beads_client",
+        lambda **_kwargs: write_client,
+    )
     monkeypatch.setattr(
         RepoBeadsProvider,
         "sync_state",
@@ -259,9 +288,4 @@ def test_repo_beads_provider_close_uses_close_issue_helper(
     closed = provider.close_ticket(ref)
 
     assert closed.ticket_id == "bd-7"
-    assert captured == {
-        "issue_id": "bd-7",
-        "beads_root": tmp_path / ".beads",
-        "cwd": tmp_path,
-        "allow_failure": False,
-    }
+    assert write_client.close_requests == [CloseIssueRequest(issue_id="bd-7")]
