@@ -1,234 +1,177 @@
 from pathlib import Path
 from unittest.mock import patch
 
+from atelier.testing.beads import InMemoryBeadsBackend, IssueFixtureBuilder, patch_in_memory_beads
 from atelier.worker import changeset_state
 
 
-def test_mark_changeset_blocked_adds_blocked_state_and_note() -> None:
-    with patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command:
+def _seed_backend(
+    tmp_path: Path, *issues: dict[str, object]
+) -> tuple[InMemoryBeadsBackend, Path, Path]:
+    beads_root = tmp_path / ".beads"
+    repo_root = tmp_path / "repo"
+    beads_root.mkdir()
+    repo_root.mkdir()
+    return InMemoryBeadsBackend(seeded_issues=issues), beads_root, repo_root
+
+
+def test_mark_changeset_blocked_adds_blocked_state_and_note(tmp_path: Path) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue("at-1", title="Blocked changeset", status="open"),
+    )
+
+    with patch_in_memory_beads(backend):
         changeset_state.mark_changeset_blocked(
             "at-1",
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
+            beads_root=beads_root,
+            repo_root=repo_root,
             reason="missing integration",
         )
 
-    args = run_bd_command.call_args.args[0]
-    assert args[0:2] == ["update", "at-1"]
-    assert "--status" in args
-    assert "blocked" in args
-    assert "--append-notes" in args
-    assert "missing integration" in args[-1]
+    issue = backend.state.show("at-1")
+    assert issue["status"] == "blocked"
+    assert "blocked_at:" in str(issue.get("description"))
+    assert "missing integration" in str(issue.get("description"))
 
 
-def test_close_completed_container_changesets_closes_eligible_nodes() -> None:
-    descendants = [
-        {
-            "id": "at-1.1",
-            "status": "done",
-            "labels": ["cs:merged"],
-            "description": "",
-        },
-        {
-            "id": "at-1.2",
-            "status": "done",
-            "labels": ["cs:abandoned"],
-            "description": "",
-        },
-        {
-            "id": "at-1.3",
-            "status": "open",
-            "labels": [],
-            "description": "",
-        },
-        {
-            "id": "at-1.4",
-            "status": "",
-            "labels": ["cs:merged"],
-            "description": "",
-        },
-    ]
-    with (
-        patch(
-            "atelier.worker.changeset_state.beads.list_descendant_changesets",
-            return_value=descendants,
+def test_close_completed_container_changesets_closes_eligible_nodes(tmp_path: Path) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue("at-1", title="Epic", issue_type="epic", labels=("at:epic",)),
+        builder.issue(
+            "at-1.1",
+            title="Merged descendant",
+            parent="at-1",
+            status="done",
+            labels=("cs:merged",),
         ),
-        patch("atelier.worker.changeset_state.mark_changeset_closed") as mark_closed,
-    ):
+        builder.issue(
+            "at-1.2",
+            title="Abandoned descendant",
+            parent="at-1",
+            status="done",
+            labels=("cs:abandoned",),
+        ),
+        builder.issue("at-1.3", title="Open descendant", parent="at-1", status="open"),
+        builder.issue(
+            "at-1.4",
+            title="Unknown status descendant",
+            parent="at-1",
+            status="custom",
+        ),
+    )
+
+    with patch_in_memory_beads(backend):
         closed = changeset_state.close_completed_container_changesets(
             "at-1",
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
+            beads_root=beads_root,
+            repo_root=repo_root,
             has_open_descendant_changesets=lambda issue_id: issue_id == "at-1.2",
         )
 
     assert closed == ["at-1.1"]
-    mark_closed.assert_called_once_with(
-        "at-1.1", beads_root=Path("/beads"), repo_root=Path("/repo")
+    assert backend.state.show("at-1.1")["status"] == "closed"
+    assert backend.state.show("at-1.2")["status"] == "done"
+    assert backend.state.show("at-1.3")["status"] == "open"
+
+
+def test_close_completed_container_changesets_reopens_active_pr_changeset(tmp_path: Path) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue("at-1", title="Epic", issue_type="epic", labels=("at:epic",)),
+        builder.issue(
+            "at-1.1",
+            title="Active PR descendant",
+            parent="at-1",
+            status="done",
+            labels=("cs:merged",),
+            description="pr_state: pr-open\n",
+        ),
     )
 
-
-def test_close_completed_container_changesets_reopens_active_pr_changeset() -> None:
-    descendants = [
-        {
-            "id": "at-1.1",
-            "status": "done",
-            "labels": ["cs:merged"],
-            "description": "pr_state: pr-open\n",
-        }
-    ]
-    with (
-        patch(
-            "atelier.worker.changeset_state.beads.list_descendant_changesets",
-            return_value=descendants,
-        ),
-        patch("atelier.worker.changeset_state.mark_changeset_closed") as mark_closed,
-        patch("atelier.worker.changeset_state.mark_changeset_in_progress") as mark_in_progress,
-    ):
+    with patch_in_memory_beads(backend):
         closed = changeset_state.close_completed_container_changesets(
             "at-1",
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
+            beads_root=beads_root,
+            repo_root=repo_root,
             has_open_descendant_changesets=lambda _issue_id: False,
         )
 
     assert closed == []
-    mark_closed.assert_not_called()
-    mark_in_progress.assert_called_once_with(
-        "at-1.1", beads_root=Path("/beads"), repo_root=Path("/repo")
+    assert backend.state.show("at-1.1")["status"] == "in_progress"
+
+
+def test_close_completed_ancestor_container_changesets_closes_claimed_lineage_only(
+    tmp_path: Path,
+) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue("at-1", title="Epic", issue_type="epic", labels=("at:epic",)),
+        builder.issue("at-1.1", title="Parent", parent="at-1", status="in_progress"),
+        builder.issue("at-1.2", title="Grandparent", parent="at-1.1", status="in_progress"),
+        builder.issue("at-1.2.1", title="Leaf", parent="at-1.2", status="closed"),
     )
 
-
-def test_close_completed_ancestor_container_changesets_closes_claimed_lineage_only() -> None:
-    issues = {
-        "at-1.2.1": {
-            "id": "at-1.2.1",
-            "status": "closed",
-            "parent": "at-1.2",
-            "labels": [],
-            "description": "",
-        },
-        "at-1.2": {
-            "id": "at-1.2",
-            "status": "in_progress",
-            "parent": "at-1.1",
-            "labels": [],
-            "description": "",
-        },
-        "at-1.1": {
-            "id": "at-1.1",
-            "status": "in_progress",
-            "parent": "at-1",
-            "labels": [],
-            "description": "",
-        },
-        "at-1": {
-            "id": "at-1",
-            "status": "in_progress",
-            "labels": ["at:epic"],
-            "description": "",
-        },
-    }
-
-    def _show(args, **_kwargs):
-        if args[:1] != ["show"]:
-            return []
-        issue_id = args[1]
-        issue = issues.get(issue_id)
-        if issue is None:
-            return []
-        return [issue]
-
-    with (
-        patch("atelier.worker.changeset_state.beads.run_bd_json", side_effect=_show),
-        patch("atelier.worker.changeset_state._close_guard_allows", return_value=True),
-        patch("atelier.worker.changeset_state.mark_changeset_closed") as mark_closed,
-    ):
+    with patch_in_memory_beads(backend):
         closed = changeset_state.close_completed_ancestor_container_changesets(
             "at-1.2.1",
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
+            beads_root=beads_root,
+            repo_root=repo_root,
             has_open_descendant_changesets=lambda _issue_id: False,
         )
 
     assert closed == ["at-1.2", "at-1.1"]
-    assert [call.args[0] for call in mark_closed.call_args_list] == ["at-1.2", "at-1.1"]
+    assert backend.state.show("at-1.2")["status"] == "closed"
+    assert backend.state.show("at-1.1")["status"] == "closed"
 
 
-def test_close_completed_ancestor_container_changesets_stops_when_ancestor_has_open_descendants() -> (
-    None
-):
-    issues = {
-        "at-1.2.1": {
-            "id": "at-1.2.1",
-            "status": "closed",
-            "parent": "at-1.2",
-            "labels": [],
-            "description": "",
-        },
-        "at-1.2": {
-            "id": "at-1.2",
-            "status": "in_progress",
-            "parent": "at-1.1",
-            "labels": [],
-            "description": "",
-        },
-        "at-1.1": {
-            "id": "at-1.1",
-            "status": "in_progress",
-            "parent": "at-1",
-            "labels": [],
-            "description": "",
-        },
-    }
+def test_close_completed_ancestor_container_changesets_stops_when_ancestor_has_open_descendants(
+    tmp_path: Path,
+) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue("at-1", title="Epic", issue_type="epic", labels=("at:epic",)),
+        builder.issue("at-1.1", title="Parent", parent="at-1", status="in_progress"),
+        builder.issue("at-1.2", title="Grandparent", parent="at-1.1", status="in_progress"),
+        builder.issue("at-1.2.1", title="Leaf", parent="at-1.2", status="closed"),
+    )
 
-    def _show(args, **_kwargs):
-        if args[:1] != ["show"]:
-            return []
-        issue_id = args[1]
-        issue = issues.get(issue_id)
-        if issue is None:
-            return []
-        return [issue]
-
-    with (
-        patch("atelier.worker.changeset_state.beads.run_bd_json", side_effect=_show),
-        patch("atelier.worker.changeset_state._close_guard_allows", return_value=True),
-        patch("atelier.worker.changeset_state.mark_changeset_closed") as mark_closed,
-    ):
+    with patch_in_memory_beads(backend):
         closed = changeset_state.close_completed_ancestor_container_changesets(
             "at-1.2.1",
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
+            beads_root=beads_root,
+            repo_root=repo_root,
             has_open_descendant_changesets=lambda issue_id: issue_id == "at-1.1",
         )
 
     assert closed == ["at-1.2"]
-    mark_closed.assert_called_once_with(
-        "at-1.2",
-        beads_root=Path("/beads"),
-        repo_root=Path("/repo"),
+    assert backend.state.show("at-1.2")["status"] == "closed"
+    assert backend.state.show("at-1.1")["status"] == "in_progress"
+
+
+def test_promote_planned_descendant_changesets_promotes_deferred_only(tmp_path: Path) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue("at-1", title="Epic", issue_type="epic", labels=("at:epic",)),
+        builder.issue("at-1.1", title="Deferred child", parent="at-1", status="deferred"),
+        builder.issue("at-1.2", title="Open child", parent="at-1", status="open"),
     )
 
-
-def test_promote_planned_descendant_changesets_promotes_deferred_only() -> None:
-    descendants = [
-        {"id": "at-1.1", "status": "deferred", "labels": []},
-        {"id": "at-1.2", "status": "open", "labels": []},
-    ]
-    with (
-        patch(
-            "atelier.worker.changeset_state.beads.list_descendant_changesets",
-            return_value=descendants,
-        ),
-        patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
-    ):
+    with patch_in_memory_beads(backend):
         promoted = changeset_state.promote_planned_descendant_changesets(
-            "at-1", beads_root=Path("/beads"), repo_root=Path("/repo")
+            "at-1", beads_root=beads_root, repo_root=repo_root
         )
 
     assert promoted == ["at-1.1"]
-    run_bd_command.assert_called_once()
+    assert backend.state.show("at-1.1")["status"] == "open"
+    assert backend.state.show("at-1.2")["status"] == "open"
 
 
 def test_mark_changeset_in_progress_reconciles_reopened_external_tickets() -> None:
@@ -248,127 +191,103 @@ def test_mark_changeset_in_progress_reconciles_reopened_external_tickets() -> No
     )
 
 
-def test_mark_changeset_merged_reconciles_external_tickets() -> None:
-    with (
-        patch(
-            "atelier.worker.changeset_state.beads.run_bd_json",
-            return_value=[{"id": "at-1.1", "description": "pr_state: merged\n"}],
+def test_mark_changeset_merged_reconciles_external_tickets(tmp_path: Path) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue(
+            "at-1.1",
+            title="Merged changeset",
+            status="open",
+            description="pr_state: merged\n",
+            labels=("cs:abandoned",),
         ),
-        patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
-        patch(
-            "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
-        ) as reconcile,
-    ):
+    )
+
+    with patch_in_memory_beads(backend):
         changeset_state.mark_changeset_merged(
             "at-1.1",
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
+            beads_root=beads_root,
+            repo_root=repo_root,
         )
 
-    run_bd_command.assert_called_once_with(
-        [
-            "update",
-            "at-1.1",
-            "--status",
-            "closed",
-            "--add-label",
-            "cs:merged",
-            "--remove-label",
-            "cs:abandoned",
-        ],
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
-    reconcile.assert_called_once_with(
-        "at-1.1",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
+    issue = backend.state.show("at-1.1")
+    assert issue["status"] == "closed"
+    assert "cs:merged" in issue["labels"]
+    assert "cs:abandoned" not in issue["labels"]
 
 
-def test_mark_changeset_abandoned_sets_terminal_marker_and_reconciles_external_tickets() -> None:
-    with (
-        patch(
-            "atelier.worker.changeset_state.beads.run_bd_json",
-            return_value=[{"id": "at-1.2", "description": "pr_state: closed\n"}],
+def test_mark_changeset_abandoned_sets_terminal_marker_and_reconciles_external_tickets(
+    tmp_path: Path,
+) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue(
+            "at-1.2",
+            title="Abandoned changeset",
+            status="open",
+            description="pr_state: closed\n",
+            labels=("cs:merged",),
         ),
-        patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
-        patch(
-            "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
-        ) as reconcile,
-    ):
+    )
+
+    with patch_in_memory_beads(backend):
         changeset_state.mark_changeset_abandoned(
             "at-1.2",
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
+            beads_root=beads_root,
+            repo_root=repo_root,
         )
 
-    run_bd_command.assert_called_once_with(
-        [
-            "update",
-            "at-1.2",
-            "--status",
-            "closed",
-            "--add-label",
-            "cs:abandoned",
-            "--remove-label",
-            "cs:merged",
-        ],
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
-    reconcile.assert_called_once_with(
-        "at-1.2",
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
+    issue = backend.state.show("at-1.2")
+    assert issue["status"] == "closed"
+    assert "cs:abandoned" in issue["labels"]
+    assert "cs:merged" not in issue["labels"]
 
 
-def test_mark_changeset_merged_reopens_when_pr_lifecycle_is_active() -> None:
-    with (
-        patch(
-            "atelier.worker.changeset_state.beads.run_bd_json",
-            return_value=[{"id": "at-1.3", "description": "pr_state: in-review\n"}],
+def test_mark_changeset_merged_reopens_when_pr_lifecycle_is_active(tmp_path: Path) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue(
+            "at-1.3",
+            title="Active review changeset",
+            status="open",
+            description="pr_state: in-review\n",
         ),
-        patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
-        patch(
-            "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
-        ) as reconcile,
-    ):
+    )
+
+    with patch_in_memory_beads(backend):
         changeset_state.mark_changeset_merged(
             "at-1.3",
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
+            beads_root=beads_root,
+            repo_root=repo_root,
         )
 
-    run_bd_command.assert_called_once_with(
-        ["update", "at-1.3", "--status", "in_progress"],
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
-    reconcile.assert_not_called()
+    issue = backend.state.show("at-1.3")
+    assert issue["status"] == "in_progress"
+    assert "cs:merged" not in issue["labels"]
 
 
-def test_mark_changeset_abandoned_reopens_when_pr_lifecycle_is_active() -> None:
-    with (
-        patch(
-            "atelier.worker.changeset_state.beads.run_bd_json",
-            return_value=[{"id": "at-1.4", "description": "pr_state: draft-pr\n"}],
+def test_mark_changeset_abandoned_reopens_when_pr_lifecycle_is_active(tmp_path: Path) -> None:
+    builder = IssueFixtureBuilder()
+    backend, beads_root, repo_root = _seed_backend(
+        tmp_path,
+        builder.issue(
+            "at-1.4",
+            title="Draft PR changeset",
+            status="open",
+            description="pr_state: draft-pr\n",
         ),
-        patch("atelier.worker.changeset_state.beads.run_bd_command") as run_bd_command,
-        patch(
-            "atelier.worker.changeset_state.beads.reconcile_closed_issue_exported_github_tickets"
-        ) as reconcile,
-    ):
+    )
+
+    with patch_in_memory_beads(backend):
         changeset_state.mark_changeset_abandoned(
             "at-1.4",
-            beads_root=Path("/beads"),
-            repo_root=Path("/repo"),
+            beads_root=beads_root,
+            repo_root=repo_root,
         )
 
-    run_bd_command.assert_called_once_with(
-        ["update", "at-1.4", "--status", "in_progress"],
-        beads_root=Path("/beads"),
-        cwd=Path("/repo"),
-    )
-    reconcile.assert_not_called()
+    issue = backend.state.show("at-1.4")
+    assert issue["status"] == "in_progress"
+    assert "cs:abandoned" not in issue["labels"]

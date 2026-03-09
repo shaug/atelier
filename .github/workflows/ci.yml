@@ -43,6 +43,8 @@ jobs:
 
       - name: Test
         run: |
+          # Pytest should default to in-memory Beads for planner/worker
+          # unit-service coverage; shell tests keep the real-bd boundary.
           uv run python -m atelier.skill_frontmatter_validation
           uv run pytest
           bash tests/shell/run.sh
