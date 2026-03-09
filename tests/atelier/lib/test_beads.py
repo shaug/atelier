@@ -143,13 +143,11 @@ class _FakeClient:
 
     async def inspect_startup_state(self) -> BeadsStartupState:
         return BeadsStartupState(
-            classification="in_memory_backend",
+            classification="ready",
             migration_eligible=False,
-            active_backend_ready=False,
-            recoverable_legacy_present=False,
-            active_issue_total=None,
-            recoverable_issue_total=None,
-            reason="in_memory_backend_has_no_recoverable_legacy_state",
+            active_backend_ready=True,
+            operator_attention_required=False,
+            reason="backend_ready",
             backend="in-memory",
         )
 
@@ -580,13 +578,11 @@ def test_subprocess_client_inspects_startup_state_from_configured_beads_root(
 
     startup = _run(client.inspect_startup_state())
 
-    assert startup.classification == "healthy_active_backend"
+    assert startup.classification == "ready"
     assert startup.migration_eligible is False
     assert startup.active_backend_ready is True
-    assert startup.recoverable_legacy_present is True
-    assert startup.active_issue_total == 7
-    assert startup.recoverable_issue_total == 7
-    assert startup.active_issue_source == "backend_issue_stats"
-    assert startup.recoverable_issue_source == "recoverable_issue_stats"
+    assert startup.operator_attention_required is False
     assert startup.backend == "dolt"
-    assert startup.diagnostics()[0] == "classification=healthy_active_backend"
+    assert startup.reason == "backend_ready"
+    assert startup.diagnostics()[0] == "classification=ready"
+    assert "active_issue_total" not in startup.model_dump()

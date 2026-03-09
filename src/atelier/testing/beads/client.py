@@ -70,13 +70,11 @@ _TIER_ZERO_CAPABILITIES = (
 
 def _default_startup_state() -> BeadsStartupState:
     return BeadsStartupState(
-        classification="in_memory_backend",
+        classification="ready",
         migration_eligible=False,
-        active_backend_ready=False,
-        recoverable_legacy_present=False,
-        active_issue_total=None,
-        recoverable_issue_total=None,
-        reason="in_memory_backend_has_no_recoverable_legacy_state",
+        active_backend_ready=True,
+        operator_attention_required=False,
+        reason="backend_ready",
         backend="in-memory",
     )
 

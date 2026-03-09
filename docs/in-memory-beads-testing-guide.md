@@ -65,21 +65,21 @@ from atelier.testing.beads import build_in_memory_beads_client
 
 client, _store = build_in_memory_beads_client(
     startup_state=BeadsStartupState(
-        classification="healthy_active_backend",
+        classification="ready",
         migration_eligible=False,
         active_backend_ready=True,
-        recoverable_legacy_present=True,
-        active_issue_total=3,
-        recoverable_issue_total=3,
-        reason="active_issue_total_covers_recoverable_legacy_data",
+        operator_attention_required=False,
+        reason="backend_ready",
         backend="dolt",
-        active_issue_source="backend_issue_stats",
-        recoverable_issue_source="recoverable_issue_stats",
     )
 )
 
 startup = SyncBeadsClient(client).inspect_startup_state()
 ```
+
+Keep typed-client startup assertions focused on semantic readiness, migration,
+and operator-attention signals. Raw counts and probe provenance belong only in
+compatibility fixture tests.
 
 Reserve `build_startup_admin_fixture(...)` for compatibility tests that need to
 assert raw `bd stats`, `migrate`, or `dolt show` command behavior.

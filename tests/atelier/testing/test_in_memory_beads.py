@@ -332,16 +332,12 @@ def test_in_memory_client_supports_representative_planner_flow() -> None:
 
 def test_in_memory_client_reports_configured_startup_state_directly() -> None:
     startup_state = BeadsStartupState(
-        classification="healthy_active_backend",
+        classification="ready",
         migration_eligible=False,
         active_backend_ready=True,
-        recoverable_legacy_present=True,
-        active_issue_total=9,
-        recoverable_issue_total=9,
-        reason="active_issue_total_covers_recoverable_legacy_data",
+        operator_attention_required=False,
+        reason="backend_ready",
         backend="dolt",
-        active_issue_source="backend_issue_stats",
-        recoverable_issue_source="recoverable_issue_stats",
     )
     client, _store = build_in_memory_beads_client(startup_state=startup_state)
     sync = SyncBeadsClient(client)
@@ -349,7 +345,8 @@ def test_in_memory_client_reports_configured_startup_state_directly() -> None:
     reported = sync.inspect_startup_state()
 
     assert reported == startup_state
-    assert reported.diagnostics()[0] == "classification=healthy_active_backend"
+    assert reported.diagnostics()[0] == "classification=ready"
+    assert "active_issue_total" not in reported.model_dump()
 
 
 def test_typed_client_mutates_the_store_directly() -> None:

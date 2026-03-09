@@ -71,7 +71,9 @@ The shared `Beads` protocol exposes issue semantics plus one startup semantic:
 
 - `inspect_startup_state()` returns a typed `BeadsStartupState` describing
   whether the active backend is healthy, whether recoverable legacy data still
-  needs migration, or whether startup needs operator attention.
+  needs migration, or whether startup needs operator attention. The shared model
+  exposes only semantic readiness/recovery flags plus a stable reason; it does
+  not publish issue totals, probe provenance, or storage-artifact details.
 
 Boundary ownership is explicit:
 
