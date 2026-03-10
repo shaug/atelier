@@ -58,6 +58,10 @@ def test_install_workspace_skills_writes_skill_docs() -> None:
         workspace_dir = Path(tmp)
         metadata = skills.install_workspace_skills(workspace_dir)
         assert metadata
+        assert "shared" in metadata
+        assert (
+            workspace_dir / "skills" / "shared" / "scripts" / "projected_bootstrap.py"
+        ).is_file()
         for name in (
             "publish",
             "github",
@@ -211,6 +215,19 @@ def test_sync_project_skills_updates_when_packaged_skill_missing() -> None:
         result = skills.sync_project_skills(project_dir)
         assert result.action == "updated"
         assert stale_skill.exists()
+
+
+def test_sync_project_skills_updates_when_shared_support_tree_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        project_dir = Path(tmp)
+        skills.install_workspace_skills(project_dir)
+        support_tree = project_dir / "skills" / "shared"
+        shutil.rmtree(support_tree)
+
+        result = skills.sync_project_skills(project_dir)
+
+        assert result.action == "updated"
+        assert (support_tree / "scripts" / "projected_bootstrap.py").is_file()
 
 
 def test_sync_project_skills_applies_upgrade_with_yes() -> None:

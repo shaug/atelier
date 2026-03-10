@@ -8,48 +8,29 @@ from pathlib import Path
 
 import pytest
 
+import atelier.skills as packaged_skills
+
+
+def _project_repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
 
 def _skills_source_root() -> Path:
-    return Path(__file__).resolve().parents[3] / "src" / "atelier" / "skills"
+    return _project_repo_root() / "src" / "atelier" / "skills"
 
 
-def _copy_script(
+def _install_projected_script(
     tmp_path: Path,
     *,
     skill_name: str,
     script_name: str,
 ) -> tuple[Path, Path]:
     agent_home = tmp_path / "agent-home"
-    projected_script = _copy_script_into_agent_home(
-        agent_home,
-        skill_name=skill_name,
-        script_name=script_name,
-    )
+    packaged_skills.install_workspace_skills(agent_home)
+    projected_script = agent_home / "skills" / skill_name / "scripts" / script_name
+    assert projected_script.exists()
+    assert (agent_home / "skills" / "shared" / "scripts" / "projected_bootstrap.py").is_file()
     return agent_home, projected_script
-
-
-def _copy_script_into_agent_home(
-    agent_home: Path,
-    *,
-    skill_name: str,
-    script_name: str,
-) -> Path:
-    skills_root = _skills_source_root()
-    source_script = skills_root / skill_name / "scripts" / script_name
-    projected_bootstrap = skills_root / "shared" / "scripts" / "projected_bootstrap.py"
-    projected_bootstrap_target = (
-        agent_home / "skills" / "shared" / "scripts" / "projected_bootstrap.py"
-    )
-    projected_bootstrap_target.parent.mkdir(parents=True, exist_ok=True)
-    projected_bootstrap_target.write_text(
-        projected_bootstrap.read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
-    script_dir = agent_home / "skills" / skill_name / "scripts"
-    script_dir.mkdir(parents=True, exist_ok=True)
-    projected_script = script_dir / script_name
-    projected_script.write_text(source_script.read_text(encoding="utf-8"), encoding="utf-8")
-    return projected_script
 
 
 def _write_fake_module(path: Path, content: str) -> None:
@@ -182,8 +163,34 @@ def test_all_projected_skill_scripts_importing_atelier_use_shared_bootstrap() ->
     assert missing_bootstrap == []
 
 
+@pytest.mark.parametrize(
+    ("skill_name", "script_name"),
+    (
+        ("planner-startup-check", "refresh_overview.py"),
+        ("plan-create-epic", "create_epic.py"),
+        ("plan-changeset-guardrails", "check_guardrails.py"),
+        ("tickets", "auto_export_issue.py"),
+    ),
+)
+def test_synced_agent_home_includes_shared_bootstrap_dependency_path(
+    tmp_path: Path,
+    *,
+    skill_name: str,
+    script_name: str,
+) -> None:
+    agent_home, projected_script = _install_projected_script(
+        tmp_path,
+        skill_name=skill_name,
+        script_name=script_name,
+    )
+    shared_bootstrap = agent_home / "skills" / "shared" / "scripts" / "projected_bootstrap.py"
+
+    assert projected_script.is_file()
+    assert shared_bootstrap.is_file()
+
+
 def test_projected_create_epic_prefers_agent_worktree_source(tmp_path: Path) -> None:
-    agent_home, projected_script = _copy_script(
+    agent_home, projected_script = _install_projected_script(
         tmp_path,
         skill_name="plan-create-epic",
         script_name="create_epic.py",
@@ -212,7 +219,7 @@ def test_projected_create_epic_prefers_agent_worktree_source(tmp_path: Path) -> 
 def test_projected_create_epic_reorders_repo_src_ahead_of_installed_package(
     tmp_path: Path,
 ) -> None:
-    agent_home, projected_script = _copy_script(
+    agent_home, projected_script = _install_projected_script(
         tmp_path,
         skill_name="plan-create-epic",
         script_name="create_epic.py",
@@ -267,7 +274,7 @@ def test_projected_create_epic_reorders_repo_src_ahead_of_installed_package(
 
 
 def test_projected_auto_export_prefers_explicit_repo_dir_source(tmp_path: Path) -> None:
-    agent_home, projected_script = _copy_script(
+    agent_home, projected_script = _install_projected_script(
         tmp_path,
         skill_name="tickets",
         script_name="auto_export_issue.py",
@@ -301,7 +308,7 @@ def test_projected_auto_export_prefers_explicit_repo_dir_source(tmp_path: Path) 
 def test_projected_check_guardrails_reorders_repo_src_ahead_of_installed_package(
     tmp_path: Path,
 ) -> None:
-    agent_home, projected_script = _copy_script(
+    agent_home, projected_script = _install_projected_script(
         tmp_path,
         skill_name="plan-changeset-guardrails",
         script_name="check_guardrails.py",
@@ -383,7 +390,7 @@ def test_projected_check_guardrails_reorders_repo_src_ahead_of_installed_package
 def test_projected_render_tickets_section_reorders_repo_src_ahead_of_installed_package(
     tmp_path: Path,
 ) -> None:
-    agent_home, projected_script = _copy_script(
+    agent_home, projected_script = _install_projected_script(
         tmp_path,
         skill_name="pr-draft",
         script_name="render_tickets_section.py",
@@ -454,7 +461,7 @@ def test_projected_render_tickets_section_reorders_repo_src_ahead_of_installed_p
 def test_projected_refresh_overview_reorders_repo_src_ahead_of_installed_package(
     tmp_path: Path,
 ) -> None:
-    agent_home, projected_script = _copy_script(
+    agent_home, projected_script = _install_projected_script(
         tmp_path,
         skill_name="planner-startup-check",
         script_name="refresh_overview.py",
@@ -592,20 +599,10 @@ def test_projected_refresh_overview_reorders_repo_src_ahead_of_installed_package
 def test_projected_refresh_overview_fails_closed_when_repo_runtime_is_dependency_unhealthy(
     tmp_path: Path,
 ) -> None:
-    agent_home, projected_script = _copy_script(
+    agent_home, projected_script = _install_projected_script(
         tmp_path,
         skill_name="planner-startup-check",
         script_name="refresh_overview.py",
-    )
-    _copy_script_into_agent_home(
-        agent_home,
-        skill_name="plan-create-epic",
-        script_name="create_epic.py",
-    )
-    _copy_script_into_agent_home(
-        agent_home,
-        skill_name="tickets",
-        script_name="auto_export_issue.py",
     )
     repo_root = _fake_repo(
         tmp_path,
@@ -763,7 +760,7 @@ def test_projected_refresh_overview_fails_closed_when_repo_runtime_is_dependency
 def test_projected_check_issue_ownership_fails_closed_when_repo_runtime_is_dependency_unhealthy(
     tmp_path: Path,
 ) -> None:
-    agent_home, projected_script = _copy_script(
+    agent_home, projected_script = _install_projected_script(
         tmp_path,
         skill_name="beads",
         script_name="check_issue_ownership.py",

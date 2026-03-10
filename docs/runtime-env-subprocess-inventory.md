@@ -27,15 +27,23 @@ when launching planner/worker/editor/shell subprocesses.
   bootstrap bugs and installed-tool dependency-health failures are treated as
   separate classes. Helpers fail closed before import-time crashes when the
   selected interpreter cannot import `pydantic_core._pydantic_core`.
-- The recurring cross-project drift after `at-g5a19`, `at-34t6h`, and
-  `at-s6qu4` was that projected helper entrypoints were still using multiple
-  bootstrap contracts. Some scripts re-execed into the repo runtime, while
-  others still imported `atelier` directly or only reordered `sys.path`.
-  Projected skill scripts that import `atelier` now share
+- The recurring cross-project drift after `at-g5a19`, `at-34t6h`, and `at-s6qu4`
+  was that projected helper entrypoints were still using multiple bootstrap
+  contracts. Some scripts re-execed into the repo runtime, while others still
+  imported `atelier` directly or only reordered `sys.path`. Projected skill
+  scripts that import `atelier` now share
   `src/atelier/skills/shared/scripts/projected_bootstrap.py`, so repo-source
-  selection, runtime re-exec, and dependency-health diagnostics stay in
-  lockstep for every helper entrypoint instead of drifting one script at a
-  time.
+  selection, runtime re-exec, and dependency-health diagnostics stay in lockstep
+  for every helper entrypoint instead of drifting one script at a time.
+- `at-e1yzp` fixed the shared bootstrap import contract but missed the synced
+  skill packaging topology: `shared/` was not a user skill, so
+  `sync_project_skills` ignored it even though projected scripts imported
+  `skills/shared/scripts/projected_bootstrap.py` at runtime. The old tests also
+  copied that helper directly into temp agent homes, which bypassed the actual
+  packaged-skill install path and let the gap ship. Synced skill installs now
+  package `shared/` as an internal support tree, and projected-runtime
+  regression tests execute from installed agent-home skills instead of manual
+  fixture copies.
 - Runtime warnings about removed inherited keys are now immediate guidance for
   explicit launch context, not future deprecation notices.
 
