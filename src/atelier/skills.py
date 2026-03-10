@@ -25,6 +25,7 @@ _SKILLS_LOCK_DIRNAME = ".locks"
 _SKILLS_LOCK_FILENAME = "skills-sync.lock"
 _SKILLS_LOCK_GUARD = threading.Lock()
 _SKILLS_LOCAL_LOCKS: dict[str, threading.RLock] = {}
+_PACKAGED_SUPPORT_TREE_NAMES = frozenset({"shared"})
 
 
 @dataclass(frozen=True)
@@ -133,7 +134,7 @@ def _verify_skills_tree(
         return False
     for name, definition in definitions.items():
         skill_dir = skills_dir / name
-        if not (skill_dir / "SKILL.md").is_file():
+        if "SKILL.md" in definition.files and not (skill_dir / "SKILL.md").is_file():
             return False
         if _hash_dir(skill_dir) != definition.digest:
             return False
@@ -183,6 +184,26 @@ def _skills_root() -> Traversable:
     return resources.files("atelier").joinpath("skills")
 
 
+def _load_definition(name: str, root: Traversable) -> SkillDefinition:
+    files = _collect_files(root, Path())
+    digest = _hash_files(files)
+    return SkillDefinition(name=name, files=files, digest=digest)
+
+
+def _packaged_skill_tree_definitions() -> dict[str, SkillDefinition]:
+    """Return packaged skill trees, including internal support directories."""
+    root = _skills_root()
+    definitions: dict[str, SkillDefinition] = {}
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        is_user_skill = entry.joinpath("SKILL.md").is_file()
+        if not is_user_skill and entry.name not in _PACKAGED_SUPPORT_TREE_NAMES:
+            continue
+        definitions[entry.name] = _load_definition(entry.name, entry)
+    return definitions
+
+
 def list_packaged_skills() -> list[str]:
     root = _skills_root()
     if not root.is_dir():
@@ -223,15 +244,12 @@ def load_packaged_skills() -> dict[str, SkillDefinition]:
     root = _skills_root()
     definitions: dict[str, SkillDefinition] = {}
     for name in list_packaged_skills():
-        skill_root = root.joinpath(name)
-        files = _collect_files(skill_root, Path())
-        digest = _hash_files(files)
-        definitions[name] = SkillDefinition(name=name, files=files, digest=digest)
+        definitions[name] = _load_definition(name, root.joinpath(name))
     return definitions
 
 
 def packaged_skill_metadata() -> dict[str, dict[str, str]]:
-    definitions = load_packaged_skills()
+    definitions = _packaged_skill_tree_definitions()
     return {
         name: {"version": __version__, "hash": definition.digest}
         for name, definition in definitions.items()
@@ -252,7 +270,7 @@ def workspace_skill_state(
     workspace_dir: Path,
     stored_metadata: dict[str, object] | None,
 ) -> SkillWorkspaceState:
-    definitions = load_packaged_skills()
+    definitions = _packaged_skill_tree_definitions()
     packaged_meta = packaged_skill_metadata()
     raw_stored = stored_metadata or {}
     stored: dict[str, dict[str, str | None]] = {}
@@ -334,7 +352,7 @@ def workspace_skill_state(
 
 
 def install_workspace_skills(workspace_dir: Path) -> dict[str, dict[str, str]]:
-    definitions = load_packaged_skills()
+    definitions = _packaged_skill_tree_definitions()
     skills_dir = workspace_dir / paths.SKILLS_DIRNAME
     with _skills_write_lock(workspace_dir):
         staging_dir = _stage_skills_tree(workspace_dir, definitions)
