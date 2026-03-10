@@ -1,8 +1,8 @@
 # Beads Adoption Guide
 
 This guide records the current adoption boundary for `atelier.lib.beads` and
-`atelier.testing.beads`. It is intentionally narrow. The goal is to use the
-new Beads APIs where they pay off today without turning them into an accidental
+`atelier.testing.beads`. It is intentionally narrow. The goal is to use the new
+Beads APIs where they pay off today without turning them into an accidental
 store abstraction before `at-njpt4` lands.
 
 ## Decision Rule
@@ -97,10 +97,10 @@ provenance.
 
 ### Default Tests To The In-Memory Backend
 
-Moving planner, worker, and shared client tests onto
-`atelier.testing.beads` removed `bd` binary and store-coupling noise without
-losing meaningful coverage. The remaining real-`bd` tests are the ones that
-still need to prove subprocess wiring or publish behavior.
+Moving planner, worker, and shared client tests onto `atelier.testing.beads`
+removed `bd` binary and store-coupling noise without losing meaningful coverage.
+The remaining real-`bd` tests are the ones that still need to prove subprocess
+wiring or publish behavior.
 
 ### Surface Contract Gaps Explicitly
 
