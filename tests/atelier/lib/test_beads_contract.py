@@ -10,6 +10,7 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTRACT_FIXTURE_PATH = FIXTURES_DIR / "beads_client_contract_v1.json"
 CONTRACT_DOC_PATH = REPO_ROOT / "docs" / "beads-client-contract.md"
+ADOPTION_GUIDE_PATH = REPO_ROOT / "docs" / "beads-adoption-guide.md"
 README_PATH = REPO_ROOT / "README.md"
 
 _OPERATION_METHODS = {
@@ -91,3 +92,15 @@ def test_readme_points_to_the_published_beads_contract() -> None:
 
     assert "`bd` `>= 0.56.1`" in content
     assert "docs/beads-client-contract.md" in content
+
+
+def test_readme_and_docs_publish_the_beads_adoption_boundary() -> None:
+    readme = README_PATH.read_text(encoding="utf-8")
+    guide = ADOPTION_GUIDE_PATH.read_text(encoding="utf-8")
+    contract = CONTRACT_DOC_PATH.read_text(encoding="utf-8")
+
+    assert "docs/beads-adoption-guide.md" in readme
+    assert "atelier.lib.beads" in guide
+    assert "atelier.testing.beads" in guide
+    assert "at-njpt4" in guide
+    assert "docs/beads-adoption-guide.md" in contract

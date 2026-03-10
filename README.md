@@ -80,7 +80,10 @@ Command-specific details live in module docstrings under `src/atelier/commands`.
 The reusable Beads client published under `atelier.lib.beads` supports a bounded
 v1 `bd` surface. See
 [docs/beads-client-contract.md](docs/beads-client-contract.md) for the supported
-command inventory, version/capability policy, and downstream adoption rules.
+command inventory, version/capability policy, and downstream adoption rules. See
+[docs/beads-adoption-guide.md](docs/beads-adoption-guide.md) for the current
+decision boundary between direct low-level Beads usage, in-memory test usage,
+and work that should wait for the future `at-njpt4` store layer.
 
 ## Repo-Local Commit Hooks
 
@@ -739,6 +742,9 @@ Planner and worker unit-service suites should use the in-memory Beads backend
 from `atelier.testing.beads` by default. Keep real-`bd` coverage explicit in
 shell tests and command-integration tests that verify subprocess wiring or
 publish flows. See
+[`docs/beads-adoption-guide.md`](docs/beads-adoption-guide.md) for contributor
+guidance about where direct `atelier.lib.beads` usage is still in bounds, and
+see
 [`docs/in-memory-beads-testing-guide.md`](docs/in-memory-beads-testing-guide.md)
 for the backend-selection rule, an example harness, and current migrated
 coverage.

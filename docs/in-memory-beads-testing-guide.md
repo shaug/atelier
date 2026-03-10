@@ -4,6 +4,10 @@
 unit-service tests. Use the real `bd` CLI only when the test must verify an
 external integration boundary.
 
+For the broader boundary between direct `atelier.lib.beads` adoption, test-only
+adoption, and work that should wait for `at-njpt4`, see
+[`docs/beads-adoption-guide.md`](docs/beads-adoption-guide.md).
+
 ### Backend Selection Rule
 
 - Use `atelier.testing.beads` for planner startup, worker startup, selection,
@@ -99,6 +103,11 @@ The shared-client migration exposed one current Tier 0 gap:
 Keep `dep add` and `dep remove` assertions in explicit subprocess tests until
 the in-memory contract grows that semantic, instead of falling back to broad CLI
 monkeypatching for the whole module.
+
+The same migration also reinforced a boundary rule: if a test only needs issue
+semantics, seed the in-memory backend and keep the suite local. Do not take that
+as permission to move higher-level planner or worker policy modules directly
+onto `Beads`; that layer still belongs to `at-njpt4`.
 
 ### Runtime And Reliability Impact
 

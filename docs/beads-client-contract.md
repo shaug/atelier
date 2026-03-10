@@ -92,6 +92,10 @@ Boundary ownership is explicit:
 Downstream code should treat the protocol plus the shared request/response
 models and typed errors as the integration boundary.
 
+For contributor-facing adoption guidance, anti-guidance, and lessons from the
+initial runtime/test migrations, see
+[`docs/beads-adoption-guide.md`](docs/beads-adoption-guide.md).
+
 ### `at-s1vc`: alternative implementation contract
 
 The in-memory implementation planned in `at-s1vc` should implement the same
@@ -120,6 +124,8 @@ reusable Beads client instead of reconstructing `bd` subprocess glue.
   storage inspection inside `atelier.lib.beads`.
 - Use `SyncBeadsClient` only at synchronous call boundaries; keep the core
   integration async-first where possible.
+- Treat the current direct-client adopters as low-level boundaries only; do not
+  use this contract as a substitute for the higher-level store abstraction.
 
 ## Proof Artifacts
 
