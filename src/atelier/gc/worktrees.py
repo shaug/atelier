@@ -6,15 +6,12 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import beads, git, worktrees
+from .. import beads, changesets, git, worktrees
 from ..io import die, say, select
+from ..lib.beads import SyncBeadsProtocol, build_sync_beads_client
 from .common import (
     branch_integrated_into_target,
     branch_lookup_ref,
-    changeset_review_state,
-    is_merged_closed_changeset,
-    issue_integrated_sha,
-    issue_labels,
     log_debug,
     log_warning,
     normalize_branch,
@@ -42,6 +39,54 @@ class _MappingIssueLookupIndex:
 class _MappingIssueLookup:
     issue: dict[str, object] | None
     source: str
+
+
+def _issue_labels(issue: dict[str, object]) -> set[str]:
+    labels = issue.get("labels")
+    if not isinstance(labels, (list, tuple)):
+        return set()
+    return {str(label) for label in labels if label}
+
+
+def _issue_description(issue: dict[str, object]) -> str | None:
+    description = issue.get("description")
+    if isinstance(description, str):
+        return description
+    return None
+
+
+def _changeset_review_state(issue: dict[str, object]) -> str:
+    review = changesets.parse_review_metadata(_issue_description(issue) or "")
+    return (review.pr_state or "").strip().lower()
+
+
+def _issue_integrated_sha(issue: dict[str, object]) -> str | None:
+    fields = beads.parse_description_fields(_issue_description(issue))
+    integrated = fields.get("changeset.integrated_sha")
+    if isinstance(integrated, str):
+        value = integrated.strip()
+        if value and value.lower() != "null":
+            return value
+    notes = issue.get("notes")
+    if not isinstance(notes, str) or not notes.strip():
+        return None
+    for line in notes.splitlines():
+        if "changeset.integrated_sha" not in line:
+            continue
+        _prefix, _sep, suffix = line.partition(":")
+        value = suffix.strip()
+        if value and value.lower() != "null":
+            return value
+    return None
+
+
+def _is_merged_closed_changeset(issue: dict[str, object]) -> bool:
+    status = str(issue.get("status") or "").strip().lower()
+    if status != "closed":
+        return False
+    if _issue_integrated_sha(issue):
+        return True
+    return _changeset_review_state(issue) == "merged"
 
 
 def _normalize_mapping_worktree_key(*, project_dir: Path, worktree_path: str | None) -> str | None:
@@ -79,7 +124,7 @@ def _issue_metadata_branches(issue: dict[str, object]) -> set[str]:
     metadata_work = normalize_branch(fields.get("changeset.work_branch"))
     if metadata_work:
         branches.add(metadata_work)
-    label_branch = workspace_branch_from_labels(issue_labels(issue))
+    label_branch = workspace_branch_from_labels(_issue_labels(issue))
     if label_branch:
         branches.add(label_branch)
     return branches
@@ -151,8 +196,7 @@ def _resolve_mapping_issue(
     mapping: worktrees.WorktreeMapping,
     index: _MappingIssueLookupIndex,
     project_dir: Path,
-    beads_root: Path,
-    repo_root: Path,
+    client: SyncBeadsProtocol,
 ) -> _MappingIssueLookup:
     mapping_epic_id = mapping.epic_id.strip()
     if not mapping_epic_id:
@@ -212,12 +256,14 @@ def _resolve_mapping_issue(
 
     issue = try_show_issue(
         mapping_epic_id,
-        beads_root=beads_root,
-        cwd=repo_root,
+        client=client,
         context=f"worktree mapping {mapping.worktree_path}",
     )
     if issue is not None:
-        return _MappingIssueLookup(issue=issue, source="direct-bd-show")
+        return _MappingIssueLookup(
+            issue=issue.model_dump(mode="json", by_alias=True, exclude_none=True),
+            source="direct-bd-show",
+        )
     return _MappingIssueLookup(issue=None, source="unresolved")
 
 
@@ -242,6 +288,7 @@ def collect_resolved_epic_artifacts(
         beads_root=beads_root,
         repo_root=repo_root,
     )
+    client = build_sync_beads_client(beads_root=beads_root, cwd=repo_root)
     default_branch = git.git_default_branch(repo_root, git_path=git_path) or ""
     for path in meta_dir.glob("*.json"):
         mapping = worktrees.load_mapping(path)
@@ -254,8 +301,7 @@ def collect_resolved_epic_artifacts(
             mapping=mapping,
             index=lookup_index,
             project_dir=project_dir,
-            beads_root=beads_root,
-            repo_root=repo_root,
+            client=client,
         )
         epic = lookup.issue
         if not epic:
@@ -265,18 +311,17 @@ def collect_resolved_epic_artifacts(
         status = str(epic.get("status") or "").strip().lower()
         if status not in {"closed", "done"}:
             continue
-        labels = issue_labels(epic)
+        labels = _issue_labels(epic)
         cleanup_override_labels = _cleanup_override_labels(labels)
         merged_markers: list[str] = []
         if "cs:merged" in labels:
             merged_markers.append("label cs:merged")
-        review_state = changeset_review_state(epic)
+        review_state = _changeset_review_state(epic)
         if review_state == "merged":
             merged_markers.append("pr_state=merged")
-        has_integrated_sha = issue_integrated_sha(epic) is not None
+        has_integrated_sha = _issue_integrated_sha(epic) is not None
 
-        description = epic.get("description")
-        fields = beads.parse_description_fields(description if isinstance(description, str) else "")
+        fields = beads.parse_description_fields(_issue_description(epic))
         parent_branch = normalize_branch(fields.get("workspace.parent_branch"))
         if not parent_branch:
             parent_branch = normalize_branch(fields.get("changeset.parent_branch"))
@@ -489,7 +534,7 @@ def collect_closed_workspace_branches_without_mapping(
         status = str(issue.get("status") or "").strip().lower()
         if status not in {"closed", "done"}:
             continue
-        if not is_merged_closed_changeset(issue):
+        if not _is_merged_closed_changeset(issue):
             continue
         issue_key = issue_id.strip()
         mapping_path = worktrees.mapping_path(project_dir, issue_key)
@@ -507,7 +552,7 @@ def collect_closed_workspace_branches_without_mapping(
             else:
                 worktree_skip_reason = "conventional changeset worktree path missing"
 
-        labels = issue_labels(issue)
+        labels = _issue_labels(issue)
         workspace_branch = workspace_branch_from_labels(labels)
         description = issue.get("description")
         fields = beads.parse_description_fields(description if isinstance(description, str) else "")
@@ -647,6 +692,7 @@ def collect_orphan_worktrees(
         beads_root=beads_root,
         repo_root=repo_root,
     )
+    client = build_sync_beads_client(beads_root=beads_root, cwd=repo_root)
     for path in meta_dir.glob("*.json"):
         mapping = worktrees.load_mapping(path)
         if not mapping:
@@ -658,8 +704,7 @@ def collect_orphan_worktrees(
             mapping=mapping,
             index=lookup_index,
             project_dir=project_dir,
-            beads_root=beads_root,
-            repo_root=repo_root,
+            client=client,
         )
         if lookup.issue is not None:
             continue

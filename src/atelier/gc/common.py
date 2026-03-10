@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from pathlib import Path
 
-from .. import beads, changesets, git, lifecycle
 from .. import exec as exec_util
+from .. import git
 from .. import log as atelier_log
+from ..lib.beads import (
+    BeadError,
+    IssueRecord,
+    ShowIssueRequest,
+    SyncBeadsProtocol,
+)
 
 
 def log_debug(message: str) -> None:
@@ -52,20 +57,6 @@ def parse_rfc3339(value: str | None) -> dt.datetime | None:
     return parsed
 
 
-def issue_labels(issue: dict[str, object]) -> set[str]:
-    labels = issue.get("labels")
-    if not isinstance(labels, list):
-        return set()
-    return {str(label) for label in labels if label}
-
-
-def issue_sort_key(issue: dict[str, object]) -> str:
-    issue_id = issue.get("id")
-    if isinstance(issue_id, str):
-        return issue_id
-    return ""
-
-
 def normalize_branch(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -78,10 +69,9 @@ def normalize_branch(value: object) -> str | None:
 def try_show_issue(
     issue_id: object,
     *,
-    beads_root: Path,
-    cwd: Path,
+    client: SyncBeadsProtocol,
     context: str | None = None,
-) -> dict[str, object] | None:
+) -> IssueRecord | None:
     if not isinstance(issue_id, str):
         return None
     cleaned = issue_id.strip()
@@ -94,42 +84,17 @@ def try_show_issue(
             f"{issue_id!r}{detail}; treating metadata as unresolved"
         )
         return None
-    result = beads.run_bd_command(
-        ["show", cleaned, "--json"],
-        beads_root=beads_root,
-        cwd=cwd,
-        allow_failure=True,
-    )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
+    try:
+        record = client.show(ShowIssueRequest(issue_id=cleaned))
+    except BeadError as exc:
+        detail = " ".join(str(exc).split())
         if not detail:
-            detail = f"bd show exited with code {result.returncode}"
+            detail = "bd show failed"
         log_warning(
             f"gc issue lookup failed for {cleaned!r}: {detail}; treating mapping as unresolved"
         )
         return None
-    raw = result.stdout.strip() if result.stdout else ""
-    if not raw:
-        return None
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        log_warning(f"gc issue lookup returned invalid JSON for {cleaned!r}; skipping")
-        return None
-    if isinstance(payload, dict):
-        issues: list[dict[str, object]] = [payload]
-    elif isinstance(payload, list):
-        issues = [entry for entry in payload if isinstance(entry, dict)]
-    else:
-        return None
-    try:
-        records = beads.parse_issue_records(issues, source="gc.try_show_issue")
-    except ValueError:
-        log_warning(f"gc issue lookup returned invalid issue payload for {cleaned!r}; skipping")
-        return None
-    if records:
-        return records[0].raw
-    return None
+    return record
 
 
 def branch_lookup_ref(
@@ -165,41 +130,6 @@ def branch_integrated_into_target(
         if fully_applied is True:
             return True
     return False
-
-
-def changeset_review_state(issue: dict[str, object]) -> str:
-    description = issue.get("description")
-    review = changesets.parse_review_metadata(description if isinstance(description, str) else "")
-    return (review.pr_state or "").strip().lower()
-
-
-def issue_integrated_sha(issue: dict[str, object]) -> str | None:
-    description = issue.get("description")
-    fields = beads.parse_description_fields(description if isinstance(description, str) else "")
-    integrated = fields.get("changeset.integrated_sha")
-    if isinstance(integrated, str):
-        value = integrated.strip()
-        if value and value.lower() != "null":
-            return value
-    notes = issue.get("notes")
-    if not isinstance(notes, str) or not notes.strip():
-        return None
-    for line in notes.splitlines():
-        if "changeset.integrated_sha" not in line:
-            continue
-        _prefix, _sep, suffix = line.partition(":")
-        value = suffix.strip()
-        if value and value.lower() != "null":
-            return value
-    return None
-
-
-def is_merged_closed_changeset(issue: dict[str, object]) -> bool:
-    if lifecycle.canonical_lifecycle_status(issue.get("status")) != "closed":
-        return False
-    if issue_integrated_sha(issue):
-        return True
-    return changeset_review_state(issue) == "merged"
 
 
 def workspace_branch_from_labels(labels: set[str]) -> str | None:

@@ -1,12 +1,12 @@
 """Tests for gc.worktrees."""
 
-import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 import atelier.gc.worktrees as gc_worktrees
 import atelier.worktrees as worktrees
+from atelier.lib.beads import IssueRecord
 
 
 def test_collect_resolved_epic_artifacts_prunes_worktrees_and_branches() -> None:
@@ -54,7 +54,10 @@ def test_collect_resolved_epic_artifacts_prunes_worktrees_and_branches() -> None
         with (
             patch("atelier.beads.list_epics", return_value=[epic_issue]),
             patch("atelier.beads.list_descendant_changesets", return_value=[]),
-            patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
+            patch(
+                "atelier.gc.worktrees.try_show_issue",
+                return_value=IssueRecord.model_validate(epic_issue),
+            ),
             patch(
                 "atelier.beads.epic_changeset_summary",
                 side_effect=AssertionError("summary should not gate closed epic cleanup"),
@@ -134,7 +137,10 @@ def test_collect_resolved_epic_artifacts_skips_when_not_integrated() -> None:
         with (
             patch("atelier.beads.list_epics", return_value=[epic_issue]),
             patch("atelier.beads.list_descendant_changesets", return_value=[]),
-            patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
+            patch(
+                "atelier.gc.worktrees.try_show_issue",
+                return_value=IssueRecord.model_validate(epic_issue),
+            ),
             patch(
                 "atelier.beads.epic_changeset_summary",
                 side_effect=AssertionError("summary should not gate closed epic cleanup"),
@@ -204,7 +210,10 @@ def test_collect_resolved_epic_artifacts_allows_explicit_abandoned_cleanup() -> 
         with (
             patch("atelier.beads.list_epics", return_value=[epic_issue]),
             patch("atelier.beads.list_descendant_changesets", return_value=[]),
-            patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
+            patch(
+                "atelier.gc.worktrees.try_show_issue",
+                return_value=IssueRecord.model_validate(epic_issue),
+            ),
             patch("atelier.git.git_default_branch", return_value="main"),
             patch(
                 "atelier.git.git_ref_exists",
@@ -274,7 +283,10 @@ def test_collect_resolved_epic_artifacts_reports_drift_for_closed_merged_state()
         with (
             patch("atelier.beads.list_epics", return_value=[epic_issue]),
             patch("atelier.beads.list_descendant_changesets", return_value=[]),
-            patch("atelier.gc.worktrees.try_show_issue", return_value=epic_issue),
+            patch(
+                "atelier.gc.worktrees.try_show_issue",
+                return_value=IssueRecord.model_validate(epic_issue),
+            ),
             patch("atelier.git.git_default_branch", return_value="main"),
             patch(
                 "atelier.git.git_ref_exists",
@@ -347,40 +359,17 @@ def test_collect_resolved_epic_artifacts_continues_when_mapping_epic_missing() -
             "description": "workspace.parent_branch: main\n",
         }
 
-        def fake_bd_show(
-            args: list[str],
-            *,
-            beads_root: Path,
-            cwd: Path,
-            allow_failure: bool = False,
-        ) -> subprocess.CompletedProcess[str]:
-            assert beads_root == Path("/beads")
-            assert cwd == repo_root
-            assert allow_failure is True
-            assert args[0] == "show"
-            if args[1] == missing_epic_id:
-                return subprocess.CompletedProcess(
-                    args=["bd", *args],
-                    returncode=1,
-                    stdout='{"error":"no issues found matching the provided IDs"}',
-                    stderr='Error fetching at-missing: no issue found matching "at-missing"',
-                )
-            if args[1] == closed_epic_id:
-                return subprocess.CompletedProcess(
-                    args=["bd", *args],
-                    returncode=0,
-                    stdout=(
-                        '{"id":"at-closed","status":"closed","description":"'
-                        'workspace.parent_branch: main\\n"}'
-                    ),
-                    stderr="",
-                )
-            raise AssertionError(f"unexpected issue lookup: {args[1]}")
-
         with (
             patch("atelier.beads.list_epics", return_value=[closed_epic_issue]),
             patch("atelier.beads.list_descendant_changesets", return_value=[]),
-            patch("atelier.gc.common.beads.run_bd_command", side_effect=fake_bd_show),
+            patch(
+                "atelier.gc.worktrees.try_show_issue",
+                side_effect=lambda issue_id, **_kwargs: (
+                    IssueRecord.model_validate(closed_epic_issue)
+                    if issue_id == closed_epic_id
+                    else None
+                ),
+            ),
             patch("atelier.git.git_default_branch", return_value="main"),
             patch(
                 "atelier.git.git_ref_exists",

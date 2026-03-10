@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 from .. import beads, messages
-from .common import coerce_float, parse_rfc3339
+from ..lib.beads import (
+    CloseIssueRequest,
+    ListIssuesRequest,
+    UpdateIssueRequest,
+    build_sync_beads_client,
+)
+from .common import (
+    coerce_float,
+    parse_rfc3339,
+    try_show_issue,
+)
 from .models import GcAction
 
 
@@ -29,16 +38,15 @@ def collect_message_claims(
     now = dt.datetime.now(tz=dt.timezone.utc)
     stale_delta = dt.timedelta(hours=stale_hours)
     actions: list[GcAction] = []
-    issues = beads.run_bd_json(
-        ["list", "--label", beads.issue_label("message", beads_root=beads_root)],
-        beads_root=beads_root,
-        cwd=repo_root,
+    client = build_sync_beads_client(beads_root=beads_root, cwd=repo_root)
+    issues = client.list(
+        ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),))
     )
     for issue in issues:
-        issue_id = issue.get("id")
+        issue_id = issue.id
         if not isinstance(issue_id, str) or not issue_id:
             continue
-        description = issue.get("description")
+        description = issue.description
         if not isinstance(description, str):
             continue
         payload = messages.parse_message(description)
@@ -50,7 +58,7 @@ def collect_message_claims(
         if claimed_time is None or now - claimed_time <= stale_delta:
             continue
         description_text = f"Release stale queue claim for message {issue_id}"
-        expected_assignee = _clean_optional_string(issue.get("assignee"))
+        expected_assignee = _clean_optional_string(issue.assignee)
         expected_claimed_by = _clean_optional_string(payload.metadata.get("claimed_by"))
         expected_claimed_at = _clean_optional_string(payload.metadata.get("claimed_at"))
 
@@ -60,14 +68,13 @@ def collect_message_claims(
             stale_claimed_by: str | None = expected_claimed_by,
             stale_claimed_at: str | None = expected_claimed_at,
         ) -> None:
-            current = beads.run_bd_json(["show", message_id], beads_root=beads_root, cwd=repo_root)
-            if not current:
+            current_issue = try_show_issue(message_id, client=client)
+            if current_issue is None:
                 return
-            issue_payload = current[0]
-            current_assignee = _clean_optional_string(issue_payload.get("assignee"))
+            current_assignee = _clean_optional_string(current_issue.assignee)
             if current_assignee != stale_assignee:
                 return
-            description = issue_payload.get("description")
+            description = current_issue.description
             if not isinstance(description, str):
                 return
             current_payload = messages.parse_message(description)
@@ -75,28 +82,18 @@ def collect_message_claims(
             current_claimed_at = _clean_optional_string(current_payload.metadata.get("claimed_at"))
             if current_claimed_by != stale_claimed_by or current_claimed_at != stale_claimed_at:
                 return
-            if current_assignee:
-                beads.run_bd_command(
-                    ["update", message_id, "--assignee", "", "--status", "open"],
-                    beads_root=beads_root,
-                    cwd=repo_root,
-                    allow_failure=True,
-                )
             metadata = dict(current_payload.metadata)
             metadata["claimed_by"] = None
             metadata["claimed_at"] = None
             updated = messages.render_message(metadata, current_payload.body)
-            with NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
-                handle.write(updated)
-                temp_path = handle.name
-            try:
-                beads.run_bd_command(
-                    ["update", message_id, "--body-file", temp_path],
-                    beads_root=beads_root,
-                    cwd=repo_root,
+            client.update(
+                UpdateIssueRequest(
+                    issue_id=message_id,
+                    assignee="" if current_assignee else None,
+                    status="open" if current_assignee else None,
+                    description=updated,
                 )
-            finally:
-                Path(temp_path).unlink(missing_ok=True)
+            )
 
         actions.append(GcAction(description=description_text, apply=_apply_release))
     return actions
@@ -111,16 +108,15 @@ def collect_message_retention(
 
     now = dt.datetime.now(tz=dt.timezone.utc)
     actions: list[GcAction] = []
-    issues = beads.run_bd_json(
-        ["list", "--label", beads.issue_label("message", beads_root=beads_root)],
-        beads_root=beads_root,
-        cwd=repo_root,
+    client = build_sync_beads_client(beads_root=beads_root, cwd=repo_root)
+    issues = client.list(
+        ListIssuesRequest(labels=(beads.issue_label("message", beads_root=beads_root),))
     )
     for issue in issues:
-        issue_id = issue.get("id")
+        issue_id = issue.id
         if not isinstance(issue_id, str) or not issue_id:
             continue
-        description = issue.get("description")
+        description = issue.description
         if not isinstance(description, str):
             continue
         payload = messages.parse_message(description)
@@ -133,7 +129,7 @@ def collect_message_retention(
         if isinstance(expires_at, str):
             expiry_time = parse_rfc3339(expires_at)
         if expiry_time is None and retention_days is not None:
-            created_at_raw = issue.get("created_at")
+            created_at_raw = issue.extra_fields.get("created_at")
             created_at = parse_rfc3339(created_at_raw if isinstance(created_at_raw, str) else None)
             if created_at is not None:
                 expiry_time = created_at + dt.timedelta(days=retention_days)
@@ -142,12 +138,7 @@ def collect_message_retention(
         description_text = f"Close expired channel message {issue_id}"
 
         def _apply_close(message_id: str = issue_id) -> None:
-            beads.run_bd_command(
-                ["close", message_id],
-                beads_root=beads_root,
-                cwd=repo_root,
-                allow_failure=True,
-            )
+            client.close(CloseIssueRequest(issue_id=message_id))
 
         actions.append(GcAction(description=description_text, apply=_apply_close))
     return actions

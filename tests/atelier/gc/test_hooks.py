@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import atelier.gc.hooks as gc_hooks
+from atelier.lib.beads import IssueRecord
 
 
 def test_collect_hooks_returns_empty_when_no_agents() -> None:
@@ -45,7 +46,7 @@ def test_collect_hooks_releases_stale_hook_when_heartbeat_missing() -> None:
         patch("atelier.beads.get_agent_hook", return_value="epic-1"),
         patch(
             "atelier.gc.hooks.try_show_issue",
-            return_value=epic,
+            return_value=IssueRecord.model_validate(epic),
         ),
         patch(
             "atelier.gc.hooks.release_epic",
@@ -119,7 +120,7 @@ def test_collect_hooks_scans_all_agent_pages_before_releasing_stale_hooks() -> N
         ),
         patch(
             "atelier.gc.hooks.try_show_issue",
-            side_effect=lambda issue_id, **_kwargs: {"id": issue_id},
+            side_effect=lambda issue_id, **_kwargs: IssueRecord.model_validate({"id": issue_id}),
         ),
     ):
         actions = gc_hooks.collect_hooks(

@@ -39,8 +39,10 @@ from atelier.lib.beads import (
     SubprocessBeadsTransport,
     SupportedOperation,
     SyncBeadsClient,
+    SyncBeadsProtocol,
     UnsupportedVersionError,
     UpdateIssueRequest,
+    build_sync_beads_client,
     decode_help_output,
     decode_version_output,
 )
@@ -74,6 +76,12 @@ def test_issue_record_rejects_known_field_type_mismatch() -> None:
 def test_update_request_requires_a_field_change() -> None:
     with pytest.raises(ValidationError, match="at least one field change"):
         UpdateIssueRequest(issue_id="at-1")
+
+
+def test_update_request_allows_empty_assignee_to_clear_assignment() -> None:
+    request = UpdateIssueRequest(issue_id="at-1", assignee="")
+
+    assert request.assignee == ""
 
 
 def test_compatibility_policy_rejects_unsupported_version() -> None:
@@ -489,6 +497,152 @@ def test_subprocess_client_decodes_dependency_mutations() -> None:
     assert removed.dependencies == ()
 
 
+def test_subprocess_client_supports_global_args() -> None:
+    responses = _probe_responses()
+    responses.update(
+        {
+            (
+                "bd",
+                "--readonly",
+                "--version",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "--version"),
+                returncode=0,
+                stdout="bd version 0.56.1",
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "show",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "show", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "list",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "list", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "create",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "create", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "update",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "update", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "close",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "close", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "dep",
+                "add",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "dep", "add", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "dep",
+                "remove",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "dep", "remove", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "ready",
+                "--help",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "ready", "--help"),
+                returncode=0,
+                stdout=_HELP_OUTPUT,
+                stderr="",
+            ),
+            (
+                "bd",
+                "--readonly",
+                "show",
+                "at-1",
+                "--json",
+            ): BeadsCommandResult(
+                argv=("bd", "--readonly", "show", "at-1", "--json"),
+                returncode=0,
+                stdout='[{"id":"at-1","issue_type":"task"}]',
+                stderr="",
+            ),
+        }
+    )
+    client = SubprocessBeadsClient(
+        transport=ScriptedBeadsTransport(responses),
+        global_args=("--readonly",),
+    )
+
+    issue = _run(client.show(ShowIssueRequest(issue_id="at-1")))
+
+    assert issue.id == "at-1"
+
+
+def test_subprocess_client_update_supports_clearing_assignee() -> None:
+    responses = _probe_responses()
+    responses.update(
+        [
+            _result(
+                ("bd", "update", "at-3", "--json", "--assignee", ""),
+                stdout='[{"id":"at-3","status":"open","issue_type":"task"}]',
+            ),
+        ]
+    )
+    client = SubprocessBeadsClient(transport=ScriptedBeadsTransport(responses))
+
+    updated = _run(client.update(UpdateIssueRequest(issue_id="at-3", assignee="")))
+
+    assert updated.id == "at-3"
+    assert updated.status == "open"
+
+
 @pytest.mark.parametrize(
     ("argv", "stdout", "returncode", "stderr", "match", "client_request", "error_type"),
     [
@@ -636,6 +790,38 @@ def test_sync_beads_client_wraps_async_client() -> None:
 
     assert environment.version == SemanticVersion(major=0, minor=56, patch=1)
     assert issue.id == "at-1"
+    assert isinstance(sync_client, SyncBeadsProtocol)
+
+
+def test_build_sync_beads_client_sets_beads_root_and_readonly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: dict[str, object] = {}
+
+    class _FakeSyncClient:
+        def __init__(self, async_client: object) -> None:
+            created["async_client"] = async_client
+
+    def fake_subprocess_client(**kwargs: object) -> object:
+        created["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr("atelier.lib.beads.sync.SubprocessBeadsClient", fake_subprocess_client)
+    monkeypatch.setattr("atelier.lib.beads.sync.SyncBeadsClient", _FakeSyncClient)
+
+    client = build_sync_beads_client(
+        cwd=Path("/repo"),
+        beads_root=Path("/repo/.beads"),
+        readonly=True,
+    )
+
+    assert isinstance(client, _FakeSyncClient)
+    assert created["kwargs"] == {
+        "cwd": Path("/repo"),
+        "beads_root": Path("/repo/.beads"),
+        "env": {"BEADS_DIR": "/repo/.beads"},
+        "global_args": ("--readonly",),
+    }
 
 
 def test_subprocess_client_inspects_startup_state_from_configured_beads_root(

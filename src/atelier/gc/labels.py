@@ -5,19 +5,29 @@ from __future__ import annotations
 from pathlib import Path
 
 from .. import beads, lifecycle
-from .common import (
-    issue_labels,
-    issue_sort_key,
-    normalize_branch,
-)
+from .common import normalize_branch
 from .models import GcAction
+
+
+def _issue_labels(issue: dict[str, object]) -> set[str]:
+    labels = issue.get("labels")
+    if not isinstance(labels, (list, tuple)):
+        return set()
+    return {str(label) for label in labels if label}
+
+
+def _issue_sort_key(issue: dict[str, object]) -> str:
+    issue_id = issue.get("id")
+    if isinstance(issue_id, str):
+        return issue_id
+    return ""
 
 
 def _resolve_changeset_status_for_migration(
     issue: dict[str, object],
 ) -> tuple[str | None, tuple[str, ...]]:
     if not lifecycle.is_work_issue(
-        labels=issue_labels(issue),
+        labels=_issue_labels(issue),
         issue_type=lifecycle.issue_payload_type(issue),
     ):
         return None, ()
@@ -43,7 +53,7 @@ def _resolve_epic_status_for_migration(
     *,
     beads_root: Path,
 ) -> tuple[str | None, tuple[str, ...]]:
-    labels = issue_labels(issue)
+    labels = _issue_labels(issue)
     if not beads.has_issue_label(labels, "epic", beads_root=beads_root):
         return None, ()
     current_status = lifecycle.normalize_status_value(issue.get("status"))
@@ -74,7 +84,7 @@ def collect_normalize_changeset_labels(
         cwd=repo_root,
         include_closed=True,
     )
-    for issue in sorted(issues, key=issue_sort_key):
+    for issue in sorted(issues, key=_issue_sort_key):
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id.strip():
             continue
@@ -121,7 +131,7 @@ def collect_remove_deprecated_label(
         beads_root=beads_root,
         cwd=repo_root,
     )
-    for issue in sorted(issues, key=issue_sort_key):
+    for issue in sorted(issues, key=_issue_sort_key):
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id.strip():
             continue
@@ -154,7 +164,7 @@ def collect_normalize_epic_labels(
 ) -> list[GcAction]:
     actions: list[GcAction] = []
     issues = beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=True)
-    for issue in sorted(issues, key=issue_sort_key):
+    for issue in sorted(issues, key=_issue_sort_key):
         issue_id = issue.get("id")
         if not isinstance(issue_id, str) or not issue_id.strip():
             continue
