@@ -16,8 +16,9 @@ Use `atelier.lib.beads` directly when all of the following are true:
 - The seam is still close to raw issue semantics, not planner/worker business
   policy.
 
-Use `atelier.testing.beads` by default when a test exercises Beads semantics
-without needing a real `bd` subprocess.
+Use `atelier.testing.beads` when the code under test already depends on
+`atelier.lib.beads` and the test only needs Beads semantics, not a real `bd`
+subprocess.
 
 Wait for `at-njpt4` when the work wants to define or consume an Atelier-owned
 store concept rather than a low-level Beads boundary.
@@ -29,7 +30,8 @@ store concept rather than a low-level Beads boundary.
   semantics.
 - Low-level GC helpers that read or mutate Beads issues near the subprocess
   boundary.
-- Tests that need realistic Beads issue payloads but not real CLI transport.
+- Tests around those adopted low-level seams that need realistic Beads issue
+  payloads but not real CLI transport.
 
 ## Where Direct Client Use Is Out Of Bounds
 
@@ -46,14 +48,17 @@ store concept rather than a low-level Beads boundary.
 
 Prefer `atelier.testing.beads` for:
 
-- planner startup and worker runtime unit-service suites
 - shared typed-client contract coverage
 - low-level semantic tests that seed issue payloads directly
+- planner or worker tests only after the production seam under test already uses
+  `atelier.lib.beads`
 
 Keep real-`bd` coverage explicit for:
 
 - shell tests
 - command-integration tests that verify subprocess wiring
+- planner or worker suites whose production path still shells out through legacy
+  helpers
 - publish flows
 - version/help probing
 - dependency mutation coverage until the in-memory backend grows that semantic
@@ -95,12 +100,13 @@ Callers should depend on semantic readiness, migration, and operator-attention
 signals rather than raw `bd stats` output, Dolt marker layouts, or probe
 provenance.
 
-### Default Tests To The In-Memory Backend
+### Default The Adopted Beads Boundary To The In-Memory Backend
 
-Moving planner, worker, and shared client tests onto `atelier.testing.beads`
-removed `bd` binary and store-coupling noise without losing meaningful coverage.
-The remaining real-`bd` tests are the ones that still need to prove subprocess
-wiring or publish behavior.
+Once a test exercises code that already depends on `atelier.lib.beads`, moving
+that suite onto `atelier.testing.beads` removes `bd` binary and store-coupling
+noise without losing meaningful coverage. The remaining real-`bd` tests are the
+ones that still need to prove subprocess wiring, publish behavior, or
+higher-level planner/worker paths that have not crossed that boundary yet.
 
 ### Surface Contract Gaps Explicitly
 

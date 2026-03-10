@@ -1,8 +1,9 @@
 ## In-memory Beads Testing Guide
 
-`atelier.testing.beads` is the default backend for planner and worker
-unit-service tests. Use the real `bd` CLI only when the test must verify an
-external integration boundary.
+`atelier.testing.beads` is the default backend for tests that exercise code
+already written against `atelier.lib.beads`. Use the real `bd` CLI when the test
+must verify an external integration boundary or production code that still
+crosses the legacy subprocess seam directly.
 
 For the broader boundary between direct `atelier.lib.beads` adoption, test-only
 adoption, and work that should wait for `at-njpt4`, see
@@ -10,18 +11,20 @@ adoption, and work that should wait for `at-njpt4`, see
 
 ### Backend Selection Rule
 
-- Use `atelier.testing.beads` for planner startup, worker startup, selection,
-  and finalization logic that only depends on Beads semantics.
+- Use `atelier.testing.beads` when the code under test already depends on
+  `atelier.lib.beads` and the assertions only need Beads semantics.
 - Keep real-`bd` coverage for shell and command-integration tests that must
   prove subprocess wiring, repository bootstrap behavior, or publish scripts.
+- Keep real-`bd` coverage for planner/worker suites whose production path has
+  not adopted the shared Beads client yet.
 - Fail closed when a test needs a Beads semantic the in-memory backend does not
   implement yet. Extend the backend contract instead of reintroducing ad hoc CLI
   monkeypatching.
 
 ### Current Migration Boundary
 
-The following planner-worker suites now run against the in-memory backend by
-default:
+The following suites are the current adopted exceptions because their code under
+test already crosses the shared Beads boundary:
 
 - `tests/atelier/test_planner_startup_check.py`
 - `tests/atelier/worker/test_changeset_state.py`
@@ -105,9 +108,10 @@ the in-memory contract grows that semantic, instead of falling back to broad CLI
 monkeypatching for the whole module.
 
 The same migration also reinforced a boundary rule: if a test only needs issue
-semantics, seed the in-memory backend and keep the suite local. Do not take that
-as permission to move higher-level planner or worker policy modules directly
-onto `Beads`; that layer still belongs to `at-njpt4`.
+semantics, seed the in-memory backend only after the code under test already
+depends on `atelier.lib.beads`, then keep the suite local. Do not take that as
+permission to move higher-level planner or worker policy modules directly onto
+`Beads`; that layer still belongs to `at-njpt4`.
 
 ### Runtime And Reliability Impact
 

@@ -12,6 +12,7 @@ CONTRACT_FIXTURE_PATH = FIXTURES_DIR / "beads_client_contract_v1.json"
 CONTRACT_DOC_PATH = REPO_ROOT / "docs" / "beads-client-contract.md"
 ADOPTION_GUIDE_PATH = REPO_ROOT / "docs" / "beads-adoption-guide.md"
 README_PATH = REPO_ROOT / "README.md"
+TESTING_GUIDE_PATH = REPO_ROOT / "docs" / "in-memory-beads-testing-guide.md"
 
 _OPERATION_METHODS = {
     SupportedOperation.INSPECT_ENVIRONMENT: "inspect_environment",
@@ -98,9 +99,12 @@ def test_readme_and_docs_publish_the_beads_adoption_boundary() -> None:
     readme = README_PATH.read_text(encoding="utf-8")
     guide = ADOPTION_GUIDE_PATH.read_text(encoding="utf-8")
     contract = CONTRACT_DOC_PATH.read_text(encoding="utf-8")
+    testing_guide = TESTING_GUIDE_PATH.read_text(encoding="utf-8")
 
     assert "docs/beads-adoption-guide.md" in readme
     assert "atelier.lib.beads" in guide
     assert "atelier.testing.beads" in guide
     assert "at-njpt4" in guide
+    assert "already depends on\n`atelier.lib.beads`" in guide
+    assert "already written against `atelier.lib.beads`" in testing_guide
     assert "docs/beads-adoption-guide.md" in contract
