@@ -232,12 +232,16 @@ class FakeStartupService:
         mode: str,
         issues: list[dict[str, object]],
         dry_run: bool,
+        is_actionable: Callable[[str], bool],
+        review_followup_enabled: bool,
     ) -> None:
         self._send_needs_decision(
             agent_id=agent_id,
             mode=mode,
             issues=issues,
             dry_run=dry_run,
+            is_actionable=is_actionable,
+            review_followup_enabled=review_followup_enabled,
         )
 
     def dry_run_log(self, message: str) -> None:
@@ -1109,6 +1113,34 @@ def test_run_startup_contract_selects_stale_reclaimable_review_feedback() -> Non
     assert result.epic_id == "at-stale"
     assert result.changeset_id == "at-stale.1"
     assert result.reassign_from == "atelier/worker/codex/p099"
+
+
+def test_run_startup_contract_resumes_unassigned_draft_pr_review_followup() -> None:
+    feedback = ReviewFeedbackSelection(
+        epic_id="at-v1se7",
+        changeset_id="at-v1se7.1",
+        feedback_at="2026-03-14T23:30:00Z",
+    )
+
+    result = _run_startup(
+        branch_pr=True,
+        repo_slug="org/repo",
+        list_epics=lambda: [
+            {
+                "id": "at-v1se7",
+                "status": "open",
+                "labels": ["at:epic"],
+                "assignee": None,
+                "created_at": "2026-03-14T23:00:00Z",
+            }
+        ],
+        next_changeset=lambda **_kwargs: None,
+        select_review_feedback_changeset=lambda **_kwargs: feedback,
+    )
+
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "at-v1se7"
+    assert result.changeset_id == "at-v1se7.1"
 
 
 def test_run_startup_contract_skips_unclaimable_global_review_feedback() -> None:

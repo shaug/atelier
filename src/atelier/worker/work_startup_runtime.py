@@ -313,6 +313,8 @@ def _no_eligible_epics_summary(
     mode: str,
     beads_root: Path,
     issues: list[dict[str, object]],
+    is_actionable: Callable[[str], bool],
+    review_followup_enabled: bool,
 ) -> list[str]:
     """Build a concise no-eligible-epics startup summary.
 
@@ -320,6 +322,10 @@ def _no_eligible_epics_summary(
         agent_id: Active worker agent identifier.
         mode: Worker selection mode.
         issues: Candidate epic issues.
+        is_actionable: Callback that evaluates whether an epic has selectable
+            work under the startup contract.
+        review_followup_enabled: Whether startup can scan PR review-followup
+            work for the current runtime context.
 
     Returns:
         Summary lines for operator output.
@@ -327,6 +333,14 @@ def _no_eligible_epics_summary(
     ready = filter_epics(issues, require_unassigned=True)
     assigned = filter_epics(issues, assignee=agent_id)
     planner_owned = worker_selection.planner_owned_executable_issues(issues)
+    actionable_ready = sum(
+        1 for issue in ready if isinstance(issue.get("id"), str) and is_actionable(str(issue["id"]))
+    )
+    actionable_assigned = sum(
+        1
+        for issue in assigned
+        if isinstance(issue.get("id"), str) and is_actionable(str(issue["id"]))
+    )
     timestamp = dt.datetime.now(tz=dt.timezone.utc).isoformat()
     ownership_detail = ", ".join(
         sorted(
@@ -341,8 +355,15 @@ def _no_eligible_epics_summary(
         f"- Mode: {mode}",
         f"- Beads root: {beads_root}",
         f"- Total epics: {len(issues)}",
-        f"- Ready epics: {len(ready)}",
-        f"- Assigned epics: {len(assigned)}",
+        f"- Ready epics (actionable): {actionable_ready}",
+        f"- Ready epics (top-level): {len(ready)}",
+        f"- Assigned epics (actionable): {actionable_assigned}",
+        f"- Assigned epics (top-level): {len(assigned)}",
+        (
+            "- Review-followup scanning: enabled"
+            if review_followup_enabled
+            else "- Review-followup scanning: disabled (missing PR startup context)"
+        ),
         f"- Planner-owned executable epics: {len(planner_owned)}",
         (
             f"- Ownership violations: {ownership_detail}"
@@ -1005,12 +1026,16 @@ class _StartupContractService(worker_startup.StartupContractService):
         mode: str,
         issues: list[dict[str, object]],
         dry_run: bool,
+        is_actionable: Callable[[str], bool],
+        review_followup_enabled: bool,
     ) -> None:
         lines = _no_eligible_epics_summary(
             agent_id=agent_id,
             mode=mode,
             beads_root=self._beads_root,
             issues=issues,
+            is_actionable=is_actionable,
+            review_followup_enabled=review_followup_enabled,
         )
         if dry_run:
             for line in lines:
