@@ -21,6 +21,7 @@ from atelier.lib.beads import (
 )
 
 from .contract import (
+    AppendNotesRequest,
     ChangesetQuery,
     ClaimMessageRequest,
     ClearHookRequest,
@@ -167,6 +168,27 @@ def _description_fields_match(
         if current != expected:
             return False
     return True
+
+
+def _append_issue_notes(description: str, *, notes: tuple[str, ...]) -> str:
+    base = description.rstrip("\n")
+    joined = "\n".join(note for note in notes if note)
+    if not joined:
+        return description or ""
+    if not base:
+        return f"{joined}\n"
+    if _description_ends_with_notes(description, notes=notes):
+        return f"{base}\n"
+    return f"{base}\n{joined}\n"
+
+
+def _description_ends_with_notes(description: str, *, notes: tuple[str, ...]) -> bool:
+    if not notes:
+        return True
+    lines = (description or "").rstrip("\n").splitlines()
+    if len(lines) < len(notes):
+        return False
+    return tuple(lines[-len(notes) :]) == notes
 
 
 @dataclass
@@ -631,6 +653,40 @@ class AtelierStore:
         updated_state = _ReadState(self, issue_cache={updated.id: updated})
         return await self._changeset_record(updated, state=updated_state)
 
+    async def append_notes(
+        self,
+        request: AppendNotesRequest,
+    ) -> EpicRecord | ChangesetRecord:
+        state = _ReadState(self)
+        issue = await state.get_issue(request.issue_id)
+        role = await self._role(issue, state=state)
+        if role.is_epic and role.parent_id is None:
+            issue_kind = WorkItemKind.EPIC
+        elif role.is_changeset:
+            issue_kind = WorkItemKind.CHANGESET
+        else:
+            raise ValueError(f"notes append requires work items: {request.issue_id}")
+
+        def build_request(current: IssueRecord) -> UpdateIssueRequest:
+            description = _append_issue_notes(current.description or "", notes=request.notes)
+            return UpdateIssueRequest(issue_id=current.id, description=description)
+
+        def verify(updated_issue: IssueRecord) -> bool:
+            return _description_ends_with_notes(
+                updated_issue.description or "", notes=request.notes
+            )
+
+        updated = await self._update_issue_until_verified(
+            request.issue_id,
+            build_request=build_request,
+            verify=verify,
+            failure_message=f"notes append could not be verified for {request.issue_id}",
+        )
+        updated_state = _ReadState(self, issue_cache={updated.id: updated})
+        if issue_kind is WorkItemKind.EPIC:
+            return await self._epic_record(updated, state=updated_state)
+        return await self._changeset_record(updated, state=updated_state)
+
     async def transition_lifecycle(
         self,
         request: LifecycleTransitionRequest,
@@ -718,6 +774,8 @@ class AtelierStore:
     ) -> IssueRecord:
         for _attempt in range(_MAX_UPDATE_ATTEMPTS):
             current = await self._show_issue(issue_id)
+            if verify(current):
+                return current
             request = build_request(current)
             updated = await self._beads.update(request)
             if verify(updated):

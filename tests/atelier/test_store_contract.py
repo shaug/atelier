@@ -19,6 +19,7 @@ from atelier.lib.beads import (
 )
 from atelier.messages import render_message
 from atelier.store import (
+    AppendNotesRequest,
     AtelierStore,
     ChangesetBranches,
     ChangesetRecord,
@@ -64,6 +65,7 @@ _STORE_METHOD_NAMES = (
     "add_dependency",
     "remove_dependency",
     "create_message",
+    "append_notes",
     "claim_message",
     "set_agent_hook",
     "clear_agent_hook",
@@ -132,6 +134,18 @@ def test_work_threaded_messages_require_thread_identity() -> None:
     )
 
     assert request.audience == ("planner",)
+
+
+def test_append_notes_request_requires_non_empty_deduped_notes() -> None:
+    with pytest.raises(ValidationError, match="append notes requires at least one non-empty note"):
+        AppendNotesRequest(issue_id="at-123", notes=("  ",))
+
+    request = AppendNotesRequest(
+        issue_id="at-123",
+        notes=(" first note ", "second note", "first note"),
+    )
+
+    assert request.notes == ("first note", "second note")
 
 
 def test_store_message_query_and_request_do_not_expose_assignee_routing() -> None:
@@ -302,6 +316,26 @@ def test_beads_store_mutation_paths(operation: str) -> None:
         41,
         "abc1234",
     )
+    appended = _RUN(
+        store.append_notes(
+            AppendNotesRequest(
+                issue_id="at-change",
+                notes=("worker_update: preserved lifecycle mutation parity",),
+            )
+        )
+    )
+    assert appended.id == "at-change"
+    _RUN(
+        store.append_notes(
+            AppendNotesRequest(
+                issue_id="at-change",
+                notes=("worker_update: preserved lifecycle mutation parity",),
+            )
+        )
+    )
+    refreshed = _RUN(store._show_issue("at-change"))
+    assert refreshed.description is not None
+    assert refreshed.description.count("worker_update: preserved lifecycle mutation parity") == 1
     assert (
         _RUN(
             store.transition_lifecycle(
@@ -469,6 +503,20 @@ def test_beads_store_mutation_paths(operation: str) -> None:
         "at-dep",
         True,
     )
+
+
+def test_beads_store_append_notes_fails_for_non_work_items() -> None:
+    store = _store_for(_queue_message())
+
+    with pytest.raises(ValueError, match="notes append requires work items"):
+        _RUN(
+            store.append_notes(
+                AppendNotesRequest(
+                    issue_id="msg-queue",
+                    notes=("worker_update: this should fail",),
+                )
+            )
+        )
 
 
 def test_beads_store_fails_closed() -> None:

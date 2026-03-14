@@ -26,6 +26,7 @@ Typed request/query models:
 - `MessageQuery`
 - `DependencyMutation`
 - `CreateMessageRequest`
+- `AppendNotesRequest`
 - `ClaimMessageRequest`
 - `SetHookRequest`
 - `ClearHookRequest`
@@ -92,8 +93,8 @@ This contract-definition slice does not include the following work:
 
 - implementing `AtelierStore` graph and discovery methods on top of the Beads
   client; that belongs to [GitHub issue #644]
-- implementing `AtelierStore` lifecycle, review, message, hook, and dependency
-  mutation methods on top of the Beads client; that belongs to
+- implementing `AtelierStore` lifecycle, notes, review, message, hook, and
+  dependency mutation methods on top of the Beads client; that belongs to
   [GitHub issue #645]
 - dual-backend proof over both the process-backed and in-memory Beads clients;
   that belongs to [GitHub issue #646]

@@ -2,6 +2,7 @@
 
 from .beads_store import AtelierStore, build_atelier_store
 from .contract import (
+    AppendNotesRequest,
     ChangesetQuery,
     ClaimMessageRequest,
     ClearHookRequest,
@@ -32,6 +33,7 @@ from .models import (
 )
 
 __all__ = [
+    "AppendNotesRequest",
     "AtelierStore",
     "ChangesetBranches",
     "ChangesetQuery",
