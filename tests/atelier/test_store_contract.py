@@ -16,6 +16,7 @@ from atelier.store import (
     EpicRecord,
     LifecycleStatus,
     MessageDelivery,
+    MessageQuery,
     MessageRecord,
     MessageThreadKind,
     ReviewMetadata,
@@ -82,6 +83,11 @@ def test_work_threaded_messages_require_thread_identity() -> None:
     assert request.audience == ("planner",)
 
 
+def test_store_message_query_and_request_do_not_expose_assignee_routing() -> None:
+    assert "assignee" not in MessageQuery.model_fields
+    assert "assignee" not in CreateMessageRequest.model_fields
+
+
 def test_message_record_enforces_store_message_contract() -> None:
     record = MessageRecord(
         id="msg-1",
@@ -132,6 +138,7 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "Atelier-Owned Invariants" in store_doc
     assert "Beads-Client Responsibilities" in store_doc
     assert "Deferred Work" in store_doc
+    assert "adapter-local compatibility state" in store_doc
     assert "GitHub issue #644" in store_doc
     assert "GitHub issue #645" in store_doc
     assert "GitHub issue #646" in store_doc

@@ -52,7 +52,6 @@ class ReadyChangesetQuery(StoreModel):
 class MessageQuery(StoreModel):
     """Filter for listing durable coordination messages."""
 
-    assignee: Identifier | None = None
     thread_id: Identifier | None = None
     queue: Identifier | None = None
     unread_only: bool = False
@@ -79,7 +78,6 @@ class CreateMessageRequest(StoreModel):
     body: str = ""
     delivery: MessageDelivery = MessageDelivery.WORK_THREADED
     sender: Identifier | None = None
-    assignee: Identifier | None = None
     thread_id: Identifier | None = None
     thread_kind: MessageThreadKind | None = None
     audience: tuple[Identifier, ...] = ()
@@ -251,7 +249,7 @@ class AtelierStore:
         """List durable coordination messages through store-owned filters.
 
         Args:
-            query: Optional assignee, thread, queue, and unread filters.
+            query: Optional thread, queue, audience, and unread filters.
 
         Returns:
             Matching durable message records in backend-defined stable order.
@@ -302,7 +300,7 @@ class AtelierStore:
         """Persist one durable work-threaded coordination message.
 
         Args:
-            request: Message payload and routing metadata to persist.
+            request: Message payload and threaded routing metadata to persist.
 
         Returns:
             The persisted message record on its epic or changeset thread.
