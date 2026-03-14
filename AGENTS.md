@@ -202,6 +202,11 @@ ______________________________________________________________________
 - Exported docstrings should describe behavior, inputs, return values, and
   expected failure modes (for example, raised exceptions or blocking
   conditions).
+- In authored markdown, prefer inline reference links with the visible text as
+  the link label (for example `[Atelier Store Contract]`) and place the
+  definitions at the end of the file under
+  `<!-- inline reference link definitions. please keep alphabetized -->`.
+- When linking to other documentation, use the document title as the link text.
 - Keep line lengths strict:
   - code lines: **100** max
   - comments and docstring prose: **80** max

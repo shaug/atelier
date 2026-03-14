@@ -1,8 +1,8 @@
 # Work-Threaded Message Migration
 
 Work-threaded messages are the durable coordination model for Atelier. Attach
-decisions and instructions to the epic or changeset bead that owns the work so
-a later worker or planner session can recover the same context.
+decisions and instructions to the epic or changeset bead that owns the work so a
+later worker or planner session can recover the same context.
 
 Assignees and queues are optional compatibility metadata. They may help the
 current runtime notice a message quickly, but they are not a durable
@@ -13,8 +13,8 @@ dispatches must name the owning epic or changeset explicitly with
 ## Default policy
 
 - Put durable coordination on a work thread with `thread: <epic-or-changeset>`.
-- Treat `mail-send` without `thread` as invalid. Fail closed instead of
-  creating an agent-addressed coordination message.
+- Treat `mail-send` without `thread` as invalid. Fail closed instead of creating
+  an agent-addressed coordination message.
 - Set explicit routing metadata when the message is work-scoped:
   - `thread_target: epic|changeset`
   - `audiences: [worker|planner|operator]`
@@ -28,8 +28,8 @@ dispatches must name the owning epic or changeset explicitly with
 
 - Planner-to-worker guidance should be threaded to the selected epic or
   changeset.
-- Use the worker assignee only as a compatibility nudge for the currently
-  active worker session.
+- Use the worker assignee only as a compatibility nudge for the currently active
+  worker session.
 - If no worker is active, still persist the message on the same epic or
   changeset thread so the next worker sees the original instruction.
 
@@ -40,8 +40,8 @@ dispatches must name the owning epic or changeset explicitly with
 - Queue metadata may still surface the message in planner/operator startup, but
   the thread owns the durable context.
 - Non-work-wide exceptions, such as "no eligible epics", are outside
-  `mail-send`'s durable work-threaded contract because there is no specific
-  work thread to attach.
+  `mail-send`'s durable work-threaded contract because there is no specific work
+  thread to attach.
 
 ## Operator flows
 

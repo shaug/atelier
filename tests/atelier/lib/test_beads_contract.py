@@ -76,6 +76,9 @@ def test_beads_contract_fixture_matches_default_policy() -> None:
 def test_contract_doc_publishes_supported_inventory_and_downstream_rules() -> None:
     payload = _load_contract_fixture()
     content = CONTRACT_DOC_PATH.read_text(encoding="utf-8")
+    public_downstream_refs = {
+        "at-njpt4": "GitHub issue #574",
+    }
 
     assert "Beads Client v1 Contract" in content
     assert payload["minimum_version"] in content
@@ -85,7 +88,7 @@ def test_contract_doc_publishes_supported_inventory_and_downstream_rules() -> No
     for unsupported_command in payload["unsupported_surface"]:
         assert unsupported_command in content
     for downstream_id in payload["downstream_contract"]:
-        assert downstream_id in content
+        assert public_downstream_refs.get(downstream_id, downstream_id) in content
 
 
 def test_readme_points_to_the_published_beads_contract() -> None:
@@ -104,7 +107,9 @@ def test_readme_and_docs_publish_the_beads_adoption_boundary() -> None:
     assert "docs/beads-adoption-guide.md" in readme
     assert "atelier.lib.beads" in guide
     assert "atelier.testing.beads" in guide
-    assert "at-njpt4" in guide
+    assert "GitHub issue #574" in guide
     assert "already depends on\n`atelier.lib.beads`" in guide
+    assert "GitHub issue #574" in testing_guide
+    assert "GitHub issue #574" in contract
     assert "already written against `atelier.lib.beads`" in testing_guide
-    assert "docs/beads-adoption-guide.md" in contract
+    assert "[Beads Adoption Guide]" in contract

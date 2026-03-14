@@ -8,9 +8,9 @@ description: >-
 # Mail send
 
 Work-threaded messages are the durable coordination path. `mail-send` supports
-only work-threaded coordination and fails closed when `--thread` is omitted.
-Use `to` only to describe the intended audience and, when helpful, to nudge
-the current runtime.
+only work-threaded coordination and fails closed when `--thread` is omitted. Use
+`to` only to describe the intended audience and, when helpful, to nudge the
+current runtime.
 
 ## Inputs
 
