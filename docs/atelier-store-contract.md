@@ -87,29 +87,92 @@ implementation is backed by Beads:
 The eventual `AtelierStore` implementation may use those lower-level details
 internally, but they are not part of the Atelier store contract.
 
+## Dual-Backend Proof
+
+The store contract is now proven against both supported `Beads` backends:
+
+- `InMemoryBeadsClient` for deterministic semantic fixtures
+- `SubprocessBeadsClient` for the process-backed command contract
+
+The shared proof runs the same `AtelierStore` read and mutation flows over both
+backends. Representative read coverage includes epic discovery, changeset
+listing and ready discovery, message listing, hook lookup, branch metadata, and
+review/dependency state decoding. Representative mutation coverage includes
+review updates, note appends, lifecycle transitions, message create/claim, and
+agent hook set/clear.
+
+This proof freezes one architecture shape: a single Atelier-owned store boundary
+implemented on top of multiple `Beads` backends. Future backend additions must
+extend the same `AtelierStore` contract rather than introducing a new public
+store surface for planner or worker code.
+
+## Downstream Migration Contract
+
+Planner, worker, and publish migrations should depend on `atelier.store` and its
+typed models/requests, not on raw Beads issue payloads.
+
+Downstream epics can rely on the following store surface today:
+
+- `AtelierStore`
+- `EpicRecord`, `ChangesetRecord`, `MessageRecord`, `HookRecord`
+- `ReviewMetadata`, `DependencyRecord`, `LifecycleTransition`
+- the request/query models in `atelier.store.contract`, including
+  `AppendNotesRequest`, `UpdateReviewRequest`, `LifecycleTransitionRequest`,
+  `CreateMessageRequest`, `ClaimMessageRequest`, `SetHookRequest`, and
+  `ClearHookRequest`
+- shared dual-backend parity for discovery/read flows plus notes, review,
+  lifecycle, message, and hook mutations
+
+Downstream code should not:
+
+- parse description fields directly for review, branch, hook, or message state
+- infer lifecycle from raw labels or issue types when `atelier.store` already
+  publishes the decision
+- construct `bd` argv or depend on `BEADS_DIR`, cwd, Dolt layout, or subprocess
+  capability probing from planner/worker/publish policy modules
+
+Direct `atelier.lib.beads` usage remains appropriate only in boundary adapters
+that own transport, startup diagnostics, or other Beads-client-specific
+concerns.
+
+Downstream migrations should treat the following as still deferred:
+
+- planner, worker, and publish orchestration rewrites that replace legacy
+  Beads-shaped call sites with `AtelierStore`
+- dependency add/remove parity in the in-memory backend before those mutations
+  can move into the shared dual-backend proof suite
+- any new store semantic not already published through `atelier.store`
+
+## Known Contract Gaps
+
+- dependency add/remove is not yet proven in the shared dual-backend suite
+  because `InMemoryBeadsClient` still treats dependency mutation as outside Tier
+  0 scope
+- dependency mutation remains covered through explicit process-backed store
+  tests until the in-memory backend grows the same semantic support
+- if downstream migrations need new store semantics, add them to `atelier.store`
+  first and extend both backend suites before moving business logic onto the new
+  field or operation
+
 ## Deferred Work
 
-This contract-definition slice does not include the following work:
+This proof slice leaves only the following work deferred:
 
-- implementing `AtelierStore` graph and discovery methods on top of the Beads
-  client; that belongs to [GitHub issue #644]
-- implementing `AtelierStore` lifecycle, notes, review, message, hook, and
-  dependency mutation methods on top of the Beads client; that belongs to
-  [GitHub issue #645]
-- dual-backend proof over both the process-backed and in-memory Beads clients;
-  that belongs to [GitHub issue #646]
-- planner, worker, and publish migrations onto this store surface; that remains
-  deferred to [GitHub issue #582], [GitHub issue #583], and [GitHub issue #584]
+- planner migrations onto `atelier.store`; that remains deferred to
+  [GitHub issue #582]
+- worker migrations onto `atelier.store`; that remains deferred to
+  [GitHub issue #583]
+- publish/integration migrations onto `atelier.store`; that remains deferred to
+  [GitHub issue #584]
+- dependency add/remove parity in the in-memory backend so those mutations can
+  graduate from process-backed-only coverage into the shared proof suite
 
-The immediate review goal for this slice is narrower: downstream work should be
-able to implement `AtelierStore` on top of `atelier.lib.beads.Beads` without
-redesigning the core vocabulary during review.
+The core store contract, discovery methods, mutation methods, and dual-backend
+proof are no longer deferred work. Downstream epics should build on that landed
+surface instead of re-deriving store semantics from Beads issue payloads.
 
 <!-- inline reference link definitions. please keep alphabetized -->
 
 [github issue #582]: https://github.com/shaug/atelier/issues/582
 [github issue #583]: https://github.com/shaug/atelier/issues/583
 [github issue #584]: https://github.com/shaug/atelier/issues/584
-[github issue #644]: https://github.com/shaug/atelier/issues/644
-[github issue #645]: https://github.com/shaug/atelier/issues/645
-[github issue #646]: https://github.com/shaug/atelier/issues/646
