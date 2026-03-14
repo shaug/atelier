@@ -475,6 +475,8 @@ class StartupContractService(Protocol):
         mode: str,
         issues: list[dict[str, object]],
         dry_run: bool,
+        is_actionable: Callable[[str], bool],
+        review_followup_enabled: bool,
     ) -> None: ...
 
     def dry_run_log(self, message: str) -> None: ...
@@ -1149,6 +1151,8 @@ def run_startup_contract_service(
             mode=mode,
             issues=issues,
             dry_run=dry_run,
+            is_actionable=epic_has_actionable_changeset,
+            review_followup_enabled=branch_pr and bool(repo_slug),
         )
         return StartupContractResult(
             epic_id=None,

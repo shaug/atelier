@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from atelier.worker import integration
+from atelier import beads
+from atelier.worker import integration, work_startup_runtime
 from atelier.worker.review import MergeConflictSelection, ReviewFeedbackSelection
 from atelier.worker.session import startup
 
@@ -232,12 +233,16 @@ class FakeStartupService:
         mode: str,
         issues: list[dict[str, object]],
         dry_run: bool,
+        is_actionable: Callable[[str], bool],
+        review_followup_enabled: bool,
     ) -> None:
         self._send_needs_decision(
             agent_id=agent_id,
             mode=mode,
             issues=issues,
             dry_run=dry_run,
+            is_actionable=is_actionable,
+            review_followup_enabled=review_followup_enabled,
         )
 
     def dry_run_log(self, message: str) -> None:
@@ -1109,6 +1114,99 @@ def test_run_startup_contract_selects_stale_reclaimable_review_feedback() -> Non
     assert result.epic_id == "at-stale"
     assert result.changeset_id == "at-stale.1"
     assert result.reassign_from == "atelier/worker/codex/p099"
+
+
+def test_run_startup_contract_resumes_unassigned_draft_pr_review_followup() -> None:
+    epic = {
+        "id": "at-v1se7",
+        "status": "open",
+        "labels": ["at:epic"],
+        "assignee": None,
+        "created_at": "2026-03-14T23:00:00Z",
+    }
+    changeset = {
+        "id": "at-v1se7.1",
+        "parent_id": "at-v1se7",
+        "status": "in_progress",
+        "labels": [],
+        "description": "changeset.work_branch: feat/at-v1se7.1\npr_state: draft-pr\n",
+    }
+    record_by_id = {
+        record.issue.id: record
+        for record in beads.parse_issue_records([changeset], source="startup_draft_pr_feedback")
+    }
+    context = startup.StartupContractContext(
+        agent_id="atelier/worker/codex/p100",
+        agent_bead_id=None,
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+        mode="auto",
+        explicit_epic_id=None,
+        queue_only=False,
+        dry_run=False,
+        assume_yes=False,
+        repo_slug="org/repo",
+        branch_pr=True,
+        git_path="git",
+        worker_queue_name="worker",
+    )
+
+    with (
+        patch(
+            "atelier.worker.work_startup_runtime.beads.list_epics",
+            return_value=[epic],
+        ),
+        patch(
+            "atelier.worker.work_startup_runtime.worker_selection.stale_family_assigned_epics",
+            return_value=[],
+        ),
+        patch(
+            "atelier.worker.work_startup_runtime.select_conflicted_changeset",
+            return_value=None,
+        ),
+        patch(
+            "atelier.worker.work_startup_runtime.worker_review.select_global_startup_candidates",
+            return_value=work_startup_runtime.GlobalStartupSelections(
+                conflict=None,
+                feedback=None,
+            ),
+        ),
+        patch(
+            "atelier.worker.review._cleanup_leaked_pr_review_branches",
+            return_value=(),
+        ),
+        patch(
+            "atelier.worker.review.beads.list_descendant_changesets",
+            return_value=[changeset],
+        ),
+        patch(
+            "atelier.worker.review.beads.BeadsClient.show_issue",
+            side_effect=lambda issue_id, *, source: record_by_id.get(issue_id),
+        ),
+        patch(
+            "atelier.worker.review.prs.read_github_pr_status",
+            return_value={
+                "number": 662,
+                "state": "OPEN",
+                "isDraft": True,
+                "reviewDecision": None,
+                "reviewRequests": [],
+            },
+        ),
+        patch(
+            "atelier.worker.review.prs.latest_feedback_timestamp_with_inline_comments",
+            return_value="2026-03-14T23:30:00Z",
+        ),
+        patch(
+            "atelier.worker.review.prs.unresolved_review_thread_count",
+            return_value=1,
+        ),
+    ):
+        result = work_startup_runtime.run_startup_contract(context=context)
+
+    assert result.reason == "review_feedback"
+    assert result.epic_id == "at-v1se7"
+    assert result.changeset_id == "at-v1se7.1"
 
 
 def test_run_startup_contract_skips_unclaimable_global_review_feedback() -> None:

@@ -606,6 +606,61 @@ def test_select_review_feedback_changeset_skips_when_no_unresolved_threads() -> 
     assert selection is None
 
 
+def test_select_review_feedback_changeset_accepts_draft_pr_feedback() -> None:
+    issues = [
+        {
+            "id": "at-v1se7.1",
+            "labels": [],
+            "parent_id": "at-v1se7",
+            "status": "in_progress",
+            "description": "changeset.work_branch: feat/at-v1se7.1\npr_state: draft-pr\n",
+        }
+    ]
+    record_by_id = {
+        record.issue.id: record
+        for record in beads.parse_issue_records(issues, source="review_draft_pr_feedback")
+    }
+
+    with (
+        patch(
+            "atelier.worker.review.beads.list_descendant_changesets",
+            return_value=issues,
+        ),
+        patch(
+            "atelier.worker.review.beads.BeadsClient.show_issue",
+            side_effect=lambda issue_id, *, source: record_by_id.get(issue_id),
+        ),
+        patch(
+            "atelier.worker.review.prs.read_github_pr_status",
+            return_value={
+                "number": 662,
+                "state": "OPEN",
+                "isDraft": True,
+                "reviewDecision": None,
+                "reviewRequests": [],
+            },
+        ),
+        patch(
+            "atelier.worker.review.prs.latest_feedback_timestamp_with_inline_comments",
+            return_value="2026-03-14T23:30:00Z",
+        ),
+        patch(
+            "atelier.worker.review.prs.unresolved_review_thread_count",
+            return_value=1,
+        ),
+    ):
+        selection = review.select_review_feedback_changeset(
+            epic_id="at-v1se7",
+            repo_slug="org/repo",
+            beads_root=Path("/beads"),
+            repo_root=Path("/repo"),
+        )
+
+    assert selection is not None
+    assert selection.epic_id == "at-v1se7"
+    assert selection.changeset_id == "at-v1se7.1"
+
+
 def test_select_conflicted_changeset_picks_oldest_conflict() -> None:
     issues = [
         {

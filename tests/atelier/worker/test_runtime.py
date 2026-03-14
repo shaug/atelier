@@ -1013,10 +1013,15 @@ def test_startup_service_no_eligible_summary_does_not_queue_message() -> None:
             mode="auto",
             issues=issues,
             dry_run=False,
+            is_actionable=lambda _epic_id: False,
+            review_followup_enabled=True,
         )
 
     assert create_message.call_count == 0
     assert emitted[0] == "No eligible epics available."
+    assert any("Ready epics (actionable): 0" in line for line in emitted)
+    assert any("Ready epics (top-level): 1" in line for line in emitted)
+    assert any("Review-followup scanning: enabled" in line for line in emitted)
 
 
 def test_startup_service_lists_only_non_closed_epics() -> None:
@@ -1264,12 +1269,42 @@ def test_startup_service_reports_planner_owned_executable_violations() -> None:
             mode="auto",
             issues=issues,
             dry_run=False,
+            is_actionable=lambda _epic_id: False,
+            review_followup_enabled=True,
         )
 
     assert any("Planner-owned executable epics: 1" in line for line in emitted)
     assert any("Ownership violations: at-violation" in line for line in emitted)
     assert any(
         "Ownership-policy blockers may prevent review-feedback pickup." in line for line in emitted
+    )
+
+
+def test_startup_service_no_eligible_summary_distinguishes_top_level_from_actionable_ready() -> (
+    None
+):
+    emitted: list[str] = []
+    issues = [{"id": "at-v1se7", "status": "open", "labels": ["at:epic"]}]
+    service = work_startup_runtime._StartupContractService(  # pyright: ignore[reportPrivateUsage]
+        beads_root=Path("/beads"),
+        repo_root=Path("/repo"),
+    )
+
+    with patch("atelier.worker.work_startup_runtime.say", side_effect=emitted.append):
+        service.send_needs_decision(
+            agent_id="atelier/worker/codex/p2",
+            mode="auto",
+            issues=issues,
+            dry_run=False,
+            is_actionable=lambda _epic_id: False,
+            review_followup_enabled=False,
+        )
+
+    assert any("Ready epics (actionable): 0" in line for line in emitted)
+    assert any("Ready epics (top-level): 1" in line for line in emitted)
+    assert any(
+        "Review-followup scanning: disabled (missing PR startup context)" in line
+        for line in emitted
     )
 
 
