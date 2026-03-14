@@ -107,4 +107,4 @@ def test_readme_and_docs_publish_the_beads_adoption_boundary() -> None:
     assert "at-njpt4" in guide
     assert "already depends on\n`atelier.lib.beads`" in guide
     assert "already written against `atelier.lib.beads`" in testing_guide
-    assert "[Beads Adoption Guide][beads-adoption-guide]" in contract
+    assert "[Beads Adoption Guide]" in contract

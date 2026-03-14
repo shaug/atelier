@@ -86,22 +86,23 @@ part of the Atelier store contract.
 This contract-definition slice does not include the following work:
 
 - concrete graph and discovery adapters from `AtelierStore` to the Beads client;
-  that belongs to [GitHub issue #644][issue-644]
+  that belongs to [GitHub issue #644]
 - lifecycle, review, message, hook, and dependency mutation adapters; that
-  belongs to [GitHub issue #645][issue-645]
+  belongs to [GitHub issue #645]
 - dual-backend proof over both the process-backed and in-memory Beads clients;
-  that belongs to [GitHub issue #646][issue-646]
+  that belongs to [GitHub issue #646]
 - planner, worker, and publish migrations onto this store surface; that remains
-  deferred to [GitHub issue #582][issue-582], [GitHub issue #583][issue-583],
-  and [GitHub issue #584][issue-584]
+  deferred to [GitHub issue #582], [GitHub issue #583], and [GitHub issue #584]
 
 The immediate review goal for this slice is narrower: downstream work should be
 able to implement adapters against `atelier.store` without redesigning the core
 vocabulary during review.
 
-[issue-582]: https://github.com/shaug/atelier/issues/582
-[issue-583]: https://github.com/shaug/atelier/issues/583
-[issue-584]: https://github.com/shaug/atelier/issues/584
-[issue-644]: https://github.com/shaug/atelier/issues/644
-[issue-645]: https://github.com/shaug/atelier/issues/645
-[issue-646]: https://github.com/shaug/atelier/issues/646
+<!-- inline reference link definitions. please keep alphabetized -->
+
+[github issue #582]: https://github.com/shaug/atelier/issues/582
+[github issue #583]: https://github.com/shaug/atelier/issues/583
+[github issue #584]: https://github.com/shaug/atelier/issues/584
+[github issue #644]: https://github.com/shaug/atelier/issues/644
+[github issue #645]: https://github.com/shaug/atelier/issues/645
+[github issue #646]: https://github.com/shaug/atelier/issues/646

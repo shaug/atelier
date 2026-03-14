@@ -254,8 +254,8 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "GitHub issue #644" in store_doc
     assert "GitHub issue #645" in store_doc
     assert "GitHub issue #646" in store_doc
-    assert "[Atelier Store Contract][atelier-store-contract]" in beads_doc
-    assert "[Atelier Store Contract][atelier-store-contract]" in adoption_guide
+    assert "[Atelier Store Contract]" in beads_doc
+    assert "[Atelier Store Contract]" in adoption_guide
 
 
 def test_epic_and_work_refs_are_store_native_models() -> None:
