@@ -2,7 +2,7 @@
 
 This document defines the Atelier-owned planning store contract that sits above
 `atelier.lib.beads`. It freezes the vocabulary and invariant ownership for
-planner and worker logic before the adapter slices land.
+planner and worker logic before the implementation slices land.
 
 ## Public Contract
 
@@ -37,9 +37,10 @@ Async store service:
 - `AtelierStore`
 
 `AtelierStore` is the single async store boundary for downstream Atelier code.
-Concrete adapters land in later changesets and should implement that protocol on
-top of the reusable Beads client contract rather than exposing backend-specific
-construction or transport details here.
+Later changesets should implement `AtelierStore` itself on top of the reusable
+Beads client contract. `atelier.lib.beads.Beads` remains the swappable boundary
+underneath, while backend-specific construction and transport details stay out
+of this published surface.
 
 The contract is intentionally backend-neutral. It does not expose `bd` commands,
 `BEADS_DIR`, Dolt layout, filesystem probes, transport details, or startup
@@ -47,8 +48,8 @@ marker paths.
 
 ## Atelier-Owned Invariants
 
-Atelier owns the business semantics below even when the concrete adapter is
-backed by Beads:
+Atelier owns the business semantics below even when the concrete store
+implementation is backed by Beads:
 
 - Lifecycle status uses the canonical set
   `deferred|open|in_progress|blocked|closed`.
@@ -80,25 +81,26 @@ backed by Beads:
 - concrete Beads persistence details such as description fields, labels, slots,
   and backend storage layout
 
-The store adapter may use those lower-level details internally, but they are not
-part of the Atelier store contract.
+The eventual `AtelierStore` implementation may use those lower-level details
+internally, but they are not part of the Atelier store contract.
 
 ## Deferred Work
 
 This contract-definition slice does not include the following work:
 
-- concrete graph and discovery adapters from `AtelierStore` to the Beads client;
-  that belongs to [GitHub issue #644]
-- lifecycle, review, message, hook, and dependency mutation adapters; that
-  belongs to [GitHub issue #645]
+- implementing `AtelierStore` graph and discovery methods on top of the Beads
+  client; that belongs to [GitHub issue #644]
+- implementing `AtelierStore` lifecycle, review, message, hook, and dependency
+  mutation methods on top of the Beads client; that belongs to
+  [GitHub issue #645]
 - dual-backend proof over both the process-backed and in-memory Beads clients;
   that belongs to [GitHub issue #646]
 - planner, worker, and publish migrations onto this store surface; that remains
   deferred to [GitHub issue #582], [GitHub issue #583], and [GitHub issue #584]
 
 The immediate review goal for this slice is narrower: downstream work should be
-able to implement adapters against `atelier.store` without redesigning the core
-vocabulary during review.
+able to implement `AtelierStore` on top of `atelier.lib.beads.Beads` without
+redesigning the core vocabulary during review.
 
 <!-- inline reference link definitions. please keep alphabetized -->
 

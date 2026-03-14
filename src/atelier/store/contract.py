@@ -144,10 +144,10 @@ class AtelierStore(Protocol):
     """Async protocol for Atelier planning state above the Beads client.
 
     Downstream planner, worker, and publish code should depend on this single
-    store contract. Follow-on adapter changesets should provide concrete
-    implementations that compose the `atelier.lib.beads.Beads` protocol rather
-    than exposing backend selection, transport details, or storage layout to
-    higher-level business logic.
+    store contract. Follow-on changesets should implement `AtelierStore` itself
+    by composing the `atelier.lib.beads.Beads` protocol rather than exposing
+    backend selection, transport details, or storage layout to higher-level
+    business logic.
     """
 
     async def get_epic(self, epic_id: str) -> EpicRecord:

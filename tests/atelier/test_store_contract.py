@@ -179,8 +179,9 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "Beads-Client Responsibilities" in store_doc
     assert "Deferred Work" in store_doc
     assert "adapter-local compatibility state" in store_doc
-    assert "Concrete adapters land in later changesets" in store_doc
-    assert "reusable Beads client contract" in store_doc
+    assert "implement `AtelierStore` itself" in store_doc
+    assert "`atelier.lib.beads.Beads` remains the swappable boundary" in store_doc
+    assert "implementing `AtelierStore` graph and discovery methods" in store_doc
     assert "GitHub issue #644" in store_doc
     assert "GitHub issue #645" in store_doc
     assert "GitHub issue #646" in store_doc
