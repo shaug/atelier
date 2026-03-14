@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import get_args, get_origin, get_type_hints
 
 import pytest
 from pydantic import ValidationError
@@ -41,85 +42,34 @@ STORE_CONTRACT_DOC_PATH = REPO_ROOT / "docs" / "atelier-store-contract.md"
 BEADS_CONTRACT_DOC_PATH = REPO_ROOT / "docs" / "beads-client-contract.md"
 ADOPTION_GUIDE_PATH = REPO_ROOT / "docs" / "beads-adoption-guide.md"
 
+_STORE_METHOD_NAMES = (
+    "get_epic",
+    "list_epics",
+    "get_changeset",
+    "list_changesets",
+    "list_ready_changesets",
+    "list_messages",
+    "get_agent_hook",
+    "add_dependency",
+    "remove_dependency",
+    "create_message",
+    "claim_message",
+    "set_agent_hook",
+    "clear_agent_hook",
+    "update_review",
+    "transition_lifecycle",
+)
 
-class StubAtelierStore:
-    def __init__(self, beads_backend: Beads) -> None:
-        self.beads_backend = beads_backend
 
-    async def get_epic(self, epic_id: str) -> EpicRecord:
-        del epic_id
-        raise NotImplementedError
-
-    async def list_epics(self, query: EpicQuery = EpicQuery()) -> tuple[EpicRecord, ...]:
-        del query
-        raise NotImplementedError
-
-    async def get_changeset(self, changeset_id: str) -> ChangesetRecord:
-        del changeset_id
-        raise NotImplementedError
-
-    async def list_changesets(
-        self,
-        query: ChangesetQuery = ChangesetQuery(),
-    ) -> tuple[ChangesetRecord, ...]:
-        del query
-        raise NotImplementedError
-
-    async def list_ready_changesets(
-        self,
-        query: ReadyChangesetQuery = ReadyChangesetQuery(),
-    ) -> tuple[ChangesetRecord, ...]:
-        del query
-        raise NotImplementedError
-
-    async def list_messages(
-        self,
-        query: MessageQuery = MessageQuery(),
-    ) -> tuple[MessageRecord, ...]:
-        del query
-        raise NotImplementedError
-
-    async def get_agent_hook(self, agent_id: str) -> HookRecord | None:
-        del agent_id
-        raise NotImplementedError
-
-    async def add_dependency(self, mutation: DependencyMutation) -> DependencyRecord:
-        del mutation
-        raise NotImplementedError
-
-    async def remove_dependency(
-        self,
-        mutation: DependencyMutation,
-    ) -> DependencyRecord | None:
-        del mutation
-        raise NotImplementedError
-
-    async def create_message(self, request: CreateMessageRequest) -> MessageRecord:
-        del request
-        raise NotImplementedError
-
-    async def claim_message(self, request: ClaimMessageRequest) -> MessageRecord:
-        del request
-        raise NotImplementedError
-
-    async def set_agent_hook(self, request: SetHookRequest) -> HookRecord:
-        del request
-        raise NotImplementedError
-
-    async def clear_agent_hook(self, request: ClearHookRequest) -> HookRecord | None:
-        del request
-        raise NotImplementedError
-
-    async def update_review(self, request: UpdateReviewRequest) -> ChangesetRecord:
-        del request
-        raise NotImplementedError
-
-    async def transition_lifecycle(
-        self,
-        request: LifecycleTransitionRequest,
-    ) -> LifecycleTransition:
-        del request
-        raise NotImplementedError
+def _annotation_leaks_beads_contract(annotation: object) -> bool:
+    origin = get_origin(annotation)
+    if origin is not None:
+        return _annotation_leaks_beads_contract(origin) or any(
+            _annotation_leaks_beads_contract(arg) for arg in get_args(annotation)
+        )
+    return annotation is Beads or getattr(annotation, "__module__", "").startswith(
+        "atelier.lib.beads"
+    )
 
 
 def test_changeset_record_captures_store_owned_metadata() -> None:
@@ -197,23 +147,26 @@ def test_store_message_contract_only_exposes_durable_threaded_path() -> None:
     assert tuple(item.value for item in MessageThreadKind) == ("changeset", "epic")
 
 
-def test_store_protocol_is_backend_neutral() -> None:
+def test_store_contract_stays_above_the_beads_client_layer() -> None:
     process_backend = SubprocessBeadsClient(
         transport=RecordingBeadsTransport(),
         cwd=Path("."),
         beads_root=Path("."),
         env={},
     )
-    in_memory_client, _store = build_in_memory_beads_client()
-    process_backed = StubAtelierStore(process_backend)
-    in_memory = StubAtelierStore(in_memory_client)
+    in_memory_client, _ = build_in_memory_beads_client()
 
     assert isinstance(process_backend, Beads)
     assert isinstance(in_memory_client, Beads)
-    assert isinstance(process_backed, AtelierStore)
-    assert isinstance(in_memory, AtelierStore)
-    assert process_backed.beads_backend is not None
-    assert in_memory.beads_backend is in_memory_client
+    assert not isinstance(process_backend, AtelierStore)
+    assert not isinstance(in_memory_client, AtelierStore)
+
+    for method_name in _STORE_METHOD_NAMES:
+        hints = get_type_hints(getattr(AtelierStore, method_name))
+        assert hints, method_name
+        assert not any(
+            _annotation_leaks_beads_contract(annotation) for annotation in hints.values()
+        ), method_name
 
 
 def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
