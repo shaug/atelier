@@ -117,6 +117,9 @@ The in-memory implementation planned in `at-s1vc` should implement the same
 The Atelier-owned store abstraction planned in `at-njpt4` should build on the
 reusable Beads client instead of reconstructing `bd` subprocess glue.
 
+The published contract-definition slice now lives in
+[`docs/atelier-store-contract.md`](docs/atelier-store-contract.md).
+
 - Depend on the `Beads` protocol, not directly on `SubprocessBeadsClient`.
 - Consume typed `IssueRecord` and request models instead of parsing `bd` stdout
   or rebuilding argv.

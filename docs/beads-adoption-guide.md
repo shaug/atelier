@@ -21,7 +21,10 @@ Use `atelier.testing.beads` when the code under test already depends on
 subprocess.
 
 Wait for `at-njpt4` when the work wants to define or consume an Atelier-owned
-store concept rather than a low-level Beads boundary.
+store concept rather than a low-level Beads boundary. The current contract
+definition for that layer lives in
+[`docs/atelier-store-contract.md`](docs/atelier-store-contract.md), but the
+concrete adapters and planner/worker migrations remain deferred.
 
 ## Where Direct Client Use Is In Bounds Today
 
