@@ -38,6 +38,8 @@ from .models import (
     ChangesetBranches,
     ChangesetRecord,
     DependencyRecord,
+    EpicDiscoveryParity,
+    EpicIdentityViolation,
     EpicRecord,
     HookRecord,
     LifecycleStatus,
@@ -54,6 +56,13 @@ from .models import (
 _DEFAULT_SCAN_LIMIT = 10_000
 _MAX_UPDATE_ATTEMPTS = 5
 _MESSAGE_LABELS = ("at:message", "at:unread")
+_ACTIVE_TOP_LEVEL_DISCOVERY_STATUSES = frozenset(
+    {
+        LifecycleStatus.OPEN,
+        LifecycleStatus.IN_PROGRESS,
+        LifecycleStatus.BLOCKED,
+    }
+)
 _REVIEW_STATE_MAP = {
     ReviewState.PUSHED.value: ReviewState.PUSHED,
     ReviewState.DRAFT_PR.value: ReviewState.DRAFT_PR,
@@ -119,6 +128,19 @@ def _changeset_branches(issue: IssueRecord) -> ChangesetBranches | None:
     if all(value is None for value in branches.model_dump().values()):
         return None
     return branches
+
+
+def _epic_root_branch(issue: IssueRecord) -> str | None:
+    fields = beads_metadata.parse_description_fields(issue.description or "")
+    return _clean_text(fields.get("workspace.root_branch"))
+
+
+def _epic_label_for_issue(issue: IssueRecord) -> str:
+    prefix, _, _rest = issue.id.partition("-")
+    normalized = prefix.strip().lower()
+    if normalized:
+        return f"{normalized}:epic"
+    return "at:epic"
 
 
 def _normalize_description_field_value(value: str | None) -> str | None:
@@ -289,6 +311,69 @@ class AtelierStore:
             if await self._is_indexed_epic(issue, state=state):
                 records.append(await self._epic_record(issue, state=state))
         return tuple(records)
+
+    async def epic_discovery_parity(self) -> EpicDiscoveryParity:
+        state = _ReadState(self)
+        issues = await state.scan_issues(include_closed=True)
+
+        active_top_level: list[IssueRecord] = []
+        indexed_active_ids: set[str] = set()
+        executable_active_ids: set[str] = set()
+        missing_identity: list[EpicIdentityViolation] = []
+
+        for issue in issues:
+            labels = _normalized_labels(issue.labels)
+            parent_id = _parent_id(issue)
+            role = lifecycle.infer_work_role(
+                labels=labels,
+                issue_type=issue.type,
+                parent_id=parent_id,
+                has_work_children=False,
+            )
+            canonical_status = _canonical_status(issue)
+
+            if await self._is_indexed_epic(issue, state=state):
+                if canonical_status in _ACTIVE_TOP_LEVEL_DISCOVERY_STATUSES:
+                    indexed_active_ids.add(issue.id)
+
+            if not role.is_work or not role.is_epic:
+                continue
+            if canonical_status not in _ACTIVE_TOP_LEVEL_DISCOVERY_STATUSES:
+                continue
+            active_top_level.append(issue)
+
+            executable_identity = (
+                lifecycle.is_executable_epic_identity(
+                    labels=labels,
+                    issue_type=issue.type,
+                    parent_id=parent_id,
+                )
+                and lifecycle.normalize_status_value(issue.type) == WorkItemKind.EPIC.value
+            )
+            if executable_identity:
+                executable_active_ids.add(issue.id)
+                continue
+            missing_identity.append(
+                EpicIdentityViolation(
+                    issue_id=issue.id,
+                    status=canonical_status,
+                    issue_type=_clean_text(issue.type),
+                    labels=tuple(sorted(labels)),
+                    remediation_command=(
+                        f"bd update {issue.id} --type epic "
+                        f"--add-label {_epic_label_for_issue(issue)}"
+                    ),
+                )
+            )
+
+        return EpicDiscoveryParity(
+            active_top_level_work_count=len(active_top_level),
+            indexed_active_epic_count=len(indexed_active_ids),
+            missing_executable_identity=tuple(
+                sorted(missing_identity, key=lambda item: item.issue_id)
+            ),
+            missing_from_index=tuple(sorted(executable_active_ids - indexed_active_ids)),
+        )
 
     async def get_changeset(self, changeset_id: str) -> ChangesetRecord:
         state = _ReadState(self)
@@ -815,6 +900,7 @@ class AtelierStore:
             return None
         if contract.thread_kind not in {"changeset", "epic"}:
             return None
+        routing = messages.work_thread_routing(issue.model_dump(mode="python", by_alias=True))
         status = lifecycle.canonical_lifecycle_status(issue.status)
         queue_name = _clean_text(contract.metadata.get("queue"))
         return MessageRecord(
@@ -833,6 +919,7 @@ class AtelierStore:
             queue=queue_name,
             claimed_by=_clean_text(contract.metadata.get("claimed_by")),
             claimed_at=_clean_text(contract.metadata.get("claimed_at")),
+            blocking_roles=tuple(routing.blocking_roles),
         )
 
     async def _candidate_changesets(
@@ -918,6 +1005,7 @@ class AtelierStore:
             title=issue.title or issue.id,
             lifecycle=_canonical_status(issue),
             assignee=issue.assignee,
+            root_branch=_epic_root_branch(issue),
             labels=issue.labels,
             changesets=changesets,
             dependencies=await self._dependencies(issue, state=state),
@@ -986,6 +1074,7 @@ class AtelierStore:
             depends_on_id=depends_on_id,
             satisfied=satisfied,
             requires_integrated_state=requires_integrated_state,
+            status=_canonical_status(dependency_issue),
         )
 
     async def _resolve_epic_id(self, issue: IssueRecord, *, state: _ReadState) -> str | None:

@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from atelier import messages, planner_startup_check
-from atelier.testing.beads import InMemoryBeadsBackend, IssueFixtureBuilder, patch_in_memory_beads
+from atelier.store import build_atelier_store
+from atelier.testing.beads import (
+    IssueFixtureBuilder,
+    build_in_memory_beads_client,
+)
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "planner_startup_check"
 
@@ -97,25 +101,27 @@ def test_startup_helper_surfaces_threaded_planner_decisions_without_assignee() -
         beads_root=Path("/beads"),
         cwd=Path("/repo"),
     )
-    object.__setattr__(
-        helper,
-        "_run_list_query",
-        lambda _args: [
-            {
-                "id": "at-msg-1",
-                "title": "NEEDS-DECISION: Publish incomplete (at-epic.1)",
-                "description": (
-                    "---\n"
-                    "from: atelier/worker/codex/p100\n"
-                    "queue: planner\n"
-                    "thread: at-epic.1\n"
-                    "msg_type: notification\n"
-                    "---\n\n"
-                    "Confirm the next publish step."
-                ),
-            }
-        ],
+    fake_message = SimpleNamespace(
+        id="at-msg-1",
+        title="NEEDS-DECISION: Publish incomplete (at-epic.1)",
+        body="Confirm the next publish step.",
+        thread_id="at-epic.1",
+        thread_kind=SimpleNamespace(value="changeset"),
+        kind="notification",
+        audience=("planner",),
+        blocking_roles=("planner",),
     )
+
+    class _FakeStore:
+        async def list_messages(self, _query):
+            return (fake_message,)
+
+    class _FakeClient:
+        async def list(self, _request):
+            return ()
+
+    object.__setattr__(helper, "_store_cache", _FakeStore())
+    object.__setattr__(helper, "_beads_client_cache", _FakeClient())
 
     messages_for_planner = helper.list_inbox_messages("atelier/planner/codex/p200")
 
@@ -125,6 +131,7 @@ def test_startup_helper_surfaces_threaded_planner_decisions_without_assignee() -
 
 
 def test_startup_helper_uses_in_memory_backend_for_inbox_queue_and_epic_queries(
+    monkeypatch,
     tmp_path: Path,
 ) -> None:
     beads_root = tmp_path / ".beads"
@@ -136,8 +143,8 @@ def test_startup_helper_uses_in_memory_backend_for_inbox_queue_and_epic_queries(
         cwd=repo_root,
     )
     builder = IssueFixtureBuilder()
-    backend = InMemoryBeadsBackend(
-        seeded_issues=(
+    client, _store = build_in_memory_beads_client(
+        issues=(
             builder.issue(
                 "at-msg-routed",
                 title="NEEDS-DECISION: Publish incomplete (at-epic.1)",
@@ -206,11 +213,16 @@ def test_startup_helper_uses_in_memory_backend_for_inbox_queue_and_epic_queries(
             ),
         )
     )
+    monkeypatch.setattr(
+        planner_startup_check,
+        "_build_store",
+        lambda **_kwargs: build_atelier_store(beads=client),
+    )
+    monkeypatch.setattr(planner_startup_check, "_build_beads_client", lambda **_kwargs: client)
 
-    with patch_in_memory_beads(backend):
-        inbox_messages = helper.list_inbox_messages("atelier/planner/codex/p200")
-        queued_messages = helper.list_queue_messages(queue="planner")
-        epics = helper.list_epics()
+    inbox_messages = helper.list_inbox_messages("atelier/planner/codex/p200")
+    queued_messages = helper.list_queue_messages(queue="planner")
+    epics = helper.list_epics()
 
     assert [issue["id"] for issue in inbox_messages] == [
         "at-msg-routed",
@@ -224,7 +236,10 @@ def test_startup_helper_uses_in_memory_backend_for_inbox_queue_and_epic_queries(
     assert [issue["id"] for issue in epics] == ["at-epic-open"]
 
 
-def test_startup_helper_lists_leaf_descendants_with_in_memory_backend(tmp_path: Path) -> None:
+def test_startup_helper_lists_leaf_descendants_with_in_memory_backend(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     beads_root = tmp_path / ".beads"
     repo_root = tmp_path / "repo"
     beads_root.mkdir()
@@ -234,8 +249,8 @@ def test_startup_helper_lists_leaf_descendants_with_in_memory_backend(tmp_path: 
         cwd=repo_root,
     )
     builder = IssueFixtureBuilder()
-    backend = InMemoryBeadsBackend(
-        seeded_issues=(
+    client, _store = build_in_memory_beads_client(
+        issues=(
             builder.issue(
                 "at-epic",
                 title="Epic",
@@ -274,9 +289,13 @@ def test_startup_helper_lists_leaf_descendants_with_in_memory_backend(tmp_path: 
             ),
         )
     )
+    monkeypatch.setattr(
+        planner_startup_check,
+        "_build_store",
+        lambda **_kwargs: build_atelier_store(beads=client),
+    )
 
-    with patch_in_memory_beads(backend):
-        descendants = helper.list_descendant_changesets("at-epic")
+    descendants = helper.list_descendant_changesets("at-epic")
 
     assert [issue["id"] for issue in descendants] == ["at-epic.2", "at-epic.1.1"]
 

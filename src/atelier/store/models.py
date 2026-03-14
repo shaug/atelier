@@ -85,6 +85,7 @@ class DependencyRecord(StoreModel):
     depends_on_id: Identifier
     satisfied: bool | None = None
     requires_integrated_state: bool = True
+    status: LifecycleStatus | None = None
 
 
 class ReviewMetadata(StoreModel):
@@ -115,6 +116,7 @@ class EpicRecord(StoreModel):
     title: Identifier
     lifecycle: LifecycleStatus
     assignee: Identifier | None = None
+    root_branch: Identifier | None = None
     labels: tuple[Identifier, ...] = ()
     changesets: tuple[WorkRef, ...] = ()
     dependencies: tuple[DependencyRecord, ...] = ()
@@ -163,10 +165,11 @@ class MessageRecord(StoreModel):
     queue: Identifier | None = None
     claimed_by: Identifier | None = None
     claimed_at: Identifier | None = None
+    blocking_roles: tuple[Identifier, ...] = ()
 
-    @field_validator("audience")
+    @field_validator("audience", "blocking_roles")
     @classmethod
-    def _dedupe_audience(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+    def _dedupe_identifiers(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _dedupe_identifiers(value)
 
     @model_validator(mode="after")
@@ -195,10 +198,42 @@ class LifecycleTransition(StoreModel):
     reason: Identifier | None = None
 
 
+class EpicIdentityViolation(StoreModel):
+    """Active top-level work missing executable epic identity metadata."""
+
+    issue_id: Identifier
+    status: LifecycleStatus | None = None
+    issue_type: Identifier | None = None
+    labels: tuple[Identifier, ...] = ()
+    remediation_command: str
+
+    @field_validator("labels")
+    @classmethod
+    def _dedupe_violation_labels(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _dedupe_identifiers(value)
+
+
+class EpicDiscoveryParity(StoreModel):
+    """Indexed epic discovery parity diagnostics."""
+
+    active_top_level_work_count: int = Field(ge=0, default=0)
+    indexed_active_epic_count: int = Field(ge=0, default=0)
+    missing_executable_identity: tuple[EpicIdentityViolation, ...] = ()
+    missing_from_index: tuple[Identifier, ...] = ()
+
+    @property
+    def in_parity(self) -> bool:
+        """Return whether startup epic discovery is in parity."""
+
+        return not self.missing_executable_identity and not self.missing_from_index
+
+
 __all__ = [
     "ChangesetBranches",
     "ChangesetRecord",
     "DependencyRecord",
+    "EpicDiscoveryParity",
+    "EpicIdentityViolation",
     "EpicRecord",
     "HookRecord",
     "Identifier",

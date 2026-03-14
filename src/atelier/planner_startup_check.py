@@ -1,11 +1,14 @@
-"""Deterministic planner-startup planning and Beads invocation helpers."""
+"""Deterministic planner-startup planning and store-backed read helpers."""
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import beads, lifecycle, messages
+from .lib.beads import Beads, ListIssuesRequest, SubprocessBeadsClient
+from .store import ChangesetQuery, EpicQuery, MessageQuery, build_atelier_store
 
 _SUPPORTED_LIST_FLAGS = frozenset({"--label", "--assignee", "--all", "--limit", "--parent"})
 _LIST_FLAGS_REQUIRING_VALUE = frozenset({"--label", "--assignee", "--limit", "--parent"})
@@ -34,7 +37,7 @@ class StartupCommandResult:
     inbox_messages: list[dict[str, object]]
     queued_messages: list[dict[str, object]]
     epics: list[dict[str, object]]
-    parity_report: beads.EpicDiscoveryParityReport
+    parity_report: object
 
 
 @dataclass(frozen=True)
@@ -127,6 +130,65 @@ class StartupTriageModel:
     deferred_changesets: tuple[StartupDeferredChangesetGroup, ...]
     diagnostics: StartupTriageDiagnostics
     epic_list_markdown: str
+
+
+def _build_store(*, beads_root: Path, cwd: Path, beads_client: Beads | None = None):
+    client = beads_client or _build_beads_client(beads_root=beads_root, cwd=cwd)
+    return build_atelier_store(beads=client)
+
+
+def _build_beads_client(*, beads_root: Path, cwd: Path) -> Beads:
+    return SubprocessBeadsClient(
+        cwd=cwd,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+
+
+def _epic_issue_payload(epic) -> dict[str, object]:
+    return {
+        "id": epic.id,
+        "title": epic.title,
+        "status": epic.lifecycle.value,
+        "labels": list(epic.labels),
+        "assignee": epic.assignee,
+        "description": (
+            f"workspace.root_branch: {epic.root_branch}"
+            if isinstance(getattr(epic, "root_branch", None), str)
+            else None
+        ),
+        "dependencies": [
+            {
+                "id": dependency.depends_on_id,
+                "status": dependency.status.value if dependency.status is not None else None,
+            }
+            for dependency in epic.dependencies
+        ],
+    }
+
+
+def _changeset_issue_payload(changeset) -> dict[str, object]:
+    return {
+        "id": changeset.id,
+        "title": changeset.title,
+        "status": changeset.lifecycle.value,
+    }
+
+
+def _render_message_summary(record) -> str:
+    title = str(record.title or "").strip() or "(untitled)"
+    detail_parts: list[str] = []
+    if record.thread_id:
+        target = record.thread_kind.value if record.thread_kind is not None else "work"
+        detail_parts.append(f"{target}={record.thread_id}")
+    if record.kind:
+        detail_parts.append(f"kind={record.kind}")
+    if record.audience:
+        detail_parts.append(f"audience={','.join(record.audience)}")
+    detail = f" ({'; '.join(detail_parts)})" if detail_parts else ""
+    if record.body:
+        return f"{title}{detail}\n{record.body}"
+    return f"{title}{detail}"
 
 
 def _issue_sort_key(issue: dict[str, object]) -> tuple[str, str]:
@@ -512,14 +574,87 @@ def validate_startup_list_invocation(args: list[str]) -> None:
 
 @dataclass(frozen=True)
 class StartupBeadsInvocationHelper:
-    """Shared Beads helper for planner-startup command execution."""
+    """Shared store-backed helper for planner-startup command execution."""
 
     beads_root: Path
     cwd: Path
 
-    def _run_list_query(self, args: list[str]) -> list[dict[str, object]]:
-        validate_startup_list_invocation(args)
-        return beads.run_bd_json(args, beads_root=self.beads_root, cwd=self.cwd)
+    def _store(self):
+        cached = getattr(self, "_store_cache", None)
+        if cached is None:
+            cached = _build_store(beads_root=self.beads_root, cwd=self.cwd)
+            object.__setattr__(self, "_store_cache", cached)
+        return cached
+
+    def _beads_client(self) -> Beads:
+        cached = getattr(self, "_beads_client_cache", None)
+        if cached is None:
+            cached = _build_beads_client(beads_root=self.beads_root, cwd=self.cwd)
+            object.__setattr__(self, "_beads_client_cache", cached)
+        return cached
+
+    def _list_assignee_messages(
+        self,
+        agent_id: str,
+        *,
+        unread_only: bool,
+    ) -> list[dict[str, object]]:
+        labels = [beads.issue_label("message", beads_root=self.beads_root)]
+        if unread_only:
+            labels.append(beads.issue_label("unread", beads_root=self.beads_root))
+        issues = asyncio.run(
+            self._beads_client().list(ListIssuesRequest(labels=tuple(labels), include_closed=False))
+        )
+        matches: list[dict[str, object]] = []
+        for issue in issues:
+            if issue.assignee != agent_id:
+                continue
+            matches.append(
+                {
+                    "id": issue.id,
+                    "title": issue.title or issue.id,
+                }
+            )
+        return matches
+
+    def _list_compat_queue_messages(
+        self,
+        *,
+        queue: str | None,
+        unread_only: bool,
+    ) -> list[dict[str, object]]:
+        labels = [beads.issue_label("message", beads_root=self.beads_root)]
+        if unread_only:
+            labels.append(beads.issue_label("unread", beads_root=self.beads_root))
+        issues = asyncio.run(
+            self._beads_client().list(ListIssuesRequest(labels=tuple(labels), include_closed=False))
+        )
+        matches: list[dict[str, object]] = []
+        for issue in issues:
+            if not isinstance(issue.description, str):
+                continue
+            payload = messages.parse_message(issue.description)
+            queue_name = payload.metadata.get("queue")
+            if not isinstance(queue_name, str) or not queue_name.strip():
+                continue
+            if queue is not None and queue_name != queue:
+                continue
+            assignee_claim = issue.assignee.strip() if issue.assignee else None
+            claimed_by = payload.metadata.get("claimed_by")
+            normalized_claim = (
+                claimed_by.strip()
+                if isinstance(claimed_by, str) and claimed_by.strip()
+                else assignee_claim
+            )
+            matches.append(
+                {
+                    "id": issue.id,
+                    "title": issue.title or issue.id,
+                    "queue": queue_name,
+                    "claimed_by": normalized_claim,
+                }
+            )
+        return matches
 
     def list_inbox_messages(
         self,
@@ -527,32 +662,31 @@ class StartupBeadsInvocationHelper:
         *,
         unread_only: bool = True,
     ) -> list[dict[str, object]]:
-        """List planner inbox messages via the canonical startup helper path."""
+        """List planner inbox messages via store reads plus assignee fallback.
 
-        args = ["list", "--label", beads.issue_label("message", beads_root=self.beads_root)]
-        if unread_only:
-            args.extend(["--label", beads.issue_label("unread", beads_root=self.beads_root)])
-        issues = self._run_list_query(args)
+        This preserves legacy assignee-routed compatibility messages while the
+        store-backed threaded path becomes the default planner read surface.
+        """
+
+        issues = asyncio.run(self._store().list_messages(MessageQuery(unread_only=unread_only)))
         matches: list[dict[str, object]] = []
         seen_ids: set[str] = set()
         for issue in issues:
+            issue_id = issue.id
+            routed_attention = any(role in issue.blocking_roles for role in ("planner", "operator"))
+            if not routed_attention:
+                continue
+            title = _render_message_summary(issue).replace("\n", " | ")
+            if issue_id in seen_ids:
+                continue
+            seen_ids.add(issue_id)
+            matches.append({"id": issue.id, "title": title})
+        for issue in self._list_assignee_messages(agent_id, unread_only=unread_only):
             issue_id = str(issue.get("id") or "").strip()
-            assignee = issue.get("assignee")
-            assignee_match = isinstance(assignee, str) and assignee.strip() == agent_id
-            routed_attention = any(
-                messages.message_blocks_runtime(issue, runtime_role=role)
-                for role in ("planner", "operator")
-            )
-            if not assignee_match and not routed_attention:
+            if not issue_id or issue_id in seen_ids:
                 continue
-            enriched = dict(issue)
-            if routed_attention:
-                enriched["title"] = messages.render_work_thread_summary(issue).replace("\n", " | ")
-            if issue_id and issue_id in seen_ids:
-                continue
-            if issue_id:
-                seen_ids.add(issue_id)
-            matches.append(enriched)
+            seen_ids.add(issue_id)
+            matches.append(issue)
         return matches
 
     def list_queue_messages(
@@ -562,81 +696,41 @@ class StartupBeadsInvocationHelper:
         unclaimed_only: bool = True,
         unread_only: bool = True,
     ) -> list[dict[str, object]]:
-        """List queued message beads from deterministic startup queries."""
+        """List queued message beads from store-backed message queries."""
 
-        args = ["list", "--label", beads.issue_label("message", beads_root=self.beads_root)]
-        if unread_only:
-            args.extend(["--label", beads.issue_label("unread", beads_root=self.beads_root)])
-        issues = self._run_list_query(args)
+        issues = asyncio.run(
+            self._store().list_messages(MessageQuery(queue=queue, unread_only=unread_only))
+        )
         matches: list[dict[str, object]] = []
+        seen_ids: set[str] = set()
         for issue in issues:
-            description = issue.get("description")
-            if not isinstance(description, str):
+            normalized_claim = issue.claimed_by
+            if unclaimed_only and issue.claimed_by:
                 continue
-            payload = messages.parse_message(description)
-            queue_name = payload.metadata.get("queue")
-            if not isinstance(queue_name, str) or not queue_name.strip():
-                continue
-            if queue is not None and queue_name != queue:
-                continue
-            claimed_by = payload.metadata.get("claimed_by")
-            assignee = issue.get("assignee")
-            assignee_claim = (
-                assignee.strip() if isinstance(assignee, str) and assignee.strip() else None
+            seen_ids.add(issue.id)
+            matches.append(
+                {
+                    "id": issue.id,
+                    "title": issue.title,
+                    "queue": issue.queue or "queue",
+                    "claimed_by": normalized_claim,
+                }
             )
-            normalized_claim = (
-                claimed_by.strip()
-                if isinstance(claimed_by, str) and claimed_by.strip()
-                else assignee_claim
-            )
-            if unclaimed_only and normalized_claim:
+        for issue in self._list_compat_queue_messages(queue=queue, unread_only=unread_only):
+            issue_id = str(issue.get("id") or "").strip()
+            if not issue_id or issue_id in seen_ids:
                 continue
-            enriched = dict(issue)
-            enriched["queue"] = queue_name
-            enriched["claimed_by"] = normalized_claim
-            matches.append(enriched)
+            if unclaimed_only and issue.get("claimed_by"):
+                continue
+            seen_ids.add(issue_id)
+            matches.append(issue)
         return matches
 
     def list_epics(self, *, include_closed: bool = False) -> list[dict[str, object]]:
-        """List epic beads via fixed `<prefix>:epic` discovery."""
+        """List indexed epics through the Atelier store."""
 
-        args = [
-            "list",
-            "--label",
-            beads.issue_label("epic", beads_root=self.beads_root),
-            "--all",
-            "--limit",
-            "0",
-        ]
-        issues = self._run_list_query(args)
-        if include_closed:
-            return issues
-        return [
-            issue
-            for issue in issues
-            if lifecycle.canonical_lifecycle_status(issue.get("status")) != "closed"
-        ]
-
-    def list_work_children(
-        self,
-        parent_id: str,
-        *,
-        include_closed: bool = False,
-    ) -> list[dict[str, object]]:
-        """List direct child work beads for a parent issue."""
-
-        args = ["list", "--parent", parent_id]
-        if include_closed:
-            args.append("--all")
-        issues = self._run_list_query(args)
-        return [
-            issue
-            for issue in issues
-            if lifecycle.is_work_issue(
-                labels=lifecycle.normalized_labels(issue.get("labels")),
-                issue_type=lifecycle.issue_payload_type(issue),
-            )
-        ]
+        epics = asyncio.run(self._store().list_epics(EpicQuery(include_closed=include_closed)))
+        return [_epic_issue_payload(epic) for epic in epics]
 
     def list_descendant_changesets(
         self,
@@ -646,35 +740,17 @@ class StartupBeadsInvocationHelper:
     ) -> list[dict[str, object]]:
         """List descendant changesets (leaf work beads under a parent)."""
 
-        descendants: list[dict[str, object]] = []
-        seen: set[str] = set()
-        queue = [parent_id]
-        while queue:
-            current = queue.pop(0)
-            children = self.list_work_children(current, include_closed=include_closed)
-            for issue in children:
-                issue_id = str(issue.get("id") or "").strip()
-                if not issue_id or issue_id in seen:
-                    continue
-                seen.add(issue_id)
-                grandchildren = self.list_work_children(issue_id, include_closed=include_closed)
-                if not grandchildren:
-                    descendants.append(issue)
-                queue.append(issue_id)
-        return descendants
+        changesets = asyncio.run(
+            self._store().list_changesets(
+                ChangesetQuery(epic_id=parent_id, include_closed=include_closed)
+            )
+        )
+        return [_changeset_issue_payload(changeset) for changeset in changesets]
 
-    def epic_discovery_parity_report(
-        self,
-        *,
-        indexed_epics: list[dict[str, object]],
-    ) -> beads.EpicDiscoveryParityReport:
+    def epic_discovery_parity_report(self) -> object:
         """Return startup epic discovery parity diagnostics."""
 
-        return beads.epic_discovery_parity_report(
-            beads_root=self.beads_root,
-            cwd=self.cwd,
-            indexed_epics=indexed_epics,
-        )
+        return asyncio.run(self._store().epic_discovery_parity())
 
 
 def execute_startup_command_plan(
@@ -698,7 +774,7 @@ def execute_startup_command_plan(
     inbox_messages: list[dict[str, object]] = []
     queued_messages: list[dict[str, object]] = []
     epics: list[dict[str, object]] = []
-    parity_report: beads.EpicDiscoveryParityReport | None = None
+    parity_report: object | None = None
 
     for step in startup_command_plan():
         if step.name == "list_inbox_unread_messages":
@@ -711,12 +787,12 @@ def execute_startup_command_plan(
             epics = helper.list_epics(include_closed=False)
             continue
         if step.name == "compute_epic_discovery_parity":
-            parity_report = helper.epic_discovery_parity_report(indexed_epics=epics)
+            parity_report = helper.epic_discovery_parity_report()
             continue
         raise RuntimeError(f"unknown startup command step: {step.name}")
 
     if parity_report is None:
-        parity_report = helper.epic_discovery_parity_report(indexed_epics=epics)
+        parity_report = helper.epic_discovery_parity_report()
     return StartupCommandResult(
         inbox_messages=inbox_messages,
         queued_messages=queued_messages,

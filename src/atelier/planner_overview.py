@@ -2,23 +2,58 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 
-from . import beads, lifecycle
+from . import lifecycle
+from .lib.beads import Beads, SubprocessBeadsClient
+from .store import EpicQuery, EpicRecord, build_atelier_store
+
+
+def _build_store(*, beads_root: Path, repo_root: Path, beads_client: Beads | None = None):
+    client = beads_client or SubprocessBeadsClient(
+        cwd=repo_root,
+        beads_root=beads_root,
+        env={"BEADS_DIR": str(beads_root)},
+    )
+    return build_atelier_store(beads=client)
+
+
+def _epic_issue_payload(epic: EpicRecord) -> dict[str, object]:
+    description = (
+        f"workspace.root_branch: {epic.root_branch}" if isinstance(epic.root_branch, str) else None
+    )
+    return {
+        "id": epic.id,
+        "title": epic.title,
+        "status": epic.lifecycle.value,
+        "labels": list(epic.labels),
+        "description": description,
+        "assignee": epic.assignee,
+        "dependencies": [
+            {
+                "id": dependency.depends_on_id,
+                "status": dependency.status.value if dependency.status is not None else None,
+            }
+            for dependency in epic.dependencies
+        ],
+    }
 
 
 def list_epics(*, beads_root: Path, repo_root: Path) -> list[dict[str, object]]:
-    """List epic beads for planner overview rendering.
+    """List epic records for planner overview rendering.
 
     Args:
         beads_root: Root directory for the Beads planning store.
         repo_root: Repository root used as the working directory for `bd`.
 
     Returns:
-        Epic issue payloads from Beads. Non-dict entries are discarded.
+        Epic issue payloads derived from the Atelier store.
     """
-    return beads.list_epics(beads_root=beads_root, cwd=repo_root, include_closed=False)
+    store = _build_store(beads_root=beads_root, repo_root=repo_root)
+    epics = asyncio.run(store.list_epics(EpicQuery(include_closed=False)))
+    return [_epic_issue_payload(epic) for epic in epics]
 
 
 def render_epics(issues: list[dict[str, object]], *, show_drafts: bool) -> str:
@@ -167,7 +202,6 @@ def _sort_key(issue: dict[str, object]) -> tuple[str, str]:
 
 def _append_issue(lines: list[str], issue: dict[str, object]) -> None:
     issue_id = str(issue.get("id") or "").strip() or "(unknown)"
-    labels = _labels(issue)
     canonical_status = lifecycle.canonical_lifecycle_status(issue.get("status"))
     raw_status = str(issue.get("status") or "unknown").strip() or "unknown"
     status = canonical_status or raw_status
