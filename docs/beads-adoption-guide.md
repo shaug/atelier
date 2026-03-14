@@ -22,8 +22,9 @@ subprocess.
 
 Wait for [GitHub issue #574] when the work wants to define or consume an
 Atelier-owned store concept rather than a low-level Beads boundary. The current
-contract definition for that layer lives in [Atelier Store Contract], but the
-concrete adapters and planner/worker migrations remain deferred.
+contract and concrete adapters for that layer now live in
+[Atelier Store Contract]. The planner/worker/publish migrations onto that
+surface remain deferred.
 
 ## Where Direct Client Use Is In Bounds Today
 

@@ -232,13 +232,18 @@ def test_store_contract_docs_record_invariants_and_deferred_work() -> None:
     assert "Known Contract Gaps" in store_doc
     assert "dependency add/remove is not yet proven in the shared dual-backend suite" in store_doc
     assert "Planner, worker, and publish migrations should depend on `atelier.store`" in store_doc
-    assert "implementing `AtelierStore` graph and discovery methods" in store_doc
-    assert "GitHub issue #644" in store_doc
-    assert "GitHub issue #645" in store_doc
-    assert "GitHub issue #646" in store_doc
+    assert "Downstream epics can rely on the following store surface today" in store_doc
+    assert "shared dual-backend parity for discovery/read flows" in store_doc
+    assert "This proof slice leaves only the following work deferred" in store_doc
+    assert "planner migrations onto `atelier.store`" in store_doc
+    assert "publish/integration migrations onto `atelier.store`" in store_doc
+    assert "The core store contract, discovery methods, mutation methods, and dual-backend" in (
+        store_doc
+    )
     assert "[Atelier Store Contract]" in beads_doc
     assert "[Atelier Store Contract]" in adoption_guide
     assert "Downstream migrations should import `atelier.store`" in adoption_guide
+    assert "contract and concrete adapters for that layer now live in" in adoption_guide
     assert "process-backed coverage only" in adoption_guide
 
 
